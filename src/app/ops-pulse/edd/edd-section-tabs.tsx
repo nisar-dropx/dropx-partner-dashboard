@@ -10,13 +10,14 @@ import { PendingLink } from "@/components/pending-link";
  * toggle: proper URLs, back/forward, and the same visual language as the
  * rest of Ops Pulse.
  */
-export function EddSectionTabs({ active }: { active: "flash" | "ageing" | "performance" | "edds" }) {
+export function EddSectionTabs({ active }: { active: "flash" | "ageing" | "performance" | "edds" | "scrub" }) {
   const pathname = usePathname();
   const sections = [
     { href: "/edd/flash", key: "flash" as const, label: "Ops Live" },
     { href: "/edd", key: "ageing" as const, label: "Ageing" },
     { href: "/edd/performance", key: "performance" as const, label: "Performance" },
-    { href: "/edd/edds", key: "edds" as const, label: "EDDs" }
+    { href: "/edd/edds", key: "edds" as const, label: "EDDs" },
+    { href: "/edd/scrub", key: "scrub" as const, label: "Scrub Report" }
   ];
 
   return (

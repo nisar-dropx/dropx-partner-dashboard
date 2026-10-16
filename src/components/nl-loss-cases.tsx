@@ -274,6 +274,7 @@ function RecoveryForm({
   const [deductionMonths, setDeductionMonths] = useState<
     Record<string, string>
   >({});
+  const [awaitingFinal, setAwaitingFinal] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [people, setPeople] = useState<RecoveryPerson[]>([]),
     [history, setHistory] = useState<History[]>([]),
@@ -312,6 +313,7 @@ function RecoveryForm({
           );
         setCaseKey(j.case_key);
         setDeductionMonths(j.deduction_months);
+        setAwaitingFinal(!!j.awaiting_final);
         setPeople(j.people);
         setHistory(j.history);
         setDirectoryReady(true);
@@ -615,7 +617,16 @@ function RecoveryForm({
             </label>
             {option?.allocation_required && deductionPeriod ? (
               <p className={styles.notice}>
-                <strong>Deduction month: {monthLabel(deductionPeriod)}</strong>
+                <strong>
+                  Deducted from {monthLabel(deductionPeriod)} salary
+                </strong>
+                <br />
+                {awaitingFinal
+                  ? "SLP Initial is a report only. Assign employees once this case is in the SLP Final file. "
+                  : null}
+                People are deducted in HRMS payroll and Workforce members in
+                the Workforce payout. A month that cannot carry it moves the
+                deduction to the next month.
                 <br />
                 {option.deduction_timing === "next_month"
                   ? "Next-month exception: record employee IDs, the full amount and the reason now."
@@ -939,7 +950,7 @@ function RecoveryForm({
                 })}
               </small>
               {h.after_value.deduction_month ? (
-                <p>Deduction: {monthLabel(h.after_value.deduction_month)}</p>
+                <p>Salary month: {monthLabel(h.after_value.deduction_month)}</p>
               ) : null}
               <p>{h.after_value.remarks}</p>
               {h.after_value.recovery_details?.reason ? (

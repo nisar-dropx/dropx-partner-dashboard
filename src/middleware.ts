@@ -14,7 +14,7 @@ const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env
 const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
-const CLEAN_OPS_ROOTS = ["/attendance", "/team-ops", "/daily-submission", "/performance", "/capacity", "/service-network", "/rostering", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/station-edd", "/reports", "/client", "/access", "/audits", "/store-audits", "/unauthorized"];
+const CLEAN_OPS_ROOTS = ["/attendance", "/team-ops", "/daily-submission", "/performance", "/capacity", "/service-network", "/rostering", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/station-edd", "/reports", "/client", "/access", "/audits", "/store-audits", "/report-bot", "/unauthorized"];
 // Only these specific /master/* subpaths live under src/app/ops-pulse/master/* and need the
 // /ops-pulse prefix rewritten in; every other /master/* path (performance-targets, cod-master,
 // designations, ...) is a real top-level route under src/app/master/* already, so this list
@@ -374,7 +374,7 @@ export async function middleware(request: NextRequest) {
           needsClaimVerification = true;
         } else {
           const loginUrl = new URL("/login", request.url);
-          loginUrl.searchParams.set("next", request.nextUrl.pathname);
+          loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
           return NextResponse.redirect(loginUrl);
         }
       }
@@ -398,7 +398,7 @@ export async function middleware(request: NextRequest) {
       if (!data.user) {
         if (isTransientAuthFailure(error)) return unavailableSessionResponse();
         const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("next", request.nextUrl.pathname);
+        loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
         return NextResponse.redirect(loginUrl);
       }
     } catch (error) {

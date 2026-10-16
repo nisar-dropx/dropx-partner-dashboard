@@ -4,6 +4,7 @@ import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import * as XLSX from "xlsx";
 import {
+  buildProviderFirstWorkerSelectionIndex,
   canonicalizeProviderFirstMembers,
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
@@ -11,13 +12,16 @@ import {
   providerFirstLocationRemap,
   providerFirstLocationNeedsDates,
   providerFirstLocationIsAllowed,
+  providerFirstMappingReferenceForRow,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstNamesMatch,
+  providerFirstRowForMappingPeriod,
   providerFirstRowIssue,
   providerFirstValidationStatus,
   providerFirstWorkerIsSelectable,
   providerMemberIdFromSpreadsheetCells,
+  providerMemberIdentityKey,
   providerMemberKey,
   providerSourceMemberKey,
   scientificProviderIdCouldRepresent
@@ -88,6 +92,35 @@ test("keys provider members by station and normalized member ID", () => {
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
 });
 
+test("keys history across locations by exact provider and member identity without changing mapping identity", () => {
+  const oldStationMappingKey = providerMemberKey("station-old", " 2000080007500 ");
+  const newStationMappingKey = providerMemberKey("station-new", "2000080007500");
+  assert.notEqual(oldStationMappingKey, newStationMappingKey, "mapping ownership must remain station-specific");
+
+  const oldStationHistoryKey = providerMemberIdentityKey(" Provider-A ", " 2000080007500 ");
+  const newStationHistoryKey = providerMemberIdentityKey("provider-a", "2000080007500");
+  assert.equal(oldStationHistoryKey, newStationHistoryKey, "the same provider identity should expose its prior-location history");
+  assert.notEqual(
+    oldStationHistoryKey,
+    providerMemberIdentityKey("provider-b", "2000080007500"),
+    "the same member ID at a different provider must not leak history"
+  );
+  assert.notEqual(
+    oldStationHistoryKey,
+    providerMemberIdentityKey("provider-a", "2000080007501"),
+    "a different member at the same provider must not leak history"
+  );
+});
+
+test("provider mapping page preserves inactive-location history without inferring a new location mapping", async () => {
+  const page = await readFile(new URL("../app/provider-id-mapping/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /from\("stations"\)[^\n]+\.eq\("company_id", companyId\)\.order\("station_code"\)/);
+  assert.doesNotMatch(page, /from\("stations"\)[^\n]+\.eq\("is_active", true\)/);
+  assert.match(page, /const link = mappingByMember\.get\(providerMemberKey\(member\.stationId, member\.id\)\)/);
+  assert.match(page, /historyByProviderMember\.get\(providerMemberIdentityKey\(member\.providerId, member\.id\)\)/);
+  assert.match(page, /workforceId: worker\?\.id \?\? ""/);
+});
+
 test("requests an exact confirmation only when an existing provider mapping changes DropX owner", () => {
   const replacement = providerFirstMappingReplacement(row, {
     ...row,
@@ -123,6 +156,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
   const remap = providerFirstLocationRemap(destination, sourceWorker);
   assert.deepEqual(remap, {
     kind: "location",
+    allowKeepAll: true,
     allowMove: false,
     mappingId: "mapping-1",
     providerMemberId: "member-1",
@@ -133,11 +167,16 @@ test("permits only an exact same-provider, same-member location remap", () => {
     newLocationLabel: "JUGF - Sundergarh",
     effectiveFrom: "2026-09-01"
   });
+  assert.equal(remap.allowMove, false);
   assert.equal(
     providerFirstMappingReplacementMessage(remap),
-    "Provider ID member-1 - Asha Devi is already mapped to DROPX1 - Asha Devi at its registered location JUGD - Jharsuguda.\nUse Keep all to add JUGF - Sundergarh for the same DropX ID while preserving the verified registered-location mapping."
+    "Provider ID member-1 - Asha Devi is already mapped to DROPX1 - Asha Devi at its registered location JUGD - Jharsuguda.\nUse Keep all to add JUGF - Sundergarh from 2026-09-01 for the same DropX ID while preserving the verified registered-location mapping for that period."
   );
   assert.equal(providerFirstValidationStatus(destination, sourceWorker, method), "ready");
+  assert.equal(
+    providerFirstRowIssue({ ...destination, effectiveTo: "2026-09-30" }, sourceWorker, method),
+    "Move or Keep all requires an ongoing mapping. Leave Effective to blank."
+  );
   assert.equal(providerFirstLocationRemap({ ...destination, providerId: "provider-2" }, sourceWorker), null);
   assert.equal(providerFirstLocationRemap({ ...destination, providerMemberId: "member-2" }, sourceWorker), null);
   assert.equal(providerFirstLocationRemap({ ...destination, mappingId: "stale-mapping" }, sourceWorker), null);
@@ -215,7 +254,61 @@ test("offers an exact second-location candidate when its registered-location map
   assert.equal(providerFirstWorkerIsSelectable(secondLocationRow, worker, [secondLocationRow]), true);
 });
 
-test("uses the effective mapping station when the Workforce profile already moved", () => {
+test("indexed worker selection preserves conflict rules without rescanning every draft", () => {
+  const unmappedRow = {
+    ...row,
+    workforceId: "",
+    dropxId: "",
+    dropxName: "",
+    mappingId: ""
+  };
+  const available = {
+    ...worker,
+    id: "available",
+    mappingId: "",
+    providerId: "",
+    mappedProviderMemberId: "",
+    currentMappings: [],
+    mappingHistory: []
+  };
+  const occupied = {
+    ...available,
+    id: "occupied",
+    currentMappings: [{
+      mappingId: "other-mapping",
+      stationId: "station-1",
+      locationLabel: "KOZA",
+      providerId: "provider-2",
+      mappedProviderMemberId: "member-2",
+      paymentMethodId: method.id,
+      paymentValues: {},
+      productionThresholdConfig: null,
+      productionThresholdMinimumUnits: "",
+      effectiveFrom: "2026-09-01",
+      effectiveTo: "",
+      status: "active"
+    }]
+  };
+  const conflictingDraft = {
+    ...unmappedRow,
+    providerId: "provider-3",
+    providerMemberId: "member-3",
+    workforceId: available.id
+  };
+  const drafts = [unmappedRow, conflictingDraft];
+  const workers = [available, occupied, { ...available, id: "restricted", hasRestrictedMapping: true }];
+  const selectionIndex = buildProviderFirstWorkerSelectionIndex(workers, drafts, "2026-10-15");
+
+  for (const candidate of workers) {
+    assert.equal(
+      providerFirstWorkerIsSelectable(unmappedRow, candidate, drafts, selectionIndex),
+      providerFirstWorkerIsSelectable(unmappedRow, candidate, drafts),
+      `indexed selection should match legacy rules for ${candidate.id}`
+    );
+  }
+});
+
+test("uses the effective mapping station and keeps both relocation choices when the Workforce profile already moved", () => {
   const driftedWorker = {
     ...worker,
     stationId: "station-1",
@@ -233,6 +326,8 @@ test("uses the effective mapping station when the Workforce profile already move
     }, driftedWorker),
     {
       kind: "location",
+      allowKeepAll: true,
+      allowMove: true,
       mappingId: "mapping-1",
       providerMemberId: "member-1",
       providerMemberName: "Asha Devi",
@@ -242,6 +337,198 @@ test("uses the effective mapping station when the Workforce profile already move
       newLocationLabel: "JUGF",
       effectiveFrom: "2026-10-04"
     }
+  );
+  const moveToProfile = providerFirstLocationRemap({
+    ...row,
+    stationId: "station-2",
+    stationLabel: "JUGF",
+    effectiveFrom: "2026-10-04"
+  }, driftedWorker);
+  assert.equal(moveToProfile?.allowKeepAll, true);
+  assert.equal(moveToProfile?.allowMove, true);
+  assert.match(providerFirstMappingReplacementMessage(moveToProfile), /move it to JUGF/i);
+  assert.match(providerFirstMappingReplacementMessage(moveToProfile), /keep both location mappings/i);
+  assert.match(providerFirstMappingReplacementMessage(moveToProfile), /Keep all preserves both locations from this date/);
+});
+
+test("a future source location cannot be moved before its own effective date", () => {
+  const futureSource = {
+    mappingId: "mapping-future-source",
+    stationId: "station-1",
+    locationLabel: "JUGD",
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-15",
+    effectiveTo: "",
+    status: "active"
+  };
+  const futureSourceWorker = {
+    ...worker,
+    stationId: futureSource.stationId,
+    locationLabel: futureSource.locationLabel,
+    profileStationId: "station-2",
+    profileLocationLabel: "JUGF",
+    mappingId: futureSource.mappingId,
+    paymentMethodId: futureSource.paymentMethodId,
+    paymentValues: futureSource.paymentValues,
+    effectiveFrom: futureSource.effectiveFrom,
+    mappedProviderMemberId: futureSource.mappedProviderMemberId,
+    currentMappings: [futureSource],
+    mappingHistory: [futureSource]
+  };
+  const destination = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "JUGF",
+    mappingId: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: ""
+  };
+
+  assert.equal(providerFirstLocationIsAllowed(destination, futureSourceWorker), false);
+  assert.equal(providerFirstLocationRemap(destination, futureSourceWorker), null);
+  assert.equal(providerFirstRowIssue(destination, futureSourceWorker, method), "Location mismatch.");
+  const validFromSourceStart = { ...destination, effectiveFrom: "2026-10-15" };
+  assert.equal(providerFirstLocationIsAllowed(validFromSourceStart, futureSourceWorker), true);
+  assert.equal(providerFirstLocationRemap(validFromSourceStart, futureSourceWorker)?.mappingId, futureSource.mappingId);
+});
+
+test("relocation selects the latest mapping effective on the requested start instead of a later scheduled mapping", () => {
+  const earlierSource = {
+    mappingId: "mapping-september-source",
+    stationId: "station-1",
+    locationLabel: "JUGD",
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "",
+    status: "active"
+  };
+  const futureSource = {
+    ...earlierSource,
+    mappingId: "mapping-october-15-source",
+    stationId: "station-3",
+    locationLabel: "KLZA",
+    effectiveFrom: "2026-10-15"
+  };
+  const multiLocationWorker = {
+    ...worker,
+    stationId: futureSource.stationId,
+    locationLabel: futureSource.locationLabel,
+    profileStationId: "station-2",
+    profileLocationLabel: "JUGF",
+    mappingId: futureSource.mappingId,
+    paymentMethodId: futureSource.paymentMethodId,
+    paymentValues: futureSource.paymentValues,
+    effectiveFrom: futureSource.effectiveFrom,
+    mappedProviderMemberId: futureSource.mappedProviderMemberId,
+    currentMappings: [futureSource, earlierSource],
+    mappingHistory: [futureSource, earlierSource]
+  };
+  const destination = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "JUGF",
+    mappingId: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: ""
+  };
+
+  assert.equal(providerFirstMappingReferenceForRow(destination, multiLocationWorker)?.mappingId, earlierSource.mappingId);
+  assert.equal(providerFirstLocationRemap(destination, multiLocationWorker)?.mappingId, earlierSource.mappingId);
+  assert.equal(providerFirstLocationRemap(destination, multiLocationWorker)?.allowMove, true);
+});
+
+test("does not reuse a future current mapping for an earlier bounded period", () => {
+  const futureMapping = {
+    mappingId: "mapping-october",
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "",
+    status: "active"
+  };
+  const futureWorker = {
+    ...worker,
+    mappingId: futureMapping.mappingId,
+    effectiveFrom: futureMapping.effectiveFrom,
+    currentMappings: [futureMapping],
+    mappingHistory: [futureMapping],
+    registeredLocationMappings: [futureMapping]
+  };
+  const septemberRow = {
+    ...row,
+    mappingId: futureMapping.mappingId,
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30"
+  };
+
+  assert.equal(providerFirstMappingReferenceForRow(septemberRow, futureWorker), undefined);
+  assert.deepEqual(providerFirstRowForMappingPeriod(septemberRow, futureWorker), {
+    ...septemberRow,
+    mappingId: "",
+    paymentMethodId: "",
+    paymentValues: {},
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: ""
+  });
+});
+
+test("keeps a current mapping reference when the requested period overlaps it", () => {
+  const futureMapping = {
+    mappingId: "mapping-october",
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "",
+    status: "active"
+  };
+  const futureWorker = {
+    ...worker,
+    mappingId: futureMapping.mappingId,
+    effectiveFrom: futureMapping.effectiveFrom,
+    currentMappings: [futureMapping],
+    mappingHistory: [futureMapping],
+    registeredLocationMappings: [futureMapping]
+  };
+
+  assert.equal(
+    providerFirstMappingReferenceForRow({
+      ...row,
+      mappingId: futureMapping.mappingId,
+      effectiveFrom: "2026-09-01",
+      effectiveTo: ""
+    }, futureWorker)?.mappingId,
+    futureMapping.mappingId
+  );
+  assert.equal(
+    providerFirstMappingReferenceForRow({
+      ...row,
+      mappingId: futureMapping.mappingId,
+      effectiveFrom: "2026-09-01",
+      effectiveTo: "2026-10-15"
+    }, futureWorker)?.mappingId,
+    futureMapping.mappingId
   );
 });
 
@@ -256,6 +543,8 @@ test("matches controlled provider-report spelling variants without weakening glo
   assert.equal(providerFirstNamesMatch("R Kumar / DROP / 1005", "R KUMAR"), true);
   assert.equal(providerFirstNamesMatch("Thaha mohammad B / SPVAN-DROP / 206139406", "MOHAMMED THAHA"), true);
   assert.equal(providerFirstNamesMatch("Suresh Chandran / DROP / 1011", "CHANDRAN"), true);
+  assert.equal(providerFirstNamesMatch("Muzammil M/SPVAN_DROP/207739487", "MUZAMMIL M K"), true);
+  assert.equal(providerFirstNamesMatch("MUZAMMIL M K", "Muzammil M/SPVAN_DROP/207739487"), true);
   assert.equal(providerFirstNamesMatch("Rajesh Sharma / DROP / 1003", "Ramesh Varma"), false);
   assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
 });
@@ -271,6 +560,9 @@ test("rejects provider mappings supported only by an initial or a common name to
   assert.equal(providerFirstNamesMatch("R Kumar / DROP / 1008", "RITESH KUMAR"), false);
   assert.equal(providerFirstNamesMatch("Mohammed A / DROP / 1009", "MOHAMMED ABDUL"), false);
   assert.equal(providerFirstNamesMatch("M Kumar / DROP / 1010", "MANOJ KUMAR"), false);
+  assert.equal(providerFirstNamesMatch("M K / DROP / 1016", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Muzamil M / DROP / 1017", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Mohammed M / DROP / 1018", "MOHAMMED M K"), false);
 });
 
 test("recognizes scientific provider IDs without fabricating missing digits", () => {
@@ -481,7 +773,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /production_threshold_minimum_units/);
   assert.match(component, /mappingId: mappingReference\?\.mappingId \?\? ""/);
   assert.match(component, /Replace existing mapping\?/);
-  assert.match(component, /Move mapping to new location\?/);
+  assert.match(component, /Choose location mapping action/);
   assert.match(component, />Keep all<\/button>/);
   assert.match(component, /\[clear_mapping\]/);
   assert.match(component, /Replace mapping/);

@@ -941,3 +941,80 @@ export async function fetchLoadFlashTracking(date?: string, stations?: string[])
     };
   }).filter((row) => row.trackingId);
 }
+
+export type ScrubType = "inStation" | "onRoad";
+
+export type ScrubInvocation = { operator: string | null; at: string };
+
+export type ScrubTypeActivity = {
+  /** Newest first; Amazon keeps the last 7 days. */
+  invocations: ScrubInvocation[];
+  lastAt: string | null;
+  error: string | null;
+};
+
+export type StationScrubActivity = {
+  stationCode: string;
+  /** When Amazon was last asked for this station; null before the first fetch. */
+  fetchedAt: string | null;
+  inStation: ScrubTypeActivity;
+  onRoad: ScrubTypeActivity;
+};
+
+function normalizeScrubType(raw: unknown): ScrubTypeActivity {
+  const entry = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const invocations = Array.isArray(entry.invocations)
+    ? entry.invocations
+        .map((item) => {
+          const row = (item ?? {}) as Record<string, unknown>;
+          return { operator: row.operator == null ? null : String(row.operator), at: String(row.at ?? "") };
+        })
+        .filter((row) => !Number.isNaN(Date.parse(row.at)))
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    : [];
+  return {
+    invocations,
+    lastAt: invocations[0]?.at ?? null,
+    error: entry.error == null ? (Array.isArray(entry.invocations) ? null : "No scrub data returned.") : String(entry.error)
+  };
+}
+
+/**
+ * In-Station and On-Road scrub invocations (last 7 days) for the given stations.
+ * Reads the worker's saved report (morning sweep or last manual fetch); `refresh`
+ * asks Amazon now and saves the result for everyone.
+ */
+export async function fetchScrubNetwork(stations: string[], options: { refresh?: boolean } = {}): Promise<{ fetchedAt: string; stations: StationScrubActivity[] }> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  // An empty list would mean "every station" to the worker.
+  if (!stations.length) return { fetchedAt: new Date().toISOString(), stations: [] };
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/scrub/network${options.refresh ? "/refresh" : ""}`);
+  url.searchParams.set("stations", stations.join(","));
+  const response = await fetch(url.toString(), {
+    method: options.refresh ? "POST" : "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(options.refresh ? 55000 : 15000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  const rows = Array.isArray(raw.stations)
+    ? raw.stations.map((row) => {
+        const entry = (row ?? {}) as Record<string, unknown>;
+        return {
+          stationCode: String(entry.stationCode ?? "").toUpperCase(),
+          fetchedAt: typeof entry.fetchedAt === "string" && !Number.isNaN(Date.parse(entry.fetchedAt)) ? entry.fetchedAt : null,
+          inStation: normalizeScrubType(entry.inStation),
+          onRoad: normalizeScrubType(entry.onRoad)
+        };
+      }).filter((row) => row.stationCode)
+    : [];
+  return { fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()), stations: rows };
+}

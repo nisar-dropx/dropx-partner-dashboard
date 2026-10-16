@@ -376,6 +376,11 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   }
 
   const designation = companyId ? await loadPeopleDesignation(companyId, profile.id) : undefined;
+  // Report Bot is in testing: Full Stack Developers get it alongside Owners. Other
+  // designations are granted through Designation Access as usual.
+  if (designation?.active && designation.code === "FSD") {
+    permissions.ops_report_bot = { canView: true, canAdd: true, canEdit: true };
+  }
   return {
     designationName: designation?.name ?? null,
     canPreviewUsers: Boolean(previewViewer),

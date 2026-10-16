@@ -83,3 +83,27 @@ Keep the Supabase redirect allowlist including `https://dashboard.dropxlogistics
 4. Build Provider ID mapping create/correct workflow.
 5. Build Amazon report import using the sample `111.xlsx`.
 6. Add daily earnings calculation API route.
+
+## Loss recovery salary deductions
+
+Losses assigned in Team Ops → Losses are deducted from salary: People employees in HRMS payroll
+(`OPS_LOSS_RECOVERY` line), Workforce members in the monthly Workforce payout (`LOSS_RECOVERY` line).
+The rule lives in `supabase/migrations/20261015130000_loss_recovery_payroll_deductions.sql`
+(dashboard repo, shared database).
+
+- **Salary month.** A loss is settled on the day it is assigned (for SLP, the later of that and the
+  day the case first appears in SLP Final). Settled before the 7th → the previous month's salary;
+  on or after the 7th → that month's salary. "Deduct next month" adds one month.
+- **NL loss for month M is never deducted earlier than month M+1's salary.** A September NL loss
+  assigned on 4 Nov comes off October salary; assigned on 8 Nov, it comes off November.
+- **SLP Initial is a report only.** Employees can be assigned only once the case is in SLP Final.
+- **Exactly once.** A loss already on another HRMS run or another published payout is skipped; a
+  month that cannot carry it (person not in that payroll, or take-home too low) moves it whole to
+  the next month. A loss is never part-recovered.
+- **Locked once paid.** A loss on a reviewed/approved HRMS run or a published payout cannot be
+  changed or removed in Losses.
+- **Manual loss deductions are separate.** HR's Salary detail "Loss deduction" upload stays a
+  manual entry. Ops recoveries export in their own "Ops loss recovery" column, which the upload
+  never reads back, so a re-upload cannot deduct an Ops loss twice. Do not also upload an Ops
+  loss manually.
+- First salary month carrying Ops losses: October 2026 (`payroll_start_month` in the recovery policy).

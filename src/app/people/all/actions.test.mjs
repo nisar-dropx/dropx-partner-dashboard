@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { canonicalWorkforceStatusEditPatch } from "../../../lib/canonical-workforce-status.ts";
+
 const action = readFileSync(new URL("./actions.ts", import.meta.url), "utf8");
 
 test("save action accepts sparse changes and removes canonical values that are already unchanged", () => {
@@ -22,6 +24,85 @@ test("save action keeps linked designation and biometric state aligned", () => {
   assert.match(action, /if \(source\.categoryCode === "workforce"\) payload\.designation = next\.name/);
   assert.match(action, /\["location_id", "date_of_join", "is_active"\]\.some/);
   assert.match(action, /await syncBiometricEnrolment\(/);
+});
+
+test("canonical Workforce status edits write a coherent active or inactive lifecycle", () => {
+  assert.deepEqual(canonicalWorkforceStatusEditPatch(true, {
+    onboarding_status: "active",
+    lifecycle_status: "inactive",
+    is_active: false
+  }), {
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true
+  });
+  assert.deepEqual(canonicalWorkforceStatusEditPatch(false, {
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true
+  }), {
+    lifecycle_status: "inactive",
+    is_active: false
+  });
+  assert.match(action, /canonicalWorkforceStatusEditPatch\(payload\.is_active === true, existing\)/);
+});
+
+test("canonical Workforce status edits preserve lifecycle-owned terminal and exit states", () => {
+  assert.throws(
+    () => canonicalWorkforceStatusEditPatch(true, { lifecycle_status: "exited", is_active: false }),
+    /controlled by Workforce Lifecycle/
+  );
+  assert.throws(
+    () => canonicalWorkforceStatusEditPatch(true, { deleted_at: "2026-10-15", is_active: false }),
+    /Archived workforce profiles/
+  );
+  assert.deepEqual(canonicalWorkforceStatusEditPatch(false, {
+    onboarding_status: "cancelled",
+    lifecycle_status: "exited",
+    is_active: false
+  }), { is_active: false });
+  assert.deepEqual(canonicalWorkforceStatusEditPatch(true, {
+    onboarding_status: "active",
+    lifecycle_status: "settlement_pending",
+    is_active: true
+  }), { is_active: true });
+});
+
+test("canonical Workforce profile edits cannot bypass onboarding review", () => {
+  for (const onboarding_status of ["pending", "under_review", "returned", "approved", "rejected", "cancelled"]) {
+    assert.throws(
+      () => canonicalWorkforceStatusEditPatch(true, {
+        onboarding_status,
+        lifecycle_status: "onboarding",
+        is_active: false
+      }),
+      /Workforce Lifecycle/
+    );
+    assert.deepEqual(canonicalWorkforceStatusEditPatch(false, {
+      onboarding_status,
+      lifecycle_status: "onboarding",
+      is_active: false
+    }), { is_active: false });
+  }
+});
+
+test("canonical Workforce profile edits repair only an already-active pending split tuple", () => {
+  assert.deepEqual(canonicalWorkforceStatusEditPatch(true, {
+    onboarding_status: "pending",
+    lifecycle_status: "onboarding",
+    is_active: true
+  }), {
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true
+  });
+});
+
+test("both canonical Workforce editors use the shared coherent status patch", () => {
+  const fieldExecutiveAction = readFileSync(new URL("../../field-executive/actions.ts", import.meta.url), "utf8");
+  assert.match(fieldExecutiveAction, /canonicalWorkforceStatusEditPatch\(payload\.is_active, existingProfile\)/);
+  assert.match(fieldExecutiveAction, /table === "workforce" \? \["onboarding_status", "lifecycle_status", "deleted_at", "deactivated_at"\] : \[\]/);
+  assert.match(action, /source\.categoryCode === "workforce" && "is_active" in payload/);
 });
 
 test("sensitive edits reuse matching server-persisted verification and safely invalidate stale results", () => {

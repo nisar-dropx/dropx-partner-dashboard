@@ -25,6 +25,7 @@ import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdWorker } from "@/lib/workforce-client-id-queue";
 import { loadClientIdPartnerStates } from "@/lib/workforce-client-id-partner";
 import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
+import { canonicalWorkforceStatusEditPatch } from "@/lib/canonical-workforce-status";
 import {
   assertUniquePeopleBulkIdentities,
   HELPER_BULK_IMPORT_MAX_ROWS,
@@ -651,17 +652,23 @@ export async function updateFieldExecutive(formData: FormData) {
     const { id, payload } = normalizeFieldExecutivePayload(formData, true);
     if (!id) throw new Error("Field executive is required.");
     const executiveId = id;
+    const existingProfileFields = [
+      "location_id", "email", "biometric_id", "is_active",
+      ...(table === "workforce" ? ["onboarding_status", "lifecycle_status", "deleted_at", "deactivated_at"] : []),
+      "aadhaar_front_path", "aadhaar_back_path", "pan_upload_path", "dl_front_path", "dl_back_path", "profile_photo_path"
+    ].join(", ");
     const existingResult = await supabaseAdmin
       .from(table)
-      .select("location_id, email, biometric_id, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path")
+      .select(existingProfileFields)
       .eq("id", executiveId)
       .eq("company_id", companyId)
       .maybeSingle();
     if (existingResult.error) throw new Error(existingResult.error.message);
     if (!existingResult.data) throw new Error("Associate was not found.");
+    const existingProfile = existingResult.data as unknown as Record<string, unknown>;
     const allowedLocationIds = await scopedWorkforceLocationIds(companyId, authorization);
-    if (allowedLocationIds && (!allowedLocationIds.has(existingResult.data.location_id) || !allowedLocationIds.has(payload.location_id))) throw new Error("Associate or selected location is outside your station scope.");
-    payload.biometric_id = String((existingResult.data as { biometric_id?: string | null } | null)?.biometric_id ?? "").replace(/\D/g, "") || null;
+    if (allowedLocationIds && (!allowedLocationIds.has(String(existingProfile.location_id ?? "")) || !allowedLocationIds.has(payload.location_id))) throw new Error("Associate or selected location is outside your station scope.");
+    payload.biometric_id = String(existingProfile.biometric_id ?? "").replace(/\D/g, "") || null;
 
     if (allowedLocationIds && !allowedLocationIds.has(payload.location_id)) {
       throw new Error("You do not have access to the selected location.");
@@ -676,7 +683,7 @@ export async function updateFieldExecutive(formData: FormData) {
     if (!location) throw new Error("Selected location is not available for this company.");
 
     let stationEmailExceptionNote = "";
-    if (currentAccessSurface() === "ops" && (payload.email !== existingResult.data.email || payload.location_id !== existingResult.data.location_id)) {
+    if (currentAccessSurface() === "ops" && (payload.email !== existingProfile.email || payload.location_id !== existingProfile.location_id)) {
       const requiresStationEmail = workforceStationPolicy(location).requiresStationEmail;
       const emailError = workforceStationEmailError(payload.email, location.station_code, requiresStationEmail);
       if (emailError) {
@@ -766,6 +773,9 @@ export async function updateFieldExecutive(formData: FormData) {
       excludeId: executiveId,
       excludeRegister: table
     });
+    const statusPayload = table === "workforce"
+      ? canonicalWorkforceStatusEditPatch(payload.is_active, existingProfile)
+      : { is_active: payload.is_active };
     const corePayload = {
       full_name: payload.full_name,
       mobile_country_code: payload.mobile_country_code,
@@ -776,12 +786,12 @@ export async function updateFieldExecutive(formData: FormData) {
       designation: payload.designation,
       ...(table === "workforce" ? { designation_id: designationResult.data.id } : {}),
       biometric_id: payload.biometric_id,
-      is_active: payload.is_active,
+      ...statusPayload,
       statutory_applicability: payload.statutory_applicability
     };
 
     const documentPayload: Record<string, string> = {};
-    const existingPaths = existingResult.data as Record<string, string | null> | null;
+    const existingPaths = existingProfile as Record<string, string | null>;
     for (const field of fieldExecutiveDocumentFields) {
       if (!dashboardEnabled.has(field.ruleKey)) continue;
       const uploaded = await uploadProfileDocument({
@@ -833,7 +843,7 @@ export async function updateFieldExecutive(formData: FormData) {
         action: "workforce_station_email_exception",
         entity_table: table,
         entity_id: executiveId,
-        old_values: { email: existingResult.data.email, location_id: existingResult.data.location_id },
+        old_values: { email: existingProfile.email, location_id: existingProfile.location_id },
         new_values: { email: payload.email, station_code: location.station_code, location_id: payload.location_id },
         reason: stationEmailExceptionNote
       });

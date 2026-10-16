@@ -71,6 +71,13 @@ async function resolveAccount(accountId: string, profileType: string) {
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
+function assertRegistrationPhotoUpdate(account: ConnectAccount) {
+  const status = String(account.status ?? "").trim().toLowerCase();
+  if (!["pending", "returned"].includes(status)) {
+    throw new Error("Profile photo changes are not available after registration. Use the OTP-protected profile edit flow for profile changes.");
+  }
+}
+
 function workforceUpdateTable(profileType: string) {
   if (profileType === "employee") return "employees" as const;
   if (isNonEmployeeProfileType(profileType)) return workforceTable(profileType);
@@ -179,6 +186,7 @@ export async function PUT(request: Request) {
     const accountId = String(body.accountId ?? "").trim();
     const profileType = String(body.profileType ?? "").trim();
     const account = await resolveAccount(accountId, profileType);
+    assertRegistrationPhotoUpdate(account);
     const [settings, updatesUsed] = await Promise.all([
       loadConnectProfilePhotoPolicy(account.companyId),
       countConnectProfilePhotoUpdatesThisMonth({
@@ -249,6 +257,7 @@ export async function POST(request: Request) {
     const profileType = String(form.get("profile_type") ?? "").trim();
     const challengeId = String(form.get("challenge_id") ?? "").trim();
     const account = await resolveAccount(accountId, profileType);
+    assertRegistrationPhotoUpdate(account);
     const [settings, updatesUsed] = await Promise.all([
       loadConnectProfilePhotoPolicy(account.companyId),
       countConnectProfilePhotoUpdatesThisMonth({

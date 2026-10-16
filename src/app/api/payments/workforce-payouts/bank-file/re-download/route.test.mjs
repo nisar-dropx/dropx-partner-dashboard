@@ -27,11 +27,19 @@ test("bulk re-download is authorized, exact-selection only, and read-only", () =
   assert.match(route, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
   assert.match(route, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(route, /authorization\.hasAllLocationAccess/);
+  assert.doesNotMatch(route, /bank processing requires all-location access/i);
   assert.match(route, /MAX_REQUEST_BYTES = 4 \* 1024 \* 1024/);
   assert.match(route, /uniquePaymentItemIds\(body\.paymentItemIds\)/);
   assert.match(route, /completeCalendarMonth\(periodStart, periodEnd\)/);
   assert.match(route, /rpc\("workforce_get_payout_payment_redownload"/);
   assert.match(route, /returnedIds\.size !== paymentItemIds\.length/);
+  assert.match(route, /UUID\.test\(locationId\) && allowed\.has\(locationId\)/);
+  assert.match(route, /immutableLocationsAreInScope\(access\.authorization, items\)/);
+  assert.ok(
+    route.indexOf("immutableLocationsAreInScope(access.authorization, items)")
+      > route.indexOf("returnedIds.size !== paymentItemIds.length"),
+    "the scope check must use the exact immutable RPC result"
+  );
   assert.doesNotMatch(route, /workforce_create_payout_payment/);
   assert.doesNotMatch(route, /refreshWorkforcePayoutPublicationJobs/);
   assert.doesNotMatch(route, /\.from\([^)]*\)[\s\S]{0,200}\.(?:update|insert|delete)\(/);

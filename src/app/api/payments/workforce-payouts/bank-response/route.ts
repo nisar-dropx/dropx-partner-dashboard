@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { requireCompanyId } from "@/lib/company-scope";
+import { payoutBankResponseImportIdentity } from "@/lib/payout-bank-response-import-identity";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   isValidWorkforceBankReference,
@@ -78,15 +79,37 @@ async function loadOwnedPaymentReferences(companyId: string, candidates: string[
   const results = await mapWithConcurrency(lookups, REFERENCE_LOOKUP_CONCURRENCY, async (lookup) => {
     const result = await database
       .from(lookup.table)
-      .select("reference_no")
+      .select("reference_no,location_id_snapshot")
       .eq("company_id", companyId)
       .in("reference_no", lookup.references);
     if (result.error) {
       throw new Error(`Unable to verify ${lookup.audience === "helpers" ? "Helper" : "Workforce"} payment references: ${result.error.message}`);
     }
-    return (result.data ?? []).map((row) => String(row.reference_no ?? "").trim().toUpperCase()).filter(Boolean);
+    return (result.data ?? []).map((row) => ({
+      locationId: String(row.location_id_snapshot ?? "").trim().toLowerCase(),
+      referenceNo: String(row.reference_no ?? "").trim().toUpperCase()
+    })).filter((row) => Boolean(row.referenceNo));
   });
-  return new Set(results.flat());
+  const owned = new Map<string, string>();
+  for (const row of results.flat()) {
+    const existingLocationId = owned.get(row.referenceNo);
+    if (existingLocationId !== undefined && existingLocationId !== row.locationId) {
+      throw new Error("A payment reference resolved to conflicting immutable locations.");
+    }
+    owned.set(row.referenceNo, row.locationId);
+  }
+  return owned;
+}
+
+function scopedOwnedPaymentReferences(
+  authorization: AuthorizationContext,
+  ownedReferenceLocations: Map<string, string>
+) {
+  if (authorization.hasAllLocationAccess) return new Set(ownedReferenceLocations.keys());
+  const allowed = new Set(authorization.locationScopeIds.map((id) => String(id).trim().toLowerCase()));
+  return new Set([...ownedReferenceLocations].flatMap(([referenceNo, locationId]) => (
+    UUID.test(locationId) && allowed.has(locationId) ? [referenceNo] : []
+  )));
 }
 
 type LegacyReferenceResolution = {
@@ -174,7 +197,6 @@ export async function POST(request: Request) {
     if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
       return errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403);
     }
-    if (!authorization.hasAllLocationAccess) return errorResponse("Workforce bank finalization requires all-location access.", 403);
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
 
@@ -204,14 +226,20 @@ export async function POST(request: Request) {
       return errorResponse(`The bank response can contain at most ${MAX_REFERENCE_CANDIDATES} distinct DropX-looking references.`, 400);
     }
     const rowReferenceAliases = await resolveLegacyPaymentReferences(companyId, legacyCandidates);
-    const ownedReferences = await loadOwnedPaymentReferences(companyId, [
+    const ownedReferenceLocations = await loadOwnedPaymentReferences(companyId, [
       ...new Set([...candidates, ...rowReferenceAliases.values()])
     ]);
+    const companyOwnedReferences = new Set(ownedReferenceLocations.keys());
     for (const [rowNumber, referenceNo] of rowReferenceAliases) {
-      if (!ownedReferences.has(referenceNo)) {
+      if (!companyOwnedReferences.has(referenceNo)) {
         throw new Error(`The bank response file cannot be processed:\n- Row ${rowNumber}: the resolved payment reference no longer belongs to this company.`);
       }
     }
+    // A bank response can combine Workforce, Helper, other-location and
+    // unrelated transactions. Treat company-owned references outside this
+    // editor's immutable location scope exactly like unrelated rows: skip
+    // them, and send only the permitted subset to the mixed atomic finalizer.
+    const ownedReferences = scopedOwnedPaymentReferences(authorization, ownedReferenceLocations);
     if (!ownedReferences.size) {
       return Response.json({
         paid: 0,
@@ -226,12 +254,17 @@ export async function POST(request: Request) {
     if (parsed.workforceRows.length + parsed.helperRows.length > MAX_RESPONSE_ROWS) {
       return errorResponse(`The bank response can contain at most ${MAX_RESPONSE_ROWS} DropX payment rows.`, 400);
     }
-    const fileSha256 = createHash("sha256").update(bytes).digest("hex");
+    const rawFileSha256 = createHash("sha256").update(bytes).digest("hex");
+    const importIdentity = payoutBankResponseImportIdentity({
+      rawFileSha256,
+      hasAllLocationAccess: authorization.hasAllLocationAccess,
+      includedReferences: ownedReferences
+    });
     const rpcBase = {
       p_company_id: companyId,
       p_actor_user_id: authorization.userId,
       p_operation_id: operationId,
-      p_file_sha256: fileSha256,
+      p_file_sha256: importIdentity,
       p_file_name: file.name.slice(0, 240)
     };
     // The same Federal Bank response can contain Workforce, Helper and unrelated

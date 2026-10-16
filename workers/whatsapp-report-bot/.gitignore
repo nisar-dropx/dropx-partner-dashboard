@@ -1,0 +1,4 @@
+# The WhatsApp session lives here. It is a login credential: never commit it.
+.report-bot-data/
+node_modules/
+.env

@@ -3,26 +3,40 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 
-function loadReviewAction(currentProfile) {
+function loadReviewActions(currentProfile, options = {}) {
   let updatePayload = null;
+  const updateFilters = [];
   const notifications = [];
   const revalidated = [];
 
   const query = () => {
+    let operation = "read";
     const chain = {
-      eq() {
+      eq(column, value) {
+        if (operation === "update") updateFilters.push([column, value]);
+        return chain;
+      },
+      is(column, value) {
+        if (operation === "update") updateFilters.push([column, value]);
         return chain;
       },
       maybeSingle() {
-        return Promise.resolve({ data: currentProfile, error: null });
+        if (operation === "update") {
+          return Promise.resolve({
+            data: options.staleUpdate ? null : { id: currentProfile.id },
+            error: options.updateError ?? null
+          });
+        }
+        return Promise.resolve({ data: currentProfile, error: options.readError ?? null });
       },
       select() {
         return chain;
       },
       then(resolve, reject) {
-        return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+        return Promise.resolve({ data: null, error: options.updateError ?? null }).then(resolve, reject);
       },
       update(payload) {
+        operation = "update";
         updatePayload = payload;
         return chain;
       }
@@ -109,7 +123,8 @@ function loadReviewAction(currentProfile) {
 
   return {
     reviewPeopleProfile: module.exports.reviewPeopleProfile,
-    result: () => ({ notifications, revalidated, updatePayload })
+    reviewProfileEdit: module.exports.reviewProfileEdit,
+    result: () => ({ notifications, revalidated, updateFilters, updatePayload })
   };
 }
 
@@ -122,8 +137,14 @@ function reviewForm(action = "approve") {
   return form;
 }
 
-async function submitReview(currentProfile, action = "approve") {
-  const harness = loadReviewAction({
+function profileEditForm(action = "approve", reviewVersion = "2026-10-15T08:00:00.000Z") {
+  const form = reviewForm(action);
+  form.set("review_version", reviewVersion);
+  return form;
+}
+
+async function submitRegistrationReview(currentProfile, action = "approve") {
+  const harness = loadReviewActions({
     id: "workforce-id",
     location_id: "station-id",
     onboarding_status: "under_review",
@@ -136,29 +157,190 @@ async function submitReview(currentProfile, action = "approve") {
   return harness.result();
 }
 
-test("People Review explicitly approves a required existing-person exception when activating Workforce", async () => {
-  const result = await submitReview({ identity_exception_required: true });
+async function submitProfileEdit(currentProfile = {}, action = "approve", options = {}) {
+  const harness = loadReviewActions({
+    id: "workforce-id",
+    location_id: "station-id",
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true,
+    deleted_at: null,
+    deactivated_at: null,
+    profile_edit_review_pending: true,
+    updated_at: "2026-10-15T08:00:00.000Z",
+    ...currentProfile
+  }, options);
+  await assert.rejects(
+    harness.reviewProfileEdit(profileEditForm(action)),
+    (error) => String(error?.digest ?? "").startsWith("NEXT_REDIRECT;/people/review?notice=")
+  );
+  return harness.result();
+}
+
+test("ordinary People Review preserves main approval behavior without profile-edit schema", async () => {
+  const result = await submitRegistrationReview({ identity_exception_required: true });
 
   assert.equal(result.updatePayload.onboarding_status, "active");
+  assert.equal(result.updatePayload.lifecycle_status, "active");
+  assert.equal(result.updatePayload.is_active, true);
   assert.match(result.updatePayload.identity_exception_approved_at, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(result.updatePayload.identity_exception_approved_by, "reviewer-user");
+  assert.equal("profile_edit_review_pending" in result.updatePayload, false);
+  assert.deepEqual(result.updateFilters, [
+    ["id", "workforce-id"],
+    ["company_id", "company-id"]
+  ]);
   assert.equal(result.notifications[0]?.eventCode, "profile_approved");
   assert.ok(result.revalidated.includes("/people/review"));
 });
 
-test("People Review does not stamp an identity exception when none is required", async () => {
-  const result = await submitReview({ identity_exception_required: false });
+test("ordinary People Review does not stamp an identity exception when none is required", async () => {
+  const result = await submitRegistrationReview({ identity_exception_required: false });
 
   assert.equal(result.updatePayload.onboarding_status, "active");
+  assert.equal(result.updatePayload.lifecycle_status, "active");
+  assert.equal(result.updatePayload.is_active, true);
   assert.equal("identity_exception_approved_at" in result.updatePayload, false);
   assert.equal("identity_exception_approved_by" in result.updatePayload, false);
 });
 
-test("returning a Workforce profile never approves its existing-person exception", async () => {
-  const result = await submitReview({ identity_exception_required: true }, "return");
+test("ordinary People Review return preserves main registration behavior", async () => {
+  const result = await submitRegistrationReview({ identity_exception_required: true }, "return");
 
   assert.equal(result.updatePayload.onboarding_status, "returned");
+  assert.equal(result.updatePayload.lifecycle_status, "onboarding");
+  assert.equal(result.updatePayload.is_active, false);
+  assert.equal("profile_edit_review_pending" in result.updatePayload, false);
   assert.equal("identity_exception_approved_at" in result.updatePayload, false);
   assert.equal("identity_exception_approved_by" in result.updatePayload, false);
   assert.equal(result.notifications[0]?.eventCode, "profile_returned");
 });
+
+test("ordinary review cannot consume an active self-edit review", async () => {
+  const harness = loadReviewActions({
+    id: "workforce-id",
+    location_id: "station-id",
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true,
+    profile_edit_review_pending: true,
+    updated_at: "2026-10-15T08:00:00.000Z"
+  });
+
+  await assert.rejects(
+    harness.reviewPeopleProfile(reviewForm()),
+    (error) => String(error?.digest ?? "").startsWith("NEXT_REDIRECT;/people/review?error=") &&
+      String(error?.digest ?? "").includes("Only+profiles+under+review+can+be+approved+or+returned")
+  );
+  assert.equal(harness.result().updatePayload, null);
+});
+
+test("self-edit approval only clears the independent review state", async () => {
+  const result = await submitProfileEdit();
+
+  assert.equal(result.updatePayload.profile_edit_review_pending, false);
+  assert.equal(result.updatePayload.profile_return_remarks, null);
+  assert.equal(result.updatePayload.profile_returned_at, null);
+  for (const field of ["onboarding_status", "lifecycle_status", "is_active", "identity_exception_approved_at"]) {
+    assert.equal(field in result.updatePayload, false);
+  }
+  assert.ok(result.updateFilters.some(([column, value]) => column === "onboarding_status" && value === "active"));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "profile_edit_review_pending" && value === true));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "is_active" && value === true));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "lifecycle_status" && value === "active"));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "deleted_at" && value === null));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "deactivated_at" && value === null));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "updated_at" && value === "2026-10-15T08:00:00.000Z"));
+  assert.deepEqual(result.notifications, []);
+});
+
+test("returning a self-edit keeps the profile active and records correction remarks", async () => {
+  const result = await submitProfileEdit({}, "return");
+
+  assert.equal(result.updatePayload.profile_edit_review_pending, true);
+  assert.equal(result.updatePayload.profile_return_remarks, "Correct the submitted documents.");
+  assert.match(result.updatePayload.profile_returned_at, /^\d{4}-\d{2}-\d{2}T/);
+  for (const field of ["onboarding_status", "lifecycle_status", "is_active"]) {
+    assert.equal(field in result.updatePayload, false);
+  }
+  assert.equal(result.notifications[0]?.data.profileEdit, true);
+});
+
+test("self-edit review rejects a stale rendered version before updating", async () => {
+  const harness = loadReviewActions({
+    id: "workforce-id",
+    location_id: "station-id",
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true,
+    deleted_at: null,
+    deactivated_at: null,
+    profile_edit_review_pending: true,
+    updated_at: "2026-10-15T08:01:00.000Z"
+  });
+
+  await assert.rejects(
+    harness.reviewProfileEdit(profileEditForm()),
+    (error) => String(error?.digest ?? "").startsWith("NEXT_REDIRECT;/people/review?error=") &&
+      String(error?.digest ?? "").includes("Profile+changed+while+you+were+reviewing+it")
+  );
+  const result = harness.result();
+  assert.equal(result.updatePayload, null);
+  assert.deepEqual(result.notifications, []);
+});
+
+for (const [condition, profile] of [
+  ["inactive", { lifecycle_status: "inactive", is_active: false }],
+  ["outside the active lifecycle", { lifecycle_status: "exited", is_active: true }],
+  ["deleted", { deleted_at: "2026-10-15T07:00:00.000Z" }],
+  ["deactivated", { deactivated_at: "2026-10-15T07:00:00.000Z" }]
+]) {
+  test(`self-edit review cannot reactivate a Workforce profile that is ${condition}`, async () => {
+    const harness = loadReviewActions({
+      id: "workforce-id",
+      location_id: "station-id",
+      onboarding_status: "active",
+      lifecycle_status: "active",
+      is_active: true,
+      deleted_at: null,
+      deactivated_at: null,
+      profile_edit_review_pending: true,
+      updated_at: "2026-10-15T08:00:00.000Z",
+      ...profile
+    });
+
+    await assert.rejects(
+      harness.reviewProfileEdit(profileEditForm("return")),
+      (error) => String(error?.digest ?? "").startsWith("NEXT_REDIRECT;/people/review?error=") &&
+        String(error?.digest ?? "").includes("Only+active+profiles+with+changes+awaiting+review")
+    );
+    const result = harness.result();
+    assert.equal(result.updatePayload, null);
+    assert.deepEqual(result.notifications, []);
+    assert.deepEqual(result.revalidated, []);
+  });
+}
+
+for (const action of ["approve", "return"]) {
+  test(`stale self-edit ${action} CAS is rejected before side effects`, async () => {
+    const harness = loadReviewActions({
+      id: "workforce-id",
+      location_id: "station-id",
+      onboarding_status: "active",
+      lifecycle_status: "active",
+      is_active: true,
+      deleted_at: null,
+      deactivated_at: null,
+      profile_edit_review_pending: true,
+      updated_at: "2026-10-15T08:00:00.000Z"
+    }, { staleUpdate: true });
+    await assert.rejects(
+      harness.reviewProfileEdit(profileEditForm(action)),
+      (error) => String(error?.digest ?? "").startsWith("NEXT_REDIRECT;/people/review?error=") &&
+        String(error?.digest ?? "").includes("Profile+changed+while+you+were+reviewing+it")
+    );
+    const result = harness.result();
+    assert.deepEqual(result.notifications, []);
+    assert.deepEqual(result.revalidated, []);
+  });
+}

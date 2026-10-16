@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import JSZip from "jszip";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildWorkforceFedOneWorkbook } from "@/lib/workforce-payout-bank-file";
@@ -108,6 +108,15 @@ function databaseStatus(message: string) {
   return /processing|selected|company|month|legacy|download|changed/i.test(message) ? 409 : 400;
 }
 
+function immutableLocationsAreInScope(authorization: AuthorizationContext, items: RedownloadItem[]) {
+  if (authorization.hasAllLocationAccess) return true;
+  const allowed = new Set(authorization.locationScopeIds.map((id) => String(id).trim().toLowerCase()));
+  return items.length > 0 && items.every((item) => {
+    const locationId = String(item.location_id ?? "").trim().toLowerCase();
+    return UUID.test(locationId) && allowed.has(locationId);
+  });
+}
+
 async function authorize(audience: PayoutAudience) {
   const label = audience === "helpers" ? "Helper" : "Workforce";
   const authorization = await getAuthorization();
@@ -117,9 +126,6 @@ async function authorize(audience: PayoutAudience) {
   const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
   if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
-  }
-  if (!authorization.hasAllLocationAccess) {
-    return { error: errorResponse("Workforce bank processing requires all-location access.", 403) } as const;
   }
   if (!supabaseAdmin) return { error: errorResponse("Database configuration is unavailable.", 503) } as const;
   return { authorization, companyId: requireCompanyId(authorization) } as const;
@@ -214,6 +220,9 @@ export async function POST(request: Request) {
     const returnedIds = new Set(items.map((item) => String(item.payment_item_id ?? "").toLowerCase()));
     if (returnedIds.size !== paymentItemIds.length || paymentItemIds.some((id) => !returnedIds.has(id))) {
       return errorResponse("The bank file did not resolve the exact selected payments.", 409);
+    }
+    if (!immutableLocationsAreInScope(access.authorization, items)) {
+      return errorResponse("One or more selected payments are outside your location scope.", 403);
     }
 
     const groups = new Map<string, RedownloadItem[]>();

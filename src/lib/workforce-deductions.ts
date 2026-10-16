@@ -16,7 +16,8 @@ export type DeductionWorkerContext = {
   panNumber?: string | null;
 };
 
-export type AutomaticDeductionLine = { code: string; label: string; amount: number };
+/** recoveryKey marks an Ops loss recovery line (month|case|ref), so a published payout proves it was deducted. */
+export type AutomaticDeductionLine = { code: string; label: string; amount: number; recoveryKey?: string };
 
 function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;

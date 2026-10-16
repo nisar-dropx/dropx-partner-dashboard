@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
+import { ConnectMobileValidationError } from "@/lib/country-codes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST(request: Request) {
@@ -32,6 +33,9 @@ export async function POST(request: Request) {
       accounts
     });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to check mobile number." }, { status: 500 });
   }
 }

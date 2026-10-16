@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { normalizeMobile, verifyOtpHash } from "@/lib/connect-otp";
+import { ConnectMobileValidationError, normalizeConnectMobile } from "@/lib/country-codes";
+import { verifyOtpHash } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type AccountRow = {
@@ -58,8 +59,7 @@ export async function POST(request: Request) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; otp?: unknown };
-    const countryCode = String(body.countryCode ?? "91").replace(/\D/g, "") || "91";
-    const mobile = normalizeMobile(body.mobile, countryCode);
+    const { countryCode, mobile, localMobile } = normalizeConnectMobile(body.mobile, body.countryCode);
     const otp = String(body.otp ?? "").replace(/\D/g, "");
     if (!mobile || mobile.length < 11) {
       return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
@@ -123,7 +123,6 @@ export async function POST(request: Request) {
       user_agent: request.headers.get("user-agent")
     }).eq("id", otpRow.id);
 
-    const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
     let [profilesResult, executivesResult]: [ProfileMatchResult, ExecutiveMatchResult] = await Promise.all([
       supabaseAdmin
         .from("profiles")
@@ -138,19 +137,19 @@ export async function POST(request: Request) {
         .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
     ]);
-    if (isMissingColumnError(profilesResult.error) || isMissingColumnError(executivesResult.error)) {
-      [profilesResult, executivesResult] = await Promise.all([
-        supabaseAdmin
+    if (isMissingColumnError(profilesResult.error)) {
+      profilesResult = await supabaseAdmin
           .from("profiles")
           .select("id, company_id, full_name, email, employee_id, role, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
-        supabaseAdmin
+          .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
+    }
+    if (isMissingColumnError(executivesResult.error)) {
+      executivesResult = await supabaseAdmin
           .from("workforce")
           .select("id, company_id, full_name, email, dropx_id, designation, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-      ]);
+          .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
     }
     if (profilesResult.error) throw new Error(profilesResult.error.message);
     if (executivesResult.error) throw new Error(executivesResult.error.message);
@@ -200,6 +199,9 @@ export async function POST(request: Request) {
         }))
     });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to verify OTP." }, { status: 500 });
   }
 }

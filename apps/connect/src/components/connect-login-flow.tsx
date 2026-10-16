@@ -197,6 +197,15 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const approvalAccess = resolveApprovalAccess(account, isWorkforceWorkspace(account), reporteeCheck);
   const lastLoggedScreen = useRef("");
 
+  useEffect(() => {
+    if (searchParams.get("profileUpdated") !== "1") return;
+    setNotice("Profile updated successfully. Sign in again with your new mobile number.");
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("profileUpdated");
+    const query = nextParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
   // A scroll position left over from one screen (e.g. a focused input's scrollIntoView
   // during login) can otherwise carry into the next screen and render content under the
   // sticky header. Cheap and safe regardless of how panels for each step actually render.
@@ -900,11 +909,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       <PullToRefresh />
       {step === "dashboard" && account ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}
       {openedNotice ? <ConnectNoticeDialog notice={openedNotice} onClose={() => setOpenedNotice(null)} onContinue={() => { navigateNotification(openedNotice); setOpenedNotice(null); }} /> : null}
-      {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} />}</ConnectBetaJourneyShell> : null}
+      {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} />}</ConnectBetaJourneyShell> : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
-      {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
+      {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "salary" && account && canViewInterimSalary(account) ? <ConnectInterimSalary key={accountKey(account)} account={account} onDocuments={() => open("documents")} onAttendance={allowed(account, "attendance") ? () => open("attendance") : undefined} /> : null}
       {step === "connect" && account ? <ConnectCommunicationCenter key={accountKey(account)} account={account} readOnly={userPreview} initialCaseId={connectTarget.caseId} initialAnnouncementId={connectTarget.announcementId} /> : null}

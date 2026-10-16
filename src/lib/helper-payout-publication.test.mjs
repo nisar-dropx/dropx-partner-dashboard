@@ -378,10 +378,13 @@ test("Helper publication migration atomically creates an App-only worker notific
 test("payment-settings access exposes Helper setup without broadening Workforce provider mapping", () => {
   const page = readFileSync(new URL("../app/provider-mapping/direct-pay/page.tsx", import.meta.url), "utf8");
   const action = readFileSync(new URL("../app/provider-mapping/direct-pay/actions.ts", import.meta.url), "utf8");
+  const hostPolicy = readFileSync(new URL("provider-mapping-host.ts", import.meta.url), "utf8");
   const hub = readFileSync(new URL("../app/settings/workforce-payment/page.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /audience === "helpers" && searchParams\.source === "payment-settings"/);
+  assert.match(page, /isDashboardPaymentSettingsDirectPayEntry\(pageCode, audience, searchParams\.source\)/);
   assert.match(page, /accessPageCode = paymentSettingsEntry \? "payment_settings" : pageCode/);
+  assert.match(hostPolicy, /pageCode === "provider_mapping"[\s\S]*?audience === "helpers"[\s\S]*?source === "payment-settings"/);
+  assert.match(action, /isDashboardPaymentSettingsDirectPayEntry\([\s\S]*?pageCode,[\s\S]*?audience/);
   assert.match(action, /if \(permissionScope === "payment_settings"\)[\s\S]*?audience !== "helpers"/);
   assert.match(action, /hasPermission\(authorization, "payment_settings", "edit"\)/);
   assert.match(action, /else if \(!canEditProviderMappings\(authorization\)\)/);

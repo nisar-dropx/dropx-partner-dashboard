@@ -1,3 +1,4 @@
+import { providerMappingHref, providerMappingEntryFilters } from '../provider-mapping-navigation.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -26,7 +27,7 @@ new Function('exports','module','require',ts.transpileModule(readFileSync(new UR
 const routeDistance={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-route-distance.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(routeDistance.exports,routeDistance);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../workforce-route-distance')return routeDistance.exports;if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../provider-mapping-navigation')return {providerMappingHref};if(id==='../workforce-route-distance')return routeDistance.exports;if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -300,7 +301,7 @@ test('provider-required workforce gaps use the canonical ID mapping URL with enc
  const r=rebuildCps(base([day('A & B','2026-09-01',0)]),f);
  const gap=r.gaps.find(g=>g.kind==='Provider ID not linked'&&g.dropx_id==='D1 / north');
  assert.ok(gap);
- assert.equal(gap.href,'https://dashboard.dropxlogistics.com/provider-id-mapping?q=D1%20%2F%20north&station=A%20%26%20B');
+ assert.equal(gap.href,'/provider-id-mapping?q=D1%20%2F%20north&station=A%20%26%20B&month=2026-09&mapping=all');
 });
 test('historical direct cost stays on the allocation station after a workforce transfer',()=>{
  const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;f.workforce[0].location_id='station-b';
@@ -349,12 +350,17 @@ test('employee-backed CTC follows effective Workforce station after a transfer',
  r=rebuildCps(base([day('B','2026-09-01',0)]),f);
  assert.equal(r.daily[0].da_salary,0,'current station B must not receive the pre-transfer CTC');
 });
-test('effective payment policy distinguishes optional, required and non-field dates',()=>{
+test('effective payment policy is independent of the Field Operations flag',()=>{
  const policy=(is_field_operations,provider_mapping_required)=>[{workforce_id:'w1',station_id:'station-a',station_code_snapshot:'A',designation_is_active:true,effective_from:'2026-09-01',effective_to:null,is_field_operations,provider_mapping_required}];
- for(const [history,expected] of [[policy(true,false),'Direct payment allocation missing'],[policy(true,true),'Provider ID not linked'],[policy(false,false),null]]) {
+ for(const [history,expected] of [
+  [policy(true,false),'Direct payment allocation missing'],
+  [policy(false,false),'Direct payment allocation missing'],
+  [policy(true,true),'Provider ID not linked'],
+  [policy(false,true),'Provider ID not linked']
+ ]) {
   const f=facts();f.shipments=[];f.mappings=[];f.allocations=[];f.policy_history=history;
   const r=rebuildCps(base([day('A','2026-09-01',0)]),f);
-  if(expected) assert.ok(r.gaps.some(g=>g.kind===expected)); else assert.ok(!r.gaps.some(g=>g.dropx_id==='D1'));
+  assert.ok(r.gaps.some(g=>g.kind===expected&&g.dropx_id==='D1'));
  }
 });
 test('dates before the first truthful policy snapshot suppress policy-derived gaps',()=>{
@@ -672,4 +678,34 @@ test('seller production sources and legacy MFN rates are excluded without a mast
  f.mappings[0]={...f.mappings[0],payment_method_id:null,delivery_rate:10,mfn_rate:9,mfn_return_rate:7};
  assert.equal(rebuildCps(base(),f).daily[0].da,1000);
  assert.equal(calculateRateCard(f.mappings[0],[],f.shipments[0],'2026-09-01',false,{}).variable,1125);
+});
+
+test('unmapped CPS source links retain the exact provider, station and historical month on OpsPulse',()=>{
+ const f=facts();f.mappings=[];
+ const gap=rebuildCps(base(),f).gaps.find(g=>g.kind==='Unmapped');
+ const url=new URL(gap.href,'https://ops.dropxlogistics.com');
+ assert.equal(url.origin,'https://ops.dropxlogistics.com');
+ assert.equal(url.pathname,'/provider-id-mapping');
+ assert.equal(url.searchParams.get('q'),'AM1');
+ assert.equal(url.searchParams.get('station'),'A');
+ assert.deepEqual(providerMappingEntryFilters(Object.fromEntries(url.searchParams),'2026-10-15'),{month:'2026-09',mapping:'all'});
+});
+test('a mapping gap spanning months does not hide records behind the current-month filter',()=>{
+ const f=facts();f.mappings=[];f.shipments.push({...f.shipments[0],id:'oct',work_date:'2026-10-01'});
+ const gap=rebuildCps(base([day(),day('A','2026-10-01')]),f).gaps.find(g=>g.kind==='Unmapped');
+ assert.equal(new URL(gap.href,'https://ops.dropxlogistics.com').searchParams.get('month'),'all');
+ assert.deepEqual(providerMappingEntryFilters({month:'all',mapping:'all'},'2026-10-15'),{month:'',mapping:'all'});
+});
+test('direct allocation and cached mapping gaps also stay on the current product',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].provider_mapping_required=false;f.workforce[0].is_field_operations=true;
+ const direct=rebuildCps(base(),f).gaps.find(g=>g.kind==='Direct payment allocation missing');
+ assert.equal(direct.href,'/provider-mapping/direct-pay?q=D1');
+ const cached={...direct,key:'legacy',kind:'Unmapped',provider_id:'AM1',dropx_id:'D1',href:'https://dashboard.dropxlogistics.com/provider-id-mapping?q=D1'};
+ const r=rebuildCps({...base(),gaps:[cached]},facts());
+ assert.equal(r.gaps.find(g=>g.key==='legacy').href,'/provider-id-mapping?q=AM1&station=A&month=2026-09&mapping=all');
+});
+test('plain ID mapping opens current month and Unmapped; invalid link filters cannot override those defaults',()=>{
+ for(const params of [undefined,{}, {month:'2026-99',mapping:'anything'}]) {
+  assert.deepEqual(providerMappingEntryFilters(params,'2026-10-15'),{month:'2026-10',mapping:'unmapped'});
+ }
 });

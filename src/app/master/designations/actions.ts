@@ -63,9 +63,6 @@ function friendlyError(error: unknown, fallback: string) {
 function providerMappingPolicy(formData: FormData) {
   const isFieldOperations = formData.has("is_field_operations");
   const providerMappingRequired = formData.has("provider_mapping_required");
-  if (providerMappingRequired && !isFieldOperations) {
-    throw new Error("Provider ID mapping can only be required for a Field Operations designation.");
-  }
   return { isFieldOperations, providerMappingRequired };
 }
 

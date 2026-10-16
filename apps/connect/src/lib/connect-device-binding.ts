@@ -19,6 +19,10 @@ export function readDeviceIdentity(request: Request) {
 
 type BindingRow = { id: string; account_id: string; profile_type: string; device_id: string };
 
+export type DeviceBindingMutation = {
+  createdBindingIds: string[];
+};
+
 async function loadActiveBindings(accounts: ConnectAccount[]) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
@@ -68,11 +72,14 @@ export async function bindDevice({
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const { platform, deviceId, deviceLabel } = readDeviceIdentity(request);
-  if (platform !== "app" || !deviceId || !accounts.length) return;
+  if (platform !== "app" || !deviceId || !accounts.length) {
+    return { createdBindingIds: [] } satisfies DeviceBindingMutation;
+  }
 
   const now = new Date().toISOString();
   const bindings = await loadActiveBindings(accounts);
   const boundKeys = new Set(bindings.map((binding) => `${binding.account_id}:${binding.profile_type}`));
+  const createdBindingIds: string[] = [];
 
   if (bindings.length) {
     const touch = await supabaseAdmin
@@ -84,20 +91,24 @@ export async function bindDevice({
 
   const missing = accounts.filter((account) => !boundKeys.has(`${account.id}:${account.profileType}`));
   if (missing.length) {
-    const insert = await supabaseAdmin.from("connect_account_devices").insert(missing.map((account) => ({
-      account_id: account.id,
-      profile_type: account.profileType,
-      device_id: deviceId,
-      platform: "app",
-      company_id: account.companyId,
-      display_name: account.name,
-      country_code: countryCode,
-      mobile_number: mobile,
-      device_label: deviceLabel
-    })));
+    const insert = await supabaseAdmin
+      .from("connect_account_devices")
+      .insert(missing.map((account) => ({
+        account_id: account.id,
+        profile_type: account.profileType,
+        device_id: deviceId,
+        platform: "app",
+        company_id: account.companyId,
+        display_name: account.name,
+        country_code: countryCode,
+        mobile_number: mobile,
+        device_label: deviceLabel
+      })))
+      .select("id");
     // 23505: another request bound this account a moment ago. Re-check rather than fail.
     if (insert.error && insert.error.code !== "23505") throw new Error(insert.error.message);
     if (insert.error) await assertDeviceAllowed(accounts, request);
+    else createdBindingIds.push(...(insert.data ?? []).map((binding) => binding.id));
   }
 
   const sessions = await supabaseAdmin
@@ -121,4 +132,16 @@ export async function bindDevice({
       .in("id", otherAppSessions);
     if (revoke.error) throw new Error(revoke.error.message);
   }
+
+  return { createdBindingIds } satisfies DeviceBindingMutation;
+}
+
+export async function rollbackCreatedDeviceBindings(mutation: DeviceBindingMutation) {
+  if (!mutation.createdBindingIds.length) return;
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const result = await supabaseAdmin
+    .from("connect_account_devices")
+    .delete()
+    .in("id", mutation.createdBindingIds);
+  if (result.error) throw new Error(result.error.message);
 }

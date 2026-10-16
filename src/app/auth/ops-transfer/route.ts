@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeOpsNextPath } from "@/lib/ops-pulse/auth";
 import { readOpsAuthTransfer } from "@/lib/ops-auth-transfer";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -6,7 +7,9 @@ export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
   const loginUrl = new URL("/login", request.url);
-  const response = NextResponse.redirect(new URL("/ops-pulse", request.url));
+  const nextPath = safeOpsNextPath(request.cookies.get("dropx_ops_auth_next")?.value);
+  loginUrl.searchParams.set("next", nextPath);
+  const response = NextResponse.redirect(new URL(nextPath, request.url));
 
   try {
     const token = request.nextUrl.searchParams.get("token");
@@ -28,6 +31,9 @@ export async function GET(request: NextRequest) {
       secure: true,
       path: "/",
       maxAge: 0
+    });
+    response.cookies.set("dropx_ops_auth_next", "", {
+      httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 0
     });
     return response;
   } catch (error) {
