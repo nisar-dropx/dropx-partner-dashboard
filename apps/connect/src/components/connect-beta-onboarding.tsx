@@ -165,7 +165,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
         <section className={compact.todo}><header><small>UP NEXT</small><span>{done} / {milestones.length} complete</span></header><h2>{data.verificationClosed?"Speak with your team leader":next?.label||"You’re all set"}</h2><p>{data.verificationClosed?"Your team leader can help you review your onboarding.":next?.detail}</p>{next&&!data.verificationClosed?<button className="dx-beta-primary" onClick={()=>navigate(next.id)}>Continue<ArrowRight size={18}/></button>:null}
         {milestones.filter(m=>m.status==="action"&&m.id!==next?.id).map(m=><button key={m.id} className={compact.alsoPending} onClick={()=>navigate(m.id)}><span>{m.label}<small>Also needs your action</small></span><ArrowRight size={17}/></button>)}
         </section>
-        <section className={compact.steps}><header><h2>Progress tracker</h2><span>{done} complete</span></header>{milestones.map((item,index)=><button key={item.id} onClick={()=>navigate(item.id)}><i data-state={item.status}>{item.status==="complete"?<Check size={17}/>:index+1}</i><span><strong>{item.label}</strong><small>{item.status==="complete"?"Completed":item.detail}</small></span><StateBadge state={item.status}/><ChevronRight size={16}/></button>)}</section>
+        <section className={compact.steps}><header><h2>Progress tracker</h2></header>{milestones.map((item,index)=><button key={item.id} onClick={()=>navigate(item.id)}><i data-state={item.status}>{item.status==="complete"?<Check size={17}/>:index+1}</i><span><strong>{item.label}</strong>{item.status!=="complete"?<small>{item.detail}</small>:null}</span><StateBadge state={item.status}/><ChevronRight size={16}/></button>)}</section>
       </div>
       {guidanceCard}
 
