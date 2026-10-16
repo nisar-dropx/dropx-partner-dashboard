@@ -55,10 +55,15 @@ assert.match(
   "App-only publications must render as published instead of falling back to Under Review."
 );
 assert.doesNotMatch(tableSource, /Send Notification requires all-location access/);
-assert.match(reviewActionSource, /workforce_decide_payout_dispute/);
+assert.match(reviewActionSource, /workforce_dispute_step/);
+assert.match(reviewActionSource, /\["propose", "approve", "send_back"\]/);
+const approvalMigration=readFileSync(new URL("../supabase/migrations/20261016190000_payout_dispute_approval.sql",import.meta.url),"utf8");
+assert.match(approvalMigration,/if d\.proposed_by=p_actor then raise exception/);
+assert.match(approvalMigration,/grant execute on function public\.workforce_dispute_step[\s\S]*to service_role/);
 assert.match(reviewActionSource, /\["resolved", "rejected"\]/);
-assert.match(reviewDeskSource, />\s*Reject\s*</);
-assert.match(reviewDeskSource, />\s*Resolve\s*</);
+assert.match(reviewDeskSource, />\s*Propose reject\s*</);
+assert.match(reviewDeskSource, />\s*Propose resolve\s*</);
+assert.match(reviewDeskSource, />\s*Approve decision\s*</);
 assert.doesNotMatch(reviewDeskSource, /Under review \/ reply|Save response|Correct a legacy payroll payout/);
 assert.equal(existsSync(opsDisputePage), false, "Ops Pulse must not expose the payout-dispute desk.");
 assert.equal(existsSync(opsDisputeActions), false, "Ops Pulse must not expose payout-dispute actions.");
