@@ -16,3 +16,10 @@ Whenever you change anything in `workers/whatsapp-report-bot/`:
 
 If the worker's HTTP contract changes (endpoints, payloads, auth), update the portal side in the same change:
 `src/lib/report-bot/worker-client.ts`, `src/app/api/report-bot/worker/*`, and `src/app/api/report-bot/session`.
+
+## Team Ops, People and payroll workflows
+
+Before changing loss recovery, station loss claims, salary holds, exit money checks, payout disputes,
+payout cross-checks, the COD cash position, the delivery scorecard or training written answers, read
+`docs/team-ops-payroll-workflows.md`. It lists the state machines, recovery keys, payroll rules, the
+safe way to apply migrations to the shared Supabase project, and the pending work.

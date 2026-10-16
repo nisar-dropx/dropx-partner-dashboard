@@ -42,7 +42,7 @@ await db.exec(`insert into companies values('${C}','X'); insert into stations va
   ('${C}','nl','2026-09','I1','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','I2','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','F1','BLR1',200,'Recoverable'),
   ('${C}','nl','2026-09','CAP','BLR1',1200,'Recoverable'),('${C}','nl','2026-09','W1','BLR1',900,'Recoverable');`);
 // Each migration applied twice: both must be safe to re-run.
-for (const file of ["20261015130000_loss_recovery_payroll_deductions.sql", "20261016160000_loss_recovery_installments.sql", "20261016180000_station_loss_claims.sql"]) {
+for (const file of ["20261015130000_loss_recovery_payroll_deductions.sql", "20261016161000_loss_recovery_installments.sql", "20261016181000_station_loss_claims.sql"]) {
   const sql = readFileSync(`supabase/migrations/${file}`, "utf8");
   await db.exec(sql); await db.exec(sql);
 }
