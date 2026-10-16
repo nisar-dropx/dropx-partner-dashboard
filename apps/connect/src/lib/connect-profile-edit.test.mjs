@@ -393,6 +393,47 @@ test("mobile-change completion preserves a success message across forced reauthe
   assert.match(loginFlow, /nextParams\.delete\("profileUpdated"\)/);
 });
 
+test("mobile-change OTP keeps current and new inputs together in one secure dialog", () => {
+  const profileApp = fs.readFileSync(
+    new URL("../components/connect-profile-app.tsx", import.meta.url),
+    "utf8"
+  );
+  const styles = fs.readFileSync(
+    new URL("../../app/globals.css", import.meta.url),
+    "utf8"
+  );
+
+  assert.equal(
+    (profileApp.match(/className="dx-submit-confirmation dx-profile-edit-otp"/g) ?? []).length,
+    1
+  );
+  const verifyFlow = profileApp.match(
+    /async function verifyProfileEditOtp\(\) \{([\s\S]*?)\n  \}\n\n  async function resendProfileEditOtp/
+  )?.[1] ?? "";
+  assert.notEqual(verifyFlow, "");
+  assert.match(profileApp, /currentCode: string;[\s\S]*?newCode: string;[\s\S]*?newOtpSent: boolean;/);
+  assert.match(profileApp, /<h2 id="dx-profile-edit-otp-title">Verify mobile \{editOtp\.mobileChanged \? "numbers" : "number"\}<\/h2>/);
+  assert.match(profileApp, /Current number OTP <small>\{editOtp\.currentMasked\}<\/small>/);
+  assert.match(profileApp, /\{editOtp\.mobileChanged \? \([\s\S]*?New number OTP <small>\{editOtp\.newMasked\}<\/small>/);
+  assert.match(profileApp, /disabled=\{editOtp\.busy \|\| editOtp\.leg !== "current"\}/);
+  assert.match(profileApp, /disabled=\{editOtp\.busy \|\| editOtp\.leg !== "new" \|\| !editOtp\.newOtpSent\}/);
+  assert.match(profileApp, /editOtp\.leg === "current" \? "one-time-code" : "off"/);
+  assert.match(profileApp, /editOtp\.leg === "new" \? "one-time-code" : "off"/);
+  assert.match(profileApp, /dx-profile-edit-otp-verified[\s\S]*?<BadgeCheck aria-hidden="true" \/>Verified/);
+  assert.match(
+    verifyFlow,
+    /if \(payload\.nextLeg === "new"\) \{[\s\S]*?setEditOtp\(\(current\) => \(\{[\s\S]*?leg: "new",[\s\S]*?currentCode: "",[\s\S]*?newCode: "",[\s\S]*?newOtpSent: payload\.otpSent !== false,[\s\S]*?busy: false/
+  );
+  assert.doesNotMatch(verifyFlow, /setEditOtp\(emptyProfileEditOtp\)|open:\s*false/);
+  assert.doesNotMatch(profileApp, /Enter the WhatsApp OTP sent to/);
+  assert.doesNotMatch(profileApp, /Your new number will be verified next/);
+  assert.doesNotMatch(profileApp, /message: "OTP sent on WhatsApp\."/);
+  assert.doesNotMatch(profileApp, /dx-profile-edit-note/);
+  assert.doesNotMatch(styles, /\.dx-profile-edit-note/);
+  assert.match(styles, /\.dx-profile-edit-otp-fields\{/);
+  assert.match(styles, /\.dx-profile-edit-otp-control\{/);
+});
+
 test("OTP verification cannot consume a code replaced by a concurrent resend", () => {
   const route = fs.readFileSync(
     new URL("../../app/api/connect/profile-edit/route.ts", import.meta.url),

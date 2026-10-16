@@ -64,7 +64,9 @@ type ProfileEditOtpState = {
   open: boolean;
   requestId: string;
   leg: "current" | "new";
-  code: string;
+  currentCode: string;
+  newCode: string;
+  newOtpSent: boolean;
   mobileChanged: boolean;
   currentMasked: string;
   newMasked: string;
@@ -91,7 +93,9 @@ const emptyProfileEditOtp: ProfileEditOtpState = {
   open: false,
   requestId: "",
   leg: "current",
-  code: "",
+  currentCode: "",
+  newCode: "",
+  newOtpSent: false,
   mobileChanged: false,
   currentMasked: "",
   newMasked: "",
@@ -404,12 +408,19 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   const chosenUploadsRef = useRef(chosenUploads);
   const editViewSnapshotRef = useRef<ProfileEditViewSnapshot | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const newOtpInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => {
     Object.values(chosenUploadsRef.current).forEach((entry) => {
       if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
     });
   }, []);
+
+  useEffect(() => {
+    if (editOtp.open && editOtp.leg === "new" && editOtp.newOtpSent) {
+      newOtpInputRef.current?.focus();
+    }
+  }, [editOtp.leg, editOtp.newOtpSent, editOtp.open]);
 
   const chooseUpload = (name: string, file: File | undefined) => {
     const previous = chosenUploadsRef.current[name];
@@ -824,13 +835,15 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         open: true,
         requestId: payload.requestId,
         leg: "current",
-        code: "",
+        currentCode: "",
+        newCode: "",
+        newOtpSent: false,
         mobileChanged: Boolean(payload.mobileChanged),
         currentMasked: payload.currentMasked || "your current mobile number",
         newMasked: payload.newMasked || "",
         busy: false,
         error: "",
-        message: "OTP sent on WhatsApp."
+        message: ""
       });
     } catch (reason) {
       setError(userFacingError(reason, "Unable to send WhatsApp OTP. Please try again."));
@@ -855,9 +868,13 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   }
 
   async function verifyProfileEditOtp() {
-    if (editOtp.busy || !/^\d{6}$/.test(editOtp.code)) {
-      if (!/^\d{6}$/.test(editOtp.code)) {
-        setEditOtp((current) => ({ ...current, error: "Enter the 6 digit OTP." }));
+    const code = editOtp.leg === "current" ? editOtp.currentCode : editOtp.newCode;
+    if (editOtp.busy || !/^\d{6}$/.test(code) || (editOtp.leg === "new" && !editOtp.newOtpSent)) {
+      if (!/^\d{6}$/.test(code)) {
+        setEditOtp((current) => ({
+          ...current,
+          error: `Enter the 6 digit ${current.leg === "current" ? "current-number" : "new-number"} OTP.`
+        }));
       }
       return;
     }
@@ -866,17 +883,19 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       const response = await fetch("/api/connect/profile-edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "verify", requestId: editOtp.requestId, leg: editOtp.leg, otp: editOtp.code })
+        body: JSON.stringify({ action: "verify", requestId: editOtp.requestId, leg: editOtp.leg, otp: code })
       });
       const payload = await response.json();
       if (!response.ok && payload.currentVerified && payload.nextLeg === "new") {
         setEditOtp((current) => ({
           ...current,
           leg: "new",
-          code: "",
+          currentCode: "",
+          newCode: "",
+          newOtpSent: false,
           busy: false,
           error: payload.error || "Current number verified, but the new-number OTP could not be sent. Tap Resend OTP.",
-          message: "Current number verified."
+          message: ""
         }));
         return;
       }
@@ -885,10 +904,12 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         setEditOtp((current) => ({
           ...current,
           leg: "new",
-          code: "",
+          currentCode: "",
+          newCode: "",
+          newOtpSent: payload.otpSent !== false,
           busy: false,
           error: payload.otpSent === false ? (payload.warning || "Current number verified, but the new OTP could not be sent. Tap Resend OTP.") : "",
-          message: payload.otpSent === false ? "Current number verified." : "Current number verified. A new OTP was sent to the new number."
+          message: ""
         }));
         return;
       }
@@ -913,7 +934,14 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to resend OTP.");
-      setEditOtp((current) => ({ ...current, busy: false, code: "", message: "A fresh OTP was sent on WhatsApp." }));
+      setEditOtp((current) => ({
+        ...current,
+        busy: false,
+        currentCode: current.leg === "current" ? "" : current.currentCode,
+        newCode: current.leg === "new" ? "" : current.newCode,
+        newOtpSent: current.leg === "new" ? true : current.newOtpSent,
+        message: "OTP resent."
+      }));
     } catch (reason) {
       setEditOtp((current) => ({
         ...current,
@@ -1241,7 +1269,6 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   const drivingEnabled = ["driving_license_no","driving_license_exp_date","vehicle_reg_no","vehicle_reg_exp_date","vehicle_insurance_exp_date","vehicle_pollution_exp_date"].some((field) => enabled.has(field));
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
-    {editing ? <aside className="dx-profile-edit-note"><LockKeyhole /><div><strong>Edit your profile</strong><p>Name, DropX ID, biometric ID, email, location, designation and date of joining are locked. Saving requires a WhatsApp OTP from your current number{(values.mobileNumber || "") !== (editOriginalValues.mobileNumber || "") || (values.mobileCountryCode || "") !== (editOriginalValues.mobileCountryCode || "") ? " and your new number" : ""}.</p></div></aside> : null}
     {isolatedPilot ? <aside className="dx-beta-review-note"><ShieldCheck size={20}/><div><strong>Submit your details for review</strong><p>Your documents will be reviewed within this private beta. Submitting does not mark identity or bank checks as verified.</p></div></aside> : null}
     <p className="dx-company">{account.companyName}</p>
     {!readOnly && !account.activationOnly && !editing ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
@@ -1390,33 +1417,106 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       <div className="dx-submit-confirmation-backdrop" role="presentation">
         <section aria-labelledby="dx-profile-edit-otp-title" aria-modal="true" className="dx-submit-confirmation dx-profile-edit-otp" role="dialog">
           <div className="dx-profile-edit-otp-icon"><LockKeyhole /></div>
-          <h2 id="dx-profile-edit-otp-title">Verify {editOtp.leg === "current" ? "current" : "new"} number</h2>
-          <p>Enter the WhatsApp OTP sent to <strong>{editOtp.leg === "current" ? editOtp.currentMasked : editOtp.newMasked}</strong>.</p>
-          {editOtp.leg === "current" && editOtp.mobileChanged ? <small>Your new number will be verified next.</small> : null}
-          <label className="dx-field dx-profile-edit-otp-field">
-            <span>6 digit OTP</span>
-            <input
-              autoComplete="one-time-code"
-              autoFocus
-              inputMode="numeric"
-              maxLength={6}
-              onChange={(event) => setEditOtp((current) => ({ ...current, code: event.target.value.replace(/\D/g, "").slice(0, 6), error: "" }))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void verifyProfileEditOtp();
-                }
-              }}
-              value={editOtp.code}
-            />
-          </label>
-          {editOtp.message ? <div className="dx-alert success">{editOtp.message}</div> : null}
-          {editOtp.error ? <div className="dx-alert error">{editOtp.error}</div> : null}
-          <button className="dx-profile-edit-resend" disabled={editOtp.busy} onClick={resendProfileEditOtp} type="button">Resend OTP</button>
+          <h2 id="dx-profile-edit-otp-title">Verify mobile {editOtp.mobileChanged ? "numbers" : "number"}</h2>
+          <div className="dx-profile-edit-otp-fields">
+            <div className="dx-field dx-profile-edit-otp-field">
+              <label htmlFor="dx-profile-edit-current-otp">Current number OTP <small>{editOtp.currentMasked}</small></label>
+              <div className="dx-profile-edit-otp-control">
+                <input
+                  aria-describedby={editOtp.error && editOtp.leg === "current" ? "dx-profile-edit-otp-error" : undefined}
+                  autoComplete={editOtp.leg === "current" ? "one-time-code" : "off"}
+                  autoFocus
+                  disabled={editOtp.busy || editOtp.leg !== "current"}
+                  id="dx-profile-edit-current-otp"
+                  inputMode="numeric"
+                  maxLength={6}
+                  name="current_mobile_otp"
+                  onChange={(event) => setEditOtp((current) => ({
+                    ...current,
+                    currentCode: event.target.value.replace(/\D/g, "").slice(0, 6),
+                    error: "",
+                    message: ""
+                  }))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void verifyProfileEditOtp();
+                    }
+                  }}
+                  pattern="[0-9]*"
+                  value={editOtp.currentCode}
+                />
+                {editOtp.leg === "current" ? (
+                  <button
+                    aria-label={`Resend OTP to current number ${editOtp.currentMasked}`}
+                    className="dx-profile-edit-resend"
+                    disabled={editOtp.busy}
+                    onClick={resendProfileEditOtp}
+                    type="button"
+                  >Resend</button>
+                ) : (
+                  <span className="dx-profile-edit-otp-verified" role="status"><BadgeCheck aria-hidden="true" />Verified</span>
+                )}
+              </div>
+            </div>
+            {editOtp.mobileChanged ? (
+              <div className="dx-field dx-profile-edit-otp-field">
+                <label htmlFor="dx-profile-edit-new-otp">New number OTP <small>{editOtp.newMasked}</small></label>
+                <div className="dx-profile-edit-otp-control">
+                  <input
+                    aria-describedby={editOtp.leg === "current"
+                      ? "dx-profile-edit-new-otp-wait"
+                      : editOtp.error ? "dx-profile-edit-otp-error" : undefined}
+                    autoComplete={editOtp.leg === "new" ? "one-time-code" : "off"}
+                    disabled={editOtp.busy || editOtp.leg !== "new" || !editOtp.newOtpSent}
+                    id="dx-profile-edit-new-otp"
+                    inputMode="numeric"
+                    maxLength={6}
+                    name="new_mobile_otp"
+                    onChange={(event) => setEditOtp((current) => ({
+                      ...current,
+                      newCode: event.target.value.replace(/\D/g, "").slice(0, 6),
+                      error: "",
+                      message: ""
+                    }))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void verifyProfileEditOtp();
+                      }
+                    }}
+                    pattern="[0-9]*"
+                    ref={newOtpInputRef}
+                    value={editOtp.newCode}
+                  />
+                  {editOtp.leg === "new" ? (
+                    <button
+                      aria-label={`Resend OTP to new number ${editOtp.newMasked}`}
+                      className="dx-profile-edit-resend"
+                      disabled={editOtp.busy}
+                      onClick={resendProfileEditOtp}
+                      type="button"
+                    >Resend</button>
+                  ) : null}
+                </div>
+                {editOtp.leg === "current" ? <span className="sr-only" id="dx-profile-edit-new-otp-wait">Verify the current number first.</span> : null}
+              </div>
+            ) : null}
+          </div>
+          {editOtp.message ? <div aria-live="polite" className="dx-alert success" role="status">{editOtp.message}</div> : null}
+          {editOtp.error ? <div className="dx-alert error" id="dx-profile-edit-otp-error" role="alert">{editOtp.error}</div> : null}
           <div>
             <button className="dx-confirm-cancel" disabled={editOtp.busy} onClick={() => setEditOtp(emptyProfileEditOtp)} type="button">Cancel</button>
-            <button className="dx-confirm-submit" disabled={editOtp.busy || editOtp.code.length !== 6} onClick={verifyProfileEditOtp} type="button">
-              {editOtp.busy ? <><span className="dx-button-spinner" aria-hidden="true" />Verifying...</> : editOtp.leg === "new" ? "Verify & save" : "Verify"}
+            <button
+              className="dx-confirm-submit"
+              disabled={editOtp.busy
+                || (editOtp.leg === "current" ? editOtp.currentCode.length !== 6 : editOtp.newCode.length !== 6 || !editOtp.newOtpSent)}
+              onClick={verifyProfileEditOtp}
+              type="button"
+            >
+              {editOtp.busy
+                ? <><span className="dx-button-spinner" aria-hidden="true" />Verifying...</>
+                : editOtp.mobileChanged && editOtp.leg === "current" ? "Verify current" : "Verify & save"}
             </button>
           </div>
         </section>
