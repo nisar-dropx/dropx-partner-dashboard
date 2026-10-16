@@ -58,17 +58,16 @@ export function parseClockTime(value: string): number | null {
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
-/** Accepts "9:00, 09:30 10:15"; returns sorted unique HH:MM or throws with the bad entry. */
-export function normalizeTimeList(raw: string, max = 6): string[] {
+/** Accepts "9:00, 09:30 10:15"; returns sorted unique HH:MM or throws with the bad entry. No limit on how many. */
+export function normalizeTimeList(raw: string): string[] {
   const entries = String(raw ?? "").split(/[\s,;]+/).map((entry) => entry.trim()).filter(Boolean);
   const normalized = entries.map((entry) => {
     const padded = /^\d:\d\d$/.test(entry) ? `0${entry}` : entry;
     if (parseClockTime(padded) === null) throw new Error(`"${entry}" is not a valid time. Use 24-hour HH:MM.`);
     return padded;
   });
-  const unique = [...new Set(normalized)].sort((a, b) => (parseClockTime(a) ?? 0) - (parseClockTime(b) ?? 0));
-  if (unique.length > max) throw new Error(`Use at most ${max} reminder times.`);
-  return unique;
+  // Duplicates are merged: the same time twice would only post the same reminder twice.
+  return [...new Set(normalized)].sort((a, b) => (parseClockTime(a) ?? 0) - (parseClockTime(b) ?? 0));
 }
 
 export function normalizeDays(values: Array<string | number>): number[] {

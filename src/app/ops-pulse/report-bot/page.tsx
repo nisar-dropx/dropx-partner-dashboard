@@ -549,7 +549,7 @@ function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRo
           ))}
         </div>
       </fieldset>
-      <Field label="Reminder times" hint="24-hour times, separated by commas (up to 6). Leave empty to track the report without reminding." className={s.span3}>
+      <Field label="Reminder times" hint="24-hour times, separated by commas, as many as you need. Leave empty to track the report without reminding." className={s.span3}>
         <input className={s.input} name="reminder_times" defaultValue={schedule ? schedule.reminder_times.join(", ") : "09:00, 09:45"} placeholder="09:00, 09:45" />
       </Field>
       <Field label="First reminder" className={s.span3}>
