@@ -9,9 +9,10 @@ import type { NavItem } from "@/lib/app-navigation";
 type SidebarNavProps = {
   active: string;
   items: NavItem[];
+  prefetch?: boolean;
 };
 
-export function SidebarNav({ active, items }: SidebarNavProps) {
+export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) {
   const hasMappingItem=items.some(item=>item.code==='fleet_da_mapping');
   const [mappingAvailable,setMappingAvailable]=useState(false);
   // Vehicle eligibility is optional navigation data and never delays the app shell.
@@ -84,7 +85,7 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
             }}
           >
             {item.children.map((child) => child.href ? (
-              <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label}>
+              <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label} prefetch={prefetch}>
                 <span className="nav-label">{child.label}</span>
                 <PaymentNavBadge code={child.hideBadge || (item.code === "people_all" && child.code === "people_all") ? undefined : child.code} />
               </PendingLink>
@@ -98,6 +99,7 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
           className={`nav-item ${active === item.label ? "active" : ""}`}
           disableWhenCurrent
           href={item.href}
+          prefetch={prefetch}
           key={item.label}
         >
           <Icon>{item.icon}</Icon>

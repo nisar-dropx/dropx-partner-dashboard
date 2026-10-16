@@ -19,7 +19,13 @@ export async function loadDsApprovals(a: AuthorizationContext) {
   async function payments() {
     if (!hasPermission(a, 'payment_approvals', 'access')) return null;
     if (!supabaseAdmin) throw Error('Payments are unavailable.');
-    let query = supabaseAdmin.from('payment_requests').select('id,location_id,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,created_at,stations(location_model_id)').eq('company_id', companyId).order('id');
+    // Discard terminal history in the database, before paginating the live inbox.
+    // Keep null/unknown states for the canonical eligibility check below.
+    const terminal=['FINAL_APPROVED','OWNER_APPROVED','RE_APPROVED','REJECTED','RETURNED','CANCELLED','PROCESSING','PROCESSED'];
+    const terminalValues=terminal.flatMap(value=>[value,value.toLowerCase()]).join(',');
+    let query = supabaseAdmin.from('payment_requests').select('id,location_id,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,created_at,stations(location_model_id)').eq('company_id', companyId)
+      .or('status.is.null,status.not.in.(approved,APPROVED)')
+      .or(`approval_status.is.null,approval_status.not.in.(${terminalValues})`).order('id');
     if (!a.hasAllLocationAccess) query = query.in('location_id', a.locationScopeIds.length ? a.locationScopeIds : ['00000000-0000-0000-0000-000000000000']);
     const result = await readAllRows(query);
     if (result.error) throw Error('Payments are unavailable.');
