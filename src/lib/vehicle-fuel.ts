@@ -42,6 +42,12 @@ export type VehicleVerificationAudit = {
   response_data?: unknown;
 };
 
+export type StoredVehicleVerification = {
+  verified?: boolean | null;
+  input_key?: unknown;
+  details?: unknown;
+};
+
 function record(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -73,4 +79,19 @@ export function trustedVehicleFuelFromAudits(
   }
 
   return "";
+}
+
+export function trustedVehicleFuelFromStoredVerification(
+  verification: StoredVehicleVerification | null | undefined,
+  registrationNumber: unknown
+) {
+  const expectedRegistration = normalizeVehicleRegistration(registrationNumber);
+  if (!expectedRegistration || verification?.verified !== true) return "";
+  if (text(verification.input_key).toUpperCase() !== expectedRegistration) return "";
+
+  const details = record(verification.details);
+  if (text(details.kind).toLowerCase() !== "vehicle" || details.verified !== true) return "";
+  if (text(details.inputKey).toUpperCase() !== expectedRegistration) return "";
+
+  return text(details.fuelType);
 }

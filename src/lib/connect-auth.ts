@@ -1,7 +1,23 @@
 import { createHash, randomUUID } from "crypto";
-import { cookies } from "next/headers";
-import { normalizeMobile } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { eligibleConnectWorkforceAccount } from "@/lib/connect-account-freshness";
+
+export {
+  normalizeConnectMobile,
+  normalizeStoredConnectMobile
+} from "@/lib/country-codes";
+export {
+  activateConnectSession,
+  authenticateConnectPin,
+  ConnectCredentialError,
+  revokeIssuedConnectSession,
+  setConnectPinWithOtp,
+  type IssuedConnectSession
+} from "@/lib/connect-session-issuance";
+export {
+  sameConnectAccountIdentitySet,
+  type ConnectAccountIdentity
+} from "@/lib/connect-account-freshness";
 
 export type ConnectAccount = {
   id: string;
@@ -50,15 +66,6 @@ export function isMissingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
 }
 
-export function normalizeConnectMobile(mobile: unknown, countryCode: unknown) {
-  const normalizedCountryCode = String(countryCode ?? "91").replace(/\D/g, "") || "91";
-  const normalizedMobile = normalizeMobile(mobile, normalizedCountryCode);
-  const localMobile = normalizedMobile.startsWith(normalizedCountryCode)
-    ? normalizedMobile.slice(normalizedCountryCode.length)
-    : normalizedMobile;
-  return { countryCode: normalizedCountryCode, mobile: normalizedMobile, localMobile };
-}
-
 function accountLabel(account: AccountRow, companyNameById: Map<string, string>) {
   const companyName = companyNameById.get(account.company_id) ?? "Company";
   const id = account.employee_id || account.dropx_id || account.email || "";
@@ -73,12 +80,16 @@ async function signedProfilePhotoUrl(path?: string | null) {
   return result.data?.signedUrl ?? "";
 }
 
-export async function findConnectAccounts(countryCode: string, mobile: string) {
+export async function findConnectAccounts(
+  countryCode: string,
+  mobile: string,
+  _options: { fresh?: boolean } = {}
+) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
   let [profilesResult, executivesResult]: [
     MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null }>,
-    MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; profile_photo_path?: string | null }>
+    MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; is_active?: boolean | null; deleted_at?: string | null; deactivated_at?: string | null }>
   ] = await Promise.all([
     supabaseAdmin
       .from("profiles")
@@ -88,28 +99,28 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
     supabaseAdmin
       .from("workforce")
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, profile_photo_path, is_active, mobile_country_code")
+      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, deleted_at, deactivated_at, mobile_country_code")
       .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
   ]);
-  if (isMissingColumnError(profilesResult.error) || isMissingColumnError(executivesResult.error)) {
-    [profilesResult, executivesResult] = await Promise.all([
-      supabaseAdmin
+  if (isMissingColumnError(profilesResult.error)) {
+    profilesResult = await supabaseAdmin
         .from("profiles")
         .select("id, company_id, full_name, email, employee_id, role, is_active")
         .eq("is_active", true)
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
-      supabaseAdmin
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
+  }
+  if (isMissingColumnError(executivesResult.error)) {
+    executivesResult = await supabaseAdmin
         .from("workforce")
-        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, is_active")
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-    ]);
+        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, deleted_at, deactivated_at")
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   }
   if (profilesResult.error) throw new Error(profilesResult.error.message);
   if (executivesResult.error) throw new Error(executivesResult.error.message);
   executivesResult = {
     ...executivesResult,
-    data: (executivesResult.data ?? []).filter((row) => !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()))
+    data: (executivesResult.data ?? []).filter(eligibleConnectWorkforceAccount)
   };
 
   const accounts: AccountRow[] = [
@@ -171,35 +182,4 @@ export function verifySecretHash(value: string, storedHash: string) {
   const [salt, hash] = storedHash.split(":");
   if (!salt || !hash) return false;
   return createHash("sha256").update(`${salt}:${value}`).digest("hex") === hash;
-}
-
-export async function createConnectSession({
-  countryCode,
-  mobile,
-  request
-}: {
-  countryCode: string;
-  mobile: string;
-  request: Request;
-}) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const token = randomUUID() + randomUUID();
-  const sessionHash = createHash("sha256").update(token).digest("hex");
-  const expiresAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
-  const insertResult = await supabaseAdmin.from("connect_login_sessions").insert({
-    country_code: countryCode,
-    mobile_number: mobile,
-    session_hash: sessionHash,
-    expires_at: expiresAt.toISOString(),
-    request_ip: requestIp(request),
-    user_agent: request.headers.get("user-agent")
-  });
-  if (insertResult.error) throw new Error(insertResult.error.message);
-  cookies().set(connectSessionCookieName, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: true,
-    path: "/",
-    expires: expiresAt
-  });
 }
