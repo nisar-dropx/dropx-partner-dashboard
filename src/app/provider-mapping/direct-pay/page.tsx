@@ -56,6 +56,7 @@ type AllocationRow = {
   effective_to: string | null;
   status: string;
   change_reason: string | null;
+  updated_at: string;
 };
 type PaymentMethodRow = {
   id: string;
@@ -182,14 +183,14 @@ export default async function DirectPaymentAllocationsPage({
   if (!loadError && people.length) {
     const allocationResult = audience === "helpers"
       ? await readAllRows(supabaseAdmin.from("helper_payment_allocations")
-        .select("id, helper_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason")
+        .select("id, helper_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason, updated_at")
         .eq("company_id", companyId)
         .neq("status", "cancelled")
         .order("effective_from", { ascending: false })
         .order("created_at", { ascending: false })
         .order("id"))
       : await readAllRows(supabaseAdmin.from("workforce_payment_allocations")
-        .select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason")
+        .select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason, updated_at")
         .eq("company_id", companyId)
         .neq("status", "cancelled")
         .order("effective_from", { ascending: false })
@@ -242,6 +243,7 @@ export default async function DirectPaymentAllocationsPage({
           ?? (() => { const designation = designationByName.get(String(person.designation ?? "").trim().toLowerCase()); return designation ? `${designation.code} - ${designation.name}` : "Designation unavailable"; })(),
       dateOfJoin: person.date_of_join ?? "",
       allocationId: current?.id ?? "",
+      allocationUpdatedAt: current?.updated_at ?? "",
       paymentMethodId: current?.payment_method_id ?? "",
       currentMethodName: methodNameById.get(current?.payment_method_id ?? "") ?? "",
       paymentValues: Object.fromEntries(Object.entries(current?.payment_values ?? {})

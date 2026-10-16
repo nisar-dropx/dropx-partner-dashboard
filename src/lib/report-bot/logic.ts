@@ -75,19 +75,22 @@ export function normalizeDays(values: Array<string | number>): number[] {
   return [...new Set(values.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
 }
 
-export type ReminderStep = { index: number; action: "send" | "skip_stale" };
+export type ReminderStep = { minute: number; action: "send" | "skip_stale" };
 
 /**
- * Which reminder slots are due now. A slot older than maxDelayMinutes is
- * skipped instead of sent, so a worker outage never produces a burst of stale
- * reminders when it reconnects. Slots before `handled` were already decided.
+ * Which reminder slots are due now, identified by their time of day (minutes since
+ * midnight). Tracking the last handled *time* rather than a position in the list keeps
+ * this right when someone edits the reminder times mid-day. A slot older than
+ * maxDelayMinutes is skipped instead of sent, so a worker outage never produces a
+ * burst of stale reminders when it reconnects.
  */
-export function dueReminderSteps(reminderTimes: string[], handled: number, nowMinutes: number, maxDelayMinutes: number): ReminderStep[] {
-  const slots = reminderTimes.map(parseClockTime).filter((value): value is number => value !== null).sort((a, b) => a - b);
+export function dueReminderSteps(reminderTimes: string[], lastHandledMinute: number | null, nowMinutes: number, maxDelayMinutes: number): ReminderStep[] {
+  const slots = [...new Set(reminderTimes.map(parseClockTime).filter((value): value is number => value !== null))].sort((a, b) => a - b);
   const steps: ReminderStep[] = [];
-  for (let index = Math.max(handled, 0); index < slots.length; index += 1) {
-    if (nowMinutes < slots[index]) break;
-    steps.push({ index, action: nowMinutes - slots[index] > maxDelayMinutes ? "skip_stale" : "send" });
+  for (const minute of slots) {
+    if (lastHandledMinute !== null && minute <= lastHandledMinute) continue;
+    if (nowMinutes < minute) break;
+    steps.push({ minute, action: nowMinutes - minute > maxDelayMinutes ? "skip_stale" : "send" });
   }
   // Only the latest fresh slot is worth sending; earlier fresh ones would repeat it.
   const lastSend = steps.map((step) => step.action).lastIndexOf("send");
@@ -238,9 +241,30 @@ export type FeedbackTemplateSettings = {
   max_feedback_chars: number;
 };
 
+/**
+ * The review itself, for the group: failed and unclear rules with the reason. Passed
+ * rules are left out so a good report gets a short reply.
+ */
+export function formatChecks(checks: AnalysisCheck[]) {
+  return checks
+    .filter((check) => check.status !== "pass")
+    .map((check) => `${check.status === "fail" ? "❌" : "❓"} ${check.rule}${check.note ? ` — ${check.note}` : ""}`)
+    .join("\n");
+}
+
+/**
+ * WhatsApp @mention for a group member. The text must carry "@<user>" and the message
+ * must list the same JID in `mentions`; WhatsApp then shows the member's name and
+ * notifies them. Returns null when there is no usable JID (the name is used instead).
+ */
+export function mentionFor(jid: string | null | undefined) {
+  const match = /^(\d{5,20})(?::\d+)?@(s\.whatsapp\.net|lid)$/.exec(String(jid ?? ""));
+  return match ? { text: `@${match[1]}`, jid: `${match[1]}@${match[2]}` } : null;
+}
+
 export function composeFeedback(
   settings: FeedbackTemplateSettings,
-  values: { verdict: Verdict; feedback: string; report: string; sender: string; group: string; date: string }
+  values: { verdict: Verdict; feedback: string; report: string; sender: string; group: string; date: string; checks?: AnalysisCheck[] }
 ) {
   const label = values.verdict === "pass" ? settings.label_pass : values.verdict === "fail" ? settings.label_fail : settings.label_review;
   const body = renderTemplate(settings.feedback_template, {
@@ -249,7 +273,8 @@ export function composeFeedback(
     group: values.group,
     date: values.date,
     verdict_label: label,
-    feedback: values.feedback
+    feedback: values.feedback,
+    checks: formatChecks(values.checks ?? [])
   });
   return truncateText(body, settings.max_feedback_chars);
 }

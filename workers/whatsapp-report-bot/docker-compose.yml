@@ -1,17 +1,14 @@
+# Optional: run on your own Docker host instead of Railway.
 services:
   report-bot:
     build: .
     restart: unless-stopped
     environment:
-      PORTAL_URL: "${PORTAL_URL}"
+      PORTAL_URL: "${PORTAL_URL:-https://ops.dropxlogistics.com}"
       WORKER_TOKEN: "${WORKER_TOKEN}"
+      WORKER_PUBLIC_URL: "https://${WORKER_DOMAIN}"
       DEVICE_NAME: "${DEVICE_NAME:-DropX Report Bot}"
-      MEDIA_TTL_HOURS: "${MEDIA_TTL_HOURS:-48}"
-      MESSAGE_TTL_DAYS: "${MESSAGE_TTL_DAYS:-30}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
-    volumes:
-      # Holds the WhatsApp session. Losing it means linking the number again.
-      - report_bot_data:/data
     expose:
       - "8090"
 
@@ -29,5 +26,4 @@ services:
       - report-bot
 
 volumes:
-  report_bot_data:
   caddy_data:

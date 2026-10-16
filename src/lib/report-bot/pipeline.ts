@@ -8,6 +8,7 @@ import {
   dueReminderSteps,
   formatClock,
   localClock,
+  mentionFor,
   parseClockTime,
   randomDelaySeconds,
   renderTemplate,
@@ -26,12 +27,12 @@ type ScheduleRow = {
 };
 type RequestRow = {
   id: string; company_id: string; schedule_id: string; group_id: string; report_type_id: string; business_date: string; status: string;
-  reminders_handled: number; reminders_sent: number; overdue_notified: boolean;
+  reminders_handled: number; reminders_sent: number; overdue_notified: boolean; last_reminder_minute: number | null;
 };
 type SubmissionRow = {
   id: string; company_id: string; group_id: string; request_id: string | null; report_type_id: string | null; wa_message_id: string;
   sender_jid: string | null; sender_name: string | null; caption: string | null; message_at: string; media_ref: string | null;
-  media_mime: string | null; attempts: number;
+  media_mime: string | null; wa_message_record: string | null; attempts: number;
 };
 type OutboxRow = {
   id: string; company_id: string; group_id: string; kind: string; body: string; quoted_message_id: string | null; quoted_participant: string | null;
@@ -105,7 +106,7 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
       due_time: formatClock(schedule.due_time),
       date: displayDate(request.business_date)
     };
-    const steps = dueReminderSteps(schedule.reminder_times ?? [], request.reminders_handled, clock.minutes, settings.max_reminder_delay_minutes);
+    const steps = dueReminderSteps(schedule.reminder_times ?? [], request.last_reminder_minute, clock.minutes, settings.max_reminder_delay_minutes);
     let sent = request.reminders_sent;
     for (const step of steps) {
       if (step.action !== "send") continue;
@@ -116,7 +117,8 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
         company_id: companyId,
         group_id: request.group_id,
         kind: sent === 0 ? "reminder" : "followup",
-        dedupe_key: `reminder:${request.id}:${step.index}`,
+        // Keyed by the slot's time, so an edited reminder list can't repeat or skip a slot.
+        dedupe_key: `reminder:${request.id}:${step.minute}`,
         body,
         request_id: request.id,
         stale_after: nowIso(settings.max_reminder_delay_minutes * 60)
@@ -142,16 +144,18 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
       if (inserted.error) throw new Error(`Queue overdue notice: ${inserted.error.message}`);
       queued += 1;
     }
-    const handled = steps.length ? steps[steps.length - 1].index + 1 : request.reminders_handled;
-    if (handled !== request.reminders_handled || sent !== request.reminders_sent || becameOverdue) {
-      // Guard on the values we read so a concurrent run can't double count.
-      must(await db.from("report_bot_requests").update({
-        reminders_handled: handled,
+    const lastMinute = steps.length ? steps[steps.length - 1].minute : request.last_reminder_minute;
+    if (lastMinute !== request.last_reminder_minute || sent !== request.reminders_sent || becameOverdue) {
+      // Guard on the slot we read so a concurrent run can't double count.
+      const update = db.from("report_bot_requests").update({
+        last_reminder_minute: lastMinute,
+        reminders_handled: request.reminders_handled + steps.length,
         reminders_sent: sent,
         status: becameOverdue ? "overdue" : request.status,
         overdue_notified: request.overdue_notified || Boolean(sendOverdue) || becameOverdue,
         updated_at: nowIso()
-      }).eq("id", request.id).eq("reminders_handled", request.reminders_handled).in("status", ["pending", "overdue"]), "Update request");
+      }).eq("id", request.id).in("status", ["pending", "overdue"]);
+      must(await (request.last_reminder_minute === null ? update.is("last_reminder_minute", null) : update.eq("last_reminder_minute", request.last_reminder_minute)), "Update request");
     }
   }
   return queued;
@@ -250,10 +254,10 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "No report was scheduled for this group that day.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
         continue;
       }
-      const image = await fetchReportImage(settings, submission.media_ref);
+      const image = await fetchReportImage(settings, submission.media_ref, submission.wa_message_record);
       const mime = sniffImageType(image);
       if (!mime) throw new AiError("The stored image could not be read.", false);
-      const analysis = await analyseReportImage(settings, {
+      const input = {
         image,
         mime,
         candidates,
@@ -261,7 +265,18 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         stationLabel: group.station ? [group.station.station_code, group.station.station_name].filter(Boolean).join(" · ") : null,
         businessDate,
         caption: submission.caption
-      });
+      };
+      let analysis;
+      try {
+        analysis = await analyseReportImage(settings, input);
+      } catch (error) {
+        // One quick retry for a transient failure (malformed reply, a 5xx), instead of making
+        // the sender wait for the next run. Quota limits won't clear in seconds, so skip those.
+        const transient = error instanceof AiError && error.retryable && !error.blocked && !/quota/i.test(error.message);
+        if (!transient || Date.now() > deadline - AI_TIMEOUT_MS - 40_000) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        analysis = await analyseReportImage(settings, input);
+      }
       const reportType = candidates.find((candidate) => candidate.id === analysis.matched_report_type_id) ?? null;
       const request = reportType ? requests.find((row) => row.report_type_id === reportType.id) ?? null : null;
       // Listen mode is a dry run: nothing is queued to send without a person approving it.
@@ -271,9 +286,11 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         verdict: analysis.verdict,
         feedback: analysis.feedback,
         report: reportType?.name ?? "Report",
-        sender: senderLabel(submission.sender_name, submission.sender_jid),
+        // Tag the sender (@mention) so WhatsApp shows their name and notifies them.
+        sender: mentionFor(submission.sender_jid)?.text ?? senderLabel(submission.sender_name, submission.sender_jid),
         group: group.group_name ?? "",
-        date: displayDate(businessDate)
+        date: displayDate(businessDate),
+        checks: analysis.checks
       });
       const status = decision === "silent" ? "ignored" : decision === "auto_send" ? "queued_to_send" : "awaiting_approval";
       must(await db.from("report_bot_submissions").update({
@@ -310,8 +327,20 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
 /** Feedback older than this is no longer useful in a busy group chat. */
 const FEEDBACK_STALE_HOURS = 12;
 
-export async function queueFeedback(settings: ReportBotSettings, submission: Pick<SubmissionRow, "id" | "company_id" | "group_id" | "wa_message_id" | "sender_jid">, body: string, userId: string | null) {
-  const delay = randomDelaySeconds(settings.reply_delay_min_seconds, settings.reply_delay_max_seconds);
+/**
+ * `immediate`: a person just approved it, so there is no reason to wait. Automatic
+ * replies get the short configured delay so they don't land the same second.
+ */
+export async function queueFeedback(
+  settings: ReportBotSettings,
+  submission: Pick<SubmissionRow, "id" | "company_id" | "group_id" | "wa_message_id" | "sender_jid">,
+  body: string,
+  userId: string | null,
+  options: { immediate?: boolean } = {}
+) {
+  const delay = options.immediate ? 0 : randomDelaySeconds(settings.reply_delay_min_seconds, settings.reply_delay_max_seconds);
+  // Only mention the sender if the reply still contains their @tag (a reviewer may have edited it out).
+  const mention = mentionFor(submission.sender_jid);
   const result = await reportBotDb().from("report_bot_outbox").upsert({
     company_id: submission.company_id,
     group_id: submission.group_id,
@@ -320,9 +349,7 @@ export async function queueFeedback(settings: ReportBotSettings, submission: Pic
     body,
     quoted_message_id: submission.wa_message_id,
     quoted_participant: submission.sender_jid,
-    // Quoting the image already notifies its sender; an @mention would need the
-    // number written into the text to display correctly.
-    mentions: [],
+    mentions: mention && body.includes(mention.text) ? [mention.jid] : [],
     submission_id: submission.id,
     not_before: nowIso(delay),
     stale_after: nowIso(delay + FEEDBACK_STALE_HOURS * 3600),
@@ -331,6 +358,9 @@ export async function queueFeedback(settings: ReportBotSettings, submission: Pic
   if (result.error) throw new Error(`Queue feedback: ${result.error.message}`);
 }
 
+/** How long the sender waits for a message about to fall due (reply delay, group gap). */
+const SHORT_WAIT_MS = 15_000;
+
 /** Sends due outbox items through the worker, one group message at a time. */
 export async function flushOutbox(settings: ReportBotSettings, deadline: number) {
   const db = reportBotDb();
@@ -338,7 +368,17 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
   while (Date.now() < deadline - 20_000) {
     const claimed = must(await db.rpc("report_bot_claim_outbox", { p_company_id: settings.company_id, p_limit: 1, p_lease_seconds: 60 }), "Claim outbox") as OutboxRow[];
     const item = claimed[0];
-    if (!item) break;
+    if (!item) {
+      // A reply due in a few seconds is sent now rather than on next minute's run.
+      const next = await db.from("report_bot_outbox").select("not_before").eq("company_id", settings.company_id).eq("status", "pending")
+        .order("not_before", { ascending: true }).limit(1).maybeSingle();
+      const waitMs = next.data ? new Date(next.data.not_before).getTime() - Date.now() + 250 : Infinity;
+      if (waitMs > 0 && waitMs <= SHORT_WAIT_MS && Date.now() + waitMs < deadline - 20_000) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      break;
+    }
     const release = (fields: Record<string, unknown>) => db.from("report_bot_outbox").update({ ...fields, locked_until: null, updated_at: nowIso() }).eq("id", item.id);
     if (item.stale_after && new Date(item.stale_after).getTime() < Date.now()) {
       await release({ status: "cancelled", status_reason: "Too late to send; skipped so the group does not get a stale reminder." });
@@ -352,10 +392,12 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
       }
       // An image from this group is still being analysed: it may be the report, so
       // hold the reminder briefly rather than nag right after someone posted it.
+      // Only a fresh photo on its first attempt counts: one stuck retrying must never
+      // hold reminders until they go stale and get cancelled.
       const analysing = await db.from("report_bot_submissions").select("id", { head: true, count: "exact" })
-        .eq("group_id", item.group_id).eq("status", "queued").gte("message_at", nowIso(-6 * 3600));
+        .eq("group_id", item.group_id).eq("status", "queued").lte("attempts", 1).gte("message_at", nowIso(-10 * 60));
       if (analysing.count) {
-        await release({ not_before: nowIso(60), attempts: Math.max(item.attempts - 1, 0) });
+        await release({ not_before: nowIso(30), attempts: Math.max(item.attempts - 1, 0) });
         continue;
       }
     }
@@ -413,6 +455,17 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
   return sent;
 }
 
+/**
+ * Check new photos right away (called when the worker reports one) and post any reply
+ * that's ready, instead of waiting for the minute cron. Safe alongside the cron: work is
+ * claimed row by row.
+ */
+export async function processNow(settings: ReportBotSettings, deadline: number) {
+  if (settings.mode === "off") return;
+  await processSubmissions(settings, deadline);
+  if (settings.mode === "live") await flushOutbox(settings, deadline);
+}
+
 export async function runReportBotCycle(settings: ReportBotSettings, deadline: number) {
   const clock = localClock(new Date(), settings.timezone);
   const summary = { company_id: settings.company_id, mode: settings.mode, requests: 0, reminders: 0, analysed: 0, sent: 0 };
@@ -420,7 +473,9 @@ export async function runReportBotCycle(settings: ReportBotSettings, deadline: n
   summary.requests = await syncDailyRequests(settings, clock);
   if (settings.mode === "live") summary.reminders = await queueReminders(settings, clock);
   else await markOverdue(settings, clock);
+  // Send what's already due before the (slow) AI checks, so replies never wait behind them.
+  if (settings.mode === "live") summary.sent = await flushOutbox(settings, Math.min(deadline, Date.now() + 60_000));
   summary.analysed = await processSubmissions(settings, deadline);
-  if (settings.mode === "live") summary.sent = await flushOutbox(settings, deadline);
+  if (settings.mode === "live") summary.sent += await flushOutbox(settings, deadline);
   return summary;
 }

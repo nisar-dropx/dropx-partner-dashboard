@@ -1,17 +1,14 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
-import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 import {
   AlertTriangle,
   Bot,
   CalendarCheck,
   CheckCircle2,
   ChevronRight,
-  Circle,
   FileText,
   HelpCircle,
   Inbox,
-  Info,
   RefreshCw,
   Send,
   Server,
@@ -22,8 +19,9 @@ import {
   XCircle
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { ActionButton, CopyButton, ReportThumb } from "@/components/report-bot-controls";
-import { ReportBotConnection } from "@/components/report-bot-connection";
+import { ActionButton } from "@/components/report-bot-controls";
+import { GroupPicker } from "@/components/report-bot-group-picker";
+import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-viewer";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
@@ -32,36 +30,34 @@ import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from
 import { aiKeyConfigured, aiKeyName, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import {
   approveFeedback,
-  connectWhatsApp,
-  disconnectWhatsApp,
   reanalyseSubmission,
   rejectFeedback,
-  rotateWorkerToken,
-  saveBotSettings,
+  removeGroup,
+  saveGroupSelection,
   saveReportType,
   saveSchedule,
-  saveWorkerUrl,
+  sendAllWaiting,
+  sendTestReminder,
+  setAutoReply,
   setRequestStatus,
-  syncGroups,
   updateGroup
 } from "./actions";
 import s from "./report-bot.module.css";
+import { Badge, Card, Empty, Field, FlashMessage, loadSetupSteps, ReportBotNav, SETUP_HREF, StatusBadge, Toggle, VERDICT, when, sender, workerIsOnline, type Tone } from "./ui";
 
 export const dynamic = "force-dynamic";
+// "Approve and send" posts straight away inside the action, which needs more than the default time.
+export const maxDuration = 60;
 
 const TABS = [
   { key: "today", label: "Today", icon: CalendarCheck },
   { key: "review", label: "Review", icon: Inbox },
   { key: "groups", label: "Groups", icon: Users },
-  { key: "reports", label: "Reports & schedules", icon: FileText },
-  { key: "connection", label: "Connection", icon: Smartphone },
-  { key: "settings", label: "Settings", icon: Settings2 }
+  { key: "reports", label: "Reports & schedules", icon: FileText }
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const WORKER_FRESH_MS = 3 * 60 * 1000;
 
-type Tone = "good" | "warn" | "bad" | "info" | "neutral";
 type GroupRow = {
   id: string; wa_group_id: string; group_name: string | null; participant_count: number | null; location_id: string | null;
   is_enabled: boolean; bot_in_group: boolean;
@@ -79,92 +75,6 @@ type SubmissionRow = {
 };
 type Lookup = { groupName: Map<string, string>; reportName: Map<string, string> };
 
-const STATUS: Record<string, [string, Tone]> = {
-  queued: ["Checking", "info"],
-  blocked: ["On hold", "warn"],
-  awaiting_approval: ["Waiting for review", "warn"],
-  queued_to_send: ["Sending", "info"],
-  sent: ["Reply sent", "good"],
-  ignored: ["Not a report", "neutral"],
-  skipped: ["Skipped", "neutral"],
-  rejected: ["Not sent", "neutral"],
-  failed: ["Failed", "bad"],
-  pending: ["Waiting", "neutral"],
-  overdue: ["Overdue", "bad"],
-  received: ["Received", "good"],
-  missed: ["Missed", "bad"],
-  cancelled: ["Cancelled", "neutral"]
-};
-const VERDICT: Record<string, [string, Tone]> = {
-  pass: ["Looks good", "good"],
-  fail: ["Needs correction", "bad"],
-  needs_review: ["Unclear", "warn"],
-  not_report: ["Not a report", "neutral"]
-};
-
-function Badge({ tone, children, className = "" }: { tone: Tone; children: ReactNode; className?: string }) {
-  return <span className={`${s.badge} ${s[tone]} ${className}`}>{children}</span>;
-}
-
-function StatusBadge({ value }: { value: string }) {
-  const [label, tone] = STATUS[value] ?? [value, "neutral" as Tone];
-  return <Badge tone={tone}>{label}</Badge>;
-}
-
-function Field({ label, hint, children, className = "" }: { label: string; hint?: ReactNode; children: ReactNode; className?: string }) {
-  return (
-    <label className={`${s.field} ${className}`}>
-      <span className={s.label}>{label}</span>
-      {children}
-      {hint ? <span className={s.hint}>{hint}</span> : null}
-    </label>
-  );
-}
-
-function Toggle({ name, label, hint, defaultChecked, disabled, form }: { name: string; label: string; hint?: string; defaultChecked?: boolean; disabled?: boolean; form?: string }) {
-  return (
-    <label className={s.switch}>
-      <input type="checkbox" role="switch" name={name} defaultChecked={defaultChecked} disabled={disabled} form={form} />
-      <span>{label}{hint ? <small>{hint}</small> : null}</span>
-    </label>
-  );
-}
-
-function Empty({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
-  return <div className={s.empty}>{icon}<strong>{title}</strong>{children ? <span>{children}</span> : null}</div>;
-}
-
-function Card({ title, icon, description, action, children, flush }: { title: string; icon?: ReactNode; description?: ReactNode; action?: ReactNode; children: ReactNode; flush?: boolean }) {
-  return (
-    <section className={s.card}>
-      <div className={s.cardHead}>
-        <div><h2>{icon}{title}</h2>{description ? <p>{description}</p> : null}</div>
-        {action}
-      </div>
-      {flush ? children : <div className={s.cardBody}>{children}</div>}
-    </section>
-  );
-}
-
-function readFlash() {
-  const raw = cookies().get("dropx_report_bot_flash")?.value;
-  if (!raw) return {} as { error?: string; notice?: string; token?: string };
-  try {
-    return JSON.parse(raw) as { error?: string; notice?: string; token?: string };
-  } catch {
-    return {};
-  }
-}
-
-function when(value: string | null | undefined, timeZone: string) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("en-IN", { timeZone, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-}
-
-function sender(row: { sender_name: string | null; sender_jid: string | null }) {
-  return row.sender_name || (row.sender_jid ? `+${row.sender_jid.split("@")[0].split(":")[0]}` : "Unknown sender");
-}
-
 function tabHref(tab: Tab) {
   return `/report-bot?tab=${tab}`;
 }
@@ -173,8 +83,11 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   const authorization = await requirePagePermission(REPORT_BOT_PAGE, "access");
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, REPORT_BOT_PAGE, "edit");
-  const tab: Tab = TABS.find((entry) => entry.key === searchParams?.tab)?.key ?? "today";
-  const flash = readFlash();
+  // Old links to the moved tabs land on the setup page instead of a blank tab.
+  const requested = searchParams?.tab;
+  if (requested === "connection" || requested === "settings") redirect(SETUP_HREF);
+  if (requested === "chats") redirect("/report-bot/chats");
+  const tab: Tab = TABS.find((entry) => entry.key === requested)?.key ?? "today";
   const db = reportBotDb();
 
   let settings: ReportBotSettings;
@@ -193,9 +106,10 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
     );
   }
 
-  const [groupsResult, reportTypesResult] = await Promise.all([
+  const [groupsResult, reportTypesResult, steps] = await Promise.all([
     db.from("report_bot_groups").select("*").eq("company_id", companyId).order("group_name"),
-    db.from("report_bot_report_types").select("*").eq("company_id", companyId).order("name")
+    db.from("report_bot_report_types").select("*").eq("company_id", companyId).order("name"),
+    loadSetupSteps(settings)
   ]);
   const groups = ((groupsResult.data ?? []) as GroupRow[]).filter((group) => canSeeGroup(authorization, group));
   const groupIds = groups.map((group) => group.id);
@@ -212,17 +126,8 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   };
 
   const aiReady = aiKeyConfigured(settings.ai_provider);
-  const workerSeenMs = settings.last_worker_seen_at ? Date.now() - new Date(settings.last_worker_seen_at).getTime() : Infinity;
-  const workerOnline = workerSeenMs < WORKER_FRESH_MS;
+  const workerOnline = workerIsOnline(settings);
   const linked = settings.connection_state === "open";
-  const steps = [
-    { done: Boolean(settings.worker_url && settings.worker_token_hash && workerOnline), text: "Run the worker and save its address", tab: "connection" as Tab },
-    { done: linked, text: "Link a WhatsApp number", tab: "connection" as Tab },
-    { done: groups.some((group) => group.is_enabled), text: "Turn on a report group", tab: "groups" as Tab },
-    { done: schedules.some((schedule) => schedule.is_active), text: "Add a report type and a schedule", tab: "reports" as Tab },
-    { done: aiReady, text: `Add ${aiKeyName(settings.ai_provider)} in Vercel`, tab: "settings" as Tab },
-    { done: settings.mode !== "off", text: "Switch the bot to Listen only", tab: "settings" as Tab }
-  ];
   const doneSteps = steps.filter((step) => step.done).length;
   const modeTone: Tone = settings.mode === "live" ? "good" : settings.mode === "listen" ? "info" : "neutral";
   const modeLabel = settings.mode === "live" ? "Live" : settings.mode === "listen" ? "Listen only" : "Off";
@@ -236,80 +141,46 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
             <h1>Report Bot</h1>
             <p>Reminds WhatsApp groups to share their daily reports, then checks each report photo and replies with feedback.</p>
           </div>
-          <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
+          <div className={s.formActions}>
+            <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
+            <Link className={s.button} href={SETUP_HREF}><Settings2 size={15} aria-hidden />Setup</Link>
+          </div>
         </header>
 
         <div className={s.tiles}>
-          <Link className={s.tile} href={tabHref("settings")}>
+          <Link className={s.tile} href={`${SETUP_HREF}#mode`}>
             <span className={`${s.tileIcon} ${settings.mode === "live" ? s.good : settings.mode === "listen" ? s.warn : ""}`}><Bot size={18} aria-hidden /></span>
             <span><span className={s.tileLabel}>Mode</span><div className={s.tileValue}>{modeLabel}</div><div className={s.tileHint}>{settings.mode === "live" ? "Sends reminders and replies" : settings.mode === "listen" ? "Checks photos, sends nothing" : "Not listening to groups"}</div></span>
           </Link>
-          <Link className={s.tile} href={tabHref("connection")}>
+          <Link className={s.tile} href={`${SETUP_HREF}#whatsapp`}>
             <span className={`${s.tileIcon} ${s[linked ? "good" : "bad"]}`}><Smartphone size={18} aria-hidden /></span>
             <span><span className={s.tileLabel}>WhatsApp</span><div className={s.tileValue}>{linked ? "Connected" : "Not linked"}</div><div className={s.tileHint}>{settings.connected_number ? `+${settings.connected_number}` : "Link a number to start"}</div></span>
           </Link>
-          <Link className={s.tile} href={tabHref("connection")}>
+          <Link className={s.tile} href={`${SETUP_HREF}#worker`}>
             <span className={`${s.tileIcon} ${s[workerOnline ? "good" : settings.last_worker_seen_at ? "warn" : "bad"]}`}><Server size={18} aria-hidden /></span>
-            <span><span className={s.tileLabel}>Worker</span><div className={s.tileValue}>{workerOnline ? "Online" : settings.last_worker_seen_at ? "Not responding" : "Not set up"}</div><div className={s.tileHint}>{settings.last_worker_seen_at ? `Last seen ${when(settings.last_worker_seen_at, settings.timezone)}` : "Deploy it, then add its address"}</div></span>
+            <span><span className={s.tileLabel}>Worker</span><div className={s.tileValue}>{workerOnline ? "Online" : settings.last_worker_seen_at ? "Not responding" : "Not started"}</div><div className={s.tileHint}>{settings.last_worker_seen_at ? `Last seen ${when(settings.last_worker_seen_at, settings.timezone)}` : "Start it from Setup"}</div></span>
           </Link>
-          <Link className={s.tile} href={tabHref("settings")}>
+          <Link className={s.tile} href={`${SETUP_HREF}#ai`}>
             <span className={`${s.tileIcon} ${s[aiReady ? "good" : "bad"]}`}><Sparkles size={18} aria-hidden /></span>
             <span><span className={s.tileLabel}>AI check</span><div className={s.tileValue}>{aiReady ? `${aiProviderLabel(settings.ai_provider)} ready` : "Key missing"}</div><div className={s.tileHint}>{aiReady ? settings.ai_model : `Add ${aiKeyName(settings.ai_provider)} in Vercel`}</div></span>
           </Link>
         </div>
 
         {doneSteps < steps.length ? (
-          <section className={s.setup} aria-labelledby="setup-title">
-            <div className={s.setupHead}>
-              <h2 id="setup-title">Finish setting up</h2>
-              <span>{doneSteps} of {steps.length} done</span>
-            </div>
-            <div className={s.progress} aria-hidden><span style={{ width: `${(doneSteps / steps.length) * 100}%` }} /></div>
-            <ol className={s.steps}>
-              {steps.map((step) => (
-                <li key={step.text} className={`${s.step} ${step.done ? s.done : ""}`}>
-                  {step.done ? <CheckCircle2 size={18} className={s.stepIcon} aria-label="Done" /> : <Circle size={18} className={s.stepIcon} aria-label="To do" />}
-                  <span className={s.stepText}>{step.text}</span>
-                  {step.done ? null : <Link className={s.stepLink} href={tabHref(step.tab)}>Open<ChevronRight size={14} aria-hidden /></Link>}
-                </li>
-              ))}
-            </ol>
-          </section>
-        ) : null}
-
-        {flash.error || flash.notice ? (
-          <div className={`${s.flash} ${flash.error ? s.flashError : s.flashSuccess}`} role={flash.error ? "alert" : "status"}>
-            {flash.error ? <AlertTriangle size={18} aria-hidden /> : <CheckCircle2 size={18} aria-hidden />}
-            <div>
-              <strong>{flash.error ? "That didn't work" : "Done"}</strong>
-              {flash.error ?? flash.notice}
-              {flash.token ? (
-                <div className={s.tokenBox}>
-                  <code>{flash.token}</code>
-                  <CopyButton value={flash.token} className={`${s.button} ${s.small}`} />
-                  <span className={s.hint}>Shown only this once.</span>
-                </div>
-              ) : null}
-            </div>
+          <div className={s.setupBanner}>
+            <span><strong>Setup {doneSteps} of {steps.length} done.</strong> Finish it to start receiving report checks.</span>
+            <Link className={`${s.button} ${s.primary} ${s.small}`} href={SETUP_HREF}>Finish setup<ChevronRight size={14} aria-hidden /></Link>
           </div>
         ) : null}
 
-        <nav className={s.tabs} aria-label="Report Bot sections">
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <Link key={key} href={tabHref(key)} className={`${s.tab} ${tab === key ? s.tabActive : ""}`} aria-current={tab === key ? "page" : undefined}>
-              <Icon size={16} aria-hidden />{label}
-              {key === "review" && (waitingCount.count ?? 0) > 0 ? <span className={s.count} aria-label={`${waitingCount.count} waiting`}>{waitingCount.count}</span> : null}
-              {key === "review" && (attentionCount.count ?? 0) > 0 ? <span className={`${s.count} ${s.countMuted}`} aria-label={`${attentionCount.count} need attention`}>{attentionCount.count}</span> : null}
-            </Link>
-          ))}
-        </nav>
+        <FlashMessage />
+
+        <ReportBotNav active={tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
 
         {tab === "today" ? await TodayTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
         {tab === "review" ? await ReviewTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
         {tab === "groups" ? await GroupsTab({ authorization, groups, canEdit }) : null}
         {tab === "reports" ? <ReportsTab groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
-        {tab === "connection" ? <ConnectionTab settings={settings} canEdit={canEdit} workerOnline={workerOnline} /> : null}
-        {tab === "settings" ? <SettingsTab settings={settings} canEdit={canEdit} /> : null}
       </div>
     </AppShell>
   );
@@ -375,7 +246,7 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
           </div>
         ) : (
           <Empty icon={<CalendarCheck size={28} aria-hidden />} title={settings.mode === "off" ? "The bot is off" : "Nothing due today"}>
-            {settings.mode === "off" ? <>Turn on <Link href={tabHref("settings")}>Listen only</Link> to start tracking reports.</> : <>Reports appear here on days that have a <Link href={tabHref("reports")}>schedule</Link>.</>}
+            {settings.mode === "off" ? <>Turn on <Link href={`${SETUP_HREF}#mode`}>Listen only</Link> to start tracking reports.</> : <>Reports appear here on days that have a <Link href={tabHref("reports")}>schedule</Link>.</>}
           </Empty>
         )}
       </Card>
@@ -400,9 +271,9 @@ function SubmissionTable({ rows, lookup, timeZone, title, emptyText }: { rows: S
                     <td className={s.cellTitle}>{lookup.groupName.get(row.group_id) ?? "—"}</td>
                     <td>{sender(row)}</td>
                     <td>{row.report_type_id ? lookup.reportName.get(row.report_type_id) ?? "—" : "—"}</td>
-                    <td><StatusBadge value={row.status} />{row.status_reason ? <span className={s.cellSub}>{row.status_reason}</span> : null}</td>
+                    <td><StatusBadge value={row.status} />{row.status_reason ? <span className={s.cellSub}>{row.status === "queued" ? `Retrying automatically: ${row.status_reason}` : row.status_reason}</span> : null}</td>
                     <td>{verdict ? <Badge tone={verdict[1]}>{verdict[0]}</Badge> : "—"}</td>
-                    <td>{row.media_ref ? <a className={`${s.button} ${s.small} ${s.ghost}`} href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">View</a> : null}</td>
+                    <td>{row.media_ref ? <ViewImageButton submissionId={row.id} title={`Photo from ${sender(row)}`} className={`${s.button} ${s.small} ${s.ghost}`}>View</ViewImageButton> : null}</td>
                   </tr>
                 );
               })}
@@ -438,13 +309,39 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
   ]) : [{ data: [] }, { data: [] }, { data: [] }];
   const waitingRows = (waiting.data ?? []) as SubmissionRow[];
   const attentionRows = (attention.data ?? []) as SubmissionRow[];
+  const auto = settings.approval_mode === "auto";
   return (
     <>
+      {canEdit ? (
+        <section className={s.card}>
+          <div className={s.reviewBar}>
+            <div>
+              <strong>Auto-reply is {auto ? "on" : "off"}</strong>
+              <div className={s.hint}>
+                {auto
+                  ? `Confident results (${Math.round(settings.auto_send_min_confidence * 100)}%+, no unclear rule) are posted without a click. Unclear photos still wait below.`
+                  : "Every reply waits here for you to approve."}
+              </div>
+            </div>
+            <div className={s.formActions}>
+              {waitingRows.some((row) => row.feedback_text?.trim()) ? (
+                <form action={sendAllWaiting}>
+                  <ActionButton className={s.button} confirm={`Post the AI's reply for all ${waitingRows.length} waiting photos?`}><Send size={15} aria-hidden />Send all waiting</ActionButton>
+                </form>
+              ) : null}
+              <form action={setAutoReply}>
+                <input type="hidden" name="auto" value={auto ? "off" : "on"} />
+                <ActionButton className={`${s.button} ${auto ? "" : s.primary}`}><Sparkles size={15} aria-hidden />{auto ? "Turn auto-reply off" : "Turn auto-reply on"}</ActionButton>
+              </form>
+            </div>
+          </div>
+        </section>
+      ) : null}
       <Card
         title="Waiting for review"
         icon={<Inbox size={18} aria-hidden />}
         description={settings.mode === "live"
-          ? "Compare the AI's reading with the photo, adjust the reply if needed, and approve. It's posted as a reply to the photo after a short delay."
+          ? "Compare the AI's reading with the photo, adjust the reply if needed, and approve. It's posted in the group within seconds."
           : "The bot is not Live, so approved replies wait and go out once you switch to Live (within 12 hours)."}
         action={waitingRows.length ? <span className={s.count}>{waitingRows.length}</span> : null}
       >
@@ -455,7 +352,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
               const confidence = row.confidence === null ? null : Math.round(Number(row.confidence) * 100);
               return (
                 <article key={row.id} className={s.reviewCard}>
-                  <ReportThumb src={`/api/report-bot/image/${row.id}`} alt={`Report photo from ${sender(row)}`} className={s.thumb} missingClassName={s.thumbMissing} />
+                  <ReportThumb submissionId={row.id} alt={`Report photo from ${sender(row)}`} className={s.thumb} missingClassName={s.thumbMissing} />
                   <div className={s.reviewMain}>
                     <div className={s.reviewMeta}>
                       <strong>{lookup.groupName.get(row.group_id) ?? "Group"}</strong>
@@ -545,44 +442,55 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
   } catch (error) {
     storeError = error instanceof Error ? error.message : "Stores could not be loaded.";
   }
-  const enabled = groups.filter((group) => group.is_enabled).length;
+  // Only groups ticked in the picker are on the bot and shown here.
+  const active = groups.filter((group) => group.is_enabled);
   return (
     <Card
       title="WhatsApp groups"
       icon={<Users size={18} aria-hidden />}
-      description="Groups the linked number belongs to. Turn on only the report groups: the bot ignores every other chat and never reads private messages."
-      action={canEdit ? <form action={syncGroups}><ActionButton className={`${s.button} ${s.primary}`}><RefreshCw size={15} aria-hidden />Refresh from WhatsApp</ActionButton></form> : null}
+      description="The report groups the bot listens to. Add or remove them from the list of groups the linked number is in; the bot ignores every other chat and never reads private messages."
+      action={canEdit ? <GroupPicker action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
       flush
     >
       {storeError ? <div className={s.cardBody}><p className={s.hint} role="alert">{storeError}</p></div> : null}
-      {groups.length ? (
+      {active.length ? (
         <div className={s.groupList}>
-          <div className={s.cardBody} style={{ paddingBottom: 0 }}><span className={s.hint}>{enabled} of {groups.length} groups turned on</span></div>
-          {groups.map((group) => (
-            <form key={group.id} action={updateGroup} className={s.groupRow}>
-              <input type="hidden" name="group_id" value={group.id} />
-              <div>
-                <div className={s.groupName}>{group.group_name ?? "Unnamed group"}</div>
-                <div className={s.groupMeta}>
-                  {group.participant_count ? <span>{group.participant_count} members</span> : null}
-                  {group.bot_in_group ? null : <Badge tone="bad">Bot number not in group</Badge>}
-                  {group.is_enabled ? <Badge tone="good">Listening</Badge> : null}
+          {active.map((group) => (
+            <div key={group.id} className={s.groupRow}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+                <span className={s.avatar} aria-hidden>{(group.group_name ?? "G").slice(0, 1).toUpperCase()}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div className={s.groupName}>{group.group_name ?? "Unnamed group"}</div>
+                  <div className={s.groupMeta}>
+                    {group.participant_count ? <span>{group.participant_count} members</span> : null}
+                    {group.bot_in_group ? <Badge tone="good">Listening</Badge> : <Badge tone="bad">Bot number not in group</Badge>}
+                    <Link href={`/report-bot/chats?group=${group.id}`}>Open chat</Link>
+                  </div>
                 </div>
               </div>
-              <Field label="Store">
-                <select className={s.select} name="location_id" defaultValue={group.location_id ?? ""} disabled={!canEdit}>
-                  <option value="">{authorization.hasAllLocationAccess ? "No store linked" : "Choose a store"}</option>
-                  {stores.map((store) => <option key={store.id} value={store.id}>{store.station_code}{store.station_name ? ` · ${store.station_name}` : ""}</option>)}
-                </select>
-              </Field>
-              <Toggle name="is_enabled" label="Listen" defaultChecked={group.is_enabled} disabled={!canEdit} />
-              {canEdit ? <ActionButton className={`${s.button} ${s.small}`}>Save</ActionButton> : <span />}
-            </form>
+              <form action={updateGroup} className={s.inlineForm}>
+                <input type="hidden" name="group_id" value={group.id} />
+                <Field label="Store">
+                  <select className={s.select} name="location_id" defaultValue={group.location_id ?? ""} disabled={!canEdit}>
+                    <option value="">{authorization.hasAllLocationAccess ? "No store linked" : "Choose a store"}</option>
+                    {stores.map((store) => <option key={store.id} value={store.id}>{store.station_code}{store.station_name ? ` · ${store.station_name}` : ""}</option>)}
+                  </select>
+                </Field>
+                {canEdit ? <ActionButton className={`${s.button} ${s.small}`}>Save</ActionButton> : null}
+              </form>
+              {canEdit ? (
+                <form action={removeGroup}>
+                  <input type="hidden" name="group_id" value={group.id} />
+                  <ActionButton className={`${s.button} ${s.small} ${s.danger}`} confirm={`Remove "${group.group_name ?? "this group"}" from the bot? It stops listening and posting there; history is kept.`}>Remove</ActionButton>
+                </form>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : (
-        <Empty icon={<Users size={28} aria-hidden />} title="No groups yet">
-          <Link href={tabHref("connection")}>Link WhatsApp</Link> first, then press Refresh from WhatsApp.
+        <Empty icon={<Users size={28} aria-hidden />} title="No groups on the bot yet">
+          {canEdit ? <>Press <strong>Add or remove groups</strong> and tick the report groups.</> : "An editor adds the report groups here."}
+          {" "}The WhatsApp number must be <Link href={`${SETUP_HREF}#whatsapp`}>linked</Link> first.
         </Empty>
       )}
     </Card>
@@ -617,7 +525,8 @@ function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRo
       <Field label="Group">
         <select className={s.select} name="group_id" defaultValue={schedule?.group_id ?? ""} required>
           <option value="">Choose a group</option>
-          {groups.map((group) => <option key={group.id} value={group.id}>{group.group_name ?? "Unnamed group"}{group.is_enabled ? "" : " (not listening)"}</option>)}
+          {/* Only groups on the bot, plus a removed group this schedule still points at. */}
+          {groups.filter((group) => group.is_enabled || group.id === schedule?.group_id).map((group) => <option key={group.id} value={group.id}>{group.group_name ?? "Unnamed group"}{group.is_enabled ? "" : " (removed from the bot)"}</option>)}
         </select>
       </Field>
       <Field label="Report">
@@ -692,7 +601,7 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
           ) : null}
         </div>
       </Card>
-      <Card title="Schedules" icon={<CalendarCheck size={18} aria-hidden />} description="When each group must post each report, and when the bot reminds them. Times use the time zone in Settings.">
+      <Card title="Schedules" icon={<CalendarCheck size={18} aria-hidden />} description="When each group must post each report, and when the bot reminds them. Times use the time zone in Settings. Reminders stop for the day as soon as that day's report photo arrives; use Send test reminder to try one any time.">
         <div className={s.itemList}>
           {schedules.map((schedule) => (
             <details key={schedule.id} className={s.item}>
@@ -708,7 +617,16 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
                 </div>
                 <ChevronRight size={18} className={s.chevron} aria-hidden />
               </summary>
-              {canEdit ? <div className={s.itemBody}><ScheduleForm schedule={schedule} groups={groups} reportTypes={reportTypes} /></div> : null}
+              {canEdit ? (
+                <div className={s.itemBody}>
+                  <form action={sendTestReminder} className={s.formActions} style={{ justifyContent: "flex-start", marginBottom: 14 }}>
+                    <input type="hidden" name="id" value={schedule.id} />
+                    <ActionButton className={`${s.button} ${s.small}`}><Send size={14} aria-hidden />Send test reminder</ActionButton>
+                    <span className={s.hint}>Posts the first reminder in the group now, even if today&apos;s report is already in.</span>
+                  </form>
+                  <ScheduleForm schedule={schedule} groups={groups} reportTypes={reportTypes} />
+                </div>
+              ) : null}
             </details>
           ))}
           {!schedules.length ? <Empty icon={<CalendarCheck size={28} aria-hidden />} title="No schedules yet">A schedule ties a report to a group and sets its reminder times.</Empty> : null}
@@ -723,198 +641,5 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
         </div>
       </Card>
     </div>
-  );
-}
-
-function ConnectionTab({ settings, canEdit, workerOnline }: { settings: ReportBotSettings; canEdit: boolean; workerOnline: boolean }) {
-  const workerReady = Boolean(settings.worker_url && settings.worker_token_hash);
-  const linked = settings.connection_state === "open";
-  return (
-    <div className={s.connectSteps}>
-      <Card
-        title="Worker"
-        icon={<span className={`${s.stepNumber} ${workerReady && workerOnline ? s.stepNumberDone : ""}`}>1</span>}
-        description="The always-on service that keeps WhatsApp connected. Deploy it from workers/whatsapp-report-bot, then connect it here."
-        action={workerOnline ? <Badge tone="good">Online</Badge> : <Badge tone={settings.last_worker_seen_at ? "warn" : "neutral"}>{settings.last_worker_seen_at ? "Not responding" : "Not connected"}</Badge>}
-      >
-        <div className={s.session}>
-          <form action={saveWorkerUrl} className={s.inlineForm}>
-            <Field label="Worker address" hint="The https address the worker is reachable at.">
-              <input className={s.input} name="worker_url" defaultValue={settings.worker_url ?? ""} placeholder="https://wa-bot.dropxlogistics.com" required disabled={!canEdit} />
-            </Field>
-            {canEdit ? <ActionButton className={`${s.button} ${s.primary}`}>Save address</ActionButton> : null}
-          </form>
-          <div className={s.divider} />
-          <div className={s.inlineForm} style={{ alignItems: "center" }}>
-            <div className={s.field} style={{ flex: 1 }}>
-              <span className={s.label}>Worker token</span>
-              <span className={s.hint}>{settings.worker_token_hash ? `Created ${when(settings.worker_token_created_at, settings.timezone)}. For security it can't be shown again; replace it if it's lost.` : "Create a token, then set it as WORKER_TOKEN on the worker."}</span>
-            </div>
-            {canEdit ? (
-              <form action={rotateWorkerToken}>
-                <ActionButton className={`${s.button} ${settings.worker_token_hash ? "" : s.primary}`} confirm={settings.worker_token_hash ? "Replace the token? The worker stops working until you update WORKER_TOKEN on it." : undefined}>
-                  {settings.worker_token_hash ? "Replace token" : "Create token"}
-                </ActionButton>
-              </form>
-            ) : null}
-          </div>
-          <p className={s.note}><Info size={16} aria-hidden /><span>On the worker set <code>PORTAL_URL=https://ops.dropxlogistics.com</code> and <code>WORKER_TOKEN</code> to the token, then restart it. It shows as Online within a minute.</span></p>
-        </div>
-      </Card>
-
-      <Card
-        title="WhatsApp number"
-        icon={<span className={`${s.stepNumber} ${linked ? s.stepNumberDone : ""}`}>2</span>}
-        description="Link any WhatsApp account as a linked device, for example your own number while testing. To change numbers later, unlink and link the new one; groups, schedules and history are kept."
-      >
-        <div className={s.session}>
-          {workerReady ? (
-            canEdit ? <ReportBotConnection polling initial={{ state: settings.connection_state, number: settings.connected_number, name: settings.connected_name, error: settings.connection_error }} />
-              : <div className={s.sessionState}><Badge tone={linked ? "good" : "neutral"}>{linked ? "Connected" : "Not linked"}</Badge>{settings.connected_number ? <strong>+{settings.connected_number}</strong> : null}</div>
-          ) : <p className={s.hint}>Finish step 1 first.</p>}
-          {canEdit && workerReady ? (
-            <>
-              <div className={s.divider} />
-              <div className={s.inlineForm}>
-                {linked ? null : <form action={connectWhatsApp}><input type="hidden" name="method" value="qr" /><ActionButton className={`${s.button} ${s.primary}`}>Link with QR code</ActionButton></form>}
-                {linked ? null : (
-                  <form action={connectWhatsApp} className={s.inlineForm}>
-                    <input type="hidden" name="method" value="code" />
-                    <Field label="Or link with a code" hint="Number with country code, digits only.">
-                      <input className={s.input} name="phone" inputMode="numeric" autoComplete="tel" placeholder="919876543210" required pattern="[0-9]{10,15}" />
-                    </Field>
-                    <ActionButton className={s.button}>Get code</ActionButton>
-                  </form>
-                )}
-                {linked || settings.connection_state === "closed" ? (
-                  <form action={disconnectWhatsApp}>
-                    <ActionButton className={`${s.button} ${s.danger}`} confirm="Unlink this WhatsApp number? The bot stops until a number is linked again.">Unlink / switch number</ActionButton>
-                  </form>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-          <p className={s.note}><Info size={16} aria-hidden /><span>The bot reads photos only from groups you turn on under Groups, and never reads private chats. Your own photos are ignored unless &quot;Check my own photos&quot; is on in Settings.</span></p>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function SettingsTab({ settings, canEdit }: { settings: ReportBotSettings; canEdit: boolean }) {
-  const modes = [
-    { value: "off", title: "Off", text: "Not listening to any group." },
-    { value: "listen", title: "Listen only", text: "Checks report photos but never posts. Use this while testing." },
-    { value: "live", title: "Live", text: "Posts reminders and approved replies in the groups." }
-  ];
-  return (
-    <form action={saveBotSettings} className={s.card}>
-      <fieldset disabled={!canEdit} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-        <div className={s.cardBody} style={{ display: "grid", gap: 22 }}>
-          <div className={s.section}>
-            <h2 className={s.sectionTitle}><Bot size={17} aria-hidden />Mode</h2>
-            <p className={s.sectionText}>Start in Listen only. Switch to Live when the checks look right.</p>
-            <div className={s.choices} role="radiogroup" aria-label="Mode">
-              {modes.map((mode) => (
-                <label key={mode.value} className={s.choice}>
-                  <input type="radio" name="mode" value={mode.value} defaultChecked={settings.mode === mode.value} />
-                  <strong>{mode.title}</strong>
-                  <span>{mode.text}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className={s.section}>
-            <h2 className={s.sectionTitle}><Sparkles size={17} aria-hidden />AI that reads the photos</h2>
-            <p className={s.sectionText}>The key is a deployment secret: add {aiKeyName(settings.ai_provider)} in Vercel. It is never stored in the portal.</p>
-            <div className={s.formGrid}>
-              <Field label="Provider">
-                <select className={s.select} name="ai_provider" defaultValue={settings.ai_provider}>
-                  <option value="gemini">Google Gemini (free tier)</option>
-                  <option value="anthropic">Anthropic Claude (paid)</option>
-                  <option value="openai">OpenAI (paid)</option>
-                </select>
-              </Field>
-              <Field label="Model" hint="Pick a suggestion or type a model name.">
-                <input className={s.input} name="ai_model" defaultValue={settings.ai_model} required maxLength={100} list="report-bot-models" />
-              </Field>
-              <datalist id="report-bot-models">
-                <option value="gemini-3.8-flash">Gemini · free · best quality</option>
-                <option value="gemini-3.5-flash-lite">Gemini · free · faster, higher daily limit</option>
-                <option value="claude-opus-5-5">Claude · paid</option>
-              </datalist>
-              <Field label="Thoroughness" hint="Higher is more careful but slower.">
-                <select className={s.select} name="ai_effort" defaultValue={settings.ai_effort}>
-                  <option value="low">Quick</option>
-                  <option value="medium">Balanced</option>
-                  <option value="high">Thorough</option>
-                </select>
-              </Field>
-            </div>
-            {settings.ai_provider === "gemini" ? (
-              <p className={s.note} style={{ marginTop: 14 }}><Info size={16} aria-hidden /><span>Gemini&apos;s free tier has daily limits; photos over the limit are retried later. Google may use free-tier photos to improve its products, so choose a paid provider if report photos must stay private.</span></p>
-            ) : null}
-          </div>
-
-          <div className={s.section}>
-            <h2 className={s.sectionTitle}><Send size={17} aria-hidden />Replies and approval</h2>
-            <p className={s.sectionText}>Keep &quot;Approve every reply&quot; until you trust the readings.</p>
-            <div className={s.formGrid}>
-              <Field label="Approval">
-                <select className={s.select} name="approval_mode" defaultValue={settings.approval_mode}>
-                  <option value="manual">Approve every reply</option>
-                  <option value="auto">Send confident results automatically</option>
-                </select>
-              </Field>
-              <Field label="Auto-send when at least" hint="0.85 means the AI is 85% sure. Unclear results always wait for review.">
-                <input className={s.input} name="auto_send_min_confidence" type="number" step="0.01" min="0.5" max="1" defaultValue={settings.auto_send_min_confidence} required />
-              </Field>
-              <Field label="Gap between bot messages" hint="Seconds, per group.">
-                <input className={s.input} name="group_min_gap_seconds" type="number" min="0" max="3600" defaultValue={settings.group_min_gap_seconds} required />
-              </Field>
-              <Field label="Reply delay from" hint="Seconds. A random delay in this range looks more natural.">
-                <input className={s.input} name="reply_delay_min_seconds" type="number" min="0" max="3600" defaultValue={settings.reply_delay_min_seconds} required />
-              </Field>
-              <Field label="Reply delay to" hint="Seconds.">
-                <input className={s.input} name="reply_delay_max_seconds" type="number" min="0" max="3600" defaultValue={settings.reply_delay_max_seconds} required />
-              </Field>
-              <Field label="Skip reminders late by more than" hint="Minutes. Stops a burst of old reminders after an outage.">
-                <input className={s.input} name="max_reminder_delay_minutes" type="number" min="1" max="1440" defaultValue={settings.max_reminder_delay_minutes} required />
-              </Field>
-            </div>
-          </div>
-
-          <div className={s.section}>
-            <h2 className={s.sectionTitle}><FileText size={17} aria-hidden />Reply format</h2>
-            <p className={s.sectionText}>How the reply looks in the group.</p>
-            <div className={s.formGrid}>
-              <Field label="Layout" className={s.span3} hint={<span className={s.chips}>{["{report}", "{sender}", "{group}", "{date}", "{verdict_label}", "{feedback}"].map((chip) => <code key={chip} className={s.chip}>{chip}</code>)}</span>}>
-                <textarea className={s.textarea} name="feedback_template" rows={3} defaultValue={settings.feedback_template} required maxLength={1000} />
-              </Field>
-              <Field label="When it passes"><input className={s.input} name="label_pass" defaultValue={settings.label_pass} required maxLength={80} /></Field>
-              <Field label="When it fails"><input className={s.input} name="label_fail" defaultValue={settings.label_fail} required maxLength={80} /></Field>
-              <Field label="When it's unclear"><input className={s.input} name="label_review" defaultValue={settings.label_review} required maxLength={80} /></Field>
-              <Field label="Reply language" hint="The AI writes its feedback in this language."><input className={s.input} name="feedback_language" defaultValue={settings.feedback_language} required maxLength={40} /></Field>
-              <Field label="Longest reply" hint="Characters."><input className={s.input} name="max_feedback_chars" type="number" min="100" max="3000" defaultValue={settings.max_feedback_chars} required /></Field>
-              <Field label="Time zone" hint="Used for schedules and dates, e.g. Asia/Kolkata."><input className={s.input} name="timezone" defaultValue={settings.timezone} required /></Field>
-            </div>
-          </div>
-
-          <div className={s.section}>
-            <h2 className={s.sectionTitle}><Settings2 size={17} aria-hidden />Testing</h2>
-            <div style={{ display: "grid", gap: 14, marginTop: 10 }}>
-              <Toggle name="include_own_messages" label="Check my own photos" hint="For testing with your own number. The bot's own replies are always ignored." defaultChecked={settings.include_own_messages} />
-              <Toggle name="accept_without_request" label="Check photos on days with no report due" hint="Otherwise photos are only checked on days that have a schedule." defaultChecked={settings.accept_without_request} />
-            </div>
-          </div>
-        </div>
-        {canEdit ? (
-          <div className={`${s.formActions} ${s.stickyActions}`}>
-            <ActionButton className={`${s.button} ${s.primary}`}>Save settings</ActionButton>
-          </div>
-        ) : null}
-      </fieldset>
-    </form>
   );
 }

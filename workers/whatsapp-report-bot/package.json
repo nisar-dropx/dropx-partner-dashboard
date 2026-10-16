@@ -8,8 +8,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check lib.mjs",
-    "test": "node --test lib.test.mjs"
+    "check": "node --check server.mjs && node --check lib.mjs && node --check auth-state.mjs",
+    "test": "node --test lib.test.mjs auth-state.test.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.24",

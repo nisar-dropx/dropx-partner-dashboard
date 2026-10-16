@@ -289,6 +289,9 @@ $identity$;
 begin
   select pg_get_functiondef('public.workforce_save_mapping(uuid,uuid,uuid,uuid,text,jsonb,uuid[])'::regprocedure)
     into definition;
+  definition := replace(definition, E'\r\n', E'\n');
+  marker := replace(marker, E'\r\n', E'\n');
+  identity_check := replace(identity_check, E'\r\n', E'\n');
   if position(marker || identity_check in definition) = 0 then
     if (length(definition) - length(replace(definition, marker, ''))) / length(marker) <> 1 then
       raise exception 'Unexpected mapping overlap definition; migration stopped without changing it';
@@ -323,6 +326,9 @@ $new$;
 begin
   select pg_get_functiondef('public.workforce_keep_joining_mapping(uuid,uuid,uuid,uuid,text,jsonb,uuid[],text)'::regprocedure)
     into definition;
+  definition := replace(definition, E'\r\n', E'\n');
+  old_check := replace(old_check, E'\r\n', E'\n');
+  new_check := replace(new_check, E'\r\n', E'\n');
   if position(new_check in definition) = 0 then
     if (length(definition) - length(replace(definition, old_check, ''))) / length(old_check) <> 1 then
       raise exception 'Unexpected Keep-all coverage definition; migration stopped without changing it';

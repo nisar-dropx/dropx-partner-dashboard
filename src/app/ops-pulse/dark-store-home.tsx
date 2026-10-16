@@ -25,16 +25,29 @@ async function StoreEconomics({authorization:a,locations,month}:Props&{month:str
   try{
     const result=await loadCpu(a,{period:'monthly',month,scope:locations.map(l=>l.station_code).join(',')});
     const total=summarizeStoreCpu(result.rows);
-    return <Link className={styles.sectionCard} href={href}><span>Estimated CPU <ArrowUpRight size={15}/></span><strong>{money(total.cpu)}</strong><small>{total.through?`Through ${date(total.through)}`:`${total.ready}/${result.rows.length} stores have units`} · open costs & sources</small></Link>;
-  }catch{return <Link className={styles.sectionCard} href={href}><span>Estimated CPU <ArrowUpRight size={15}/></span><strong>Unavailable</strong><small>Open CPU to check the source</small></Link>;}
+    return <Link prefetch={false} className={styles.sectionCard} href={href}><span>Estimated CPU <ArrowUpRight size={15}/></span><strong>{money(total.cpu)}</strong><small>{total.through?`Through ${date(total.through)}`:`${total.ready}/${result.rows.length} stores have units`} · open costs & sources</small></Link>;
+  }catch{return <Link prefetch={false} className={styles.sectionCard} href={href}><span>Estimated CPU <ArrowUpRight size={15}/></span><strong>Unavailable</strong><small>Open CPU to check the source</small></Link>;}
 }
 
 export function CommandLoading({label='Loading your store status'}:{label?:string}){
   return <div className={styles.loading} role="status"><span className="page-spinner" aria-hidden="true"/>{label}…</div>;
 }
 
-async function StoreCommand({authorization:a,locations,month,today}:Props&{month:string;today:string}){
-  const data=await loadDsCommandData(a,locations,month,today),stores=data.stores;
+function StoreCommand({authorization:a,locations,month,today}:Props&{month:string;today:string}){
+  const data=loadDsCommandData(a,locations,month,today);
+  const extraItems=data.then(value=>storeSummary(a,locations,month,today,value).extraItems);
+  return <>
+    <OpsCommandAttention authorization={a} locations={locations} today={today} mode="amazon_now" extraItems={extraItems}/>
+    <p className={styles.eyebrow}>SECTION SNAPSHOTS</p>
+    <div className={styles.sectionCards}>
+      <Suspense fallback={<CommandLoading label="Loading attendance and units"/>}><StoreSnapshots authorization={a} locations={locations} month={month} today={today} result={data}/></Suspense>
+      <Suspense fallback={<CommandLoading label="Loading CPU"/>}><StoreEconomics authorization={a} locations={locations} month={month}/></Suspense>
+    </div>
+  </>;
+}
+
+function storeSummary(a:AuthorizationContext,locations:CodLocationRow[],month:string,today:string,data:Awaited<ReturnType<typeof loadDsCommandData>>) {
+  const stores=data.stores;
   const scope=encodeURIComponent(locations.map(l=>l.station_code).join(','));
   const unitHref=hasPermission(a,'cps_inputs','access')?`/cpu/master?month=${month}`:`/cpu?period=monthly&month=${month}&scope=${scope}`;
   const needsUnits=stores.filter(s=>s.units?.status==='missing'||s.units?.status==='behind');
@@ -49,14 +62,15 @@ async function StoreCommand({authorization:a,locations,month,today}:Props&{month
     if(needsRoster.length)extraItems.push({key:'shift-times',title:'Shift assignments',value:`${needsRoster.length} stores need review`,count:needsRoster.length,detail:'Shift times missing · not counted as absent',href:`/rostering?station=${encodeURIComponent(needsRoster[0].code)}`,action:'Open rostering',tone:'action'});
   }
   if(data.canUnits)extraItems.push({key:'units',title:'Store unit reporting',value:data.unitError?'Unavailable':`${needsUnits.length} stores to update`,count:needsUnits.length,detail:`${month} · cumulative units expected through ${date(data.expectedThrough)}`,href:unitHref,action:'Open unit reports',tone:data.unitError?'unknown':needsUnits.length?'action':'clear'});
+  return {extraItems,attendanceHref,unitHref,due,reported,entered,units};
+}
+
+async function StoreSnapshots({authorization:a,locations,month,today,result}:Props&{month:string;today:string;result:ReturnType<typeof loadDsCommandData>}) {
+  const data=await result;
+  const {attendanceHref,unitHref,due,reported,entered,units}=storeSummary(a,locations,month,today,data);
   return <>
-    <Suspense fallback={<CommandLoading label="Checking current priorities"/>}><OpsCommandAttention authorization={a} locations={locations} today={today} mode="amazon_now" extraItems={extraItems}/></Suspense>
-    <p className={styles.eyebrow}>SECTION SNAPSHOTS</p>
-    <div className={styles.sectionCards}>
-      {data.canPeople&&<Link className={styles.sectionCard} href={attendanceHref}><span>Due shifts reported today <ArrowUpRight size={15}/></span><strong>{data.peopleError?'—':`${count(reported)} / ${count(due)}`}</strong><small>Excludes future shifts and approved leave · open attendance</small></Link>}
-      {data.canUnits&&<Link className={styles.sectionCard} href={unitHref}><span>Processed units · {month} <ArrowUpRight size={15}/></span><strong>{data.unitError||!entered?'—':count(units)}</strong><small>{entered}/{stores.length} stores entered · open unit actuals</small></Link>}
-      <Suspense fallback={<CommandLoading label="Loading CPU"/>}><StoreEconomics authorization={a} locations={locations} month={month}/></Suspense>
-    </div>
+    {data.canPeople&&<Link prefetch={false} className={styles.sectionCard} href={attendanceHref}><span>Due shifts reported today <ArrowUpRight size={15}/></span><strong>{data.peopleError?'—':`${count(reported)} / ${count(due)}`}</strong><small>Excludes future shifts and approved leave · open attendance</small></Link>}
+    {data.canUnits&&<Link prefetch={false} className={styles.sectionCard} href={unitHref}><span>Processed units · {month} <ArrowUpRight size={15}/></span><strong>{data.unitError||!entered?'—':count(units)}</strong><small>{entered}/{data.stores.length} stores entered · open unit actuals</small></Link>}
   </>;
 }
 
@@ -68,7 +82,7 @@ export function DarkStoreHome({authorization:a,locations,searchParams={}}:Props)
   return <AppShell active="Command Center" pageCode="ops_pulse"><div className={styles.command}>
     <header className={styles.hero}><div><p className={styles.eyebrow}><span className={styles.workspaceMark}><Store size={13}/> DS</span> DARK STORE OPERATIONS</p><h1>Command center</h1><p>Your priorities first. Open a section to act or inspect actuals.</p></div><div className={styles.today}><span><Clock3 size={15}/>{date(today)} · IST</span><DarkStoreRefresh/></div></header>
     <DarkStoreFilters key={`${searchParams.station||''}:${searchParams.city||''}:${month}`} stores={locations.map(l=>({code:l.station_code,name:l.station_name||l.station_code,city:l.city||''}))} station={searchParams.station||''} city={searchParams.city||''} month={month} maxMonth={today.slice(0,7)}/>
-    <div className={styles.contextBar}><p><strong>{scopeLabel}</strong><span>{selected.length} stores in view</span></p><nav aria-label="Quick actions">{links.filter(([code])=>hasPermission(a,code,'access')).map(([code,label,href])=><Link key={code} href={code==='cpu_overview'?`${href}?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`:href}>{label}<ArrowUpRight size={13}/></Link>)}</nav></div>
-    {!selected.length?<div className={styles.notice}>No store in your authorized scope matches this selection. <Link href="/ops-pulse">View my stores</Link></div>:<Suspense key={`${month}:${searchParams.station||''}:${searchParams.city||''}`} fallback={<CommandLoading/>}><StoreCommand authorization={a} locations={selected} month={month} today={today}/></Suspense>}
+    <div className={styles.contextBar}><p><strong>{scopeLabel}</strong><span>{selected.length} stores in view</span></p><nav aria-label="Quick actions">{links.filter(([code])=>hasPermission(a,code,'access')).map(([code,label,href])=><Link prefetch={false} key={code} href={code==='cpu_overview'?`${href}?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`:href}>{label}<ArrowUpRight size={13}/></Link>)}</nav></div>
+    {!selected.length?<div className={styles.notice}>No store in your authorized scope matches this selection. <Link prefetch={false} href="/ops-pulse">View my stores</Link></div>:<Suspense key={`${month}:${searchParams.station||''}:${searchParams.city||''}`} fallback={<CommandLoading/>}><StoreCommand authorization={a} locations={selected} month={month} today={today}/></Suspense>}
   </div></AppShell>;
 }

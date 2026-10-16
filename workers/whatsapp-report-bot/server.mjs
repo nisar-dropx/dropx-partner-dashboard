@@ -1,7 +1,10 @@
 // DropX Report Bot worker: holds one WhatsApp linked-device session, forwards
 // report images from portal-enabled groups, and sends what the portal asks.
+// It keeps nothing important on its own disk: the WhatsApp login and message records
+// live in the portal, so the worker can be redeployed or moved without re-linking.
 import http from "node:http";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import pino from "pino";
 import {
@@ -10,16 +13,20 @@ import {
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   makeWASocket,
-  normalizeMessageContent,
-  useMultiFileAuthState
+  normalizeMessageContent
 } from "@whiskeysockets/baileys";
+import { clearRemoteSession, hasRemoteSession, useRemoteAuthState } from "./auth-state.mjs";
 import {
   backoffMs,
   bearerMatches,
   classifyContent,
   EventQueue,
   GROUP_JID,
+  ChatLog,
+  chatEntry,
+  cleanMentions,
   Lru,
   MEDIA_REF,
   messageSeconds,
@@ -33,26 +40,35 @@ import {
 
 const PORT = Number(process.env.PORT || 8090);
 const WORKER_TOKEN = String(process.env.WORKER_TOKEN || "").trim();
-const PORTAL_URL = String(process.env.PORTAL_URL || "").trim().replace(/\/+$/, "");
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), ".report-bot-data");
-const AUTH_DIR = path.join(DATA_DIR, "auth");
+const PORTAL_URL = String(process.env.PORTAL_URL || "https://ops.dropxlogistics.com").trim().replace(/\/+$/, "");
+// Hosts publish the service's own address; the worker reports it so nobody copies it by hand.
+const PUBLIC_URL = (() => {
+  const explicit = String(process.env.WORKER_PUBLIC_URL || "").trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, "");
+  if (process.env.FLY_APP_NAME) return `https://${process.env.FLY_APP_NAME}.fly.dev`;
+  return null;
+})();
+// Only a cache: losing it costs a re-download from WhatsApp, never data.
+const DATA_DIR = process.env.DATA_DIR || path.join(os.tmpdir(), "dropx-report-bot");
 const MEDIA_DIR = path.join(DATA_DIR, "media");
 const EVENTS_DIR = path.join(DATA_DIR, "events");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const SENT_FILE = path.join(DATA_DIR, "sent-refs.json");
-// Image bytes are a short cache. The small message record is kept longer so the
-// image can be downloaded from WhatsApp again when someone opens it later.
 const MEDIA_TTL_HOURS = Math.max(Number(process.env.MEDIA_TTL_HOURS || 48), 1);
-const MESSAGE_TTL_DAYS = Math.max(Number(process.env.MESSAGE_TTL_DAYS || 30), 1);
 const MAX_MEDIA_BYTES = Math.max(Number(process.env.MAX_MEDIA_BYTES || 12 * 1024 * 1024), 1024 * 1024);
 // Matches the portal's cut-off for accepting a message as a new submission.
 const MAX_MESSAGE_AGE_SECONDS = 6 * 60 * 60;
-const DEVICE_NAME =String(process.env.DEVICE_NAME || "DropX Report Bot").slice(0, 40);
+// Vercel rejects request bodies over 4.5 MB; stay well under it per event batch.
+const MAX_BATCH_BYTES = 3 * 1024 * 1024;
+const MAX_RECORD_BYTES = 100_000;
+const DEVICE_NAME = String(process.env.DEVICE_NAME || "DropX Report Bot").slice(0, 40);
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 const baileysLogger = logger.child({ module: "baileys" }, { level: process.env.BAILEYS_LOG_LEVEL || "warn" });
 
 if (!WORKER_TOKEN || WORKER_TOKEN.length < 20) {
-  logger.fatal("WORKER_TOKEN is missing or too short. Create it in Ops Pulse → Report Bot → Connection.");
+  logger.fatal("WORKER_TOKEN is missing or too short. Copy it from Ops Pulse → Settings → Report Bot setup.");
   process.exit(1);
 }
 if (!/^https?:\/\//.test(PORTAL_URL)) {
@@ -62,6 +78,8 @@ if (!/^https?:\/\//.test(PORTAL_URL)) {
 
 const queue = new EventQueue(EVENTS_DIR);
 const messageCache = new Lru(500); // recent group messages, for quoting replies
+// Live chat view for the portal: recent messages of enabled groups, memory only.
+const chatLog = new ChatLog(300);
 const botMessageIds = new Lru(2000); // ids the bot itself sent, never forwarded back
 let sentRefs = new Lru(1000); // client_ref -> result, so a retried /send never posts twice
 let config = normalizeConfig(null);
@@ -107,6 +125,27 @@ function readBody(req, limit = 100_000) {
   });
 }
 
+async function portalFetch(pathname, init = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    return await fetch(`${PORTAL_URL}${pathname}`, {
+      ...init,
+      headers: { authorization: `Bearer ${WORKER_TOKEN}`, "content-type": "application/json", ...(init.headers ?? {}) },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The WhatsApp login store in the portal. Throws on failure so a key is never assumed saved. */
+async function authCall(body) {
+  const response = await portalFetch("/api/report-bot/worker/auth", { method: "POST", body: JSON.stringify(body) });
+  if (!response.ok) throw new Error(`Portal session store returned HTTP ${response.status}`);
+  return response.json();
+}
+
 /** "9198...:12@s.whatsapp.net" and "1234@lid" both reduce to their user part. */
 function bareId(value) {
   return String(value ?? "").split("@")[0].split(":")[0];
@@ -117,22 +156,26 @@ function myIds(sock) {
   return new Set([sock?.user?.id, sock?.user?.lid].filter(Boolean).map(bareId));
 }
 
+function statusEvent() {
+  return {
+    type: "status",
+    state: session.state,
+    me: session.sock?.user ? { id: session.sock.user.id, name: session.sock.user.name ?? null } : null,
+    error: session.lastError,
+    public_url: PUBLIC_URL
+  };
+}
+
 function setState(state, error = null) {
   session.state = state;
   session.lastError = error;
   if (state !== "qr") session.qr = null;
   if (state !== "pairing") session.pairingCode = null;
-  queue.push({ type: "status", state, me: session.sock?.user ? { id: session.sock.user.id, name: session.sock.user.name ?? null } : null, error }).catch(() => {});
-}
-
-async function hasSavedSession() {
-  const creds = await readJson(path.join(AUTH_DIR, "creds.json"), null);
-  return Boolean(creds?.registered || creds?.me?.id);
+  queue.push(statusEvent()).catch(() => {});
 }
 
 async function wipeSession() {
-  await rm(AUTH_DIR, { recursive: true, force: true });
-  await mkdir(AUTH_DIR, { recursive: true });
+  await clearRemoteSession(authCall).catch((error) => logger.error({ err: error }, "could not clear the saved session"));
   session.groups.clear();
 }
 
@@ -178,13 +221,13 @@ async function forwardMessage(msg) {
     logger.info({ groupId, messageId, size: media.size }, "skipping oversized image");
     return;
   }
-  // Media URLs expire, so download now and let the portal fetch it from us later.
+  // Download now while WhatsApp's link is fresh; the bytes are only a local cache.
   const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: baileysLogger, reuploadRequest: session.sock.updateMediaMessage });
   if (!buffer?.length || buffer.length > MAX_MEDIA_BYTES) return;
   const ref = newRef();
   await writeFile(path.join(MEDIA_DIR, `${ref}.bin`), buffer);
-  await writeFile(path.join(MEDIA_DIR, `${ref}.meta`), JSON.stringify({ mime: media.mime, size: buffer.length }));
-  await writeFile(path.join(MEDIA_DIR, `${ref}.msg`), JSON.stringify(msg, BufferJSON.replacer));
+  // The message record (a few KB) lets any worker download this image again later.
+  const record = JSON.stringify({ key: msg.key, message: msg.message, messageTimestamp: msg.messageTimestamp }, BufferJSON.replacer);
   await queue.push({
     type: "message",
     group_id: groupId,
@@ -197,7 +240,8 @@ async function forwardMessage(msg) {
     timestamp: messageSeconds(msg.messageTimestamp),
     kind: media.kind,
     caption: media.caption,
-    media: { ref, mime: media.mime, size: buffer.length }
+    media: { ref, mime: media.mime, size: buffer.length },
+    message_record: record.length <= MAX_RECORD_BYTES ? record : null
   });
 }
 
@@ -218,9 +262,7 @@ async function startSocket({ method, phone = null }) {
   closeSocket();
   session.manualStop = false;
   session.pairingPhone = method === "code" ? phone : null;
-  await mkdir(AUTH_DIR, { recursive: true });
-  const { state: authState, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const registered = Boolean(authState.creds.registered || authState.creds.me?.id);
+  const { state: authState, saveCreds, registered } = await useRemoteAuthState(authCall);
   let version;
   try {
     ({ version } = await fetchLatestBaileysVersion());
@@ -229,7 +271,8 @@ async function startSocket({ method, phone = null }) {
   }
   const sock = makeWASocket({
     ...(version ? { version } : {}),
-    auth: authState,
+    // Cache keys in memory so every message doesn't round-trip to the portal.
+    auth: { creds: authState.creds, keys: makeCacheableSignalKeyStore(authState.keys, baileysLogger) },
     logger: baileysLogger,
     browser: Browsers.ubuntu(DEVICE_NAME),
     printQRInTerminal: false,
@@ -242,7 +285,7 @@ async function startSocket({ method, phone = null }) {
   logger.info({ registered }, "starting whatsapp socket");
   let pairingRequested = false;
 
-  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("creds.update", () => saveCreds().catch((error) => logger.error({ err: error }, "could not save credentials")));
 
   sock.ev.on("connection.update", async (update) => {
     if (session.sock !== sock) return;
@@ -294,6 +337,10 @@ async function startSocket({ method, phone = null }) {
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     for (const msg of messages ?? []) {
+      const groupId = msg?.key?.remoteJid;
+      if (groupId && config.groups.includes(groupId)) {
+        chatLog.add(groupId, chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) }));
+      }
       try {
         await forwardMessage(msg);
       } catch (error) {
@@ -341,13 +388,45 @@ async function sendToGroup(body) {
     : undefined;
   await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
-  const sent = await session.sock.sendMessage(body.to, { text: body.text }, quoted ? { quoted } : {});
+  const mentions = cleanMentions(body.mentions);
+  const sent = await session.sock.sendMessage(body.to, { text: body.text, ...(mentions.length ? { mentions } : {}) }, quoted ? { quoted } : {});
   await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
   const result = { id: sent?.key?.id ?? null };
-  if (result.id) botMessageIds.set(result.id, true);
+  if (result.id) {
+    botMessageIds.set(result.id, true);
+    const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
+    chatLog.add(body.to, {
+      id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: "text", text: body.text,
+      quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
+      mentions
+    });
+  }
   sentRefs.set(body.client_ref, result);
   await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
   return result;
+}
+
+/** Image bytes: from the local cache, otherwise downloaded from WhatsApp using the saved record. */
+async function mediaBytes(ref, record) {
+  const file = path.join(MEDIA_DIR, `${ref}.bin`);
+  if (await stat(file).catch(() => null)) return { status: 200, bytes: await readFile(file) };
+  if (typeof record !== "string" || !record) return { status: 404, error: "This image was received before the portal kept message records." };
+  if (!session.sock || session.state !== "open") return { status: 503, error: "WhatsApp is not connected, so the image cannot be fetched right now." };
+  let message;
+  try {
+    message = JSON.parse(record, BufferJSON.reviver);
+  } catch {
+    return { status: 404, error: "The saved message record is unreadable." };
+  }
+  try {
+    const bytes = await downloadMediaMessage(message, "buffer", {}, { logger: baileysLogger, reuploadRequest: session.sock.updateMediaMessage });
+    if (!bytes?.length) return { status: 404, error: "WhatsApp returned an empty image." };
+    await writeFile(file, bytes).catch(() => {});
+    return { status: 200, bytes };
+  } catch (error) {
+    logger.warn({ err: error, ref }, "download from WhatsApp failed");
+    return { status: 404, error: "WhatsApp no longer has this image (deleted or expired on the sender's phone)." };
+  }
 }
 
 async function handle(req, res) {
@@ -370,7 +449,7 @@ async function handle(req, res) {
     const method = body.method === "code" ? "code" : "qr";
     const phone = String(body.phone ?? "").replace(/\D/g, "");
     if (method === "code" && (phone.length < 10 || phone.length > 15)) return json(res, 400, { error: "Phone number must be 10 to 15 digits with country code." });
-    if (method === "code" && (await hasSavedSession())) return json(res, 409, { error: "A session is already saved. Unlink first." });
+    if (method === "code" && (await hasRemoteSession(authCall))) return json(res, 409, { error: "A session is already saved. Unlink first." });
     await startSocket({ method, phone: method === "code" ? phone : null });
     return json(res, 202, { ok: true, state: session.state });
   }
@@ -384,13 +463,27 @@ async function handle(req, res) {
     setState("logged_out", null);
     return json(res, 200, { ok: true });
   }
+  if (req.method === "GET" && url.pathname === "/chats") {
+    const group = url.searchParams.get("group") ?? "";
+    if (!GROUP_JID.test(group) || !config.groups.includes(group)) return json(res, 404, { error: "This group is not enabled in the portal." });
+    const after = Number(url.searchParams.get("after") || 0);
+    return json(res, 200, {
+      messages: chatLog.list(group, Number.isFinite(after) ? after : 0),
+      names: Object.fromEntries(chatLog.names),
+      since: chatLog.startedAt,
+      connected: session.state === "open",
+      subject: session.groups.get(group)?.subject ?? null,
+      size: session.groups.get(group)?.size ?? null
+    });
+  }
   if (req.method === "GET" && url.pathname === "/groups") {
     if (session.state !== "open") return json(res, 503, { error: "WhatsApp is not connected." });
     return json(res, 200, { groups: await refreshGroups() });
   }
   if (req.method === "POST" && url.pathname === "/config") {
     config = normalizeConfig(await readBody(req));
-    await writeJsonAtomic(CONFIG_FILE, config);
+    chatLog.forget(config.groups); // a group turned off in the portal stops being visible at once
+    await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     return json(res, 200, { ok: true, groups: config.groups.length });
   }
   if (req.method === "POST" && url.pathname === "/send") {
@@ -399,54 +492,36 @@ async function handle(req, res) {
     if (invalid) return json(res, 422, { error: invalid });
     return json(res, 200, await sendToGroup(body));
   }
-  const media = url.pathname.match(/^\/media\/([A-Za-z0-9_-]+)$/);
-  if (req.method === "GET" && media && MEDIA_REF.test(media[1])) {
-    const file = path.join(MEDIA_DIR, `${media[1]}.bin`);
-    const meta = await readJson(path.join(MEDIA_DIR, `${media[1]}.meta`), {});
-    let bytes = (await stat(file).catch(() => null)) ? await readFile(file) : null;
-    if (!bytes) {
-      // Cache expired: download it from WhatsApp again using the saved message record.
-      const raw = await readFile(path.join(MEDIA_DIR, `${media[1]}.msg`), "utf8").catch(() => null);
-      if (!raw) return json(res, 404, { error: "This image is older than the worker keeps (MESSAGE_TTL_DAYS)." });
-      if (!session.sock || session.state !== "open") return json(res, 503, { error: "WhatsApp is not connected, so the image cannot be fetched right now." });
-      try {
-        bytes = await downloadMediaMessage(JSON.parse(raw, BufferJSON.reviver), "buffer", {}, { logger: baileysLogger, reuploadRequest: session.sock.updateMediaMessage });
-      } catch (error) {
-        logger.warn({ err: error, ref: media[1] }, "re-download from WhatsApp failed");
-        return json(res, 404, { error: "WhatsApp no longer has this image (deleted or expired on the sender's phone)." });
-      }
-      if (!bytes?.length) return json(res, 404, { error: "WhatsApp returned an empty image." });
-      await writeFile(file, bytes).catch(() => {});
-    }
-    res.writeHead(200, { "content-type": typeof meta.mime === "string" ? meta.mime : "application/octet-stream", "content-length": bytes.length, "cache-control": "no-store" });
-    return res.end(bytes);
+  if (req.method === "POST" && url.pathname === "/media") {
+    // The record arrives JSON-encoded inside this body, where escaping can triple its size.
+    const body = await readBody(req, MAX_RECORD_BYTES * 3 + 1000);
+    if (typeof body.ref !== "string" || !MEDIA_REF.test(body.ref)) return json(res, 400, { error: "Invalid media reference." });
+    const result = await mediaBytes(body.ref, body.record);
+    if (result.status !== 200) return json(res, result.status, { error: result.error });
+    res.writeHead(200, { "content-type": "application/octet-stream", "content-length": result.bytes.length, "cache-control": "no-store" });
+    return res.end(result.bytes);
   }
   return json(res, 404, { error: "Not found" });
-}
-
-async function portalFetch(pathname, init = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
-  try {
-    return await fetch(`${PORTAL_URL}${pathname}`, {
-      ...init,
-      headers: { authorization: `Bearer ${WORKER_TOKEN}`, "content-type": "application/json", ...(init.headers ?? {}) },
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 let deliveryFailures = 0;
 let lastDelivery = 0;
 async function deliverLoop() {
   try {
-    const batch = await queue.peek(50);
+    const peeked = await queue.peek(50);
+    // Keep each request under the portal's body limit; always send at least one event.
+    const batch = [];
+    let bytes = 0;
+    for (const item of peeked) {
+      const size = Buffer.byteLength(JSON.stringify(item.event));
+      if (batch.length && bytes + size > MAX_BATCH_BYTES) break;
+      batch.push(item);
+      bytes += size;
+    }
     // An empty batch every minute is the heartbeat that tells the portal we are alive.
     const heartbeatDue = Date.now() - lastDelivery > 60_000;
     if (batch.length || heartbeatDue) {
-      const events = batch.length ? batch.map((item) => item.event) : [{ type: "status", state: session.state, me: session.sock?.user ? { id: session.sock.user.id, name: session.sock.user.name ?? null } : null, error: session.lastError }];
+      const events = batch.length ? batch.map((item) => item.event) : [statusEvent()];
       const response = await portalFetch("/api/report-bot/worker/events", { method: "POST", body: JSON.stringify({ events }) });
       if (response.ok || response.status === 400) {
         if (response.status === 400) logger.error({ body: await response.text() }, "portal rejected an event batch; dropping it");
@@ -457,7 +532,7 @@ async function deliverLoop() {
         throw new Error(`Portal returned HTTP ${response.status}`);
       }
     }
-    setTimeout(deliverLoop, batch.length === 50 ? 200 : 2_000);
+    setTimeout(deliverLoop, batch.length < peeked.length || peeked.length === 50 ? 200 : 2_000);
   } catch (error) {
     const delay = backoffMs(deliveryFailures++);
     logger.warn({ err: error.message, delay }, "event delivery failed");
@@ -470,14 +545,26 @@ async function configLoop() {
     const response = await portalFetch("/api/report-bot/worker/config");
     if (response.ok) {
       config = normalizeConfig(await response.json());
-      await writeJsonAtomic(CONFIG_FILE, config);
+      chatLog.forget(config.groups);
+      await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     } else {
-      logger.warn({ status: response.status }, "config refresh failed");
+      logger.warn({ status: response.status }, response.status === 401 ? "the portal rejected WORKER_TOKEN; copy it again from Report Bot setup" : "config refresh failed");
     }
   } catch (error) {
     logger.warn({ err: error.message }, "config refresh failed");
   }
   setTimeout(configLoop, 60_000);
+}
+
+/** Reconnect a saved WhatsApp login on boot, retrying while the portal is unreachable. */
+async function resumeSavedSession(attempt = 0) {
+  try {
+    if (await hasRemoteSession(authCall)) await startSocket({ method: "qr" });
+  } catch (error) {
+    const delay = backoffMs(attempt);
+    logger.warn({ err: error.message, delay }, "could not check the saved session; retrying");
+    setTimeout(() => resumeSavedSession(attempt + 1), delay);
+  }
 }
 
 async function main() {
@@ -492,17 +579,13 @@ async function main() {
       if (!res.headersSent) json(res, error.status ?? 500, { error: error.status ? error.message : "Worker error" });
     });
   });
-  server.listen(PORT, () => logger.info({ port: PORT }, "report bot worker listening"));
+  server.listen(PORT, () => logger.info({ port: PORT, portal: PORTAL_URL, publicUrl: PUBLIC_URL }, "report bot worker listening"));
   deliverLoop();
   configLoop();
-  const prune = () => Promise.all([
-    pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin"),
-    pruneOlderThan(MEDIA_DIR, MESSAGE_TTL_DAYS * 86400 * 1000, Date.now(), ".msg"),
-    pruneOlderThan(MEDIA_DIR, MESSAGE_TTL_DAYS * 86400 * 1000, Date.now(), ".meta")
-  ]).catch(() => {});
+  const prune = () => pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin").catch(() => {});
   setInterval(prune, 3600 * 1000);
   prune();
-  if (await hasSavedSession()) await startSocket({ method: "qr" });
+  resumeSavedSession();
 
   const shutdown = () => {
     session.manualStop = true;

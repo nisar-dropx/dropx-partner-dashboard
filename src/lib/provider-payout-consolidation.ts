@@ -38,6 +38,45 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
   for (const { subjectId: workforceId, locationId, items: workerSegments } of grouped) {
     const first = workerSegments[0];
     if (!first) continue;
+    if (workerSegments.some((segment) => segment.row.mappingStatus === "Payment setup conflict")) {
+      const paymentSourceIdentities = workforcePayoutRowSourceIdentities({
+        paymentSourceIdentities: workerSegments.flatMap((segment) => workforcePayoutRowSourceIdentities(segment.row))
+      });
+      rows.push({
+        workforceId,
+        categoryCode: first.categoryCode,
+        panNumber: first.panNumber,
+        row: {
+          ...first.row,
+          id: `provider-conflict-${workforceId}-${locationId || "unassigned"}`,
+          paymentSourceIdentity: paymentSourceIdentities[0],
+          paymentSourceIdentities,
+          providerMemberId: joined(workerSegments.map((segment) => segment.row.providerMemberId), "-"),
+          providerMemberName: joined(workerSegments.map((segment) => segment.row.providerMemberName), "-"),
+          locationId: locationId || null,
+          location: joined(workerSegments.map((segment) => segment.row.location), "-"),
+          provider: joined(workerSegments.map((segment) => segment.row.provider), "-"),
+          model: joined(workerSegments.map((segment) => segment.row.model), "All models"),
+          paymentMethod: joined(workerSegments.map((segment) => segment.row.paymentMethod), "-"),
+          mappingStatus: "Payment setup conflict",
+          paymentDetailsAvailable: false,
+          workDays: 0,
+          workDaysSource: "Unavailable",
+          paymentMethodBreakdown: [],
+          production: 0,
+          productionBreakdown: [],
+          dailyBreakdown: [],
+          baseAmount: 0,
+          additions: 0,
+          grossPayment: 0,
+          deductions: 0,
+          deductionBreakdown: [],
+          netAmount: 0,
+          status: "Configuration incomplete"
+        }
+      });
+      continue;
+    }
     const dailyByDate = new Map<string, { day: WorkforcePayoutRow["dailyBreakdown"][number]; paymentSetupKey: string }>();
     let overlap = false;
     for (const segment of workerSegments) {

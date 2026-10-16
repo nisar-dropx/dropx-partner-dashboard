@@ -69,6 +69,28 @@ test("overlapping mapping periods are rejected instead of double-paid", () => {
   assert.equal(result.rows.length, 0);
 });
 
+test("an attendance setup conflict becomes one non-payable location row", () => {
+  const first = segment({ id: "first", methodId: "daily-a", method: "Daily A", from: 1, to: 5, rate: 800, units: 5, amount: 4000, paymentSetupKey: "setup-a" });
+  const second = segment({ id: "second", methodId: "daily-b", method: "Daily B", from: 1, to: 5, rate: 900, units: 5, amount: 4500, paymentSetupKey: "setup-b" });
+  first.row.mappingStatus = "Payment setup conflict";
+  first.row.paymentDetailsAvailable = false;
+  first.row.status = "Configuration incomplete";
+  second.row.mappingStatus = "Payment setup conflict";
+  second.row.paymentDetailsAvailable = false;
+  second.row.status = "Configuration incomplete";
+
+  const result = consolidateProviderPayoutSegments([first, second]);
+
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].row.mappingStatus, "Payment setup conflict");
+  assert.equal(result.rows[0].row.status, "Configuration incomplete");
+  assert.equal(result.rows[0].row.paymentDetailsAvailable, false);
+  assert.equal(result.rows[0].row.grossPayment, 0);
+  assert.equal(result.rows[0].row.netAmount, 0);
+  assert.deepEqual(result.rows[0].row.dailyBreakdown, []);
+});
+
 test("simultaneous provider IDs with the same payment setup merge without double-counting work days", () => {
   const first = segment({ id: "provider-a", methodId: "packets", method: "Per packet", from: 1, to: 1, rate: 10, units: 7, amount: 70, paymentSetupKey: "same-setup" });
   const second = segment({ id: "provider-b", methodId: "packets", method: "Per packet", from: 1, to: 1, rate: 10, units: 5, amount: 50, paymentSetupKey: "same-setup" });

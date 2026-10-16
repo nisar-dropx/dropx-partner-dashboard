@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
-import { isValidTimeZone, normalizeDays, normalizeTimeList, parseClockTime } from "@/lib/report-bot/logic";
-import { queueFeedback } from "@/lib/report-bot/pipeline";
+import { displayDate, formatClock, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, renderTemplate } from "@/lib/report-bot/logic";
+import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
   generateWorkerToken,
   hashWorkerToken,
@@ -14,7 +14,7 @@ import {
   reportBotDb,
   type ReportBotSettings
 } from "@/lib/report-bot/settings";
-import { workerRequest, type WorkerGroup } from "@/lib/report-bot/worker-client";
+import { workerRequest } from "@/lib/report-bot/worker-client";
 
 const FLASH_COOKIE = "dropx_report_bot_flash";
 const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings"]);
@@ -23,6 +23,10 @@ type Flash = { error?: string; notice?: string; token?: string };
 
 function finish(tab: string, flash: Flash): never {
   cookies().set(FLASH_COOKIE, JSON.stringify(flash), { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+  // Connection and settings live on the setup page (Settings → Report Bot setup).
+  if (tab === "worker") redirect("/report-bot/setup#worker");
+  if (tab === "connection") redirect("/report-bot/setup#whatsapp");
+  if (tab === "settings") redirect("/report-bot/setup");
   redirect(`/report-bot?tab=${TABS.has(tab) ? tab : "today"}`);
 }
 
@@ -135,7 +139,7 @@ export async function saveBotSettings(form: FormData) {
       updated_by: authorization.userId,
       updated_at: new Date().toISOString()
     };
-    if (mode === "live" && (!previous.worker_url || !previous.worker_token)) throw new Error("Connect the worker under Connection before switching to Live.");
+    if (mode === "live" && (!previous.worker_url || !previous.worker_token)) throw new Error("Start the worker (step 1 of Report Bot setup) before switching to Live.");
     check(await reportBotDb().from("report_bot_settings").update(update).eq("company_id", companyId), "Save settings");
     // A settings fix (key, model, worker) is the only thing blocked images wait for.
     check(await reportBotDb().from("report_bot_submissions").update({ status: "queued", next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -151,7 +155,7 @@ export async function saveBotSettings(form: FormData) {
 }
 
 export async function saveWorkerUrl(form: FormData) {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("worker", async ({ companyId }) => {
     const raw = field(form, "worker_url").replace(/\/+$/, "");
     let url: URL;
     try {
@@ -167,7 +171,7 @@ export async function saveWorkerUrl(form: FormData) {
 }
 
 export async function rotateWorkerToken() {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("worker", async ({ companyId }) => {
     await loadReportBotSettings(companyId);
     const token = generateWorkerToken();
     check(await reportBotDb().from("report_bot_settings").update({
@@ -203,28 +207,47 @@ export async function disconnectWhatsApp() {
   });
 }
 
-export async function syncGroups() {
-  await mutate("groups", async ({ companyId }) => {
-    const settings = await loadReportBotSettings(companyId);
-    const payload = await workerRequest<{ groups: WorkerGroup[] }>(settings, "/groups", { timeoutMs: 30000 });
-    const live = (payload?.groups ?? []).filter((group) => /^[0-9-]+@g\.us$/.test(group.id));
+/**
+ * Saves the groups ticked in the "Add or remove groups" dialog. Ticked groups are
+ * listened to and listed on the page; groups that were on and are now unticked are
+ * turned off (kept for their history) and their queued messages are cancelled.
+ */
+export async function saveGroupSelection(form: FormData) {
+  await mutate("groups", async ({ authorization, companyId }) => {
+    // New groups have no store yet, so only people who see every store may add them.
+    if (!authorization.hasAllLocationAccess) throw new Error("Only users with access to all stores can add or remove groups.");
+    let picked: Array<{ id?: unknown; subject?: unknown; size?: unknown }>;
+    try {
+      picked = JSON.parse(field(form, "selected") || "[]");
+    } catch {
+      throw new Error("The group selection could not be read. Please try again.");
+    }
+    if (!Array.isArray(picked) || picked.length > 200) throw new Error("Select at most 200 groups.");
+    const selected = picked.filter((group) => typeof group.id === "string" && /^[0-9-]+@g\.us$/.test(group.id));
     const now = new Date().toISOString();
-    if (live.length) {
-      check(await reportBotDb().from("report_bot_groups").upsert(live.map((group) => ({
+    const db = reportBotDb();
+    if (selected.length) {
+      check(await db.from("report_bot_groups").upsert(selected.map((group) => ({
         company_id: companyId,
-        wa_group_id: group.id,
+        wa_group_id: group.id as string,
         group_name: String(group.subject ?? "").slice(0, 200) || null,
-        participant_count: Number.isInteger(group.size) ? group.size : null,
+        participant_count: Number.isInteger(group.size) ? group.size as number : null,
+        is_enabled: true,
         bot_in_group: true,
         last_synced_at: now,
         updated_at: now
       })), { onConflict: "company_id,wa_group_id" }), "Save groups");
     }
-    const liveIds = new Set(live.map((group) => group.id));
-    const known = check(await reportBotDb().from("report_bot_groups").select("id,wa_group_id").eq("company_id", companyId), "Load groups") as Array<{ id: string; wa_group_id: string }>;
-    const gone = known.filter((group) => !liveIds.has(group.wa_group_id)).map((group) => group.id);
-    if (gone.length) check(await reportBotDb().from("report_bot_groups").update({ bot_in_group: false, updated_at: now }).in("id", gone), "Mark missing groups");
-    return { notice: `Found ${live.length} group${live.length === 1 ? "" : "s"} for the linked number.${gone.length ? ` ${gone.length} saved group(s) no longer include this number.` : ""}` };
+    const keep = new Set(selected.map((group) => group.id as string));
+    const enabled = check(await db.from("report_bot_groups").select("id,wa_group_id").eq("company_id", companyId).eq("is_enabled", true), "Load groups") as Array<{ id: string; wa_group_id: string }>;
+    const removed = enabled.filter((group) => !keep.has(group.wa_group_id)).map((group) => group.id);
+    if (removed.length) {
+      check(await db.from("report_bot_groups").update({ is_enabled: false, updated_at: now }).in("id", removed), "Turn off groups");
+      check(await db.from("report_bot_outbox").update({ status: "cancelled", status_reason: "Group removed from the bot.", updated_at: now })
+        .in("group_id", removed).eq("status", "pending"), "Cancel queued messages");
+    }
+    await pushWorkerConfig(await loadReportBotSettings(companyId));
+    return { notice: `${selected.length} group${selected.length === 1 ? "" : "s"} on the bot.${removed.length ? ` ${removed.length} removed.` : ""} Link each one to its store below.` };
   });
 }
 
@@ -238,14 +261,20 @@ export async function updateGroup(form: FormData) {
       const station = check(await reportBotDb().from("stations").select("id").eq("company_id", companyId).eq("id", locationId).maybeSingle(), "Check store");
       if (!station) throw new Error("That store does not exist.");
     }
-    const enabled = form.get("is_enabled") === "on";
-    check(await reportBotDb().from("report_bot_groups").update({ location_id: locationId, is_enabled: enabled, updated_at: new Date().toISOString() }).eq("id", group.id), "Save group");
-    if (group.is_enabled && !enabled) {
-      check(await reportBotDb().from("report_bot_outbox").update({ status: "cancelled", status_reason: "Group disabled.", updated_at: new Date().toISOString() })
-        .eq("group_id", group.id).eq("status", "pending"), "Cancel queued messages");
-    }
+    check(await reportBotDb().from("report_bot_groups").update({ location_id: locationId, updated_at: new Date().toISOString() }).eq("id", group.id), "Save group");
+    return { notice: "Store saved for this group." };
+  });
+}
+
+export async function removeGroup(form: FormData) {
+  await mutate("groups", async ({ authorization, companyId }) => {
+    const group = await scopedGroup(authorization, companyId, field(form, "group_id"));
+    const now = new Date().toISOString();
+    check(await reportBotDb().from("report_bot_groups").update({ is_enabled: false, updated_at: now }).eq("id", group.id), "Remove group");
+    check(await reportBotDb().from("report_bot_outbox").update({ status: "cancelled", status_reason: "Group removed from the bot.", updated_at: now })
+      .eq("group_id", group.id).eq("status", "pending"), "Cancel queued messages");
     await pushWorkerConfig(await loadReportBotSettings(companyId));
-    return { notice: enabled ? "Group enabled. The bot listens to report images here." : "Group saved (disabled)." };
+    return { notice: "Group removed. The bot no longer listens or posts there; its history is kept." };
   });
 }
 
@@ -333,8 +362,109 @@ export async function approveFeedback(form: FormData) {
     if (!updated.length) throw new Error("Someone already handled this image.");
     // A retry after a failed send needs a fresh outbox row; the old one is finished.
     await reportBotDb().from("report_bot_outbox").delete().eq("company_id", companyId).eq("dedupe_key", `feedback:${submission.id}`).in("status", ["failed", "cancelled"]);
-    await queueFeedback(settings, submission, feedback, authorization.userId);
-    return { notice: settings.mode === "live" ? "Approved. The reply goes out after the configured short delay." : "Approved. It will be sent once the bot is switched to Live (within 12 hours)." };
+    await queueFeedback(settings, submission, feedback, authorization.userId, { immediate: true });
+    return { notice: await sendNow(settings, [submission.id]) };
+  });
+}
+
+/**
+ * A person approved it, so post it right now instead of waiting for the minute cron.
+ * Returns what actually happened, so the page never claims "sent" for a queued reply.
+ */
+async function sendNow(settings: ReportBotSettings, submissionIds: string[]) {
+  if (settings.mode !== "live") return "Approved. It will be posted once the bot is switched to Live (within 12 hours).";
+  try {
+    await flushOutbox(settings, Date.now() + 45_000);
+  } catch {
+    // The minute cron retries anything left queued.
+  }
+  const rows = check(await reportBotDb().from("report_bot_submissions").select("status").in("id", submissionIds), "Check sending") as Array<{ status: string }>;
+  const sent = rows.filter((row) => row.status === "sent").length;
+  if (sent === submissionIds.length) return sent === 1 ? "Reply posted in the group." : `${sent} replies posted in their groups.`;
+  return `${sent} of ${submissionIds.length} posted now; the rest go out within a minute (the worker may be busy or reconnecting).`;
+}
+
+export async function sendAllWaiting() {
+  await mutate("review", async ({ authorization, companyId }) => {
+    const settings = await loadReportBotSettings(companyId);
+    const waiting = check(await reportBotDb().from("report_bot_submissions")
+      .select("id,company_id,group_id,wa_message_id,sender_jid,feedback_text, group:report_bot_groups(location_id)")
+      .eq("company_id", companyId).eq("status", "awaiting_approval").order("message_at").limit(25), "Load waiting") as unknown as Array<{
+        id: string; company_id: string; group_id: string; wa_message_id: string; sender_jid: string | null; feedback_text: string | null; group: { location_id: string | null } | null;
+      }>;
+    const sendable = waiting.filter((row) => row.feedback_text?.trim() && canSeeGroup(authorization, { location_id: row.group?.location_id ?? null }));
+    if (!sendable.length) throw new Error("Nothing is waiting that has a reply ready.");
+    const approved: string[] = [];
+    for (const row of sendable) {
+      const updated = check(await reportBotDb().from("report_bot_submissions").update({
+        status: "queued_to_send", reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      }).eq("id", row.id).eq("status", "awaiting_approval").select("id"), "Approve") as Array<{ id: string }>;
+      if (!updated.length) continue;
+      await queueFeedback(settings, row, row.feedback_text!, authorization.userId, { immediate: true });
+      approved.push(row.id);
+    }
+    return { notice: approved.length ? await sendNow(settings, approved) : "Someone else already handled these." };
+  });
+}
+
+/**
+ * Posts a schedule's first reminder now, whatever today's status. Scheduled reminders stop
+ * once the day's report has arrived, so this is the way to try the wording and the link.
+ */
+export async function sendTestReminder(form: FormData) {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const settings = await loadReportBotSettings(companyId);
+    if (settings.mode !== "live") throw new Error("Switch the bot to Live in Report Bot setup to post messages.");
+    const schedule = check(await reportBotDb().from("report_bot_schedules")
+      .select("id,group_id,due_time,first_reminder_template, report:report_bot_report_types(name), group:report_bot_groups(group_name,is_enabled)")
+      .eq("company_id", companyId).eq("id", field(form, "id")).maybeSingle(), "Load schedule") as unknown as {
+        id: string; group_id: string; due_time: string; first_reminder_template: string;
+        report: { name: string } | null; group: { group_name: string | null; is_enabled: boolean } | null;
+      } | null;
+    if (!schedule) throw new Error("Schedule not found.");
+    await scopedGroup(authorization, companyId, schedule.group_id);
+    if (!schedule.group?.is_enabled) throw new Error("This group is not on the bot. Add it on the Groups tab first.");
+    const today = localClock(new Date(), settings.timezone).date;
+    const body = renderTemplate(schedule.first_reminder_template, {
+      group: schedule.group.group_name ?? "team",
+      report: schedule.report?.name ?? "report",
+      due_time: formatClock(schedule.due_time),
+      date: displayDate(today)
+    });
+    const now = new Date();
+    const dedupe = `test:${schedule.id}:${now.getTime()}`;
+    check(await reportBotDb().from("report_bot_outbox").insert({
+      company_id: companyId,
+      group_id: schedule.group_id,
+      kind: "reminder",
+      dedupe_key: dedupe,
+      body,
+      not_before: now.toISOString(),
+      stale_after: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+      created_by: authorization.userId
+    }), "Queue test reminder");
+    try {
+      await flushOutbox(settings, Date.now() + 45_000);
+    } catch {
+      // Reported below from the row's status.
+    }
+    const row = check(await reportBotDb().from("report_bot_outbox").select("status,status_reason").eq("company_id", companyId).eq("dedupe_key", dedupe).single(), "Check test reminder") as { status: string; status_reason: string | null };
+    if (row.status === "sent") return { notice: `Test reminder posted in ${schedule.group.group_name ?? "the group"}.` };
+    if (row.status === "failed") throw new Error(`The test reminder could not be posted: ${row.status_reason ?? "unknown error"}`);
+    return { notice: `Test reminder queued; it goes out within a minute.${row.status_reason ? ` (${row.status_reason})` : ""}` };
+  });
+}
+
+/** The Review tab's auto-reply switch. Unclear or low-confidence photos still wait for a person. */
+export async function setAutoReply(form: FormData) {
+  await mutate("review", async ({ authorization, companyId }) => {
+    const auto = field(form, "auto") === "on";
+    check(await reportBotDb().from("report_bot_settings").update({
+      approval_mode: auto ? "auto" : "manual", updated_by: authorization.userId, updated_at: new Date().toISOString()
+    }).eq("company_id", companyId), "Save auto-reply");
+    return { notice: auto
+      ? "Auto-reply is on: confident results are posted without a click. Unclear photos still wait here."
+      : "Auto-reply is off: every reply waits for approval here." };
   });
 }
 

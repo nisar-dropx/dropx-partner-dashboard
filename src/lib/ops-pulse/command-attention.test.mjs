@@ -21,11 +21,11 @@ test('document renewals keep selected location and role access; no company-wide 
 test('unavailable checks never sort as clear; overdue appears before other action',()=>{
  assert.deepEqual(domain.attentionOrder([{key:'clear',tone:'clear'},{key:'unknown',tone:'unknown'},{key:'action',tone:'action'},{key:'urgent',tone:'urgent'}]).map(x=>x.key),['urgent','action','unknown','clear']);
 });
-function fixture(permissions=[],fail=false){
+function fixture(permissions=[],fail=false,peopleWait=null){
  const calls=[];const query=table=>new Proxy({table},{get:(o,k)=>k==='then'?resolve=>Promise.resolve(resolve({data:[],error:fail?{message:'offline'}:null})):k in o?o[k]:(...args)=>{calls.push([table,k,...args]);return query(table);}});
  const db={from:query};
- const mod=compile('./command-attention-data.ts',{'server-only':{},'@/lib/authorization':{hasPermission:(_a,p)=>permissions.includes(p)},'@/lib/company-scope':{requireCompanyId:()=> 'C'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows:async q=>await q},'@/lib/fleet/da-mapping-client':{mappingAdmin:{rpc:async(_n,args)=>{calls.push(['fleet',args]);return {data:{totalPending:5,overdue:4}};}}},'@/lib/fleet/da-mapping-server':{mappingCanView:()=>permissions.includes('fleet_da_mapping'),mappingStationScope:async()=>({stations:[{code:'A'},{code:'B'}]})},'./station-audits':{loadStationAuditMaster:async()=>({programmeSettings:{}}),loadAuditStations:async()=>[{id:'a'},{id:'b'}],canManageStationAudits:()=>true},'./station-audit-planning':planning,'./ds-command-data':{loadDsApprovals:async()=>({payment:null,rosterCount:null})},'./station-manpower':{loadOpsStationManpower:async(...a)=>{calls.push(['people',...a]);return {people:[]};}},'./ds-command-center':{summarizeStorePeople:()=>({notReported:0,missingOut:0,unplanned:0})},'./cod-pending-access':{canAccessDailyCodPending:()=>permissions.includes('cod_reports')},'./cod-pending-data':{loadCodPendingReport:async(...a)=>{calls.push(['cod',...a.slice(1)]);return []; }},'./capacity-snapshot':{loadCapacitySnapshot:async args=>{calls.push(['capacity',args]);return {errors:[],stations:[]};}},'./command-attention':domain});
- return {calls,run:(mode='amazon_edsp',time=now)=>mod.loadCommandAttention({userId:'u',roleId:'r',hasAllLocationAccess:false,locationScopeIds:['a']},[{id:'a',station_code:'A'},{id:'b',station_code:'B'}],today,mode,time)};
+ const mod=compile('./command-attention-data.ts',{'server-only':{},'@/lib/authorization':{hasPermission:(_a,p)=>permissions.includes(p)},'@/lib/company-scope':{requireCompanyId:()=> 'C'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows:async q=>await q},'@/lib/fleet/da-mapping-client':{mappingAdmin:{rpc:async(_n,args)=>{calls.push(['fleet',args]);return {data:{totalPending:5,overdue:4}};}}},'@/lib/fleet/da-mapping-server':{mappingCanView:()=>permissions.includes('fleet_da_mapping'),mappingStationScope:async()=>({stations:[{code:'A'},{code:'B'}]})},'./station-audits':{loadStationAuditMaster:async()=>({programmeSettings:{}}),loadAuditStations:async()=>[{id:'a'},{id:'b'}],canManageStationAudits:()=>true},'./station-audit-planning':planning,'./ds-command-data':{loadDsApprovals:async()=>({payment:null,rosterCount:null})},'./station-manpower':{loadOpsStationManpower:async(...a)=>{calls.push(['people',...a]);if(peopleWait)await peopleWait;return {people:[]};}},'./ds-command-center':{summarizeStorePeople:()=>({notReported:0,missingOut:0,unplanned:0})},'./cod-pending-access':{canAccessDailyCodPending:()=>permissions.includes('cod_reports')},'./cod-pending-data':{loadCodPendingReport:async(...a)=>{calls.push(['cod',...a.slice(1)]);return []; }},'./capacity-snapshot':{loadCapacitySnapshot:async args=>{calls.push(['capacity',args]);return {errors:[],stations:[]};}},'./command-attention':domain});
+ return {calls,start:()=>mod.startCommandAttention({userId:'u',roleId:'r',hasAllLocationAccess:false,locationScopeIds:['a']},[{id:'a',station_code:'A'}],today,'amazon_edsp',now),run:(mode='amazon_edsp',time=now)=>mod.loadCommandAttention({userId:'u',roleId:'r',hasAllLocationAccess:false,locationScopeIds:['a']},[{id:'a',station_code:'A'},{id:'b',station_code:'B'}],today,mode,time)};
 }
 test('no source reads without module permission',async()=>{const f=fixture();assert.deepEqual(await f.run(),[]);assert.deepEqual(f.calls,[]);});
 test('audit managers see selected-location oversight, not just personal assignments; every read stays authorized',async()=>{
@@ -80,4 +80,20 @@ test('source failures and missing approval results remain unavailable, not zero'
 test('both dashboards show operational attention before cost and do not hide audit queue in disclosure',()=>{
  for(const page of ['../../app/ops-pulse/page.tsx','../../app/ops-pulse/dark-store-home.tsx'])assert.match(readFileSync(new URL(page,import.meta.url),'utf8'),/<OpsCommandAttention/);
  assert.doesNotMatch(readFileSync(new URL('../../app/ops-pulse/page.tsx',import.meta.url),'utf8'),/My audits & vehicle mapping queue/);
+});
+
+test('slow attendance does not hold completed audit, COD or capacity checks',async()=>{
+ let release;const wait=new Promise(resolve=>{release=resolve;});
+ const f=fixture(['station_audits','ops_rostering','cod_reports','capacity_overview'],false,wait);
+ const batches=f.start();let peopleFinished=false;
+ batches[2].then(()=>{peopleFinished=true;});
+ const ready=await Promise.race([
+  Promise.all(batches.filter((_,i)=>i!==2)),
+  new Promise((_,reject)=>{const t=setTimeout(()=>reject(Error('Independent checks were blocked')),1000);t.unref();})
+ ]);
+ assert.equal(peopleFinished,false);
+ const keys=ready.flat().map(item=>item.key);
+ assert(keys.includes('audits'));assert(keys.includes('cod'));assert(keys.includes('capacity'));
+ assert.equal(f.calls.filter(call=>call[0]==='people').length,1);
+ release();assert.equal((await batches[2])[0].key,'people');
 });

@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
-import { Check, Copy, ImageOff, Loader2 } from "lucide-react";
+import { Check, Copy, Loader2 } from "lucide-react";
 
 type FormAction = (formData: FormData) => void | Promise<void>;
 
@@ -57,24 +57,5 @@ export function CopyButton({ value, className }: { value: string; className: str
       {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
       {copied ? "Copied" : "Copy"}
     </button>
-  );
-}
-
-/** Report image fetched live from WhatsApp; shows a calm fallback when it is no longer available. */
-export function ReportThumb({ src, alt, className, missingClassName }: { src: string; alt: string; className: string; missingClassName: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return (
-      <div className={`${className} ${missingClassName}`}>
-        <span><ImageOff size={22} aria-hidden /><br />Image not available from WhatsApp</span>
-      </div>
-    );
-  }
-  return (
-    <a className={className} href={src} target="_blank" rel="noreferrer" title="Open full image">
-      {/* eslint-disable-next-line @next/next/no-img-element -- streamed from the worker, not a static asset */}
-      <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />
-      <span>Open</span>
-    </a>
   );
 }

@@ -26,13 +26,12 @@ test("save action keeps linked designation and biometric state aligned", () => {
   assert.match(action, /await syncBiometricEnrolment\(/);
 });
 
-test("canonical Workforce status edits write a coherent active or inactive lifecycle", () => {
+test("canonical Workforce status edits keep completed lifecycle and enabled flag aligned", () => {
   assert.deepEqual(canonicalWorkforceStatusEditPatch(true, {
     onboarding_status: "active",
     lifecycle_status: "inactive",
     is_active: false
   }), {
-    onboarding_status: "active",
     lifecycle_status: "active",
     is_active: true
   });
@@ -56,6 +55,16 @@ test("canonical Workforce status edits preserve lifecycle-owned terminal and exi
     () => canonicalWorkforceStatusEditPatch(true, { deleted_at: "2026-10-15", is_active: false }),
     /Archived workforce profiles/
   );
+  for (const onboarding_status of ["cancelled", "rejected"]) {
+    assert.throws(
+      () => canonicalWorkforceStatusEditPatch(true, {
+        onboarding_status,
+        lifecycle_status: "onboarding",
+        is_active: false
+      }),
+      /terminal registration status/
+    );
+  }
   assert.deepEqual(canonicalWorkforceStatusEditPatch(false, {
     onboarding_status: "cancelled",
     lifecycle_status: "exited",
@@ -68,16 +77,13 @@ test("canonical Workforce status edits preserve lifecycle-owned terminal and exi
   }), { is_active: true });
 });
 
-test("canonical Workforce profile edits cannot bypass onboarding review", () => {
-  for (const onboarding_status of ["pending", "under_review", "returned", "approved", "rejected", "cancelled"]) {
-    assert.throws(
-      () => canonicalWorkforceStatusEditPatch(true, {
-        onboarding_status,
-        lifecycle_status: "onboarding",
-        is_active: false
-      }),
-      /Workforce Lifecycle/
-    );
+test("canonical Workforce profile edits preserve every non-terminal registration workflow state", () => {
+  for (const onboarding_status of ["pending", "under_review", "returned", "approved"]) {
+    assert.deepEqual(canonicalWorkforceStatusEditPatch(true, {
+      onboarding_status,
+      lifecycle_status: "onboarding",
+      is_active: false
+    }), { is_active: true });
     assert.deepEqual(canonicalWorkforceStatusEditPatch(false, {
       onboarding_status,
       lifecycle_status: "onboarding",
@@ -86,14 +92,12 @@ test("canonical Workforce profile edits cannot bypass onboarding review", () => 
   }
 });
 
-test("canonical Workforce profile edits repair only an already-active pending split tuple", () => {
+test("enabled pending Workforce profiles remain pending on a no-op save", () => {
   assert.deepEqual(canonicalWorkforceStatusEditPatch(true, {
     onboarding_status: "pending",
     lifecycle_status: "onboarding",
     is_active: true
   }), {
-    onboarding_status: "active",
-    lifecycle_status: "active",
     is_active: true
   });
 });

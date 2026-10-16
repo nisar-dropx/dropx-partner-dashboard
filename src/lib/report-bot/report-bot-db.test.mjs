@@ -4,6 +4,9 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const reminderSlots = await readFile(new URL("../../../supabase/migrations/20261016180000_report_bot_reminder_slots.sql", import.meta.url), "utf8");
+const fasterReplies = await readFile(new URL("../../../supabase/migrations/20261016160000_report_bot_faster_replies.sql", import.meta.url), "utf8");
+const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");
 const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
 const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
 const COMPANY_A = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -18,8 +21,65 @@ async function setup() {
   await db.exec(migration);
   await db.exec(geminiDefault);
   await db.exec(noImageStorage);
+  await db.exec(statelessWorker);
+  await db.exec(fasterReplies);
+  await db.exec(reminderSlots);
   return db;
 }
+
+test("requests remember the last reminder slot by time of day", async () => {
+  const db = await setup();
+  try {
+    const groupId = await seedGroup(db, COMPANY_A, "120363000000000001@g.us");
+    const type = await db.query("insert into public.report_bot_report_types (company_id, name, rules) values ($1, 'EOD', '{a}') returning id", [COMPANY_A]);
+    const schedule = await db.query("insert into public.report_bot_schedules (company_id, group_id, report_type_id, due_time) values ($1, $2, $3, '10:00') returning id", [COMPANY_A, groupId, type.rows[0].id]);
+    const request = await db.query("insert into public.report_bot_requests (company_id, schedule_id, group_id, report_type_id, business_date) values ($1, $2, $3, $4, '2026-10-16') returning id, last_reminder_minute", [COMPANY_A, schedule.rows[0].id, groupId, type.rows[0].id]);
+    assert.equal(request.rows[0].last_reminder_minute, null, "a new day starts with no slot handled");
+    await db.query("update public.report_bot_requests set last_reminder_minute = 932 where id = $1", [request.rows[0].id]);
+    await assert.rejects(db.query("update public.report_bot_requests set last_reminder_minute = 1440 where id = $1", [request.rows[0].id]), /check constraint/);
+  } finally {
+    await db.close();
+  }
+});
+
+test("faster reply defaults apply to untouched rows only, and the reply layout gains @mention and checks", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec("create role anon; create role authenticated; create role service_role; create table public.stations (id uuid primary key, company_id uuid);");
+    await db.exec(migration);
+    await db.query("insert into public.report_bot_settings (company_id) values ($1)", [COMPANY_A]);
+    await db.query("insert into public.report_bot_settings (company_id, reply_delay_min_seconds, reply_delay_max_seconds, group_min_gap_seconds, feedback_template) values ($1, 5, 60, 45, 'custom {feedback}')", [COMPANY_B]);
+    await db.exec(fasterReplies);
+    const rows = (await db.query("select reply_delay_min_seconds as lo, reply_delay_max_seconds as hi, group_min_gap_seconds as gap, feedback_template as t from public.report_bot_settings order by company_id")).rows;
+    assert.deepEqual([rows[0].lo, rows[0].hi, rows[0].gap], [3, 10, 10]);
+    assert.ok(rows[0].t.includes("{checks}") && rows[0].t.startsWith("{sender}"));
+    assert.deepEqual([rows[1].lo, rows[1].hi, rows[1].gap, rows[1].t], [5, 60, 45, "custom {feedback}"], "deliberate settings are kept");
+  } finally {
+    await db.close();
+  }
+});
+
+test("the WhatsApp login store is per company, private to the server, and message records are bounded", async () => {
+  const db = await setup();
+  try {
+    await db.query("insert into public.report_bot_wa_auth (company_id, key, value) values ($1, 'creds', '{}'), ($2, 'creds', '{}')", [COMPANY_A, COMPANY_B]);
+    await assert.rejects(db.query("insert into public.report_bot_wa_auth (company_id, key, value) values ($1, 'creds', '{}')", [COMPANY_A]), /duplicate key/);
+    const upsert = await db.query("insert into public.report_bot_wa_auth (company_id, key, value) values ($1, 'creds', '{\"v\":2}') on conflict (company_id, key) do update set value = excluded.value returning value", [COMPANY_A]);
+    assert.equal(upsert.rows[0].value, '{"v":2}');
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(db.query("select * from public.report_bot_wa_auth"), /permission denied/);
+      await db.exec("reset role");
+    }
+    const groupId = await seedGroup(db, COMPANY_A, "120363000000000001@g.us");
+    await assert.rejects(
+      db.query("insert into public.report_bot_submissions (company_id, group_id, wa_message_id, message_at, media_ref, wa_message_record) values ($1, $2, 'BIG', now(), 'ref12345678', repeat('x', 100001))", [COMPANY_A, groupId]),
+      /check constraint/
+    );
+  } finally {
+    await db.close();
+  }
+});
 
 test("existing rows on the old untouched default move to free Gemini; deliberate choices stay", async () => {
   const db = new PGlite();

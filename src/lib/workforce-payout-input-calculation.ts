@@ -1,6 +1,7 @@
 export type WorkforcePayoutAttendanceOverrideRow = {
   id?: string | null;
   workforce_id: string;
+  station_id?: string | null;
   work_date: string;
   attendance_status: string;
   work_minutes: number | string | null;

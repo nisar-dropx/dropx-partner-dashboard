@@ -15,6 +15,7 @@ import { assertMinimumProfileAge } from "../../../../src/lib/profile-age";
 import { createProfileSubmittedNotification } from "../../../../src/lib/app-notifications";
 import { todayInIndia } from "../../../../src/lib/india-date";
 import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-verification";
+import { workforceRegistrationSubmission } from "../../../../src/lib/workforce-registration-submission";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 import {
   isNonEmployeeProfileType,
@@ -598,15 +599,15 @@ export async function POST(request: Request) {
       }
     }
     const submittedAt = new Date().toISOString();
-    const isFieldExecutive = account.profileType === "field_executive";
-    const uploadPayload: Record<string, unknown> = {
-      onboarding_status: isFieldExecutive ? "under_review" : manualReviewRequired ? "under_review" : "active",
-      profile_return_remarks: null,
-      profile_returned_at: null,
-      is_active: !isFieldExecutive,
-      ...(isFieldExecutive ? { onboarding_submitted_at: submittedAt, lifecycle_status: "onboarding" } : {}),
-      updated_at: submittedAt
-    };
+    const submission = workforceRegistrationSubmission({
+      accountId: account.id,
+      companyId: account.companyId,
+      currentStatus,
+      manualReviewRequired,
+      profileType: account.profileType,
+      submittedAt
+    });
+    const uploadPayload = submission.profilePatch;
     if (aadhaarFrontPath) uploadPayload.aadhaar_front_path = aadhaarFrontPath;
     if (aadhaarBackPath) uploadPayload.aadhaar_back_path = aadhaarBackPath;
     if (panUploadPath) uploadPayload.pan_upload_path = panUploadPath;
@@ -621,16 +622,10 @@ export async function POST(request: Request) {
     if (uploadUpdateResult.error) {
       throw new Error(`Profile details were saved, but the profile could not be submitted. ${uploadUpdateResult.error.message}`);
     }
-    if (isFieldExecutive) {
-      const eventResult = await supabaseAdmin.from("workforce_onboarding_events").insert({
-        company_id: account.companyId,
-        field_executive_id: account.id,
-        event_code: "candidate_submitted",
-        from_status: currentStatus,
-        to_status: "under_review",
-        source_portal: "connect",
-        remarks: "Applicant submitted profile and agreement for HO review."
-      });
+    if (submission.onboardingEvent) {
+      const eventResult = await supabaseAdmin
+        .from("workforce_onboarding_events")
+        .insert(submission.onboardingEvent);
       if (eventResult.error) throw new Error(eventResult.error.message);
     }
     const executive = await loadExecutive(account.id, account.companyId, account.profileType);
@@ -659,7 +654,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       profile: await serializeExecutive(executive, account.profileType),
-      notice: isFieldExecutive ? "Registration submitted to the HO Workforce team for review." : "Profile saved successfully."
+      notice: submission.legacyFieldExecutive
+        ? "Registration submitted to the HO Workforce team for review."
+        : "Profile saved successfully."
     });
   } catch (error) {
     // The user only sees a friendly message; keep the real cause in the logs.

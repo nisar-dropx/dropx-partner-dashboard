@@ -7,6 +7,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { isDashboardPaymentSettingsDirectPayEntry } from "@/lib/provider-mapping-host";
+import { directPaymentProfileIsEditable } from "@/lib/direct-payment-profile-visibility";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeDirectPaymentValues,
@@ -76,13 +77,25 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const personId = required(formData, audience === "helpers" ? "helper_id" : "workforce_id", audience === "helpers" ? "Helper" : "Workforce member");
     const paymentMethodId = required(formData, "payment_method_id", "Payment method");
+    const allocationId = text(formData.get("allocation_id"));
+    const allocationUpdatedAt = text(formData.get("allocation_updated_at"));
     const effectiveFrom = dateValue(formData, "effective_from", "Effective from")!;
     const effectiveTo = dateValue(formData, "effective_to", "Effective to", true);
     if (effectiveTo && effectiveTo < effectiveFrom) {
       throw new Error("Effective to cannot be before effective from.");
     }
 
-    let person: { id: string; full_name: string; location_id: string | null; designation_id?: string | null; designation?: string | null } | null = null;
+    let person: {
+      id: string;
+      full_name: string;
+      location_id: string | null;
+      designation_id?: string | null;
+      designation?: string | null;
+      onboarding_status?: string | null;
+      lifecycle_status?: string | null;
+      is_active?: boolean | null;
+      deleted_at?: string | null;
+    } | null = null;
     if (audience === "helpers") {
       const helperResult = await supabaseAdmin
         .from("helpers")
@@ -98,14 +111,15 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
     } else {
       const workerResult = await supabaseAdmin
         .from("workforce")
-        .select("id, full_name, location_id, designation_id, designation, is_active")
+        .select("id, full_name, location_id, designation_id, designation, onboarding_status, lifecycle_status, is_active, deleted_at")
         .eq("id", personId)
         .eq("company_id", companyId)
-        .eq("is_active", true)
         .is("deleted_at", null)
         .maybeSingle();
       if (workerResult.error) throw new Error(workerResult.error.message);
-      if (!workerResult.data) throw new Error("The workforce member is no longer active.");
+      if (!workerResult.data || !directPaymentProfileIsEditable(workerResult.data, "workforce")) {
+        throw new Error("The workforce member is inactive or no longer eligible for direct-pay setup.");
+      }
       person = workerResult.data;
 
       const designationResult = await supabaseAdmin
@@ -182,7 +196,7 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
         p_change_reason: text(formData.get("change_reason")),
         p_actor_user_id: authorization.userId
       })
-      : await supabaseAdmin.rpc("save_workforce_payment_allocation_v2", {
+      : await supabaseAdmin.rpc("save_workforce_payment_allocation_v3", {
         p_company_id: companyId,
         p_workforce_id: personId,
         p_payment_method_id: paymentMethodId,
@@ -190,7 +204,9 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
         p_effective_from: effectiveFrom,
         p_effective_to: effectiveTo,
         p_change_reason: text(formData.get("change_reason")),
-        p_actor_user_id: authorization.userId
+        p_actor_user_id: authorization.userId,
+        p_allocation_id: allocationId,
+        p_expected_updated_at: allocationUpdatedAt
       });
     if (saveResult.error) throw new Error(saveResult.error.message);
 

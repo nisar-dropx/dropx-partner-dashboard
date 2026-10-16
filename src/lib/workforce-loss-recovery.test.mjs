@@ -72,3 +72,23 @@ test("a database without the recovery function loads payouts without losses", ()
   assert.equal(isMissingLossRecoveryFunction({ code: "57014", message: "canceling statement due to statement timeout" }), false);
   assert.equal(isMissingLossRecoveryFunction(null), false);
 });
+
+test("capped lines take at most the Master share of the net payout; overrides and final settlements may use the rest", () => {
+  const capped = (key, amount, extra = {}) => ({ ...line(key, amount), cap_percent: "50", ...extra });
+  const rows = [row("a", "w1", 1000)];
+  const { carried } = applyWorkforceLossRecoveries(rows, [capped("A", 300), capped("B", 300)]);
+  assert.deepEqual(rows[0].deductionBreakdown.map((l) => l.amount), [300]);
+  assert.deepEqual(carried.map((l) => l.case_key), ["B"]);
+  assert.equal(rows[0].netAmount, 700);
+  const exemptRows = [row("a", "w1", 1000)];
+  applyWorkforceLossRecoveries(exemptRows, [capped("A", 300), capped("B", 600, { cap_exempt: true, final_settlement: true })]);
+  assert.equal(exemptRows[0].netAmount, 100);
+  const over = [row("a", "w1", 500)];
+  assert.equal(applyWorkforceLossRecoveries(over, [capped("A", 600, { cap_exempt: true })]).carried.length, 1);
+});
+
+test("an instalment line keeps its own recovery key", () => {
+  const rows = [row("a", "w1", 1000)];
+  applyWorkforceLossRecoveries(rows, [{ ...line("A", 250), recovery_key: "2026-09|A|workforce:w1|2", installment_no: 2, installment_count: 4 }]);
+  assert.equal(rows[0].deductionBreakdown[0].recoveryKey, "2026-09|A|workforce:w1|2");
+});

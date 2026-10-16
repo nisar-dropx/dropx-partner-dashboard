@@ -14,16 +14,16 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   if (!authorization) return NextResponse.json({ error: "Access denied" }, { status: 403 });
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const submission = await reportBotDb().from("report_bot_submissions")
-    .select("media_ref, group:report_bot_groups(location_id)")
+    .select("media_ref, wa_message_record, group:report_bot_groups(location_id)")
     .eq("company_id", authorization.companyId!)
     .eq("id", params.id)
     .maybeSingle();
-  const row = submission.data as { media_ref: string | null; group: { location_id: string | null } | null } | null;
+  const row = submission.data as { media_ref: string | null; wa_message_record: string | null; group: { location_id: string | null } | null } | null;
   if (!row?.media_ref || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   try {
-    const image = await fetchReportImage(await loadReportBotSettings(authorization.companyId!), row.media_ref);
+    const image = await fetchReportImage(await loadReportBotSettings(authorization.companyId!), row.media_ref, row.wa_message_record);
     return new NextResponse(Buffer.from(image), {
       headers: { "content-type": "image/jpeg", "cache-control": "private, no-store", "x-content-type-options": "nosniff" }
     });

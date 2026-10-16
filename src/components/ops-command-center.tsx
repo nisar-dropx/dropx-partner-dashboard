@@ -16,12 +16,12 @@ export function OpsCommandCenter({model:m,period,codes,canCost,canPerformance,pe
     <p className={styles.eyebrow}>SECTION SNAPSHOTS · {date(period.from)}–{date(period.to)}</p>
     <div className={styles.snapshots}>
       {canCost&&<>
-        <Link href={costHref}><span>Shipment volume <ArrowUpRight size={15}/></span><strong>{m.observed?number(m.total?.deliveries):'—'}</strong><small>Delivered · open shipment actuals</small></Link>
-        <Link href={costHref}><span>{m.provisional?'Provisional CPS':'Cost per shipment'} <ArrowUpRight size={15}/></span><strong>{money(m.total?.cps)}</strong><small>Open cost breakdown & sources</small></Link>
+        <Link prefetch={false} href={costHref}><span>Shipment volume <ArrowUpRight size={15}/></span><strong>{m.observed?number(m.total?.deliveries):'—'}</strong><small>Delivered · open shipment actuals</small></Link>
+        <Link prefetch={false} href={costHref}><span>{m.provisional?'Provisional CPS':'Cost per shipment'} <ArrowUpRight size={15}/></span><strong>{money(m.total?.cps)}</strong><small>Open cost breakdown & sources</small></Link>
       </>}
-      {canPerformance&&<Link href={perfHref}><span>Service performance <ArrowUpRight size={15}/></span><strong>{number(m.performanceRisk)}<em> groups flagged</em></strong><small>{date(performanceDate)} · open performance actuals</small></Link>}
+      {canPerformance&&<Link prefetch={false} href={perfHref}><span>Service performance <ArrowUpRight size={15}/></span><strong>{number(m.performanceRisk)}<em> groups flagged</em></strong><small>{date(performanceDate)} · open performance actuals</small></Link>}
     </div>
     {errors.length>0&&<p className={styles.sourceNote} role="status">Unavailable: {errors.join(', ')}. No missing result is shown as zero.</p>}
-    {canCost&&<details className={styles.sources}><summary>How these figures are calculated</summary><div><p>CPS uses the same live cost store as the CPS section: operating costs ÷ deliveries including SWA and customer returns. Missing source data keeps the figure provisional. Targets, costs and daily station detail remain in CPS.</p><p>Shipment coverage: {m.observed}/{m.expected} location-days. Links retain the selected dates and location scope.</p><Link href={costHref}>Open sources and actuals →</Link></div></details>}
+    {canCost&&<details className={styles.sources}><summary>How these figures are calculated</summary><div><p>CPS uses the same live cost store as the CPS section: operating costs ÷ deliveries including SWA and customer returns. Missing source data keeps the figure provisional. Targets, costs and daily station detail remain in CPS.</p><p>Shipment coverage: {m.observed}/{m.expected} location-days. Links retain the selected dates and location scope.</p><Link prefetch={false} href={costHref}>Open sources and actuals →</Link></div></details>}
   </section>;
 }

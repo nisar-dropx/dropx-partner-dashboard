@@ -189,6 +189,69 @@ function workforceIdentityFields() {
   };
 }
 
+async function cleanupNewlyInsertedProfiles({
+  companyId,
+  config,
+  profileIds
+}: {
+  companyId: string;
+  config: ReturnType<typeof nonEmployeeConfigForRoute>;
+  profileIds: string[];
+}) {
+  const insertedIds = Array.from(new Set(profileIds.map(String).filter(Boolean)));
+  if (!insertedIds.length) return [];
+
+  const client = supabaseAdmin;
+  if (!client) return ["Supabase service role key is not configured."];
+
+  const failures: string[] = [];
+  const runCleanup = async (
+    label: string,
+    operation: () => PromiseLike<{ error: { message: string } | null }>
+  ) => {
+    try {
+      const result = await operation();
+      if (result.error) failures.push(`${label}: ${result.error.message}`);
+    } catch (error) {
+      failures.push(`${label}: ${error instanceof Error ? error.message : "unknown cleanup error"}`);
+    }
+  };
+
+  // Earlier rows in a bulk request may already have their request event. Remove
+  // those before deleting their newly-created profiles so a failed import does
+  // not leave partial onboarding history behind.
+  if (config.profileType === "field_executive") {
+    const profileIdColumn = config.table === "workforce" ? "workforce_id" : "field_executive_id";
+    await runCleanup("onboarding events", () => client
+      .from("workforce_onboarding_events")
+      .delete()
+      .eq("company_id", companyId)
+      .in(profileIdColumn, insertedIds));
+  }
+
+  if (config.profileType === "field_executive") {
+    await runCleanup("biometric enrolments", () => client
+      .from("biometric_enrolments")
+      .delete()
+      .eq("company_id", companyId)
+      .in("field_executive_id", insertedIds));
+  } else {
+    await runCleanup("biometric enrolments", () => client
+      .from("biometric_enrolments")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("profile_type", config.profileType).in("account_id", insertedIds));
+  }
+
+  await runCleanup("profiles", () => client
+    .from(config.table)
+    .delete()
+    .eq("company_id", companyId)
+    .in("id", insertedIds));
+
+  return failures;
+}
+
 const fieldExecutiveDocumentFields = [
   { ruleKey: "aadhaar_front", formKey: "aadhaar_front_file", pathKey: "aadhaar_front_path", label: "Aadhaar front" },
   { ruleKey: "aadhaar_back", formKey: "aadhaar_back_file", pathKey: "aadhaar_back_path", label: "Aadhaar back" },
@@ -552,7 +615,7 @@ export async function createFieldExecutive(formData: FormData) {
     });
 
     if (config.profileType === "field_executive") {
-      await supabaseAdmin.from("workforce_onboarding_events").insert({
+      const onboardingEvent = await supabaseAdmin.from("workforce_onboarding_events").insert({
         company_id: companyId,
         field_executive_id: table === "workforce" ? null : executive.id,
         workforce_id: table === "workforce" ? executive.id : null,
@@ -563,6 +626,17 @@ export async function createFieldExecutive(formData: FormData) {
         source_portal: applicationSource,
         metadata: { designation, location_id: locationId, onboarding_source: selectedOnboardingSource.source, onboarding_source_detail: selectedOnboardingSource.detail }
       });
+      if (onboardingEvent.error) {
+        const cleanupFailures = await cleanupNewlyInsertedProfiles({
+          companyId,
+          config,
+          profileIds: [String(executive.id)]
+        });
+        const cleanupMessage = cleanupFailures.length
+          ? ` Automatic cleanup was incomplete: ${cleanupFailures.join("; ")}`
+          : " The new profile and biometric enrolment were removed.";
+        throw new Error(`Unable to record the Workforce onboarding request: ${onboardingEvent.error.message}.${cleanupMessage}`);
+      }
       if (reportedOn && table === "workforce") {
         const progressResult = await supabaseAdmin.rpc("workforce_record_partner_progress", {
           p_company: companyId,
@@ -1082,7 +1156,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
   const authorization = await requirePagePermission(pageCodeForReturnPath(returnPath), "add");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
-  const inserted: { id: string; locationId: string; biometricId: string | null; dateOfJoin: string }[] = [];
+  const inserted: { id: string; locationId: string; biometricId: string | null; dateOfJoin: string; rowNumber: number }[] = [];
   const requestHost = headers().get("host")?.split(":")[0].toLowerCase() ?? "";
   const applicationSource = requestHost === "ops.dropxlogistics.com" || requestHost.startsWith("ops-")
     ? "ops"
@@ -1219,7 +1293,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         is_active: lifecycle.isActive
       }, companyId)).select("id").single();
       if (insertResult.error) throw new Error(`Row ${rowNumber}: ${friendlyFieldExecutiveError(insertResult.error.message)}`);
-      inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin });
+      inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin, rowNumber });
     }
 
     for (const row of inserted) {
@@ -1238,7 +1312,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         workerType: "individual_contract"
       });
       if (config.profileType === "field_executive") {
-        await supabaseAdmin.from("workforce_onboarding_events").insert({
+        const onboardingEvent = await supabaseAdmin.from("workforce_onboarding_events").insert({
           company_id: companyId,
           field_executive_id: table === "workforce" ? null : row.id,
           workforce_id: table === "workforce" ? row.id : null,
@@ -1248,6 +1322,9 @@ export async function bulkImportFieldExecutives(formData: FormData) {
           source_portal: applicationSource,
           metadata: { bulk_import: true, location_id: row.locationId }
         });
+        if (onboardingEvent.error) {
+          throw new Error(`Row ${row.rowNumber}: Unable to record the Workforce onboarding request: ${onboardingEvent.error.message}`);
+        }
         continue;
       }
     }
@@ -1262,16 +1339,19 @@ export async function bulkImportFieldExecutives(formData: FormData) {
     }, returnPath);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
+    let errorMessage = error instanceof Error ? friendlyFieldExecutiveError(error.message) : `Unable to import ${entityLabel.toLowerCase()} records.`;
     if (inserted.length) {
       const insertedIds = inserted.map((row) => row.id);
-      if (config.profileType === "field_executive") {
-        await supabaseAdmin.from("biometric_enrolments").delete().eq("company_id", companyId).in("field_executive_id", insertedIds);
-      } else {
-        await supabaseAdmin.from("biometric_enrolments").delete().eq("company_id", companyId).eq("profile_type", config.profileType).in("account_id", insertedIds);
+      const cleanupFailures = await cleanupNewlyInsertedProfiles({
+        companyId,
+        config,
+        profileIds: insertedIds
+      });
+      if (cleanupFailures.length) {
+        errorMessage += ` Automatic cleanup was incomplete: ${cleanupFailures.join("; ")}`;
       }
-      await supabaseAdmin.from(table).delete().eq("company_id", companyId).in("id", insertedIds);
     }
-    fieldExecutiveRedirect({ error: error instanceof Error ? friendlyFieldExecutiveError(error.message) : `Unable to import ${entityLabel.toLowerCase()} records.` }, returnPath);
+    fieldExecutiveRedirect({ error: errorMessage }, returnPath);
   }
 }
 

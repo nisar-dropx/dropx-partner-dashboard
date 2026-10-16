@@ -5,7 +5,9 @@ import {
   decideDelivery,
   dueReminderSteps,
   extractJsonText,
+  formatChecks,
   isGroupJid,
+  mentionFor,
   localClock,
   normalizeDays,
   normalizeTimeList,
@@ -39,16 +41,21 @@ test("time lists are validated, padded, sorted and de-duplicated", () => {
 
 test("reminders: due slots send once, stale slots are skipped, future slots wait", () => {
   const times = ["09:00", "09:30", "10:00"];
-  assert.deepEqual(dueReminderSteps(times, 0, 8 * 60 + 59, 30), []);
-  assert.deepEqual(dueReminderSteps(times, 0, 9 * 60 + 5, 30), [{ index: 0, action: "send" }]);
-  // Already handled slot 0: nothing new until 09:30.
-  assert.deepEqual(dueReminderSteps(times, 1, 9 * 60 + 20, 30), []);
+  assert.deepEqual(dueReminderSteps(times, null, 8 * 60 + 59, 30), []);
+  assert.deepEqual(dueReminderSteps(times, null, 9 * 60 + 5, 30), [{ minute: 540, action: "send" }]);
+  // 09:00 already handled: nothing new until 09:30.
+  assert.deepEqual(dueReminderSteps(times, 540, 9 * 60 + 20, 30), []);
   // Worker was down 09:00-09:45: only the latest fresh reminder goes out, never a burst.
-  assert.deepEqual(dueReminderSteps(times, 0, 9 * 60 + 45, 30), [{ index: 0, action: "skip_stale" }, { index: 1, action: "send" }]);
+  assert.deepEqual(dueReminderSteps(times, null, 9 * 60 + 45, 30), [{ minute: 540, action: "skip_stale" }, { minute: 570, action: "send" }]);
   // Bot switched on at 15:00: every earlier slot is stale, nothing is sent.
-  assert.deepEqual(dueReminderSteps(times, 0, 15 * 60, 30).map((step) => step.action), ["skip_stale", "skip_stale", "skip_stale"]);
-  // Unsorted input and garbage entries do not break ordering.
-  assert.deepEqual(dueReminderSteps(["10:00", "bad", "09:00"], 0, 9 * 60, 30), [{ index: 0, action: "send" }]);
+  assert.deepEqual(dueReminderSteps(times, null, 15 * 60, 30).map((step) => step.action), ["skip_stale", "skip_stale", "skip_stale"]);
+  // Unsorted input, duplicates and garbage entries do not break ordering.
+  assert.deepEqual(dueReminderSteps(["10:00", "bad", "09:00", "09:00"], null, 9 * 60, 30), [{ minute: 540, action: "send" }]);
+  // The reported bug: 09:00 and 09:45 handled at 13:00, then 01:12, 01:14, 13:15 and 15:32 are
+  // added. Earlier slots must not shift onto later ones; 15:32 still fires at 15:32.
+  const edited = ["01:12", "01:14", "09:00", "09:45", "13:15", "15:32"];
+  assert.deepEqual(dueReminderSteps(edited, 585, 13 * 60 + 20, 30), [{ minute: 795, action: "send" }], "13:15 fires; the added early times are in the past and skipped");
+  assert.deepEqual(dueReminderSteps(edited, 795, 15 * 60 + 33, 30), [{ minute: 932, action: "send" }]);
 });
 
 test("templates fill known placeholders and keep unknown ones visible", () => {
@@ -110,6 +117,27 @@ test("feedback message uses the configured layout and length limit", () => {
   assert.ok(text.startsWith("*EOD* · Ravi\nFIX\nDate"));
   assert.ok(text.length <= 40 && text.endsWith("…"));
   assert.equal(truncateText("short", 10), "short");
+});
+
+test("replies tag the sender and carry the review itself", () => {
+  assert.deepEqual(mentionFor("919876543210:4@s.whatsapp.net"), { text: "@919876543210", jid: "919876543210@s.whatsapp.net" });
+  assert.deepEqual(mentionFor("123456789012345@lid"), { text: "@123456789012345", jid: "123456789012345@lid" });
+  assert.equal(mentionFor(null), null);
+  assert.equal(mentionFor("120363000000000001@g.us"), null, "a group is never mentioned");
+
+  const checks = [
+    { rule: "Date is today", status: "fail", note: "shows 14-10-2026" },
+    { rule: "Station code visible", status: "pass", note: "" },
+    { rule: "Liability is zero", status: "unclear", note: "cropped" }
+  ];
+  assert.equal(formatChecks(checks), "❌ Date is today — shows 14-10-2026\n❓ Liability is zero — cropped", "passed rules are left out");
+  assert.equal(formatChecks([{ rule: "x", status: "pass", note: "" }]), "");
+
+  const settings = { feedback_template: "{sender} *{report}*\n{verdict_label}\n{feedback}\n{checks}", label_pass: "✅ Looks good", label_fail: "❌ Needs correction", label_review: "🔎", max_feedback_chars: 700 };
+  const fail = composeFeedback(settings, { verdict: "fail", feedback: "Please resend today's screenshot.", report: "EOD", sender: "@919876543210", group: "g", date: "15-10-2026", checks });
+  assert.equal(fail, "@919876543210 *EOD*\n❌ Needs correction\nPlease resend today's screenshot.\n❌ Date is today — shows 14-10-2026\n❓ Liability is zero — cropped");
+  const pass = composeFeedback(settings, { verdict: "pass", feedback: "All good, thanks.", report: "EOD", sender: "@919876543210", group: "g", date: "15-10-2026", checks: [] });
+  assert.equal(pass, "@919876543210 *EOD*\n✅ Looks good\nAll good, thanks.", "no trailing blank line when nothing failed");
 });
 
 test("JSON is recovered from fenced or chatty model replies", () => {

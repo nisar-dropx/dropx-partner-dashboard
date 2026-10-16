@@ -11,9 +11,9 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
  * a reviewer opening it) it is fetched from the worker, which keeps a short cache and
  * otherwise downloads it from WhatsApp again. Returned as a resized JPEG in memory.
  */
-export async function fetchReportImage(settings: ReportBotSettings, mediaRef: string | null) {
+export async function fetchReportImage(settings: ReportBotSettings, mediaRef: string | null, messageRecord: string | null) {
   if (!mediaRef) throw new AiError("This message has no image attached.", false);
-  const original = await workerMedia(settings, mediaRef);
+  const original = await workerMedia(settings, mediaRef, messageRecord);
   if (original.byteLength > MAX_IMAGE_BYTES) throw new AiError("The image is larger than 12 MB.", false);
   try {
     // Fixes phone rotation, caps size (AI limits, Vercel's response limit) and converts HEIC/PNG/WEBP.
