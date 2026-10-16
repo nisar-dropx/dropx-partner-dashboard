@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import s from "@/app/ops-pulse/report-bot/report-bot.module.css";
 
 type SessionView = {
   state: string;
@@ -12,64 +13,72 @@ type SessionView = {
 };
 
 const LABELS: Record<string, string> = {
+  unknown: "Not set up",
   idle: "Not linked",
   connecting: "Connecting…",
   qr: "Waiting for QR scan",
   pairing: "Waiting for pairing code",
   open: "Connected",
   closed: "Reconnecting…",
-  logged_out: "Unlinked",
+  logged_out: "Not linked",
   unreachable: "Worker unreachable"
 };
 
-/** Polls the worker while linking; slows down once connected. */
-export function ReportBotConnection({ initial }: { initial: SessionView }) {
+const LINKING = ["qr", "pairing", "connecting", "closed"];
+
+/** Live WhatsApp link status. Polls fast while linking, slowly once connected. */
+export function ReportBotConnection({ initial, polling }: { initial: SessionView; polling: boolean }) {
   const [session, setSession] = useState<SessionView>(initial);
 
   useEffect(() => {
+    if (!polling) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
         const response = await fetch("/api/report-bot/session", { cache: "no-store" });
-        const next = await response.json() as SessionView & { error?: string };
+        const next = await response.json() as SessionView;
         if (!cancelled) setSession(response.ok ? next : { state: "unreachable", error: next.error ?? "Could not load status." });
       } catch {
         if (!cancelled) setSession({ state: "unreachable", error: "Could not reach the portal." });
       }
-      if (!cancelled) {
-        const linking = ["qr", "pairing", "connecting", "closed"].includes(session.state);
-        timer = setTimeout(poll, document.hidden ? 30000 : linking ? 3000 : 15000);
-      }
+      if (!cancelled) timer = setTimeout(poll, document.hidden ? 30000 : LINKING.includes(session.state) ? 3000 : 15000);
     };
-    timer = setTimeout(poll, 1500);
+    timer = setTimeout(poll, 800);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-    // The poll interval adapts on each run; restarting on state change keeps it current.
-  }, [session.state]);
+  }, [polling, session.state]);
 
-  const tone = session.state === "open" ? "good" : ["qr", "pairing", "connecting", "closed"].includes(session.state) ? "warn" : "bad";
+  const tone = session.state === "open" ? s.good : LINKING.includes(session.state) ? s.warn : s.bad;
   return (
-    <div className="report-bot-session" aria-live="polite">
-      <p>
-        <span className={`status-pill ${tone}`}>{LABELS[session.state] ?? session.state}</span>
-        {session.state === "open" && session.number ? <strong style={{ marginLeft: 10 }}>+{session.number}{session.name ? ` · ${session.name}` : ""}</strong> : null}
-      </p>
-      {session.error && session.state !== "open" ? <p className="subtle" role="alert">{session.error}</p> : null}
+    <div className={s.session} aria-live="polite">
+      <div className={s.sessionState}>
+        <span className={`${s.badge} ${tone}`}>{LABELS[session.state] ?? session.state}</span>
+        {session.state === "open" && session.number ? <strong>+{session.number}{session.name ? ` · ${session.name}` : ""}</strong> : null}
+      </div>
+      {session.error && session.state !== "open" ? <p className={s.hint} role="alert">{session.error}</p> : null}
       {session.state === "qr" && session.qr_image ? (
-        <figure style={{ margin: "12px 0" }}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- data URL generated server-side */}
-          <img src={session.qr_image} alt="WhatsApp link QR code" width={280} height={280} style={{ background: "#fff", padding: 8, borderRadius: 8 }} />
-          <figcaption className="subtle">WhatsApp → Settings → Linked devices → Link a device. The code refreshes automatically.</figcaption>
-        </figure>
+        <div className={s.qr}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- QR is a data URL rendered on the server */}
+          <img src={session.qr_image} alt="QR code to link WhatsApp" width={240} height={240} />
+          <ol>
+            <li>Open WhatsApp on the phone</li>
+            <li>Settings → Linked devices → Link a device</li>
+            <li>Point the camera at this code</li>
+          </ol>
+        </div>
       ) : null}
       {session.state === "pairing" && session.pairing_code ? (
-        <p style={{ margin: "12px 0" }}>
-          Pairing code: <strong style={{ fontSize: 24, letterSpacing: 4 }}>{session.pairing_code}</strong>
-          <br /><span className="subtle">WhatsApp → Linked devices → Link a device → Link with phone number instead.</span>
-        </p>
+        <div className={s.qr}>
+          <div className={s.pairing}>{session.pairing_code}</div>
+          <ol>
+            <li>Open WhatsApp → Settings → Linked devices</li>
+            <li>Link a device → Link with phone number instead</li>
+            <li>Enter this code</li>
+          </ol>
+        </div>
       ) : null}
     </div>
   );
