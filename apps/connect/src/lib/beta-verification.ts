@@ -1,7 +1,7 @@
 import { idfyActionUrl } from './onboarding-action-url.ts';
 
 export type VerificationState = 'complete' | 'action' | 'in_progress' | 'pending';
-export type BetaCheck = {code:string;label:string;status:VerificationState;result?:string;detail:string;owner:string;source:string;updatedAt:string|null;actionUrl?:string|null};
+export type BetaCheck = {code:string;label:string;status:VerificationState;result?:string;notRequested?:boolean;detail:string;owner:string;source:string;updatedAt:string|null;actionUrl?:string|null};
 export type BetaSnapshot = {amazon_profile_id?:string|null;identity_email?:string|null;driver_id?:string|null;idfy_profile_id?:string|null;id_created_at?:string|null;bgc_submitted_at?:string|null;operational_status?:string|null;bgc_status?:string|null;uan_status?:string|null;checks?:unknown;amazon_tasks?:unknown;learning_status?:string|null;learning_confirmed_at?:string|null;lsc_observed_at?:string|null;idfy_observed_at?:string|null;sync_error?:string|null};
 export type BetaInboxAction = {kind:'uan'|'assisted'|'verification';url:string;receivedAt:string|null;label:string};
 export function verificationState(value:unknown):VerificationState {
@@ -35,7 +35,7 @@ export function betaInboxActions(messages:Array<{sender?:string;subject?:string;
 }
 export function betaChecks(snapshot:BetaSnapshot|null):BetaCheck[]{
  if(!snapshot||!Array.isArray(snapshot.checks))return [];
- return snapshot.checks.filter(x=>x&&typeof x==='object'&&typeof x.code==='string'&&typeof x.label==='string').map(x=>({code:x.code,label:x.label,status:verificationState(x.result??x.status),result:String(x.result??x.status??''),detail:String(x.detail??'Status received from IDfy.'),owner:verificationState(x.result??x.status)==='action'?'You / station team':'IDfy',source:'IDfy profile',updatedAt:snapshot.idfy_observed_at??null}));
+ return snapshot.checks.filter(x=>x&&typeof x==='object'&&typeof x.code==='string'&&typeof x.label==='string').map(x=>({code:x.code,label:x.label,status:verificationState(x.result??x.status),result:String(x.result??x.status??''),notRequested:String(x.result??x.status??'').toLowerCase()==='cannot request for verification',detail:String(x.detail??'Status received from IDfy.'),owner:verificationState(x.result??x.status)==='action'?'You / station team':'IDfy',source:'IDfy profile',updatedAt:snapshot.idfy_observed_at??null}));
 }
 export function betaLearning(snapshot:BetaSnapshot|null,now=Date.now()){
  const parsed=snapshot?.id_created_at?Date.parse(snapshot.id_created_at):NaN;
@@ -52,4 +52,17 @@ export function betaTaskComplete(snapshot:BetaSnapshot|null,name:string):boolean
  if(!Array.isArray(snapshot?.amazon_tasks))return false;
  const matches=snapshot.amazon_tasks.filter(x=>x&&typeof x==='object'&&x.name===name);
  return matches.length===1&&verificationState(matches[0].status)==='complete';
+}
+
+/** Each source advances only the task it confirms; an email is never completion. */
+export function betaSourceProgress(snapshot:BetaSnapshot|null) {
+ const accepted=betaTaskComplete(snapshot,'Accept Invitation');
+ const tasks=Array.isArray(snapshot?.amazon_tasks)?snapshot.amazon_tasks:[];
+ const submitted=Boolean(snapshot?.bgc_submitted_at)||tasks.some(t=>t.name==='Background Check'&&Array.isArray(t.subtasks)&&t.subtasks.some((s:{name:string;status:string})=>s.name==='Data Submitted'&&verificationState(s.status)==='complete'));
+ const registrationComplete=submitted||['ACTIVE','INACTIVE'].includes(snapshot?.operational_status??'');
+ const addressChecks=betaChecks(snapshot).filter(c=>/^address(?:_|$)/.test(c.code)&&!c.notRequested);
+ return {invitationAccepted:accepted||registrationComplete,amazonRegistrationConfirmed:registrationComplete,
+  videoVerificationComplete:addressChecks.length>0&&addressChecks.every(c=>c.status==='complete'),
+  accountSetupConfirmed:betaTaskComplete(snapshot,'Account Setup'),
+  amazonRegistrationStarted:accepted, bgcSubmitted:submitted};
 }

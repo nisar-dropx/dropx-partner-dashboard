@@ -1,4 +1,4 @@
-import { betaInboxActions, betaChecks, betaLearning, betaTaskComplete, verifiedBetaSnapshot, verificationState } from "@/lib/beta-verification";
+import { betaSourceProgress, betaInboxActions, betaChecks, betaLearning, verifiedBetaSnapshot, verificationState } from "@/lib/beta-verification";
 import { acknowledgedBetaExitNote } from "@/lib/beta-exit-notice";
 import { betaJourney } from "@/lib/beta-journey";
 import {pilotStatus,withLiveAmazonEvidence,type Pilot} from '@/lib/amazon-pilot';
@@ -79,8 +79,8 @@ export async function GET(request: NextRequest) {
         stage:journey.stage,stageLabel:journey.label,instruction:journey.instruction,
         registrationReady:journey.ready,
         reportUpdatedAt:live?.idfy_observed_at??null,reportDate:null,stale:Boolean(live?.idfy_observed_at&&Date.now()-Date.parse(live.idfy_observed_at)>24*3600000),syncDelayed:Boolean(snapshot.error||live?.sync_error||!live?.idfy_observed_at),
-        inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanStatus:live?.uan_status??null,amazonRegistrationConfirmed:betaTaskComplete(live,"Accept Invitation"),accountSetupConfirmed:betaTaskComplete(live,"Account Setup"),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
-        driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
+        inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanStatus:live?.uan_status??null,...betaSourceProgress(live),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
+        sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at??null,idfyUpdatedAt:live?.idfy_observed_at??null,lastAttemptAt:snapshot.data?.updated_at??null,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error)},driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
         invitationUrl,invitationAvailable:Boolean(rawInvitationUrl),invitationReceivedAt:amazonMessage?.received_at??candidate.data.last_message_at,
         registrationRequired:!registrationSubmitted,registrationStatus,registrationUpdatedAt:registration.data?.updated_at??null,

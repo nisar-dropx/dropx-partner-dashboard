@@ -80,3 +80,20 @@ test('beta inbox stays usable before migration; messages never masquerade as BGC
  assert.deepEqual(result.bgcChecks,[]);assert.equal(result.syncDelayed,true);assert.equal(result.isolatedBeta,true);
  assert.ok(!JSON.stringify(result).includes('PRIVATE EMAIL BODY'));
 });
+
+test('accepting an invitation does not mean Flex registration or BGC is complete',()=>{
+ const result=verification.betaSourceProgress({amazon_tasks:[{name:'Accept Invitation',status:'completed'}]});
+ assert.equal(result.invitationAccepted,true);assert.equal(result.amazonRegistrationConfirmed,false);assert.equal(result.videoVerificationComplete,false);
+});
+test('Amazon submission advances registration without claiming BGC or UAN clearance',()=>{
+ const result=verification.betaSourceProgress({amazon_tasks:[{name:'Background Check',status:'in_progress',subtasks:[{name:'Data Submitted',status:'completed'}]},{name:'Account Setup',status:'pending'}],checks:[{code:'address_current',label:'Current address',result:'In Progress'}]});
+ assert.equal(result.amazonRegistrationConfirmed,true);assert.equal(result.bgcSubmitted,true);assert.equal(result.accountSetupConfirmed,false);assert.equal(result.videoVerificationComplete,false);
+});
+test('only confirmed address checks retire the video action',()=>{
+ const checks=[{code:'address_current',label:'Current address',result:'Green'},{code:'court',label:'Court',result:'In Progress'}];
+ assert.equal(verification.betaSourceProgress({checks}).videoVerificationComplete,true);
+ assert.equal(verification.betaSourceProgress({checks:[...checks,{code:'address_permanent',label:'Permanent address',result:'Red'}]}).videoVerificationComplete,false);
+ assert.equal(verification.betaSourceProgress(null).videoVerificationComplete,false);
+});
+
+test('an unrequested permanent-address check does not repeat completed current-address verification',()=>{const checks=[{code:'address_current',label:'Current',result:'Green'},{code:'address_permanent',label:'Permanent',result:'Cannot Request For Verification'}];assert.equal(verification.betaSourceProgress({checks}).videoVerificationComplete,true);assert.equal(verification.betaChecks({checks})[1].notRequested,true);assert.equal(verification.betaChecks({checks})[1].status,'pending');});
