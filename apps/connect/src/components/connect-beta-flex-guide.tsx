@@ -43,10 +43,10 @@ export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvit
   </section>;
 }
 
-export function ConnectBetaFlexJourney({ accountId, companyId, language, email, invitationUrl, driverId, learningPassword }: {
-  accountId: string; companyId: string; language: GuidanceLanguage; email: string; invitationUrl: string | null; driverId?:string|null; learningPassword?:string|null;
+export function ConnectBetaFlexJourney({ accountId, companyId, language, email, invitationUrl, driverId, learningPassword, invitationAccepted = false }: {
+  accountId: string; companyId: string; language: GuidanceLanguage; email: string; invitationUrl: string | null; driverId?:string|null; learningPassword?:string|null; invitationAccepted?:boolean;
 }) {
-  const [view, setView] = useState<"invitation" | "guide">("invitation");
+  const [view, setView] = useState<"invitation" | "guide">(invitationAccepted?"guide":"invitation");
   const [copied, setCopied] = useState<"email" | "link" | null>(null);
   const [copyFailed, setCopyFailed] = useState(false);
   const top = useRef<HTMLDivElement>(null), titleId = useId();
