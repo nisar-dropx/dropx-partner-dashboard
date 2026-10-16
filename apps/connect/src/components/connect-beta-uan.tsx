@@ -10,11 +10,11 @@ export function BetaUanOptions({language,assistedUrl,submitUrl}:{language:Guidan
  const c=betaNextStepsCopy[language];
  return <div lang={language}>
   <div className={styles.uanOptions}>
+   <section><b><Headphones size={17}/></b><h3>{c.assistedTitle}</h3><p>{c.assistedBody}</p>{assistedUrl?<a className={`${styles.download} ${styles.assistedAction}`} href={assistedUrl} target="_blank" rel="noopener noreferrer">{c.assistedCta}<ExternalLink size={16}/></a>:<small>{c.awaitLink}</small>}</section>
    <section><b><UserRound size={17}/></b><h3>{c.selfTitle}</h3><p>{c.selfBody}</p><a className={styles.download} href="https://register.eshram.gov.in/#/user/platform-worker-registration" target="_blank" rel="noopener noreferrer">{c.selfCta}<ExternalLink size={16}/></a></section>
-   <section><b><Headphones size={17}/></b><h3>{c.assistedTitle}</h3><p>{c.assistedBody}</p>{assistedUrl?<a className={styles.download} href={assistedUrl} target="_blank" rel="noopener noreferrer">{c.assistedCta}<ExternalLink size={16}/></a>:<small>{c.awaitLink}</small>}</section>
   </div>
   <p className={styles.uanSms}>{c.sms}</p>
-  {submitUrl?<a className={styles.download} href={submitUrl} target="_blank" rel="noopener noreferrer">{c.submitCta}<ExternalLink size={16}/></a>:null}
+  {submitUrl?<a className={`${styles.download} ${styles.submitAction}`} href={submitUrl} target="_blank" rel="noopener noreferrer">{c.submitCta}<ExternalLink size={16}/></a>:null}
  </div>;
 }
 

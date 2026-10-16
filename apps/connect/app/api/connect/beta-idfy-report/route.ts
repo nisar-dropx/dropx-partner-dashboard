@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
     if (!report.reportUrl) return NextResponse.json({error:'IDfy has not made a report available yet. Your check results remain visible below. Try again later.'},{status:404,headers});
     const url = betaReportUrl(report.reportUrl); if (!url) throw new Error('Unsupported report source');
     const pdf = await readBetaPdf(await fetch(url,{cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)}));
-    return new Response(pdf,{headers:{...headers,'Content-Type':'application/pdf','Content-Disposition':`attachment; filename="IDfy-verification-${report.profileId}.pdf"`,'Content-Length':String(pdf.length)}});
+    const disposition=request.nextUrl.searchParams.get('view')==='inline'?'inline':'attachment';
+    return new Response(pdf,{headers:{...headers,'Content-Type':'application/pdf','Content-Disposition':`${disposition}; filename="IDfy-verification-${report.profileId}.pdf"`,'Content-Length':String(pdf.length)}});
   } catch { return NextResponse.json({error:'Your IDfy report could not be downloaded right now. Please retry; your last confirmed check results are still available.'},{status:503,headers}); }
 }
