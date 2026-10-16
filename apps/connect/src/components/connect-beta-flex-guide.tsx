@@ -18,6 +18,7 @@ export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvit
   const copy = betaFlexGuide[language], item = copy.steps[step];
   const index = flexGuideSteps.findIndex(item => item.id === step), meta = flexGuideSteps[index];
   const titleId = useId(), selectId = useId();
+  const stepTitle = (id: FlexGuideStep) => id === "uan" && context.uanVerified ? betaNextStepsCopy[language].verified : copy.steps[id].title;
   const panel = useRef<HTMLElement>(null);
   const open = (value: FlexGuideStep) => {
     setStep(value);
@@ -26,10 +27,10 @@ export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvit
   return <section className={styles.guide} lang={language} aria-labelledby={titleId}>
     <header className={styles.guideHeader}><span><BookOpen size={19}/>{copy.guide}</span><span>{index + 1} / {flexGuideSteps.length}</span></header>
     <div className={styles.layout}>
-      <nav className={styles.desktopNav} aria-label={copy.choose}>{flexGuideSteps.map((entry, i) => <button key={entry.id} type="button" aria-current={step === entry.id ? "step" : undefined} onClick={() => open(entry.id)}><b>{i + 1}</b><span>{copy.steps[entry.id].title}</span></button>)}</nav>
-      <div className={styles.mobileSelect}><label htmlFor={selectId}>{copy.choose}</label><select id={selectId} value={step} onChange={event => open(event.target.value as FlexGuideStep)}>{flexGuideSteps.map((entry, i) => <option key={entry.id} value={entry.id}>{i + 1}. {copy.steps[entry.id].title}</option>)}</select></div>
+      <nav className={styles.desktopNav} aria-label={copy.choose}>{flexGuideSteps.map((entry, i) => <button key={entry.id} type="button" aria-current={step === entry.id ? "step" : undefined} onClick={() => open(entry.id)}><b>{i + 1}</b><span>{stepTitle(entry.id)}</span></button>)}</nav>
+      <div className={styles.mobileSelect}><label htmlFor={selectId}>{copy.choose}</label><select id={selectId} value={step} onChange={event => open(event.target.value as FlexGuideStep)}>{flexGuideSteps.map((entry, i) => <option key={entry.id} value={entry.id}>{i + 1}. {stepTitle(entry.id)}</option>)}</select></div>
       <article className={styles.panel} ref={panel} tabIndex={-1} aria-labelledby={titleId}>
-        <div className={styles.stepTitle}><span className={styles.stepNumber}>{index + 1}</span><div><small>{copy.step} {index + 1}</small><h2 id={titleId}>{step==="uan"&&context.uanVerified?betaNextStepsCopy[language].verified:item.title}</h2></div></div>
+        <div className={styles.stepTitle}><span className={styles.stepNumber}>{index + 1}</span><div><small>{copy.step} {index + 1}</small><h2 id={titleId}>{stepTitle(step)}</h2></div></div>
         <div className={styles.screen}><Smartphone size={18}/><span><small>{copy.screen}</small><strong lang="en">{meta.screen}</strong></span></div>
         <BetaPersonalGuide step={step} language={language} context={context}/>
         {!["learning","uan"].includes(step)?<ol className={styles.instructions}>{item.actions.map((line,i)=><li key={i}>{line}</li>)}</ol>:null}
@@ -59,7 +60,7 @@ export function ConnectBetaFlexJourney({ accountId, companyId, language, email, 
     catch { setCopyFailed(true); }
   };
   return <div className={styles.journey} lang={language} ref={top} tabIndex={-1}>
-    <div className={styles.email}><Mail size={20}/><div><small>{copy.email}</small><strong>{email}</strong></div><button type="button" onClick={() => void copyValue("email", email)}><Copy size={16}/>{copied === "email" ? copy.emailCopied : copy.copyEmail}</button></div>
+    {view==="invitation"?<div className={styles.email}><Mail size={20}/><div><small>{copy.email}</small><strong>{email}</strong></div><button type="button" onClick={() => void copyValue("email", email)}><Copy size={16}/>{copied === "email" ? copy.emailCopied : copy.copyEmail}</button></div>:null}
     {copyFailed ? <p role="alert" className={styles.copyFallback}>{copy.email}: <input aria-label={copy.email} readOnly value={email} onFocus={event => event.target.select()}/>{invitationUrl ? <><span>{copy.copyLink}</span><input aria-label={copy.copyLink} readOnly value={invitationUrl} onFocus={event => event.target.select()}/></> : null}</p> : null}
     <div className={styles.tabs} role="group" aria-label={copy.guide}><button type="button" aria-pressed={view === "invitation"} onClick={() => changeView("invitation")}>{copy.invitation}</button><button type="button" aria-pressed={view === "guide"} onClick={() => changeView("guide")}>{copy.guide}<ArrowRight size={16}/></button></div>
     {view === "invitation" ? <>
@@ -68,6 +69,5 @@ export function ConnectBetaFlexJourney({ accountId, companyId, language, email, 
       <ConnectBetaAmazonOtp accountId={accountId} companyId={companyId} language={language}/>
       <p className={styles.password}><ShieldCheck size={17}/><span><strong>{copy.password}</strong> {copy.passwordBody}</span></p>
     </> : <ConnectBetaFlexGuide language={language} context={{email,driverId,learningPassword,...guideContext}} onInvitation={() => changeView("invitation")}/>}
-    <aside className={styles.liveStatus}><Info size={18}/><div><strong>{copy.status}</strong><p>{copy.statusBody}</p></div></aside>
   </div>;
 }
