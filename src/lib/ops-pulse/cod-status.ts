@@ -1,7 +1,8 @@
 import type { PickupPolicy } from './cod-pickup';
 import type { CodCmsContact } from './cod-cms-followup';
+import { codRemittanceRows, defaultRemittanceTolerance, remittanceAmountCheck } from './cod-remittance-variance.ts';
 import { reconciliationView } from './cod-reconciliation.ts';
-export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; managers?: string[]; managerRole?: 'Cluster' | 'AOM' | 'Unmapped'; leads?: {name:string;role:string;phone:string|null}[]; teamUnavailable?:boolean; pickup?: PickupPolicy | null; cmsContact?: CodCmsContact; reconDueTime?: string | null; ageFlagDays?: number | null; maxAgeMinutes?: number | null; pickupBasis?: string | null };
+export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; managers?: string[]; managerRole?: 'Cluster' | 'AOM' | 'Unmapped'; leads?: {name:string;role:string;phone:string|null}[]; teamUnavailable?:boolean; pickup?: PickupPolicy | null; cmsContact?: CodCmsContact; reconDueTime?: string | null; ageFlagDays?: number | null; maxAgeMinutes?: number | null; pickupBasis?: string | null; remittanceTolerance?: number | null };
 export type StatusComponent<T> = { state: 'ok' | 'unavailable'; checkedAt: string; data: T | null };
 export type CodRemittance = { id: string; code: string | null; status: string; expectedAmount: number; actualAmount: number; variance: number; createdAt: number | null; updatedAt: number | null; submittedAt: number | null; createdBy: string; submittedBy: string | null };
 export type CodStatusSnapshot = {
@@ -56,7 +57,7 @@ export function classifyRemittance(row: CodRemittance, latest: CodRemittance | n
     ? {...base,dueAt,tone:'attention',label:'Pickup overdue',reason:`Open beyond pickup on ${dueDate}, ${policy.start}–${policy.end} IST.`}
     : {...base,dueAt,tone:'waiting',label:'Awaiting scheduled pickup',reason:`Due ${dueDate}, ${policy.start}–${policy.end} IST. Within the station’s pickup schedule.`};
 }
-export function codStatusChecks(snapshot: CodStatusSnapshot | undefined, policy: PickupPolicy | null = null, now = new Date(), failed = false, collectionDate='', reconDueTime:string|null=null, maxAgeMinutes:number|null=15): Record<CodPart,CodCheck> {
+export function codStatusChecks(snapshot: CodStatusSnapshot | undefined, policy: PickupPolicy | null = null, now = new Date(), failed = false, collectionDate='', reconDueTime:string|null=null, maxAgeMinutes:number|null=15, remittanceTolerance:number|null=defaultRemittanceTolerance): Record<CodPart,CodCheck> {
   if (!snapshot) { const c:CodCheck = failed ? unknown('Refresh this station to retry.') : {tone:'unchecked',label:'Not checked',reason:'Waiting for the station check.'}; return {reconciliation:c,prepareDeposit:c,remittances:c}; }
   if (failed || snapshot.date !== codStatusToday(now) || !Number.isFinite(Date.parse(snapshot.fetchedAt)) || Date.parse(snapshot.fetchedAt)>now.getTime()+60000 || !maxAgeMinutes || now.getTime()-Date.parse(snapshot.fetchedAt)>maxAgeMinutes*60000) {
     const c=unknown('Previous check · refresh required');return {reconciliation:c,prepareDeposit:c,remittances:c};
@@ -72,7 +73,11 @@ export function codStatusChecks(snapshot: CodStatusSnapshot | undefined, policy:
   else {
     const open=m.rows.filter(isOpen), checks=open.map(row=>classifyRemittance(row,m.latestSubmitted,policy,now));
     const alerts=checks.filter(c=>c.tone==='attention'), waiting=checks.filter(c=>c.tone==='waiting');
-    if (alerts.length) remittances={tone:'attention',label:`${alerts.length} timing ${alerts.length===1?'issue':'issues'}`,reason:alerts[0].reason};
+    const amountChecks=codRemittanceRows(m).map(row=>remittanceAmountCheck(row,remittanceTolerance)).filter(c=>c!==null);
+    const differences=amountChecks.filter(c=>c.tone==='attention').sort((a,b)=>Math.abs(b.difference || 0)-Math.abs(a.difference || 0));
+    if (differences.length) remittances={tone:'attention',label:differences.length===1?differences[0].label:`${differences.length} remittance differences`,reason:`${differences[0].reason}${differences.length>1?` Plus ${differences.length-1} other submitted remittance(s) above tolerance.`:''}${alerts.length?` Also ${alerts.length} pickup timing issue(s).`:''}`};
+    else if (alerts.length) remittances={tone:'attention',label:`${alerts.length} timing ${alerts.length===1?'issue':'issues'}`,reason:alerts[0].reason};
+    else if (amountChecks.some(c=>c.tone==='unavailable')) remittances=unknown('Submitted remittance amounts or variance tolerance need verification. Open the details.');
     else if (!m.complete || open.length!==m.openCount || checks.some(c=>c.tone==='unavailable')) remittances=unknown('Some remittance records or pickup settings need verification.');
     else if (waiting.length) remittances={tone:'waiting',label:`${waiting.length} awaiting pickup`,reason:waiting.sort((a,b)=>(a.dueAt||0)-(b.dueAt||0))[0].reason};
     else if (open.length) remittances={tone:'clear',label:`${open.length} earlier open ${open.length===1?'record':'records'}`,reason:`${open.length} earlier open ${open.length===1?'record predates':'records predate'} the latest submission. View original records below.`};
@@ -85,8 +90,8 @@ export function codStatusChecks(snapshot: CodStatusSnapshot | undefined, policy:
   }
   return checks;
 }
-export function codStatusCategory(snapshot: CodStatusSnapshot | undefined, now = new Date(), policy: PickupPolicy | null = null, failed = false, collectionDate='', reconDueTime:string|null=null,maxAgeMinutes:number|null=15): CodTone {
-  const checks=Object.values(codStatusChecks(snapshot,policy,now,failed,collectionDate,reconDueTime,maxAgeMinutes));
+export function codStatusCategory(snapshot: CodStatusSnapshot | undefined, now = new Date(), policy: PickupPolicy | null = null, failed = false, collectionDate='', reconDueTime:string|null=null,maxAgeMinutes:number|null=15,remittanceTolerance:number|null=defaultRemittanceTolerance): CodTone {
+  const checks=Object.values(codStatusChecks(snapshot,policy,now,failed,collectionDate,reconDueTime,maxAgeMinutes,remittanceTolerance));
   return (['attention','unavailable','unchecked','waiting','active','clear'] as CodTone[]).find(t=>checks.some(c=>c.tone===t))!;
 }
 export type CodSelection = string | string[];
@@ -125,7 +130,7 @@ export function compareCodRows(a:CodStatusLocation,b:CodStatusLocation,snapshots
     if(sort==='checkedAt') return s && Number.isFinite(Date.parse(s.fetchedAt)) ? Date.parse(s.fetchedAt) : null;
     if(sort==='reconciliation') return s?.reconciliation.data ? reconciliationView(s.reconciliation.data,collectionDate,l.reconDueTime || null,now).amount : null;
     if(sort==='prepareDeposit') return s?.prepareDeposit.data?.expectedAmount ?? null;
-    return s ? ['attention','waiting','unavailable','unchecked','clear'].indexOf(codStatusChecks(s,l.pickup || null,now,false,collectionDate,l.reconDueTime || null,l.maxAgeMinutes ?? null).remittances.tone) : null;
+    return s ? ['attention','waiting','unavailable','unchecked','clear'].indexOf(codStatusChecks(s,l.pickup || null,now,false,collectionDate,l.reconDueTime || null,l.maxAgeMinutes ?? null,l.remittanceTolerance).remittances.tone) : null;
   };
   const av=value(a),bv=value(b);
   // Missing values stay last in either direction; station code is a stable tie-break.
