@@ -30,8 +30,15 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
  }
  if(b.action==='mapping.review-policy'){
   if(!d.canPolicy||typeof b.autoDelivery!=='boolean')throw new FleetReportError('Fleet Masters edit permission and a valid review policy are required.',403);
-  const result=await supabaseAdmin!.from('fleet_control_settings').update({assignment_auto_delivery:b.autoDelivery}).eq('company_id',company).select('company_id');
+  if(b.minimumDeliveries!==undefined&&(!Number.isInteger(b.minimumDeliveries)||b.minimumDeliveries<1||b.minimumDeliveries>10000))throw new FleetReportError('Minimum deliveries must be between 1 and 10,000.',400);
+  const result=await supabaseAdmin!.from('fleet_control_settings').update({assignment_auto_delivery:b.autoDelivery,...(b.minimumDeliveries!==undefined?{assignment_min_deliveries:b.minimumDeliveries}:{})}).eq('company_id',company).select('company_id');
   if(result.error||!result.data?.length)throw new FleetReportError('Could not save review policy.');return Response.json({ok:true});
+ }
+ if(b.action==='mapping.history-backfill'){
+  if(!d.canPolicy||(!auth.isMasterOwner&&!auth.hasAllLocationAccess))throw new FleetReportError('Fleet Masters edit permission and all-location access are required.',403);
+  const result=await supabaseAdmin!.rpc('fleet_backfill_da_history',{p_company:company,p_actor:auth.viewerUserId??auth.userId});
+  if(result.error)throw new FleetReportError('Historical defaults could not be applied. Retry.');
+  return Response.json({ok:true,backfilled:result.data});
  }
  if(b.action==='mapping.policy'){
   if(!d.canPolicy)throw new FleetReportError('Default DA settings are managed in Fleet Masters.',403);
