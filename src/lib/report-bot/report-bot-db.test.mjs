@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
 const COMPANY_A = "aaaaaaaa-0000-0000-0000-000000000001";
 const COMPANY_B = "bbbbbbbb-0000-0000-0000-000000000002";
 
@@ -14,8 +15,25 @@ async function setup() {
     create table public.stations (id uuid primary key, company_id uuid);
   `);
   await db.exec(migration);
+  await db.exec(geminiDefault);
   return db;
 }
+
+test("existing rows on the old untouched default move to free Gemini; deliberate choices stay", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec("create role anon; create role authenticated; create role service_role; create table public.stations (id uuid primary key, company_id uuid);");
+    await db.exec(migration);
+    await db.query("insert into public.report_bot_settings (company_id) values ($1)", [COMPANY_A]);
+    await db.query("insert into public.report_bot_settings (company_id, ai_provider, ai_model) values ($1, 'openai', 'gpt-4o-mini')", [COMPANY_B]);
+    await db.exec(geminiDefault);
+    const rows = (await db.query("select company_id, ai_provider, ai_model from public.report_bot_settings order by company_id")).rows;
+    assert.deepEqual(rows.map((row) => [row.ai_provider, row.ai_model]), [["gemini", "gemini-3.8-flash"], ["openai", "gpt-4o-mini"]]);
+    await assert.rejects(db.query("update public.report_bot_settings set ai_provider = 'deepmind'"), /check constraint/);
+  } finally {
+    await db.close();
+  }
+});
 
 async function seedGroup(db, companyId, jid) {
   const result = await db.query("insert into public.report_bot_groups (company_id, wa_group_id, is_enabled) values ($1, $2, true) returning id", [companyId, jid]);
@@ -33,7 +51,7 @@ test("migration applies, enforces shape and keeps tables away from browser roles
     await assert.rejects(db.query("insert into public.report_bot_settings (company_id, mode) values ($1, 'sometimes')", [COMPANY_A]), /check constraint/);
     await assert.rejects(db.query("insert into public.report_bot_settings (company_id, reply_delay_min_seconds, reply_delay_max_seconds) values ($1, 90, 20)", [COMPANY_A]), /check constraint/);
     const settings = await db.query("insert into public.report_bot_settings (company_id) values ($1) returning mode, ai_model, approval_mode", [COMPANY_A]);
-    assert.deepEqual(settings.rows[0], { mode: "off", ai_model: "claude-opus-5-5", approval_mode: "manual" }, "a new company starts switched off and on manual approval");
+    assert.deepEqual(settings.rows[0], { mode: "off", ai_model: "gemini-3.8-flash", approval_mode: "manual" }, "a new company starts switched off, on free Gemini and manual approval");
 
     const groupId = await seedGroup(db, COMPANY_A, "120363000000000001@g.us");
     await assert.rejects(seedGroup(db, COMPANY_A, "120363000000000001@g.us"), /duplicate key/);

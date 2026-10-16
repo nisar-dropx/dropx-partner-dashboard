@@ -1,6 +1,6 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import { analysisJsonSchema, parseAnalysis, type Analysis } from "@/lib/report-bot/logic";
+import { analysisJsonSchema, extractJsonText, parseAnalysis, type Analysis } from "@/lib/report-bot/logic";
 import type { ReportBotSettings } from "@/lib/report-bot/settings";
 
 /** retryable: try again later. blocked: nothing will work until settings change. */
@@ -140,9 +140,79 @@ async function analyseWithOpenAi(settings: ReportBotSettings, input: AnalysisInp
   }
 }
 
+const GEMINI_THINKING: Record<ReportBotSettings["ai_effort"], string> = { low: "low", medium: "medium", high: "high" };
+
+/**
+ * Google Gemini (free tier on Flash models). JSON mode keeps the reply parseable;
+ * the schema is also given in the prompt and every field is validated afterwards,
+ * so a model that ignores part of it can never put bad data in the database.
+ */
+async function analyseWithGemini(settings: ReportBotSettings, input: AnalysisInput): Promise<unknown> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) throw new AiError("GEMINI_API_KEY is not set in the deployment environment.", false, true);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+  const body = (withThinking: boolean) => JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{
+      role: "user",
+      parts: [
+        { inlineData: { mimeType: input.mime, data: base64(input.image) } },
+        { text: `Check this image. Context:\n${contextText(input, settings.feedback_language)}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(analysisJsonSchema())}` }
+      ]
+    }],
+    generationConfig: {
+      // Temperature stays at the model default: Gemini 3 models can loop when it is lowered.
+      responseMimeType: "application/json",
+      ...(withThinking ? { thinkingConfig: { thinkingLevel: GEMINI_THINKING[settings.ai_effort] } } : {})
+    }
+  });
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.ai_model)}:generateContent`;
+  try {
+    const call = (withThinking: boolean) => fetch(url, {
+      method: "POST",
+      headers: { "x-goog-api-key": apiKey, "content-type": "application/json" },
+      signal: controller.signal,
+      body: body(withThinking)
+    });
+    let response = await call(true);
+    let payload = await response.json().catch(() => ({}));
+    // Older models reject the thinking level; one plain retry keeps any Gemini model usable.
+    if (response.status === 400 && /thinking/i.test(String(payload?.error?.message ?? ""))) {
+      response = await call(false);
+      payload = await response.json().catch(() => ({}));
+    }
+    const apiMessage = String(payload?.error?.message ?? "");
+    if (response.status === 429) throw new AiError("Free AI quota reached for now. It will be retried automatically.", true);
+    if (response.status === 401 || response.status === 403 || /api key/i.test(apiMessage)) throw new AiError("The Gemini API key was rejected. Check GEMINI_API_KEY.", false, true);
+    if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found. Check the model in Report Bot settings.`, false, true);
+    if (response.status === 400) throw new AiError(`The AI request was rejected: ${apiMessage || "bad request"}`, false);
+    if (!response.ok) throw new AiError(`AI service error (${response.status}). It will be retried.`, true);
+    if (payload?.promptFeedback?.blockReason) throw new AiError("The AI declined to review this image. Review it manually.", false);
+    const candidate = payload?.candidates?.[0];
+    if (candidate?.finishReason === "MAX_TOKENS") throw new AiError("The AI response was cut off. It will be retried.", true);
+    if (["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "IMAGE_SAFETY", "RECITATION"].includes(candidate?.finishReason)) {
+      throw new AiError("The AI declined to review this image. Review it manually.", false);
+    }
+    const text = (candidate?.content?.parts ?? [])
+      .filter((part: { text?: string; thought?: boolean }) => typeof part.text === "string" && !part.thought)
+      .map((part: { text: string }) => part.text)
+      .join("");
+    if (!text.trim()) throw new AiError("The AI returned no result.", true);
+    return extractJsonText(text);
+  } catch (error) {
+    if (error instanceof AiError) throw error;
+    throw new AiError("AI service is unreachable. It will be retried.", true);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function analyseReportImage(settings: ReportBotSettings, input: AnalysisInput): Promise<Analysis> {
   if (!input.candidates.length) throw new AiError("No report type is scheduled for this group.", false);
-  const raw = settings.ai_provider === "openai" ? await analyseWithOpenAi(settings, input) : await analyseWithAnthropic(settings, input);
+  const raw = settings.ai_provider === "gemini"
+    ? await analyseWithGemini(settings, input)
+    : settings.ai_provider === "openai" ? await analyseWithOpenAi(settings, input) : await analyseWithAnthropic(settings, input);
   try {
     return parseAnalysis(raw, input.candidates.map((candidate) => candidate.id));
   } catch (error) {

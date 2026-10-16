@@ -4,6 +4,7 @@ import {
   composeFeedback,
   decideDelivery,
   dueReminderSteps,
+  extractJsonText,
   isGroupJid,
   localClock,
   normalizeDays,
@@ -100,6 +101,13 @@ test("feedback message uses the configured layout and length limit", () => {
   assert.ok(text.startsWith("*EOD* · Ravi\nFIX\nDate"));
   assert.ok(text.length <= 40 && text.endsWith("…"));
   assert.equal(truncateText("short", 10), "short");
+});
+
+test("JSON is recovered from fenced or chatty model replies", () => {
+  assert.equal(extractJsonText('{"a":1}'), '{"a":1}');
+  assert.equal(extractJsonText('```json\n{"a":1}\n```'), '{"a":1}');
+  assert.equal(extractJsonText('Here you go: {"a":{"b":2}} hope it helps'), '{"a":{"b":2}}');
+  assert.equal(extractJsonText("no json"), "no json", "unusable text is passed through so validation rejects it");
 });
 
 test("small helpers", () => {

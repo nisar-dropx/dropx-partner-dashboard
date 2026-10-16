@@ -41,7 +41,9 @@ const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const SENT_FILE = path.join(DATA_DIR, "sent-refs.json");
 const MEDIA_TTL_HOURS = Math.max(Number(process.env.MEDIA_TTL_HOURS || 48), 1);
 const MAX_MEDIA_BYTES = Math.max(Number(process.env.MAX_MEDIA_BYTES || 12 * 1024 * 1024), 1024 * 1024);
-const DEVICE_NAME = String(process.env.DEVICE_NAME || "DropX Report Bot").slice(0, 40);
+// Matches the portal's cut-off for accepting a message as a new submission.
+const MAX_MESSAGE_AGE_SECONDS = 6 * 60 * 60;
+const DEVICE_NAME =String(process.env.DEVICE_NAME || "DropX Report Bot").slice(0, 40);
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 const baileysLogger = logger.child({ module: "baileys" }, { level: process.env.BAILEYS_LOG_LEVEL || "warn" });
 
@@ -161,6 +163,9 @@ async function forwardMessage(msg) {
   const messageId = msg.key.id;
   if (!messageId || botMessageIds.has(messageId)) return;
   if (msg.key.fromMe && !config.include_own_messages) return;
+  // History replayed after a re-link is not a fresh report; the portal would drop it
+  // anyway, so don't spend bandwidth downloading its images.
+  if (Date.now() / 1000 - messageSeconds(msg.messageTimestamp) > MAX_MESSAGE_AGE_SECONDS) return;
   messageCache.set(messageId, msg);
   const content = normalizeMessageContent(msg.message);
   const media = classifyContent(content);
@@ -367,7 +372,8 @@ async function handle(req, res) {
   if (req.method === "POST" && url.pathname === "/session/logout") {
     session.manualStop = true;
     const sock = session.sock;
-    if (sock && session.state === "open") await sock.logout().catch(() => {});
+    // Try even while reconnecting, so the phone's Linked devices list is cleaned up too.
+    if (sock) await Promise.race([sock.logout().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 5000))]);
     closeSocket();
     await wipeSession();
     setState("logged_out", null);

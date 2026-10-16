@@ -97,7 +97,7 @@ export async function saveBotSettings(form: FormData) {
     const timezone = requiredText(form, "timezone", "Time zone", 64);
     if (!isValidTimeZone(timezone)) throw new Error(`"${timezone}" is not a valid time zone (example: Asia/Kolkata).`);
     const provider = field(form, "ai_provider");
-    if (!["anthropic", "openai"].includes(provider)) throw new Error("Choose an AI provider.");
+    if (!["gemini", "anthropic", "openai"].includes(provider)) throw new Error("Choose an AI provider.");
     const model = requiredText(form, "ai_model", "AI model", 100);
     if (!/^[A-Za-z0-9._:-]+$/.test(model)) throw new Error("AI model may only contain letters, numbers, dot, dash, colon and underscore.");
     const effort = field(form, "ai_effort");

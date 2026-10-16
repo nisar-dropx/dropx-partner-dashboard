@@ -151,6 +151,17 @@ export function analysisJsonSchema() {
   };
 }
 
+/** Models without a strict JSON mode sometimes wrap the object in ``` fences or a sentence. */
+export function extractJsonText(text: string) {
+  const trimmed = String(text ?? "").trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
+  const body = fenced ? fenced[1].trim() : trimmed;
+  if (body.startsWith("{")) return body;
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  return start >= 0 && end > start ? body.slice(start, end + 1) : body;
+}
+
 /** Validates model output; never trusts it. Throws when it cannot be used safely. */
 export function parseAnalysis(raw: unknown, candidateIds: string[]): Analysis {
   const value = typeof raw === "string" ? JSON.parse(raw) : raw;

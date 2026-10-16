@@ -10,7 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
 import { formatClock, localClock, type AnalysisCheck } from "@/lib/report-bot/logic";
-import { aiKeyConfigured, aiKeyName, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
+import { aiKeyConfigured, aiKeyName, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import {
   approveFeedback,
   connectWhatsApp,
@@ -104,7 +104,7 @@ function ModeBanner({ settings }: { settings: ReportBotSettings }) {
       <div className="metric-card"><span>Mode</span><strong>{settings.mode === "live" ? "Live" : settings.mode === "listen" ? "Listen only" : "Off"}</strong><small>{settings.mode === "live" ? "Reminders and feedback are sent" : settings.mode === "listen" ? "Analyses images, sends nothing" : "Not listening"}</small></div>
       <div className="metric-card"><span>WhatsApp</span><strong>{settings.connection_state === "open" ? "Connected" : settings.connection_state === "unknown" ? "Not set up" : (STATUS_LABELS[settings.connection_state] ?? settings.connection_state)}</strong><small>{settings.connected_number ? `+${settings.connected_number}` : "No number linked"}</small></div>
       <div className="metric-card"><span>Worker</span><strong>{workerFresh ? "Online" : settings.last_worker_seen_at ? "Not responding" : "Not connected"}</strong><small>{settings.last_worker_seen_at ? `Last seen ${when(settings.last_worker_seen_at, settings.timezone)}` : "Set up under Connection"}</small></div>
-      <div className="metric-card"><span>AI</span><strong>{aiReady ? "Ready" : "Key missing"}</strong><small>{aiReady ? `${settings.ai_provider === "anthropic" ? "Claude" : "OpenAI"} · ${settings.ai_model}` : `Add ${aiKeyName(settings.ai_provider)} in Vercel`}</small></div>
+      <div className="metric-card"><span>AI</span><strong>{aiReady ? "Ready" : "Key missing"}</strong><small>{aiReady ? `${aiProviderLabel(settings.ai_provider)} · ${settings.ai_model}` : `Add ${aiKeyName(settings.ai_provider)} in Vercel`}</small></div>
     </section>
   );
 }
@@ -534,11 +534,18 @@ function SettingsTab({ settings, canEdit }: { settings: ReportBotSettings; canEd
             <div className="span-3 section-divider"><strong>AI</strong><span>The API key itself is a deployment secret ({aiKeyName(settings.ai_provider)}), never stored here.</span></div>
             <label>Provider
               <select className="field" name="ai_provider" defaultValue={settings.ai_provider}>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="openai">OpenAI</option>
+                <option value="gemini">Google Gemini (free tier)</option>
+                <option value="anthropic">Anthropic Claude (paid)</option>
+                <option value="openai">OpenAI (paid)</option>
               </select>
             </label>
-            <label>Model<input className="field" name="ai_model" defaultValue={settings.ai_model} required maxLength={100} /></label>
+            <label>Model<input className="field" name="ai_model" defaultValue={settings.ai_model} required maxLength={100} list="report-bot-models" /></label>
+            <datalist id="report-bot-models">
+              <option value="gemini-3.8-flash">Gemini, free tier, best quality</option>
+              <option value="gemini-3.5-flash-lite">Gemini, free tier, faster with a higher daily limit</option>
+              <option value="claude-opus-5-5">Claude, paid</option>
+            </datalist>
+            <p className="subtle span-3">Gemini&apos;s free tier costs nothing but has daily request limits (images over the limit are retried later), and Google may use free-tier images to improve its products. Use a paid provider if report images must stay private.</p>
             <label>Effort
               <select className="field" name="ai_effort" defaultValue={settings.ai_effort}>
                 <option value="low">Low (faster, cheaper)</option>

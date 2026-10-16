@@ -11,7 +11,7 @@ export type ReportBotSettings = {
   worker_token: string | null;
   worker_token_hash: string | null;
   worker_token_created_at: string | null;
-  ai_provider: "anthropic" | "openai";
+  ai_provider: "gemini" | "anthropic" | "openai";
   ai_model: string;
   ai_effort: "low" | "medium" | "high";
   approval_mode: "manual" | "auto";
@@ -83,10 +83,20 @@ export async function settingsForWorkerRequest(request: Request): Promise<Report
   return normalizeSettings(result.data);
 }
 
-export function aiKeyConfigured(provider: ReportBotSettings["ai_provider"]) {
-  return provider === "anthropic" ? Boolean(process.env.ANTHROPIC_API_KEY?.trim()) : Boolean(process.env.OPENAI_API_KEY?.trim());
-}
+const AI_KEY_ENV: Record<ReportBotSettings["ai_provider"], string> = {
+  gemini: "GEMINI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY"
+};
 
 export function aiKeyName(provider: ReportBotSettings["ai_provider"]) {
-  return provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+  return AI_KEY_ENV[provider] ?? "GEMINI_API_KEY";
+}
+
+export function aiKeyConfigured(provider: ReportBotSettings["ai_provider"]) {
+  return Boolean(process.env[aiKeyName(provider)]?.trim());
+}
+
+export function aiProviderLabel(provider: ReportBotSettings["ai_provider"]) {
+  return provider === "gemini" ? "Gemini" : provider === "anthropic" ? "Claude" : "OpenAI";
 }
