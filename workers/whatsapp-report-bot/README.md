@@ -11,8 +11,9 @@ and be moved without losing anything. Vercel can't host it because it needs one 
 ## Where it is deployed from
 
 Hosts deploy the private repository **DROPX-LOGISTICS/Report-bot-worker**, which holds a copy of this folder plus
-a root-level `render.yaml`. This folder stays the source of truth: after changing the worker here, copy the files
-to that repository and push; Render redeploys automatically.
+a root-level `render.yaml`. This folder stays the source of truth: after changing the worker here, commit, then run
+`pnpm sync:report-bot-worker` from the dashboard repository root. It tests the worker, mirrors the tracked files
+into Report-bot-worker and pushes; Render redeploys automatically.
 
 ## Deploy on Render — free (recommended)
 
