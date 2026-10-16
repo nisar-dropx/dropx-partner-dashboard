@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { readFile } from "node:fs/promises";
 
@@ -539,8 +540,247 @@ await expectDatabaseError(
   /choose whether to transfer paid payment details or keep them/i
 );
 
+// Reproduce the final settlement-aware station candidate, rather than merely
+// checking the payment-history view. A manually finalized short payment is a
+// terminal instruction whose actual settlement must drive the worksheet's
+// Paid / Partially Paid status and remaining bank-file balance.
+await db.exec(`
+  alter table public.workforce_payout_payment_items
+    add column settled_amount numeric(14,2),
+    add column ifsc_snapshot text,
+    add column response_debit_account_no text,
+    add column response_value_date date,
+    add column response_credit_account_no text,
+    add column response_ifsc text,
+    add column finalization_remarks text;
+  update public.workforce_payout_payment_items
+  set settled_amount = instruction_amount
+  where status = 'paid';
+
+  alter table public.stations add column station_code text;
+  alter table public.workforce_payout_mapping_relocks
+    add column affected_workforce_ids uuid[],
+    add column active_locations jsonb,
+    add column relocked_at timestamptz;
+  alter table public.workforce_payout_publications
+    add column review_submission_id uuid,
+    add column publication_kind text,
+    add column revision integer,
+    add column mapping_relock_id uuid,
+    add column snapshot_hash text,
+    add column published_at timestamptz;
+
+  create table public.workforce_payout_publication_refresh_jobs(
+    company_id uuid, workforce_id uuid, station_id uuid,
+    period_start date, period_end date, status text
+  );
+  create table public.workforce_payout_review_submissions(
+    id uuid primary key, company_id uuid, subject_type text, subject_id uuid,
+    location_id uuid, period_start date, period_end date, status text
+  );
+  create table public.connect_profile_verifications(
+    company_id uuid, profile_type text, account_id uuid, kind text, verified boolean
+  );
+  create table public.workforce_payout_payment_hold_events(
+    id uuid primary key, company_id uuid, workforce_id uuid,
+    period_start date, period_end date, action text, created_at timestamptz
+  );
+  create function public.workforce_payout_mapping_revision_state(uuid,uuid)
+  returns table(period_start date,period_end date,revision_pending boolean)
+  language sql stable as $$
+    select null::date,null::date,false where false
+  $$;
+  create function public.workforce_payout_bank_account_canonical(text)
+  returns text language sql immutable as $$
+    select regexp_replace(upper(btrim(coalesce($1,''))), '[^A-Z0-9]', '', 'g')
+  $$;
+  create function public.workforce_payout_bank_ifsc_canonical(text)
+  returns text language sql immutable as $$
+    select regexp_replace(upper(btrim(coalesce($1,''))), '[^A-Z0-9]', '', 'g')
+  $$;
+`);
+
+const settlementSource = await readFile(
+  new URL("../supabase/migrations/20261013110000_payout_payment_settlement_evidence_manual_finalize.sql", import.meta.url),
+  "utf8"
+);
+const settlementViewStart = settlementSource.indexOf(
+  "create or replace view public.workforce_payout_effective_paid_allocations"
+);
+const settlementViewEnd = settlementSource.indexOf(
+  "-- Every live calculator and transfer flow must use actual settled value",
+  settlementViewStart
+);
+if (settlementViewStart < 0 || settlementViewEnd <= settlementViewStart) {
+  throw new Error("settlement-aware effective paid-allocation view marker missing");
+}
+await db.exec(settlementSource.slice(settlementViewStart, settlementViewEnd));
+
+// The production settlement migration patches five existing Workforce
+// functions plus the Helper calculator. Supply the two unrelated calculator
+// stubs absent from this focused fixture so its real fail-closed patch can run.
+const paidTotalPatchTarget = (name, args) => `
+  create or replace function public.${name}(${args})
+  returns numeric language plpgsql as $function$
+  declare v_paid numeric;
+  begin
+    select sum(item.instruction_amount) filter (where item.status = 'paid')
+    into v_paid from public.workforce_payout_payment_items item;
+    return coalesce(v_paid, 0);
+  end
+  $function$;
+`;
+await db.exec([
+  paidTotalPatchTarget("workforce_payout_payment_candidates", "uuid,date,date,uuid[]"),
+  paidTotalPatchTarget("workforce_preview_payout_payment_rows", "uuid,date,date,jsonb"),
+  `create or replace function public.helper_payout_payment_row_candidates(uuid,date,date,jsonb)
+   returns numeric language plpgsql as $function$
+   declare v_paid numeric;
+   begin
+     select sum(item.instruction_amount) filter (where item.status = 'paid')
+     into v_paid from public.workforce_payout_payment_items item;
+     return coalesce(v_paid, 0);
+   end
+   $function$;`
+].join("\n"));
+const settlementPatchStart = settlementSource.indexOf("do $patch_paid_totals$");
+const settlementPatchEnd = settlementSource.indexOf(
+  "$patch_paid_totals$;",
+  settlementPatchStart
+) + "$patch_paid_totals$;".length;
+if (settlementPatchStart < 0 || settlementPatchEnd <= settlementPatchStart) {
+  throw new Error("settlement paid-total patch marker missing");
+}
+await db.exec(settlementSource.slice(settlementPatchStart, settlementPatchEnd));
+
+const stationBalanceMigration = await readFile(
+  new URL("../supabase/migrations/20261016213000_workforce_partial_settlement_station_balance.sql", import.meta.url),
+  "utf8"
+);
+await db.exec(stationBalanceMigration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""));
+await db.exec(stationBalanceMigration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""));
+
+const partialWorkforce = "10000000-0000-4000-8000-000000000070";
+const partialStation = "10000000-0000-4000-8000-000000000071";
+const partialReview = "10000000-0000-4000-8000-000000000072";
+const partialPublication = "10000000-0000-4000-8000-000000000073";
+const partialItem = "10000000-0000-4000-8000-000000000074";
+const partialAllocation = "10000000-0000-4000-8000-000000000075";
+const processingItem = "10000000-0000-4000-8000-000000000076";
+const processingAllocation = "10000000-0000-4000-8000-000000000077";
+await db.exec(`
+  insert into public.workforce(
+    id,company_id,dropx_id,full_name,bank_account_no,ifsc_code,
+    is_active,lifecycle_status,onboarding_status
+  ) values ('${partialWorkforce}','10000000-0000-4000-8000-000000000002','GDRD80073',
+    'KALIMELI SIVA PRASAD','44050747206','SBIN0002811',true,'active','active');
+  insert into public.stations(id,company_id,station_code)
+  values ('${partialStation}','10000000-0000-4000-8000-000000000002','GDRD');
+  insert into public.workforce_payout_review_submissions(
+    id,company_id,subject_type,subject_id,location_id,period_start,period_end,status
+  ) values ('${partialReview}','10000000-0000-4000-8000-000000000002','workforce',
+    '${partialWorkforce}','${partialStation}',
+    '2026-09-01','2026-09-30','approved');
+  insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,period_start,period_end,snapshot,
+    review_submission_id,publication_kind,revision,mapping_relock_id,
+    snapshot_hash,published_at
+  ) values ('${partialPublication}','10000000-0000-4000-8000-000000000002',
+    '${partialWorkforce}','${partialStation}',
+    '2026-09-01','2026-09-30',jsonb_build_object(
+      'schema_version','2','source','workforce_payout_worksheet',
+      'worksheet',jsonb_build_object('payment_eligible',true),
+      'item',jsonb_build_object(
+        'workforce_id','${partialWorkforce}','station_code','GDRD','net_amount','47945.70'
+      )
+    ),'${partialReview}','worksheet',1,null,repeat('a',64),clock_timestamp());
+  insert into public.workforce_payout_payment_items(
+    id,company_id,batch_id,workforce_id,period_start,period_end,payment_version,
+    reference_no,instruction_amount,settled_amount,status,utr_cin,
+    bank_account_no_snapshot,ifsc_snapshot,location_id_snapshot,
+    location_code_snapshot,created_at,finalized_at
+  ) values ('${partialItem}','10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000009','${partialWorkforce}',
+    '2026-09-01','2026-09-30',1,
+    'WFGDRD80073092026V1',47945.70,42995.70,'paid','FBPT262858291630',
+    '44050747206','SBIN0002811','${partialStation}','GDRD',clock_timestamp(),clock_timestamp());
+  insert into public.workforce_payout_payment_allocations(
+    id,company_id,payment_item_id,publication_id,station_id,instruction_amount_snapshot
+  ) values ('${partialAllocation}','10000000-0000-4000-8000-000000000002',
+    '${partialItem}','${partialPublication}','${partialStation}',47945.70);
+  insert into public.connect_profile_verifications(
+    company_id,profile_type,account_id,kind,verified
+  ) values ('10000000-0000-4000-8000-000000000002','workforce',
+    '${partialWorkforce}','pan_aadhaar',true);
+`);
+
+const previewStationPayment = async () => {
+  const result = await db.query(`
+    select * from public.workforce_payout_payment_row_candidates(
+      '10000000-0000-4000-8000-000000000002','2026-09-01','2026-09-30',
+      jsonb_build_array(jsonb_build_object(
+        'workforce_id',$1::text,'station_id',$2::text
+      ))
+    )
+  `, [partialWorkforce, partialStation]);
+  assert.equal(result.rows.length, 1);
+  return result.rows[0];
+};
+
+const partialStationPreview = await previewStationPayment();
+assert.equal(Number(partialStationPreview.current_target_amount), 47945.70);
+assert.equal(Number(partialStationPreview.paid_amount), 42995.70);
+assert.equal(Number(partialStationPreview.balance_payable), 4950);
+assert.equal(Number(partialStationPreview.available_to_pay), 4950);
+assert.equal(partialStationPreview.payment_status, "Partially Paid");
+assert.equal(partialStationPreview.eligible, true);
+assert.equal(partialStationPreview.eligibility_code, "eligible");
+
+// A second instruction reserves only the unpaid balance. The finalized partial
+// amount remains the paid total and Payment Processing keeps precedence.
+await db.exec(`
+  insert into public.workforce_payout_payment_items(
+    id,company_id,batch_id,workforce_id,period_start,period_end,payment_version,
+    reference_no,instruction_amount,status,bank_account_no_snapshot,ifsc_snapshot,
+    location_id_snapshot,location_code_snapshot,created_at
+  ) values ('${processingItem}','10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000009','${partialWorkforce}',
+    '2026-09-01','2026-09-30',2,
+    'WFGDRD80073092026V2',4950,'processing','44050747206','SBIN0002811','${partialStation}',
+    'GDRD',clock_timestamp());
+  insert into public.workforce_payout_payment_allocations(
+    id,company_id,payment_item_id,publication_id,station_id,instruction_amount_snapshot
+  ) values ('${processingAllocation}','10000000-0000-4000-8000-000000000002',
+    '${processingItem}','${partialPublication}','${partialStation}',4950);
+`);
+const processingStationPreview = await previewStationPayment();
+assert.equal(Number(processingStationPreview.paid_amount), 42995.70);
+assert.equal(Number(processingStationPreview.processing_amount), 4950);
+assert.equal(Number(processingStationPreview.balance_payable), 4950);
+assert.equal(Number(processingStationPreview.available_to_pay), 0);
+assert.equal(processingStationPreview.payment_status, "Payment Processing");
+assert.equal(processingStationPreview.eligibility_code, "payment_processing");
+
+// Finalizing the remainder as V2 makes the cumulative settlement exact. The
+// original V1 remains immutable and partial, while the main row becomes Paid.
+await db.query(`
+  update public.workforce_payout_payment_items
+  set status='paid', settled_amount=instruction_amount,
+    finalized_at=clock_timestamp(), utr_cin='UTR-REMAINDER'
+  where id=$1
+`, [processingItem]);
+const fullyPaidStationPreview = await previewStationPayment();
+assert.equal(Number(fullyPaidStationPreview.paid_amount), 47945.70);
+assert.equal(Number(fullyPaidStationPreview.balance_payable), 0);
+assert.equal(Number(fullyPaidStationPreview.available_to_pay), 0);
+assert.equal(Number(fullyPaidStationPreview.history_count), 2);
+assert.equal(fullyPaidStationPreview.payment_status, "Paid");
+assert.equal(fullyPaidStationPreview.eligible, false);
+assert.equal(fullyPaidStationPreview.eligibility_code, "no_positive_balance");
+
 console.log(
   "verified paid-remap migration, stale fingerprint guard, monthly boundary guard, "
-  + "Keep/replay, transfer chain, immutable bank evidence and cross-station relock guard"
+  + "Keep/replay, transfer chain, immutable bank evidence, cross-station relock guard, "
+  + "and station partial-settlement balance/status"
 );
 await db.close();
