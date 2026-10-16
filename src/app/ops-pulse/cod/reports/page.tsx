@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
+import { CodCashPosition } from "@/components/cod-cash-position";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { requirePagePermission } from "@/lib/authorization";
@@ -370,7 +371,9 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
   const verified = submissionsResult.rows.filter((row) => row.validation_status === "Matched").length;
   const issues = submissionsResult.rows.filter((row) => ["Short", "Excess", "Rejected"].includes(row.validation_status)).length;
   const erCollectedTotal = finalClosureRows.reduce((sum, row) => sum + amountValue(row.collected_cod), 0);
-  const varianceTotal = deposited - erCollectedTotal;
+  const verifiedAmount = submissionsResult.rows.filter((row) => row.validation_status === "Matched").reduce((sum, row) => sum + amountValue(row.deposited_amount), 0);
+  const issueAmount = submissionsResult.rows.filter((row) => ["Short", "Excess", "Rejected"].includes(row.validation_status)).reduce((sum, row) => sum + Math.abs(amountValue(row.deposited_amount) - amountValue(row.validated_amount)), 0);
+  const pendingAmount = pendingClosures.reduce((sum, closure) => sum + amountValue(remittanceExpectedFromClosure(closure) ?? closure.collected_cod), 0);
 
   return (
     <>
@@ -435,8 +438,10 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
             </div>
           </section>
 
+          <CodCashPosition data={{ collected: erCollectedTotal, pendingAmount, pendingDays: pendingClosures.length, deposited, verifiedAmount, issueAmount, issueCount: issues, notStarted: notStartedCount, focusDateLabel: formatDate(focusDate) }} />
+
           {selectedClient !== "flipkart" ? (
-            <section className="panel">
+            <section className="panel" id="station-status">
               <div className="panel-head">
                 <div>
                   <h2>Station reconciliation status — {formatDate(focusDate)}</h2>
@@ -475,7 +480,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
           ) : null}
 
           {selectedClient !== "flipkart" ? (
-            <section className="panel">
+            <section className="panel" id="pending-cod">
               <div className="panel-head">
                 <div>
                   <h2>Pending COD</h2>
@@ -520,15 +525,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
             </section>
           ) : null}
 
-          <section className="summary-grid">
-            <div className="metric-card"><span>Pending COD</span><strong>{pendingClosures.length}</strong><small>ER done, slip missing</small></div>
-            <div className="metric-card"><span>ER closed days</span><strong>{finalClosureRows.length}</strong><small>Final submitted</small></div>
-            <div className="metric-card"><span>Submissions</span><strong>{submissionsResult.rows.length}</strong><small>Deposit slips filed</small></div>
-            <div className="metric-card"><span>Deposited</span><strong>{formatAmount(deposited)}</strong><small>Station submitted value</small></div>
-            <div className="metric-card"><span>Verified</span><strong>{verified}</strong><small>Matched / portal verified</small></div>
-            <div className="metric-card"><span>Issues</span><strong>{issues}</strong><small>Short / Excess / Rejected</small></div>
-            <div className="metric-card"><span>ER vs deposited</span><strong>{formatAmount(varianceTotal)}</strong><small>Deposited − ER collected</small></div>
-          </section>
+
 
           <section className="panel">
             <div className="panel-head">
