@@ -41,16 +41,21 @@ test("time lists are validated, padded, sorted and de-duplicated", () => {
 
 test("reminders: due slots send once, stale slots are skipped, future slots wait", () => {
   const times = ["09:00", "09:30", "10:00"];
-  assert.deepEqual(dueReminderSteps(times, 0, 8 * 60 + 59, 30), []);
-  assert.deepEqual(dueReminderSteps(times, 0, 9 * 60 + 5, 30), [{ index: 0, action: "send" }]);
-  // Already handled slot 0: nothing new until 09:30.
-  assert.deepEqual(dueReminderSteps(times, 1, 9 * 60 + 20, 30), []);
+  assert.deepEqual(dueReminderSteps(times, null, 8 * 60 + 59, 30), []);
+  assert.deepEqual(dueReminderSteps(times, null, 9 * 60 + 5, 30), [{ minute: 540, action: "send" }]);
+  // 09:00 already handled: nothing new until 09:30.
+  assert.deepEqual(dueReminderSteps(times, 540, 9 * 60 + 20, 30), []);
   // Worker was down 09:00-09:45: only the latest fresh reminder goes out, never a burst.
-  assert.deepEqual(dueReminderSteps(times, 0, 9 * 60 + 45, 30), [{ index: 0, action: "skip_stale" }, { index: 1, action: "send" }]);
+  assert.deepEqual(dueReminderSteps(times, null, 9 * 60 + 45, 30), [{ minute: 540, action: "skip_stale" }, { minute: 570, action: "send" }]);
   // Bot switched on at 15:00: every earlier slot is stale, nothing is sent.
-  assert.deepEqual(dueReminderSteps(times, 0, 15 * 60, 30).map((step) => step.action), ["skip_stale", "skip_stale", "skip_stale"]);
-  // Unsorted input and garbage entries do not break ordering.
-  assert.deepEqual(dueReminderSteps(["10:00", "bad", "09:00"], 0, 9 * 60, 30), [{ index: 0, action: "send" }]);
+  assert.deepEqual(dueReminderSteps(times, null, 15 * 60, 30).map((step) => step.action), ["skip_stale", "skip_stale", "skip_stale"]);
+  // Unsorted input, duplicates and garbage entries do not break ordering.
+  assert.deepEqual(dueReminderSteps(["10:00", "bad", "09:00", "09:00"], null, 9 * 60, 30), [{ minute: 540, action: "send" }]);
+  // The reported bug: 09:00 and 09:45 handled at 13:00, then 01:12, 01:14, 13:15 and 15:32 are
+  // added. Earlier slots must not shift onto later ones; 15:32 still fires at 15:32.
+  const edited = ["01:12", "01:14", "09:00", "09:45", "13:15", "15:32"];
+  assert.deepEqual(dueReminderSteps(edited, 585, 13 * 60 + 20, 30), [{ minute: 795, action: "send" }], "13:15 fires; the added early times are in the past and skipped");
+  assert.deepEqual(dueReminderSteps(edited, 795, 15 * 60 + 33, 30), [{ minute: 932, action: "send" }]);
 });
 
 test("templates fill known placeholders and keep unknown ones visible", () => {

@@ -37,6 +37,7 @@ import {
   saveReportType,
   saveSchedule,
   sendAllWaiting,
+  sendTestReminder,
   setAutoReply,
   setRequestStatus,
   updateGroup
@@ -270,7 +271,7 @@ function SubmissionTable({ rows, lookup, timeZone, title, emptyText }: { rows: S
                     <td className={s.cellTitle}>{lookup.groupName.get(row.group_id) ?? "—"}</td>
                     <td>{sender(row)}</td>
                     <td>{row.report_type_id ? lookup.reportName.get(row.report_type_id) ?? "—" : "—"}</td>
-                    <td><StatusBadge value={row.status} />{row.status_reason ? <span className={s.cellSub}>{row.status_reason}</span> : null}</td>
+                    <td><StatusBadge value={row.status} />{row.status_reason ? <span className={s.cellSub}>{row.status === "queued" ? `Retrying automatically: ${row.status_reason}` : row.status_reason}</span> : null}</td>
                     <td>{verdict ? <Badge tone={verdict[1]}>{verdict[0]}</Badge> : "—"}</td>
                     <td>{row.media_ref ? <ViewImageButton submissionId={row.id} title={`Photo from ${sender(row)}`} className={`${s.button} ${s.small} ${s.ghost}`}>View</ViewImageButton> : null}</td>
                   </tr>
@@ -600,7 +601,7 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
           ) : null}
         </div>
       </Card>
-      <Card title="Schedules" icon={<CalendarCheck size={18} aria-hidden />} description="When each group must post each report, and when the bot reminds them. Times use the time zone in Settings.">
+      <Card title="Schedules" icon={<CalendarCheck size={18} aria-hidden />} description="When each group must post each report, and when the bot reminds them. Times use the time zone in Settings. Reminders stop for the day as soon as that day's report photo arrives; use Send test reminder to try one any time.">
         <div className={s.itemList}>
           {schedules.map((schedule) => (
             <details key={schedule.id} className={s.item}>
@@ -616,7 +617,16 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
                 </div>
                 <ChevronRight size={18} className={s.chevron} aria-hidden />
               </summary>
-              {canEdit ? <div className={s.itemBody}><ScheduleForm schedule={schedule} groups={groups} reportTypes={reportTypes} /></div> : null}
+              {canEdit ? (
+                <div className={s.itemBody}>
+                  <form action={sendTestReminder} className={s.formActions} style={{ justifyContent: "flex-start", marginBottom: 14 }}>
+                    <input type="hidden" name="id" value={schedule.id} />
+                    <ActionButton className={`${s.button} ${s.small}`}><Send size={14} aria-hidden />Send test reminder</ActionButton>
+                    <span className={s.hint}>Posts the first reminder in the group now, even if today&apos;s report is already in.</span>
+                  </form>
+                  <ScheduleForm schedule={schedule} groups={groups} reportTypes={reportTypes} />
+                </div>
+              ) : null}
             </details>
           ))}
           {!schedules.length ? <Empty icon={<CalendarCheck size={28} aria-hidden />} title="No schedules yet">A schedule ties a report to a group and sets its reminder times.</Empty> : null}

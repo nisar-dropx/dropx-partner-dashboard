@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const reminderSlots = await readFile(new URL("../../../supabase/migrations/20261016180000_report_bot_reminder_slots.sql", import.meta.url), "utf8");
 const fasterReplies = await readFile(new URL("../../../supabase/migrations/20261016160000_report_bot_faster_replies.sql", import.meta.url), "utf8");
 const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");
 const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
@@ -22,8 +23,24 @@ async function setup() {
   await db.exec(noImageStorage);
   await db.exec(statelessWorker);
   await db.exec(fasterReplies);
+  await db.exec(reminderSlots);
   return db;
 }
+
+test("requests remember the last reminder slot by time of day", async () => {
+  const db = await setup();
+  try {
+    const groupId = await seedGroup(db, COMPANY_A, "120363000000000001@g.us");
+    const type = await db.query("insert into public.report_bot_report_types (company_id, name, rules) values ($1, 'EOD', '{a}') returning id", [COMPANY_A]);
+    const schedule = await db.query("insert into public.report_bot_schedules (company_id, group_id, report_type_id, due_time) values ($1, $2, $3, '10:00') returning id", [COMPANY_A, groupId, type.rows[0].id]);
+    const request = await db.query("insert into public.report_bot_requests (company_id, schedule_id, group_id, report_type_id, business_date) values ($1, $2, $3, $4, '2026-10-16') returning id, last_reminder_minute", [COMPANY_A, schedule.rows[0].id, groupId, type.rows[0].id]);
+    assert.equal(request.rows[0].last_reminder_minute, null, "a new day starts with no slot handled");
+    await db.query("update public.report_bot_requests set last_reminder_minute = 932 where id = $1", [request.rows[0].id]);
+    await assert.rejects(db.query("update public.report_bot_requests set last_reminder_minute = 1440 where id = $1", [request.rows[0].id]), /check constraint/);
+  } finally {
+    await db.close();
+  }
+});
 
 test("faster reply defaults apply to untouched rows only, and the reply layout gains @mention and checks", async () => {
   const db = new PGlite();

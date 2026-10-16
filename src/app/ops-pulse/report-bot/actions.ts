@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
-import { isValidTimeZone, normalizeDays, normalizeTimeList, parseClockTime } from "@/lib/report-bot/logic";
+import { displayDate, formatClock, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, renderTemplate } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
   generateWorkerToken,
@@ -404,6 +404,54 @@ export async function sendAllWaiting() {
       approved.push(row.id);
     }
     return { notice: approved.length ? await sendNow(settings, approved) : "Someone else already handled these." };
+  });
+}
+
+/**
+ * Posts a schedule's first reminder now, whatever today's status. Scheduled reminders stop
+ * once the day's report has arrived, so this is the way to try the wording and the link.
+ */
+export async function sendTestReminder(form: FormData) {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const settings = await loadReportBotSettings(companyId);
+    if (settings.mode !== "live") throw new Error("Switch the bot to Live in Report Bot setup to post messages.");
+    const schedule = check(await reportBotDb().from("report_bot_schedules")
+      .select("id,group_id,due_time,first_reminder_template, report:report_bot_report_types(name), group:report_bot_groups(group_name,is_enabled)")
+      .eq("company_id", companyId).eq("id", field(form, "id")).maybeSingle(), "Load schedule") as unknown as {
+        id: string; group_id: string; due_time: string; first_reminder_template: string;
+        report: { name: string } | null; group: { group_name: string | null; is_enabled: boolean } | null;
+      } | null;
+    if (!schedule) throw new Error("Schedule not found.");
+    await scopedGroup(authorization, companyId, schedule.group_id);
+    if (!schedule.group?.is_enabled) throw new Error("This group is not on the bot. Add it on the Groups tab first.");
+    const today = localClock(new Date(), settings.timezone).date;
+    const body = renderTemplate(schedule.first_reminder_template, {
+      group: schedule.group.group_name ?? "team",
+      report: schedule.report?.name ?? "report",
+      due_time: formatClock(schedule.due_time),
+      date: displayDate(today)
+    });
+    const now = new Date();
+    const dedupe = `test:${schedule.id}:${now.getTime()}`;
+    check(await reportBotDb().from("report_bot_outbox").insert({
+      company_id: companyId,
+      group_id: schedule.group_id,
+      kind: "reminder",
+      dedupe_key: dedupe,
+      body,
+      not_before: now.toISOString(),
+      stale_after: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+      created_by: authorization.userId
+    }), "Queue test reminder");
+    try {
+      await flushOutbox(settings, Date.now() + 45_000);
+    } catch {
+      // Reported below from the row's status.
+    }
+    const row = check(await reportBotDb().from("report_bot_outbox").select("status,status_reason").eq("company_id", companyId).eq("dedupe_key", dedupe).single(), "Check test reminder") as { status: string; status_reason: string | null };
+    if (row.status === "sent") return { notice: `Test reminder posted in ${schedule.group.group_name ?? "the group"}.` };
+    if (row.status === "failed") throw new Error(`The test reminder could not be posted: ${row.status_reason ?? "unknown error"}`);
+    return { notice: `Test reminder queued; it goes out within a minute.${row.status_reason ? ` (${row.status_reason})` : ""}` };
   });
 }
 

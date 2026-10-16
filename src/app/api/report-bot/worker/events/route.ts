@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { isGroupJid, truncateText } from "@/lib/report-bot/logic";
+import { processNow } from "@/lib/report-bot/pipeline";
 import { reportBotDb, settingsForWorkerRequest } from "@/lib/report-bot/settings";
 
 export const dynamic = "force-dynamic";
+// New photos are checked in the background right after this responds (see waitUntil below).
+export const maxDuration = 300;
 
 const MAX_EVENTS = 50;
 // WhatsApp replays history after a re-link; anything older is not a fresh submission.
@@ -32,6 +36,7 @@ export async function POST(request: Request) {
   const companyId = settings.company_id;
   const now = new Date().toISOString();
   const counts = { accepted: 0, ignored: 0 };
+  let newPhotos = 0;
 
   // Every worker call proves it is alive, even an empty heartbeat batch.
   await db.from("report_bot_settings").update({ last_worker_seen_at: now }).eq("company_id", companyId);
@@ -119,9 +124,16 @@ export async function POST(request: Request) {
       media_mime: text(media?.mime, 100),
       wa_message_record: typeof raw.message_record === "string" && raw.message_record.length <= 100_000 ? raw.message_record : null,
       media_size: Number.isInteger(media?.size) ? media!.size as number : null
-    }, { onConflict: "group_id,wa_message_id", ignoreDuplicates: true });
+    }, { onConflict: "group_id,wa_message_id", ignoreDuplicates: true }).select("id");
     if (inserted.error) return NextResponse.json({ error: "Could not save message" }, { status: 500 });
+    if (inserted.data?.length) newPhotos += 1;
     counts.accepted += 1;
+  }
+  // Start checking new photos now rather than on the next minute's cron. A redelivered
+  // photo (already stored) doesn't trigger anything.
+  if (newPhotos && settings.mode !== "off") {
+    const owner = settings;
+    waitUntil(processNow(owner, Date.now() + 270_000).catch((error) => console.error("[report-bot] immediate processing failed", error)));
   }
   return NextResponse.json({ ok: true, ...counts });
 }

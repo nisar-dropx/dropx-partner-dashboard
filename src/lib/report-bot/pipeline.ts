@@ -27,7 +27,7 @@ type ScheduleRow = {
 };
 type RequestRow = {
   id: string; company_id: string; schedule_id: string; group_id: string; report_type_id: string; business_date: string; status: string;
-  reminders_handled: number; reminders_sent: number; overdue_notified: boolean;
+  reminders_handled: number; reminders_sent: number; overdue_notified: boolean; last_reminder_minute: number | null;
 };
 type SubmissionRow = {
   id: string; company_id: string; group_id: string; request_id: string | null; report_type_id: string | null; wa_message_id: string;
@@ -106,7 +106,7 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
       due_time: formatClock(schedule.due_time),
       date: displayDate(request.business_date)
     };
-    const steps = dueReminderSteps(schedule.reminder_times ?? [], request.reminders_handled, clock.minutes, settings.max_reminder_delay_minutes);
+    const steps = dueReminderSteps(schedule.reminder_times ?? [], request.last_reminder_minute, clock.minutes, settings.max_reminder_delay_minutes);
     let sent = request.reminders_sent;
     for (const step of steps) {
       if (step.action !== "send") continue;
@@ -117,7 +117,8 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
         company_id: companyId,
         group_id: request.group_id,
         kind: sent === 0 ? "reminder" : "followup",
-        dedupe_key: `reminder:${request.id}:${step.index}`,
+        // Keyed by the slot's time, so an edited reminder list can't repeat or skip a slot.
+        dedupe_key: `reminder:${request.id}:${step.minute}`,
         body,
         request_id: request.id,
         stale_after: nowIso(settings.max_reminder_delay_minutes * 60)
@@ -143,16 +144,18 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
       if (inserted.error) throw new Error(`Queue overdue notice: ${inserted.error.message}`);
       queued += 1;
     }
-    const handled = steps.length ? steps[steps.length - 1].index + 1 : request.reminders_handled;
-    if (handled !== request.reminders_handled || sent !== request.reminders_sent || becameOverdue) {
-      // Guard on the values we read so a concurrent run can't double count.
-      must(await db.from("report_bot_requests").update({
-        reminders_handled: handled,
+    const lastMinute = steps.length ? steps[steps.length - 1].minute : request.last_reminder_minute;
+    if (lastMinute !== request.last_reminder_minute || sent !== request.reminders_sent || becameOverdue) {
+      // Guard on the slot we read so a concurrent run can't double count.
+      const update = db.from("report_bot_requests").update({
+        last_reminder_minute: lastMinute,
+        reminders_handled: request.reminders_handled + steps.length,
         reminders_sent: sent,
         status: becameOverdue ? "overdue" : request.status,
         overdue_notified: request.overdue_notified || Boolean(sendOverdue) || becameOverdue,
         updated_at: nowIso()
-      }).eq("id", request.id).eq("reminders_handled", request.reminders_handled).in("status", ["pending", "overdue"]), "Update request");
+      }).eq("id", request.id).in("status", ["pending", "overdue"]);
+      must(await (request.last_reminder_minute === null ? update.is("last_reminder_minute", null) : update.eq("last_reminder_minute", request.last_reminder_minute)), "Update request");
     }
   }
   return queued;
@@ -254,7 +257,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
       const image = await fetchReportImage(settings, submission.media_ref, submission.wa_message_record);
       const mime = sniffImageType(image);
       if (!mime) throw new AiError("The stored image could not be read.", false);
-      const analysis = await analyseReportImage(settings, {
+      const input = {
         image,
         mime,
         candidates,
@@ -262,7 +265,18 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         stationLabel: group.station ? [group.station.station_code, group.station.station_name].filter(Boolean).join(" · ") : null,
         businessDate,
         caption: submission.caption
-      });
+      };
+      let analysis;
+      try {
+        analysis = await analyseReportImage(settings, input);
+      } catch (error) {
+        // One quick retry for a transient failure (malformed reply, a 5xx), instead of making
+        // the sender wait for the next run. Quota limits won't clear in seconds, so skip those.
+        const transient = error instanceof AiError && error.retryable && !error.blocked && !/quota/i.test(error.message);
+        if (!transient || Date.now() > deadline - AI_TIMEOUT_MS - 40_000) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        analysis = await analyseReportImage(settings, input);
+      }
       const reportType = candidates.find((candidate) => candidate.id === analysis.matched_report_type_id) ?? null;
       const request = reportType ? requests.find((row) => row.report_type_id === reportType.id) ?? null : null;
       // Listen mode is a dry run: nothing is queued to send without a person approving it.
@@ -378,10 +392,12 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
       }
       // An image from this group is still being analysed: it may be the report, so
       // hold the reminder briefly rather than nag right after someone posted it.
+      // Only a fresh photo on its first attempt counts: one stuck retrying must never
+      // hold reminders until they go stale and get cancelled.
       const analysing = await db.from("report_bot_submissions").select("id", { head: true, count: "exact" })
-        .eq("group_id", item.group_id).eq("status", "queued").gte("message_at", nowIso(-6 * 3600));
+        .eq("group_id", item.group_id).eq("status", "queued").lte("attempts", 1).gte("message_at", nowIso(-10 * 60));
       if (analysing.count) {
-        await release({ not_before: nowIso(60), attempts: Math.max(item.attempts - 1, 0) });
+        await release({ not_before: nowIso(30), attempts: Math.max(item.attempts - 1, 0) });
         continue;
       }
     }
@@ -437,6 +453,17 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
     }
   }
   return sent;
+}
+
+/**
+ * Check new photos right away (called when the worker reports one) and post any reply
+ * that's ready, instead of waiting for the minute cron. Safe alongside the cron: work is
+ * claimed row by row.
+ */
+export async function processNow(settings: ReportBotSettings, deadline: number) {
+  if (settings.mode === "off") return;
+  await processSubmissions(settings, deadline);
+  if (settings.mode === "live") await flushOutbox(settings, deadline);
 }
 
 export async function runReportBotCycle(settings: ReportBotSettings, deadline: number) {

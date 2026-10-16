@@ -153,7 +153,9 @@ async function analyseWithGemini(settings: ReportBotSettings, input: AnalysisInp
   if (!apiKey) throw new AiError("GEMINI_API_KEY is not set in the deployment environment.", false, true);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
-  const body = (withThinking: boolean) => JSON.stringify({
+  // `enhanced` adds schema-constrained JSON (so the reply always parses) and a thinking
+  // level. Models or API versions that don't accept either get the plain JSON request.
+  const body = (enhanced: boolean) => JSON.stringify({
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
     contents: [{
       role: "user",
@@ -165,21 +167,21 @@ async function analyseWithGemini(settings: ReportBotSettings, input: AnalysisInp
     generationConfig: {
       // Temperature stays at the model default: Gemini 3 models can loop when it is lowered.
       responseMimeType: "application/json",
-      ...(withThinking ? { thinkingConfig: { thinkingLevel: GEMINI_THINKING[settings.ai_effort] } } : {})
+      ...(enhanced ? { responseJsonSchema: analysisJsonSchema(), thinkingConfig: { thinkingLevel: GEMINI_THINKING[settings.ai_effort] } } : {})
     }
   });
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.ai_model)}:generateContent`;
   try {
-    const call = (withThinking: boolean) => fetch(url, {
+    const call = (enhanced: boolean) => fetch(url, {
       method: "POST",
       headers: { "x-goog-api-key": apiKey, "content-type": "application/json" },
       signal: controller.signal,
-      body: body(withThinking)
+      body: body(enhanced)
     });
     let response = await call(true);
     let payload = await response.json().catch(() => ({}));
-    // Older models reject the thinking level; one plain retry keeps any Gemini model usable.
-    if (response.status === 400 && /thinking/i.test(String(payload?.error?.message ?? ""))) {
+    // A 400 here is a rejected option (schema keyword, thinking level), not a bad image or key.
+    if (response.status === 400 && !/api key/i.test(String(payload?.error?.message ?? ""))) {
       response = await call(false);
       payload = await response.json().catch(() => ({}));
     }
