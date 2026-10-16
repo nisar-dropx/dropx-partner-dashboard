@@ -13,7 +13,7 @@ type SidebarNavProps = {
 };
 
 export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) {
-  const hasMappingItem=items.some(item=>item.code==='fleet_da_mapping');
+  const hasMappingItem=items.some(item=>item.code==='fleet_da_mapping'||item.children?.some(child=>child.code==='fleet_da_mapping'));
   const [mappingAvailable,setMappingAvailable]=useState(false);
   // Vehicle eligibility is optional navigation data and never delays the app shell.
   useEffect(()=>{
@@ -23,6 +23,13 @@ export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) 
     load();window.addEventListener('focus',load);
     return()=>{controller.abort();window.removeEventListener('focus',load);};
   },[hasMappingItem]);
+  const visibleItems = items
+    .filter(item=>item.code!=='fleet_da_mapping'||mappingAvailable)
+    .map(item=>item.children ? {
+      ...item,
+      children:item.children.filter(child=>child.code!=='fleet_da_mapping'||mappingAvailable)
+    } : item)
+    .filter(item=>!item.children||item.children.length>0);
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const submenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [submenuUp, setSubmenuUp] = useState<Record<string, boolean>>({});
@@ -59,7 +66,7 @@ export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) 
 
   return (
     <nav className="nav" aria-label="Primary">
-      {items.filter(item=>item.code!=='fleet_da_mapping'||mappingAvailable).map((item) => item.children ? (
+      {visibleItems.map((item) => item.children ? (
         <div
           className={`nav-group ${submenuUp[item.label] ? "submenu-up" : ""}`.trim()}
           key={item.label}
