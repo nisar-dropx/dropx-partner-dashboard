@@ -63,7 +63,7 @@ export async function loadRecoveryPayables(
           db
             .from("hr_payroll_run_people")
             .select(
-              "worker_id,net_pay,adjusted_net_pay,is_adjusted,calculation_status,hr_payroll_runs!inner(status,period_start,period_end,updated_at),hr_payroll_run_items(code,amount)",
+              "worker_id,gross_pay,net_pay,adjusted_net_pay,is_adjusted,calculation_status,hr_payroll_runs!inner(status,period_start,period_end,updated_at),hr_payroll_run_items(code,amount)",
             )
             .eq("company_id", company)
             .eq("worker_type", "employee")
@@ -126,6 +126,7 @@ export async function loadRecoveryPayables(
       )[0] as any;
     const eligible = !duplicate && eligibleRecoveryEmployment(record,start,end,policy,!!employeePay) && (!policy.eligible_designations.length || policy.eligible_designations.some(d => d.toLowerCase() === person.designation.toLowerCase()));
     let payable: number | null = null;
+    let gross: number | null = null;
     let source =
       payouts.error && person.ref.startsWith("workforce:")
         ? "Review Dashboard payout configuration"
@@ -155,6 +156,7 @@ export async function loadRecoveryPayables(
             (Number(adjusted ? employeePay.adjusted_net_pay : employeePay.net_pay) + opsLoss) * 100,
           ) / 100,
         );
+        gross = Number.isFinite(Number(employeePay.gross_pay)) ? Math.round(Number(employeePay.gross_pay) * 100) / 100 : null;
         source = `People payroll · ${employeePay.calculation_status}`;
       }
     } else {
@@ -173,32 +175,32 @@ export async function loadRecoveryPayables(
           0,
           Math.round(rows.reduce((sum, p) => sum + p.netAmount, 0) * 100) / 100,
         );
+        gross = Math.round(rows.reduce((sum, p) => sum + p.grossPayment, 0) * 100) / 100;
         source = "Dashboard workforce payout worksheet";
       }
     }
     if (payable != null && !Number.isFinite(payable)) payable = null;
+    if (gross != null && !Number.isFinite(gross)) gross = null;
     const reserved = policy.reserve_other_recoveries
       ? (existing.data || [])
           .filter((r) => !(r.month === caseMonth && r.case_key === caseKey))
           .flatMap((r) => r.allocations || [])
           .filter((a: any) => a.ref === person.ref && a.salary_month === month)
-          .reduce((sum: number, a: any) => sum + Number(a.amount), 0)
+          // A recurring debit reserves one instalment a month, a full debit its whole share.
+          .reduce((sum: number, a: any) => sum + Number(a.monthly_amount ?? a.amount), 0)
       : 0;
-    const limit =
+    const limitAt = (percent: number) =>
       payable == null
         ? null
-        : Math.max(
-            0,
-            Math.round(
-              ((payable * policy.salary_cap_percent) / 100 - reserved) * 100,
-            ) / 100,
-          );
+        : Math.max(0, Math.round(((payable * percent) / 100 - reserved) * 100) / 100);
+    const limit = limitAt(policy.salary_cap_percent);
     checks.push({
       company_id: company,
       employee_ref: person.ref,
       salary_month: month,
       eligible,
       payable,
+      gross,
       source,
       checked_at: new Date().toISOString(),
       policy_updated_at: policyUpdated,
@@ -208,7 +210,10 @@ export async function loadRecoveryPayables(
         ...person,
         salary_month: month,
         salary_payable: payable,
+        salary_gross: gross,
         recovery_limit: limit,
+        override_limit: limitAt(100),
+        reserved,
         salary_source: source,
       });
   }
