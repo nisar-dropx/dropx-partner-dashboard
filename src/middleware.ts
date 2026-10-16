@@ -206,6 +206,7 @@ export async function middleware(request: NextRequest) {
     path !== "/" &&
     path !== "/fleet-control" &&
     path !== "/fleet/mapping-mail" &&
+    path !== "/fleet/paytap" &&
     path !== "/users" &&
     path !== "/unauthorized"
   ) {
