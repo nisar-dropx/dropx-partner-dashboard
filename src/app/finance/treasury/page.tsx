@@ -80,7 +80,7 @@ export default async function TreasuryPage({
           eyebrow="DROPX FINANCE"
           title="Cash & reconciliation"
           subtitle="Follow bank evidence back to the payout and the books."
-          action={<Refresh />}
+          action={<><Link href="/finance/treasury/sync">Bank &amp; Tally sync</Link><Refresh /></>}
         />
         <nav className="books-tabs" aria-label="Treasury views">
           {views.map(([id, label]) => (
