@@ -5,6 +5,7 @@ import ts from 'typescript';
 import * as salary from './interim-salary.ts';
 import { peopleDocumentsAvailable } from './dropx-one-pages.ts';
 import { visibleDashboardNotices } from './dashboard-notices.ts';
+import * as verificationAliases from '../../../../src/lib/profile-verification-alias.ts';
 
 const account = { id: 'worker', companyId: 'company', profileType: 'employee', workspace: 'people', pageAccess: [] };
 const run = { id: 'run', label: 'Period', period_start: '2026-09-01', period_end: '2026-09-30', status: 'calculated' };
@@ -159,17 +160,18 @@ test('dashboard notices are data driven, expire, and require an explicit valid d
 });
 test('dashboard preview verification uses target authorization and triple scoping; tampering is denied', async () => {
   const calls = []; const state = { preview: account, resolved: account, fail: false };
-  const q = { select() { return q; }, eq(...args) { calls.push(args); return q; }, then(resolve) { return Promise.resolve({ data: [{ kind: 'pan', verified: true, details: {} }], error: null }).then(resolve); } };
+  const q = { select() { return q; }, eq(...args) { calls.push(['eq', ...args]); return q; }, in(...args) { calls.push(['in', ...args]); return q; }, then(resolve) { return Promise.resolve({ data: [{ kind: 'pan', verified: true, details: {} }], error: null }).then(resolve); } };
   const api = load('../../app/api/connect/verification/route.ts', {
     'next/server': { NextResponse: { json: (body, init) => Response.json(body, init) } },
     '@/lib/connect-auth': { requireConnectAccount: async () => { if (state.fail) throw Error('unauthorized'); return state.resolved; } },
     '@/lib/connect-preview': { resolveConnectPreview: async () => state.preview },
     '@/lib/supabase-admin': { supabaseAdmin: { from: () => q } },
-    '@/lib/vehicle-fuel': { vehicleFuelTypeForClient: () => '' }
+    '@/lib/vehicle-fuel': { vehicleFuelTypeForClient: () => '' },
+    '../../../../../../src/lib/profile-verification-alias': verificationAliases
   });
   const request = { nextUrl: new URL('https://one.example/api/connect/verification?profileType=employee&accountId=worker') };
   const response = await api.GET(request); assert.equal(response.status, 200); assert.equal((await response.json()).verifications[0].verified, true);
-  assert.deepEqual(calls, [['company_id', 'company'], ['profile_type', 'employee'], ['account_id', 'worker']]);
+  assert.deepEqual(calls, [['eq', 'company_id', 'company'], ['in', 'profile_type', ['employee']], ['eq', 'account_id', 'worker']]);
   calls.length = 0;
   for (const override of [{ companyId: 'other' }, { id: 'other' }, { profileType: 'contractor' }]) { state.resolved = { ...account, ...override }; assert.equal((await api.GET(request)).status, 403); }
   state.fail = true; assert.equal((await api.GET(request)).status, 403); assert.equal(calls.length, 0);

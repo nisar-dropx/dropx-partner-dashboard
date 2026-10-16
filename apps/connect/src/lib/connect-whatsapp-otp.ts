@@ -1,6 +1,8 @@
 import { clampOtpExpiryMinutes } from "./connect-otp";
 import { supabaseAdmin } from "./supabase-admin";
-import { extractWhatsAppTemplateVariables, type WhatsAppTemplateComponent } from "./whatsapp-template";
+import { buildConnectOtpTemplateComponents, type WhatsAppTemplateComponent } from "./whatsapp-template";
+
+export { buildConnectOtpTemplateComponents } from "./whatsapp-template";
 
 type NotificationConfigRow = {
   company_id: string;
@@ -8,42 +10,6 @@ type NotificationConfigRow = {
   whatsapp_profile_id: string | null;
   variable_mappings: Record<string, string> | null;
 };
-
-function messageValue(source: string | undefined, values: Record<string, string>) {
-  if (!source) return "";
-  return values[source] ?? source;
-}
-
-export function buildConnectOtpTemplateComponents(
-  components: WhatsAppTemplateComponent[],
-  mappings: Record<string, string>,
-  values: Record<string, string>
-) {
-  const variables = extractWhatsAppTemplateVariables(components);
-  const messageComponents: Array<Record<string, unknown>> = [];
-  for (const componentType of ["header", "body"] as const) {
-    const componentVariables = variables
-      .filter((variable) => variable.component === componentType)
-      .sort((first, second) => first.position - second.position);
-    if (!componentVariables.length) continue;
-    messageComponents.push({
-      type: componentType,
-      parameters: componentVariables.map((variable) => ({
-        type: "text",
-        text: messageValue(mappings[variable.key], values)
-      }))
-    });
-  }
-  for (const variable of variables.filter((item) => item.component === "button")) {
-    messageComponents.push({
-      type: "button",
-      sub_type: "url",
-      index: String(variable.buttonIndex ?? 0),
-      parameters: [{ type: "text", text: messageValue(mappings[variable.key], values) }]
-    });
-  }
-  return messageComponents;
-}
 
 export async function sendCompanyConnectOtp({
   companyId,

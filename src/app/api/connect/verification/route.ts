@@ -5,6 +5,10 @@ import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-
 import { matchNames } from "@/lib/name-match";
 import { verifyPanWithFallback } from "@/lib/pan-verification";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
+import {
+  preferredProfileVerificationRows,
+  verificationProfileTypeAliases
+} from "@/lib/profile-verification-alias";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { callVerificationProvider, VerificationProviderTransportError, type ProviderCall } from "@/lib/verification-api-audit";
 import { isPureElectricFuel, vehicleFuelTypeForClient } from "@/lib/vehicle-fuel";
@@ -313,16 +317,17 @@ export async function GET(request: NextRequest) {
     const account = await resolveAccount(accountId, profileType);
     const result = await supabaseAdmin
       .from("connect_profile_verifications")
-      .select("kind, input_key, verified, manual_review, block_submit, display_name, message, details, verified_at")
+      .select("kind, input_key, verified, manual_review, block_submit, display_name, message, details, verified_at, profile_type, updated_at")
       .eq("company_id", account.companyId)
-      .eq("profile_type", profileType)
+      .in("profile_type", verificationProfileTypeAliases(profileType))
       .eq("account_id", accountId);
     if (result.error) {
       if (isMissingVerificationTable(result.error)) return ok({ verifications: [] });
       throw new Error(result.error.message);
     }
+    const verificationRows = preferredProfileVerificationRows(result.data ?? []);
     return ok({
-      verifications: (result.data ?? []).map((row) => {
+      verifications: verificationRows.map((row) => {
         const details = row.details && typeof row.details === "object" && !Array.isArray(row.details)
           ? row.details as Record<string, unknown>
           : {};

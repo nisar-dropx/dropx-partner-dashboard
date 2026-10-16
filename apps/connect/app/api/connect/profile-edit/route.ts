@@ -13,6 +13,7 @@ import {
   changedProfileEditPayload,
   createProfileEditOtpHmac,
   maskProfileEditMobile,
+  missingChangedRequiredProfileField,
   normalizeProfileEditPayload,
   profileEditLocalMobile,
   profileEditMobileHash,
@@ -320,11 +321,15 @@ export async function GET(request: Request) {
     if (!accountId || !profileType) throw new ProfileEditError("A supported profile is required.");
     const account = await authenticatedAccount(session, accountId, profileType);
     const profile = await loadProfile(account, profileType);
+    if (!profile.updated_at) {
+      throw new ProfileEditError("This profile cannot be edited until its update timestamp is repaired.", 409);
+    }
     const { mobileCountryCode, mobileNumber } = authenticatedProfileMobile(profile, session);
     return NextResponse.json({
       values: profileEditBootstrapValues(profile, profileType),
       mobileCountryCode,
-      mobileNumber
+      mobileNumber,
+      sourceUpdatedAt: String(profile.updated_at)
     });
   } catch (error) {
     const status = error instanceof ProfileEditError ? error.status : 500;
@@ -381,13 +386,17 @@ async function enforceEditFieldRules({
   profile,
   profileType,
   normalized,
-  current
+  current,
+  hasPfUan,
+  hasEsiNo
 }: {
   account: ConnectAccount;
   profile: ProfileRow;
   profileType: ProfileEditProfileType;
   normalized: ProfileEditPayload;
   current: Record<string, unknown>;
+  hasPfUan: "yes" | "no" | null;
+  hasEsiNo: "yes" | "no" | null;
 }) {
   const rules = await loadEditFieldRules(account, profile, profileType);
   if (!rules.enabled.length && Object.keys(normalized).length) {
@@ -416,15 +425,47 @@ async function enforceEditFieldRules({
     normalized.vehicle_pollution_exp_date = null;
     finalValues.vehicle_pollution_exp_date = null;
   }
-
-  for (const key of rules.required) {
-    if (!(key in finalValues)) continue; // Existing uploads are outside this JSON-only edit flow.
-    if (key === "vehicle_pollution_exp_date" && pureElectric) continue;
-    const value = finalValues[key];
-    const present = typeof value === "boolean" ? true : String(value ?? "").trim().length > 0;
-    if (!present) throw new ProfileEditError(`${key.replaceAll("_", " ")} is required.`);
+  const payload = changedProfileEditPayload(normalized, current);
+  const changesAny = (...keys: string[]) => keys.some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+  const finalText = (key: string) => String(finalValues[key] ?? "").trim();
+  if (changesAny("pan_number", "aadhaar_number") && finalText("aadhaar_number") && !finalText("pan_number")) {
+    throw new ProfileEditError("PAN is required when an Aadhaar number is provided.");
   }
-  return { pureElectric };
+  if (
+    changesAny("bank_account_no", "ifsc") &&
+    Boolean(finalText("bank_account_no")) !== Boolean(finalText("ifsc"))
+  ) {
+    throw new ProfileEditError("Bank account number and IFSC must be provided together.");
+  }
+  if (
+    changesAny("driving_license_no", "date_of_birth") &&
+    finalText("driving_license_no") &&
+    !finalText("date_of_birth")
+  ) {
+    throw new ProfileEditError("Date of birth is required to verify the driving licence.");
+  }
+  const exemptFields = [
+    ...(pureElectric ? ["vehicle_pollution_exp_date"] : []),
+    ...(hasPfUan === "no" ? ["pf_uan"] : []),
+    ...(hasEsiNo === "no" ? ["esi_no"] : [])
+  ];
+  const missingRequired = missingChangedRequiredProfileField({
+    payload,
+    finalValues,
+    requiredFields: rules.required,
+    exemptFields
+  });
+  if (missingRequired) {
+    throw new ProfileEditError(`${missingRequired.replaceAll("_", " ")} is required.`);
+  }
+  return { payload };
+}
+
+function statutoryAnswer(value: unknown, label: string) {
+  const answer = String(value ?? "").trim().toLowerCase();
+  if (!answer) return null;
+  if (answer === "yes" || answer === "no") return answer;
+  throw new ProfileEditError(`${label} must be Yes or No.`);
 }
 
 async function audit(row: EditRequestRow, eventCode: string, metadata: Record<string, unknown> = {}, leg?: "current" | "new") {
@@ -645,6 +686,10 @@ async function start(request: Request, body: Record<string, unknown>, session: A
   if (!profile.updated_at) {
     throw new ProfileEditError("This profile cannot be edited until its update timestamp is repaired.", 409);
   }
+  const sourceUpdatedAt = String(body.sourceUpdatedAt ?? "").trim();
+  if (!sourceUpdatedAt || sourceUpdatedAt !== String(profile.updated_at)) {
+    throw new ProfileEditError("This profile changed after editing started. Reload it and try again.", 409);
+  }
   const { sessionMobile, mobileCountryCode, mobileNumber } = authenticatedProfileMobile(profile, session);
   // The authenticated session is the authoritative current OTP destination.
   // Profile tables legitimately contain either local or digit-only E.164 values.
@@ -661,8 +706,17 @@ async function start(request: Request, body: Record<string, unknown>, session: A
   } catch (error) {
     throw new ProfileEditError(error instanceof Error ? error.message : "Invalid profile details.");
   }
-  await enforceEditFieldRules({ account, profile, profileType, normalized, current: currentValues });
-  const payload = changedProfileEditPayload(normalized, currentValues);
+  const hasPfUan = statutoryAnswer(body.hasPfUan, "PF UAN selection");
+  const hasEsiNo = statutoryAnswer(body.hasEsiNo, "ESI selection");
+  const { payload } = await enforceEditFieldRules({
+    account,
+    profile,
+    profileType,
+    normalized,
+    current: currentValues,
+    hasPfUan,
+    hasEsiNo
+  });
   if (!Object.keys(payload).length && !mobileChanged) {
     throw new ProfileEditError("No profile changes were found.");
   }
@@ -970,10 +1024,10 @@ export async function POST(request: Request) {
     const action = String(body.action ?? "");
     // Global retention is handled by the authenticated hourly cron. Keep the
     // user request path bounded to this account and this edit request.
-    if (action === "start") return start(request, body, session);
-    if (action === "verify") return verify(body, session);
-    if (action === "resend") return resend(body, session);
-    if (action === "commit") return commit(body, session);
+    if (action === "start") return await start(request, body, session);
+    if (action === "verify") return await verify(body, session);
+    if (action === "resend") return await resend(body, session);
+    if (action === "commit") return await commit(body, session);
     throw new ProfileEditError("Unsupported profile edit action.");
   } catch (error) {
     const status = error instanceof ProfileEditError ? error.status : 500;

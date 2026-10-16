@@ -8,10 +8,15 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { minimumAgeError } from "../lib/profile-age";
 import { ConnectExitManagement } from "./connect-exit-management";
 import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
-import { userFacingError } from "../lib/user-facing-error";
+import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
 import { compressFormImages, formFileBytes, MAX_UPLOAD_REQUEST_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from "../lib/compress-form-images";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 import { countryCodeOptions } from "@/lib/country-codes";
+import {
+  matchingProfileVerification,
+  profileEditVerificationPlan,
+  profileVerificationExpiryPatch
+} from "@/lib/profile-verification-state";
 
 export type AppAccount = {
   id: string;
@@ -80,6 +85,7 @@ type ProfileEditBootstrap = {
   values: Record<string, string | boolean | null>;
   mobileCountryCode: string;
   mobileNumber: string;
+  sourceUpdatedAt: string;
 };
 
 type ProfileEditViewSnapshot = {
@@ -305,7 +311,7 @@ function VerifyField({ label, name, value, onChange, onVerify, running, checked,
   const invalid = Boolean(rule && !rule.pattern.test(value));
   return <label className="dx-field">
     <span>{label}</span>
-    <div className={`dx-input-action${disabled && placeholder ? " dx-verify-disabled" : ""}`}>
+    <div className={`dx-input-action${disabled && placeholder ? " dx-verify-disabled" : ""}${verified ? " dx-input-verified" : ""}`}>
       <input
         disabled={disabled}
         inputMode={rule?.numeric ? "numeric" : "text"}
@@ -317,10 +323,30 @@ function VerifyField({ label, name, value, onChange, onVerify, running, checked,
         value={value}
       />
       {onVerify && !verificationCompleted ? <button disabled={disabled || running || invalid} onClick={onVerify} type="button">{running ? <i className="mini-spin" /> : "Verify"}</button> : null}
-      {verified ? <BadgeCheck className="dx-verified-icon" /> : null}
+      {verified ? <span className="dx-verified-tag"><BadgeCheck aria-hidden="true" />Verified</span> : null}
     </div>
     {error ? <small className="dx-field-error">{error}</small> : null}
   </label>;
+}
+
+function VerificationAction({ label, onVerify, running, checked, verified, disabled, error }: {
+  label: string;
+  onVerify: () => void;
+  running?: boolean;
+  checked?: boolean;
+  verified?: boolean;
+  disabled?: boolean;
+  error?: string;
+}) {
+  return <div className="dx-field dx-verification-action">
+    <span>{label}</span>
+    <div className="dx-verification-action-control">
+      {!checked ? <button disabled={disabled || running || Boolean(error)} onClick={onVerify} type="button">{running ? <i className="mini-spin" /> : "Verify"}</button> : null}
+      {verified ? <span className="dx-verified-tag"><BadgeCheck aria-hidden="true" />Verified</span> : null}
+      {checked && !verified ? <span className="dx-verification-action-state">Checked</span> : null}
+    </div>
+    {error ? <small className="dx-field-error">{error}</small> : null}
+  </div>;
 }
 
 function ManualDateField({ label, name, value, required, readOnly, warning, onChange }: {
@@ -389,6 +415,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   const [profile, setProfile] = useState<Profile | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [verifications, setVerifications] = useState<Record<string, Verification>>({});
+  const [editBaselineVerifications, setEditBaselineVerifications] = useState<Record<string, Verification>>({});
   const [verificationErrors, setVerificationErrors] = useState<Record<string, string>>({});
   const [pfAnswer, setPfAnswer] = useState("");
   const [esiAnswer, setEsiAnswer] = useState("");
@@ -404,6 +431,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   const [editing, setEditing] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [editOriginalValues, setEditOriginalValues] = useState<Record<string, string>>({});
+  const [editSourceUpdatedAt, setEditSourceUpdatedAt] = useState("");
   const [editOtp, setEditOtp] = useState<ProfileEditOtpState>(emptyProfileEditOtp);
   const [chosenUploads, setChosenUploads] = useState<Record<string, { fileName: string; previewUrl: string | null }>>({});
   const chosenUploadsRef = useRef(chosenUploads);
@@ -476,6 +504,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       setEditing(false);
       setEditLoading(false);
       setEditOriginalValues({});
+      setEditSourceUpdatedAt("");
+      setEditBaselineVerifications({});
       editViewSnapshotRef.current = null;
       setEditOtp(emptyProfileEditOtp);
       const agreementAlreadyAccepted = Boolean(next.agreement?.acceptedAt);
@@ -495,43 +525,101 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     return new Set(Array.isArray(configured) ? configured : executive ? defaultExecutive : defaultEmployee);
   }, [executive, profile]);
   const required = useMemo(() => new Set(profile?.fieldRules?.required ?? []), [profile]);
+  const editValueChanged = (key: string) => (values[key] ?? "") !== (editOriginalValues[key] ?? "");
+  const nativeFieldRequired = (field: string, valueKey = fieldValueKeys[field] ?? field) =>
+    required.has(field) && (!editing || editValueChanged(valueKey));
+  const editVerificationPlan = profileEditVerificationPlan({
+    values,
+    originalValues: editOriginalValues,
+    requirePfUan: pfAnswer === "yes" && enabled.has("pf_uan") && Boolean(executive || profile?.statutoryApplicability?.includes("pf"))
+  });
   const completed = statusReadOnly(profile?.status) && !editing;
   const canEditProfile = !readOnly && !isolatedPilot &&
     ["employee", "workforce", "field_executive", "contractor", "vendor"].includes(account.profileType) &&
     String(profile?.status ?? "").trim().toLowerCase() === "active";
 
+  const verificationKeyForValues = (kind: string, source: Record<string, string>) => {
+    const upper = (input: string | undefined) => String(input ?? "").trim().toUpperCase();
+    const plain = (input: string | undefined) => String(input ?? "").trim();
+    if (kind === "pan") return upper(source.panNumber);
+    if (kind === "pan_aadhaar") return `${upper(source.panNumber)}|${plain(source.aadhaarNumber)}`;
+    if (kind === "bank") return `${upper(source.bankAccountNo)}|${upper(source.ifsc)}`;
+    if (kind === "pf_uan") return upper(source.pfUan);
+    if (kind === "dl") return `${upper(source.drivingLicenseNo)}|${displayDate(plain(source.dateOfBirth))}`;
+    return upper(source.vehicleRegistrationNo);
+  };
+
   const set = (key: string, value: string, clear: string[] = []) => {
-    setValues((current) => ({
-      ...current,
-      [key]: value,
-      ...(["drivingLicenseNo", "dateOfBirth"].includes(key) ? { drivingLicenseExpiry: "" } : {}),
-      ...(key === "vehicleRegistrationNo" ? {
-        registrationExpiry: "",
-        insuranceExpiry: "",
-        pollutionExpiry: ""
-      } : {})
-    }));
+    setValues((current) => {
+      const next = { ...current, [key]: value };
+      if (["drivingLicenseNo", "dateOfBirth"].includes(key)) {
+        Object.assign(next, profileVerificationExpiryPatch({
+          kind: "dl",
+          inputKey: verificationKeyForValues("dl", next),
+          originalInputKey: verificationKeyForValues("dl", editOriginalValues),
+          editing,
+          fresh: verifications.dl,
+          baseline: editBaselineVerifications.dl,
+          originalValues: {
+            drivingLicenseExpiry: editOriginalValues.drivingLicenseExpiry || "",
+            registrationExpiry: editOriginalValues.registrationExpiry || "",
+            insuranceExpiry: editOriginalValues.insuranceExpiry || "",
+            pollutionExpiry: editOriginalValues.pollutionExpiry || ""
+          }
+        }));
+      }
+      if (key === "vehicleRegistrationNo") {
+        Object.assign(next, profileVerificationExpiryPatch({
+          kind: "vehicle",
+          inputKey: verificationKeyForValues("vehicle", next),
+          originalInputKey: verificationKeyForValues("vehicle", editOriginalValues),
+          editing,
+          fresh: verifications.vehicle,
+          baseline: editBaselineVerifications.vehicle,
+          originalValues: {
+            drivingLicenseExpiry: editOriginalValues.drivingLicenseExpiry || "",
+            registrationExpiry: editOriginalValues.registrationExpiry || "",
+            insuranceExpiry: editOriginalValues.insuranceExpiry || "",
+            pollutionExpiry: editOriginalValues.pollutionExpiry || ""
+          }
+        }));
+      }
+      return next;
+    });
     if (clear.length) {
-      setVerifications((current) => Object.fromEntries(Object.entries(current).filter(([kind]) => !clear.includes(kind))));
+      // Exact input-key matching hides stale checks during an edit. Retaining
+      // edit-only checks also restores the tag if the user reverts a value.
+      if (!editing) {
+        setVerifications((current) => Object.fromEntries(Object.entries(current).filter(([kind]) => !clear.includes(kind))));
+      }
       setVerificationErrors((current) => Object.fromEntries(Object.entries(current).filter(([kind]) => !clear.includes(kind))));
     }
   };
 
-  const verificationKey = (kind: string) => {
-    if (kind === "pan") return values.panNumber?.toUpperCase() || "";
-    if (kind === "pan_aadhaar") return `${values.panNumber?.toUpperCase() || ""}|${values.aadhaarNumber || ""}`;
-    if (kind === "bank") return `${values.bankAccountNo?.toUpperCase() || ""}|${values.ifsc?.toUpperCase() || ""}`;
-    if (kind === "pf_uan") return values.pfUan?.toUpperCase() || "";
-    if (kind === "dl") return `${values.drivingLicenseNo?.toUpperCase() || ""}|${displayDate(values.dateOfBirth)}`;
-    return values.vehicleRegistrationNo?.toUpperCase() || "";
-  };
+  const verificationKey = (kind: string) => verificationKeyForValues(kind, values);
 
   const currentCheck = (kind: string) => {
-    const check = verifications[kind];
-    return check?.inputKey === verificationKey(kind) ? check : undefined;
+    return matchingProfileVerification({
+      inputKey: verificationKey(kind),
+      editing,
+      fresh: verifications[kind],
+      baseline: editBaselineVerifications[kind]
+    });
   };
-  const verified = (kind: string) => currentCheck(kind)?.verified === true;
-  const attempted = (kind: string) => Boolean(currentCheck(kind));
+  const freshCheck = (kind: string) => matchingProfileVerification({
+    inputKey: verificationKey(kind),
+    editing: false,
+    fresh: verifications[kind]
+  });
+  const requiredEditKinds = new Set<string>(editVerificationPlan.requirements.map(({ kind }) => kind));
+  // Saved checks remain visible for unchanged values. Any verification-bound
+  // edit must use a fresh session-bound provider result, even when a legacy raw
+  // value normalizes to the same input key as the saved check.
+  const actionCheck = (kind: string) => editing && requiredEditKinds.has(kind)
+    ? freshCheck(kind)
+    : currentCheck(kind);
+  const verified = (kind: string) => actionCheck(kind)?.verified === true;
+  const attempted = (kind: string) => Boolean(actionCheck(kind));
 
   async function requestVerification(kind: string, profileEdit = false) {
     const body = {
@@ -586,7 +674,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       return next;
     });
     try {
-      if (kind === "pan") {
+      if (kind === "pan" && !editing) {
         setVerifications((current) => {
           const next = { ...current };
           delete next.pan_aadhaar;
@@ -677,16 +765,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     if (!countryCodeOptions.some((option) => option.code === values.mobileCountryCode)) return "Select a supported mobile country code.";
     if (!/^\d{6,14}$/.test(values.mobileNumber || "")) return "Enter a 6 to 14 digit mobile number.";
 
-    const applies = (field: string, value: string | undefined) => enabled.has(field) && (required.has(field) || Boolean(value?.trim()));
-    const changed = (...keys: string[]) => keys.some((key) => (values[key] || "") !== (editOriginalValues[key] || ""));
-    const mandatory: Array<[string, string]> = [
-      ...(changed("panNumber") && applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
-      ...(changed("panNumber", "aadhaarNumber") && applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
-      ...(changed("bankAccountNo", "ifsc") && applies("bank_account_no", values.bankAccountNo) && applies("ifsc", values.ifsc) ? [["bank", "Bank account"] as [string, string]] : []),
-      ...(changed("pfUan") && pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? [["pf_uan", "PF UAN"] as [string, string]] : []),
-      ...(changed("drivingLicenseNo", "dateOfBirth") && applies("driving_license_no", values.drivingLicenseNo) ? [["dl", "Driving license no"] as [string, string]] : []),
-      ...(changed("vehicleRegistrationNo") && applies("vehicle_reg_no", values.vehicleRegistrationNo) ? [["vehicle", "Vehicle reg no"] as [string, string]] : [])
-    ];
+    if (editVerificationPlan.error) return editVerificationPlan.error;
+
+    const mandatory: Array<[string, string]> = editVerificationPlan.requirements
+      .map(({ kind, label }) => [kind, label]);
     const pending = isolatedPilot ? [] : mandatory.filter(([kind]) => !attempted(kind)).map(([, label]) => label);
     if (pending.length) {
       return `Tap Verify for ${pending.join(", ")} before submitting.`;
@@ -695,7 +777,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     const requiredKinds = new Set(mandatory.map(([kind]) => kind));
     const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
       .filter((kind) => requiredKinds.has(kind))
-      .map((kind) => currentCheck(kind))
+      .map((kind) => actionCheck(kind))
       .find((item) => item?.blockSubmit);
     if (!isolatedPilot && blockedCheck) {
       return blockedCheck.message || "A required identity verification did not match.";
@@ -739,8 +821,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       ["emergency_contact_relation", "emergencyContactRelation"]
     ];
     return Object.fromEntries(fields
-      .filter(([field]) => enabled.has(field))
-      .map(([, key]) => [key, values[key] || ""]));
+      .filter(([field, key]) => enabled.has(field) && (values[key] ?? "") !== (editOriginalValues[key] ?? ""))
+      .map(([, key]) => [key, values[key] ?? ""]));
   }
 
   async function beginProfileEdit() {
@@ -750,11 +832,20 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     setNotice("");
     try {
       const params = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-      const response = await fetch(`/api/connect/profile-edit?${params}`, { cache: "no-store" });
-      const payload = await response.json() as Partial<ProfileEditBootstrap> & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Unable to load current profile details.");
+      const verificationParams = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
+      const [payload, checks] = await Promise.all([
+        fetch(`/api/connect/profile-edit?${params}`, { cache: "no-store" }).then((response) =>
+          readJsonResponse<ProfileEditBootstrap>(response, "Unable to load current profile details.")
+        ),
+        fetch(`/api/connect/verification?${verificationParams}`, { cache: "no-store" })
+          .then((response) => readJsonResponse<{ verifications?: Verification[] }>(response, "Unable to load profile checks."))
+          .catch(() => ({ verifications: [] as Verification[] }))
+      ]);
       if (!payload.values || typeof payload.values !== "object" || Array.isArray(payload.values)) {
         throw new Error("Current profile details are unavailable. Reload and try again.");
+      }
+      if (!String(payload.sourceUpdatedAt || "").trim()) {
+        throw new Error("Current profile version is unavailable. Reload and try again.");
       }
 
       const editValues = Object.fromEntries(Object.entries(payload.values).map(([key, value]) => [
@@ -775,10 +866,15 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       };
       setValues(nextValues);
       setEditOriginalValues({ ...nextValues });
+      setEditSourceUpdatedAt(String(payload.sourceUpdatedAt || ""));
       setPfAnswer(nextValues.pfUan ? "yes" : "no");
       setEsiAnswer(nextValues.esiNo ? "yes" : "no");
       // Registration drafts and their verification snapshots must never seed a
-      // self-service edit. Changed identity fields obtain fresh checks in edit mode.
+      // self-service edit. Canonical saved checks are display-only baselines for
+      // unchanged values; changed identity fields obtain fresh edit-bound checks.
+      setEditBaselineVerifications(Object.fromEntries(
+        (checks.verifications ?? []).map((item) => [item.kind, item])
+      ));
       setVerifications({});
       setVerificationErrors({});
       setEditOtp(emptyProfileEditOtp);
@@ -807,6 +903,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     }
     editViewSnapshotRef.current = null;
     setEditOriginalValues({});
+    setEditSourceUpdatedAt("");
+    setEditBaselineVerifications({});
     setEditOtp(emptyProfileEditOtp);
     setEditing(false);
     setError("");
@@ -817,8 +915,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     if (!editing || saving) return;
     setSaving(true);
     setError("");
+    let response: Response | undefined;
     try {
-      const response = await fetch("/api/connect/profile-edit", {
+      response = await fetch("/api/connect/profile-edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -827,11 +926,18 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
           profileType: account.profileType,
           mobileCountryCode: values.mobileCountryCode,
           mobileNumber: values.mobileNumber,
+          hasPfUan: pfAnswer,
+          hasEsiNo: esiAnswer,
+          sourceUpdatedAt: editSourceUpdatedAt,
           payload: editablePayload()
         })
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to send WhatsApp OTP.");
+      const payload = await readJsonResponse<{
+        requestId: string;
+        mobileChanged?: boolean;
+        currentMasked?: string;
+        newMasked?: string;
+      }>(response, "Unable to start profile verification. Please try again.");
       setEditOtp({
         open: true,
         requestId: payload.requestId,
@@ -847,7 +953,11 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         message: ""
       });
     } catch (reason) {
-      setError(userFacingError(reason, "Unable to send WhatsApp OTP. Please try again."));
+      // If the request may have reached OTP delivery, its request-bound
+      // verification rows may have been consumed or rolled back. Force only
+      // changed identity fields to verify again; saved baseline tags remain.
+      if (!response || response.status >= 500) setVerifications({});
+      setError(userFacingError(reason, "Unable to start profile verification. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -859,8 +969,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "commit", requestId })
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Unable to save profile changes.");
+    const payload = await readJsonResponse<{ sessionRevoked?: boolean }>(response, "Unable to save profile changes.");
     if (payload.sessionRevoked) {
       window.location.assign("/?profileUpdated=1");
       return;
@@ -886,21 +995,11 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "verify", requestId: editOtp.requestId, leg: editOtp.leg, otp: code })
       });
-      const payload = await response.json();
-      if (!response.ok && payload.currentVerified && payload.nextLeg === "new") {
-        setEditOtp((current) => ({
-          ...current,
-          leg: "new",
-          currentCode: "",
-          newCode: "",
-          newOtpSent: false,
-          busy: false,
-          error: payload.error || "Current number verified, but the new-number OTP could not be sent. Tap Resend OTP.",
-          message: ""
-        }));
-        return;
-      }
-      if (!response.ok) throw new Error(payload.error || "OTP verification failed.");
+      const payload = await readJsonResponse<{
+        nextLeg?: "new" | "commit";
+        otpSent?: boolean;
+        warning?: string;
+      }>(response, "OTP verification failed. Please try again.");
       if (payload.nextLeg === "new") {
         setEditOtp((current) => ({
           ...current,
@@ -933,8 +1032,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "resend", requestId: editOtp.requestId, leg: editOtp.leg })
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to resend OTP.");
+      await readJsonResponse(response, "Unable to resend OTP. Please try again.");
       setEditOtp((current) => ({
         ...current,
         busy: false,
@@ -1210,7 +1308,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     const valueKey = fieldValueKeys[field] ?? field.replace(/_([a-z])/g, (_, character) => character.toUpperCase());
     const value = values[valueKey] ?? "";
     return <label className="dx-field" key={field}><span>{label}{required.has(field) ? " *" : ""}</span>
-      {options?.choices ? <select name={field} onChange={(event) => set(valueKey, event.target.value)} required={required.has(field)} value={value}>
+      {options?.choices ? <select name={field} onChange={(event) => set(valueKey, event.target.value)} required={nativeFieldRequired(field, valueKey)} value={value}>
         <option value="">Select</option>
         {options.choices.map((choice) => {
           const option = typeof choice === "string" ? { value: choice, label: choice } : choice;
@@ -1222,7 +1320,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         name={field}
         onChange={(event) => set(valueKey, sanitizeProfileInput(field, event.target.value))}
         readOnly={options?.readOnly}
-        required={required.has(field)}
+        required={nativeFieldRequired(field, valueKey)}
         value={value}
       />}
     </label>;
@@ -1241,7 +1339,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       name={field}
       onChange={(value) => set(valueKey, value, verificationToClear)}
       readOnly={options?.readOnly}
-      required={required.has(field)}
+      required={nativeFieldRequired(field, valueKey)}
       value={values[valueKey] ?? ""}
       warning={options?.warning}
     />;
@@ -1264,10 +1362,17 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     </label>;
   };
 
-  const dlCheck = currentCheck("dl");
-  const vehicleCheck = currentCheck("vehicle");
+  const dlCheck = actionCheck("dl");
+  const vehicleCheck = actionCheck("vehicle");
   const verifiedVehicleCheck = vehicleCheck?.verified === true;
-  const drivingEnabled = ["driving_license_no","driving_license_exp_date","vehicle_reg_no","vehicle_reg_exp_date","vehicle_insurance_exp_date","vehicle_pollution_exp_date"].some((field) => enabled.has(field));
+  const panAadhaarDependency = editing && editVerificationPlan.panAadhaarDependency;
+  const bankDependency = editing && editVerificationPlan.bankDependency;
+  const drivingLicenseDependency = editing && editVerificationPlan.drivingLicenseDependency;
+  const panPrerequisiteMissing = (!editing || editVerificationPlan.panChanged) && (!attempted("pan") || Boolean(actionCheck("pan")?.blockSubmit));
+  const showHiddenPanAadhaarCheck = enabled.has("pan_number") && !enabled.has("aadhaar_number") && (panAadhaarDependency || Boolean(currentCheck("pan_aadhaar")));
+  const showHiddenBankCheck = enabled.has("bank_account_no") && !enabled.has("ifsc") && (bankDependency || Boolean(currentCheck("bank")));
+  const showHiddenDrivingLicenseCheck = !enabled.has("driving_license_no") && (enabled.has("date_of_birth") || enabled.has("driving_license_exp_date")) && (drivingLicenseDependency || Boolean(currentCheck("dl")));
+  const drivingEnabled = showHiddenDrivingLicenseCheck || ["driving_license_no","driving_license_exp_date","vehicle_reg_no","vehicle_reg_exp_date","vehicle_insurance_exp_date","vehicle_pollution_exp_date"].some((field) => enabled.has(field));
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
     {isolatedPilot ? <aside className="dx-beta-review-note"><ShieldCheck size={20}/><div><strong>Submit your details for review</strong><p>Your documents will be reviewed within this private beta. Submitting does not mark identity or bank checks as verified.</p></div></aside> : null}
@@ -1296,8 +1401,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       {input("gender","Gender",{ choices: ["Male","Female","Other"] })}
       {dateField("date_of_birth","Date of birth",{ warning: minimumAgeError(values.dateOfBirth) ?? "" })}
       {enabled.has("pan_number") ? <>
-        <VerifyField label={`PAN${required.has("pan_number") ? " *" : ""}`} name="pan_number" onChange={(value) => set("panNumber", value, ["pan","pan_aadhaar"])} onVerify={isolatedPilot ? undefined : () => verify("pan")} running={running === "pan"} value={values.panNumber || ""} checked={attempted("pan")} verified={verified("pan")} error={verificationErrors.pan || verificationInputError("pan", values)} required={required.has("pan_number")} />
-        <VerificationText checks={[currentCheck("pan")]} running={running === "pan" ? "pan" : undefined} />
+        <VerifyField label={`PAN${required.has("pan_number") ? " *" : ""}`} name="pan_number" onChange={(value) => set("panNumber", value, ["pan","pan_aadhaar"])} onVerify={isolatedPilot ? undefined : () => verify("pan")} running={running === "pan"} value={values.panNumber || ""} checked={attempted("pan")} verified={verified("pan")} error={verificationErrors.pan || verificationInputError("pan", values)} required={nativeFieldRequired("pan_number", "panNumber")} />
+        <VerificationText checks={[actionCheck("pan")]} running={running === "pan" ? "pan" : undefined} />
       </> : null}
       {enabled.has("aadhaar_number") ? <>
         <VerifyField
@@ -1309,12 +1414,16 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
           value={values.aadhaarNumber || ""}
           checked={attempted("pan_aadhaar")}
           verified={verified("pan_aadhaar")}
-          disabled={!isolatedPilot && (!attempted("pan") || Boolean(currentCheck("pan")?.blockSubmit))}
-          placeholder={!isolatedPilot && (!attempted("pan") || Boolean(currentCheck("pan")?.blockSubmit)) ? "Verify PAN first" : undefined}
+          disabled={!isolatedPilot && panPrerequisiteMissing}
+          placeholder={!isolatedPilot && panPrerequisiteMissing ? "Verify PAN first" : undefined}
           error={verificationErrors.pan_aadhaar || verificationInputError("pan_aadhaar", values)}
-          required={required.has("aadhaar_number")}
+          required={nativeFieldRequired("aadhaar_number", "aadhaarNumber")}
         />
-        <VerificationText checks={[currentCheck("pan_aadhaar")]} running={running === "pan_aadhaar" ? "pan_aadhaar" : undefined} />
+        <VerificationText checks={[actionCheck("pan_aadhaar")]} running={running === "pan_aadhaar" ? "pan_aadhaar" : undefined} />
+      </> : null}
+      {showHiddenPanAadhaarCheck ? <>
+        <VerificationAction label="PAN–Aadhaar link" onVerify={() => verify("pan_aadhaar")} running={running === "pan_aadhaar"} checked={attempted("pan_aadhaar")} verified={verified("pan_aadhaar")} disabled={panPrerequisiteMissing} error={verificationErrors.pan_aadhaar || verificationInputError("pan_aadhaar", values)} />
+        <VerificationText checks={[actionCheck("pan_aadhaar")]} running={running === "pan_aadhaar" ? "pan_aadhaar" : undefined} />
       </> : null}
       {input("father_name","Father name")}
       {input("blood_group","Blood group",{ choices: bloodGroups })}
@@ -1324,10 +1433,14 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       {input("address","Address")}{input("state_code","State code",{ choices: states })}{input("pincode","Pincode")}{input("landmark","Landmark")}
     </ProfileSection>
     <ProfileSection title="Bank details">
-      {enabled.has("bank_account_no") ? <label className="dx-field"><span>Bank account no{required.has("bank_account_no") ? " *" : ""}</span><input maxLength={30} name="bank_account_no" onChange={(event) => set("bankAccountNo", sanitizeProfileInput("bank_account_no", event.target.value), ["bank"])} required={required.has("bank_account_no")} value={values.bankAccountNo || ""} /></label> : null}
+      {enabled.has("bank_account_no") ? <label className="dx-field"><span>Bank account no{required.has("bank_account_no") ? " *" : ""}</span><input maxLength={30} name="bank_account_no" onChange={(event) => set("bankAccountNo", sanitizeProfileInput("bank_account_no", event.target.value), ["bank"])} required={nativeFieldRequired("bank_account_no", "bankAccountNo")} value={values.bankAccountNo || ""} /></label> : null}
       {enabled.has("ifsc") ? <>
-        <VerifyField label={`IFSC${required.has("ifsc") ? " *" : ""}`} name="ifsc" onChange={(value) => set("ifsc", value, ["bank"])} onVerify={isolatedPilot ? undefined : () => verify("bank")} running={running === "bank"} value={values.ifsc || ""} verified={verified("bank")} error={verificationErrors.bank || verificationInputError("bank", values)} required={required.has("ifsc")} />
-        <VerificationText checks={[currentCheck("bank")]} running={running === "bank" ? "bank" : undefined} />
+        <VerifyField label={`IFSC${required.has("ifsc") ? " *" : ""}`} name="ifsc" onChange={(value) => set("ifsc", value, ["bank"])} onVerify={isolatedPilot ? undefined : () => verify("bank")} running={running === "bank"} value={values.ifsc || ""} verified={verified("bank")} error={verificationErrors.bank || verificationInputError("bank", values)} required={nativeFieldRequired("ifsc", "ifsc")} />
+        <VerificationText checks={[actionCheck("bank")]} running={running === "bank" ? "bank" : undefined} />
+      </> : null}
+      {showHiddenBankCheck ? <>
+        <VerificationAction label="Bank account check" onVerify={() => verify("bank")} running={running === "bank"} checked={attempted("bank")} verified={verified("bank")} error={verificationErrors.bank || verificationInputError("bank", values)} />
+        <VerificationText checks={[actionCheck("bank")]} running={running === "bank" ? "bank" : undefined} />
       </> : null}
     </ProfileSection>
     {["eshram_uan","pf_uan","pf_account_no","esi_no"].some((field) => enabled.has(field)) ? <ProfileSection title="Statutory details">
@@ -1344,8 +1457,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
           </select>
         </label>
         {pfAnswer === "yes" ? <>
-          <VerifyField label="PF UAN *" name="pf_uan" onChange={(value) => set("pfUan", value, ["pf_uan"])} onVerify={isolatedPilot ? undefined : () => verify("pf_uan")} running={running === "pf_uan"} value={values.pfUan || ""} checked={attempted("pf_uan")} verified={verified("pf_uan")} error={verificationErrors.pf_uan || verificationInputError("pf_uan", values)} required />
-          <VerificationText checks={[currentCheck("pf_uan")]} running={running === "pf_uan" ? "pf_uan" : undefined} />
+          <VerifyField label="PF UAN *" name="pf_uan" onChange={(value) => set("pfUan", value, ["pf_uan"])} onVerify={isolatedPilot ? undefined : () => verify("pf_uan")} running={running === "pf_uan"} value={values.pfUan || ""} checked={attempted("pf_uan")} verified={verified("pf_uan")} error={verificationErrors.pf_uan || verificationInputError("pf_uan", values)} required={!editing || !editOriginalValues.pfUan || editValueChanged("pfUan")} />
+          <VerificationText checks={[actionCheck("pf_uan")]} running={running === "pf_uan" ? "pf_uan" : undefined} />
         </> : null}
       </> : null}
       {executive || profile.statutoryApplicability?.includes("pf") ? input("pf_account_no","PF Account No") : null}
@@ -1360,17 +1473,21 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
             <option value="">Select</option><option value="yes">Yes</option><option value="no">No</option>
           </select>
         </label>
-        {esiAnswer === "yes" ? <label className="dx-field"><span>ESI No *</span><input name="esi_no" onChange={(event) => set("esiNo", event.target.value)} required value={values.esiNo || ""} /></label> : null}
+        {esiAnswer === "yes" ? <label className="dx-field"><span>ESI No *</span><input name="esi_no" onChange={(event) => set("esiNo", event.target.value)} required={!editing || !editOriginalValues.esiNo || editValueChanged("esiNo")} value={values.esiNo || ""} /></label> : null}
       </> : null}
     </ProfileSection> : null}
     {drivingEnabled ? <ProfileSection title="Driving and vehicle">
       {enabled.has("driving_license_no") ? <>
-        <VerifyField label={`Driving license no${required.has("driving_license_no") ? " *" : ""}`} name="driving_license_no" onChange={(value) => set("drivingLicenseNo", value, ["dl"])} onVerify={isolatedPilot ? undefined : () => verify("dl")} running={running === "dl"} value={values.drivingLicenseNo || ""} checked={attempted("dl") && !dlCheck?.blockSubmit} verified={verified("dl")} error={verificationErrors.dl || verificationInputError("dl", values)} required={required.has("driving_license_no")} />
+        <VerifyField label={`Driving license no${required.has("driving_license_no") ? " *" : ""}`} name="driving_license_no" onChange={(value) => set("drivingLicenseNo", value, ["dl"])} onVerify={isolatedPilot ? undefined : () => verify("dl")} running={running === "dl"} value={values.drivingLicenseNo || ""} checked={attempted("dl") && !dlCheck?.blockSubmit} verified={verified("dl")} error={verificationErrors.dl || verificationInputError("dl", values)} required={nativeFieldRequired("driving_license_no", "drivingLicenseNo")} />
+        <VerificationText checks={[dlCheck]} running={running === "dl" ? "dl" : undefined} />
+      </> : null}
+      {showHiddenDrivingLicenseCheck ? <>
+        <VerificationAction label="Driving licence check" onVerify={() => verify("dl")} running={running === "dl"} checked={attempted("dl") && !dlCheck?.blockSubmit} verified={verified("dl")} error={verificationErrors.dl || verificationInputError("dl", values)} />
         <VerificationText checks={[dlCheck]} running={running === "dl" ? "dl" : undefined} />
       </> : null}
       {dateField("driving_license_exp_date","DL expiry date",{ readOnly: Boolean(dlCheck?.expiryDate), warning: expired(values.drivingLicenseExpiry) ? "Driving licence has expired." : "" })}
       {enabled.has("vehicle_reg_no") ? <>
-        <VerifyField label={`Vehicle reg no${required.has("vehicle_reg_no") ? " *" : ""}`} name="vehicle_reg_no" onChange={(value) => set("vehicleRegistrationNo", value, ["vehicle"])} onVerify={isolatedPilot ? undefined : () => verify("vehicle")} running={running === "vehicle"} value={values.vehicleRegistrationNo || ""} verified={verified("vehicle")} error={verificationErrors.vehicle || verificationInputError("vehicle", values)} required={required.has("vehicle_reg_no")} />
+        <VerifyField label={`Vehicle reg no${required.has("vehicle_reg_no") ? " *" : ""}`} name="vehicle_reg_no" onChange={(value) => set("vehicleRegistrationNo", value, ["vehicle"])} onVerify={isolatedPilot ? undefined : () => verify("vehicle")} running={running === "vehicle"} value={values.vehicleRegistrationNo || ""} verified={verified("vehicle")} error={verificationErrors.vehicle || verificationInputError("vehicle", values)} required={nativeFieldRequired("vehicle_reg_no", "vehicleRegistrationNo")} />
         <VerificationText checks={[vehicleCheck]} running={running === "vehicle" ? "vehicle" : undefined} />
       </> : null}
       {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: verifiedVehicleCheck && Boolean(vehicleCheck?.registrationExpiryDate), warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}

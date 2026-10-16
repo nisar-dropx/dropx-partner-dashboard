@@ -3,6 +3,10 @@ import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveConnectPreview } from "@/lib/connect-preview";
 import { vehicleFuelTypeForClient } from "@/lib/vehicle-fuel";
+import {
+  preferredProfileVerificationRows,
+  verificationProfileTypeAliases
+} from "../../../../../../src/lib/profile-verification-alias";
 
 const dashboardUrl =
   process.env.DASHBOARD_URL?.replace(/\/$/, "") ||
@@ -41,10 +45,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Verification is unavailable for this preview." }, { status: 403 });
     }
     const result = await supabaseAdmin.from("connect_profile_verifications")
-      .select("kind,input_key,verified,manual_review,block_submit,display_name,message,details,verified_at")
-      .eq("company_id", account.companyId).eq("profile_type", account.profileType).eq("account_id", account.id);
+      .select("kind,input_key,verified,manual_review,block_submit,display_name,message,details,verified_at,profile_type,updated_at")
+      .eq("company_id", account.companyId).in("profile_type", verificationProfileTypeAliases(account.profileType)).eq("account_id", account.id);
     if (result.error) throw new Error("Unable to load profile checks. Please retry.");
-    return NextResponse.json({ verifications: (result.data ?? []).map(row => {
+    const verificationRows = preferredProfileVerificationRows(result.data ?? []);
+    return NextResponse.json({ verifications: verificationRows.map(row => {
       const details = row.details && typeof row.details === "object" && !Array.isArray(row.details) ? row.details as Record<string, unknown> : {};
       return { kind: row.kind, inputKey: row.input_key, verified: row.verified, manualReview: row.manual_review, blockSubmit: row.block_submit,
         name: row.display_name, message: row.message, details: row.details, verifiedAt: row.verified_at,

@@ -202,6 +202,30 @@ export function changedProfileEditPayload(
   })) as ProfileEditPayload;
 }
 
+export function missingChangedRequiredProfileField({
+  payload,
+  finalValues,
+  requiredFields,
+  exemptFields = []
+}: {
+  payload: ProfileEditPayload;
+  finalValues: Record<string, unknown>;
+  requiredFields: Iterable<string>;
+  exemptFields?: Iterable<string>;
+}) {
+  const exemptions = new Set(exemptFields);
+  for (const key of requiredFields) {
+    // Self-service edits must not be blocked by unrelated legacy gaps. A
+    // required field is enforced when this request actually changes it.
+    if (!Object.prototype.hasOwnProperty.call(payload, key) || exemptions.has(key)) continue;
+    if (!(key in finalValues)) continue; // Uploads are outside this JSON-only flow.
+    const value = finalValues[key];
+    const present = typeof value === "boolean" ? true : String(value ?? "").trim().length > 0;
+    if (!present) return key;
+  }
+  return null;
+}
+
 export function createProfileEditOtpHmac({
   requestId,
   leg,
