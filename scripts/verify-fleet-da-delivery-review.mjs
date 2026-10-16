@@ -80,6 +80,7 @@ console.log('Delivery exceptions: missing/processing/failed/complete imports; ze
 // Apply the historical threshold migration only after verifying legacy behavior.
 await db.exec('alter table cps_shipment_daily add column c_return numeric,add column swa_delivery numeric;');
 await db.exec(readFileSync('supabase/migrations/20261016113000_fleet_da_delivery_history.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20261016114000_fleet_da_delivery_query_performance.sql','utf8'));
 assert.equal((await review()).find(r=>r.vehicle_id===v).review_status,'pending','saved identity with no deliveries remains pending');
 assert.equal((await review()).find(r=>r.vehicle_id===v).provider_employee_id,'REPLACEMENT','manual ID is never overwritten');
 await db.exec(`insert into cps_shipment_daily(company_id,source_batch_id,station_code,work_date,provider_employee_id,total_delivery,c_return,swa_delivery) values('${c}','${batch}','AAA','${clock.yesterday}','REPLACEMENT',4,2,1);`);
