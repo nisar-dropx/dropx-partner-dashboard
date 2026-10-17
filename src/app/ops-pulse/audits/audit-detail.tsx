@@ -1416,14 +1416,14 @@ function AuditCheck({
               (response?.response_value as { employees?: AuditEmployee[] })
                 ?.employees || []
             }
-            placeholder="Search SSA, TL, SM or other UTR staff"
+            placeholder="Choose UTR staff (SSA, TL, SM…)"
             emptyHint="No station UTR staff (SSA, TL, SM…) are linked to this station. Update People station mapping — delivery associates are not listed as key custodians."
             maxOptions={200}
           />
           <small>
-            Select known UTR custodians (SSA, TL, SM…). Delivery associates (DA /
-            DSA) are not listed here. Explain any unidentified custodian in
-            observations.
+            Open the dropdown, search by ID/name/role, and tick one or more UTR
+            custodians (SSA, TL, SM…). DA / DSA are not listed. Explain any
+            unidentified custodian in observations.
           </small>
         </div>
       )}

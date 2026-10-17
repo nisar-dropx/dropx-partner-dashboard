@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SearchableSelect } from "@/components/searchable-select";
 import {
   compareAuditTids,
   auditDifferencesWorkbook,
@@ -16,6 +15,8 @@ import type {
   StationAuditWorkspace,
 } from "@/lib/ops-pulse/station-audits";
 import styles from "./audit-workspace.module.css";
+
+/** Searchable staff dropdown with optional multi-select chips for audit forms. */
 export function EmployeePicker({
   name,
   people,
@@ -23,9 +24,10 @@ export function EmployeePicker({
   required = false,
   initial = [],
   onChange,
-  placeholder = "Search employee ID or name",
+  placeholder = "Select staff",
   emptyHint = "No station-linked employee IDs available. Update the People/workforce station mapping.",
-  maxOptions = 100,
+  maxOptions = 200,
+  maxSelected = 25,
 }: {
   name: string;
   people: AuditEmployee[];
@@ -36,60 +38,272 @@ export function EmployeePicker({
   placeholder?: string;
   emptyHint?: string;
   maxOptions?: number;
+  maxSelected?: number;
 }) {
   const [selected, setSelectedState] = useState(initial.map((p) => p.ref));
-  const setSelected = (change: (old: string[]) => string[]) => {
-    const next = change(selected);
-    setSelectedState(next);
-    onChange?.(next);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const limit = multiple ? maxSelected : 1;
+
+  const byRef = useMemo(() => {
+    const map = new Map<string, AuditEmployee>();
+    for (const person of [...people, ...initial]) map.set(person.ref, person);
+    return map;
+  }, [people, initial]);
+
+  const setSelected = (next: string[]) => {
+    const unique = [...new Set(next)].slice(0, limit);
+    setSelectedState(unique);
+    onChange?.(unique);
   };
-  const options = people
-    .filter((p) => !multiple || !selected.includes(p.ref))
-    .map((p) => ({
-      value: p.ref,
-      label: `${p.employee_code} · ${p.full_name}`,
-      helper: `${p.designation}${p.is_active ? "" : " · inactive"}`,
-    }));
+
+  const toggle = (ref: string) => {
+    if (selected.includes(ref)) {
+      setSelected(selected.filter((value) => value !== ref));
+      return;
+    }
+    if (!multiple) {
+      setSelected([ref]);
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+    if (selected.length >= limit) return;
+    setSelected([...selected, ref]);
+  };
+
+  const term = query.trim().toLowerCase();
+  const shown = useMemo(() => {
+    const filtered = people.filter((person) => {
+      if (!term) return true;
+      return `${person.employee_code} ${person.full_name} ${person.designation}`
+        .toLowerCase()
+        .includes(term);
+    });
+    return filtered.slice(0, maxOptions);
+  }, [people, term, maxOptions]);
+
+  const allShownSelected =
+    shown.length > 0 && shown.every((person) => selected.includes(person.ref));
+
+  const toggleShown = () => {
+    if (!multiple) return;
+    if (allShownSelected) {
+      const drop = new Set(shown.map((person) => person.ref));
+      setSelected(selected.filter((ref) => !drop.has(ref)));
+      return;
+    }
+    setSelected([
+      ...new Set([...selected, ...shown.map((person) => person.ref)]),
+    ]);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (box.current && !box.current.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
+
+  const triggerLabel = (() => {
+    if (!selected.length) return placeholder;
+    if (!multiple) {
+      const person = byRef.get(selected[0]);
+      return person
+        ? `${person.employee_code} · ${person.full_name}`
+        : "1 selected";
+    }
+    if (selected.length === 1) {
+      const person = byRef.get(selected[0]);
+      return person
+        ? `${person.employee_code} · ${person.full_name}`
+        : "1 selected";
+    }
+    return `${selected.length} staff selected`;
+  })();
+
   return (
-    <div>
-      <SearchableSelect
-        name={multiple ? `${name}_search` : name}
-        options={options}
-        value={multiple ? "" : selected[0] || ""}
-        required={required && !multiple}
-        placeholder={placeholder}
-        maxOptions={maxOptions}
-        onValueChange={(ref) =>
-          setSelected((old) =>
-            multiple ? (ref ? [...old, ref] : old) : ref ? [ref] : [],
+    <div className={styles.staffPicker} ref={box}>
+      {selected.map((ref) => (
+        <input key={ref} type="hidden" name={name} value={ref} />
+      ))}
+      <input
+        className={styles.staffRequired}
+        tabIndex={-1}
+        aria-hidden
+        value={selected.length ? "1" : ""}
+        required={required}
+        onChange={() => undefined}
+        onInvalid={(event) =>
+          (event.target as HTMLInputElement).setCustomValidity(
+            required && !selected.length
+              ? "Select at least one staff member from the list."
+              : "",
           )
         }
+        onInput={(event) =>
+          (event.target as HTMLInputElement).setCustomValidity("")
+        }
       />
-      {multiple && (
-        <div className={styles.employeeChips}>
+      <div className={styles.staffControl}>
+        <button
+          type="button"
+          className={`${styles.staffTrigger}${open ? ` ${styles.staffTriggerOpen}` : ""}`}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          disabled={!people.length}
+          onClick={() => {
+            if (!people.length) return;
+            setOpen((current) => !current);
+            if (open) setQuery("");
+          }}
+        >
+          <span
+            className={
+              selected.length
+                ? styles.staffTriggerValue
+                : styles.staffTriggerPlaceholder
+            }
+          >
+            {triggerLabel}
+          </span>
+          <i aria-hidden>{open ? "▴" : "▾"}</i>
+        </button>
+
+        {open && people.length > 0 ? (
+          <div
+            className={styles.staffMenu}
+            role="listbox"
+            aria-multiselectable={multiple}
+          >
+            <div className={styles.staffSearch}>
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={`Search ${people.length} staff by ID, name or role`}
+                aria-label="Search staff"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setOpen(false);
+                    setQuery("");
+                  }
+                  if (event.key === "Enter") event.preventDefault();
+                }}
+              />
+            </div>
+            {multiple ? (
+              <label className={styles.staffSelectAll}>
+                <input
+                  type="checkbox"
+                  checked={allShownSelected}
+                  onChange={toggleShown}
+                  disabled={!shown.length}
+                />
+                Select all shown{term ? " (filtered)" : ""}
+              </label>
+            ) : null}
+            <div className={styles.staffList}>
+              {shown.map((person) => {
+                const checked = selected.includes(person.ref);
+                return (
+                  <label
+                    key={person.ref}
+                    className={`${styles.staffOption}${checked ? ` ${styles.staffOptionSelected}` : ""}`}
+                  >
+                    <input
+                      type={multiple ? "checkbox" : "radio"}
+                      name={`${name}_choice`}
+                      checked={checked}
+                      onChange={() => toggle(person.ref)}
+                    />
+                    <span>
+                      <b>
+                        {person.employee_code} · {person.full_name}
+                      </b>
+                      <small>
+                        {person.designation || "Staff"}
+                        {person.is_active ? "" : " · inactive"}
+                      </small>
+                    </span>
+                  </label>
+                );
+              })}
+              {!shown.length ? (
+                <p className={styles.staffEmpty}>
+                  {term
+                    ? `No staff match “${query.trim()}”.`
+                    : "No staff available."}
+                </p>
+              ) : null}
+            </div>
+            <div className={styles.staffFoot}>
+              <span>
+                {selected.length}
+                {multiple ? ` / ${limit}` : ""} selected
+                {term && shown.length < people.length
+                  ? ` · showing ${shown.length}`
+                  : ""}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setQuery("");
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {selected.length > 0 && (
+        <div className={styles.staffChips} aria-label="Selected staff">
           {selected.map((ref) => {
-            const p =
-              people.find((p) => p.ref === ref) ||
-              initial.find((p) => p.ref === ref);
+            const person = byRef.get(ref);
             return (
-              <span key={ref}>
-                <input type="hidden" name={name} value={ref} />
-                {p?.employee_code} · {p?.full_name}
+              <span key={ref} className={styles.staffChip}>
+                <strong>{person?.employee_code || "Staff"}</strong>
+                <span>{person?.full_name || ref}</span>
+                {person?.designation ? <em>{person.designation}</em> : null}
                 <button
                   type="button"
-                  aria-label={`Remove ${p?.full_name}`}
-                  onClick={() =>
-                    setSelected((old) => old.filter((v) => v !== ref))
-                  }
+                  aria-label={`Remove ${person?.full_name || ref}`}
+                  onClick={() => toggle(ref)}
                 >
                   ×
                 </button>
               </span>
             );
           })}
+          {multiple && selected.length > 1 ? (
+            <button
+              type="button"
+              className={styles.staffClear}
+              onClick={() => setSelected([])}
+            >
+              Clear all
+            </button>
+          ) : null}
         </div>
       )}
-      {!people.length && <small>{emptyHint}</small>}
+
+      {!people.length ? (
+        <small className={styles.staffHint}>{emptyHint}</small>
+      ) : null}
     </div>
   );
 }
