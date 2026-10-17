@@ -9,7 +9,12 @@ export type ScorecardData = { stations: ScorecardStation[]; das: ScorecardDa[]; 
 
 const n0 = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
 const n1 = (n: number) => (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 1 });
-const SORTS = { delivered: "Deliveries", perDa: "Per DA / day", change: "Change", returnRate: "Return rate" } as const;
+const SORTS = { delivered: "Deliveries", perDa: "Per DA / day", change: "Change", returnRate: "Return rate", das: "DAs" } as const;
+function csv(rows: (string | number | null)[][], name: string) {
+  const esc = (v: unknown) => { let s = String(v ?? ""); if (/^[=+@\-]/.test(s)) s = "'" + s; return `"${s.replaceAll('"', '""')}"`; };
+  const url = URL.createObjectURL(new Blob(["\ufeff" + rows.map((r) => r.map(esc).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+}
 
 function Spark({ points }: { points: Array<[string, number, number]> | null }) {
   const values = (points ?? []).map((p) => Number(p[1]) || 0);
@@ -21,6 +26,7 @@ function Spark({ points }: { points: Array<[string, number, number]> | null }) {
 
 export function ScorecardView({ data, days, ranges, from, to, stationNames }: { data: ScorecardData; days: number; ranges: number[]; from: string; to: string; stationNames: Record<string, string> }) {
   const [sort, setSort] = useState<keyof typeof SORTS>("delivered");
+  const [asc, setAsc] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const scored = useMemo(() => data.stations.map((s) => ({ ...s, ...stationScore(s) })), [data.stations]);
@@ -28,8 +34,23 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
     const q = query.trim().toLowerCase();
     return scored
       .filter((s) => !q || `${s.station} ${stationNames[s.station] ?? ""}`.toLowerCase().includes(q))
-      .sort((a, b) => sort === "returnRate" ? b.returnRate - a.returnRate : sort === "change" ? (a.change ?? 0) - (b.change ?? 0) : (b[sort] as number) - (a[sort] as number));
-  }, [scored, sort, query, stationNames]);
+      .sort((a, b) => {
+        const d = sort === "returnRate" ? b.returnRate - a.returnRate : sort === "change" ? (a.change ?? 0) - (b.change ?? 0) : (Number(b[sort]) || 0) - (Number(a[sort]) || 0);
+        return asc ? -d : d;
+      });
+  }, [scored, sort, asc, query, stationNames]);
+  const sortBy = (k: keyof typeof SORTS) => { if (k === sort) setAsc((v) => !v); else { setSort(k); setAsc(false); } };
+  const arrow = (k: keyof typeof SORTS) => (sort === k ? (asc ? " ↑" : " ↓") : "");
+  const attention = scored.filter((s) => s.flag).sort((a, b) => (a.change ?? 0) - (b.change ?? 0)).slice(0, 4);
+  const improved = scored.filter((s) => (s.change ?? 0) > 5).sort((a, b) => (b.change ?? 0) - (a.change ?? 0)).slice(0, 4);
+  function exportStations() {
+    csv([["Station", "Name", "Deliveries", "Previous period", "Change %", "DAs", "DA-days", "Per DA per day", "Returns", "Return rate %", "Flag"],
+      ...scored.map((s) => [s.station, stationNames[s.station] ?? "", s.delivered, s.prev_delivered, s.change == null ? "" : s.change.toFixed(1), s.das, s.da_days, s.perDa.toFixed(1), s.returns, s.returnRate.toFixed(1), s.flag])], `delivery-scorecard-stations-${from}-${to}.csv`);
+  }
+  function exportDas() {
+    csv([["Station", "DA", "DropX ID", "Provider ID", "Days", "Deliveries", "Per day", "Returns", "Last worked"],
+      ...data.das.map((d) => [d.station, d.name, d.dropx_id, d.id, d.days, d.delivered, d.days ? (d.delivered / d.days).toFixed(1) : "0", d.returns, d.last_day])], `delivery-scorecard-das-${from}-${to}.csv`);
+  }
   const total = scored.reduce((t, s) => ({ delivered: t.delivered + s.delivered, prev: t.prev + s.prev_delivered, daDays: t.daDays + s.da_days, das: t.das + s.das, returns: t.returns + s.returns }), { delivered: 0, prev: 0, daDays: 0, das: 0, returns: 0 });
   const change = total.prev ? ((total.delivered - total.prev) / total.prev) * 100 : null;
   const dasBy = useMemo(() => {
@@ -49,11 +70,18 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
       <div className={styles.bar}>
         <nav className={styles.ranges}>{ranges.map((r) => <Link key={r} href={`?days=${r}`} className={r === days ? styles.active : undefined} prefetch={false}>{r} days</Link>)}</nav>
         <input aria-label="Find station" placeholder="Find station" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <label>Sort <select value={sort} onChange={(e) => setSort(e.target.value as keyof typeof SORTS)}>{Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+        <button className={styles.ghost} onClick={exportStations}>Stations CSV</button>
+        <button className={styles.ghost} onClick={exportDas}>DAs CSV</button>
       </div>
+      {attention.length || improved.length ? (
+        <div className={styles.highlights}>
+          {attention.length ? <div className={styles.hlBad}><b>Needs attention</b>{attention.map((s) => <button key={s.station} onClick={() => setOpen(s.station)}>{s.station}<small>{s.flag}{s.change != null ? ` · ${n1(s.change)}%` : ""}</small></button>)}</div> : null}
+          {improved.length ? <div className={styles.hlGood}><b>Most improved</b>{improved.map((s) => <button key={s.station} onClick={() => setOpen(s.station)}>{s.station}<small>+{n1(s.change ?? 0)}%</small></button>)}</div> : null}
+        </div>
+      ) : null}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
-          <thead><tr><th>Station</th><th className={styles.num}>Deliveries</th><th className={styles.num}>Change</th><th className={styles.num}>DAs</th><th className={styles.num}>Per DA / day</th><th className={styles.num}>Return rate</th><th>Daily trend</th><th /></tr></thead>
+          <thead><tr><th>Station</th>{(["delivered", "change", "das", "perDa", "returnRate"] as const).map((k) => <th key={k} className={styles.num}><button className={styles.sort} onClick={() => sortBy(k)} aria-sort={sort === k ? (asc ? "ascending" : "descending") : "none"}>{SORTS[k]}{arrow(k)}</button></th>)}<th>Daily trend</th><th /></tr></thead>
           <tbody>
             {rows.map((s) => (
               <Fragment key={s.station}>
