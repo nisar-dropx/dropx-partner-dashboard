@@ -70,6 +70,18 @@ export function normalizeTimeList(raw: string): string[] {
   return [...new Set(normalized)].sort((a, b) => (parseClockTime(a) ?? 0) - (parseClockTime(b) ?? 0));
 }
 
+/** Every `every` minutes from `start` to `end` inclusive, as HH:MM; null when the range is impossible. */
+export function intervalTimes(start: string, end: string, every: number): string[] | null {
+  const from = parseClockTime(start);
+  const to = parseClockTime(end);
+  if (from === null || to === null || !Number.isInteger(every) || every < 1 || to < from) return null;
+  const times: string[] = [];
+  for (let minute = from; minute <= to; minute += every) {
+    times.push(`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`);
+  }
+  return times;
+}
+
 export function normalizeDays(values: Array<string | number>): number[] {
   return [...new Set(values.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
 }
@@ -98,7 +110,8 @@ export function dueReminderSteps(reminderTimes: string[], lastHandledMinute: num
 
 /** Replaces {name} placeholders; unknown placeholders are left visible so a typo is noticed. */
 export function renderTemplate(template: string, values: Record<string, string | number | null | undefined>) {
-  return String(template ?? "")
+  // Text boxes submit Windows line endings; normalise so blank-line clean-up and WhatsApp agree.
+  return String(template ?? "").replace(/\r\n?/g, "\n")
     .replace(/\{([a-z_]+)\}/gi, (whole, key: string) => {
       const value = values[key.toLowerCase()];
       return value === null || value === undefined ? whole : String(value);

@@ -22,6 +22,7 @@ import { AppShell } from "@/components/app-shell";
 import { ActionButton } from "@/components/report-bot-controls";
 import { GroupPicker } from "@/components/report-bot-group-picker";
 import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-viewer";
+import { ReminderTimesField } from "@/components/report-bot-reminder-times";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
@@ -43,7 +44,7 @@ import {
   updateGroup
 } from "./actions";
 import s from "./report-bot.module.css";
-import { Badge, Card, Empty, Field, FlashMessage, loadSetupSteps, ReportBotNav, SETUP_HREF, StatusBadge, Toggle, VERDICT, when, sender, workerIsOnline, type Tone } from "./ui";
+import { Badge, Card, Empty, Field, FlashMessage, MigrationWarning, loadSetupSteps, ReportBotNav, SETUP_HREF, StatusBadge, Toggle, VERDICT, when, sender, workerIsOnline, type Tone } from "./ui";
 
 export const dynamic = "force-dynamic";
 // "Approve and send" posts straight away inside the action, which needs more than the default time.
@@ -66,6 +67,7 @@ type ReportTypeRow = { id: string; name: string; description: string | null; rul
 type ScheduleRow = {
   id: string; group_id: string; report_type_id: string; days_of_week: number[]; reminder_times: string[]; due_time: string;
   first_reminder_template: string; followup_template: string; overdue_template: string | null; is_active: boolean;
+  stop_when_received: boolean;
 };
 type SubmissionRow = {
   id: string; group_id: string; sender_name: string | null; sender_jid: string | null; caption: string | null; message_at: string;
@@ -173,6 +175,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           </div>
         ) : null}
 
+        {await MigrationWarning()}
         <FlashMessage />
 
         <ReportBotNav active={tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
@@ -250,8 +253,57 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
           </Empty>
         )}
       </Card>
+      {await BotMessagesToday({ companyId, groupIds, lookup, timeZone: settings.timezone })}
       <SubmissionTable rows={images} lookup={lookup} timeZone={settings.timezone} title="Photos in the last 24 hours" emptyText="No report photos have been posted in your groups in the last 24 hours." />
     </>
+  );
+}
+
+const MESSAGE_KIND: Record<string, string> = { reminder: "Reminder", followup: "Follow-up reminder", overdue: "Overdue notice", feedback: "Review reply" };
+const MESSAGE_STATUS: Record<string, [string, Tone]> = {
+  sent: ["Posted", "good"],
+  pending: ["Waiting to post", "info"],
+  cancelled: ["Not posted", "neutral"],
+  failed: ["Failed", "bad"]
+};
+
+/** Every reminder and reply the bot queued in the last 24 hours, and what happened to it. */
+async function BotMessagesToday({ companyId, groupIds, lookup, timeZone }: { companyId: string; groupIds: string[]; lookup: Lookup; timeZone: string }) {
+  const result = groupIds.length
+    ? await reportBotDb().from("report_bot_outbox").select("id,group_id,kind,status,status_reason,not_before,sent_at,created_at,dedupe_key,body")
+      .eq("company_id", companyId).in("group_id", groupIds).gte("created_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString())
+      .order("created_at", { ascending: false }).limit(100)
+    : { data: [] };
+  const rows = (result.data ?? []) as Array<{
+    id: string; group_id: string; kind: string; status: string; status_reason: string | null; not_before: string; sent_at: string | null; created_at: string; dedupe_key: string; body: string;
+  }>;
+  return (
+    <Card title="Bot messages in the last 24 hours" icon={<Send size={18} aria-hidden />} description="Each reminder and reply the bot queued, and whether it was posted. A reminder that wasn't posted shows why (for example, the report had already arrived)." flush action={<span className={`${s.count} ${s.countMuted}`}>{rows.length}</span>}>
+      {rows.length ? (
+        <div className={s.tableWrap}>
+          <table className={s.table}>
+            <thead><tr><th>Queued</th><th>Group</th><th>Message</th><th>Status</th><th>Posted</th></tr></thead>
+            <tbody>
+              {rows.map((row) => {
+                const [label, tone] = MESSAGE_STATUS[row.status] ?? [row.status, "neutral" as Tone];
+                return (
+                  <tr key={row.id}>
+                    <td>{when(row.created_at, timeZone)}</td>
+                    <td className={s.cellTitle}>{lookup.groupName.get(row.group_id) ?? "—"}</td>
+                    <td>
+                      {row.dedupe_key.startsWith("test:") ? "Test reminder" : MESSAGE_KIND[row.kind] ?? row.kind}
+                      <span className={s.cellSub}>{row.body.length > 90 ? `${row.body.slice(0, 89)}…` : row.body}</span>
+                    </td>
+                    <td><Badge tone={tone}>{label}</Badge>{row.status_reason ? <span className={s.cellSub}>{row.status_reason}</span> : null}</td>
+                    <td>{row.sent_at ? when(row.sent_at, timeZone) : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : <Empty icon={<Send size={28} aria-hidden />} title="No bot messages yet">Reminders and replies appear here when they are queued.</Empty>}
+    </Card>
   );
 }
 
@@ -549,9 +601,15 @@ function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRo
           ))}
         </div>
       </fieldset>
-      <Field label="Reminder times" hint="24-hour times, separated by commas, as many as you need. Leave empty to track the report without reminding." className={s.span3}>
-        <input className={s.input} name="reminder_times" defaultValue={schedule ? schedule.reminder_times.join(", ") : "09:00, 09:45"} placeholder="09:00, 09:45" />
-      </Field>
+      <ReminderTimesField defaultValue={schedule ? schedule.reminder_times.join(", ") : "09:00, 09:45"} />
+      <div className={s.span3}>
+        <Toggle
+          name="stop_when_received"
+          label="Stop reminders once the report arrives"
+          hint="Turn off to post at every reminder time all day, even after the report is in (for groups asked at fixed intervals)."
+          defaultChecked={schedule?.stop_when_received ?? true}
+        />
+      </div>
       <Field label="First reminder" className={s.span3}>
         <textarea className={s.textarea} name="first_reminder_template" rows={2} required defaultValue={schedule?.first_reminder_template ?? "Good morning {group} team. Please share today's *{report}* by {due_time}."} />
       </Field>
@@ -613,7 +671,12 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
                     {DAY_NAMES.map((day, index) => <span key={day} className={`${s.dayChip} ${schedule.days_of_week.includes(index) ? s.dayOn : ""}`}>{day.slice(0, 2)}</span>)}
                     {schedule.is_active ? null : <Badge tone="neutral">Paused</Badge>}
                   </div>
-                  <div className={s.itemSub}>Reminders: {schedule.reminder_times.map(formatClock).join(", ") || "none"}</div>
+                  <div className={s.itemSub}>
+                    {schedule.reminder_times.length > 8
+                      ? `${schedule.reminder_times.length} reminders, ${formatClock(schedule.reminder_times[0])} to ${formatClock(schedule.reminder_times[schedule.reminder_times.length - 1])}`
+                      : `Reminders: ${schedule.reminder_times.map(formatClock).join(", ") || "none"}`}
+                    {schedule.stop_when_received === false ? <Badge tone="info">Every time, even after the report</Badge> : null}
+                  </div>
                 </div>
                 <ChevronRight size={18} className={s.chevron} aria-hidden />
               </summary>

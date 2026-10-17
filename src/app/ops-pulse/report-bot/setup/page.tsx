@@ -9,7 +9,7 @@ import { REPORT_BOT_PAGE } from "@/lib/report-bot/access";
 import { aiKeyName, ensureWorkerToken, loadReportBotSettings, portalPublicUrl, type ReportBotSettings } from "@/lib/report-bot/settings";
 import { connectWhatsApp, disconnectWhatsApp, rotateWorkerToken, saveBotSettings, saveWorkerUrl } from "../actions";
 import s from "../report-bot.module.css";
-import { Badge, Card, Field, FlashMessage, loadSetupSteps, SetupChecklist, Toggle, when, workerIsOnline } from "../ui";
+import { Badge, Card, Field, FlashMessage, MigrationWarning, loadSetupSteps, SetupChecklist, Toggle, when, workerIsOnline } from "../ui";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +47,7 @@ export default async function ReportBotSetupPage() {
           <Link className={s.button} href="/report-bot"><ArrowLeft size={15} aria-hidden />Open Report Bot</Link>
         </header>
         <SetupChecklist steps={steps} />
+        {await MigrationWarning()}
         <FlashMessage />
         <div className={s.connectSteps}>
           <WorkerCard settings={settings} canEdit={canEdit} />

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 import { AlertTriangle, CalendarCheck, CheckCircle2, ChevronRight, Circle, FileText, Inbox, MessageCircle, Users } from "lucide-react";
 import { CopyButton } from "@/components/report-bot-controls";
-import { aiKeyConfigured, aiKeyName, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
+import { aiKeyConfigured, aiKeyName, missingReportBotMigrations, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import s from "./report-bot.module.css";
 
 // Shared building blocks for the Report Bot pages (server components only).
@@ -115,6 +115,24 @@ export function FlashMessage() {
             <CopyButton value={flash.token} className={`${s.button} ${s.small}`} />
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Red warning when a Report Bot migration is missing, naming the file to apply. */
+export async function MigrationWarning() {
+  const missing = await missingReportBotMigrations().catch(() => []);
+  if (!missing.length) return null;
+  return (
+    <div className={`${s.flash} ${s.flashError}`} role="alert">
+      <AlertTriangle size={18} aria-hidden />
+      <div>
+        <strong>Database update needed</strong>
+        Apply {missing.length === 1 ? "this migration" : "these migrations"} to the Supabase project, in this order:
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          {missing.map((item) => <li key={item.migration}><code>{item.migration}</code> — until then {item.effect}.</li>)}
+        </ul>
       </div>
     </div>
   );

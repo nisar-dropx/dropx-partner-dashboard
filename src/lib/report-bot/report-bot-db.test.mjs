@@ -4,6 +4,40 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const alwaysRemind = await readFile(new URL("../../../supabase/migrations/20261017110000_report_bot_schedule_always_remind.sql", import.meta.url), "utf8");
+
+test("schedules default to stopping once the report arrives, and the column migration is safe to rerun", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec("create role anon; create role authenticated; create role service_role; create table public.stations (id uuid primary key, company_id uuid);");
+    await db.exec(migration);
+    const group = await db.query("insert into public.report_bot_groups (company_id, wa_group_id) values ($1, '120363000000000001@g.us') returning id", [COMPANY_A]);
+    const type = await db.query("insert into public.report_bot_report_types (company_id, name, rules) values ($1, 'EOD', '{a}') returning id", [COMPANY_A]);
+    await db.query("insert into public.report_bot_schedules (company_id, group_id, report_type_id, due_time) values ($1, $2, $3, '10:00')", [COMPANY_A, group.rows[0].id, type.rows[0].id]);
+    await db.exec(alwaysRemind);
+    await db.exec(alwaysRemind);
+    assert.equal((await db.query("select stop_when_received from public.report_bot_schedules")).rows[0].stop_when_received, true, "existing schedules keep today's behaviour");
+  } finally {
+    await db.close();
+  }
+});
+const lineEndings = await readFile(new URL("../../../supabase/migrations/20261017100000_report_bot_template_line_endings.sql", import.meta.url), "utf8");
+
+test("templates saved with Windows line endings are normalised and the untouched old layout gains the review", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec("create role anon; create role authenticated; create role service_role; create table public.stations (id uuid primary key, company_id uuid);");
+    await db.exec(migration);
+    await db.query("insert into public.report_bot_settings (company_id, feedback_template) values ($1, E'*{report}* · {sender}\\r\\n{verdict_label}\\r\\n{feedback}'), ($2, E'Custom\\r\\n{feedback}')", [COMPANY_A, COMPANY_B]);
+    await db.exec(lineEndings);
+    await db.exec(lineEndings); // safe to run twice
+    const rows = (await db.query("select feedback_template as t from public.report_bot_settings order by company_id")).rows;
+    assert.equal(rows[0].t, "{sender} *{report}*\n{verdict_label}\n{feedback}\n{checks}");
+    assert.equal(rows[1].t, "Custom\n{feedback}", "a custom layout keeps its wording, only line endings change");
+  } finally {
+    await db.close();
+  }
+});
 const reminderSlots = await readFile(new URL("../../../supabase/migrations/20261016180000_report_bot_reminder_slots.sql", import.meta.url), "utf8");
 const fasterReplies = await readFile(new URL("../../../supabase/migrations/20261016160000_report_bot_faster_replies.sql", import.meta.url), "utf8");
 const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");

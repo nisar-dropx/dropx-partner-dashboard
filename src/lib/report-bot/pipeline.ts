@@ -24,6 +24,7 @@ type GroupRow = { id: string; company_id: string; wa_group_id: string; group_nam
 type ScheduleRow = {
   id: string; company_id: string; group_id: string; report_type_id: string; days_of_week: number[]; reminder_times: string[];
   due_time: string; first_reminder_template: string; followup_template: string; overdue_template: string | null; is_active: boolean;
+  stop_when_received: boolean;
 };
 type RequestRow = {
   id: string; company_id: string; schedule_id: string; group_id: string; report_type_id: string; business_date: string; status: string;
@@ -93,13 +94,16 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
     .select("*, schedule:report_bot_schedules(*), report:report_bot_report_types(name,is_active), group:report_bot_groups(id,group_name,is_enabled,wa_group_id)")
     .eq("company_id", companyId)
     .eq("business_date", clock.date)
-    .in("status", ["pending", "overdue"]), "Load open requests") as Array<RequestRow & {
+    .in("status", ["pending", "overdue", "received"]), "Load open requests") as Array<RequestRow & {
       schedule: ScheduleRow | null; report: { name: string; is_active: boolean } | null; group: { id: string; group_name: string | null; is_enabled: boolean } | null;
     }>;
   let queued = 0;
   for (const request of requests) {
     const schedule = request.schedule;
     if (!schedule || !schedule.is_active || !request.report?.is_active || !request.group?.is_enabled) continue;
+    // A received report ends the day's reminders unless the schedule asks at every interval.
+    const received = request.status === "received";
+    if (received && schedule.stop_when_received !== false) continue;
     const values = {
       group: request.group.group_name ?? "team",
       report: request.report?.name ?? "report",
@@ -110,7 +114,8 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
     let sent = request.reminders_sent;
     for (const step of steps) {
       if (step.action !== "send") continue;
-      const template = sent === 0 ? schedule.first_reminder_template : schedule.followup_template;
+      // The follow-up says the report is still pending, which is wrong once it has arrived.
+      const template = sent === 0 || received ? schedule.first_reminder_template : schedule.followup_template;
       const body = renderTemplate(template, values);
       if (!body) continue;
       const inserted = await db.from("report_bot_outbox").upsert({
@@ -147,14 +152,15 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
     const lastMinute = steps.length ? steps[steps.length - 1].minute : request.last_reminder_minute;
     if (lastMinute !== request.last_reminder_minute || sent !== request.reminders_sent || becameOverdue) {
       // Guard on the slot we read so a concurrent run can't double count.
+      // Matching the status we read means a report that arrives meanwhile is never set back.
       const update = db.from("report_bot_requests").update({
         last_reminder_minute: lastMinute,
         reminders_handled: request.reminders_handled + steps.length,
         reminders_sent: sent,
-        status: becameOverdue ? "overdue" : request.status,
+        ...(becameOverdue ? { status: "overdue" } : {}),
         overdue_notified: request.overdue_notified || Boolean(sendOverdue) || becameOverdue,
         updated_at: nowIso()
-      }).eq("id", request.id).in("status", ["pending", "overdue"]);
+      }).eq("id", request.id).eq("status", request.status);
       must(await (request.last_reminder_minute === null ? update.is("last_reminder_minute", null) : update.eq("last_reminder_minute", request.last_reminder_minute)), "Update request");
     }
   }
@@ -385,9 +391,12 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
       continue;
     }
     if (item.request_id && item.kind !== "feedback") {
-      const request = await db.from("report_bot_requests").select("status").eq("id", item.request_id).maybeSingle();
-      if (request.data && !["pending", "overdue"].includes(request.data.status)) {
-        await release({ status: "cancelled", status_reason: "Report already received." });
+      const request = await db.from("report_bot_requests").select("status, schedule:report_bot_schedules(stop_when_received)").eq("id", item.request_id).maybeSingle();
+      const row = request.data as { status: string; schedule: { stop_when_received: boolean } | null } | null;
+      // Interval schedules keep asking after the report arrives; skipped or missed days never do.
+      const keepAsking = row?.status === "received" && row.schedule?.stop_when_received === false;
+      if (row && !["pending", "overdue"].includes(row.status) && !keepAsking) {
+        await release({ status: "cancelled", status_reason: row.status === "received" ? "Today's report had already arrived, so reminders stopped." : `Not sent: today's report is ${row.status}.` });
         continue;
       }
       // An image from this group is still being analysed: it may be the report, so
@@ -466,16 +475,30 @@ export async function processNow(settings: ReportBotSettings, deadline: number) 
   if (settings.mode === "live") await flushOutbox(settings, deadline);
 }
 
+/**
+ * One minute's work. Each stage runs on its own: a failure in one (say, reminders hitting
+ * a missing database column) is recorded but never stops sending or photo checks.
+ */
 export async function runReportBotCycle(settings: ReportBotSettings, deadline: number) {
   const clock = localClock(new Date(), settings.timezone);
-  const summary = { company_id: settings.company_id, mode: settings.mode, requests: 0, reminders: 0, analysed: 0, sent: 0 };
+  const summary = { company_id: settings.company_id, mode: settings.mode, requests: 0, reminders: 0, analysed: 0, sent: 0, errors: [] as string[] };
   if (settings.mode === "off") return summary;
-  summary.requests = await syncDailyRequests(settings, clock);
-  if (settings.mode === "live") summary.reminders = await queueReminders(settings, clock);
-  else await markOverdue(settings, clock);
+  const stage = async <T>(name: string, work: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      const message = `${name}: ${error instanceof Error ? error.message : "failed"}`;
+      console.error("[report-bot]", message, { companyId: settings.company_id });
+      summary.errors.push(message);
+      return fallback;
+    }
+  };
+  summary.requests = await stage("daily requests", () => syncDailyRequests(settings, clock), 0);
+  if (settings.mode === "live") summary.reminders = await stage("reminders", () => queueReminders(settings, clock), 0);
+  else await stage("overdue", () => markOverdue(settings, clock), undefined);
   // Send what's already due before the (slow) AI checks, so replies never wait behind them.
-  if (settings.mode === "live") summary.sent = await flushOutbox(settings, Math.min(deadline, Date.now() + 60_000));
-  summary.analysed = await processSubmissions(settings, deadline);
-  if (settings.mode === "live") summary.sent += await flushOutbox(settings, deadline);
+  if (settings.mode === "live") summary.sent = await stage("sending", () => flushOutbox(settings, Math.min(deadline, Date.now() + 60_000)), 0);
+  summary.analysed = await stage("photo checks", () => processSubmissions(settings, deadline), 0);
+  if (settings.mode === "live") summary.sent += await stage("sending", () => flushOutbox(settings, deadline), 0);
   return summary;
 }

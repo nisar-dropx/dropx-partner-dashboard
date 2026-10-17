@@ -109,6 +109,38 @@ export function workerEnvFile(settings: ReportBotSettings) {
   ].join("\n");
 }
 
+/**
+ * Report Bot migrations whose absence breaks features at runtime, each detected by
+ * probing something it adds. Shown as a "database update needed" warning, so a
+ * forgotten migration is visible instead of silently stopping reminders.
+ */
+const SCHEMA_PROBES: Array<{ migration: string; effect: string; probe: () => PromiseLike<{ error: { message: string } | null }> }> = [
+  {
+    migration: "20261016140000_report_bot_stateless_worker.sql",
+    effect: "the worker can't keep its WhatsApp login or re-download photos",
+    probe: () => reportBotDb().from("report_bot_wa_auth").select("key").limit(1)
+  },
+  {
+    migration: "20261016180000_report_bot_reminder_slots.sql",
+    effect: "scheduled reminders can't be tracked, so they stop going out",
+    probe: () => reportBotDb().from("report_bot_requests").select("last_reminder_minute").limit(1)
+  },
+  {
+    migration: "20261017110000_report_bot_schedule_always_remind.sql",
+    effect: "schedules can't be saved and interval reminders can't keep posting after the report arrives",
+    probe: () => reportBotDb().from("report_bot_schedules").select("stop_when_received").limit(1)
+  }
+];
+
+export async function missingReportBotMigrations() {
+  const results = await Promise.all(SCHEMA_PROBES.map(async (item) => {
+    const { error } = await item.probe();
+    // Only "doesn't exist" means a missing migration; other errors are transient.
+    return error && /does not exist|could not find|schema cache/i.test(error.message) ? { migration: item.migration, effect: item.effect } : null;
+  }));
+  return results.filter((item): item is { migration: string; effect: string } => item !== null);
+}
+
 /** Resolves which company a worker belongs to from its bearer token. */
 export async function settingsForWorkerRequest(request: Request): Promise<ReportBotSettings | null> {
   const header = request.headers.get("authorization") ?? "";

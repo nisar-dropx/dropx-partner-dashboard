@@ -6,6 +6,7 @@ import {
   dueReminderSteps,
   extractJsonText,
   formatChecks,
+  intervalTimes,
   isGroupJid,
   mentionFor,
   localClock,
@@ -63,6 +64,7 @@ test("templates fill known placeholders and keep unknown ones visible", () => {
   assert.equal(renderTemplate("Hi {group}, send *{report}* by {due_time}. {oops}", { group: "DS-1", report: "EOD", due_time: "10:00 AM" }), "Hi DS-1, send *EOD* by 10:00 AM. {oops}");
   assert.equal(renderTemplate("{GROUP}", { group: "x" }), "x");
   assert.equal(renderTemplate("a\n\n\n\nb", {}), "a\n\nb");
+  assert.equal(renderTemplate("{feedback}\r\n{checks}", { feedback: "ok", checks: "" }), "ok", "Windows line endings from text boxes don't leave a stray blank line");
 });
 
 const candidates = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
@@ -118,6 +120,18 @@ test("feedback message uses the configured layout and length limit", () => {
   assert.ok(text.startsWith("*EOD* · Ravi\nFIX\nDate"));
   assert.ok(text.length <= 40 && text.endsWith("…"));
   assert.equal(truncateText("short", 10), "short");
+});
+
+test("interval helper fills every N minutes between start and end, and refuses impossible ranges", () => {
+  assert.deepEqual(intervalTimes("09:00", "10:00", 30), ["09:00", "09:30", "10:00"]);
+  assert.deepEqual(intervalTimes("09:00", "09:50", 20), ["09:00", "09:20", "09:40"]);
+  assert.equal(intervalTimes("09:00", "18:00", 30).length, 19);
+  assert.deepEqual(intervalTimes("09:00", "09:00", 15), ["09:00"]);
+  assert.equal(intervalTimes("10:00", "09:00", 30), null, "end before start");
+  assert.equal(intervalTimes("09:00", "10:00", 0), null, "zero interval");
+  assert.equal(intervalTimes("9am", "10:00", 30), null, "bad time");
+  // Everything it produces is accepted by the schedule form.
+  assert.deepEqual(normalizeTimeList(intervalTimes("09:00", "18:00", 30).join(", ")), intervalTimes("09:00", "18:00", 30));
 });
 
 test("replies tag the sender and carry the review itself", () => {

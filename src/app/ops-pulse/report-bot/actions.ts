@@ -48,8 +48,9 @@ async function mutate(tab: string, work: (context: { authorization: Authorizatio
   finish(tab, flash);
 }
 
+/** Form text, trimmed, with Windows line endings from text boxes normalised to \n. */
 function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
+  return String(form.get(name) ?? "").replace(/\r\n?/g, "\n").trim();
 }
 
 function boundedInt(form: FormData, name: string, label: string, min: number, max: number) {
@@ -329,6 +330,7 @@ export async function saveSchedule(form: FormData) {
       followup_template: requiredText(form, "followup_template", "Follow-up reminder", 1000),
       overdue_template: field(form, "overdue_template").slice(0, 1000) || null,
       is_active: form.get("is_active") === "on",
+      stop_when_received: form.get("stop_when_received") === "on",
       updated_at: new Date().toISOString()
     };
     const result = id
