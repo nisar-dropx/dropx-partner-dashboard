@@ -461,6 +461,8 @@ export function ConnectDashboard({
     return rows.slice(0, 6);
   }, [attendance?.rows, openFlags, profile, punchState?.open, punchState?.punchDate, verifications]);
 
+  // Hooks must run on every render, before the loading returns below.
+  const trainingOpen = useOpenTrainingCount(account, variant !== "workforce" && (account.profileType === "employee" || account.profileType === "contractor"));
   if (!profile && !error) return <div className="dx-loader fullscreen"><span /><small>Loading dashboard...</small></div>;
   if (!profile || !attendance) return <div className="dx-alert error">{error}<button onClick={() => setRefreshKey((value) => value + 1)}>Retry</button></div>;
 
@@ -495,7 +497,6 @@ export function ConnectDashboard({
   const rosterAllowed = pageAccess.includes("roster");
   const leaveAllowed = pageAccess.includes("leave");
   const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor" || pageAccess.includes("performance");
-  const trainingOpen = useOpenTrainingCount(account, performanceAllowed && variant !== "workforce");
   const advancesAllowed = pageAccess.includes("advances");
   const referAllowed = variant === "workforce" && pageAccess.includes("refer_earn");
   const summary = summarizeAttendance(attendance.rows, {
