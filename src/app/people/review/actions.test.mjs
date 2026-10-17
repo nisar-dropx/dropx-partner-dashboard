@@ -128,6 +128,106 @@ function loadReviewActions(currentProfile, options = {}) {
   };
 }
 
+function loadWorkforceLifecycleActions(currentProfile) {
+  let eventPayload = null;
+  let updatePayload = null;
+
+  const query = () => {
+    let operation = "read";
+    const chain = {
+      eq() {
+        return chain;
+      },
+      insert(payload) {
+        operation = "insert";
+        eventPayload = payload;
+        return chain;
+      },
+      maybeSingle() {
+        return Promise.resolve({ data: currentProfile, error: null });
+      },
+      select() {
+        return chain;
+      },
+      then(resolve, reject) {
+        return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+      },
+      update(payload) {
+        operation = "update";
+        updatePayload = payload;
+        return chain;
+      }
+    };
+    return chain;
+  };
+
+  const modules = {
+    "next/cache": {
+      revalidatePath() {}
+    },
+    "next/navigation": {
+      redirect(path) {
+        const error = new Error(`Redirected to ${path}`);
+        error.digest = `NEXT_REDIRECT;${path}`;
+        throw error;
+      }
+    },
+    "@/lib/app-notifications": {
+      async createAppNotification() {}
+    },
+    "@/lib/authorization": {
+      async requirePagePermission() {
+        return {
+          hasAllLocationAccess: true,
+          locationScopeIds: [],
+          permissions: {},
+          userId: "reviewer-user"
+        };
+      }
+    },
+    "@/lib/biometric/enrolments": {
+      async syncBiometricEnrolment() {}
+    },
+    "@/lib/company-scope": {
+      requireCompanyId() {
+        return "company-id";
+      }
+    },
+    "@/lib/supabase-admin": {
+      supabaseAdmin: {
+        from() {
+          return query();
+        }
+      }
+    }
+  };
+
+  const source = readFileSync(
+    new URL("../workforce-lifecycle/actions.ts", import.meta.url),
+    "utf8"
+  );
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022
+    }
+  }).outputText;
+  const module = { exports: {} };
+  new Function("require", "exports", "module", compiled)(
+    (name) => {
+      if (name in modules) return modules[name];
+      throw new Error(`Unexpected dependency: ${name}`);
+    },
+    module.exports,
+    module
+  );
+
+  return {
+    result: () => ({ eventPayload, updatePayload }),
+    reviewWorkforceOnboarding: module.exports.reviewWorkforceOnboarding
+  };
+}
+
 function reviewForm(action = "approve") {
   const form = new FormData();
   form.set("id", "workforce-id");
@@ -140,6 +240,14 @@ function reviewForm(action = "approve") {
 function profileEditForm(action = "approve", reviewVersion = "2026-10-15T08:00:00.000Z") {
   const form = reviewForm(action);
   form.set("review_version", reviewVersion);
+  return form;
+}
+
+function lifecycleReviewForm(action = "return") {
+  const form = new FormData();
+  form.set("id", "workforce-id");
+  form.set("review_action", action);
+  form.set("remarks", "Correct the submitted documents.");
   return form;
 }
 
@@ -177,6 +285,27 @@ async function submitProfileEdit(currentProfile = {}, action = "approve", option
   return harness.result();
 }
 
+async function submitLifecycleReview(isActive, action = "return") {
+  const currentProfile = {
+    id: "workforce-id",
+    location_id: "station-id",
+    designation_id: "designation-id",
+    designation: "Delivery Associate",
+    date_of_join: "2026-10-01",
+    biometric_id: "70082",
+    onboarding_status: "under_review",
+    lifecycle_status: "onboarding",
+    identity_exception_required: false,
+    is_active: isActive
+  };
+  const harness = loadWorkforceLifecycleActions(currentProfile);
+  await assert.rejects(
+    harness.reviewWorkforceOnboarding(lifecycleReviewForm(action)),
+    (error) => String(error?.digest ?? "").startsWith("NEXT_REDIRECT;/people/workforce-lifecycle?notice=")
+  );
+  return { currentProfile, ...harness.result() };
+}
+
 test("ordinary People Review preserves main approval behavior without profile-edit schema", async () => {
   const result = await submitRegistrationReview({ identity_exception_required: true });
 
@@ -204,16 +333,41 @@ test("ordinary People Review does not stamp an identity exception when none is r
   assert.equal("identity_exception_approved_by" in result.updatePayload, false);
 });
 
-test("ordinary People Review return preserves main registration behavior", async () => {
-  const result = await submitRegistrationReview({ identity_exception_required: true }, "return");
+for (const isActive of [true, false]) {
+  const priorState = isActive ? "active" : "inactive";
 
-  assert.equal(result.updatePayload.onboarding_status, "returned");
-  assert.equal(result.updatePayload.lifecycle_status, "onboarding");
+  test(`ordinary People Review return preserves an initially ${priorState} operational status`, async () => {
+    const currentProfile = { identity_exception_required: true, is_active: isActive };
+    const result = await submitRegistrationReview(currentProfile, "return");
+
+    assert.equal(result.updatePayload.onboarding_status, "returned");
+    assert.equal(result.updatePayload.lifecycle_status, "onboarding");
+    assert.equal("is_active" in result.updatePayload, false);
+    assert.equal(({ ...currentProfile, ...result.updatePayload }).is_active, isActive);
+    assert.equal("profile_edit_review_pending" in result.updatePayload, false);
+    assert.equal("identity_exception_approved_at" in result.updatePayload, false);
+    assert.equal("identity_exception_approved_by" in result.updatePayload, false);
+    assert.equal(result.notifications[0]?.eventCode, "profile_returned");
+  });
+
+  test(`Workforce Lifecycle return preserves an initially ${priorState} operational status`, async () => {
+    const result = await submitLifecycleReview(isActive);
+
+    assert.equal(result.updatePayload.onboarding_status, "returned");
+    assert.equal("is_active" in result.updatePayload, false);
+    assert.equal(({ ...result.currentProfile, ...result.updatePayload }).is_active, isActive);
+    assert.equal(result.eventPayload.event_code, "returned_for_correction");
+    assert.equal(result.eventPayload.to_status, "returned");
+  });
+}
+
+test("Workforce Lifecycle rejection still deactivates the profile", async () => {
+  const result = await submitLifecycleReview(true, "reject");
+
+  assert.equal(result.updatePayload.onboarding_status, "rejected");
   assert.equal(result.updatePayload.is_active, false);
-  assert.equal("profile_edit_review_pending" in result.updatePayload, false);
-  assert.equal("identity_exception_approved_at" in result.updatePayload, false);
-  assert.equal("identity_exception_approved_by" in result.updatePayload, false);
-  assert.equal(result.notifications[0]?.eventCode, "profile_returned");
+  assert.equal(result.eventPayload.event_code, "onboarding_rejected");
+  assert.equal(result.eventPayload.to_status, "rejected");
 });
 
 test("ordinary review cannot consume an active self-edit review", async () => {

@@ -15,6 +15,10 @@ const defaultFieldRepairMigrationUrl = new URL(
   "../../supabase/migrations/20261015212000_workforce_default_field_registration_repair.sql",
   import.meta.url
 );
+const returnedOperationalRepairMigrationUrl = new URL(
+  "../../supabase/migrations/20261017190000_repair_returned_workforce_operational_status.sql",
+  import.meta.url
+);
 
 async function fixture() {
   const db = new PGlite();
@@ -36,6 +40,7 @@ async function fixture() {
       onboarding_activated_at timestamptz,
       deleted_at timestamptz,
       deactivated_at timestamptz,
+      last_working_date date,
       updated_at timestamptz not null default now()
     );
     create function workforce_identity_default() returns trigger language plpgsql as $$
@@ -120,6 +125,195 @@ async function fixture() {
   await db.exec(await readFile(independenceMigrationUrl, "utf8"));
   await db.exec(await readFile(evidenceRepairMigrationUrl, "utf8"));
   await db.exec(await readFile(defaultFieldRepairMigrationUrl, "utf8"));
+  return db;
+}
+
+async function returnedOperationalRepairFixture() {
+  const db = await fixture();
+  await db.exec(`
+    create table public.request_tracker_events (
+      id text primary key,
+      company_id text not null,
+      kind text not null,
+      source_id text not null,
+      source_table text not null,
+      source_row_id text,
+      operation text not null,
+      executor text not null default 'service_role',
+      before_data jsonb,
+      after_data jsonb,
+      changed_fields text[] not null,
+      recorded_at timestamptz not null,
+      transaction_id bigint not null
+    );
+
+    insert into public.workforce (
+      id, onboarding_status, lifecycle_status, is_active,
+      approval_required, is_handicapped, deactivated_at
+    ) values
+      ('return-bug', 'returned', 'onboarding', false, true, false, null),
+      ('rereturn-bug', 'returned', 'onboarding', false, true, false, null),
+      ('legacy-return-bug', 'returned', 'onboarding', false, true, false, null),
+      ('legacy-lookalike', 'returned', 'onboarding', false, true, false, null),
+      ('legacy-wrong-executor', 'returned', 'onboarding', false, true, false, null),
+      ('return-bug-later-note', 'returned', 'onboarding', false, true, false, null),
+      ('initially-inactive-return', 'returned', 'onboarding', false, true, false, null),
+      ('later-manual-status-change', 'returned', 'onboarding', false, true, false, null),
+      ('currently-rejected', 'rejected', 'onboarding', false, true, false, null),
+      ('currently-exited', 'returned', 'exited', false, true, false, null),
+      (
+        'currently-deactivated', 'returned', 'onboarding', false, true, false,
+        timestamptz '2026-10-17 14:00:00+00'
+      ),
+      ('returned-without-audit', 'returned', 'onboarding', false, true, false, null);
+
+    update public.workforce
+    set company_id = '43866344-b550-4e8a-9a2d-9d23f3d8a997'
+    where id in ('legacy-return-bug', 'legacy-lookalike', 'legacy-wrong-executor');
+
+    insert into public.workforce (
+      id, onboarding_status, lifecycle_status, is_active,
+      approval_required, is_handicapped, last_working_date
+    ) values (
+      'currently-last-working', 'returned', 'onboarding', false,
+      true, false, date '2026-10-17'
+    );
+
+    insert into public.request_tracker_events (
+      id, company_id, kind, source_id, source_table, source_row_id,
+      operation, before_data, after_data, changed_fields,
+      recorded_at, transaction_id
+    ) values
+      (
+        'audit-return-bug', 'company', 'workforce_onboarding', 'return-bug', 'workforce', 'return-bug',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:00:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:00:00+00', 101
+      ),
+      (
+        'audit-rereturn-bug', 'company', 'workforce_onboarding', 'rereturn-bug', 'workforce', 'rereturn-bug',
+        'update',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":true,"profile_returned_at":"2026-10-16T11:00:00Z"}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:00:30Z"}'::jsonb,
+        array['is_active','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:00:30+00', 111
+      ),
+      (
+        'audit-return-later-note', 'company', 'workforce_onboarding', 'return-bug-later-note', 'workforce', 'return-bug-later-note',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:01:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:01:00+00', 102
+      ),
+      (
+        'audit-later-note', 'company', 'workforce_onboarding', 'return-bug-later-note', 'workforce', 'return-bug-later-note',
+        'update',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_return_remarks":"Old"}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_return_remarks":"Correct ID"}'::jsonb,
+        array['profile_return_remarks','updated_at'],
+        timestamptz '2026-10-17 11:02:00+00', 103
+      ),
+      (
+        'audit-initially-inactive', 'company', 'workforce_onboarding', 'initially-inactive-return', 'workforce', 'initially-inactive-return',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":false}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:03:00Z"}'::jsonb,
+        array['onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:03:00+00', 104
+      ),
+      (
+        'audit-return-before-manual', 'company', 'workforce_onboarding', 'later-manual-status-change', 'workforce', 'later-manual-status-change',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:04:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:04:00+00', 105
+      ),
+      (
+        'audit-manual-reactivation', 'company', 'workforce_onboarding', 'later-manual-status-change', 'workforce', 'later-manual-status-change',
+        'update',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        array['is_active','updated_at'],
+        timestamptz '2026-10-17 11:05:00+00', 106
+      ),
+      (
+        'audit-manual-deactivation', 'company', 'workforce_onboarding', 'later-manual-status-change', 'workforce', 'later-manual-status-change',
+        'update',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false}'::jsonb,
+        array['is_active','updated_at'],
+        timestamptz '2026-10-17 11:06:00+00', 107
+      ),
+      (
+        'audit-before-rejected', 'company', 'workforce_onboarding', 'currently-rejected', 'workforce', 'currently-rejected',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:07:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:07:00+00', 108
+      ),
+      (
+        'audit-before-exit', 'company', 'workforce_onboarding', 'currently-exited', 'workforce', 'currently-exited',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:08:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:08:00+00', 109
+      ),
+      (
+        'audit-before-deactivation', 'company', 'workforce_onboarding', 'currently-deactivated', 'workforce', 'currently-deactivated',
+        'update',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:09:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:09:00+00', 110
+      );
+
+    insert into public.request_tracker_events (
+      id, company_id, kind, source_id, source_table, source_row_id,
+      operation, executor, before_data, after_data, changed_fields,
+      recorded_at, transaction_id
+    ) values
+      (
+        '6a5c1edc-81d1-4263-b019-1913b7bf2cb3', '43866344-b550-4e8a-9a2d-9d23f3d8a997',
+        'workforce_onboarding', 'legacy-return-bug', 'workforce', 'legacy-return-bug',
+        'update', 'postgres',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false}'::jsonb,
+        array['is_active','updated_at'],
+        timestamptz '2026-10-15 15:00:00+00', 18788344
+      ),
+      (
+        '10a5f7b0-bc9f-4053-b76f-870e2ec54a55', '43866344-b550-4e8a-9a2d-9d23f3d8a997',
+        'workforce_onboarding', 'legacy-lookalike', 'workforce', 'legacy-lookalike',
+        'update', 'postgres',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false}'::jsonb,
+        array['is_active','updated_at'],
+        timestamptz '2026-10-15 15:01:00+00', 18788345
+      ),
+      (
+        '9d4e0541-17bf-4be5-b309-28bf33fc9cbc', '43866344-b550-4e8a-9a2d-9d23f3d8a997',
+        'workforce_onboarding', 'legacy-wrong-executor', 'workforce', 'legacy-wrong-executor',
+        'update', 'service_role',
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false}'::jsonb,
+        array['is_active','updated_at'],
+        timestamptz '2026-10-15 15:02:00+00', 18788344
+      ),
+      (
+        'audit-before-last-working', 'company', 'workforce_onboarding', 'currently-last-working', 'workforce', 'currently-last-working',
+        'update', 'service_role',
+        '{"onboarding_status":"under_review","lifecycle_status":"onboarding","is_active":true}'::jsonb,
+        '{"onboarding_status":"returned","lifecycle_status":"onboarding","is_active":false,"profile_returned_at":"2026-10-17T11:10:00Z"}'::jsonb,
+        array['is_active','onboarding_status','profile_returned_at','updated_at'],
+        timestamptz '2026-10-17 11:10:00+00', 112
+      );
+  `);
   return db;
 }
 
@@ -217,6 +411,110 @@ test("evidence repair is idempotent for canonical and mirrored profiles", async 
     { workforce_id: "mirrored-contractor-later-update", repair_count: 1 },
     { workforce_id: "mirrored-contractor-unsubmitted", repair_count: 1 },
     { workforce_id: "submitted-profile-field", repair_count: 1 }
+  ]);
+});
+
+test("returned-profile repair restores only audit-proven operational deactivations and is idempotent", async (t) => {
+  const db = await returnedOperationalRepairFixture();
+  t.after(() => db.close());
+  const migration = await readFile(returnedOperationalRepairMigrationUrl, "utf8");
+
+  await db.exec(migration);
+
+  const { rows } = await db.query(`
+    select id, onboarding_status, lifecycle_status, is_active, deactivated_at, last_working_date
+    from public.workforce
+    where id in (
+      'return-bug',
+      'rereturn-bug',
+      'legacy-return-bug',
+      'legacy-lookalike',
+      'legacy-wrong-executor',
+      'return-bug-later-note',
+      'initially-inactive-return',
+      'later-manual-status-change',
+      'currently-rejected',
+      'currently-exited',
+      'currently-deactivated',
+      'currently-last-working',
+      'returned-without-audit'
+    )
+    order by id
+  `);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  assert.equal(byId.get("return-bug")?.is_active, true);
+  assert.equal(byId.get("rereturn-bug")?.is_active, true);
+  assert.equal(byId.get("legacy-return-bug")?.is_active, true);
+  assert.equal(byId.get("return-bug-later-note")?.is_active, true);
+  for (const id of [
+    "legacy-lookalike",
+    "legacy-wrong-executor",
+    "initially-inactive-return",
+    "later-manual-status-change",
+    "currently-rejected",
+    "currently-exited",
+    "currently-deactivated",
+    "currently-last-working",
+    "returned-without-audit"
+  ]) {
+    assert.equal(byId.get(id)?.is_active, false, `${id} must remain inactive`);
+  }
+  assert.equal(byId.get("currently-rejected")?.onboarding_status, "rejected");
+  assert.equal(byId.get("currently-exited")?.lifecycle_status, "exited");
+  assert.ok(byId.get("currently-deactivated")?.deactivated_at);
+  assert.ok(byId.get("currently-last-working")?.last_working_date);
+
+  const repairs = await db.query(`
+    select
+      workforce_id,
+      event_code,
+      metadata ->> 'return_audit_event_id' as return_audit_event_id,
+      metadata ->> 'repair_migration' as repair_migration
+    from public.workforce_onboarding_events
+    where event_code = 'returned_operational_status_repaired'
+    order by workforce_id
+  `);
+  assert.deepEqual(repairs.rows, [
+    {
+      workforce_id: "legacy-return-bug",
+      event_code: "returned_operational_status_repaired",
+      return_audit_event_id: "6a5c1edc-81d1-4263-b019-1913b7bf2cb3",
+      repair_migration: "20261017190000_repair_returned_workforce_operational_status"
+    },
+    {
+      workforce_id: "rereturn-bug",
+      event_code: "returned_operational_status_repaired",
+      return_audit_event_id: "audit-rereturn-bug",
+      repair_migration: "20261017190000_repair_returned_workforce_operational_status"
+    },
+    {
+      workforce_id: "return-bug",
+      event_code: "returned_operational_status_repaired",
+      return_audit_event_id: "audit-return-bug",
+      repair_migration: "20261017190000_repair_returned_workforce_operational_status"
+    },
+    {
+      workforce_id: "return-bug-later-note",
+      event_code: "returned_operational_status_repaired",
+      return_audit_event_id: "audit-return-later-note",
+      repair_migration: "20261017190000_repair_returned_workforce_operational_status"
+    }
+  ]);
+
+  await db.exec(migration);
+  const afterSecondRun = await db.query(`
+    select workforce_id, count(*)::integer as repair_count
+    from public.workforce_onboarding_events
+    where event_code = 'returned_operational_status_repaired'
+    group by workforce_id
+    order by workforce_id
+  `);
+  assert.deepEqual(afterSecondRun.rows, [
+    { workforce_id: "legacy-return-bug", repair_count: 1 },
+    { workforce_id: "rereturn-bug", repair_count: 1 },
+    { workforce_id: "return-bug", repair_count: 1 },
+    { workforce_id: "return-bug-later-note", repair_count: 1 }
   ]);
 });
 
