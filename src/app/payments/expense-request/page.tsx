@@ -20,6 +20,7 @@ import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
 import { createExpenseRequest, resubmitExpenseRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
+import { paymentQuestionDateBoundsForValue } from "@/lib/payment-question-date-rules";
 
 type LocationRow = {
   id: string;
@@ -225,15 +226,23 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
       </>
     );
   }
+  const dateBounds = question.answer_type === "date"
+    ? paymentQuestionDateBoundsForValue(question, answer?.answer_value)
+    : null;
   return (
-    <input
-      className="field"
-      name={name}
-      required={question.is_required}
-      step={question.answer_type === "number" ? "0.01" : undefined}
-      type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
-      defaultValue={answer?.answer_value ?? ""}
-    />
+    <>
+      <input
+        className="field"
+        name={name}
+        required={question.is_required}
+        step={question.answer_type === "number" ? "0.01" : undefined}
+        type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
+        defaultValue={answer?.answer_value ?? ""}
+        min={dateBounds?.min}
+        max={dateBounds?.max}
+      />
+      {dateBounds?.helper ? <span className="helper-text">Allowed: {dateBounds.helper}</span> : null}
+    </>
   );
 }
 

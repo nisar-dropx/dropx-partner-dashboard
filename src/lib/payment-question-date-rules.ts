@@ -28,6 +28,10 @@ function shiftCalendarDate(value: string, days: number) {
   return shifted.toISOString().slice(0, 10);
 }
 
+function isCalendarDate(value?: string | null): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
 export function paymentQuestionDateBounds(config: PaymentQuestionDateConfig, now = new Date()) {
   const rule = normalizePaymentQuestionDateRule(config.date_rule);
   const today = calendarDateInIndia(now);
@@ -38,9 +42,36 @@ export function paymentQuestionDateBounds(config: PaymentQuestionDateConfig, now
   return { min: undefined, max: undefined, helper: undefined };
 }
 
-export function validatePaymentQuestionDate(value: string | null, config: PaymentQuestionDateConfig, now = new Date()) {
+/** On resubmit, keep a previously saved date selectable even if the sliding window has moved. */
+export function paymentQuestionDateBoundsForValue(
+  config: PaymentQuestionDateConfig,
+  existingValue?: string | null,
+  now = new Date()
+) {
+  const bounds = paymentQuestionDateBounds(config, now);
+  if (!isCalendarDate(existingValue)) return bounds;
+  const min = bounds.min && existingValue < bounds.min ? existingValue : bounds.min;
+  const max = bounds.max && existingValue > bounds.max ? existingValue : bounds.max;
+  if (min === bounds.min && max === bounds.max) return bounds;
+  return {
+    min,
+    max,
+    helper: bounds.helper ? `${bounds.helper}; original date kept if unchanged` : undefined,
+  };
+}
+
+export function validatePaymentQuestionDate(
+  value: string | null,
+  config: PaymentQuestionDateConfig,
+  now = new Date(),
+  options?: { existingValue?: string | null }
+) {
   if (config.answer_type !== "date" || !value) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error(`${config.question_text || "Date"}: enter a valid date.`);
+  if (!isCalendarDate(value)) throw new Error(`${config.question_text || "Date"}: enter a valid date.`);
+  // Returned requests may be corrected days later. Keep the originally accepted date valid when
+  // unchanged so "today only" (and similar) rules do not block resubmission.
+  const existingValue = options?.existingValue?.trim() || null;
+  if (existingValue && value === existingValue) return;
   const bounds = paymentQuestionDateBounds(config, now);
   if ((bounds.min && value < bounds.min) || (bounds.max && value > bounds.max)) {
     throw new Error(`${config.question_text || "Date"}: ${bounds.helper ?? "date is outside the allowed range"}.`);

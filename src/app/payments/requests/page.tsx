@@ -20,7 +20,7 @@ import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
-import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
+import { paymentQuestionDateBoundsForValue } from "@/lib/payment-question-date-rules";
 import { paymentRequestCancelEligibility, type CancelEligibility } from "@/lib/payment-request-cancel";
 import { buildPaymentApprovalFlow } from "@/lib/payment-approval-flow";
 import { loadApprovalSteps } from "@/lib/payment-approval-steps";
@@ -236,7 +236,9 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
       </>
     );
   }
-  const dateBounds = question.answer_type === "date" ? paymentQuestionDateBounds(question) : null;
+  const dateBounds = question.answer_type === "date"
+    ? paymentQuestionDateBoundsForValue(question, answer?.answer_value)
+    : null;
   return (
     <>
       <input

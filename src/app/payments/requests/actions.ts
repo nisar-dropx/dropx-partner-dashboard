@@ -124,9 +124,15 @@ type PaymentQuestionForAction = {
   date_days?: number | null;
 };
 
-function validateQuestionDates(formData: FormData, questions: PaymentQuestionForAction[]) {
+function validateQuestionDates(
+  formData: FormData,
+  questions: PaymentQuestionForAction[],
+  existingAnswersByQuestionId?: Map<string, { answer_value?: string | null }>
+) {
   for (const question of questions) {
-    validatePaymentQuestionDate(clean(formData.get(`answers[${question.id}]`)), question);
+    validatePaymentQuestionDate(clean(formData.get(`answers[${question.id}]`)), question, new Date(), {
+      existingValue: existingAnswersByQuestionId?.get(question.id)?.answer_value ?? null,
+    });
   }
 }
 
@@ -1172,13 +1178,13 @@ export async function resubmitExpenseRequest(formData: FormData) {
 
     const { data: existingAnswers, error: existingAnswersError } = await admin
       .from("payment_request_answers")
-      .select("id, question_id, file_name, file_path, file_size, attachments")
+      .select("id, question_id, answer_value, file_name, file_path, file_size, attachments")
       .eq("company_id", companyId)
       .eq("payment_request_id", request.id);
     if (existingAnswersError) throw new Error(existingAnswersError.message);
     const existingAnswerByQuestionId = new Map((existingAnswers ?? []).map((answer) => [answer.question_id, answer]));
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
-    validateQuestionDates(formData, expenseQuestions);
+    validateQuestionDates(formData, expenseQuestions, existingAnswerByQuestionId);
     const questionById = new Map(expenseQuestions.map((question) => [question.id, question]));
 
     for (const questionId of formData.getAll("question_ids").map(String)) {
@@ -1440,7 +1446,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
 
     const { data: existingAnswers } = await admin
       .from("payment_request_answers")
-      .select("id, question_id, file_name, file_path, file_size, attachments")
+      .select("id, question_id, answer_value, file_name, file_path, file_size, attachments")
       .eq("company_id", companyId)
       .eq("payment_request_id", request.id);
     const existingAnswerByQuestionId = new Map((existingAnswers ?? []).map((answer) => [answer.question_id, answer]));
@@ -1448,7 +1454,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     if (questionIds.length) {
       const paymentQuestions = questionsForStage(headResult.data.payment_head_questions, "payment");
-      validateQuestionDates(formData, paymentQuestions);
+      validateQuestionDates(formData, paymentQuestions, existingAnswerByQuestionId);
       const questionById = new Map(paymentQuestions.map((question) => [question.id, question]));
       for (const questionId of questionIds) {
         const question = questionById.get(questionId);
