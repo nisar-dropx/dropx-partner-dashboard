@@ -4,6 +4,7 @@ import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
 import { useState } from "react";
 import type {
   AuditAssessment,
+  AuditResponsibilityIssue,
   AuditScoreSnapshot,
 } from "@/lib/ops-pulse/station-audit-scoring";
 import type {
@@ -18,8 +19,10 @@ export function ResponsibilityAssessment({
   options,
   evidence,
   labels = {},
+  issue,
 }: {
   labels?: Record<string, string>;
+  issue?: AuditResponsibilityIssue | null;
   keys: string[];
   initial?: Record<string, AuditAssessment>;
   options: AuditOption[];
@@ -48,7 +51,8 @@ export function ResponsibilityAssessment({
           Score only what the station could control. Verify a prior missing scan
           or external cause against dated evidence. Pending investigation does
           not deduct points, but prevents a final rating. Findings still require
-          a station response.
+          a station response. Add a reason for each decided outcome; use Pending
+          investigation if responsibility has not yet been established.
         </p>
         <input
           type="hidden"
@@ -75,6 +79,7 @@ export function ResponsibilityAssessment({
                 <label className={styles.inputLabel}>
                   Station responsibility
                   <select
+                    name={`assessment_code_${key}`}
                     value={v.code}
                     onChange={(e) => update(key, "code", e.target.value)}
                   >
@@ -100,18 +105,33 @@ export function ResponsibilityAssessment({
                 <label className={styles.inputLabel}>
                   Reason / reference
                   <input
+                    name={`assessment_reason_${key}`}
+                    aria-invalid={
+                      issue?.fieldName === `assessment_reason_${key}` ||
+                      undefined
+                    }
+                    aria-label={`Responsibility reason for ${key === "cash" ? "COD difference" : labels[key] || key}`}
                     value={v.reason}
                     onChange={(e) => update(key, "reason", e.target.value)}
-                    required={v.code !== "pending"}
+                    required={
+                      options.find((o) => o.code === v.code)?.metadata
+                        .pending !== true
+                    }
                     placeholder="What happened, when it was reported, and why the station could or could not control it"
                   />
                 </label>
               </div>
+              {issue?.key === key && (
+                <p role="alert" style={{ color: "#b91c1c", marginTop: 8 }}>
+                  {issue.message}
+                </p>
+              )}
               {excluded && (
                 <div className={styles.twoCol}>
                   <label className={styles.inputLabel}>
                     Verified proof already attached
                     <select
+                      name={`assessment_evidenceId_${key}`}
                       value={v.evidenceId}
                       onChange={(e) =>
                         update(key, "evidenceId", e.target.value)

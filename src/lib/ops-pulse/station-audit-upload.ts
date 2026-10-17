@@ -28,12 +28,11 @@ function auditFileType(field: string, file: File) {
     field === "evidence_files" ||
     field === "response_evidence" ||
     field.startsWith("check_photo_");
-  const type =
-    proofMime.test(file.type)
-      ? file.type
-      : proofMimeByExtension[extension] ||
-        (supporting ? documentMimeByExtension[extension] : "") ||
-        "";
+  const type = proofMime.test(file.type)
+    ? file.type
+    : proofMimeByExtension[extension] ||
+      (supporting ? documentMimeByExtension[extension] : "") ||
+      "";
   if (!type)
     throw new Error(
       supporting
@@ -51,6 +50,9 @@ export type UploadedAuditFile = {
   checklistItemId: string | null;
   evidenceKind: string;
 };
+// A failed submission must not re-upload the same selected file on retry.
+// File identity, audit and field all matter: the same image may be proof for two checks.
+const completedUploads = new WeakMap<File, Map<string, UploadedAuditFile>>();
 export async function uploadAuditFiles(
   data: FormData,
   onProgress?: (done: number, total: number) => void,
@@ -90,6 +92,21 @@ export async function uploadAuditFiles(
     auditFileType(field, file);
   }
   const upload = async ({ field, file }: { field: string; file: File }) => {
+    const cacheKey = JSON.stringify([data.get("audit_id"), field]);
+    const report = (result: UploadedAuditFile) => {
+      if (field.startsWith("assessment_proof_"))
+        data.set(
+          `assessment_evidence_${field.slice("assessment_proof_".length)}`,
+          result.evidenceId,
+        );
+      onUploaded?.(result);
+      onProgress?.(++done, files.length);
+    };
+    const saved = completedUploads.get(file)?.get(cacheKey);
+    if (saved) {
+      report(saved);
+      return;
+    }
     if (!supabase)
       throw new Error("Upload service unavailable. Refresh and try again.");
     const call = async (body: Record<string, unknown>) => {
@@ -129,25 +146,29 @@ export async function uploadAuditFiles(
       path: signed.path,
       kind,
     });
-    if (field.startsWith("assessment_proof_"))
-      data.set(
-        `assessment_evidence_${field.slice("assessment_proof_".length)}`,
-        completed.evidenceId,
-      );
     const checklistItemId = field.startsWith("check_photo_")
       ? field.slice("check_photo_".length)
       : null;
-    onUploaded?.({
+    const result = {
       field,
       evidenceId: completed.evidenceId,
       fileName: file.name,
       contentType,
       checklistItemId,
       evidenceKind: checklistItemId ? "checklist_photo" : kind,
-    });
-    onProgress?.(++done, files.length);
+    };
+    const savedForFile = completedUploads.get(file) || new Map();
+    savedForFile.set(cacheKey, result);
+    completedUploads.set(file, savedForFile);
+    report(result);
   };
-  for (let index = 0; index < files.length; index += 3)
-    await Promise.all(files.slice(index, index + 3).map(upload));
+  for (let index = 0; index < files.length; index += 3) {
+    // Finish this batch before allowing a retry, retaining every completed proof.
+    const results = await Promise.allSettled(
+      files.slice(index, index + 3).map(upload),
+    );
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
+  }
   for (const field of fields) data.delete(field);
 }
