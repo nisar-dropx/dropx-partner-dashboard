@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { NlLossRefresh } from "./nl-loss-refresh";
-import { LossTabs, type LossTab } from "@/components/ops-loss-report";
+import { LossHeader, type LossTab } from "@/components/loss-header";
+export { LossHeader };
 import { NlLossCases } from "./nl-loss-cases";
 import { LossWorkbook } from "./loss-workbook";
-import { LossTidSearch } from "./loss-tid-search";
 import { ALL_PERIODS, type NlView } from "@/lib/ops-pulse/nl-loss";
 import styles from "./nl-loss.module.css";
 
@@ -24,37 +24,6 @@ const time = (s: string | null | undefined) =>
         minute: "2-digit",
       })
     : "Not checked";
-
-/** Title, tracking-ID lookup and the NL / SLP tabs shared by every Losses view. */
-export function LossHeader({
-  eyebrow,
-  title,
-  intro,
-  tabs,
-  active,
-}: {
-  eyebrow: string;
-  title: string;
-  intro: string;
-  tabs: LossTab[];
-  active: string;
-}) {
-  return (
-    <header className={styles.header}>
-      <div>
-        <span className={styles.eyebrow}>{eyebrow}</span>
-        <h1>{title}</h1>
-        <p>{intro}</p>
-      </div>
-      <div className={styles.headerTools}>
-        <div className={styles.tidSearch}>
-          <LossTidSearch />
-        </div>
-        <LossTabs tabs={tabs} active={active} />
-      </div>
-    </header>
-  );
-}
 
 /** NL has two data sets in Cloak: the month still in dispute, and the months Amazon has closed. */
 export function NlViewSwitch({ active }: { active: "live" | "historic" }) {

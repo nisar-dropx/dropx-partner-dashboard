@@ -3,16 +3,12 @@ import styles from "@/components/ops-loss-report.module.css";
 import { OpsLossCases } from "@/components/ops-loss-cases";
 import { ALL_SNAPSHOTS, type LossReportView } from "@/lib/ops-pulse/loss-reports";
 
-export type LossTab = { key: string; label: string; href: string };
+import { LossHeader, LossTabs, type LossTab } from "@/components/loss-header";
+export { LossTabs, type LossTab };
 
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 const time = (value: string | null) => value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
 
-export function LossTabs({ tabs, active }: { tabs: LossTab[]; active: string }) {
-  return <nav className={styles.tabs} aria-label="Loss reports">
-    {tabs.map((t) => <Link key={t.key} href={t.href} prefetch className={`${styles.tab} ${t.key === active ? styles.activeTab : ""}`} aria-current={t.key === active ? "page" : undefined}>{t.label}</Link>)}
-  </nav>;
-}
 
 export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }: {
   title: string;
@@ -42,14 +38,7 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
   };
 
   return <div className={styles.workspace}>
-    <header className={styles.header}>
-      <div>
-        <span className={styles.eyebrow}>Team Ops · Losses</span>
-        <h1>{title}</h1>
-        <p>{intro}</p>
-      </div>
-      <LossTabs tabs={tabs} active={activeTab} />
-    </header>
+    <LossHeader title={title} intro={intro} tabs={tabs} active={activeTab} />
 
     {run ? <div className={styles.context}>
       <span>Source <strong>{view.periods.length > 1 ? `${view.periods.length} Amazon files` : (run.source_file ?? "Amazon report").trim()}</strong></span>

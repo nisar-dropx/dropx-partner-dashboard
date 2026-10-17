@@ -1,0 +1,14 @@
+.header { display: grid; gap: 14px; min-width: 0; }
+.titleRow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; min-height: 76px; }
+.titleBlock { min-width: 0; flex: 1 1 420px; }
+.eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .12em; color: #e95022; text-transform: uppercase; }
+.titleBlock h1 { margin: 6px 0 4px; font-size: 24px; line-height: 1.2; letter-spacing: -.4px; font-weight: 750; color: #182334; }
+/* One line keeps every tab the same height; the full text is in the tooltip. */
+.titleBlock p { margin: 0; color: #66758a; font-size: 13px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90ch; }
+.search { flex: 0 1 320px; min-width: 220px; }
+.tabs { display: flex; gap: 4px; padding: 4px; background: #f1f4f8; border: 1px solid #e5e9ef; border-radius: 12px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 9px; font-size: 12px; font-weight: 650; color: #5d6d84; text-decoration: none; white-space: nowrap; transition: background .15s, color .15s; }
+.tab:hover { color: #2b3b52; background: #fff; }
+.activeTab { background: #fff; color: #cf5a24; box-shadow: 0 1px 3px #1c2b401f; }
+@media (max-width: 640px) { .titleBlock p { white-space: normal; } .search { flex-basis: 100%; } .titleRow { min-height: 0; } }
