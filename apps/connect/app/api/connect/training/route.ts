@@ -31,6 +31,12 @@ export async function GET(request:Request){try{
   const target=new URL(href);if(target.protocol!=='https:')throw new Error('Invalid material link.');
   return new Response(null,{status:303,headers:{...headers,Location:target.toString()}});
  }
+ // Lightweight count for the home card and the Training tab badge: one indexed count, no details.
+ if(url.searchParams.get('summary')==='1'){
+  const open=await db().from('hr_training_enrolments').select('id',{count:'exact',head:true}).eq('company_id',account.companyId).eq('worker_type',account.profileType).eq('worker_id',account.id).not('status','in','("completed","cancelled")');
+  if(open.error)throw new Error('Unable to load your training.');
+  return Response.json({open:open.count??0},{headers});
+ }
  const enrolments=await db().from('hr_training_enrolments').select('id,programme_name,starts_on,target_completion_on,status,completed_at').eq('company_id',account.companyId).eq('worker_type',account.profileType).eq('worker_id',account.id).order('created_at',{ascending:false}).limit(200);
  if(enrolments.error)throw new Error('Unable to load your training.');
  const ids=(enrolments.data??[]).map(e=>e.id);

@@ -47,9 +47,14 @@ function Status({ value }: { value: string }) {
 }
 
 export function ConnectPerformance({account,active=true}:{account:AppAccount;active?:boolean}) {
-  const [pane,setPane]=useState<'performance'|'training'>('performance');
   const eligible=isPeopleTrainingAccount(account);
-  return <>{eligible?<nav className="dx-performance-sections" aria-label="Development sections"><button className={pane==='performance'?'active':''} onClick={()=>setPane('performance')}>Performance</button><button className={pane==='training'?'active':''} onClick={()=>setPane('training')}>Training</button></nav>:null}{eligible&&pane==='training'?<ConnectTraining key={`${account.profileType}:${account.id}`} account={account}/>:<ConnectPerformanceCore key={`${account.profileType}:${account.id}`} account={account} active={active}/>}</>;
+  const [pane,setPane]=useState<'performance'|'training'>('performance');
+  const [openTraining,setOpenTraining]=useState(0);
+  const chosen=useRef(false);
+  // Open on Training when something is assigned, unless the person already picked a tab.
+  useEffect(()=>{if(!eligible)return;let alive=true;void fetch(`/api/connect/training?summary=1&accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`,{cache:'no-store'}).then(r=>r.ok?r.json():null).then(p=>{if(!alive||!p)return;const n=Number(p.open)||0;setOpenTraining(n);if(n>0&&!chosen.current)setPane('training');}).catch(()=>null);return()=>{alive=false;};},[eligible,account.id,account.profileType]);
+  const pick=(next:'performance'|'training')=>{chosen.current=true;setPane(next);};
+  return <>{eligible?<nav className="dx-performance-sections" aria-label="Development sections"><button className={pane==='performance'?'active':''} onClick={()=>pick('performance')}>Performance</button><button className={pane==='training'?'active':''} onClick={()=>pick('training')}>Training{openTraining?<b className="dx-tab-count">{openTraining}</b>:null}</button></nav>:null}{eligible&&pane==='training'?<ConnectTraining key={`${account.profileType}:${account.id}`} account={account}/>:<ConnectPerformanceCore key={`${account.profileType}:${account.id}`} account={account} active={active}/>}</>;
 }
 
 function ConnectPerformanceCore({ account, active = true }: { account: AppAccount; active?: boolean }) {

@@ -18486,3 +18486,4 @@ img.dx-selfie-live {
   .dx-workforce-ui .dx-drawer-account strong { font-size: 15px; }
   .dx-workforce-ui .dx-mobile-nav { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
 }
+.dx-tab-count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#ee4b22;color:#fff;font-size:10px;font-weight:800}

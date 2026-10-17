@@ -18,7 +18,8 @@ import {
   Target,
   UserRound,
   UsersRound,
-  UserRoundX
+  UserRoundX,
+  GraduationCap
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
@@ -494,6 +495,7 @@ export function ConnectDashboard({
   const rosterAllowed = pageAccess.includes("roster");
   const leaveAllowed = pageAccess.includes("leave");
   const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor" || pageAccess.includes("performance");
+  const trainingOpen = useOpenTrainingCount(account, performanceAllowed && variant !== "workforce");
   const advancesAllowed = pageAccess.includes("advances");
   const referAllowed = variant === "workforce" && pageAccess.includes("refer_earn");
   const summary = summarizeAttendance(attendance.rows, {
@@ -538,6 +540,12 @@ export function ConnectDashboard({
       </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
     </section> : null}
+
+    {performanceAllowed && trainingOpen > 0 ? <button className="dx-dashboard-attendance-nudge pending" onClick={onPerformance}>
+      <GraduationCap />
+      <span><strong>Training assigned</strong><small>{trainingOpen} programme{trainingOpen === 1 ? "" : "s"} to complete · open Performance → Training</small></span>
+      <ChevronRight />
+    </button> : null}
 
     {alerts.length ? <section className="dx-dashboard-card">
       <h2>Requires attention</h2>
@@ -621,4 +629,19 @@ export function ConnectDashboard({
       <ChevronRight />
     </button> : null}
   </section>;
+}
+
+/** Open training assignments for the home card; one count request, People profiles only. */
+function useOpenTrainingCount(account: AppAccount, enabled: boolean) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!enabled || (account.profileType !== "employee" && account.profileType !== "contractor")) return;
+    let alive = true;
+    void fetch(`/api/connect/training?summary=1&accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => { if (alive && p) setCount(Number(p.open) || 0); })
+      .catch(() => null);
+    return () => { alive = false; };
+  }, [enabled, account.id, account.profileType]);
+  return count;
 }
