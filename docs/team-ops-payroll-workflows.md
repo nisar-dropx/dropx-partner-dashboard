@@ -208,6 +208,52 @@ Files: HRMS `supabase/migrations/20261016210000_training_written_answers.sql`,
 - Training is set up but barely used (one programme, no enrolments as of 2026-10-16). Adoption needs
   programmes, milestones and questions created in Training Master.
 
+## Workforce payment holds (Team Ops → Workforce holds)
+
+Files: `supabase/migrations/20261017100000_workforce_hold_requests.sql`, `src/lib/ops-pulse/workforce-hold-data.ts`,
+`src/app/api/ops-pulse/workforce-holds/route.ts`, `src/components/workforce-holds-desk.tsx`.
+
+```
+raise → awaiting_approval → (cluster manager) approve → active → (raiser) request_release → release_requested → approve_release → released
+            ├─ reject → rejected                                                      └─ reject_release → active
+            └─ withdraw → cancelled
+```
+
+- **How a hold takes effect:** approving calls `workforce_set_payout_payment_hold` for that calendar month,
+  in the same transaction. That is the real hold the Workforce payout worksheet and the bank file honour.
+  Approving the release lifts it.
+- **Old table:** the previous page wrote to `workforce_payment_holds`, which payouts never read. That table
+  is no longer written.
+- **Bank processing:** a hold cannot change while that month's payment is `processing` in
+  `workforce_payout_payment_items`, which is the same rule the Payments page applies.
+- **"On hold now":** the desk shows the latest hold events in `workforce_payout_payment_hold_events` for
+  people at the viewer's stations, including holds placed from Payments.
+- **Picking people:** associates load per station on demand; the page never reads the whole workforce.
+
+## Approver rule shared by holds and claims
+
+`holdApprovers` (`salary-hold-policy.ts`) returns the station's cluster managers, falling back to the Area
+Operations Managers when no cluster manager is mapped. The person who made the request is always excluded,
+so a cluster manager's own request goes to the AOM.
+
+People salary holds can be raised for a direct report, or for any active employee or contractor at a
+station in the viewer's Ops scope (`holdTargetAllowed`). Station people load on demand.
+
+## Offboarding checklist scope (Team Ops → Offboarding)
+
+The page shows every open exit for people at the viewer's stations, plus the viewer's direct reports, with
+steps waiting for the viewer first. The approve action (`actions.ts`) re-checks the reporting-chain level
+for every gate, so a wider list never gives anyone extra approval rights.
+
+## Load and caching notes
+
+- **COD Reports:** always uses a bounded range (default the last 14 closed days, at most 92) and lean
+  columns (`lean: true` in `loadCodSubmissions`), with 50 rows per page.
+- **Delivery scorecard:** the database aggregate is cached for 10 minutes per company, station set and
+  range (`unstable_cache`). Errors are not cached.
+- **DropX One training:** `GET /api/connect/training?summary=1` returns only a count of open enrolments. It
+  drives the home card and the Training tab badge.
+
 ## Tests
 
 - Dashboard: `pnpm run test:loss-recovery-payroll` and `pnpm run test:salary-hold`. Both run in
@@ -226,7 +272,9 @@ Files: HRMS `supabase/migrations/20261016210000_training_written_answers.sql`,
   rule.
 - **Reports** (on-screen numbers and layout) and **network planning** (LSC site). Waiting for the business
   to describe the pain points.
-- **Mileage claims.** The decision was to keep the current Ops-entered claims, so no change is planned.
+- **Mileage claims.** There are no station policies yet, and the Ops page has no review step (no `review`
+  action is passed to the mileage desk). Approved claims go to `workforce_adjustments`, which Workforce
+  payouts do not read, so they would not be paid today. Wiring them into the payout needs a decision.
 - **Training adoption.** Create real programmes and question banks. A ready-made starter programme could
   be added if wanted.
 - **Clean-up.** Remove `workforce_decide_payout_dispute` once nothing calls it. The `workforce_station_loss_claims`
