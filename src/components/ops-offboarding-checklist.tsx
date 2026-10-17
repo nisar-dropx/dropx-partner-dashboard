@@ -2,187 +2,191 @@
 import { useMemo, useState, useTransition } from "react";
 import { actOnOffboardingTaskApproval } from "@/app/ops-pulse/attendance/offboarding/actions";
 import type { OffboardingApprovalGate, OffboardingCase, OffboardingChecklistWorkspace, OffboardingTask } from "@/lib/ops-pulse/offboarding-checklist-data";
+import styles from "./ops-offboarding-checklist.module.css";
 
+const DONE = new Set(["completed", "waived"]);
+const label = (v: string) => v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const dateLabel = (value: string | null) =>
-  value ? new Date(`${value}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "Not set";
+  value ? new Date(`${value}T12:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "Not set";
+const todayIst = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+const daysTo = (date: string | null) => (date ? Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${todayIst()}T00:00:00Z`)) / 86400000) : null);
+const tone = (status: string) =>
+  ["approved", "completed"].includes(status) ? styles.good : ["rejected", "blocked"].includes(status) ? styles.bad : ["skipped", "waived"].includes(status) ? styles.muted : styles.warn;
 
-const statusPillClass = (status: string) => {
-  if (status === "approved" || status === "completed") return "status-pill good";
-  if (status === "rejected" || status === "blocked") return "status-pill bad";
-  if (status === "skipped" || status === "waived") return "status-pill";
-  return "status-pill warn";
-};
-
-function groupByCategory(tasks: OffboardingTask[]) {
-  const groups = new Map<string, OffboardingTask[]>();
-  tasks.forEach((task) => {
-    const list = groups.get(task.category) ?? [];
-    list.push(task);
-    groups.set(task.category, list);
-  });
-  return [...groups.entries()];
-}
-
-function ApprovalGateRow({ gate, taskId, onActed }: { gate: OffboardingApprovalGate; taskId: string; onActed: () => void }) {
-  const [proofNote, setProofNote] = useState("");
-  const [busy, startTransition] = useTransition();
+function Gate({ gate, onActed }: { gate: OffboardingApprovalGate; onActed: () => void }) {
+  const [note, setNote] = useState("");
+  const [busy, start] = useTransition();
   const [error, setError] = useState("");
-  const [decision, setDecision] = useState<"approved" | "rejected" | "skipped" | null>(null);
-
-  function submit(nextDecision: "approved" | "rejected" | "skipped") {
+  function act(decision: "approved" | "rejected" | "skipped") {
+    if (decision === "approved" && !note.trim()) return setError("Add a proof note before approving.");
+    if (decision !== "approved" && note.trim().length < 5) return setError("Add a reason (at least 5 characters).");
+    const form = new FormData();
+    form.set("approvalId", gate.approvalId);
+    form.set("decision", decision);
+    form.set("proofNote", note.trim());
     setError("");
-    setDecision(nextDecision);
-    const formData = new FormData();
-    formData.set("approvalId", gate.approvalId);
-    formData.set("decision", nextDecision);
-    formData.set("proofNote", proofNote.trim());
-    startTransition(async () => {
-      const result = await actOnOffboardingTaskApproval(formData);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
+    start(async () => {
+      const result = await actOnOffboardingTaskApproval(form);
+      if (!result.ok) return setError(result.message);
       onActed();
     });
   }
-
   return (
-    <div className="ooc-gate">
-      <div className="ooc-gate-head">
-        <span className="ooc-gate-name">{gate.levelName}</span>
-        <span className={statusPillClass(gate.status)}>{gate.status}</span>
-      </div>
-      {gate.status !== "pending" && (
-        <small className="ooc-gate-meta">
-          {gate.proofNote ? `Proof: ${gate.proofNote}` : "No proof note"}
-          {gate.actedAt ? ` · ${new Date(gate.actedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}
-        </small>
-      )}
-      {gate.status === "pending" && !gate.unlockedByPriorLevels && (
-        <small className="ooc-gate-meta">Waiting on earlier approval levels.</small>
-      )}
-      {gate.status === "pending" && gate.unlockedByPriorLevels && !gate.viewerCanAct && (
-        <small className="ooc-gate-meta">Awaiting {gate.levelName}.</small>
-      )}
-      {gate.status === "pending" && gate.viewerCanAct && (
-        <div className="ooc-gate-action">
-          <input
-            className="field"
-            placeholder="Proof note (required to approve)"
-            value={proofNote}
-            onChange={(e) => setProofNote(e.target.value)}
-            disabled={busy}
-          />
-          <div className="ooc-gate-buttons">
-            <button type="button" className="button" disabled={busy} onClick={() => submit("approved")}>
-              {busy && decision === "approved" ? "Approving…" : "Approve"}
-            </button>
-            <button type="button" className="button secondary" disabled={busy} onClick={() => submit("rejected")}>
-              {busy && decision === "rejected" ? "Rejecting…" : "Reject"}
-            </button>
-            <button type="button" className="button secondary" disabled={busy} onClick={() => submit("skipped")}>
-              {busy && decision === "skipped" ? "Skipping…" : "Skip"}
-            </button>
+    <li className={`${styles.gate} ${gate.viewerCanAct ? styles.gateMine : ""}`}>
+      <span className={`${styles.dot} ${tone(gate.status)}`} aria-hidden />
+      <div className={styles.gateBody}>
+        <div className={styles.gateHead}>
+          <b>{gate.levelName}</b>
+          <span className={`${styles.pill} ${tone(gate.status)}`}>{gate.viewerCanAct ? "Your approval" : label(gate.status)}</span>
+        </div>
+        {gate.status !== "pending" ? (
+          <small>{gate.proofNote ? `“${gate.proofNote}”` : "No note"}{gate.actedAt ? ` · ${new Date(gate.actedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}` : ""}</small>
+        ) : !gate.unlockedByPriorLevels ? (
+          <small>Waits for the earlier step.</small>
+        ) : !gate.viewerCanAct ? (
+          <small>Waiting for {gate.levelName}.</small>
+        ) : (
+          <div className={styles.act}>
+            <input value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} maxLength={500} placeholder="Proof note — what was checked or handed over" aria-label={`Proof note for ${gate.levelName}`} />
+            <div className={styles.actButtons}>
+              <button className={styles.primary} disabled={busy} onClick={() => act("approved")}>{busy ? "Saving…" : "Approve"}</button>
+              <button className={styles.secondary} disabled={busy} onClick={() => act("rejected")}>Reject</button>
+              <button className={styles.ghost} disabled={busy} onClick={() => act("skipped")}>Skip</button>
+            </div>
+            {error ? <p className={styles.error} role="alert">{error}</p> : null}
           </div>
-          {error && <p className="ooc-gate-error" role="alert">{error}</p>}
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </li>
   );
 }
 
-function TaskRow({ task, onActed }: { task: OffboardingTask; onActed: () => void }) {
+function Task({ task, onActed }: { task: OffboardingTask; onActed: () => void }) {
+  const mine = task.approvals.some((g) => g.viewerCanAct);
   return (
-    <div className="ooc-task">
-      <div className="ooc-task-head">
-        <div>
-          <strong>{task.name}</strong>
-          {task.isRequired && <span className="ooc-required">Required</span>}
-          <span className={statusPillClass(task.status)}>{task.status}</span>
-        </div>
+    <details className={styles.task} open={mine}>
+      <summary>
+        <span className={`${styles.check} ${DONE.has(task.status) ? styles.checkDone : ""}`} aria-hidden>{DONE.has(task.status) ? "✓" : ""}</span>
+        <span className={styles.taskTitle}>
+          <b>{task.name}</b>
+          <small>{label(task.ownerRole)}{task.dueDate ? ` · due ${dateLabel(task.dueDate)}` : ""}{task.isRequired ? " · required" : ""}</small>
+        </span>
+        {mine ? <span className={`${styles.pill} ${styles.mine}`}>Needs you</span> : <span className={`${styles.pill} ${tone(task.status)}`}>{label(task.status)}</span>}
+      </summary>
+      <div className={styles.taskBody}>
+        {task.instructions ? <p>{task.instructions}</p> : null}
+        {task.mandatoryProof ? <p className={styles.proof}>Proof needed: {task.mandatoryProof}</p> : null}
+        {task.approvals.length ? <ol className={styles.gates}>{task.approvals.map((g) => <Gate key={g.approvalId} gate={g} onActed={onActed} />)}</ol> : <small className={styles.mutedText}>No approval steps on this task.</small>}
       </div>
-      {task.instructions && <p className="ooc-task-instructions">{task.instructions}</p>}
-      {task.mandatoryProof && <p className="ooc-task-proof">Mandatory proof: {task.mandatoryProof}</p>}
-      <div className="ooc-gates">
-        {task.approvals.length === 0 && <small>No approval levels configured for this task.</small>}
-        {task.approvals.map((gate) => (
-          <ApprovalGateRow key={gate.approvalId} gate={gate} taskId={task.taskId} onActed={onActed} />
-        ))}
-      </div>
-    </div>
+    </details>
   );
 }
 
-function CaseSection({ exitCase, onActed }: { exitCase: OffboardingCase; onActed: () => void }) {
-  const categories = useMemo(() => groupByCategory(exitCase.tasks), [exitCase.tasks]);
+function CaseCard({ c, onActed, defaultOpen }: { c: OffboardingCase; onActed: () => void; defaultOpen: boolean }) {
+  const done = c.tasks.filter((t) => DONE.has(t.status)).length;
+  const pct = c.tasks.length ? Math.round((done / c.tasks.length) * 100) : 0;
+  const lwd = c.approvedLastWorkingDate || c.requestedLastWorkingDate;
+  const left = daysTo(lwd);
+  const groups = useMemo(() => {
+    const m = new Map<string, OffboardingTask[]>();
+    for (const t of c.tasks) m.set(t.category, [...(m.get(t.category) ?? []), t]);
+    return [...m];
+  }, [c.tasks]);
   return (
-    <section className="panel ooc-case">
-      <div className="ooc-case-head">
-        <div>
-          <h2>{exitCase.displayName}</h2>
-          <small>
-            {exitCase.designationName || "No designation on file"} · Case {exitCase.caseNumber} · {exitCase.scenario}
-          </small>
-        </div>
-        <div className="ooc-case-meta">
-          <span className={statusPillClass(exitCase.status)}>{exitCase.status.replace(/_/g, " ")}</span>
-          <small>Last working date: {dateLabel(exitCase.approvedLastWorkingDate || exitCase.requestedLastWorkingDate)}</small>
-        </div>
+    <details className={styles.case} open={defaultOpen}>
+      <summary className={styles.caseHead}>
+        <span className={styles.avatar} aria-hidden>{c.displayName.slice(0, 1)}</span>
+        <span className={styles.who}>
+          <b>{c.displayName}</b>
+          <small>{[c.designationName, c.stationCode, c.relation === "direct" ? "Direct report" : "Your station", c.caseNumber].filter(Boolean).join(" · ")}</small>
+        </span>
+        <span className={styles.lwd}>
+          <small>Last working day</small>
+          <b>{dateLabel(lwd)}</b>
+          {left != null ? <em className={left < 0 ? styles.bad : left <= 7 ? styles.warn : styles.muted}>{left < 0 ? `${-left} days ago` : left === 0 ? "Today" : `in ${left} days`}</em> : null}
+        </span>
+        <span className={styles.progressWrap}>
+          <span className={styles.progress}><i style={{ width: `${pct}%` }} /></span>
+          <small>{done}/{c.tasks.length} tasks</small>
+        </span>
+        {c.actionable ? <span className={`${styles.pill} ${styles.mine}`}>{c.actionable} for you</span> : <span className={`${styles.pill} ${tone(c.status)}`}>{label(c.status)}</span>}
+      </summary>
+      <div className={styles.caseBody}>
+        {groups.length ? groups.map(([category, tasks]) => (
+          <section key={category} className={styles.group}>
+            <h3>{label(category)}</h3>
+            {tasks.map((t) => <Task key={t.taskId} task={t} onActed={onActed} />)}
+          </section>
+        )) : <p className={styles.mutedText}>HR has not generated the checklist for this exit yet.</p>}
       </div>
-      {categories.length === 0 && <p className="ooc-empty">No checklist tasks have been generated for this case yet.</p>}
-      {categories.map(([category, tasks]) => (
-        <div className="ooc-category" key={category}>
-          <h3>{category}</h3>
-          {tasks.map((task) => (
-            <TaskRow key={task.taskId} task={task} onActed={onActed} />
-          ))}
-        </div>
-      ))}
-    </section>
+    </details>
   );
 }
+
+const FILTERS = [["all", "All"], ["mine", "Needs you"], ["soon", "Leaving in 7 days"], ["direct", "Direct reports"]] as const;
 
 export function OpsOffboardingChecklist({ initial }: { initial: OffboardingChecklistWorkspace }) {
   const [data, setData] = useState(initial);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-
+  const [filter, setFilter] = useState<(typeof FILTERS)[number][0]>(initial.cases.some((c) => c.actionable) ? "mine" : "all");
+  const [query, setQuery] = useState("");
   async function refresh() {
     setRefreshing(true);
     setError("");
     try {
       const response = await fetch("/api/ops-pulse/offboarding-checklist", { cache: "no-store" });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Offboarding checklist could not be refreshed.");
+      if (!response.ok) throw new Error(result.error || "Offboarding could not be refreshed.");
       setData(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Offboarding checklist could not be refreshed.");
+      setError(e instanceof Error ? e.message : "Offboarding could not be refreshed.");
     } finally {
       setRefreshing(false);
     }
   }
+  const soon = (c: OffboardingCase) => { const d = daysTo(c.approvedLastWorkingDate || c.requestedLastWorkingDate); return d != null && d <= 7; };
+  const counts = { all: data.cases.length, mine: data.cases.filter((c) => c.actionable).length, soon: data.cases.filter(soon).length, direct: data.cases.filter((c) => c.relation === "direct").length };
+  const q = query.trim().toLowerCase();
+  const shown = data.cases.filter((c) =>
+    (filter === "all" || (filter === "mine" ? c.actionable > 0 : filter === "soon" ? soon(c) : c.relation === "direct")) &&
+    (!q || [c.displayName, c.caseNumber, c.stationCode, c.designationName].join(" ").toLowerCase().includes(q)));
+  const openTasks = data.cases.reduce((n, c) => n + c.tasks.filter((t) => !DONE.has(t.status)).length, 0);
 
   return (
-    <div className="ooc">
-      <section className="panel ooc-intro">
+    <div className={styles.page}>
+      <header className={styles.header}>
         <div>
-          <span className="ooc-eyebrow">TEAM OPS · OFFBOARDING</span>
-          <h1>Offboarding Checklist</h1>
-          <p>Direct reports currently in an exit process, with their HRMS-configured clearance checklist and approval gates.</p>
+          <span className={styles.eyebrow}>Team Ops · Offboarding</span>
+          <h1>Offboarding checklist</h1>
+          <p>Everyone leaving from {data.scopeLabel.toLowerCase()}: the HR clearance checklist, who must sign each step, and the steps waiting for you.</p>
         </div>
-        <button className="button secondary" disabled={refreshing} onClick={refresh}>
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
-      </section>
-      {error && <p className="ooc-gate-error" role="alert">{error}</p>}
-      {data.cases.length === 0 && (
-        <section className="panel">
-          <p>None of your direct reports currently have an open offboarding case.</p>
-        </section>
+        <button className={styles.secondary} disabled={refreshing} onClick={refresh}>{refreshing ? "Refreshing…" : "Refresh"}</button>
+      </header>
+      <div className={styles.kpis}>
+        <div><span>Open exits</span><strong>{counts.all}</strong></div>
+        <div className={counts.mine ? styles.kpiAlert : undefined}><span>Waiting for you</span><strong>{data.cases.reduce((n, c) => n + c.actionable, 0)}</strong><small>{counts.mine} people</small></div>
+        <div><span>Leaving in 7 days</span><strong>{counts.soon}</strong></div>
+        <div><span>Open checklist tasks</span><strong>{openTasks}</strong></div>
+      </div>
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      <div className={styles.toolbar}>
+        <div className={styles.chips} role="tablist">
+          {FILTERS.map(([k, v]) => (
+            <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? styles.chipOn : styles.chip} onClick={() => setFilter(k)}>{v}<em>{counts[k]}</em></button>
+          ))}
+        </div>
+        <input aria-label="Search exits" placeholder="Name, case, station" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      {shown.length ? (
+        <div className={styles.list}>{shown.map((c, i) => <CaseCard key={c.caseId} c={c} onActed={refresh} defaultOpen={i === 0 && c.actionable > 0} />)}</div>
+      ) : (
+        <div className={styles.empty}>
+          <b>{data.cases.length ? "No exits match this view." : "No one is leaving right now."}</b>
+          <p>{data.cases.length ? "Try another filter." : `Exits raised in People for ${data.scopeLabel.toLowerCase()} appear here with their clearance checklist.`}</p>
+        </div>
       )}
-      {data.cases.map((exitCase) => (
-        <CaseSection key={exitCase.caseId} exitCase={exitCase} onActed={refresh} />
-      ))}
+      <p className={styles.footnote}>Checklist steps come from HR&apos;s exit setup in People. Each approval needs a proof note and follows the step order; you can act only on steps you hold.</p>
     </div>
   );
 }

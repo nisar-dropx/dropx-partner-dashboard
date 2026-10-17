@@ -1,0 +1,73 @@
+.page { display: grid; gap: 14px; max-width: 1200px; margin: auto; width: 100%; color: #1c2940; }
+.header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #e95022; }
+.header h1 { margin: 6px 0 4px; font-size: 24px; letter-spacing: -.4px; }
+.header p { margin: 0; color: #66758a; font-size: 13px; max-width: 80ch; line-height: 1.5; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.kpis > div { background: #fff; border: 1px solid #e3e8ef; border-radius: 12px; padding: 11px 14px; display: grid; gap: 2px; }
+.kpis span { font-size: 11px; font-weight: 700; color: #65758a; text-transform: uppercase; letter-spacing: .04em; }
+.kpis strong { font-size: 22px; }
+.kpis small { font-size: 11px; color: #72839a; }
+.kpiAlert { border-color: #f3b9a4 !important; background: #fff6f1 !important; }
+.kpiAlert strong { color: #c8461c; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.toolbar input { border: 1px solid #dbe3ed; border-radius: 9px; padding: 8px 11px; font: inherit; font-size: 13px; min-width: 220px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip, .chipOn { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #dfe5ed; background: #fff; border-radius: 999px; padding: 6px 11px; font: inherit; font-size: 12px; font-weight: 650; color: #4c5d75; cursor: pointer; }
+.chipOn { background: #fff0e8; border-color: #f3b9a4; color: #c8461c; }
+.chip em, .chipOn em { font-style: normal; font-size: 11px; background: rgba(16, 35, 63, .07); border-radius: 999px; padding: 0 6px; }
+.list { display: grid; gap: 10px; }
+.case { background: #fff; border: 1px solid #e3e8ef; border-radius: 14px; overflow: hidden; }
+.case[open] { box-shadow: 0 6px 18px rgba(16, 35, 63, .06); }
+.caseHead { display: grid; grid-template-columns: 36px minmax(160px, 1.6fr) minmax(120px, .8fr) minmax(120px, .8fr) auto; gap: 14px; align-items: center; padding: 12px 16px; cursor: pointer; list-style: none; }
+.caseHead::-webkit-details-marker { display: none; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: #fff0e8; color: #c8461c; font-weight: 800; }
+.who, .lwd, .taskTitle { display: grid; gap: 2px; min-width: 0; }
+.who b, .taskTitle b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who small, .lwd small, .taskTitle small, .progressWrap small { font-size: 11px; color: #72839a; }
+.lwd em { font-style: normal; font-size: 11px; font-weight: 700; }
+.progressWrap { display: grid; gap: 4px; }
+.progress { height: 6px; border-radius: 999px; background: #eef1f6; overflow: hidden; }
+.progress i { display: block; height: 100%; background: linear-gradient(90deg, #26987a, #3cbf97); }
+.pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.good { background: #dcf3e9; color: #0f6a4f; }
+.bad { background: #fdecea; color: #b42318; }
+.warn { background: #fff6e6; color: #875716; }
+.muted { background: #f1f3f6; color: #5b6b82; }
+.mine { background: #ee4b22; color: #fff; }
+.lwd .bad, .lwd .warn, .lwd .muted { background: none; }
+.caseBody { border-top: 1px solid #eef1f6; padding: 12px 16px 16px; display: grid; gap: 12px; background: #fbfcfe; }
+.group h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #65758a; }
+.task { background: #fff; border: 1px solid #e8edf3; border-radius: 10px; margin-bottom: 6px; }
+.task > summary { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; cursor: pointer; list-style: none; }
+.task > summary::-webkit-details-marker { display: none; }
+.check { width: 20px; height: 20px; border-radius: 6px; border: 2px solid #cfd9e6; display: grid; place-items: center; font-size: 12px; font-weight: 800; }
+.checkDone { background: #26987a; border-color: #26987a; color: #fff; }
+.taskBody { padding: 0 12px 12px 44px; font-size: 13px; display: grid; gap: 8px; }
+.taskBody p { margin: 0; color: #51627c; line-height: 1.5; }
+.proof { background: #f6f8fb; padding: 6px 10px; border-radius: 8px; }
+.gates { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; border-left: 2px solid #e8eef6; margin-left: 4px; }
+.gate { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding-left: 0; position: relative; }
+.gate .dot { width: 10px; height: 10px; border-radius: 50%; margin: 5px 0 0 -6px; border: 2px solid #fff; }
+.gateMine .gateBody { background: #fff6f1; border: 1px solid #f3b9a4; border-radius: 10px; padding: 8px 10px; }
+.gateBody { display: grid; gap: 4px; }
+.gateBody small { color: #72839a; font-size: 12px; }
+.gateHead { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.act { display: grid; gap: 6px; }
+.act input { border: 1px solid #dbe3ed; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.actButtons { display: flex; gap: 6px; flex-wrap: wrap; }
+.primary, .secondary, .ghost { border-radius: 8px; padding: 7px 13px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid transparent; }
+.primary { background: #ee4b22; color: #fff; }
+.secondary { background: #fff; color: #24344d; border-color: #dbe3ed; }
+.ghost { background: none; color: #65758a; }
+.primary:disabled, .secondary:disabled, .ghost:disabled { opacity: .55; cursor: not-allowed; }
+.error { color: #b42318; background: #fdecea; border-radius: 8px; padding: 7px 10px; font-size: 12px; margin: 0; }
+.mutedText { color: #72839a; font-size: 12px; }
+.empty { background: #fff; border: 1px dashed #dbe3ed; border-radius: 14px; padding: 28px; text-align: center; }
+.empty p { color: #72839a; margin: 6px 0 0; font-size: 13px; }
+.footnote { color: #8a97a8; font-size: 11px; margin: 0; }
+@media (max-width: 860px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .caseHead { grid-template-columns: 36px 1fr auto; }
+  .lwd, .progressWrap { display: none; }
+}

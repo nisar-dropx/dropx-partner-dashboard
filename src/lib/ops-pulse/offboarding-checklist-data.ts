@@ -66,13 +66,23 @@ export type OffboardingCase = {
   designationName: string | null;
   requestedLastWorkingDate: string | null;
   approvedLastWorkingDate: string | null;
+  stationCode: string | null;
+  /** Direct report of the viewer, or someone at one of the viewer's stations. */
+  relation: "direct" | "station";
+  /** Gates the viewer can act on now. */
+  actionable: number;
   tasks: OffboardingTask[];
 };
 
 export type OffboardingChecklistWorkspace = {
   checkedAt: string;
   cases: OffboardingCase[];
+  scopeLabel: string;
 };
+
+function scopeLabel(auth: AuthorizationContext) {
+  return auth.hasAllLocationAccess ? "All stations" : `${auth.locationScopeIds.length} station${auth.locationScopeIds.length === 1 ? "" : "s"} and your direct reports`;
+}
 
 type DirectReport = {
   personId: string;
@@ -292,28 +302,88 @@ export async function loadOffboardingChecklist(auth: AuthorizationContext): Prom
   if (!hasPermission(auth, "ops_offboarding_checklist", "access")) throw new Error("Offboarding checklist access is required.");
   if (!supabaseAdmin) throw new Error("Offboarding checklist service unavailable.");
   const companyId = requireCompanyId(auth);
-
-  const { reports, error: reportsError } = await loadDirectReports(companyId, auth.userId);
-  if (reportsError) throw new Error("Your reporting team could not be resolved. Please contact HR.");
   const checkedAt = new Date().toISOString();
-  if (!reports.length) return { checkedAt, cases: [] };
 
-  const employeeIds = reports.filter((r) => r.workerType === "employee").map((r) => r.workerId);
-  const contractorIds = reports.filter((r) => r.workerType === "contractor").map((r) => r.workerId);
-
-  const casesResult = await supabaseAdmin
-    .from("hr_exit_cases")
-    .select("id,case_number,scenario,status,worker_type,employee_id,contractor_id,manager_user_id,requested_last_working_date,approved_last_working_date")
-    .eq("company_id", companyId)
-    .or([
-      employeeIds.length ? `and(worker_type.eq.employee,employee_id.in.(${employeeIds.join(",")}))` : "",
-      contractorIds.length ? `and(worker_type.eq.contractor,contractor_id.in.(${contractorIds.join(",")}))` : ""
-    ].filter(Boolean).join(","));
+  // Open exits are few, so read them first and scope afterwards: people at the viewer's stations plus
+  // the viewer's own direct reports (who may sit at another station). Approving is re-checked per gate.
+  const [{ reports: directReports, error: reportsError }, casesResult] = await Promise.all([
+    loadDirectReports(companyId, auth.userId),
+    supabaseAdmin
+      .from("hr_exit_cases")
+      .select("id,case_number,scenario,status,worker_type,employee_id,contractor_id,manager_user_id,requested_last_working_date,approved_last_working_date")
+      .eq("company_id", companyId)
+      .not("status", "in", `(${[...TERMINAL_EXIT_STATUSES].join(",")})`)
+      .order("created_at", { ascending: false })
+      .limit(300)
+  ]);
+  if (reportsError) throw new Error("Your reporting team could not be resolved. Please contact HR.");
   if (casesResult.error) throw new Error("Offboarding cases could not be loaded.");
-  const openCases = ((casesResult.data ?? []) as RawCase[]).filter((row) => !TERMINAL_EXIT_STATUSES.has(row.status));
-  if (!openCases.length) return { checkedAt, cases: [] };
+  const allOpen = (casesResult.data ?? []) as RawCase[];
+  if (!allOpen.length) return { checkedAt, cases: [], scopeLabel: scopeLabel(auth) };
 
-  const reportByWorker = new Map(reports.map((r) => [`${r.workerType}:${r.workerId}`, r]));
+  const workerKey = (row: RawCase) => `${row.worker_type}:${row.worker_type === "contractor" ? row.contractor_id : row.employee_id}`;
+  const employeeIds = [...new Set(allOpen.filter((r) => r.worker_type === "employee" && r.employee_id).map((r) => r.employee_id!))];
+  const contractorIds = [...new Set(allOpen.filter((r) => r.worker_type === "contractor" && r.contractor_id).map((r) => r.contractor_id!))];
+  type WorkerRow = { id: string; full_name: string | null; location_id: string | null };
+  const [employees, contractors] = await Promise.all([
+    employeeIds.length ? supabaseAdmin.from("employees").select("id,full_name,location_id").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [] as WorkerRow[], error: null }),
+    contractorIds.length ? supabaseAdmin.from("contractors").select("id,full_name,location_id").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [] as WorkerRow[], error: null })
+  ]);
+  if (employees.error || contractors.error) throw new Error("Offboarding people could not be loaded.");
+  const workers = new Map<string, WorkerRow>([
+    ...((employees.data ?? []) as WorkerRow[]).map((w) => [`employee:${w.id}`, w] as [string, WorkerRow]),
+    ...((contractors.data ?? []) as WorkerRow[]).map((w) => [`contractor:${w.id}`, w] as [string, WorkerRow])
+  ]);
+  const scope = auth.hasAllLocationAccess ? null : new Set(auth.locationScopeIds);
+  const directByWorker = new Map(directReports.map((r) => [`${r.workerType}:${r.workerId}`, r]));
+  const openCases = allOpen.filter((row) => {
+    const key = workerKey(row);
+    const location = workers.get(key)?.location_id ?? null;
+    return directByWorker.has(key) || (location !== null && (!scope || scope.has(location)));
+  });
+  if (!openCases.length) return { checkedAt, cases: [], scopeLabel: scopeLabel(auth) };
+
+  // Station people who are not direct reports: resolve their primary assignment for the manager chain.
+  const missing = openCases.filter((row) => !directByWorker.has(workerKey(row)));
+  const reportByWorker = new Map<string, DirectReport & { relation: "direct" | "station" }>(
+    [...directByWorker].map(([key, r]) => [key, { ...r, relation: "direct" as const }])
+  );
+  if (missing.length) {
+    const engagements = await supabaseAdmin
+      .from("hr_engagements")
+      .select("id,person_id,worker_type,employee_id,contractor_id")
+      .eq("company_id", companyId)
+      .eq("status", "active")
+      .or([
+        missing.some((r) => r.worker_type === "employee") ? `employee_id.in.(${missing.filter((r) => r.worker_type === "employee").map((r) => r.employee_id).join(",")})` : "",
+        missing.some((r) => r.worker_type === "contractor") ? `contractor_id.in.(${missing.filter((r) => r.worker_type === "contractor").map((r) => r.contractor_id).join(",")})` : ""
+      ].filter(Boolean).join(","));
+    const engagementRows = (engagements.data ?? []) as Array<{ id: string; person_id: string; worker_type: string; employee_id: string | null; contractor_id: string | null }>;
+    const day = indiaToday();
+    const assignments = engagementRows.length
+      ? await supabaseAdmin.from("hr_work_assignments").select("id,engagement_id,designation_id").eq("company_id", companyId).eq("is_primary", true)
+          .in("engagement_id", engagementRows.map((e) => e.id)).lte("effective_from", day).or(`effective_to.is.null,effective_to.gte.${day}`)
+      : { data: [] as Array<{ id: string; engagement_id: string; designation_id: string | null }> };
+    const designationIds = [...new Set((assignments.data ?? []).map((a) => a.designation_id).filter(Boolean) as string[])];
+    const designations = designationIds.length ? await supabaseAdmin.from("designations").select("id,name").eq("company_id", companyId).in("id", designationIds) : { data: [] as Array<{ id: string; name: string }> };
+    const designationName = new Map((designations.data ?? []).map((d) => [d.id, d.name as string]));
+    const assignmentByEngagement = new Map((assignments.data ?? []).map((a) => [a.engagement_id, a]));
+    for (const e of engagementRows) {
+      const type = e.worker_type === "contractor" ? "contractor" as const : "employee" as const;
+      const id = type === "contractor" ? e.contractor_id : e.employee_id;
+      const assignment = assignmentByEngagement.get(e.id);
+      if (!id || !assignment) continue;
+      reportByWorker.set(`${type}:${id}`, {
+        personId: e.person_id, assignmentId: assignment.id, workerType: type, workerId: id, relation: "station",
+        displayName: workers.get(`${type}:${id}`)?.full_name ?? "Unknown",
+        designationName: assignment.designation_id ? designationName.get(assignment.designation_id) ?? null : null
+      });
+    }
+  }
+  const locationIds = [...new Set(openCases.map((row) => workers.get(workerKey(row))?.location_id).filter(Boolean) as string[])];
+  const stationRows = locationIds.length ? await supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).in("id", locationIds) : { data: [] as Array<{ id: string; station_code: string }> };
+  const stationCode = new Map((stationRows.data ?? []).map((s) => [s.id, s.station_code as string]));
+
 
   const caseIds = openCases.map((row) => row.id);
   const tasksResult = await supabaseAdmin
@@ -463,9 +533,15 @@ export async function loadOffboardingChecklist(auth: AuthorizationContext): Prom
       designationName: report.designationName,
       requestedLastWorkingDate: caseRow.requested_last_working_date,
       approvedLastWorkingDate: caseRow.approved_last_working_date,
+      stationCode: (() => { const loc = workers.get(workerKey(caseRow))?.location_id; return loc ? stationCode.get(loc) ?? null : null; })(),
+      relation: report.relation,
+      actionable: resultTasks.reduce((n, t) => n + t.approvals.filter((g) => g.viewerCanAct).length, 0),
       tasks: resultTasks
     });
   }
 
-  return { checkedAt, cases: resultCases };
+  // Cases waiting on the viewer first, then the nearest last working day.
+  resultCases.sort((x, y) => (y.actionable > 0 ? 1 : 0) - (x.actionable > 0 ? 1 : 0)
+    || String(x.approvedLastWorkingDate ?? x.requestedLastWorkingDate ?? "9999").localeCompare(String(y.approvedLastWorkingDate ?? y.requestedLastWorkingDate ?? "9999")));
+  return { checkedAt, cases: resultCases, scopeLabel: scopeLabel(auth) };
 }
