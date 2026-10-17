@@ -181,7 +181,7 @@ const act = (id, action, version, actor, note = null, patch = {}) => `select * f
 const c1 = await claim("blr-cash-001");
 eq("Claim is submitted with an upper-case reference", [c1.status, c1.reference, c1.station_code], ["submitted", "BLR-CASH-001", "BLR1"]);
 await throws("Reference is unique", `select station_claim_submit('${C}','${S}','BLR1','BLR-CASH-001',current_date,'other',10,'Duplicate reference here','','','${ACT}','x')`, /already used/);
-await throws("Future incident refused", `select station_claim_submit('${C}','${S}','BLR1','FUT-1',current_date+1,'other',10,'Future incident here','','','${ACT}','x')`, /last 180 days/);
+await throws("Future incident refused", `select station_claim_submit('${C}','${S}','BLR1','FUT-1',(now() at time zone 'Asia/Kolkata')::date+1,'other',10,'Future incident here','','','${ACT}','x')`, /last 180 days/);
 await throws("Raiser cannot approve", act(c1.id, "approve", 1, ACT), /cluster manager must decide/);
 await throws("Return needs a reason", act(c1.id, "return", 1, CM), /at least 5/);
 await throws("Stale version refused", act(c1.id, "approve", 9, CM), /Someone else updated/);
