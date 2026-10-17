@@ -8,6 +8,9 @@ import {
   canonicalizeProviderFirstMembers,
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
+  mergeProviderFirstLocationMembers,
+  providerFirstLocationMappingEntries,
+  providerFirstMappingIsCurrentOrScheduled,
   providerFirstPageWindow,
   providerFirstLocationRemap,
   providerFirstLocationNeedsDates,
@@ -92,6 +95,143 @@ test("keys provider members by station and normalized member ID", () => {
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
 });
 
+test("materializes every active mapped location without duplicating provider source rows", () => {
+  const source = [{
+    id: "2000032289280",
+    name: "MODUGULA RAMPRASAD",
+    stationId: "xapi",
+    stationLabel: "XAPI - Bhakarapeta",
+    providerId: "amazon",
+    outboundMonths: ["2026-10"]
+  }];
+  const merged = mergeProviderFirstLocationMembers(source, [{
+    id: "2000032289280",
+    name: "Mapped Workforce Name",
+    stationId: "xapi",
+    stationLabel: "XAPI - Bhakarapeta",
+    providerId: "amazon"
+  }, {
+    id: "2000032289280",
+    name: "Mapped Workforce Name",
+    stationId: "gntf",
+    stationLabel: "GNTF",
+    providerId: "amazon"
+  }, {
+    id: "2000032289280",
+    name: "Duplicate stored period",
+    stationId: "gntf",
+    stationLabel: "GNTF",
+    providerId: "amazon"
+  }]);
+
+  assert.equal(merged.length, 2);
+  assert.deepEqual(merged.map((member) => providerMemberKey(member.stationId, member.id)), [
+    "xapi|2000032289280",
+    "gntf|2000032289280"
+  ]);
+  assert.equal(merged[0].name, "MODUGULA RAMPRASAD", "the provider source remains authoritative at XAPI");
+  assert.equal(merged[1].name, "MODUGULA RAMPRASAD", "the same provider identity supplies the retained location name");
+  assert.deepEqual(merged[1].outboundMonths, [], "stored mappings must not invent location activity");
+});
+
+test("uses the mapped workforce name when an active stored location has no provider source row", () => {
+  assert.deepEqual(mergeProviderFirstLocationMembers([], [{
+    id: "member-1",
+    name: "Asha Devi",
+    stationId: "station-1",
+    stationLabel: "KOZA",
+    providerId: "provider-1"
+  }]), [{
+    id: "member-1",
+    name: "Asha Devi",
+    stationId: "station-1",
+    stationLabel: "KOZA",
+    providerId: "provider-1",
+    outboundMonths: []
+  }]);
+});
+
+test("joins each location's mapping fields and local history evidence by its exact key", () => {
+  const members = mergeProviderFirstLocationMembers([{
+    id: "2000032289280",
+    name: "MODUGULA RAMPRASAD",
+    stationId: "xapi",
+    stationLabel: "XAPI - Bhakarapeta",
+    providerId: "amazon",
+    outboundMonths: ["2026-10"]
+  }], [{
+    id: "2000032289280",
+    name: "Mapped Workforce Name",
+    stationId: "xapi",
+    stationLabel: "XAPI - Bhakarapeta",
+    providerId: "amazon"
+  }, {
+    id: "2000032289280",
+    name: "Mapped Workforce Name",
+    stationId: "gntf",
+    stationLabel: "GNTF",
+    providerId: "amazon"
+  }]);
+  const xapiMapping = {
+    id: "mapping-xapi",
+    payment_method_id: "fixed-monthly",
+    payment_values: { FIXED_PAYMENT_PER_MONTH: 13000 },
+    effective_from: "2026-10-01",
+    effective_to: null
+  };
+  const gntfMapping = {
+    id: "mapping-gntf",
+    payment_method_id: "per-packet",
+    payment_values: { DELIVERY: 17 },
+    effective_from: "2025-02-21",
+    effective_to: null
+  };
+  const entries = providerFirstLocationMappingEntries(
+    members,
+    new Map([
+      [providerMemberKey("xapi", "2000032289280"), xapiMapping],
+      [providerMemberKey("gntf", "2000032289280"), gntfMapping]
+    ]),
+    new Map([
+      [providerMemberKey("xapi", "2000032289280"), [{ id: "history-xapi", locationLabel: "XAPI" }]],
+      [providerMemberKey("gntf", "2000032289280"), [{ id: "history-gntf", locationLabel: "GNTF" }]]
+    ])
+  );
+
+  assert.deepEqual(entries.map(({ member, mapping, history }) => ({
+    stationId: member.stationId,
+    mappingId: mapping?.id,
+    paymentMethodId: mapping?.payment_method_id,
+    paymentValues: mapping?.payment_values,
+    effectiveFrom: mapping?.effective_from,
+    effectiveTo: mapping?.effective_to,
+    historyIds: history.map((entry) => entry.id)
+  })), [{
+    stationId: "xapi",
+    mappingId: "mapping-xapi",
+    paymentMethodId: "fixed-monthly",
+    paymentValues: { FIXED_PAYMENT_PER_MONTH: 13000 },
+    effectiveFrom: "2026-10-01",
+    effectiveTo: null,
+    historyIds: ["history-xapi"]
+  }, {
+    stationId: "gntf",
+    mappingId: "mapping-gntf",
+    paymentMethodId: "per-packet",
+    paymentValues: { DELIVERY: 17 },
+    effectiveFrom: "2025-02-21",
+    effectiveTo: null,
+    historyIds: ["history-gntf"]
+  }]);
+});
+
+test("only current or scheduled stored mapping periods are eligible for missing-source rows", () => {
+  assert.equal(providerFirstMappingIsCurrentOrScheduled({ status: "active", effectiveTo: null }, "2026-10-17"), true);
+  assert.equal(providerFirstMappingIsCurrentOrScheduled({ status: "closed", effectiveTo: "2026-10-31" }, "2026-10-17"), true);
+  assert.equal(providerFirstMappingIsCurrentOrScheduled({ status: "closed", effectiveTo: "2026-10-16" }, "2026-10-17"), false);
+  assert.equal(providerFirstMappingIsCurrentOrScheduled({ status: "cancelled", effectiveTo: null }, "2026-10-17"), false);
+});
+
 test("keys history across locations by exact provider and member identity without changing mapping identity", () => {
   const oldStationMappingKey = providerMemberKey("station-old", " 2000080007500 ");
   const newStationMappingKey = providerMemberKey("station-new", "2000080007500");
@@ -116,8 +256,8 @@ test("provider mapping page preserves inactive-location history without inferrin
   const page = await readFile(new URL("../app/provider-id-mapping/page.tsx", import.meta.url), "utf8");
   assert.match(page, /from\("stations"\)[^\n]+\.eq\("company_id", companyId\)\.order\("station_code"\)/);
   assert.doesNotMatch(page, /from\("stations"\)[^\n]+\.eq\("is_active", true\)/);
-  assert.match(page, /const link = mappingByMember\.get\(providerMemberKey\(member\.stationId, member\.id\)\)/);
   assert.match(page, /historyByProviderMember\.get\(providerMemberIdentityKey\(member\.providerId, member\.id\)\)/);
+  assert.match(page, /historyByWorkforce\.get\(link\.workforce_id\)/);
   assert.match(page, /workforceId: worker\?\.id \?\? ""/);
 });
 
@@ -745,6 +885,22 @@ test("combines filter groups with AND and selections within a group with OR", ()
     filters: { query: "ravi", stationIds: [], paymentMethodIds: ["unassigned"], mappingStatuses: [], validationStatuses: ["unmapped"] }
   });
   assert.deepEqual(unassigned, [1]);
+
+  const secondLocation = { ...row, stationId: "station-2", stationLabel: "GNTF" };
+  const bothLocations = filterProviderFirstRowIndexes({
+    rows: [row, secondLocation],
+    workerById: new Map([[worker.id, worker]]),
+    paymentMethodById: new Map([[method.id, method]]),
+    filters: { query: "member-1", stationIds: [], paymentMethodIds: [], mappingStatuses: ["mapped"], validationStatuses: [] }
+  });
+  assert.deepEqual(bothLocations, [0, 1]);
+  const onlyGntf = filterProviderFirstRowIndexes({
+    rows: [row, secondLocation],
+    workerById: new Map([[worker.id, worker]]),
+    paymentMethodById: new Map([[method.id, method]]),
+    filters: { query: "member-1", stationIds: ["station-2"], paymentMethodIds: [], mappingStatuses: [], validationStatuses: [] }
+  });
+  assert.deepEqual(onlyGntf, [1]);
 });
 
 test("paginates 1,103 filtered rows with every supported size", () => {

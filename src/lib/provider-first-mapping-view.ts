@@ -735,6 +735,93 @@ export function providerMemberIdentityKey(providerId: string, providerMemberId: 
   return `${String(providerId ?? "").trim().toLowerCase()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
 }
 
+export type ProviderFirstLocationMember = {
+  id: string;
+  name: string;
+  stationId: string;
+  stationLabel: string;
+  providerId: string;
+  outboundMonths: string[];
+};
+
+export type ProviderFirstStoredLocationMember = Omit<ProviderFirstLocationMember, "outboundMonths">;
+
+/**
+ * Provider activity and saved mappings answer different questions. Activity
+ * supplies the latest source rows, while an open saved mapping remains valid
+ * even when that location is absent from the latest activity file. Merge both
+ * by station + provider member so simultaneous Keep-all locations render as
+ * separate rows without duplicating a source-backed row.
+ */
+export function mergeProviderFirstLocationMembers(
+  sourceMembers: ProviderFirstLocationMember[],
+  storedMembers: ProviderFirstStoredLocationMember[]
+) {
+  const membersByLocation = new Map<string, ProviderFirstLocationMember>();
+  const sourceNameByIdentity = new Map<string, string>();
+
+  for (const member of sourceMembers) {
+    const id = String(member.id ?? "").trim();
+    const stationId = String(member.stationId ?? "").trim();
+    if (!id || !stationId) continue;
+    const normalized = { ...member, id, stationId, outboundMonths: [...new Set(member.outboundMonths ?? [])] };
+    const locationKey = providerMemberKey(stationId, id);
+    if (!membersByLocation.has(locationKey)) membersByLocation.set(locationKey, normalized);
+    const name = String(member.name ?? "").trim();
+    if (name && name !== "Unnamed provider member") {
+      const identityKey = providerMemberIdentityKey(member.providerId, id);
+      if (!sourceNameByIdentity.has(identityKey)) sourceNameByIdentity.set(identityKey, name);
+    }
+  }
+
+  for (const member of storedMembers) {
+    const id = String(member.id ?? "").trim();
+    const stationId = String(member.stationId ?? "").trim();
+    if (!id || !stationId) continue;
+    const locationKey = providerMemberKey(stationId, id);
+    if (membersByLocation.has(locationKey)) continue;
+    const sourceName = sourceNameByIdentity.get(providerMemberIdentityKey(member.providerId, id));
+    membersByLocation.set(locationKey, {
+      ...member,
+      id,
+      stationId,
+      name: sourceName || String(member.name ?? "").trim() || "Unnamed provider member",
+      outboundMonths: []
+    });
+  }
+
+  return [...membersByLocation.values()];
+}
+
+/**
+ * Join worksheet members to mapping and history evidence by the same
+ * station-specific identity used by the UI. Keeping this join in one pure
+ * helper prevents a multi-location member from inheriting another location's
+ * payment configuration and retains exact local evidence for unmapped rows.
+ */
+export function providerFirstLocationMappingEntries<TMapping, THistory>(
+  members: ProviderFirstLocationMember[],
+  mappingByLocation: ReadonlyMap<string, TMapping>,
+  historyByLocation: ReadonlyMap<string, THistory[]>
+) {
+  return members.map((member) => {
+    const key = providerMemberKey(member.stationId, member.id);
+    return {
+      member,
+      mapping: mappingByLocation.get(key),
+      history: historyByLocation.get(key) ?? []
+    };
+  });
+}
+
+export function providerFirstMappingIsCurrentOrScheduled(
+  mapping: { status: string; effectiveTo: string | null | undefined },
+  today: string
+) {
+  return (mapping.status === "active" && !mapping.effectiveTo)
+    || (mapping.status === "closed" && Boolean(mapping.effectiveTo) && mapping.effectiveTo! >= today);
+}
+
 function sameProviderMember(left: string, right: string) {
   return String(left ?? "").trim().toUpperCase() === String(right ?? "").trim().toUpperCase();
 }
