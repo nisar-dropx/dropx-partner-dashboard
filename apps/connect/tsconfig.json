@@ -25,6 +25,8 @@
       "@/lib/vehicle-fuel": ["../../src/lib/vehicle-fuel.ts"],
       "@/lib/roster-plan-preference": ["../../src/lib/roster-plan-preference.ts"],
       "@/lib/roster-change-deadline": ["../../src/lib/roster-change-deadline.ts"],
+      "@/lib/approval-covers": ["../../src/lib/approval-covers.ts"],
+      "@/lib/approval-covers-core": ["../../src/lib/approval-covers-core.ts"],
       "@/*": ["./src/*"]
     }
   },

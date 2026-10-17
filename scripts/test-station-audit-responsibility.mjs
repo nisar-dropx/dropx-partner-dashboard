@@ -76,6 +76,13 @@ assert.throws(
 );
 const data = new FormData();
 data.set("score_assessments", JSON.stringify(input.assessments));
+const malformed = new FormData();
+malformed.set("score_assessments", "invalid json");
+assert.match(
+  scoring.auditResponsibilityFormIssue(malformed, [key], options, [], {})
+    .message,
+  /Invalid responsibility/,
+);
 const issue = () =>
   scoring.auditResponsibilityFormIssue(data, [key], options, ["proof"], {
     [key]: item.label,
@@ -93,6 +100,16 @@ assert.equal(
   scoring.auditCheckHasScoreDifference(item, "great"),
   true,
   "an 80-point compliant outcome must not hide a retained responsibility field",
+);
+assert.equal(
+  scoring.auditCheckNeedsResponsibility(item, "great"),
+  false,
+  "do not turn an untouched compliant outcome into provisional responsibility",
+);
+assert.equal(
+  scoring.auditCheckNeedsResponsibility(item, "great", true),
+  true,
+  "keep an existing reason editable after an outcome change",
 );
 assert.equal(scoring.auditCheckHasScoreDifference(item, "pass"), false);
 assert.equal(scoring.auditCheckHasScoreDifference(item, "na"), false);

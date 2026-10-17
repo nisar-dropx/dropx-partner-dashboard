@@ -1,7 +1,11 @@
 import "server-only";
 
-import { remapApproverPeople, selectActiveCoverRows, type ApprovalCoverTarget } from "@/lib/approval-covers-core";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  remapApproverPeople,
+  selectActiveCoverRows,
+  type ApprovalCoverTarget,
+} from "./approval-covers-core";
 
 export type { ApprovalCoverTarget };
 export { remapApproverPeople, selectActiveCoverRows };

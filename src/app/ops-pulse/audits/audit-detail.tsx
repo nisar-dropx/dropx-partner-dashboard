@@ -10,7 +10,7 @@ import {
   ScoreReview,
 } from "./audit-score";
 import {
-  auditCheckHasScoreDifference,
+  auditCheckNeedsResponsibility,
   auditResponsibilityFormIssue,
   type AuditResponsibilityIssue,
 } from "@/lib/ops-pulse/station-audit-scoring";
@@ -204,7 +204,11 @@ export function AuditDetail({
         return (
           r.audit_id === audit.id &&
           item &&
-          auditCheckHasScoreDifference(item, responseValue(r.response_value))
+          auditCheckNeedsResponsibility(
+            item,
+            responseValue(r.response_value),
+            Boolean(audit.score_snapshot?.assessments[`check:${item.id}`]),
+          )
         );
       })
       .map((r) => `check:${r.checklist_item_id}`),
@@ -709,9 +713,10 @@ export function AuditDetail({
               setCheckDifferenceKeys(
                 items
                   .filter((i) =>
-                    auditCheckHasScoreDifference(
+                    auditCheckNeedsResponsibility(
                       i,
                       value(data.get(`check_${i.id}`)),
+                      checkDifferenceKeys.includes(`check:${i.id}`),
                     ),
                   )
                   .map((i) => `check:${i.id}`),
@@ -770,9 +775,10 @@ export function AuditDetail({
                       ...differenceKeys,
                       ...items
                         .filter((i) =>
-                          auditCheckHasScoreDifference(
+                          auditCheckNeedsResponsibility(
                             i,
                             value(data.get(`check_${i.id}`)),
+                            checkDifferenceKeys.includes(`check:${i.id}`),
                           ),
                         )
                         .map((i) => `check:${i.id}`),
@@ -1097,24 +1103,6 @@ export function AuditDetail({
                 </details>
               </>
             )}
-            {type?.scoring_enabled && (
-              <ResponsibilityAssessment
-                keys={[
-                  ...(variance ? ["cash"] : []),
-                  ...differenceKeys,
-                  ...checkDifferenceKeys,
-                ]}
-                labels={Object.fromEntries(
-                  items.map((i) => [`check:${i.id}`, i.label]),
-                )}
-                initial={audit.score_snapshot?.assessments}
-                issue={responsibilityIssue}
-                options={workspace.options.filter(
-                  (o) => o.option_group === "audit_responsibility",
-                )}
-                evidence={evidence}
-              />
-            )}
             {sections
               .filter((section) =>
                 items.some((item) => item.section_id === section.id),
@@ -1161,6 +1149,24 @@ export function AuditDetail({
                   </div>
                 </details>
               ))}
+            {type?.scoring_enabled && (
+              <ResponsibilityAssessment
+                keys={[
+                  ...(variance ? ["cash"] : []),
+                  ...differenceKeys,
+                  ...checkDifferenceKeys,
+                ]}
+                labels={Object.fromEntries(
+                  items.map((i) => [`check:${i.id}`, i.label]),
+                )}
+                initial={audit.score_snapshot?.assessments}
+                issue={responsibilityIssue}
+                options={workspace.options.filter(
+                  (o) => o.option_group === "audit_responsibility",
+                )}
+                evidence={evidence}
+              />
+            )}
             <details className={styles.section} open style={{ marginTop: 12 }}>
               <summary>
                 Evidence and submission{" "}

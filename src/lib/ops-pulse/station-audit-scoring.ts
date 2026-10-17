@@ -15,7 +15,12 @@ type Item = {
   label: string;
   score_weight?: number;
   score_source?: string;
-  response_options: { value: string; label: string; score?: number | null }[];
+  response_options: {
+    value: string;
+    label: string;
+    score?: number | null;
+    is_compliant?: boolean | null;
+  }[];
 };
 export type AuditScoreSnapshot = {
   inputs?: AuditScoreInput;
@@ -58,14 +63,28 @@ export type AuditScoreInput = {
   assessments: Record<string, AuditAssessment>;
   evidenceIds: string[];
 };
+/** Human label for cash / checklist / TID responsibility keys shown in validation. */
+export function auditAssessmentSubject(
+  key: string,
+  items: { id: string; label: string }[] = [],
+) {
+  if (key === "cash") return "COD difference";
+  if (key.startsWith("check:")) {
+    const id = key.slice("check:".length);
+    return items.find((item) => item.id === id)?.label || "checklist finding";
+  }
+  return `tracking ID ${key}`;
+}
 export type AuditResponsibilityIssue = {
   key: string;
   fieldName: string;
   message: string;
 };
 export class AuditResponsibilityError extends Error {
-  constructor(public issue: AuditResponsibilityIssue) {
+  issue: AuditResponsibilityIssue;
+  constructor(issue: AuditResponsibilityIssue) {
     super(issue.message);
+    this.issue = issue;
   }
 }
 
@@ -77,6 +96,20 @@ export function auditCheckHasScoreDifference(item: Item, response: string) {
     item.score_source !== "shipment_match" &&
     score != null &&
     score < 100
+  );
+}
+
+/** Keep a retained assessment editable after a better, but still scored, outcome. */
+export function auditCheckNeedsResponsibility(
+  item: Item,
+  response: string,
+  hasAssessment = false,
+) {
+  return (
+    auditCheckHasScoreDifference(item, response) &&
+    (hasAssessment ||
+      item.response_options.find((o) => o.value === response)?.is_compliant ===
+        false)
   );
 }
 
@@ -113,7 +146,7 @@ export function auditResponsibilityIssue(
   if (option.metadata.pending !== true && !value.reason.trim())
     return issue(
       "reason",
-      `Add a responsibility reason for ${label} in Responsibility & score exclusions.`,
+      `Add the responsibility reason for ${label} in Responsibility & score exclusions.`,
     );
   if (
     option.metadata.exclude_from_score === true &&
@@ -134,9 +167,22 @@ export function auditResponsibilityFormIssue(
   evidenceIds: string[],
   labels: Record<string, string>,
 ) {
-  const assessments = JSON.parse(
-    String(data.get("score_assessments") || "{}"),
-  ) as Record<string, AuditAssessment>;
+  let assessments: Record<string, AuditAssessment>;
+  try {
+    assessments = JSON.parse(String(data.get("score_assessments") || "{}"));
+    if (
+      !assessments ||
+      typeof assessments !== "object" ||
+      Array.isArray(assessments)
+    )
+      throw new Error("Invalid responsibility assessment.");
+  } catch {
+    return {
+      key: "",
+      fieldName: "",
+      message: "Invalid responsibility assessment.",
+    };
+  }
   for (const key of keys) {
     // An untouched checklist outcome keeps its configured score, as on the server.
     if (key.startsWith("check:") && !assessments[key]) continue;
@@ -152,7 +198,7 @@ export function auditResponsibilityFormIssue(
       hasNewProof ? { ...value, evidenceId: "new-proof" } : value,
       options,
       hasNewProof ? [...evidenceIds, "new-proof"] : evidenceIds,
-      key === "cash" ? "COD difference" : labels[key] || key,
+      labels[key] || auditAssessmentSubject(key),
     );
     if (issue) return issue;
   }
@@ -170,10 +216,7 @@ export function calculateAuditScore(
       reason: "",
       evidenceId: "",
     };
-    const item = key.startsWith("check:")
-      ? input.items.find((i) => i.id === key.slice(6))
-      : null;
-    const label = key === "cash" ? "COD difference" : item?.label || key;
+    const label = auditAssessmentSubject(key, input.items);
     const issue = auditResponsibilityIssue(
       key,
       value,
