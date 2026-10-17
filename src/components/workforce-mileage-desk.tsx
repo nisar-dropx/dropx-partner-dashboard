@@ -27,7 +27,9 @@ export async function WorkforceMileageDesk({pageCode,active,path,params={},submi
   let policyQuery=supabaseAdmin.from('workforce_mileage_policies').select('*').eq('company_id',company).order('effective_from',{ascending:false}).order('id');
   let claimQuery=supabaseAdmin.from('workforce_mileage_claims').select('*,adjustment:workforce_adjustments(id,amount,effective_date,status,reviewed_by,reviewed_at,review_remarks,payroll_run_id)').eq('company_id',company).order('reported_at',{ascending:false}).order('id');
   if(!auth.hasAllLocationAccess){const scope=auth.locationScopeIds.length?auth.locationScopeIds:[none];peopleQuery=peopleQuery.in('location_id',scope);stationQuery=stationQuery.in('id',scope);policyQuery=policyQuery.in('station_id',scope);claimQuery=claimQuery.in('station_id',scope);}
-  const [pr,sr,polr,cr,eligible]=await Promise.all([readAllRows(peopleQuery),readAllRows(stationQuery),readAllRows(policyQuery),readAllRows(claimQuery),workforceClassification(company)]);
+  const [sr,polr,cr,eligible]=await Promise.all([readAllRows(stationQuery),readAllRows(policyQuery),readAllRows(claimQuery),workforceClassification(company)]);
+  const policyStations=[...new Set(((polr.data??[]) as Policy[]).map(p=>p.station_id))];
+  const pr=policyStations.length?await readAllRows(peopleQuery.in('location_id',policyStations)):{data:[] as Person[],error:null};
   if([pr,sr,polr,cr].some(r=>r.error))throw new Error('Mileage records could not be loaded. No changes were made; retry or contact an administrator.');
   people=(pr.data??[]).filter(eligible) as Person[];stations=sr.data??[];policies=polr.data??[];
   claims=(cr.data??[]).map(row=>({...row,adjustment:Array.isArray(row.adjustment)?row.adjustment[0]:row.adjustment})) as Claim[];
@@ -44,7 +46,14 @@ export async function WorkforceMileageDesk({pageCode,active,path,params={},submi
  const totalPages=Math.max(1,Math.ceil(filtered.length/25)),page=Math.min(totalPages,Math.max(1,Number.parseInt(params.page??'1',10)||1)),shown=filtered.slice((page-1)*25,page*25);
  const pageHref=(n:number)=>{const query=new URLSearchParams();for(const key of ['status','station','q','sort'] as const)if(params[key])query.set(key,params[key]!);query.set('page',String(n));return path+'?'+query;};
  return <AppShell active={active} pageCode={pageCode}><div className={styles.desk}>
-  <header className={styles.header}><h1>Mileage claims</h1><p>Document distance → independent Workforce review → payroll → Finance. Only approved claims add to earnings. This is separate from fuel already included in a rate card.</p></header>
+  <header className={styles.header}><span className={styles.eyebrow}>Team Ops · Workforce</span><h1>Mileage claims</h1><p>Pay an associate for extra kilometres driven on approved work, at the station&apos;s agreed ₹/km rate. This is separate from fuel already included in a rate card.</p></header>
+  <ol className={styles.flow} aria-label="How a mileage claim works">
+   <li className={policies.length?styles.stepDone:styles.stepNow}><b>1 · Station policy</b><small>An owner sets the ₹/km rate and daily km limit for a station.</small><em>{policies.length?`${policies.length} active version${policies.length===1?'':'s'}`:'Not set up yet'}</em></li>
+   <li className={!policies.length?styles.stepTodo:claims.length?styles.stepDone:styles.stepNow}><b>2 · Ops raises a claim</b><small>Associate, date, total km, a unique reference and the trip evidence (log, odometer, route).</small><em>{claims.length} raised</em></li>
+   <li className={claims.some(c=>c.adjustment?.status==='pending')?styles.stepNow:styles.stepTodo}><b>3 · Independent review</b><small>A different authorised reviewer checks the evidence and approves or rejects it.</small><em>{claims.filter(c=>c.adjustment?.status==='pending').length} waiting</em></li>
+   <li className={claims.some(c=>['approved','posted'].includes(c.adjustment?.status))?styles.stepDone:styles.stepTodo}><b>4 · Payroll</b><small>Approved km × rate is added to the associate&apos;s earnings for the posting date.</small><em>{claims.filter(c=>['approved','posted'].includes(c.adjustment?.status)).length} approved</em></li>
+  </ol>
+  {!error&&!policies.length?<p className={styles.notice}><b>Mileage is not set up.</b> No station has an approved mileage policy, so claims cannot be raised yet. A company owner with rate card edit access adds the station terms first.</p>:null}
   {params.error||params.notice?<p role="status" className={styles.notice}>{params.error||params.notice}</p>:null}{error?<p role="alert" className={styles.error+' '+styles.notice}>{error}</p>:null}
   <section className={styles.panel}><h2>Station mileage policies</h2><p>Versioned, station-specific ₹/km terms and daily distance limits. An explicit effective rate card with zero included fuel is required for every mapped provider.</p>
    {canConfigure?<details open={!policies.length}><summary>Create approved policy</summary><form action={createPolicy} className={styles.form}>
