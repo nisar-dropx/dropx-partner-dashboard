@@ -60,3 +60,4 @@
 .person small, .personOn small { font-size: 11px; color: #72839a; font-weight: 400; }
 .toggle button:disabled { opacity: .45; cursor: not-allowed; }
 .summary { margin: 0; font-size: 13px; background: #f6f8fb; border-radius: 9px; padding: 8px 11px; }
+.filters{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr);gap:8px}.filters input,.filters select{border:1px solid #dbe3ed;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:#fff;min-width:0}@media(max-width:640px){.filters{grid-template-columns:1fr}}

@@ -1,0 +1,22 @@
+.picker { position: relative; display: grid; gap: 6px; }
+.trigger { display: flex; justify-content: space-between; align-items: center; width: 100%; border: 1px solid #dbe3ed; border-radius: 9px; padding: 10px 12px; font: inherit; font-size: 13px; background: #fff; color: #24344d; cursor: pointer; text-align: left; }
+.trigger:disabled { opacity: .55; cursor: not-allowed; }
+.trigger i { font-style: normal; color: #8a97a8; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: #fff0e8; color: #c8461c; font-size: 11px; font-weight: 650; }
+.chip button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.more { font-size: 11px; color: #72839a; align-self: center; }
+.clear { border: 0; background: none; color: #65758a; font-size: 11px; text-decoration: underline; cursor: pointer; }
+.menu { position: absolute; z-index: 40; top: 46px; left: 0; right: 0; display: grid; gap: 6px; padding: 8px; background: #fff; border: 1px solid #dbe3ed; border-radius: 12px; box-shadow: 0 14px 34px rgba(16, 35, 63, .16); }
+.menu > input { border: 1px solid #dbe3ed; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.all { display: flex !important; align-items: center; gap: 8px !important; font-size: 12px; font-weight: 650; color: #51627c; padding: 2px 4px; }
+.list { max-height: 260px; overflow-y: auto; display: grid; gap: 1px; }
+.option { display: flex !important; align-items: flex-start; gap: 8px !important; padding: 6px; border-radius: 8px; cursor: pointer; font-weight: 400 !important; }
+.option:hover { background: #f6f8fb; }
+.option span { display: grid; }
+.option b { font-size: 13px; font-weight: 650; color: #1c2940; }
+.option small { font-size: 11px; color: #72839a; }
+.option input, .all input { width: 16px; height: 16px; margin-top: 2px; accent-color: #ee4b22; }
+.none { margin: 6px; font-size: 12px; color: #72839a; }
+.foot { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #72839a; border-top: 1px solid #eef1f6; padding-top: 6px; }
+.foot button { border: 0; background: #ee4b22; color: #fff; border-radius: 7px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }

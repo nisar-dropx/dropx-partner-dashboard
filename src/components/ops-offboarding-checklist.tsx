@@ -3,6 +3,7 @@ import { useMemo, useState, useTransition } from "react";
 import { actOnOffboardingTaskApproval } from "@/app/ops-pulse/attendance/offboarding/actions";
 import type { OffboardingApprovalGate, OffboardingCase, OffboardingChecklistWorkspace, OffboardingTask } from "@/lib/ops-pulse/offboarding-checklist-data";
 import styles from "./ops-offboarding-checklist.module.css";
+import { ListPager, usePaged } from "./list-pager";
 
 const DONE = new Set(["completed", "waived"]);
 const label = (v: string) => v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -131,6 +132,7 @@ export function OpsOffboardingChecklist({ initial }: { initial: OffboardingCheck
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number][0]>(initial.cases.some((c) => c.actionable) ? "mine" : "all");
   const [query, setQuery] = useState("");
+  const [station, setStation] = useState("");
   async function refresh() {
     setRefreshing(true);
     setError("");
@@ -148,9 +150,12 @@ export function OpsOffboardingChecklist({ initial }: { initial: OffboardingCheck
   const soon = (c: OffboardingCase) => { const d = daysTo(c.approvedLastWorkingDate || c.requestedLastWorkingDate); return d != null && d <= 7; };
   const counts = { all: data.cases.length, mine: data.cases.filter((c) => c.actionable).length, soon: data.cases.filter(soon).length, direct: data.cases.filter((c) => c.relation === "direct").length };
   const q = query.trim().toLowerCase();
+  const stationCodes = useMemo(() => [...new Set(data.cases.map((c) => c.stationCode).filter(Boolean) as string[])].sort(), [data.cases]);
   const shown = data.cases.filter((c) =>
     (filter === "all" || (filter === "mine" ? c.actionable > 0 : filter === "soon" ? soon(c) : c.relation === "direct")) &&
+    (!station || c.stationCode === station) &&
     (!q || [c.displayName, c.caseNumber, c.stationCode, c.designationName].join(" ").toLowerCase().includes(q)));
+  const paged = usePaged(shown, 25, `${filter}|${station}|${q}`);
   const openTasks = data.cases.reduce((n, c) => n + c.tasks.filter((t) => !DONE.has(t.status)).length, 0);
 
   return (
@@ -176,10 +181,19 @@ export function OpsOffboardingChecklist({ initial }: { initial: OffboardingCheck
             <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? styles.chipOn : styles.chip} onClick={() => setFilter(k)}>{v}<em>{counts[k]}</em></button>
           ))}
         </div>
-        <input aria-label="Search exits" placeholder="Name, case, station" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <div className={styles.searchRow}>
+          <select aria-label="Station" value={station} onChange={(e) => setStation(e.target.value)}>
+            <option value="">All stations</option>
+            {stationCodes.map((code) => <option key={code} value={code}>{code}</option>)}
+          </select>
+          <input aria-label="Search exits" placeholder="Search name, case or designation" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
       </div>
       {shown.length ? (
-        <div className={styles.list}>{shown.map((c, i) => <CaseCard key={c.caseId} c={c} onActed={refresh} defaultOpen={i === 0 && c.actionable > 0} />)}</div>
+        <div className={styles.list}>
+          {paged.rows.map((c, i) => <CaseCard key={c.caseId} c={c} onActed={refresh} defaultOpen={paged.page === 1 && i === 0 && c.actionable > 0} />)}
+          <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="exits" />
+        </div>
       ) : (
         <div className={styles.empty}>
           <b>{data.cases.length ? "No exits match this view." : "No one is leaving right now."}</b>

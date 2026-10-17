@@ -2,6 +2,8 @@
 import { useState } from "react";
 import type { WorkforceHoldAction, WorkforceHoldRequest, WorkforceHoldStatus, WorkforceHoldWorkspace } from "@/lib/ops-pulse/workforce-hold-data";
 import styles from "./ops-salary-hold.module.css";
+import { PeoplePicker } from "./people-picker";
+import { ListPager, usePaged } from "./list-pager";
 
 const STATUS: Record<WorkforceHoldStatus, { label: string; tone: string }> = {
   awaiting_approval: { label: "Awaiting approval", tone: "warn" },
@@ -83,14 +85,13 @@ function RequestCard({ r, onDone }: { r: WorkforceHoldRequest; onDone: (m: strin
 function RaiseForm({ ws, onDone }: { ws: WorkforceHoldWorkspace; onDone: (m: string) => void }) {
   const [station, setStation] = useState(ws.stations.length === 1 ? ws.stations[0].id : "");
   const [people, setPeople] = useState<Array<{ workforceId: string; name: string; dropxId: string | null }> | null>(null);
-  const [search, setSearch] = useState("");
-  const [pick, setPick] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
   const [month, setMonth] = useState(months()[1]);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function load(id: string) {
-    setStation(id); setPeople(null); setPick("");
+    setStation(id); setPeople(null); setPicked([]);
     if (!id) return;
     try {
       const r = await fetch(`/api/ops-pulse/workforce-holds?station=${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -101,15 +102,20 @@ function RaiseForm({ ws, onDone }: { ws: WorkforceHoldWorkspace; onDone: (m: str
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!pick) return setError("Choose the associate.");
+    if (!picked.length) return setError("Choose at least one associate.");
     if (reason.trim().length < 5) return setError("Explain the reason (at least 5 characters).");
     setBusy(true); setError("");
-    try { onDone(await post({ kind: "raise", workforceId: pick, month, reason })); setPick(""); setReason(""); }
-    catch (err) { setError(err instanceof Error ? err.message : "Could not raise."); }
-    finally { setBusy(false); }
+    // One request per associate; failures are listed by name, the rest still go through.
+    const failed: string[] = [];
+    for (const id of picked) {
+      try { await post({ kind: "raise", workforceId: id, month, reason }); }
+      catch (err) { failed.push(`${people?.find((p) => p.workforceId === id)?.name ?? "Associate"}: ${err instanceof Error ? err.message : "failed"}`); }
+    }
+    const done = picked.length - failed.length;
+    if (failed.length) setError(failed.join(" · "));
+    if (done) { setPicked([]); setReason(""); onDone(`${done} hold${done === 1 ? "" : "s"} raised for ${monthLabel(month)}. They block payment once approved.`); }
+    setBusy(false);
   }
-  const q = search.trim().toLowerCase();
-  const list = (people ?? []).filter((p) => !q || `${p.name} ${p.dropxId ?? ""}`.toLowerCase().includes(q)).slice(0, 80);
   if (!ws.canRaise) return <section className={styles.card}><h2>Hold a Workforce payment</h2><p className={styles.hint}>You can view holds. Raising one needs Salary Hold edit access.</p></section>;
   return (
     <form className={styles.card} onSubmit={submit}>
@@ -117,18 +123,14 @@ function RaiseForm({ ws, onDone }: { ws: WorkforceHoldWorkspace; onDone: (m: str
       <p className={styles.hint}>Blocks the associate&apos;s payout for one month — nothing is deducted. It takes effect when the station&apos;s cluster manager approves.</p>
       <label>Station<select value={station} onChange={(e) => void load(e.target.value)}><option value="">Choose a station…</option>{ws.stations.map((s) => <option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
       {people ? (
-        <label>Associate
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search ${people.length} associates`} />
-          <div className={styles.people} role="listbox">
-            {list.map((p) => <button type="button" role="option" aria-selected={pick === p.workforceId} key={p.workforceId} className={pick === p.workforceId ? styles.personOn : styles.person} onClick={() => setPick(p.workforceId)}><b>{p.name}</b><small>{p.dropxId ?? "ID pending"}</small></button>)}
-            {!list.length ? <small className={styles.hint}>{people.length ? "No one matches." : "No associates at this station."}</small> : null}
-          </div>
+        <label>Associates
+          <PeoplePicker options={people.map((p) => ({ key: p.workforceId, label: p.name, detail: p.dropxId ?? "ID pending" }))} value={picked} onChange={setPicked} disabled={busy} placeholder="Choose associates at this station" />
         </label>
       ) : null}
       <label>Payout month<select value={month} onChange={(e) => setMonth(e.target.value)}>{months().map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select></label>
       <label>Reason<textarea rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why the payment should wait" /></label>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
-      <button className={styles.primary} disabled={busy || !pick}>{busy ? "Raising…" : "Send for approval"}</button>
+      <button className={styles.primary} disabled={busy || !picked.length}>{busy ? "Raising…" : `Send ${picked.length > 1 ? `${picked.length} holds ` : ""}for approval`}</button>
     </form>
   );
 }
@@ -144,6 +146,18 @@ export function WorkforceHoldsDesk({ initial }: { initial: WorkforceHoldWorkspac
     catch (e) { setError(e instanceof Error ? e.message : "Could not refresh."); }
   }
   const action = ws.requests.filter((r) => r.actions.length);
+  const [search, setSearch] = useState("");
+  const [stationFilter, setStationFilter] = useState("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const q = search.trim().toLowerCase();
+  const matches = (x: { name: string; dropxId: string | null; stationCode: string | null; month: string }, extra = "") =>
+    (!stationFilter || x.stationCode === stationFilter) && (!monthFilter || x.month === monthFilter) && (!q || `${x.name} ${x.dropxId ?? ""} ${extra}`.toLowerCase().includes(q));
+  const requestList = (tab === "action" ? action : ws.requests).filter((r) => matches(r, r.reason));
+  const liveList = ws.live.filter((h) => matches(h, h.remarks));
+  const stationCodes = [...new Set([...ws.requests, ...ws.live].map((x) => x.stationCode).filter(Boolean) as string[])].sort();
+  const monthsSeen = [...new Set([...ws.requests, ...ws.live].map((x) => x.month))].sort().reverse();
+  const pagedReq = usePaged(requestList, 25, `${tab}|${q}|${stationFilter}|${monthFilter}`);
+  const pagedLive = usePaged(liveList, 25, `${q}|${stationFilter}|${monthFilter}`);
   return (
     <div className={styles.desk}>
       <header className={styles.header}>
@@ -164,15 +178,23 @@ export function WorkforceHoldsDesk({ initial }: { initial: WorkforceHoldWorkspac
               <button key={k} role="tab" className={styles.tab} aria-selected={tab === k} onClick={() => setTab(k)}>{l}<span className={styles.count}>{n}</span></button>
             ))}
           </div>
-          {tab === "live" ? (ws.live.length ? ws.live.map((h) => (
+          <div className={styles.filters}>
+            <input aria-label="Search" placeholder="Search name, ID or reason" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <select aria-label="Station" value={stationFilter} onChange={(e) => setStationFilter(e.target.value)}><option value="">All stations</option>{stationCodes.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+            <select aria-label="Month" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}><option value="">All months</option>{monthsSeen.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
+          </div>
+          {tab === "live" ? (liveList.length ? pagedLive.rows.map((h) => (
             <article className={styles.hold} key={`${h.workforceId}|${h.month}`}>
               <div className={styles.holdHead}><div><strong>{h.name}</strong><small>{[h.dropxId, h.stationCode, monthLabel(h.month)].filter(Boolean).join(" · ")}</small></div><span className={`${styles.pill} ${styles.tone_danger}`}>On hold</span></div>
               <p className={styles.reason}>{h.remarks}</p>
               <small className={styles.hint}>Since {when(h.since)} · {h.viaRequest ? "approved here" : "placed from Payments → Workforce payouts"}</small>
             </article>
-          )) : <p className={styles.empty}>No Workforce payment is on hold in your stations.</p>)
-            : ((tab === "action" ? action : ws.requests).length ? (tab === "action" ? action : ws.requests).map((r) => <RequestCard key={r.id} r={r} onDone={(m) => void refresh(m)} />)
-              : <p className={styles.empty}>{tab === "action" ? "Nothing waits for you." : "No hold requests yet."}</p>)}
+          )) : <p className={styles.empty}>{ws.live.length ? "No holds match these filters." : "No Workforce payment is on hold in your stations."}</p>)
+            : (requestList.length ? pagedReq.rows.map((r) => <RequestCard key={r.id} r={r} onDone={(m) => void refresh(m)} />)
+              : <p className={styles.empty}>{(tab === "action" ? action : ws.requests).length ? "No requests match these filters." : tab === "action" ? "Nothing waits for you." : "No hold requests yet."}</p>)}
+          {tab === "live"
+            ? <ListPager page={pagedLive.page} pages={pagedLive.pages} size={pagedLive.size} total={pagedLive.total} onPage={pagedLive.setPage} onSize={pagedLive.setSize} label="holds" />
+            : <ListPager page={pagedReq.page} pages={pagedReq.pages} size={pagedReq.size} total={pagedReq.total} onPage={pagedReq.setPage} onSize={pagedReq.setSize} label="requests" />}
         </section>
       </div>
     </div>
