@@ -13,6 +13,43 @@ export type ApprovalStepRow = {
 };
 export type ApproverTarget = { userId: string; roleId: string; routingReason?: string | null } | null;
 
+type PaymentApproverExclusionRow = {
+  effective_until: string | null;
+  location_id: string | null;
+  profile_id: string;
+};
+
+function isMissingPaymentApproverExclusionSchema(error: unknown) {
+  const message = String((error as { code?: unknown; message?: unknown })?.message ?? error ?? "").toLowerCase();
+  const code = String((error as { code?: unknown })?.code ?? "").toUpperCase();
+  return (code === "42P01" || code === "PGRST205" || message.includes("payment_approver_exclusions")) &&
+    (message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find"));
+}
+
+/**
+ * A routing exclusion removes one person from payment approvals without
+ * revoking their Operations, Recruit or Workforce access. Location-specific
+ * rows are the durable replacement for emergency role/membership edits.
+ */
+async function excludedPaymentApproverUserIds(companyId: string, locationId: string | null | undefined) {
+  if (!supabaseAdmin) return new Set<string>();
+  const day = paymentRoutingDay();
+  const result = await supabaseAdmin
+    .from("payment_approver_exclusions")
+    .select("profile_id, location_id, effective_until")
+    .eq("company_id", companyId)
+    .eq("workflow_code", "payments")
+    .eq("is_active", true)
+    .lte("effective_from", day);
+  if (result.error) {
+    if (isMissingPaymentApproverExclusionSchema(result.error)) return new Set<string>();
+    throw new Error(result.error.message);
+  }
+  return new Set(((result.data ?? []) as PaymentApproverExclusionRow[])
+    .filter(row => (!row.effective_until || row.effective_until >= day) && (!row.location_id || row.location_id === locationId))
+    .map(row => row.profile_id));
+}
+
 /**
  * Loads the ordered step list for a payment head, filtering each step's
  * candidate roles down to ones that actually hold edit access on
@@ -215,11 +252,12 @@ async function redirectThroughDelegation(companyId: string, target: NonNullable<
  */
 export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
+  const excludedUserIds = await excludedPaymentApproverUserIds(companyId, locationId);
 
   for (const [candidateIndex, candidate] of step.candidates.entries()) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
-    if (positionApprover) {
+    if (positionApprover && !excludedUserIds.has(positionApprover.userId)) {
       const covered = await redirectThroughDelegation(companyId, positionApprover, locationId);
       if (covered) return { ...covered, routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment") };
     }
@@ -237,6 +275,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     if (profiles.error) throw new Error(profiles.error.message);
 
     for (const profile of profiles.data ?? []) {
+      if (excludedUserIds.has(profile.id)) continue;
       if (profile.id === positionApprover?.userId) continue;
       const covered = await redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id }, locationId);
       if (covered) return { ...covered, routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment") };

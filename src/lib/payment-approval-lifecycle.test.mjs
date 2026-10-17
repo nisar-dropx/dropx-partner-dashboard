@@ -24,7 +24,7 @@ function database(tables,failTable=null) {
     }}; return q;
   }};
 }
-function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=false,failTable=null}={}) {
+function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=false,excludeArea=false,failTable=null}={}) {
   const company='co';
   const member=(user_id,role_id,locations=['NLRE'])=>({company_id:company,user_id,role_id,product_code:'operations',is_active:true,has_all_location_access:false,location_scope_ids:locations});
   const profile=(id,role_id)=>({company_id:company,id,role_id,full_name:id,is_active:true});
@@ -35,7 +35,8 @@ function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=fals
     company_product_memberships:[member('cluster','cm'),member('area','aom',wrongScope?['OTHER']:['NLRE']),member('head','bh')],
     hr_user_person_links:['cluster','area','head'].map(id=>({company_id:company,user_id:id,person_id:id,status:'active'})),
     hr_approval_delegations:leave?[{company_id:company,approver_person_id:'cluster',delegate_person_id:'area',workflow_code:null,is_active:true,effective_from:'2026-10-14',effective_to:'2026-10-14',reason:cancelled?'Auto-delegated: leave 00000000-0000-0000-0000-000000000001':'Configured cover'}]:[],
-    hr_leave_requests:[],hr_engagements:[],hr_business_trip_requests:[]
+    hr_leave_requests:[],hr_engagements:[],hr_business_trip_requests:[],
+    payment_approver_exclusions:excludeArea?[{company_id:company,profile_id:'area',location_id:'NLRE',workflow_code:'payments',is_active:true,effective_from:'2026-10-14',effective_until:null}]:[]
   };
   if(chain)tables.hr_approval_delegations.push({company_id:company,approver_person_id:'area',delegate_person_id:'head',workflow_code:null,is_active:true,effective_from:'2026-10-14',effective_to:'2026-10-14',reason:'Configured cover'});
   const db=database(tables,failTable);
@@ -65,17 +66,36 @@ test('People lookup failures preserve the pending assignment instead of silently
   const {routing}=routingFixture({leave:true,failTable:'hr_approval_delegations'});
   await assert.rejects(()=>routing.resolveStepApprover('co',steps[0],'NLRE'),/verify active leave cover/);
 });
+test('location payment exclusion skips an AOM while preserving the same user membership',async()=>{
+  const {routing,tables}=routingFixture({excludeArea:true});
+  assert.equal((await routing.resolveStepApprover('co',steps[1],'NLRE')),null);
+  assert.equal(tables.company_product_memberships.some(row=>row.user_id==='area' && row.is_active),true);
+  const next=await routing.advanceApproval('co',steps,1,'NLRE',new Set(['cluster']));
+  assert.equal(next.nextStepOrder,3);assert.equal(next.approver.userId,'head');
+});
 test('reconciliation handles more than 250 requests and keeps reason-specific Fleet routes separate',async()=>{
   const rows=Array.from({length:520},(_,i)=>({id:String(i).padStart(4,'0'),request_no:String(i),company_id:'co',payment_head_id:'van',location_id:'NLRE',status:'pending',approval_status:'PENDING',current_step_order:1,current_approver_user_id:'old',current_approver_role_id:'old-role',updated_at:'2026-10-14',adhoc_approval_steps:i%2?[{step_order:1,candidates:[{role_id:'fleet',scope:'company'}]}]:null}));
   const db=database({payment_requests:rows}); const loaded=[];
   const {reconcilePendingPaymentApprovers}=compile('./payment-approver-reconciliation.ts',{
     '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows},'@/lib/payment-stage-policy':stage,
     '@/lib/payment-approver-reconciliation-policy':{paymentApproverNeedsReconciliation},
-    '@/lib/payment-approval-steps':{loadApprovalSteps:async(_c,_h,id)=>{loaded.push(id);return rows.find(r=>r.id===id).adhoc_approval_steps??steps;},resolveStepApprover:async(_c,step)=>({userId:step.candidates[0].role_id,roleId:step.candidates[0].role_id,routingReason:'Current People assignment'})}
+    '@/lib/payment-approval-steps':{loadApprovalSteps:async(_c,_h,id)=>{loaded.push(id);return rows.find(r=>r.id===id).adhoc_approval_steps??steps;},resolveStepApprover:async(_c,step)=>({userId:step.candidates[0].role_id,roleId:step.candidates[0].role_id,routingReason:'Current People assignment'}),advanceApproval:async()=>({done:false,nextStepOrder:3,approver:{userId:'bh',roleId:'bh'},noApproverConfigured:false})}
   });
   const result=await reconcilePendingPaymentApprovers();assert.equal(result.checked,520);assert.equal(result.reassigned,520);assert.deepEqual(result.errors,[]);
   assert.equal(loaded.length,2);assert.equal(rows[0].current_approver_user_id,'cm');assert.equal(rows[1].current_approver_user_id,'fleet');
   assert.equal(db.updates[0].patch.updated_by,null);
+});
+test('reconciliation advances an unmapped optional stage to the next required approver',async()=>{
+  const rows=[{id:'r1',request_no:'REQ1',company_id:'co',payment_head_id:'head',location_id:'NLRE',status:'pending',approval_status:'OPERATIONS_CLM_APPROVED',current_step_order:2,current_approver_user_id:'old-aom',current_approver_role_id:'aom',updated_at:'2026-10-14',adhoc_approval_steps:null}];
+  const db=database({payment_requests:rows});
+  const {reconcilePendingPaymentApprovers}=compile('./payment-approver-reconciliation.ts',{
+    '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows},'@/lib/payment-stage-policy':stage,
+    '@/lib/payment-approver-reconciliation-policy':{paymentApproverNeedsReconciliation},
+    '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,resolveStepApprover:async(_c,step)=>step.step_order===2?null:{userId:'head',roleId:'bh',routingReason:'Current People assignment'},advanceApproval:async()=>({done:false,nextStepOrder:3,approver:{userId:'head',roleId:'bh',routingReason:'Current People assignment'},noApproverConfigured:false})}
+  });
+  const result=await reconcilePendingPaymentApprovers();assert.equal(result.reassigned,1);
+  assert.equal(rows[0].current_step_order,3);assert.equal(rows[0].current_approver_user_id,'head');
+  assert.match(rows[0].approval_routing_reason,/Optional approval stage skipped/);
 });
 
 // Exercise the real server action: failed People lookup must not consume a decision.

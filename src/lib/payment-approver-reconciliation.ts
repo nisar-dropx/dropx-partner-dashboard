@@ -1,6 +1,6 @@
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { loadApprovalSteps, resolveStepApprover } from "@/lib/payment-approval-steps";
+import { advanceApproval, loadApprovalSteps, resolveStepApprover } from "@/lib/payment-approval-steps";
 import { effectiveApprovalStepOrder, isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { paymentApproverNeedsReconciliation } from "@/lib/payment-approver-reconciliation-policy";
 
@@ -76,7 +76,20 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
         target = await resolveStepApprover(request.company_id, step, request.location_id);
         targetCache.set(targetKey, target);
       }
-      if (!paymentApproverNeedsReconciliation(request, target, resolvedStepOrder) && (!target?.routingReason || target.routingReason === request.approval_routing_reason)) continue;
+      let targetStepOrder = resolvedStepOrder;
+      if (!target && !step.is_required) {
+        const advance = await advanceApproval(request.company_id, steps, resolvedStepOrder, request.location_id);
+        if (advance.approver && advance.nextStepOrder) {
+          target = {
+            ...advance.approver,
+            routingReason: `Optional approval stage skipped because no eligible approver is mapped; ${advance.approver.routingReason || "advanced to the next configured approval stage"}`
+          };
+          targetStepOrder = advance.nextStepOrder;
+        } else if (advance.noApproverConfigured && advance.nextStepOrder) {
+          targetStepOrder = advance.nextStepOrder;
+        }
+      }
+      if (!paymentApproverNeedsReconciliation(request, target, targetStepOrder) && (!target?.routingReason || target.routingReason === request.approval_routing_reason)) continue;
 
       const now = new Date().toISOString();
       const update = target ? {
@@ -86,7 +99,7 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
         current_approver_user_id: target.userId,
         current_approver_role_id: target.roleId,
         current_approver_role_ids: [target.roleId],
-        current_step_order: resolvedStepOrder,
+        current_step_order: targetStepOrder,
         email_next_reminder_at: null,
         updated_at: now
       } : {
@@ -96,7 +109,7 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
-        current_step_order: resolvedStepOrder,
+        current_step_order: targetStepOrder,
         email_next_reminder_at: null,
         updated_at: now
       };
