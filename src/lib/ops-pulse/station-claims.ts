@@ -1,4 +1,5 @@
 import "server-only";
+import { loadActiveApprovalCovers } from "@/lib/approval-covers";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -44,13 +45,14 @@ export async function loadStationClaims(auth: AuthorizationContext) {
   const viewerPeople = new Set((links.data ?? []).map((r) => r.person_id as string));
   const claimStations = [...new Set(rows.map((r) => r.station_id as string))];
   const approvedKeys = rows.filter((r) => r.status === "approved" && r.case_key).map((r) => r.case_key as string);
-  const [hierarchy, events, cases, recoveries, outcomes, settings] = await Promise.all([
+  const [hierarchy, events, cases, recoveries, outcomes, settings, covers] = await Promise.all([
     loadPeopleOperationalHierarchy(company, claimStations),
     rows.length ? db.from("ops_station_loss_claim_events").select("claim_id,action,to_status,actor_name,note,created_at").eq("company_id", company).in("claim_id", rows.map((r) => r.id)).order("created_at") : Promise.resolve({ data: [], error: null }),
     approvedKeys.length ? db.from("nl_loss_month_cases").select("*").eq("company_id", company).eq("report", "station").in("case_key", approvedKeys) : Promise.resolve({ data: [], error: null }),
     approvedKeys.length ? db.from("nl_loss_recoveries").select("*").eq("company_id", company).in("case_key", approvedKeys) : Promise.resolve({ data: [], error: null }),
     db.from("nl_recovery_outcomes").select("*").eq("company_id", company).order("sort_order").order("label"),
     db.from("nl_loss_sources").select("recoverable_statuses,allow_equal_split,allow_custom_split,include_inactive_people,history_months,updated_at,recovery_policy").eq("company_id", company).maybeSingle(),
+    loadActiveApprovalCovers(company),
   ]);
   if (hierarchy.error) throw Error("Cluster managers could not be resolved from People. Please retry.");
   if (events.error || cases.error || recoveries.error || outcomes.error || settings.error) throw Error("Station claim details could not be loaded.");
@@ -62,7 +64,7 @@ export async function loadStationClaims(auth: AuthorizationContext) {
   }
   const canRaise = canRaiseClaims(auth);
   const claims: StationClaim[] = rows.map((r) => {
-    const approvers = holdApprovers(hierarchy.byLocation.get(r.station_id));
+    const approvers = holdApprovers(hierarchy.byLocation.get(r.station_id), new Set(), covers);
     const isApprover = !auth.readOnly && approvers.personIds.some((id) => viewerPeople.has(id));
     return {
       id: r.id, version: r.version, stationId: r.station_id, stationCode: r.station_code, reference: r.reference,

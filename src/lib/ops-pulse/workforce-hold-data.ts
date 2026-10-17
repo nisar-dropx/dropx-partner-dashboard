@@ -1,6 +1,7 @@
 import "server-only";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { loadActiveApprovalCovers } from "@/lib/approval-covers";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforceClassification } from "@/lib/workforce-classification";
@@ -84,11 +85,12 @@ export async function loadWorkforceHoldWorkspace(auth: AuthorizationContext): Pr
   const allowedStation = (id: string | null | undefined) => !scope || (!!id && scope.includes(id));
   const locationIds = [...new Set([...requests.map((r) => r.station_id as string), ...[...people.values()].map((p) => p.location_id)].filter(Boolean) as string[])];
   const requesterIds = [...new Set(requests.map((r) => r.raised_by as string))];
-  const [hierarchy, stationRows, events, requesterLinks] = await Promise.all([
+  const [hierarchy, stationRows, events, requesterLinks, covers] = await Promise.all([
     loadPeopleOperationalHierarchy(companyId, [...new Set(requests.map((r) => r.station_id as string).filter(Boolean))]),
     locationIds.length ? supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).in("id", locationIds) : Promise.resolve({ data: [] as Array<{ id: string; station_code: string }> }),
     requests.length ? supabaseAdmin.from("ops_workforce_hold_events").select("request_id,action,actor_name,note,created_at").eq("company_id", companyId).in("request_id", requests.map((r) => r.id)).order("created_at") : Promise.resolve({ data: [] as Array<Record<string, any>> }),
     requesterIds.length ? supabaseAdmin.from("hr_user_person_links").select("user_id,person_id").eq("company_id", companyId).eq("status", "active").in("user_id", requesterIds) : Promise.resolve({ data: [] as Array<{ user_id: string; person_id: string }> }),
+    loadActiveApprovalCovers(companyId),
   ]);
   if (hierarchy.error) throw new Error("Cluster managers could not be resolved from People. Please retry.");
   const code = new Map(((stationRows.data ?? []) as Array<{ id: string; station_code: string }>).map((s) => [s.id, s.station_code]));
@@ -104,7 +106,7 @@ export async function loadWorkforceHoldWorkspace(auth: AuthorizationContext): Pr
     viewerId: auth.userId,
     canRaise,
     requests: requests.map((r) => {
-      const approvers = holdApprovers(hierarchy.byLocation.get(r.station_id), requesterPeople.get(r.raised_by) ?? new Set());
+      const approvers = holdApprovers(hierarchy.byLocation.get(r.station_id), requesterPeople.get(r.raised_by) ?? new Set(), covers);
       const isApprover = !auth.readOnly && approvers.personIds.some((p) => viewerPeople.has(p));
       const p = people.get(r.workforce_id);
       return {

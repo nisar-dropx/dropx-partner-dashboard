@@ -2,6 +2,7 @@ import "server-only";
 import { isStationFloorRosterDesignation } from "@/lib/approval-designation-labels";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { loadActiveApprovalCovers } from "@/lib/approval-covers";
 import { loadPeopleDesignations } from "@/lib/people-designation";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
@@ -254,13 +255,14 @@ async function describeHolds(companyId: string, viewerId: string, viewerPeople: 
   const employeeIds = [...new Set(rows.filter((h) => h.worker_type === "employee").map((h) => h.worker_id))];
   const contractorIds = [...new Set(rows.filter((h) => h.worker_type === "contractor").map((h) => h.worker_id))];
   const requesterIds = [...new Set(rows.map((h) => h.requested_by_user_id).filter(Boolean) as string[])];
-  const [hierarchy, employees, contractors, stations, events, requesterLinks] = await Promise.all([
+  const [hierarchy, employees, contractors, stations, events, requesterLinks, covers] = await Promise.all([
     loadPeopleOperationalHierarchy(companyId, locationIds),
     employeeIds.length ? supabaseAdmin!.from("employees").select("id,employee_code,full_name").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [] as NamedRow[], error: null }),
     contractorIds.length ? supabaseAdmin!.from("contractors").select("id,dropx_id,full_name").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [] as NamedRow[], error: null }),
     locationIds.length ? supabaseAdmin!.from("stations").select("id,station_code").eq("company_id", companyId).in("id", locationIds) : Promise.resolve({ data: [] as Array<{ id: string; station_code: string }>, error: null }),
     supabaseAdmin!.from("ops_salary_hold_events").select("hold_id,action,to_status,actor_name,note,created_at").eq("company_id", companyId).in("hold_id", rows.map((r) => r.id)).order("created_at"),
     requesterIds.length ? supabaseAdmin!.from("hr_user_person_links").select("user_id,person_id").eq("company_id", companyId).eq("status", "active").in("user_id", requesterIds) : Promise.resolve({ data: [] as Array<{ user_id: string; person_id: string }>, error: null }),
+    loadActiveApprovalCovers(companyId),
   ]);
   const requesterPeople = new Map<string, Set<string>>();
   for (const link of (requesterLinks.data ?? []) as Array<{ user_id: string; person_id: string }>) {
@@ -283,7 +285,7 @@ async function describeHolds(companyId: string, viewerId: string, viewerPeople: 
   }
   return rows.map((h) => {
     const location = locations.get(h.id) ?? null;
-    const approvers = holdApprovers(location ? hierarchy.byLocation.get(location) : undefined, requesterPeople.get(h.requested_by_user_id ?? "") ?? new Set());
+    const approvers = holdApprovers(location ? hierarchy.byLocation.get(location) : undefined, requesterPeople.get(h.requested_by_user_id ?? "") ?? new Set(), covers);
     const isApprover = approvers.personIds.some((id) => viewerPeople.has(id));
     const person = people.get(`${h.worker_type}:${h.worker_id}`);
     const mine = h.requested_by_user_id === viewerId;

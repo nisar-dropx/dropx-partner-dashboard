@@ -86,14 +86,25 @@ export function approverActions(
 /**
  * Cluster managers decide; with none mapped, the station's Area Operations Managers do. The person who
  * made the request is never their own approver: when a cluster manager raises it, it goes to the AOM.
+ * Optional `covers` remaps an unavailable CM/AOM to their acting cover from People.
  */
 export function holdApprovers(
   entry: { clusterManagers?: { personId: string; name: string }[]; areaOperationsManagers?: { personId: string; name: string }[] } | undefined,
   excludePersonIds: ReadonlySet<string> = new Set(),
+  covers: ReadonlyMap<string, { personId: string; name: string }> = new Map(),
 ) {
   const keep = (list: { personId: string; name: string }[] | undefined) => (list ?? []).filter((p) => !excludePersonIds.has(p.personId));
-  const cms = keep(entry?.clusterManagers);
-  const aoms = keep(entry?.areaOperationsManagers);
+  const remap = (list: { personId: string; name: string }[]) => {
+    const out = new Map<string, { personId: string; name: string }>();
+    for (const person of list) {
+      const next = covers.get(person.personId) ?? person;
+      if (excludePersonIds.has(next.personId)) continue;
+      out.set(next.personId, next);
+    }
+    return [...out.values()];
+  };
+  const cms = remap(keep(entry?.clusterManagers));
+  const aoms = remap(keep(entry?.areaOperationsManagers));
   const owners = cms.length ? cms : aoms;
   return {
     level: cms.length ? ("cluster_manager" as const) : owners.length ? ("aom" as const) : ("none" as const),

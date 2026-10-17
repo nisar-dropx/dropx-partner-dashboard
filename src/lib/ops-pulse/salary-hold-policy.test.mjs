@@ -29,6 +29,11 @@ test("cluster managers approve; AOMs only when no cluster manager is mapped", ()
   // A cluster manager who raised the hold never approves it; it moves to the AOM.
   assert.deepEqual(holdApprovers({ clusterManagers: [p("c1", "CM")], areaOperationsManagers: [p("a1", "AOM")] }, new Set(["c1"])), { level: "aom", personIds: ["a1"], names: ["AOM"] });
   assert.deepEqual(holdApprovers({ clusterManagers: [p("c1", "CM"), p("c2", "CM2")] }, new Set(["c1"])), { level: "cluster_manager", personIds: ["c2"], names: ["CM2"] });
+  // Acting cover replaces an unavailable AOM (or CM) with the next person.
+  assert.deepEqual(
+    holdApprovers({ clusterManagers: [], areaOperationsManagers: [p("a1", "AOM")] }, new Set(), new Map([["a1", p("h1", "Head")]])),
+    { level: "aom", personIds: ["h1"], names: ["Head"] },
+  );
 });
 
 test("raise validation matches the database", () => {

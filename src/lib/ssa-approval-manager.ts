@@ -1,5 +1,6 @@
 import "server-only";
 
+import { loadActiveApprovalCovers } from "@/lib/approval-covers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import { loadPeopleOperationalHierarchy } from "./people-operational-hierarchy";
@@ -65,14 +66,24 @@ export async function resolveSsaApprovalManager(input: {
   if (!manager || manager.personId === engagement.data.person_id) {
     throw new SsaApprovalRoutingError("Map a Cluster Manager or Area Operations Manager to this station before submitting the request.");
   }
-  const userId = await resolveConnectApproverUserId(input.companyId, manager.personId);
-  if (!userId) throw new SsaApprovalRoutingError(`${manager.name} does not have an active One/People approval login. Ask People to complete the manager's access.`);
+  const covers = await loadActiveApprovalCovers(input.companyId);
+  const cover = covers.get(manager.personId);
+  const acting = cover
+    ? { personId: cover.personId, name: cover.name, assignmentId: manager.assignmentId, supportCount: manager.supportCount }
+    : manager;
+  if (acting.personId === engagement.data.person_id) {
+    throw new SsaApprovalRoutingError("Map a Cluster Manager or Area Operations Manager to this station before submitting the request.");
+  }
+  const userId = await resolveConnectApproverUserId(input.companyId, acting.personId);
+  if (!userId) throw new SsaApprovalRoutingError(`${acting.name} does not have an active One/People approval login. Ask People to complete the manager's access.`);
   return {
-    ...manager,
+    ...acting,
     userId,
     isAomFallback: clusterManagers.length === 0,
     stepName: clusterManagers.length ? "Cluster Manager approval" : "Area Operations Manager approval",
-    fallbackReason: clusterManagers.length ? null : "No Cluster Manager mapped to this station"
+    fallbackReason: cover
+      ? `Acting cover for ${manager.name}`
+      : clusterManagers.length ? null : "No Cluster Manager mapped to this station"
   };
 }
 

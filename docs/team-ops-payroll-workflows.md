@@ -236,6 +236,12 @@ raise → awaiting_approval → (cluster manager) approve → active → (raiser
 Operations Managers when no cluster manager is mapped. The person who made the request is always excluded,
 so a cluster manager's own request goes to the AOM.
 
+**Acting / unavailable cover:** when a CM or AOM stops reporting, People sets an acting cover in HRMS
+Approval Workflow Master (`hr_approval_delegations`). Ops Pulse loaders (`loadActiveApprovalCovers`) remap
+that person to their acting cover for holds and station claims, and SSA routing does the same. Pending
+DropX One / People steps are shifted when the cover is saved; closing the cover restores only steps that
+still record the original person.
+
 People salary holds can be raised for a direct report, or for any active employee or contractor at a
 station in the viewer's Ops scope (`holdTargetAllowed`). Station people load on demand.
 
