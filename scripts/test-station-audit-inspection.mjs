@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import { PGlite } from '@electric-sql/pglite';
 function lib(path){const m={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports);return m.exports;}
-const {parseAuditTids,compareAuditTids,selectedAuditEmployees,readAuditTidSheet,auditTidTemplate,auditDifferencesWorkbook,auditHelpSheet}=lib('src/lib/ops-pulse/station-audit-reconciliation.ts');
+const {parseAuditTids,compareAuditTids,selectedAuditEmployees,readAuditTidSheet,auditTidTemplate,auditDifferencesWorkbook,auditHelpSheet,auditKeyCustodianPeople,isAuditDeliveryAssociate}=lib('src/lib/ops-pulse/station-audit-reconciliation.ts');
+const people=[
+  {ref:'employee:1',employee_code:'E1',full_name:'Station TL',designation:'Team Lead',is_active:true},
+  {ref:'employee:2',employee_code:'E2',full_name:'Support SSA',designation:'SSA',is_active:true},
+  {ref:'workforce:1',employee_code:'DA001',full_name:'Associate',designation:'DA',is_active:true},
+  {ref:'workforce:2',employee_code:'DSA1',full_name:'Support',designation:'DSA',is_active:true},
+];
+assert.equal(isAuditDeliveryAssociate(people[2]),true);
+assert.equal(isAuditDeliveryAssociate(people[0]),false);
+assert.deepEqual(auditKeyCustodianPeople(people).map(p=>p.employee_code),['E1','E2'],'key custodians are UTR staff only, not DA/DSA');
 // Template: an empty first sheet, then the column guide, then a filled sample that reads back cleanly.
 const template=auditTidTemplate();assert.deepEqual(template.map(s=>s.name),['Tracking IDs','Column guide','Sample']);
 assert.throws(()=>readAuditTidSheet(template[0].rows),/No tracking IDs found/,'an unfilled template says so instead of importing nothing silently');

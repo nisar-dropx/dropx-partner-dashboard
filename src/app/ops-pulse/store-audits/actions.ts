@@ -170,6 +170,17 @@ export async function saveStoreInspection(
         };
       }
     }
+    // Guard against a blank client state overwriting a draft that already has answers.
+    if (!submit) {
+      const existingAnswered = Object.values(c.audit.answers || {}).filter(
+        (a) => a?.outcome,
+      ).length;
+      const nextAnswered = Object.values(cleaned).filter((a) => a.outcome).length;
+      if (existingAnswered > 0 && nextAnswered === 0)
+        throw Error(
+          "This draft already has answers on the server. Refresh the page, then save again — an empty form was not written over them.",
+        );
+    }
     if (submit) {
       validateAnswers(c.audit, cleaned, await proofs(c, id));
       if (!summary.trim())

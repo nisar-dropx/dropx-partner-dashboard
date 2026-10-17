@@ -202,6 +202,20 @@ async function draftTarget(auditId: string) {
     path: `${companyId}/station-audits/${audit.id}/draft/${authorization.userId}.json`,
   };
 }
+function draftFilledFields(payload: string) {
+  try {
+    const draft = JSON.parse(payload) as { fields?: Array<{ value?: string; checked?: boolean }> };
+    if (!Array.isArray(draft.fields)) return 0;
+    return draft.fields.filter(
+      (field) =>
+        field?.checked === true ||
+        (typeof field?.value === "string" && field.value.trim().length > 0),
+    ).length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function saveStationAuditDraft(
   auditId: string,
   payload: string,
@@ -213,6 +227,18 @@ export async function saveStationAuditDraft(
     if (typeof payload !== "string" || !payload || payload.length > draftLimit)
       throw new Error("This draft is too large to keep on the server.");
     JSON.parse(payload);
+    const nextFilled = draftFilledFields(payload);
+    if (nextFilled === 0) {
+      const existing = await db().storage.from(draftBucket).download(path);
+      if (!existing.error && existing.data) {
+        const previous = await existing.data.text();
+        if (draftFilledFields(previous) > 0)
+          return {
+            ok: true,
+            message: "Kept the earlier draft; an empty form was not written over it.",
+          };
+      }
+    }
     const saved = await db()
       .storage.from(draftBucket)
       .upload(path, new Blob([payload], { type: "application/json" }), {

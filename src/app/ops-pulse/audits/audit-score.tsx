@@ -10,6 +10,7 @@ import type {
   AuditOption,
   StationAuditWorkspace,
 } from "@/lib/ops-pulse/station-audits";
+import { EvidencePreview } from "@/components/evidence-preview";
 import styles from "./audit-workspace.module.css";
 export function ResponsibilityAssessment({
   keys,
@@ -227,11 +228,13 @@ export function AuditScore({
                   {evidence
                     .filter((e) => e.checklist_item_id === i.id)
                     .map((e) => (
-                      <a
+                      <EvidencePreview
                         key={e.id}
+                        className={styles.scorePhoto}
                         href={`/api/ops-pulse/audits/evidence/${e.id}`}
-                        target="_blank"
-                        rel="noreferrer"
+                        label={e.file_name || e.caption || i.label}
+                        fileName={e.file_name}
+                        contentType={e.content_type}
                       >
                         <img
                           loading="lazy"
@@ -239,7 +242,7 @@ export function AuditScore({
                           alt={e.caption || i.label}
                         />
                         <small>{e.file_name}</small>
-                      </a>
+                      </EvidencePreview>
                     ))}
                 </div>
               </details>
@@ -265,13 +268,17 @@ export function AuditScore({
               </small>
               {a.evidenceId && (
                 <p>
-                  <a
+                  <EvidencePreview
+                    className={styles.photoLink}
                     href={`/api/ops-pulse/audits/evidence/${a.evidenceId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    View supporting evidence →
-                  </a>
+                    label="View supporting evidence →"
+                    fileName={
+                      evidence.find((e) => e.id === a.evidenceId)?.file_name
+                    }
+                    contentType={
+                      evidence.find((e) => e.id === a.evidenceId)?.content_type
+                    }
+                  />
                 </p>
               )}
             </div>

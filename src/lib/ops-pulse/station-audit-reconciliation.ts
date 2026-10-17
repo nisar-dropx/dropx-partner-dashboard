@@ -214,3 +214,37 @@ export function selectedAuditEmployees(
     return person;
   });
 }
+
+/** Normalise a designation / role label for station-role matching. */
+function roleText(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+}
+
+/**
+ * Delivery associates and similar field roles. Key custodians for Security /
+ * keys & CCTV are UTR station staff (SSA, TL, SM…), not DA / DSA.
+ */
+export function isAuditDeliveryAssociate(person: AuditEmployee) {
+  if (person.ref.startsWith("employee:")) return false;
+  const designation = roleText(person.designation || "");
+  if (
+    /\b(SSA|ATL|TL|STM|SM|TEAM LEAD|TEAM LEADER|STATION MANAGER|STATION SUPPORT|STORE MANAGER|CLUSTER MANAGER|AOM|AREA OPS)\b/.test(
+      designation,
+    )
+  )
+    return false;
+  if (person.ref.startsWith("workforce:")) return true;
+  return /\b(DA|DSA|DELIVERY ASSOCIATE|DELIVERY SUPPORT|SPOT DA|HELPER)\b/.test(
+    designation,
+  );
+}
+
+/** People eligible as office / cash key custodians on a physical audit. */
+export function auditKeyCustodianPeople(people: AuditEmployee[]) {
+  return people
+    .filter((person) => !isAuditDeliveryAssociate(person))
+    .sort((a, b) => {
+      const byName = a.full_name.localeCompare(b.full_name);
+      return byName || a.employee_code.localeCompare(b.employee_code);
+    });
+}

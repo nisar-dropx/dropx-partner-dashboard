@@ -2,6 +2,7 @@
 import {
   useState,
   useEffect,
+  useRef,
   useTransition,
   type Dispatch,
   type SetStateAction,
@@ -21,6 +22,7 @@ import {
   type Question,
 } from "@/lib/ops-pulse/store-audits/model";
 import type { AuditAssignee } from "@/lib/ops-pulse/station-audit-people";
+import { EvidencePreview } from "@/components/evidence-preview";
 import {
   scheduleStoreAudit,
   startStoreAudit,
@@ -116,13 +118,13 @@ function ProofFiles({
       <div className={styles.fileList}>
         {existing.map((p) => (
           <span key={p.id}>
-            <a
+            <EvidencePreview
+              className={styles.fileLink}
               href={`/api/ops-pulse/store-audits/evidence/${p.id}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {p.file_name}
-            </a>
+              label={p.file_name}
+              fileName={p.file_name}
+              contentType={p.content_type}
+            />
             {editable && p.uploaded_by === userId && (
               <button
                 type="button"
@@ -232,14 +234,44 @@ export function StoreAuditWorkspace(p: Props) {
     [section, setSection] = useState(p.focused?.template.sections[0]?.id || ""),
     [dirty, setDirty] = useState(false),
     [notes, setNotes] = useState<Record<string, string>>({});
+  const dirtyRef = useRef(dirty);
+  const focusedIdRef = useRef<string | null>(p.focused?.id ?? null);
+  dirtyRef.current = dirty;
+  // Adopt server props when the focused audit or its saved version changes.
+  // Never key this off `dirty` alone: Save draft used to set dirty=false and
+  // immediately reload stale page props (often {}), wiping the just-saved form.
   useEffect(() => {
-    if (!dirty && p.focused) {
-      setAudit(p.focused);
-      setAnswers(p.focused.answers);
-      setSummary(p.focused.summary);
+    if (!p.focused) {
+      focusedIdRef.current = null;
+      setAudit(null);
+      setAnswers({});
+      setSummary("");
       setProof(p.evidence);
+      setDirty(false);
+      return;
     }
-  }, [p.focused, p.evidence, dirty]);
+    const switched = focusedIdRef.current !== p.focused.id;
+    focusedIdRef.current = p.focused.id;
+    if (!switched && dirtyRef.current) {
+      setAudit((current) =>
+        current && current.id === p.focused!.id
+          ? { ...p.focused!, answers: current.answers, summary: current.summary }
+          : p.focused!,
+      );
+      setProof(p.evidence);
+      return;
+    }
+    setAudit(p.focused);
+    setAnswers(p.focused.answers || {});
+    setSummary(p.focused.summary || "");
+    setProof(p.evidence);
+    setDirty(false);
+    setSection((current) =>
+      p.focused!.template.sections.some((s) => s.id === current)
+        ? current
+        : p.focused!.template.sections[0]?.id || "",
+    );
+  }, [p.focused?.id, p.focused?.version, p.evidence]);
   useEffect(() => {
     if (!dirty) return;
     const before = (e: BeforeUnloadEvent) => {
@@ -251,6 +283,7 @@ export function StoreAuditWorkspace(p: Props) {
   }, [dirty]);
   const run = async (
     work: () => Promise<{ ok: boolean; message: string; version?: number }>,
+    saved?: { answers: Record<string, Answer>; summary: string },
   ) => {
     setBusy(true);
     setMessage("");
@@ -258,7 +291,16 @@ export function StoreAuditWorkspace(p: Props) {
       const r = await work();
       setMessage(r.message);
       if (r.ok) {
-        if (r.version && audit) setAudit({ ...audit, version: r.version });
+        // Keep the just-saved answers on screen until refresh brings the new version.
+        if (audit && r.version) {
+          setAudit({
+            ...audit,
+            version: r.version,
+            ...(saved
+              ? { answers: saved.answers, summary: saved.summary }
+              : {}),
+          });
+        }
         setDirty(false);
         startTransition(() => router.refresh());
       }
@@ -471,13 +513,15 @@ export function StoreAuditWorkspace(p: Props) {
                 <button
                   disabled={blocked || !dirty}
                   onClick={() =>
-                    run(() =>
-                      saveStoreInspection(
-                        audit.id,
-                        audit.version,
-                        answers,
-                        summary,
-                      ),
+                    run(
+                      () =>
+                        saveStoreInspection(
+                          audit.id,
+                          audit.version,
+                          answers,
+                          summary,
+                        ),
+                      { answers, summary },
                     )
                   }
                 >
@@ -786,15 +830,17 @@ export function StoreAuditWorkspace(p: Props) {
                   {inspection && (
                     <div className={styles.inline}>
                       <button
-                        disabled={blocked}
+                        disabled={blocked || !dirty}
                         onClick={() =>
-                          run(() =>
-                            saveStoreInspection(
-                              audit.id,
-                              audit.version,
-                              answers,
-                              summary,
-                            ),
+                          run(
+                            () =>
+                              saveStoreInspection(
+                                audit.id,
+                                audit.version,
+                                answers,
+                                summary,
+                              ),
+                            { answers, summary },
                           )
                         }
                       >
@@ -809,14 +855,16 @@ export function StoreAuditWorkspace(p: Props) {
                               "Complete this audit and release its report and findings to the store?",
                             )
                           )
-                            run(() =>
-                              saveStoreInspection(
-                                audit.id,
-                                audit.version,
-                                answers,
-                                summary,
-                                true,
-                              ),
+                            run(
+                              () =>
+                                saveStoreInspection(
+                                  audit.id,
+                                  audit.version,
+                                  answers,
+                                  summary,
+                                  true,
+                                ),
+                              { answers, summary },
                             );
                         }}
                       >

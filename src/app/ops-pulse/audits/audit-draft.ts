@@ -9,6 +9,37 @@ export type AuditFormDraft<Extra> = { savedAt: string; fields: DraftField[]; ext
 const key = (auditId: string) => `station-audit-draft:${auditId}`;
 const skipped = new Set(["audit_id", "updated_at"]);
 
+/** Counts filled values so an empty newer copy cannot replace a draft with real answers. */
+export function auditDraftContentScore(draft: AuditFormDraft<unknown> | null | undefined) {
+  if (!draft?.fields?.length) return 0;
+  let score = 0;
+  for (const field of draft.fields) {
+    if (field.checked) score += 1;
+    else if (typeof field.value === "string" && field.value.trim()) score += 1;
+  }
+  if (draft.extra && typeof draft.extra === "object") {
+    const extra = draft.extra as { shipments?: unknown[]; tidRemarks?: string };
+    if (Array.isArray(extra.shipments)) score += extra.shipments.length;
+    if (typeof extra.tidRemarks === "string" && extra.tidRemarks.trim() && extra.tidRemarks !== "{}")
+      score += 1;
+  }
+  return score;
+}
+
+/** Newer wins, except a blank draft never replaces one that still has answers. */
+export function preferAuditDraft<Extra>(
+  local: AuditFormDraft<Extra> | null,
+  remote: AuditFormDraft<Extra> | null,
+) {
+  if (!local) return remote;
+  if (!remote) return local;
+  const localScore = auditDraftContentScore(local);
+  const remoteScore = auditDraftContentScore(remote);
+  if (localScore > 0 && remoteScore === 0) return local;
+  if (remoteScore > 0 && localScore === 0) return remote;
+  return remote.savedAt > local.savedAt ? remote : local;
+}
+
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 function draftableFields(form: HTMLFormElement) {
   const seen = new Map<string, number>();

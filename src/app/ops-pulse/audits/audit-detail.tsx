@@ -19,9 +19,11 @@ import {
   clearAuditDraft,
   loadAuditDraft,
   parseAuditDraft,
+  preferAuditDraft,
   readAuditDraftText,
   saveAuditDraft,
 } from "./audit-draft";
+import { EvidencePreview } from "@/components/evidence-preview";
 import { AuditEmailDelivery } from "./audit-email-delivery";
 import {
   uploadAuditFiles,
@@ -36,7 +38,10 @@ import {
   ShipmentInspection,
   EmployeePicker,
 } from "./shipment-inspection";
-import type { AuditEmployee } from "@/lib/ops-pulse/station-audit-reconciliation";
+import {
+  auditKeyCustodianPeople,
+  type AuditEmployee,
+} from "@/lib/ops-pulse/station-audit-reconciliation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import {
   loadAuditInspectionContext,
@@ -402,9 +407,8 @@ export function AuditDetail({
         remote = null;
       }
       if (cancelled) return;
-      const fromServer =
-        !!remote && (!local || remote.savedAt > local.savedAt);
-      const draft = fromServer ? remote : local;
+      const draft = preferAuditDraft(local, remote);
+      const fromServer = draft != null && draft === remote;
       if (!draft) {
         draftReady.current = true;
         return;
@@ -1296,13 +1300,14 @@ export function AuditDetail({
               <div className={`${styles.sectionBody} ${styles.evidence}`}>
                 {evidence.length ? (
                   evidence.map((item) => (
-                    <a
-                      href={`/api/ops-pulse/audits/evidence/${item.id}`}
+                    <EvidencePreview
                       key={item.id}
-                      target="_blank"
-                    >
-                      {item.file_name || item.evidence_kind_code || "Evidence"}
-                    </a>
+                      className={styles.photoLink}
+                      href={`/api/ops-pulse/audits/evidence/${item.id}`}
+                      label={item.file_name || item.evidence_kind_code || "Evidence"}
+                      fileName={item.file_name}
+                      contentType={item.content_type}
+                    />
                   ))
                 ) : (
                   <p className={styles.checkHelp}>No files attached yet.</p>
@@ -1402,7 +1407,7 @@ function AuditCheck({
           Employee / key custodian{" "}
           <EmployeePicker
             name={`check_employee_${item.id}`}
-            people={people}
+            people={auditKeyCustodianPeople(people)}
             multiple={item.employee_selection === "multiple"}
             required={
               options.find((o) => o.value === outcome)?.is_compliant === true
@@ -1411,9 +1416,13 @@ function AuditCheck({
               (response?.response_value as { employees?: AuditEmployee[] })
                 ?.employees || []
             }
+            placeholder="Search SSA, TL, SM or other UTR staff"
+            emptyHint="No station UTR staff (SSA, TL, SM…) are linked to this station. Update People station mapping — delivery associates are not listed as key custodians."
+            maxOptions={200}
           />
           <small>
-            Select known custodians. Explain any unidentified custodian in
+            Select known UTR custodians (SSA, TL, SM…). Delivery associates (DA /
+            DSA) are not listed here. Explain any unidentified custodian in
             observations.
           </small>
         </div>
@@ -2445,14 +2454,14 @@ function ChecklistPhotos({
   return (
     <div className={styles.photoLinks}>
       {photos.map((photo) => (
-        <a
+        <EvidencePreview
           key={photo.id}
+          className={styles.photoLink}
           href={`/api/ops-pulse/audits/evidence/${photo.id}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          View file · {photo.file_name || "Inspection proof"}
-        </a>
+          label={`View file · ${photo.file_name || "Inspection proof"}`}
+          fileName={photo.file_name}
+          contentType={photo.content_type}
+        />
       ))}
     </div>
   );

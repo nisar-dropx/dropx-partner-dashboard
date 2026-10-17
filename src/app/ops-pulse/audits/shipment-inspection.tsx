@@ -23,6 +23,9 @@ export function EmployeePicker({
   required = false,
   initial = [],
   onChange,
+  placeholder = "Search employee ID or name",
+  emptyHint = "No station-linked employee IDs available. Update the People/workforce station mapping.",
+  maxOptions = 100,
 }: {
   name: string;
   people: AuditEmployee[];
@@ -30,6 +33,9 @@ export function EmployeePicker({
   required?: boolean;
   initial?: AuditEmployee[];
   onChange?: (refs: string[]) => void;
+  placeholder?: string;
+  emptyHint?: string;
+  maxOptions?: number;
 }) {
   const [selected, setSelectedState] = useState(initial.map((p) => p.ref));
   const setSelected = (change: (old: string[]) => string[]) => {
@@ -51,7 +57,8 @@ export function EmployeePicker({
         options={options}
         value={multiple ? "" : selected[0] || ""}
         required={required && !multiple}
-        placeholder="Search employee ID or name"
+        placeholder={placeholder}
+        maxOptions={maxOptions}
         onValueChange={(ref) =>
           setSelected((old) =>
             multiple ? (ref ? [...old, ref] : old) : ref ? [ref] : [],
@@ -82,12 +89,7 @@ export function EmployeePicker({
           })}
         </div>
       )}
-      {!people.length && (
-        <small>
-          No station-linked employee IDs available. Update the People/workforce
-          station mapping.
-        </small>
-      )}
+      {!people.length && <small>{emptyHint}</small>}
     </div>
   );
 }
