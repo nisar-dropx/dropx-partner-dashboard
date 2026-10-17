@@ -17,6 +17,7 @@ import {
   type RecoveryPlan,
 } from "@/lib/ops-pulse/nl-loss-policy";
 import styles from "./nl-loss.module.css";
+import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -81,8 +82,8 @@ export function NlLossCases({
       ),
     [cases, query],
   );
-  const pages = Math.ceil(shown.length / 15);
-  const current = shown.slice(page * 15, page * 15 + 15);
+  const paged = usePaged(shown, 25, query);
+  const current = paged.rows;
   function download() {
     const columns = [
       "Month",
@@ -237,33 +238,7 @@ export function NlLossCases({
       {!shown.length ? (
         <p className={styles.empty}>No recoverable cases match your search.</p>
       ) : null}
-      {pages > 1 ? (
-        <div className={styles.pagination}>
-          <button
-            className={styles.button}
-            disabled={!page}
-            onClick={() => {
-              setPage(page - 1);
-              setActive(null);
-            }}
-          >
-            Previous
-          </button>
-          <span>
-            {page + 1} / {pages}
-          </span>
-          <button
-            className={styles.button}
-            disabled={page >= pages - 1}
-            onClick={() => {
-              setPage(page + 1);
-              setActive(null);
-            }}
-          >
-            Next
-          </button>
-        </div>
-      ) : null}
+      <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={(n) => { paged.setPage(n); setActive(null); }} onSize={(n) => { paged.setSize(n); setActive(null); }} label="cases" />
     </section>
   );
 }

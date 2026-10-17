@@ -6,6 +6,7 @@ import { CLAIM_CATEGORIES, CLAIM_STATUS, claimNoteError, validateClaim, type Cla
 import type { LossSettings, NlCase, RecoveryOutcome } from "@/lib/ops-pulse/nl-loss-policy";
 import { NlLossCases } from "./nl-loss-cases";
 import styles from "./nl-loss.module.css";
+import { ListPager, usePaged } from "./list-pager";
 
 const money = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(n) || 0);
 const day = (d: string | null) => (d ? new Date(d.length === 10 ? `${d}T00:00:00Z` : d).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: d.length === 10 ? "UTC" : "Asia/Kolkata" }) : "");
@@ -27,6 +28,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
   const router = useRouter();
   const [filter, setFilter] = useState<string>(claims.some((c) => c.actions.some((a) => a === "approve" || a === "resubmit")) ? "open" : "all");
   const [query, setQuery] = useState("");
+  const [stationFilter, setStationFilter] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [raising, setRaising] = useState(false);
   const [message, setMessage] = useState("");
@@ -35,8 +37,11 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
     const q = query.trim().toLowerCase();
     return claims.filter((c) =>
       (filter === "all" || (filter === "open" ? c.status === "submitted" || c.status === "returned" : filter === "closed" ? c.status === "rejected" || c.status === "withdrawn" : c.status === filter)) &&
+      (!stationFilter || c.stationCode === stationFilter) &&
       (!q || [c.reference, c.stationCode, c.description, c.people].join(" ").toLowerCase().includes(q)));
-  }, [claims, filter, query]);
+  }, [claims, filter, query, stationFilter]);
+  const paged = usePaged(shown, 25, `${filter}|${query}|${stationFilter}`);
+  const claimStations = [...new Set(claims.map((c) => c.stationCode))].sort();
   const mine = claims.filter((c) => c.actions.some((a) => a !== "withdraw")).length;
   const sum = (s: string) => claims.filter((c) => c.status === s).reduce((n, c) => n + c.amount, 0);
   const caseByKey = new Map(cases.map((c) => [c.case_key, c]));
@@ -59,6 +64,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
           </div>
           <div className={styles.toolbar}>
             <input aria-label="Search claims" placeholder="Reference, station, description" value={query} onChange={(e) => setQuery(e.target.value)} />
+            {claimStations.length > 1 ? <select aria-label="Station" value={stationFilter} onChange={(e) => setStationFilter(e.target.value)}><option value="">All stations</option>{claimStations.map((c) => <option key={c} value={c}>{c}</option>)}</select> : null}
             {canRaise ? <button className={styles.primary} onClick={() => setRaising((v) => !v)}>{raising ? "Close" : "Raise a claim"}</button> : null}
           </div>
         </div>
@@ -73,7 +79,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
             <table className={styles.ledgerTable}>
               <thead><tr><th>Claim</th><th>Station</th><th>Incident</th><th className={styles.num}>Amount</th><th>Status · next step</th><th /></tr></thead>
               <tbody>
-                {shown.map((c) => {
+                {paged.rows.map((c) => {
                   const meta = CLAIM_STATUS[c.status];
                   const linked = c.caseKey ? caseByKey.get(c.caseKey) : undefined;
                   const assigned = linked?.recovery && !linked.recovery.is_deleted;
@@ -96,6 +102,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
                 })}
               </tbody>
             </table>
+            <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="claims" />
           </div>
         ) : (
           <p className={styles.empty}>{claims.length ? "No claims match this view." : "No station loss claims yet."}</p>

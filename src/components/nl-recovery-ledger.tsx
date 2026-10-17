@@ -10,6 +10,7 @@ import {
 } from "@/lib/ops-pulse/nl-recovery-ledger-view";
 import { recoveryCsv } from "@/lib/ops-pulse/nl-loss-policy";
 import styles from "./nl-loss.module.css";
+import { ListPager, usePaged } from "./list-pager";
 
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(n) || 0);
@@ -39,6 +40,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
   const stations = useMemo(() => [...new Set(lines.map((l) => l.station_code))].sort(), [lines]);
   const shown = useMemo(() => filterLedger(lines, { status, query, station }), [lines, status, query, station]);
   const all = useMemo(() => ledgerTotals(lines), [lines]);
+  const paged = usePaged(shown, 25, `${status}|${query}|${station}`);
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: lines.length, open: filterLedger(lines, { status: "open" }).length };
     for (const l of lines) c[l.status] = (c[l.status] ?? 0) + 1;
@@ -127,7 +129,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                 </tr>
               </thead>
               <tbody>
-                {shown.map((l) => {
+                {paged.rows.map((l) => {
                   const meta = LEDGER_STATUS[l.status] ?? { label: l.status, tone: "info" };
                   const pct = recoveredPercent(l);
                   return (
@@ -178,6 +180,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                 })}
               </tbody>
             </table>
+            <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="lines" />
           </div>
         ) : (
           <p className={styles.empty}>

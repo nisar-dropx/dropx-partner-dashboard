@@ -12,6 +12,8 @@ type SearchParams = {
   q?: string;
   run?: string;
   status?: string;
+  page?: string;
+  size?: string;
 };
 
 export default async function WorkforcePayoutDisputesPage({

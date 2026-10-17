@@ -2,8 +2,8 @@ import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { decodePayoutReviewReason } from "@/lib/payout-review-display";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { readAllRows } from "@/lib/supabase-pagination";
 import styles from "./payout-review-desk.module.css";
+import { UrlPager, readPaging } from "./url-pager";
 
 type Row = Record<string, any>;
 
@@ -22,7 +22,7 @@ export async function PayoutReviewDesk({
 }: {
   auth: AuthorizationContext;
   action: (form: FormData) => Promise<void>;
-  params?: { status?: string; q?: string; run?: string };
+  params?: { status?: string; q?: string; run?: string; page?: string; size?: string };
 }) {
   if (!supabaseAdmin) return <p role="alert">Payout disputes are unavailable.</p>;
 
@@ -34,11 +34,24 @@ export async function PayoutReviewDesk({
   if (requestedStatus === "open") disputeQuery = disputeQuery.in("status", ["open", "in_review"]);
   else if (requestedStatus !== "all") disputeQuery = disputeQuery.eq("status", requestedStatus);
   if (params.run && /^[0-9a-f-]{36}$/i.test(params.run)) disputeQuery = disputeQuery.eq("payroll_run_id", params.run);
-  const [disputeResult, counts] = await Promise.all([
-    readAllRows(disputeQuery.order("created_at", { ascending: false }).order("id")),
+  // Without a search, read only the requested page from the database; a name search needs the snapshot,
+  // so it reads a bounded set (500 newest) and filters that.
+  const { page, size } = readPaging(params.page, params.size, 25);
+  const searching = Boolean((params.q || "").trim());
+  const ordered = disputeQuery.order("created_at", { ascending: false }).order("id");
+  const [disputeResult, counts, totalResult] = await Promise.all([
+    searching ? ordered.limit(500) : ordered.range((page - 1) * size, page * size - 1),
     (scope ? supabaseAdmin.from("workforce_payout_disputes").select("status").eq("company_id", company).in("station_id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]) : supabaseAdmin.from("workforce_payout_disputes").select("status").eq("company_id", company)).in("status", ["open", "in_review"]),
+    searching ? Promise.resolve({ count: 0, error: null }) : (() => {
+      let c = supabaseAdmin!.from("workforce_payout_disputes").select("id", { count: "exact", head: true }).eq("company_id", company);
+      if (scope) c = c.in("station_id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]);
+      if (requestedStatus === "open") c = c.in("status", ["open", "in_review"]);
+      else if (requestedStatus !== "all") c = c.eq("status", requestedStatus);
+      if (params.run && /^[0-9a-f-]{36}$/i.test(params.run)) c = c.eq("payroll_run_id", params.run);
+      return c;
+    })(),
   ]);
-  if (disputeResult.error || counts.error) return <p role="alert">Payout disputes could not load. No changes were made.</p>;
+  if (disputeResult.error || counts.error || totalResult.error) return <p role="alert">Payout disputes could not load. No changes were made.</p>;
   const disputes = (disputeResult.data ?? []) as Row[];
 
   // Only the publications these disputes point at; never the whole publication history.
@@ -51,11 +64,13 @@ export async function PayoutReviewDesk({
   }
 
   const query = (params.q || "").trim().toLowerCase();
-  const shown = disputes.filter((dispute) => {
+  const matched = disputes.filter((dispute) => {
     const worker = publications.get(dispute.publication_id)?.snapshot?.item;
     const searchable = [worker?.worker_name, worker?.dropx_id, dispute.reason, dispute.category].map((v) => String(v ?? "").toLowerCase()).join(" ");
     return !query || searchable.includes(query);
   });
+  const total = searching ? matched.length : totalResult.count ?? matched.length;
+  const shown = searching ? matched.slice((page - 1) * size, page * size) : matched;
   const canDecide = hasPermission(auth, "workforce_payout_disputes", "edit") && !auth.readOnly;
   const open = (counts.data ?? []).filter((r) => r.status === "open").length;
   const awaiting = (counts.data ?? []).filter((r) => r.status === "in_review").length;
@@ -135,6 +150,9 @@ export async function PayoutReviewDesk({
       })}
 
       {!shown.length ? <section className={styles.card}>No disputes match this view.</section> : null}
+      <section className={styles.card} style={{ padding: 0 }}>
+        <UrlPager basePath="/payments/disputes" params={{ status: params.status, q: params.q, run: params.run }} total={total} page={page} size={size} label="disputes" />
+      </section>
     </div>
   );
 }
