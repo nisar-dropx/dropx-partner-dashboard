@@ -8,6 +8,7 @@ import {
   type WorkforcePayoutRow
 } from "@/components/workforce-payout-table";
 import { WorkforcePayoutPeriodFilter } from "@/components/workforce-payout-period-filter";
+import { WorkforcePayoutPublicationSelfHeal } from "@/components/workforce-payout-publication-self-heal";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
@@ -808,6 +809,25 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       })
   ]);
   const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
+  const publicationSelfHealRows = audience === "workforce"
+    && period.mode === "monthly"
+    && canEdit
+    && !authorization.readOnly
+    && !provisional
+    && !loadError
+    && !reviewed.error
+      ? [...new Map(reviewed.rows.flatMap((row) => {
+          if (!row.reviewSubjectId || !row.locationId || !workforcePayoutPublicationRefreshPending(
+            audience,
+            row.publicationLockState,
+            row.netAmount,
+            row.publicationTargetAmount
+          )) return [];
+          const workforceId = row.reviewSubjectId.toLowerCase();
+          const stationId = row.locationId.toLowerCase();
+          return [[`${workforceId}|${stationId}`, { workforceId, stationId }] as const];
+        })).values()]
+      : [];
   const reviewedPaymentRows = reviewed.rows.map((row) => {
     const paymentRow = paymentByRowId.get(row.id);
     return paymentRow?.paymentSummary
@@ -847,6 +867,9 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
           <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
         </nav>
       </div>
+      {!error && publicationSelfHealRows.length
+        ? <WorkforcePayoutPublicationSelfHeal periodStart={period.fromDate} periodEnd={period.toDate} rows={publicationSelfHealRows} />
+        : null}
       {canEdit ? <WorkforcePayoutBulkUpload audience={audience} fromDate={period.fromDate} toDate={period.toDate} /> : null}
       {provisional && !error
         ? <section className="panel message-panel warn"><div className="panel-body"><strong>Live payout updates are in progress</strong><p className="subtle">The latest worksheet is shown. Every selected payout will be rechecked before its notification is sent.</p></div></section>
