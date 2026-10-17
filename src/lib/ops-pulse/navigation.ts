@@ -36,6 +36,7 @@ const commonStart: NavItem[] = [
       { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register" },
       { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping" },
       { code: "ops_workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
+      { code: "ops_workforce_payout_disputes", label: "Payout Disputes", href: "/payments/disputes" },
       { code: "ops_workforce_advances", label: "Workforce Advance Register", href: "/payments/workforce-advances" },
       { code: "ops_rostering", label: "Rostering", href: "/rostering" }
     ]

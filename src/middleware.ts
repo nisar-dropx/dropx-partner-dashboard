@@ -27,6 +27,7 @@ const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/requests",
   "/payments/approvals",
   "/payments/workforce-payouts",
+  "/payments/disputes",
   "/payments/workforce-advances",
   "/payments/report"
 ];

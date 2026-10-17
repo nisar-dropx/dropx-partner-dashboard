@@ -1,4 +1,5 @@
 import { requirePagePermission } from "@/lib/authorization";
+import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -7,7 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
  * and a different reviewer approves it or sends it back. The database enforces the four-eyes rule.
  */
 export async function performPayoutReview(form: FormData) {
-  const auth = await requirePagePermission("workforce_payout_disputes", "edit");
+  const auth = await requirePagePermission(currentAdminAccessSurface() === "ops" ? "ops_workforce_payout_disputes" : "workforce_payout_disputes", "edit");
   if (auth.readOnly || !supabaseAdmin) throw new Error("Editing is unavailable.");
 
   const text = (key: string) => String(form.get(key) || "").trim();

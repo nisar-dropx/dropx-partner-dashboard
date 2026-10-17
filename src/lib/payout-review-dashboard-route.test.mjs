@@ -14,12 +14,14 @@ test("Dashboard exposes the payout-dispute proposal and second-reviewer decision
   const accessPages = read("./access-pages.ts");
   const permissionMatrix = read("../components/permission-matrix.tsx");
 
-  assert.match(page, /requirePagePermission\("workforce_payout_disputes", "access"\)/);
+  // One shared page: Dashboard uses workforce_payout_disputes, Ops Pulse its own grant.
+  assert.match(page, /currentAdminAccessSurface\(\) === "ops" \? "ops_workforce_payout_disputes" : "workforce_payout_disputes"/);
+  assert.match(page, /requirePagePermission\(pageCode, "access"\)/);
   assert.match(routeActions, /performPayoutReview\(form\)/);
   assert.match(routeActions, /revalidatePath\("\/payments\/disputes"\)/);
   assert.match(navigation, /code: "workforce_payout_disputes", label: "Disputes", href: "\/payments\/disputes"/);
-  assert.match(desk, /hasPermission\(auth, "workforce_payout_disputes", "edit"\)/);
-  assert.match(reviewActions, /requirePagePermission\("workforce_payout_disputes", "edit"\)/);
+  assert.match(desk, /hasPermission\(auth, pageCode, "edit"\)/);
+  assert.match(reviewActions, /requirePagePermission\(currentAdminAccessSurface\(\) === "ops" \? "ops_workforce_payout_disputes" : "workforce_payout_disputes", "edit"\)/);
   assert.match(reviewActions, /rpc\("workforce_dispute_step"/);
   assert.match(reviewActions, /\["propose", "approve", "send_back"\]/);
   assert.match(reviewActions, /p_step: step/);

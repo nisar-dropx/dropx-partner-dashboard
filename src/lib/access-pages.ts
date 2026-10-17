@@ -52,6 +52,7 @@ export const accessPages = [
   { code: "ops_loss_recovered", name: "Team Ops · Losses · Mark already recovered", sort_order: 89 },
   { code: "ops_provider_mapping", name: "ID Mapping", sort_order: 89 },
   { code: "ops_workforce_payouts", name: "Workforce & Helper Payments", sort_order: 90 },
+  { code: "ops_workforce_payout_disputes", name: "Workforce Payout Disputes (Ops)", sort_order: 90 },
   { code: "ops_workforce_advances", name: "Workforce Advance Register", sort_order: 91 },
   { code: "ops_rostering", name: "Rostering", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },
@@ -553,6 +554,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["attendance_reports"], "raw_punch_reports");
     await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "payment_recoveries", true);
     await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "workforce_payout_disputes");
+    // Ops Pulse disputes follow whoever already manages Ops Workforce Payouts.
+    await seedTargetPermissionsFromSources(supabase, companyId, ["ops_workforce_payouts"], "ops_workforce_payout_disputes");
   }
 
   const activePages = Array.from(currentPageByCode.values()).filter((page) => expectedCodes.has(page.code) && page.is_active !== false);

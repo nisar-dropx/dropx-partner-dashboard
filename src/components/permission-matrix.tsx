@@ -59,6 +59,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "workforce_register", label: "Workforce Register", codes: ["delivery_associates"] },
   { key: "ops_provider_mapping", label: "ID Mapping", codes: ["ops_provider_mapping"] },
   { key: "ops_workforce_payouts", label: "Workforce Payouts", codes: ["ops_workforce_payouts"] },
+  { key: "ops_workforce_payout_disputes", label: "Payout Disputes", codes: ["ops_workforce_payout_disputes"] },
   { key: "ops_workforce_advances", label: "Workforce Advance Register", codes: ["ops_workforce_advances"] },
   { key: "ops_rostering", label: "Rostering", codes: ["ops_rostering"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
