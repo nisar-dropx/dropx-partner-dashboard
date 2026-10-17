@@ -5,6 +5,8 @@ import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
 const alwaysRemind = await readFile(new URL("../../../supabase/migrations/20261017110000_report_bot_schedule_always_remind.sql", import.meta.url), "utf8");
+const COMPANY_A = "aaaaaaaa-0000-0000-0000-000000000001";
+const COMPANY_B = "bbbbbbbb-0000-0000-0000-000000000002";
 
 test("schedules default to stopping once the report arrives, and the column migration is safe to rerun", async () => {
   const db = new PGlite();
@@ -43,8 +45,6 @@ const fasterReplies = await readFile(new URL("../../../supabase/migrations/20261
 const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");
 const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
 const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
-const COMPANY_A = "aaaaaaaa-0000-0000-0000-000000000001";
-const COMPANY_B = "bbbbbbbb-0000-0000-0000-000000000002";
 
 async function setup() {
   const db = new PGlite();
