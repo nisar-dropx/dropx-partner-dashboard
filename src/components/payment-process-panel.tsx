@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
@@ -123,13 +123,33 @@ type Props = {
   banks: PaymentProcessBank[];
   requests: PaymentProcessRequest[];
   awaitingDetails: PaymentProcessRequest[];
-  finalizeAction: (formData: FormData) => Promise<void>;
-  finalizeResultKey?: string;
+  canEdit: boolean;
   processAction: (
     previousState: ProcessActionState,
     formData: FormData
   ) => Promise<ProcessActionState>;
   today: string;
+};
+
+type BankResponseImportResult = {
+  cancelledRows?: number;
+  error?: string;
+  failedRows?: number;
+  fileName: string;
+  ledgerRows?: {
+    helpers: number;
+    paymentRequests: number;
+    payroll: number;
+    workforce: number;
+  };
+  matched?: number;
+  ok: boolean;
+  paidRows?: number;
+  rejectedRows?: number;
+  replayedFile?: boolean;
+  replayedRows?: number;
+  skipped?: number;
+  unknownRows?: number;
 };
 
 type ProcessActionState = {
@@ -147,16 +167,6 @@ const initialProcessActionState: ProcessActionState = {
   requestId: "",
   resultKey: ""
 };
-
-function FinalizeSubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <button className={`button ${pending ? "loading" : ""}`} disabled={pending} type="submit">
-      {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
-      <span>{pending ? "Finalizing" : "Finalize requests"}</span>
-    </button>
-  );
-}
 
 function ProcessActionButton({
   children,
@@ -176,11 +186,15 @@ function ProcessActionButton({
   );
 }
 
-export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalizeAction, finalizeResultKey, processAction, today }: Props) {
+export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit, processAction, today }: Props) {
   const router = useRouter();
   const [processResult, processFormAction] = useFormState(processAction, initialProcessActionState);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [finalizeError, setFinalizeError] = useState("");
+  const [finalizePending, setFinalizePending] = useState(false);
+  const [finalizeResults, setFinalizeResults] = useState<BankResponseImportResult[]>([]);
+  const [finalizeInputKey, setFinalizeInputKey] = useState(0);
   const [processRequest, setProcessRequest] = useState<PaymentProcessRequest | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -191,10 +205,6 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
   const [processRemarks, setProcessRemarks] = useState("");
   const [rejectConfirmationOpen, setRejectConfirmationOpen] = useState(false);
   const [rejectValidationError, setRejectValidationError] = useState("");
-
-  useEffect(() => {
-    if (finalizeResultKey) setFinalizeOpen(false);
-  }, [finalizeResultKey]);
 
   useEffect(() => {
     if (!processResult.ok || !processResult.resultKey || processResult.resultKey === hiddenProcessResultKey) return;
@@ -210,6 +220,36 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
     setRejectValidationError("");
     setRejectConfirmationOpen(false);
     setProcessRequest(request);
+  }
+
+  function closeFinalize() {
+    if (finalizePending) return;
+    setFinalizeOpen(false);
+    setFinalizeError("");
+    setFinalizeResults([]);
+    setFinalizeInputKey((value) => value + 1);
+  }
+
+  async function uploadBankResponses(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFinalizeError("");
+    setFinalizeResults([]);
+    setFinalizePending(true);
+    try {
+      const response = await fetch("/api/payments/process/bank-response", {
+        body: new FormData(event.currentTarget),
+        method: "POST"
+      });
+      const payload = await response.json().catch(() => null) as { error?: string; results?: BankResponseImportResult[] } | null;
+      if (!response.ok) throw new Error(payload?.error || "Unable to import the selected bank response files.");
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      setFinalizeResults(results);
+      if (results.some((result) => result.ok)) router.refresh();
+    } catch (error) {
+      setFinalizeError(error instanceof Error ? error.message : "Unable to import the selected bank response files.");
+    } finally {
+      setFinalizePending(false);
+    }
   }
 
   function requestRejectConfirmation() {
@@ -267,11 +307,11 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
         eyebrow="Payments"
         title="Process"
         subtitle="Download bank upload files for final approved payment requests."
-        action={(
+        action={canEdit ? (
           <button className="button secondary" onClick={() => setFinalizeOpen(true)} type="button">
             Finalize
           </button>
-        )}
+        ) : undefined}
       />
 
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
@@ -354,7 +394,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
             </label>
           </div>
         </div>
-        <form action="/api/payments/process/download" className="panel-body" method="get">
+        {canEdit ? <form action="/api/payments/process/download" className="panel-body" method="get">
           <input name="request_ids" type="hidden" value={selectedBankTransferIds.join(",")} />
           <div
             className="form-grid"
@@ -383,7 +423,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
               </button>
             </div>
           </div>
-        </form>
+        </form> : null}
         <div className="panel-head" style={{ borderTop: "1px solid var(--border)", marginTop: 0 }}>
           <div>
             <h2>Ready for processing</h2>
@@ -398,6 +438,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
                   <input
                     aria-label="Select all visible payment requests"
                     checked={allVisibleSelected}
+                    disabled={!canEdit}
                     onChange={(event) => toggleAllVisible(event.target.checked)}
                     type="checkbox"
                   />
@@ -419,7 +460,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
                     <input
                       aria-label={`Select payment request ${request.request_no}`}
                       checked={selectedIds.includes(request.id)}
-                      disabled={!isAccountTransfer(request)}
+                      disabled={!canEdit || !isAccountTransfer(request)}
                       onChange={() => toggleOne(request.id)}
                       title={isAccountTransfer(request) ? "Select payment request" : "Only account transfers are included in bank files"}
                       type="checkbox"
@@ -433,9 +474,11 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
                   <td><StatusPill status={statusLabel(request)} /></td>
                   <td>{displayDate(request.created_at)}</td>
                   <td>
-                    <button className="button secondary compact" onClick={() => openProcessRequest(request)} type="button">
-                      Action
-                    </button>
+                    {canEdit ? (
+                      <button className="button secondary compact" onClick={() => openProcessRequest(request)} type="button">
+                        Action
+                      </button>
+                    ) : "View only"}
                   </td>
                 </tr>
               )) : (
@@ -454,23 +497,58 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalize
                 <h2>Finalize</h2>
                 <p className="subtle">Upload the bank transaction enquiry file to mark paid or cancelled requests.</p>
               </div>
-              <button className="modal-close" onClick={() => setFinalizeOpen(false)} type="button">x</button>
+              <button className="modal-close" disabled={finalizePending} onClick={closeFinalize} type="button">x</button>
             </div>
-            <form action={finalizeAction} className="panel-body" encType="multipart/form-data">
-              <label>Bank response file
+            <form className="panel-body" encType="multipart/form-data" onSubmit={uploadBankResponses}>
+              <label>Bank response files
                 <input
                   accept=".xlsx,.xls"
                   className="field"
-                  name="bank_response_file"
+                  disabled={finalizePending}
+                  key={finalizeInputKey}
+                  multiple
+                  name="bank_response_files"
                   required
                   type="file"
                 />
-            </label>
-            <div className="form-actions modal-actions">
-              <button className="button secondary" onClick={() => setFinalizeOpen(false)} type="button">Cancel</button>
-              <FinalizeSubmitButton />
-            </div>
-          </form>
+              </label>
+              <p className="subtle" style={{ margin: 0 }}>
+                Select up to 20 Federal Bank enquiry files. Each file is checked independently against Payment Requests, Workforce, Helpers and People Payroll; unrelated rows are skipped.
+              </p>
+              {finalizeError ? <div className="form-error" role="alert">{finalizeError}</div> : null}
+              {finalizeResults.length ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {finalizeResults.map((result, index) => (
+                    <div
+                      key={`${result.fileName}-${index}`}
+                      style={{
+                        background: result.ok ? "#f0fdf4" : "#fff1f2",
+                        border: `1px solid ${result.ok ? "#bbf7d0" : "#fecdd3"}`,
+                        borderRadius: 10,
+                        padding: 10
+                      }}
+                    >
+                      <strong>{result.fileName}</strong>
+                      {result.ok ? (
+                        <p className="subtle" style={{ margin: "4px 0 0" }}>
+                          {result.replayedFile ? "Already imported · original result: " : ""}{result.matched ?? 0} matched · {result.paidRows ?? 0} paid · {result.cancelledRows ?? 0} cancelled · {result.failedRows ?? 0} payroll failed · {result.replayedRows ?? 0} already recorded · {result.rejectedRows ?? 0} rejected · {result.unknownRows ?? 0} unknown · {result.skipped ?? 0} skipped
+                          {result.ledgerRows ? ` · Requests ${result.ledgerRows.paymentRequests}, Workforce ${result.ledgerRows.workforce}, Helpers ${result.ledgerRows.helpers}, Payroll ${result.ledgerRows.payroll}` : ""}
+                        </p>
+                      ) : (
+                        <p style={{ color: "#b91c1c", margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{result.error || "Import failed."}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="form-actions modal-actions">
+                <button className="button secondary" disabled={finalizePending} onClick={closeFinalize} type="button">Close</button>
+                <button className={`button ${finalizePending ? "loading" : ""}`} disabled={finalizePending} type="submit">
+                  {finalizePending ? <span className="button-spinner" aria-hidden="true" /> : null}
+                  <span>{finalizePending ? "Importing files" : "Finalize selected files"}</span>
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}

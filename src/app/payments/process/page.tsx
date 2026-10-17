@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { PaymentProcessPanel } from "@/components/payment-process-panel";
-import { finalizePaymentProcess, updatePaymentProcessStatus } from "@/app/payments/process/actions";
+import { updatePaymentProcessStatus } from "@/app/payments/process/actions";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { dashboardDateInputValue } from "@/lib/date-format";
@@ -20,6 +20,7 @@ type PaymentBankRow = {
 type PaymentRequestRow = {
   id: string;
   request_no: string;
+  location_id: string | null;
   location_code: string;
   location_name?: string | null;
   payment_head_id: string;
@@ -158,7 +159,14 @@ function canSeePaymentProcessRequest(
   return isReturnedToThisUser || (request.payment_process_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId));
 }
 
-async function loadPaymentProcess(companyId: string, userId: string | null, effectiveRoleIds: string[], canSeeAllFinalApproved: boolean) {
+async function loadPaymentProcess(
+  companyId: string,
+  userId: string | null,
+  effectiveRoleIds: string[],
+  canSeeAllFinalApproved: boolean,
+  hasAllLocationAccess: boolean,
+  locationScopeIds: string[]
+) {
   if (!supabaseAdmin) {
     return {
       banks: [] as PaymentBankRow[],
@@ -174,9 +182,14 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
 
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
-    .select("id, request_no, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
+    .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
+  if (!hasAllLocationAccess) {
+    requestsQuery = locationScopeIds.length
+      ? requestsQuery.in("location_id", locationScopeIds)
+      : requestsQuery.limit(0);
+  }
 
   const [banksResult, requestsResult] = await Promise.all([
     supabaseAdmin
@@ -191,6 +204,7 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
   const error = banksResult.error?.message || requestsResult.error?.message || null;
   if (error) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], awaitingDetails: [] as PaymentRequestRow[], error };
   const visibleRows = ((requestsResult.data ?? []) as unknown as PaymentRequestRow[])
+    .filter((request) => hasAllLocationAccess || Boolean(request.location_id && locationScopeIds.includes(request.location_id)))
     .filter((request) => canSeePaymentProcessRequest(request, userId, effectiveRoleIds, canSeeAllFinalApproved));
   const requestRows = visibleRows
     .filter(isReadyForPaymentProcess)
@@ -327,7 +341,14 @@ export default async function PaymentProcessPage({
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_process;
   const canSeeAllFinalApproved = isCompanyOwner(authorization);
-  const { banks, requests, awaitingDetails, error } = await loadPaymentProcess(companyId, authorization.userId, authorization.effectiveRoleIds, canSeeAllFinalApproved);
+  const { banks, requests, awaitingDetails, error } = await loadPaymentProcess(
+    companyId,
+    authorization.userId,
+    authorization.effectiveRoleIds,
+    canSeeAllFinalApproved,
+    authorization.hasAllLocationAccess,
+    authorization.locationScopeIds
+  );
   let advanceContexts = new Map<string, PayAdvanceWorkerContext>();
   if (!error) {
     try {
@@ -397,6 +418,7 @@ export default async function PaymentProcessPage({
             display_name: bank.display_name,
             account_no: bank.account_no
           }))}
+          canEdit={pagePermission.canEdit && !authorization.readOnly}
           requests={requests.map((request) => ({
             id: request.id,
             request_no: request.request_no,
@@ -421,8 +443,6 @@ export default async function PaymentProcessPage({
             payment_head_name: request.payment_heads?.name ?? null,
             advance_context: advanceContexts.get(request.id) ?? null
           }))}
-          finalizeAction={finalizePaymentProcess}
-          finalizeResultKey={searchParams?.processError || searchParams?.processNotice || ""}
           processAction={updatePaymentProcessStatus}
           today={today}
         />

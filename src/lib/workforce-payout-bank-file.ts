@@ -60,6 +60,11 @@ export type DropxFedOneResponse = {
   workforceRows: WorkforceFedOneResponseRow[];
 };
 
+export type PreparedFedOneReferenceCandidate = {
+  referenceNo: string;
+  rowNumber: number;
+};
+
 export type LegacyDropxFedOneReferenceCandidate = {
   amountError?: string;
   creditAccount: string;
@@ -381,6 +386,7 @@ function readFedOneResponseSheet(bytes: ArrayBuffer | Uint8Array): FedOneRespons
 
 function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
   const { columnFor, headerIndex, rows } = responseSheet;
+  const allReferenceCandidates: PreparedFedOneReferenceCandidate[] = [];
   const references: string[] = [];
   const legacyReferenceCandidates: LegacyDropxFedOneReferenceCandidate[] = [];
   const seen = new Set<string>();
@@ -390,6 +396,7 @@ function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
     if (row.some((value) => cleanCell(value))) dataRowCount += 1;
     const rawReference = row[columnFor("Customer Ref. No.")] ?? "";
     const referenceNo = normalizeWorkforceBankReference(rawReference);
+    if (referenceNo) allReferenceCandidates.push({ referenceNo, rowNumber: rowIndex + 1 });
     const referencePrefix = referenceNo.slice(0, 2);
     const validGeneratedReference =
       (referencePrefix === "WF" || referencePrefix === "WP" || referencePrefix === "HP")
@@ -435,7 +442,7 @@ function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
       });
     }
   }
-  return { dataRowCount, legacyReferenceCandidates, referenceCandidates: references };
+  return { allReferenceCandidates, dataRowCount, legacyReferenceCandidates, referenceCandidates: references };
 }
 
 export function prepareDropxFedOneResponse(bytes: ArrayBuffer | Uint8Array) {
@@ -457,6 +464,7 @@ export function countFedOneResponseDataRows(bytes: ArrayBuffer | Uint8Array) {
 function parseFedOneResponseSheet(
   responseSheet: FedOneResponseSheet,
   options: WorkforceFedOneResponseOptions & {
+    allowAnyReference?: boolean;
     ownedReferences?: ReadonlySet<string>;
     rowReferenceAliases?: ReadonlyMap<number, string>;
   } = {}
@@ -514,9 +522,14 @@ function parseFedOneResponseSheet(
       const expectedPrefix = options.ownedReferences
         ? referencePrefix as "WF" | "WP" | "HP"
         : options.referencePrefix;
-      if (!isDropxReference || !isValidWorkforceBankReference(referenceNo, expectedPrefix)) {
+      const validReference = options.allowAnyReference
+        ? /^[A-Z0-9_-]{2,80}$/.test(referenceNo)
+        : isDropxReference && isValidWorkforceBankReference(referenceNo, expectedPrefix);
+      if (!validReference) {
         const subject = expectedPrefix === "HP" ? "Helper" : "Workforce";
-        errors.push(`Row ${rowNumber}: Customer Ref. No. is not a valid ${subject} payment reference.`);
+        errors.push(options.allowAnyReference
+          ? `Row ${rowNumber}: Customer Ref. No. contains unsupported characters or has an invalid length.`
+          : `Row ${rowNumber}: Customer Ref. No. is not a valid ${subject} payment reference.`);
       }
     }
     if (!creditAccount) errors.push(`Row ${rowNumber}: Credit Account is required.`);
@@ -612,4 +625,29 @@ export function parsePreparedDropxFedOneResponse(
     skippedRows,
     workforceRows: rows.filter((row) => row.referenceNo.startsWith("WF") || row.referenceNo.startsWith("WP"))
   };
+}
+
+/**
+ * Parses the company-owned portion of a mixed Federal Bank enquiry file.
+ *
+ * Unlike the Workforce-specific parser, references may belong to payment
+ * requests or People payroll as well as the Workforce and Helper ledgers. The
+ * caller must resolve ownership first and pass only the references it is
+ * authorised to finalize; unrelated and out-of-scope rows are skipped before
+ * their payment fields are validated.
+ */
+export function parsePreparedFedOneResponseRows(
+  prepared: ReturnType<typeof prepareDropxFedOneResponse>,
+  ownedReferences: ReadonlySet<string>,
+  rowReferenceAliases: ReadonlyMap<number, string> = new Map()
+) {
+  const normalizedOwnedReferences = new Set([...ownedReferences].map(normalizeWorkforceBankReference));
+  const normalizedAliases = new Map(
+    [...rowReferenceAliases].map(([rowNumber, referenceNo]) => [rowNumber, normalizeWorkforceBankReference(referenceNo)])
+  );
+  return parseFedOneResponseSheet(prepared.responseSheet, {
+    allowAnyReference: true,
+    ownedReferences: normalizedOwnedReferences,
+    rowReferenceAliases: normalizedAliases
+  });
 }
