@@ -10,6 +10,7 @@ const legacyProcessAction = read("../../../../payments/process/actions.ts");
 const workforceDialog = read("../../../../../components/workforce-payout-bank-dialog.tsx");
 const workforceRoute = read("../../workforce-payouts/bank-response/route.ts");
 const migration = read("../../../../../../supabase/migrations/20261017123000_central_bank_response_finalizer.sql");
+const partialMigration = read("../../../../../../supabase/migrations/20261017150000_central_bank_response_partial_rows.sql");
 
 test("central bank import accepts multiple bounded files and reports each file independently", () => {
   assert.match(route, /const MAX_FILES = 20;/);
@@ -21,6 +22,7 @@ test("central bank import accepts multiple bounded files and reports each file i
   assert.match(route, /files\.length > MAX_FILES/);
   assert.match(route, /totalBytes > MAX_TOTAL_BYTES/);
   assert.match(route, /file\.size > MAX_FILE_BYTES/);
+  assert.match(route, /prepared\.dataRowCount === 0[\s\S]*?No payment response rows were found below the bank response headers/);
   assert.match(route, /for \(const file of files\)[\s\S]*?processFile\(\{ authorization, bytes, companyId, file, prepared \}\)/);
   assert.match(route, /results\.push\(\{ error: errorMessage\(error\), fileName: file\.name, ok: false \}\)/);
 
@@ -49,7 +51,7 @@ test("central finalization is edit-only and applies each ledger's location and f
   assert.match(panel, /action=\{canEdit \?/);
 });
 
-test("ownership is resolved across all ledgers and a collision fails the whole file closed", () => {
+test("ownership is resolved across all ledgers and a collision becomes a row error", () => {
   assert.match(route, /rpc\("resolve_central_bank_response_references", \{[\s\S]*?p_company_id: companyId,[\s\S]*?p_references: normalized/);
   for (const ledger of ["workforce", "helpers", "payment_requests", "people_payroll"]) {
     assert.match(migration, new RegExp(`'${ledger}'`));
@@ -66,12 +68,12 @@ test("ownership is resolved across all ledgers and a collision fails the whole f
   assert.match(route, /uniqueOwner\(ownerMaps\.paymentRequests/);
   assert.match(route, /uniqueOwner\(ownerMaps\.payroll/);
   assert.match(route, /resolveCentralBankRowOwner\(\{/);
-  assert.match(route, /Nothing from this file was finalized/);
-  assert.match(route, /parsePreparedFedOneResponseRows\(prepared, permittedReferences, rowAliases\)/);
+  assert.match(route, /Do not reveal whether an ambiguous reference exists outside/);
+  assert.match(route, /parsePreparedFedOneResponseRowsPartially\(prepared, permittedReferences, rowAliases\)/);
 });
 
-test("one atomic central RPC is issued per accepted file with all four ledger subsets", () => {
-  assert.equal(route.match(/rpc\("finalize_central_bank_response"/g)?.length, 1);
+test("one partial central RPC is issued per accepted file with all four ledger subsets", () => {
+  assert.equal(route.match(/rpc\("finalize_central_bank_response_partially"/g)?.length, 1);
   assert.match(route, /p_payment_request_rows: rowsByLedger\.payment_requests\.map\(centralBankRpcRow\)/);
   assert.match(route, /p_workforce_rows: rowsByLedger\.workforce\.map\(centralBankRpcRow\)/);
   assert.match(route, /p_helper_rows: rowsByLedger\.helpers\.map\(centralBankRpcRow\)/);
@@ -88,6 +90,21 @@ test("one atomic central RPC is issued per accepted file with all four ledger su
   assert.match(route, /totalCancelled = resultCount\(databaseResult, "cancelled"\)/);
 });
 
+test("mixed files finalize valid rows while returning row-specific failures for red UI display", () => {
+  assert.match(route, /parsePreparedFedOneResponseRowsPartially\(prepared, permittedReferences, rowAliases\)/);
+  assert.match(route, /rpc\("finalize_central_bank_response_partially"/);
+  assert.match(route, /databaseResult\.row_errors/);
+  assert.match(route, /rowErrors:/);
+  assert.match(route, /successfullyMatchedRows/);
+  assert.match(route, /skipped: Math\.max\(0, prepared\.dataRowCount - successfullyMatchedRows\.length\)/);
+  assert.match(panel, /rowErrors\?: Array/);
+  assert.match(panel, /result\.rowErrors\.map/);
+  assert.match(panel, /Row \{rowError\.rowNumber\}/);
+  assert.match(panel, /rowError\.referenceNo/);
+  assert.match(panel, /rowError\.message/);
+  assert.match(panel, /color: "#b91c1c"/);
+});
+
 test("route payload matches the service-only central finalizer contract", () => {
   assert.match(
     migration,
@@ -99,6 +116,12 @@ test("route payload matches the service-only central finalizer contract", () => 
   assert.match(migration, /grant execute on function public\.resolve_central_bank_response_references\(uuid, jsonb\)[\s\S]*?to service_role;/i);
   assert.match(migration, /revoke all on function public\.finalize_central_bank_response[\s\S]*?from public, anon, authenticated, service_role;/i);
   assert.match(migration, /grant execute on function public\.finalize_central_bank_response[\s\S]*?to service_role;/i);
+  assert.match(
+    partialMigration,
+    /create or replace function public\.finalize_central_bank_response_partially\(\s*p_company_id uuid,\s*p_actor_user_id uuid,\s*p_operation_id uuid,\s*p_file_sha256 text,\s*p_file_name text,\s*p_workforce_rows jsonb,\s*p_helper_rows jsonb,\s*p_payment_request_rows jsonb,\s*p_payroll_rows jsonb\s*\)/i
+  );
+  assert.match(partialMigration, /revoke all on function public\.finalize_central_bank_response_partially[\s\S]*?from public, anon, authenticated, service_role;/i);
+  assert.match(partialMigration, /grant execute on function public\.finalize_central_bank_response_partially[\s\S]*?to service_role;/i);
   assert.match(migration, /create unique index[\s\S]*?on public\.central_bank_response_imports\(company_id, operation_id\)/i);
   assert.match(migration, /create unique index[\s\S]*?on public\.central_bank_response_imports\(company_id, file_sha256, normalized_payload_hash\)/i);
 });

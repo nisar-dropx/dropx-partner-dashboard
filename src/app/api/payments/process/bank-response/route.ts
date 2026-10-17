@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   isValidWorkforceBankReference,
   normalizeWorkforceBankReference,
-  parsePreparedFedOneResponseRows,
+  parsePreparedFedOneResponseRowsPartially,
   prepareDropxFedOneResponse,
   type LegacyDropxFedOneReferenceCandidate,
   type WorkforceFedOneResponseRow
@@ -92,6 +92,12 @@ type PaymentRequestEvent = {
   status?: unknown;
 };
 
+type BankResponseRowError = {
+  message: string;
+  referenceNo: string;
+  rowNumber: number;
+};
+
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
 }
@@ -131,6 +137,54 @@ function databaseStatus(message: string) {
 
 function normalizedReference(value: unknown) {
   return normalizeWorkforceBankReference(value);
+}
+
+function addRowError(
+  errors: Map<number, BankResponseRowError>,
+  rowNumber: number,
+  referenceNo: unknown,
+  message: unknown
+) {
+  const cleanedMessage = (String(message ?? "").trim()
+    || "This bank response row could not be finalized safely.")
+    .replace(new RegExp(`^Row\\s+${rowNumber}:\\s*`, "i"), "")
+    .replace(/\s*Nothing from this file was finalized\.?$/i, "")
+    .trim();
+  const normalizedMessage = cleanedMessage || "This bank response row could not be finalized safely.";
+  const existing = errors.get(rowNumber);
+  if (existing) {
+    if (!existing.message.includes(normalizedMessage)) {
+      existing.message = `${existing.message} ${normalizedMessage}`;
+    }
+    return;
+  }
+  errors.set(rowNumber, {
+    message: normalizedMessage,
+    referenceNo: normalizedReference(referenceNo),
+    rowNumber
+  });
+}
+
+function sortedRowErrors(errors: Map<number, BankResponseRowError>) {
+  return [...errors.values()].sort((left, right) => left.rowNumber - right.rowNumber);
+}
+
+function readDatabaseRowErrors(value: unknown) {
+  const errors: BankResponseRowError[] = [];
+  if (!Array.isArray(value)) return errors;
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const issue = raw as Record<string, unknown>;
+    const rowNumber = Number(issue.row_number ?? issue.rowNumber);
+    if (!Number.isSafeInteger(rowNumber) || rowNumber <= 0) continue;
+    errors.push({
+      message: String(issue.message ?? "").trim()
+        || "This bank response row could not be finalized safely.",
+      referenceNo: normalizedReference(issue.reference_no ?? issue.referenceNo),
+      rowNumber
+    });
+  }
+  return errors;
 }
 
 function addToMap<Row>(map: Map<string, Row[]>, key: unknown, row: Row) {
@@ -209,7 +263,8 @@ async function lookupPayoutAliases(companyId: string, references: string[], maps
 
 async function resolveLegacyPaymentReferences(
   companyId: string,
-  candidates: LegacyDropxFedOneReferenceCandidate[]
+  candidates: LegacyDropxFedOneReferenceCandidate[],
+  rowErrors: Map<number, BankResponseRowError>
 ) {
   const aliases = new Map<number, string>();
   if (!candidates.length) return aliases;
@@ -238,32 +293,35 @@ async function resolveLegacyPaymentReferences(
     }
     byRow.set(rowNumber, raw);
   }
-  const errors: string[] = [];
   for (const candidate of candidates) {
     const resolution = byRow.get(candidate.rowNumber);
     if (!resolution) {
-      errors.push(`Row ${candidate.rowNumber}: no ownership resolution was returned for bare DropX ID “${candidate.dropxId}”.`);
+      addRowError(
+        rowErrors,
+        candidate.rowNumber,
+        candidate.dropxId,
+        "This reference did not match an eligible payment instruction."
+      );
       continue;
     }
     const state = String(resolution.resolution_state ?? "").trim().toLowerCase();
     if (state === "unrelated") continue;
     if (state === "error") {
-      errors.push(String(resolution.message ?? `Row ${candidate.rowNumber}: the bare DropX payment reference is ambiguous.`));
+      addRowError(
+        rowErrors,
+        candidate.rowNumber,
+        candidate.dropxId,
+        "This reference did not match an eligible payment instruction."
+      );
       continue;
     }
     const referenceNo = normalizedReference(resolution.reference_no);
     const audience = String(resolution.audience ?? "").trim().toLowerCase();
     const expectedPrefix = audience === "helpers" ? "HP" : audience === "workforce" ? "WF" : null;
     if (!expectedPrefix || !isValidWorkforceBankReference(referenceNo, expectedPrefix)) {
-      errors.push(`Row ${candidate.rowNumber}: the bare DropX resolver returned an invalid canonical payment reference.`);
-      continue;
+      throw new Error("The bare DropX payment reference resolver returned an invalid canonical payment reference.");
     }
     aliases.set(candidate.rowNumber, referenceNo);
-  }
-  if (errors.length) {
-    const shown = errors.slice(0, 25);
-    if (errors.length > shown.length) shown.push(`${errors.length - shown.length} more issue(s) were found.`);
-    throw new Error(`The bank response file cannot be processed:\n${shown.map((error) => `- ${error}`).join("\n")}`);
   }
   return aliases;
 }
@@ -337,17 +395,31 @@ async function processFile(input: {
   prepared: ReturnType<typeof prepareDropxFedOneResponse>;
 }) {
   const { bytes, prepared } = input;
+  if (prepared.dataRowCount === 0) {
+    throw new Error("No payment response rows were found below the bank response headers.");
+  }
   if (prepared.dataRowCount > MAX_RESPONSE_ROWS_PER_FILE) {
     throw new Error(`A bank response can contain at most ${MAX_RESPONSE_ROWS_PER_FILE} data rows.`);
   }
 
+  const rowErrors = new Map<number, BankResponseRowError>();
   const rawReferences = [...new Set(prepared.allReferenceCandidates.map((candidate) => candidate.referenceNo))];
-  if (!rawReferences.length) throw new Error("No payment references were found below the bank response headers.");
-  const ownerMaps = await lookupExactOwners(input.companyId, rawReferences);
+  const ownerMaps = rawReferences.length
+    ? await lookupExactOwners(input.companyId, rawReferences)
+    : {
+        helpers: new Map<string, PayoutOwner[]>(),
+        paymentRequests: new Map<string, PaymentRequestOwner[]>(),
+        payroll: new Map<string, Array<PayrollOwner & { location_id: string | null }>>(),
+        workforce: new Map<string, PayoutOwner[]>()
+      };
   // Resolve every bare-DropX candidate even when its raw value also matches a
   // generic or payroll reference. That second ownership signal is what lets
   // the ambiguity guard refuse namespace collisions rather than guessing.
-  const rowAliases = await resolveLegacyPaymentReferences(input.companyId, prepared.legacyReferenceCandidates);
+  const rowAliases = await resolveLegacyPaymentReferences(
+    input.companyId,
+    prepared.legacyReferenceCandidates,
+    rowErrors
+  );
   await lookupPayoutAliases(input.companyId, [...rowAliases.values()], ownerMaps);
 
   const ownerByRow = new Map<number, CentralBankLedger>();
@@ -356,23 +428,50 @@ async function processFile(input: {
   const owner = isCompanyOwner(input.authorization);
 
   for (const candidate of prepared.allReferenceCandidates) {
+    if (rowErrors.has(candidate.rowNumber)) continue;
     const rawReference = normalizedReference(candidate.referenceNo);
     const canonicalReference = rowAliases.get(candidate.rowNumber) ?? rawReference;
-    const paymentRequest = uniqueOwner(ownerMaps.paymentRequests.get(rawReference), "payment_requests", rawReference, candidate.rowNumber);
-    const payroll = uniqueOwner(ownerMaps.payroll.get(rawReference), "payroll", rawReference, candidate.rowNumber);
-    const workforce = uniqueOwner(ownerMaps.workforce.get(canonicalReference), "workforce", canonicalReference, candidate.rowNumber);
-    const helper = uniqueOwner(ownerMaps.helpers.get(canonicalReference), "helpers", canonicalReference, candidate.rowNumber);
-    const ledger = resolveCentralBankRowOwner({
-      matches: {
-        helpers: Boolean(helper),
-        payment_requests: Boolean(paymentRequest),
-        payroll: Boolean(payroll),
-        workforce: Boolean(workforce)
-      },
-      referenceNo: rawReference,
-      rowNumber: candidate.rowNumber
-    });
-    if (!ledger) continue;
+    let paymentRequest: PaymentRequestOwner | null = null;
+    let payroll: (PayrollOwner & { location_id: string | null }) | null = null;
+    let workforce: PayoutOwner | null = null;
+    let helper: PayoutOwner | null = null;
+    let ledger: CentralBankLedger | null = null;
+    try {
+      paymentRequest = uniqueOwner(ownerMaps.paymentRequests.get(rawReference), "payment_requests", rawReference, candidate.rowNumber);
+      payroll = uniqueOwner(ownerMaps.payroll.get(rawReference), "payroll", rawReference, candidate.rowNumber);
+      workforce = uniqueOwner(ownerMaps.workforce.get(canonicalReference), "workforce", canonicalReference, candidate.rowNumber);
+      helper = uniqueOwner(ownerMaps.helpers.get(canonicalReference), "helpers", canonicalReference, candidate.rowNumber);
+      ledger = resolveCentralBankRowOwner({
+        matches: {
+          helpers: Boolean(helper),
+          payment_requests: Boolean(paymentRequest),
+          payroll: Boolean(payroll),
+          workforce: Boolean(workforce)
+        },
+        referenceNo: rawReference,
+        rowNumber: candidate.rowNumber
+      });
+    } catch {
+      // Do not reveal whether an ambiguous reference exists outside the
+      // uploader's permitted locations. Detailed bank-evidence errors are
+      // returned only after this ownership and scope gate succeeds.
+      addRowError(
+        rowErrors,
+        candidate.rowNumber,
+        rawReference,
+        "This reference did not match an eligible payment instruction."
+      );
+      continue;
+    }
+    if (!ledger) {
+      addRowError(
+        rowErrors,
+        candidate.rowNumber,
+        rawReference,
+        "This reference did not match an eligible payment instruction."
+      );
+      continue;
+    }
 
     let permitted = false;
     if (ledger === "payment_requests" && paymentRequest) {
@@ -385,25 +484,33 @@ async function processFile(input: {
     } else if (ledger === "payroll" && payroll) {
       permitted = inLocationScope(input.authorization, payroll.location_id);
     }
-    if (!permitted) continue;
+    if (!permitted) {
+      addRowError(
+        rowErrors,
+        candidate.rowNumber,
+        rawReference,
+        "This reference did not match an eligible payment instruction."
+      );
+      continue;
+    }
     ownerByRow.set(candidate.rowNumber, ledger);
     permittedReferences.add(canonicalReference);
   }
 
-  if (!ownerByRow.size) {
-    return {
-      cancelledRows: 0,
-      failedRows: 0,
-      fileName: input.file.name,
-      ledgerRows: { helpers: 0, paymentRequests: 0, payroll: 0, workforce: 0 },
-      matched: 0,
-      ok: true,
-      paidRows: 0,
-      skipped: prepared.dataRowCount
-    };
+  const parsed = parsePreparedFedOneResponseRowsPartially(prepared, permittedReferences, rowAliases);
+  for (const issue of parsed.rowErrors) {
+    addRowError(rowErrors, issue.rowNumber, issue.referenceNo, issue.message);
   }
-
-  const parsed = parsePreparedFedOneResponseRows(prepared, permittedReferences, rowAliases);
+  for (const skipped of parsed.skippedRows) {
+    if (!rowErrors.has(skipped.rowNumber)) {
+      addRowError(
+        rowErrors,
+        skipped.rowNumber,
+        skipped.referenceNo,
+        "This reference did not match an eligible payment instruction."
+      );
+    }
+  }
   const rowsByLedger: Record<CentralBankLedger, WorkforceFedOneResponseRow[]> = {
     helpers: [],
     payment_requests: [],
@@ -412,13 +519,43 @@ async function processFile(input: {
   };
   for (const row of parsed.rows) {
     const ledger = ownerByRow.get(row.rowNumber);
-    if (!ledger) throw new Error(`Row ${row.rowNumber}: payment ownership changed while the file was being validated.`);
-    validateOwnedBankRow(row, ledger);
+    if (!ledger) {
+      addRowError(
+        rowErrors,
+        row.rowNumber,
+        row.referenceNo,
+        "Payment ownership changed while this row was being validated."
+      );
+      continue;
+    }
+    try {
+      validateOwnedBankRow(row, ledger);
+    } catch (error) {
+      addRowError(rowErrors, row.rowNumber, row.referenceNo, errorMessage(error));
+      continue;
+    }
     rowsByLedger[ledger].push(row);
   }
 
+  const rowsForFinalization = Object.values(rowsByLedger).flat();
+  if (!rowsForFinalization.length) {
+    return {
+      cancelledRows: 0,
+      failedRows: 0,
+      fileName: input.file.name,
+      ledgerRows: { helpers: 0, paymentRequests: 0, payroll: 0, workforce: 0 },
+      matched: 0,
+      ok: true,
+      paidRows: 0,
+      processedRows: 0,
+      errorRows: rowErrors.size,
+      rowErrors: sortedRowErrors(rowErrors),
+      skipped: prepared.dataRowCount
+    };
+  }
+
   const rawFileSha256 = createHash("sha256").update(bytes).digest("hex");
-  const finalized = await supabaseAdmin!.rpc("finalize_central_bank_response", {
+  const finalized = await supabaseAdmin!.rpc("finalize_central_bank_response_partially", {
     p_actor_user_id: input.authorization.userId,
     p_company_id: input.companyId,
     p_file_name: input.file.name.slice(0, 240),
@@ -433,6 +570,9 @@ async function processFile(input: {
   });
   if (finalized.error) throw new Error(finalized.error.message);
   const databaseResult = resultRecord(finalized.data);
+  for (const issue of readDatabaseRowErrors(databaseResult.row_errors)) {
+    addRowError(rowErrors, issue.rowNumber, issue.referenceNo, issue.message);
+  }
   const paymentRequestEvents = Array.isArray(databaseResult.payment_request_events)
     ? databaseResult.payment_request_events as PaymentRequestEvent[]
     : [];
@@ -444,29 +584,34 @@ async function processFile(input: {
       })));
   }
 
-  const ledgers = resultRecord(databaseResult.ledgers);
-  const peopleResult = resultRecord(ledgers.people_payroll);
-  const failedRows = resultCount(peopleResult, "failed") || resultCount(peopleResult, "cancelled");
+  const failedRows = resultCount(databaseResult, "failed");
   const totalCancelled = resultCount(databaseResult, "cancelled");
+  const databaseErrorRows = new Set(readDatabaseRowErrors(databaseResult.row_errors).map((issue) => issue.rowNumber));
+  const successfullyMatchedRows = rowsForFinalization.filter((row) => !databaseErrorRows.has(row.rowNumber));
+  const successfulRowsByLedger = (ledger: CentralBankLedger) => rowsByLedger[ledger]
+    .filter((row) => !databaseErrorRows.has(row.rowNumber)).length;
 
   return {
     cancelledRows: Math.max(0, totalCancelled - failedRows),
     fileName: input.file.name,
     ledgerRows: {
-      helpers: rowsByLedger.helpers.length,
-      paymentRequests: rowsByLedger.payment_requests.length,
-      payroll: rowsByLedger.payroll.length,
-      workforce: rowsByLedger.workforce.length
+      helpers: successfulRowsByLedger("helpers"),
+      paymentRequests: successfulRowsByLedger("payment_requests"),
+      payroll: successfulRowsByLedger("payroll"),
+      workforce: successfulRowsByLedger("workforce")
     },
-    matched: parsed.rows.length,
+    matched: successfullyMatchedRows.length,
     ok: true,
     paidRows: resultCount(databaseResult, "paid"),
+    processedRows: successfullyMatchedRows.length,
+    errorRows: rowErrors.size,
     failedRows,
     replayedFile: databaseResult.replayed === true,
     rejectedRows: resultCount(databaseResult, "rejected"),
     replayedRows: resultCount(databaseResult, "replayed_items"),
+    rowErrors: sortedRowErrors(rowErrors),
     unknownRows: resultCount(databaseResult, "unknown"),
-    skipped: Math.max(0, prepared.dataRowCount - parsed.rows.length)
+    skipped: Math.max(0, prepared.dataRowCount - successfullyMatchedRows.length)
   };
 }
 

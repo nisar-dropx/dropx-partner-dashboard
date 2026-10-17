@@ -104,6 +104,12 @@ export type WorkforceFedOneResponseRow = {
   remarks: string;
 };
 
+export type WorkforceFedOneResponseRowError = {
+  message: string;
+  referenceNo: string;
+  rowNumber: number;
+};
+
 type SheetCell = XLSX.CellObject & { f?: string };
 type FedOneResponseSheet = {
   columnFor: (header: typeof WORKFORCE_FEDONE_RESPONSE_HEADERS[number]) => number;
@@ -465,10 +471,15 @@ function parseFedOneResponseSheet(
   responseSheet: FedOneResponseSheet,
   options: WorkforceFedOneResponseOptions & {
     allowAnyReference?: boolean;
+    collectRowErrors?: boolean;
     ownedReferences?: ReadonlySet<string>;
     rowReferenceAliases?: ReadonlyMap<number, string>;
   } = {}
-): { rows: WorkforceFedOneResponseRow[]; skippedRows: Array<{ rowNumber: number; referenceNo: string }> } {
+): {
+  rowErrors: WorkforceFedOneResponseRowError[];
+  rows: WorkforceFedOneResponseRow[];
+  skippedRows: Array<{ rowNumber: number; referenceNo: string }>;
+} {
   const { columnFor, date1904, headerIndex, optionalColumnFor, rows, sheet } = responseSheet;
   const debitAccountColumn = optionalColumnFor("Debit Account");
   const valueDateColumn = optionalColumnFor("Value Date");
@@ -476,7 +487,16 @@ function parseFedOneResponseSheet(
   const errors: string[] = [];
   const parsed: WorkforceFedOneResponseRow[] = [];
   const skippedRows: Array<{ rowNumber: number; referenceNo: string }> = [];
-  const referenceRows = new Map<string, number>();
+  const rowErrors = new Map<number, { messages: string[]; referenceNo: string }>();
+  const referenceRows = new Map<string, number[]>();
+
+  const addRowError = (rowNumber: number, referenceNo: string, message: string) => {
+    errors.push(`Row ${rowNumber}: ${message}`);
+    const current = rowErrors.get(rowNumber) ?? { messages: [], referenceNo };
+    current.messages.push(message);
+    if (!current.referenceNo && referenceNo) current.referenceNo = referenceNo;
+    rowErrors.set(rowNumber, current);
+  };
 
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex] ?? [];
@@ -504,20 +524,20 @@ function parseFedOneResponseSheet(
     for (const { column, header } of responseColumns) {
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: column });
       const cell = sheet[address] as SheetCell | undefined;
-      if (cell?.f) errors.push(`Row ${rowNumber}: formulas are not accepted in ${header}.`);
+      if (cell?.f) addRowError(rowNumber, referenceNo, `formulas are not accepted in ${header}.`);
     }
 
     const rawAccount = values["Credit Account"];
     const rawDebitAccount = debitAccountColumn === undefined ? undefined : row[debitAccountColumn];
-    if (unsafeNumericIdentifier(rawReference)) errors.push(`Row ${rowNumber}: Customer Ref. No. was stored as an unsafe Excel number.`);
-    if (unsafeNumericIdentifier(rawAccount)) errors.push(`Row ${rowNumber}: Credit Account was stored as an unsafe Excel number.`);
-    if (unsafeNumericIdentifier(rawDebitAccount)) errors.push(`Row ${rowNumber}: Debit Account was stored as an unsafe Excel number.`);
+    if (unsafeNumericIdentifier(rawReference)) addRowError(rowNumber, referenceNo, "Customer Ref. No. was stored as an unsafe Excel number.");
+    if (unsafeNumericIdentifier(rawAccount)) addRowError(rowNumber, referenceNo, "Credit Account was stored as an unsafe Excel number.");
+    if (unsafeNumericIdentifier(rawDebitAccount)) addRowError(rowNumber, referenceNo, "Debit Account was stored as an unsafe Excel number.");
 
     const debitAccount = debitAccountColumn === undefined ? undefined : normalizeWorkforceBankAccount(rawDebitAccount);
     const creditAccount = normalizeWorkforceBankAccount(rawAccount);
     const ifsc = normalizeWorkforceBankIfsc(values["IFSC Code"]);
     const status = cleanCell(values.Status).toUpperCase();
-    if (!referenceNo) errors.push(`Row ${rowNumber}: Customer Ref. No. is required.`);
+    if (!referenceNo) addRowError(rowNumber, referenceNo, "Customer Ref. No. is required.");
     else {
       const expectedPrefix = options.ownedReferences
         ? referencePrefix as "WF" | "WP" | "HP"
@@ -527,22 +547,22 @@ function parseFedOneResponseSheet(
         : isDropxReference && isValidWorkforceBankReference(referenceNo, expectedPrefix);
       if (!validReference) {
         const subject = expectedPrefix === "HP" ? "Helper" : "Workforce";
-        errors.push(options.allowAnyReference
-          ? `Row ${rowNumber}: Customer Ref. No. contains unsupported characters or has an invalid length.`
-          : `Row ${rowNumber}: Customer Ref. No. is not a valid ${subject} payment reference.`);
+        addRowError(rowNumber, referenceNo, options.allowAnyReference
+          ? "Customer Ref. No. contains unsupported characters or has an invalid length."
+          : `Customer Ref. No. is not a valid ${subject} payment reference.`);
       }
     }
-    if (!creditAccount) errors.push(`Row ${rowNumber}: Credit Account is required.`);
-    if (!ifsc) errors.push(`Row ${rowNumber}: IFSC Code is required.`);
-    if (!status) errors.push(`Row ${rowNumber}: Status is required.`);
-    if (debitAccountColumn !== undefined && !debitAccount) errors.push(`Row ${rowNumber}: Debit Account is required.`);
+    if (!creditAccount) addRowError(rowNumber, referenceNo, "Credit Account is required.");
+    if (!ifsc) addRowError(rowNumber, referenceNo, "IFSC Code is required.");
+    if (!status) addRowError(rowNumber, referenceNo, "Status is required.");
+    if (debitAccountColumn !== undefined && !debitAccount) addRowError(rowNumber, referenceNo, "Debit Account is required.");
 
     let valueDate: string | undefined;
     if (valueDateColumn !== undefined) {
       try {
         valueDate = responseValueDate(row[valueDateColumn], date1904);
       } catch (error) {
-        errors.push(`Row ${rowNumber}: ${error instanceof Error ? error.message : "Value Date is invalid."}`);
+        addRowError(rowNumber, referenceNo, error instanceof Error ? error.message : "Value Date is invalid.");
       }
     }
 
@@ -550,16 +570,13 @@ function parseFedOneResponseSheet(
     try {
       debitAmountPaise = responseAmountPaise(values["Debit Amount"]);
     } catch (error) {
-      errors.push(`Row ${rowNumber}: ${error instanceof Error ? error.message : "Debit Amount is invalid."}`);
+      addRowError(rowNumber, referenceNo, error instanceof Error ? error.message : "Debit Amount is invalid.");
     }
 
     if (referenceNo) {
-      const firstRowNumber = referenceRows.get(referenceNo);
-      if (firstRowNumber) {
-        errors.push(`Rows ${firstRowNumber} and ${rowNumber}: duplicate Customer Ref. No. “${referenceNo}” after normalization.`);
-      } else {
-        referenceRows.set(referenceNo, rowNumber);
-      }
+      const duplicateRows = referenceRows.get(referenceNo);
+      if (duplicateRows) duplicateRows.push(rowNumber);
+      else referenceRows.set(referenceNo, [rowNumber]);
     }
 
     parsed.push({
@@ -576,14 +593,45 @@ function parseFedOneResponseSheet(
     });
   }
 
-  if (!parsed.length) {
+  for (const [referenceNo, duplicateRows] of referenceRows) {
+    if (duplicateRows.length < 2) continue;
+    const duplicateRowsLabel = duplicateRows.length <= 8
+      ? `Rows ${duplicateRows.join(" and ")}`
+      : `Rows ${duplicateRows.slice(0, 8).join(", ")} and ${duplicateRows.length - 8} more rows`;
+    errors.push(`${duplicateRowsLabel}: duplicate Customer Ref. No. “${referenceNo}” after normalization.`);
+    for (const rowNumber of duplicateRows) {
+      const current = rowErrors.get(rowNumber) ?? { messages: [], referenceNo };
+      current.messages.push(
+        duplicateRows.length <= 8
+          ? `Duplicate Customer Ref. No. “${referenceNo}”. ${duplicateRowsLabel} were all skipped.`
+          : `Duplicate Customer Ref. No. “${referenceNo}” appears ${duplicateRows.length} times. All duplicate rows were skipped.`
+      );
+      rowErrors.set(rowNumber, current);
+    }
+  }
+
+  if (!parsed.length && !options.collectRowErrors) {
     if (options.ownedReferences) {
       throw new Error("No matching Workforce or Helper payment references were found for this company.");
     }
     throw new Error("No payment response rows were found below the bank response headers.");
   }
-  if (errors.length) throw new Error(parseErrorList(errors));
-  return { rows: parsed, skippedRows };
+  if (errors.length && !options.collectRowErrors) throw new Error(parseErrorList(errors));
+  const rowErrorList = [...rowErrors.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([rowNumber, issue]) => ({
+      message: issue.messages.join(" "),
+      referenceNo: issue.referenceNo,
+      rowNumber
+    }));
+  const invalidRowNumbers = new Set(rowErrorList.map((issue) => issue.rowNumber));
+  return {
+    rowErrors: rowErrorList,
+    rows: options.collectRowErrors
+      ? parsed.filter((row) => !invalidRowNumbers.has(row.rowNumber))
+      : parsed,
+    skippedRows
+  };
 }
 
 function parseFedOneResponse(
@@ -647,6 +695,28 @@ export function parsePreparedFedOneResponseRows(
   );
   return parseFedOneResponseSheet(prepared.responseSheet, {
     allowAnyReference: true,
+    ownedReferences: normalizedOwnedReferences,
+    rowReferenceAliases: normalizedAliases
+  });
+}
+
+/**
+ * Central-import variant that keeps valid company-owned rows when another
+ * owned row is malformed. Existing Workforce and Helper upload screens keep
+ * using the strict parser above.
+ */
+export function parsePreparedFedOneResponseRowsPartially(
+  prepared: ReturnType<typeof prepareDropxFedOneResponse>,
+  ownedReferences: ReadonlySet<string>,
+  rowReferenceAliases: ReadonlyMap<number, string> = new Map()
+) {
+  const normalizedOwnedReferences = new Set([...ownedReferences].map(normalizeWorkforceBankReference));
+  const normalizedAliases = new Map(
+    [...rowReferenceAliases].map(([rowNumber, referenceNo]) => [rowNumber, normalizeWorkforceBankReference(referenceNo)])
+  );
+  return parseFedOneResponseSheet(prepared.responseSheet, {
+    allowAnyReference: true,
+    collectRowErrors: true,
     ownedReferences: normalizedOwnedReferences,
     rowReferenceAliases: normalizedAliases
   });
