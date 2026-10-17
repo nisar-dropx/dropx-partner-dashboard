@@ -5,6 +5,7 @@ import {
 } from "@/lib/ops-pulse/station-audit-evidence";
 import {
   calculateAuditScore,
+  AuditResponsibilityError,
   type AuditAssessment,
 } from "@/lib/ops-pulse/station-audit-scoring";
 import {
@@ -65,10 +66,11 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type ActionResult =
   | { ok: true; message: string }
-  | { ok: false; message: string };
+  | { ok: false; message: string; fieldName?: string };
 const message = (error: unknown): ActionResult => ({
   ok: false,
   message: error instanceof Error ? error.message : "Unable to save the audit.",
+  ...(error instanceof AuditResponsibilityError ? { fieldName: error.issue.fieldName } : {}),
 });
 const clean = (value: FormDataEntryValue | null | undefined) =>
   String(value ?? "").trim();

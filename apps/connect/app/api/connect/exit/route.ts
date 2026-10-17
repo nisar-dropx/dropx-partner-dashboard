@@ -157,8 +157,14 @@ async function reportingManagerChain(context: WorkerContext, levels: number): Pr
       .maybeSingle();
     if (assignment) {
       if (ssaManager) chain.push({
-        userId: ssaManager.userId, name: ssaManager.name, positionTitle: ssaManager.role,
-        designation: { code: ssaManager.designationCode, name: ssaManager.role }, stationApprovalManager: true
+        userId: ssaManager.userId,
+        name: ssaManager.name,
+        positionTitle: ssaManager.stepName,
+        designation: {
+          code: ssaManager.isAomFallback ? "AOM" : "CM",
+          name: ssaManager.stepName,
+        },
+        stationApprovalManager: true,
       });
       let subjectAssignmentId = ssaManager?.assignmentId ?? assignment.id;
       const seenAssignments = new Set<string>([assignment.id]);

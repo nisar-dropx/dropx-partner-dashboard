@@ -1,8 +1,8 @@
 import "server-only";
 
-import { loadActiveApprovalCovers } from "@/lib/approval-covers";
-import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadActiveApprovalCovers } from "./approval-covers";
 import { loadPeopleOperationalHierarchy } from "./people-operational-hierarchy";
 
 export class SsaApprovalRoutingError extends Error {

@@ -1,9 +1,10 @@
 "use client";
 import { reviewStationAuditScore } from "./actions";
 import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AuditAssessment,
+  AuditResponsibilityIssue,
   AuditScoreSnapshot,
 } from "@/lib/ops-pulse/station-audit-scoring";
 import type {
@@ -12,33 +13,119 @@ import type {
 } from "@/lib/ops-pulse/station-audits";
 import { EvidencePreview } from "@/components/evidence-preview";
 import styles from "./audit-workspace.module.css";
+
+const emptyAssessment = (): AuditAssessment => ({
+  code: "pending",
+  reason: "",
+  evidenceId: "",
+});
+
+function responsibilityOptionsFor(
+  options: AuditOption[],
+  key: string,
+): AuditOption[] {
+  const scope =
+    key === "cash" ? "cash" : key.startsWith("check:") ? "check" : "shipment";
+  return options
+    .filter(
+      (o) =>
+        !Array.isArray(o.metadata.applies_to) ||
+        o.metadata.applies_to.includes(scope),
+    )
+    .slice()
+    .sort((a, b) => {
+      const pendingRank = (o: AuditOption) =>
+        o.metadata.pending === true || o.code === "pending" ? 0 : 1;
+      return (
+        pendingRank(a) - pendingRank(b) ||
+        Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+      );
+    });
+}
+
 export function ResponsibilityAssessment({
   keys,
   initial,
   options,
   evidence,
   labels = {},
+  issue,
 }: {
   labels?: Record<string, string>;
+  issue?: AuditResponsibilityIssue | null;
   keys: string[];
   initial?: Record<string, AuditAssessment>;
   options: AuditOption[];
   evidence: StationAuditWorkspace["evidence"];
 }) {
-  const [values, setValues] = useState<Record<string, AuditAssessment>>(
-    initial || {},
-  );
+  const [values, setValues] = useState<Record<string, AuditAssessment>>(() => {
+    const next: Record<string, AuditAssessment> = {};
+    for (const key of keys) {
+      const seed = initial?.[key];
+      next[key] = seed
+        ? {
+            code: seed.code || "pending",
+            reason: seed.reason || "",
+            evidenceId: seed.evidenceId || "",
+          }
+        : emptyAssessment();
+    }
+    return next;
+  });
+  useEffect(() => {
+    setValues((old) => {
+      const next: Record<string, AuditAssessment> = {};
+      for (const key of keys) {
+        const seed = initial?.[key];
+        next[key] =
+          old[key] ||
+          (seed
+            ? {
+                code: seed.code || "pending",
+                reason: seed.reason || "",
+                evidenceId: seed.evidenceId || "",
+              }
+            : emptyAssessment());
+      }
+      const same =
+        Object.keys(old).length === keys.length &&
+        keys.every((key) => old[key] === next[key]);
+      return same ? old : next;
+    });
+  }, [keys.join("|")]);
   if (!keys.length) return null;
+  const resolveAssessment = (key: string, entry: AuditAssessment) => {
+    const scoped = responsibilityOptionsFor(options, key);
+    if (scoped.some((o) => o.code === entry.code)) return { entry, scoped };
+    const fallback =
+      scoped.find((o) => o.metadata.pending === true)?.code ||
+      scoped[0]?.code ||
+      "pending";
+    return { entry: { ...entry, code: fallback }, scoped };
+  };
   const update = (key: string, field: keyof AuditAssessment, value: string) =>
     setValues((old) => ({
       ...old,
       [key]: {
-        ...(old[key] || { code: "pending", reason: "", evidenceId: "" }),
+        ...(old[key] || emptyAssessment()),
         [field]: value,
       },
     }));
+  const payload = Object.fromEntries(
+    keys.map((key) => {
+      const { entry } = resolveAssessment(
+        key,
+        values[key] || emptyAssessment(),
+      );
+      return [key, entry];
+    }),
+  );
   return (
-    <section className={styles.section} style={{ marginTop: 12 }}>
+    <section
+      id="audit-responsibility"
+      className={styles.section}
+      style={{ marginTop: 12 }}
+    >
       <div className={styles.sectionHeader}>
         Responsibility & score exclusions
         <span>{keys.length} differences to assess</span>
@@ -48,24 +135,32 @@ export function ResponsibilityAssessment({
           Score only what the station could control. Verify a prior missing scan
           or external cause against dated evidence. Pending investigation does
           not deduct points, but prevents a final rating. Findings still require
-          a station response.
+          a station response. Any outcome other than pending needs a short
+          reason.
         </p>
         <input
           type="hidden"
           name="score_assessments"
-          value={JSON.stringify(values)}
+          value={JSON.stringify(payload)}
         />
         {keys.map((key) => {
-          const v = values[key] || {
-            code: "pending",
-            reason: "",
-            evidenceId: "",
-          };
-          const excluded =
-            options.find((o) => o.code === v.code)?.metadata
-              .exclude_from_score === true;
+          const { entry: v, scoped } = resolveAssessment(
+            key,
+            values[key] || emptyAssessment(),
+          );
+          const selected =
+            scoped.find((o) => o.code === v.code) ||
+            scoped.find((o) => o.metadata.pending === true) ||
+            scoped[0];
+          const needsReason = selected?.metadata.pending !== true;
+          const excluded = selected?.metadata.exclude_from_score === true;
           return (
-            <details className={styles.check} key={key} open>
+            <details
+              className={styles.check}
+              key={key}
+              open
+              data-assessment-key={key}
+            >
               <summary>
                 <strong>
                   {key === "cash" ? "COD difference" : labels[key] || key}
@@ -75,43 +170,48 @@ export function ResponsibilityAssessment({
                 <label className={styles.inputLabel}>
                   Station responsibility
                   <select
-                    value={v.code}
+                    name={`assessment_code_${key}`}
+                    value={selected?.code || "pending"}
                     onChange={(e) => update(key, "code", e.target.value)}
                   >
-                    {options
-                      .filter(
-                        (o) =>
-                          !Array.isArray(o.metadata.applies_to) ||
-                          o.metadata.applies_to.includes(
-                            key === "cash"
-                              ? "cash"
-                              : key.startsWith("check:")
-                                ? "check"
-                                : "shipment",
-                          ),
-                      )
-                      .map((o) => (
-                        <option key={o.code} value={o.code}>
-                          {o.label}
-                        </option>
-                      ))}
+                    {scoped.map((o) => (
+                      <option key={o.code} value={o.code}>
+                        {o.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className={styles.inputLabel}>
                   Reason / reference
                   <input
+                    name={`assessment_reason_${key}`}
+                    aria-label={`Responsibility reason for ${key === "cash" ? "COD difference" : labels[key] || key}`}
+                    aria-invalid={
+                      issue?.fieldName === `assessment_reason_${key}` ||
+                      undefined
+                    }
                     value={v.reason}
                     onChange={(e) => update(key, "reason", e.target.value)}
-                    required={v.code !== "pending"}
+                    required={needsReason}
+                    aria-required={needsReason}
                     placeholder="What happened, when it was reported, and why the station could or could not control it"
                   />
+                  {needsReason ? (
+                    <small>Required when responsibility is not pending.</small>
+                  ) : null}
                 </label>
               </div>
+              {issue?.key === key && (
+                <p role="alert" style={{ color: "#b91c1c", marginTop: 8 }}>
+                  {issue.message}
+                </p>
+              )}
               {excluded && (
                 <div className={styles.twoCol}>
                   <label className={styles.inputLabel}>
                     Verified proof already attached
                     <select
+                      name={`assessment_evidenceId_${key}`}
                       value={v.evidenceId}
                       onChange={(e) =>
                         update(key, "evidenceId", e.target.value)
