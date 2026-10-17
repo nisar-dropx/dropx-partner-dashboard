@@ -15,6 +15,10 @@ const transactionalMigration = readFileSync(
   new URL("../../../supabase/migrations/20261011190000_transactional_biometric_enrolment_assignment.sql", import.meta.url),
   "utf8"
 );
+const legacyOwnerUpdateMigration = readFileSync(
+  new URL("../../../supabase/migrations/20261017170000_normalize_legacy_biometric_owner_updates.sql", import.meta.url),
+  "utf8"
+);
 
 test("profile status does not close an assigned biometric enrolment", () => {
   assert.match(transactionalMigration, /v_status := case when v_is_active then 'Active' else 'Inactive' end/);
@@ -70,6 +74,21 @@ test("cross-category shared IDs are never closed by another owner's sync", () =>
   assert.match(transactionalMigration, /is distinct from p_account_id/);
   assert.match(transactionalMigration, /Close only this owner/);
   assert.doesNotMatch(transactionalMigration, /any\(p_close_ids\)/);
+});
+
+test("closing a grandfathered owner row canonicalizes it without weakening the owner constraint", () => {
+  assert.match(
+    legacyOwnerUpdateMigration,
+    /update public\.biometric_enrolments be\s+set worker_type = v_worker_type,\s+profile_type = v_profile_type,\s+account_id = p_account_id,\s+employee_id = v_employee_id,\s+field_executive_id = v_field_executive_id,\s+status = 'Inactive'/
+  );
+  assert.doesNotMatch(
+    legacyOwnerUpdateMigration,
+    /drop constraint(?:\s+if exists)?\s+biometric_enrolments_owner_shape_check/i
+  );
+  assert.doesNotMatch(
+    legacyOwnerUpdateMigration,
+    /alter table public\.biometric_enrolments[\s\S]*?biometric_enrolments_owner_shape_check/i
+  );
 });
 
 test("profile saves bound historical backfill to the recent 62-day inclusive window", () => {
