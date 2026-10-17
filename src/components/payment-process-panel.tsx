@@ -145,9 +145,16 @@ type BankResponseImportResult = {
   matched?: number;
   ok: boolean;
   paidRows?: number;
+  processedRows?: number;
+  errorRows?: number;
   rejectedRows?: number;
   replayedFile?: boolean;
   replayedRows?: number;
+  rowErrors?: Array<{
+    message: string;
+    referenceNo: string;
+    rowNumber: number;
+  }>;
   skipped?: number;
   unknownRows?: number;
 };
@@ -513,7 +520,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
                 />
               </label>
               <p className="subtle" style={{ margin: 0 }}>
-                Select up to 20 Federal Bank enquiry files. Each file is checked independently against Payment Requests, Workforce, Helpers and People Payroll; unrelated rows are skipped.
+                Select up to 20 Federal Bank enquiry files. Valid rows are finalized across Payment Requests, Workforce, Helpers and People Payroll; unmatched or invalid rows are skipped and listed in red.
               </p>
               {finalizeError ? <div className="form-error" role="alert">{finalizeError}</div> : null}
               {finalizeResults.length ? (
@@ -537,6 +544,18 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
                       ) : (
                         <p style={{ color: "#b91c1c", margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{result.error || "Import failed."}</p>
                       )}
+                      {result.rowErrors?.length ? (
+                        <div role="alert" style={{ color: "#b91c1c", marginTop: 6 }}>
+                          <strong>{result.rowErrors.length} skipped row{result.rowErrors.length === 1 ? "" : "s"}:</strong>
+                          <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                            {result.rowErrors.map((rowError, rowErrorIndex) => (
+                              <li key={`${rowError.rowNumber}-${rowError.referenceNo}-${rowErrorIndex}`}>
+                                Row {rowError.rowNumber}{rowError.referenceNo ? ` · ${rowError.referenceNo}` : ""} — {rowError.message}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

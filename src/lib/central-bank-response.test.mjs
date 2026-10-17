@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 import {
   WORKFORCE_FEDONE_RESPONSE_HEADERS,
   parsePreparedFedOneResponseRows,
+  parsePreparedFedOneResponseRowsPartially,
   prepareDropxFedOneResponse
 } from "./workforce-payout-bank-file.ts";
 import {
@@ -73,6 +74,97 @@ test("central parser keeps formula, required-field, amount and unsafe-number saf
       return true;
     }
   );
+});
+
+test("central partial parser retains valid owned rows and reports an invalid owned row without failing the file", () => {
+  const prepared = prepareDropxFedOneResponse(responseWorkbook([
+    ["REQGOOD01", "001234", "FDRL0000001", 100.25, "PAID", "UTR-GOOD", "Success"],
+    ["REQBAD02", "009876", "HDFC0000002", "not-an-amount", "PAID", "UTR-BAD", "Success"],
+    ["UNRELATED-ROW", "", "", "not-an-amount", "", "", ""]
+  ]));
+
+  const parsed = parsePreparedFedOneResponseRowsPartially(
+    prepared,
+    new Set(["REQGOOD01", "REQBAD02"])
+  );
+
+  assert.deepEqual(parsed.rows.map((row) => row.referenceNo), ["REQGOOD01"]);
+  assert.deepEqual(parsed.skippedRows, [{ rowNumber: 4, referenceNo: "UNRELATED-ROW" }]);
+  assert.equal(parsed.rowErrors.length, 1);
+  assert.equal(parsed.rowErrors[0].rowNumber, 3);
+  assert.equal(parsed.rowErrors[0].referenceNo, "REQBAD02");
+  assert.match(parsed.rowErrors[0].message, /Debit Amount must be a positive number with at most two decimal places/i);
+});
+
+test("central partial parser preserves strict formula and required-field validation as row errors", () => {
+  const prepared = prepareDropxFedOneResponse(responseWorkbook([
+    ["REQGOOD01", "001234", "FDRL0000001", 100, "PAID", "UTR-GOOD", "Success"],
+    ["REQBAD02", "", "", 100, "PAID", "UTR-BAD", "Success"]
+  ], {
+    cells: {
+      D3: { t: "n", f: "50+50", v: 100 }
+    }
+  }));
+
+  const parsed = parsePreparedFedOneResponseRowsPartially(
+    prepared,
+    new Set(["REQGOOD01", "REQBAD02"])
+  );
+
+  assert.deepEqual(parsed.rows.map((row) => row.referenceNo), ["REQGOOD01"]);
+  assert.equal(parsed.rowErrors.length, 1);
+  assert.deepEqual(
+    { referenceNo: parsed.rowErrors[0].referenceNo, rowNumber: parsed.rowErrors[0].rowNumber },
+    { referenceNo: "REQBAD02", rowNumber: 3 }
+  );
+  assert.match(parsed.rowErrors[0].message, /formulas are not accepted in Debit Amount/i);
+  assert.match(parsed.rowErrors[0].message, /Credit Account is required/i);
+  assert.match(parsed.rowErrors[0].message, /IFSC Code is required/i);
+});
+
+test("central partial parser rejects every occurrence of a duplicate owned reference", () => {
+  const prepared = prepareDropxFedOneResponse(responseWorkbook([
+    ["REQDUP01", "001234", "FDRL0000001", 100, "PAID", "UTR-1", "Success"],
+    [" req dup01 ", "001234", "FDRL0000001", 100, "PAID", "UTR-2", "Success"]
+  ]));
+
+  const parsed = parsePreparedFedOneResponseRowsPartially(prepared, new Set(["REQDUP01"]));
+
+  assert.deepEqual(parsed.rows, []);
+  assert.deepEqual(parsed.skippedRows, []);
+  assert.deepEqual(parsed.rowErrors.map((error) => ({
+    referenceNo: error.referenceNo,
+    rowNumber: error.rowNumber
+  })), [
+    { referenceNo: "REQDUP01", rowNumber: 2 },
+    { referenceNo: "REQDUP01", rowNumber: 3 }
+  ]);
+  for (const error of parsed.rowErrors) {
+    assert.match(error.message, /duplicate Customer Ref\. No\./i);
+    assert.match(error.message, /Rows 2 and 3 were all skipped/i);
+  }
+});
+
+test("central partial parser keeps large duplicate-group messages bounded", () => {
+  const duplicateRows = Array.from({ length: 5_000 }, (_, index) => [
+    "REQMANY01",
+    "001234",
+    "FDRL0000001",
+    100,
+    "PAID",
+    `UTR-${index + 1}`,
+    "Success"
+  ]);
+  const prepared = prepareDropxFedOneResponse(responseWorkbook(duplicateRows));
+  const parsed = parsePreparedFedOneResponseRowsPartially(
+    prepared,
+    new Set(["REQMANY01"])
+  );
+
+  assert.equal(parsed.rows.length, 0);
+  assert.equal(parsed.rowErrors.length, 5_000);
+  assert.match(parsed.rowErrors[0].message, /appears 5000 times/i);
+  assert.ok(parsed.rowErrors.every((error) => error.message.length < 180));
 });
 
 test("central parser rejects duplicate normalized references and unsupported reference characters", () => {
