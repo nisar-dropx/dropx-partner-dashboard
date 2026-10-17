@@ -24,8 +24,10 @@ export async function GET(request:Request){try{
  if(materialId){
   const milestone=await ownMilestone(account,url.searchParams.get('milestoneId')??'');
   if(!milestone.material_ids.includes(materialId))throw new Error('This material is not assigned to you.');
-  const material=await db().from('hr_training_materials').select('storage_path,external_url').eq('company_id',account.companyId).eq('id',materialId).single();
+  const material=await db().from('hr_training_materials').select('title,kind,body,storage_path,external_url').eq('company_id',account.companyId).eq('id',materialId).single();
   if(material.error)throw new Error('Material is unavailable.');
+  // Written lessons are read inside the app.
+  if(material.data.kind==='lesson')return Response.json({lesson:{title:material.data.title,body:material.data.body??''}},{headers});
   let href=material.data.external_url;
   if(material.data.storage_path){const signed=await db().storage.from('people-training').createSignedUrl(material.data.storage_path,120);if(signed.error)throw new Error('Unable to open this PDF.');href=signed.data.signedUrl;}
   const target=new URL(href);if(target.protocol!=='https:')throw new Error('Invalid material link.');

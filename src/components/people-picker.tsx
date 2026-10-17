@@ -5,7 +5,7 @@ import styles from "./people-picker.module.css";
 export type PickerOption = { key: string; label: string; detail?: string };
 
 /** Searchable multi-select dropdown for people, with chips for the selection and select-all-shown. */
-export function PeoplePicker({ options, value, onChange, placeholder = "Choose people", disabled = false, max = 50 }: {
+export function PeoplePicker({ options, value, onChange, placeholder = "Choose people", disabled = false, max = 200 }: {
   options: PickerOption[]; value: string[]; onChange: (next: string[]) => void; placeholder?: string; disabled?: boolean; max?: number;
 }) {
   const [open, setOpen] = useState(false);
