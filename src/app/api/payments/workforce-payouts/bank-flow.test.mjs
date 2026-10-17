@@ -54,6 +54,18 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
 });
 
 test("bank-file creation refreshes only the selected exact-period publications before the authoritative payment gate", () => {
+  assert.match(bankFileRoute, /ensureWorkforcePayoutPublicationRefreshJobs\(\{/);
+  assert.match(bankFileRoute, /authorization: access\.authorization/);
+  assert.match(bankFileRoute, /actorUserId: access\.authorization\.userId/);
+  assert.match(bankFileRoute, /targets: payoutRows/);
+  assert.match(bankFileRoute, /selfHealResult\.failed > 0/);
+  assert.match(bankFileRoute, /selfHealResult\.missingPublication > 0/);
+  assert.match(bankFileRoute, /selfHealResult\.mappingUnlocked > 0/);
+  assert.ok(
+    bankFileRoute.indexOf("ensureWorkforcePayoutPublicationRefreshJobs({")
+      < bankFileRoute.indexOf("refreshWorkforcePayoutPublicationJobs({"),
+    "server-authoritative live targets must enqueue missing refresh work before the selected queue is drained"
+  );
   assert.match(bankFileRoute, /refreshWorkforcePayoutPublicationJobs\(\{/);
   assert.match(bankFileRoute, /authorization: access\.authorization/);
   assert.match(bankFileRoute, /companyId: access\.companyId/);
@@ -72,6 +84,7 @@ test("bank-file creation refreshes only the selected exact-period publications b
   assert.match(publicationRefresh, /payoutRows\?: Array<\{ workforceId: string; stationId: string \}>/);
   assert.match(publicationRefresh, /rpc\("workforce_claim_selected_payout_publication_row_refresh_jobs"/);
   assert.match(publicationRefresh, /workforce_id: row\.workforceId,[\s\S]*?station_id: row\.stationId/);
+  assert.doesNotMatch(bankFileRoute, /body\.(?:currentTargetAmount|netAmount|snapshotHash)/);
 });
 
 test("bank-file re-download is permitted only for a wholly processing immutable batch", () => {

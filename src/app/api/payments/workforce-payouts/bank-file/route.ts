@@ -5,6 +5,7 @@ import { getAuthorization, hasPermission, type AuthorizationContext } from "@/li
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildWorkforceFedOneWorkbook } from "@/lib/workforce-payout-bank-file";
+import { ensureWorkforcePayoutPublicationRefreshJobs } from "@/lib/workforce-payout-publication-self-heal";
 import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { helperPayoutPublicationSnapshotHash } from "@/lib/helper-payout-publication";
@@ -445,6 +446,49 @@ export async function POST(request: Request) {
         });
       }
     } else {
+      let selfHealResult;
+      try {
+        selfHealResult = await ensureWorkforcePayoutPublicationRefreshJobs({
+          companyId: access.companyId,
+          authorization: access.authorization,
+          actorUserId: access.authorization.userId,
+          periodStart,
+          periodEnd,
+          targets: payoutRows
+        });
+      } catch (error) {
+        return errorResponse(
+          `The selected payout publications could not be checked against the current server-calculated amounts. No payment batch was created. ${error instanceof Error ? error.message : "Refresh the page and try again."}`,
+          409
+        );
+      }
+      if (
+        selfHealResult.failed > 0
+        || selfHealResult.missingPublication > 0
+        || selfHealResult.mappingUnlocked > 0
+        || selfHealResult.requested !== payoutRows.length
+        || selfHealResult.rows.length !== payoutRows.length
+      ) {
+        const blockers = [
+          selfHealResult.failed > 0
+            ? `${selfHealResult.failed} selected publication refresh job${selfHealResult.failed === 1 ? " has" : "s have"} failed.`
+            : "",
+          selfHealResult.missingPublication > 0
+            ? `${selfHealResult.missingPublication} selected payout publication${selfHealResult.missingPublication === 1 ? " is" : "s are"} missing.`
+            : "",
+          selfHealResult.mappingUnlocked > 0
+            ? `${selfHealResult.mappingUnlocked} selected payout mapping${selfHealResult.mappingUnlocked === 1 ? " is" : "s are"} unlocked.`
+            : "",
+          selfHealResult.requested !== payoutRows.length || selfHealResult.rows.length !== payoutRows.length
+            ? "The server could not verify every selected payout row."
+            : ""
+        ].filter(Boolean).join(" ");
+        return errorResponse(
+          `The selected payout publications are not ready for bank-file generation. No payment batch was created. ${blockers}`,
+          409
+        );
+      }
+
       let refreshResult;
       try {
         refreshResult = await refreshWorkforcePayoutPublicationJobs({
@@ -474,7 +518,7 @@ export async function POST(request: Request) {
           409
         );
       }
-      authoritativeRows = payoutRows.map((row) => ({
+      authoritativeRows = selfHealResult.rows.map((row) => ({
         workforce_id: row.workforceId,
         station_id: row.stationId
       }));
