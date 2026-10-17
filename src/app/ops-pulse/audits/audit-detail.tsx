@@ -4,6 +4,7 @@ import {
   isAuditEvidenceFolder,
   isAuditDriveLink,
 } from "@/lib/ops-pulse/station-audit-evidence";
+import { auditAssessmentSubject } from "@/lib/ops-pulse/station-audit-scoring";
 import {
   AuditScore,
   ResponsibilityAssessment,
@@ -733,6 +734,108 @@ export function AuditDetail({
                 submit.run(async () => ({ ok: false, message: block }));
                 return;
               }
+              if (type?.scoring_enabled) {
+                const assessmentKeys = [
+                  ...(variance ? ["cash"] : []),
+                  ...differenceKeys,
+                  ...checkDifferenceKeys,
+                ];
+                let assessments: Record<
+                  string,
+                  { code?: string; reason?: string; evidenceId?: string }
+                > = {};
+                try {
+                  assessments = JSON.parse(
+                    value(data.get("score_assessments")) || "{}",
+                  );
+                } catch {
+                  submitting.current = false;
+                  submit.run(async () => ({
+                    ok: false,
+                    message: "Invalid responsibility assessment.",
+                  }));
+                  return;
+                }
+                const responsibilityOptions = workspace.options.filter(
+                  (o) => o.option_group === "audit_responsibility",
+                );
+                for (const key of assessmentKeys) {
+                  const entry = assessments[key] || {
+                    code: "pending",
+                    reason: "",
+                    evidenceId: "",
+                  };
+                  const option = responsibilityOptions.find(
+                    (o) => o.code === (entry.code || "pending"),
+                  );
+                  const subject = auditAssessmentSubject(key, items);
+                  if (!option) {
+                    submitting.current = false;
+                    const field = form.querySelector(
+                      `[data-assessment-key="${CSS.escape(key)}"]`,
+                    );
+                    if (field instanceof HTMLElement) {
+                      field.scrollIntoView({ block: "center" });
+                    }
+                    submit.run(async () => ({
+                      ok: false,
+                      message: `Choose a configured responsibility outcome for ${subject}.`,
+                    }));
+                    return;
+                  }
+                  if (
+                    option.metadata.pending !== true &&
+                    !value(entry.reason).trim()
+                  ) {
+                    submitting.current = false;
+                    const reasonField = form.elements.namedItem(
+                      `assessment_reason_${key}`,
+                    );
+                    if (reasonField instanceof HTMLElement) {
+                      const details = reasonField.closest("details");
+                      if (details) details.open = true;
+                      reasonField.scrollIntoView({ block: "center" });
+                      reasonField.focus();
+                    } else {
+                      document
+                        .getElementById("audit-responsibility")
+                        ?.scrollIntoView({ block: "center" });
+                    }
+                    submit.run(async () => ({
+                      ok: false,
+                      message: `Add the responsibility reason for ${subject}.`,
+                    }));
+                    return;
+                  }
+                  if (
+                    option.metadata.exclude_from_score === true &&
+                    !value(entry.evidenceId).trim() &&
+                    !(
+                      form.elements.namedItem(
+                        `assessment_proof_${key}`,
+                      ) instanceof HTMLInputElement &&
+                      (
+                        form.elements.namedItem(
+                          `assessment_proof_${key}`,
+                        ) as HTMLInputElement
+                      ).files?.length
+                    )
+                  ) {
+                    submitting.current = false;
+                    const field = form.querySelector(
+                      `[data-assessment-key="${CSS.escape(key)}"]`,
+                    );
+                    if (field instanceof HTMLElement) {
+                      field.scrollIntoView({ block: "center" });
+                    }
+                    submit.run(async () => ({
+                      ok: false,
+                      message: `Select saved proof for the exclusion: ${subject}.`,
+                    }));
+                    return;
+                  }
+                }
+              }
               submit.run(async () => {
                 try {
                   await uploadAuditFiles(data, (done, total) =>
@@ -1021,23 +1124,6 @@ export function AuditDetail({
                 </details>
               </>
             )}
-            {type?.scoring_enabled && (
-              <ResponsibilityAssessment
-                keys={[
-                  ...(variance ? ["cash"] : []),
-                  ...differenceKeys,
-                  ...checkDifferenceKeys,
-                ]}
-                labels={Object.fromEntries(
-                  items.map((i) => [`check:${i.id}`, i.label]),
-                )}
-                initial={audit.score_snapshot?.assessments}
-                options={workspace.options.filter(
-                  (o) => o.option_group === "audit_responsibility",
-                )}
-                evidence={evidence}
-              />
-            )}
             {sections
               .filter((section) =>
                 items.some((item) => item.section_id === section.id),
@@ -1084,6 +1170,23 @@ export function AuditDetail({
                   </div>
                 </details>
               ))}
+            {type?.scoring_enabled && (
+              <ResponsibilityAssessment
+                keys={[
+                  ...(variance ? ["cash"] : []),
+                  ...differenceKeys,
+                  ...checkDifferenceKeys,
+                ]}
+                labels={Object.fromEntries(
+                  items.map((i) => [`check:${i.id}`, i.label]),
+                )}
+                initial={audit.score_snapshot?.assessments}
+                options={workspace.options.filter(
+                  (o) => o.option_group === "audit_responsibility",
+                )}
+                evidence={evidence}
+              />
+            )}
             <details className={styles.section} open style={{ marginTop: 12 }}>
               <summary>
                 Evidence and submission{" "}

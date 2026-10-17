@@ -58,12 +58,25 @@ export type AuditScoreInput = {
   assessments: Record<string, AuditAssessment>;
   evidenceIds: string[];
 };
+/** Human label for cash / checklist / TID responsibility keys shown in validation. */
+export function auditAssessmentSubject(
+  key: string,
+  items: { id: string; label: string }[] = [],
+) {
+  if (key === "cash") return "COD difference";
+  if (key.startsWith("check:")) {
+    const id = key.slice("check:".length);
+    return items.find((item) => item.id === id)?.label || "checklist finding";
+  }
+  return `tracking ID ${key}`;
+}
 export function calculateAuditScore(
   input: AuditScoreInput,
 ): AuditScoreSnapshot {
   const assessments: AuditScoreSnapshot["assessments"] = {};
   let provisional = false;
   const classify = (key: string) => {
+    const subject = auditAssessmentSubject(key, input.items);
     const value = input.assessments[key] || {
       code: "pending",
       reason: "",
@@ -73,20 +86,24 @@ export function calculateAuditScore(
       (o) => o.code === value.code && "exclude_from_score" in o.metadata,
     );
     if (!option)
-      throw new Error(`Choose a configured responsibility outcome for ${key}.`);
+      throw new Error(
+        `Choose a configured responsibility outcome for ${subject}.`,
+      );
     const scope =
       key === "cash" ? "cash" : key.startsWith("check:") ? "check" : "shipment";
     if (
       Array.isArray(option.metadata.applies_to) &&
       !option.metadata.applies_to.includes(scope)
     )
-      throw new Error(`This responsibility option does not apply to ${key}.`);
+      throw new Error(
+        `This responsibility option does not apply to ${subject}.`,
+      );
     const pending = option.metadata.pending === true;
     const excluded = option.metadata.exclude_from_score === true;
     if (!pending && !value.reason.trim())
-      throw new Error(`Add the responsibility reason for ${key}.`);
+      throw new Error(`Add the responsibility reason for ${subject}.`);
     if (excluded && !input.evidenceIds.includes(value.evidenceId))
-      throw new Error(`Select saved proof for the exclusion: ${key}.`);
+      throw new Error(`Select saved proof for the exclusion: ${subject}.`);
     assessments[key] = { ...value, label: option.label, excluded, pending };
     provisional ||= pending;
     return { excluded: excluded || pending, pending };
