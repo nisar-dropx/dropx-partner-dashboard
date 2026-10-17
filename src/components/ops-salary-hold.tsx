@@ -104,7 +104,14 @@ function HoldCard({ hold, onDone }: { hold: SalaryHoldRecord; onDone: (message: 
   );
 }
 
+type Target = { workerType: "employee" | "contractor"; workerId: string; displayName: string; detail: string };
+
 function RaiseForm({ workspace, onDone }: { workspace: SalaryHoldWorkspace; onDone: (message: string) => void }) {
+  const [source, setSource] = useState<"team" | "station">(workspace.eligibleWorkers.length ? "team" : "station");
+  const [stationId, setStationId] = useState(workspace.stations.length === 1 ? workspace.stations[0].id : "");
+  const [stationPeople, setStationPeople] = useState<Target[] | null>(null);
+  const [loadingPeople, setLoadingPeople] = useState(false);
+  const [search, setSearch] = useState("");
   const [workerKey, setWorkerKey] = useState("");
   const [holdType, setHoldType] = useState<"amount" | "days">("amount");
   const [amount, setAmount] = useState("");
@@ -112,15 +119,40 @@ function RaiseForm({ workspace, onDone }: { workspace: SalaryHoldWorkspace; onDo
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [busy, start] = useTransition();
+  const team: Target[] = workspace.eligibleWorkers.map((w) => ({ workerType: w.workerType, workerId: w.workerId, displayName: w.displayName, detail: w.designationName ?? "Direct report" }));
+  const options = source === "team" ? team : stationPeople ?? [];
+  const q = search.trim().toLowerCase();
+  const filtered = options.filter((o) => !q || `${o.displayName} ${o.detail}`.toLowerCase().includes(q)).slice(0, 80);
+  const chosen = options.find((o) => `${o.workerType}:${o.workerId}` === workerKey);
+
+  async function pickStation(id: string) {
+    setStationId(id);
+    setWorkerKey("");
+    setStationPeople(null);
+    if (!id) return;
+    setLoadingPeople(true);
+    try {
+      const r = await fetch(`/api/ops-pulse/salary-hold?station=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "People could not be loaded.");
+      setStationPeople((j.people as Array<{ workerType: "employee" | "contractor"; workerId: string; displayName: string; code: string | null; designation: string | null }>).map((p) => ({
+        workerType: p.workerType, workerId: p.workerId, displayName: p.displayName, detail: [p.code, p.designation, p.workerType === "contractor" ? "Contractor" : "Employee"].filter(Boolean).join(" · "),
+      })));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "People could not be loaded.");
+    } finally {
+      setLoadingPeople(false);
+    }
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const worker = workspace.eligibleWorkers.find((w) => `${w.workerType}:${w.workerId}` === workerKey);
-    if (!worker) return setError("Select a direct report.");
+    if (!chosen) return setError("Choose the person.");
     const invalid = validateRaise({ holdType, amount, days, reason });
     if (invalid) return setError(invalid);
     const form = new FormData();
-    form.set("workerType", worker.workerType);
-    form.set("workerId", worker.workerId);
+    form.set("workerType", chosen.workerType);
+    form.set("workerId", chosen.workerId);
     form.set("holdType", holdType);
     form.set("amount", amount);
     form.set("days", days);
@@ -129,36 +161,56 @@ function RaiseForm({ workspace, onDone }: { workspace: SalaryHoldWorkspace; onDo
     start(async () => {
       const result = await placeSalaryHold(form);
       if (!result.ok) return setError(result.message);
-      setWorkerKey(""); setAmount(""); setDays(""); setReason("");
+      setWorkerKey(""); setAmount(""); setDays(""); setReason(""); setSearch("");
       onDone(result.message);
     });
   }
+
   if (!workspace.designationTierCleared)
-    return <section className={styles.card}><h2>Raise a salary hold</h2><p className={styles.hint}>Only Senior Store Manager and above can raise a salary hold for a direct report.</p></section>;
+    return <section className={styles.card}><h2>Raise a salary hold</h2><p className={styles.hint}>Only Senior Store Manager and above can raise a salary hold.</p></section>;
   return (
     <form className={styles.card} onSubmit={submit}>
       <h2>Raise a salary hold</h2>
-      <p className={styles.hint}>The station&apos;s cluster manager approves it before payroll withholds anything.</p>
-      {!workspace.eligibleWorkers.length ? <p className={styles.hint}>You have no direct reports on record in People.</p> : (
-        <>
-          <label>Direct report
-            <select value={workerKey} onChange={(e) => setWorkerKey(e.target.value)} disabled={busy}>
-              <option value="">Select…</option>
-              {workspace.eligibleWorkers.map((w) => <option key={`${w.workerType}:${w.workerId}`} value={`${w.workerType}:${w.workerId}`}>{w.displayName}{w.designationName ? ` · ${w.designationName}` : ""}</option>)}
-            </select>
-          </label>
-          <div className={styles.toggle} role="group" aria-label="Hold type">
-            <button type="button" aria-pressed={holdType === "amount"} onClick={() => setHoldType("amount")}>Amount</button>
-            <button type="button" aria-pressed={holdType === "days"} onClick={() => setHoldType("days")}>Days of salary</button>
+      <p className={styles.hint}>For a direct report or anyone working at your stations. The station&apos;s cluster manager approves it before payroll withholds anything.</p>
+      <div className={styles.toggle} role="group" aria-label="Who">
+        <button type="button" aria-pressed={source === "team"} onClick={() => { setSource("team"); setWorkerKey(""); }} disabled={!team.length}>My team{team.length ? ` · ${team.length}` : ""}</button>
+        <button type="button" aria-pressed={source === "station"} onClick={() => { setSource("station"); setWorkerKey(""); }} disabled={!workspace.stations.length}>A station</button>
+      </div>
+      {source === "station" ? (
+        <label>Station
+          <select value={stationId} onChange={(e) => void pickStation(e.target.value)} disabled={busy}>
+            <option value="">Choose a station…</option>
+            {workspace.stations.map((s) => <option key={s.id} value={s.id}>{s.code}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {source === "team" || stationPeople ? (
+        <label>Person
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search ${options.length} people`} disabled={busy} />
+          <div className={styles.people} role="listbox" aria-label="People">
+            {filtered.map((o) => {
+              const key = `${o.workerType}:${o.workerId}`;
+              return (
+                <button type="button" role="option" aria-selected={workerKey === key} key={key} className={workerKey === key ? styles.personOn : styles.person} onClick={() => setWorkerKey(key)}>
+                  <b>{o.displayName}</b><small>{o.detail}</small>
+                </button>
+              );
+            })}
+            {!filtered.length ? <small className={styles.hint}>{options.length ? "No one matches." : source === "team" ? "No direct reports on record in People." : "No active People at this station."}</small> : null}
           </div>
-          {holdType === "amount"
-            ? <label>Amount to hold (₹)<input type="number" min="0.01" step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} /></label>
-            : <label>Days to hold<input type="number" min="0.5" max="31" step="0.5" value={days} onChange={(e) => setDays(e.target.value)} disabled={busy} /><span className={styles.hint}>Converted at that month&apos;s day rate in payroll.</span></label>}
-          <label>Reason<textarea rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} placeholder="What happened and why salary should be held" /></label>
-          {error ? <p className={styles.error} role="alert">{error}</p> : null}
-          <button className={styles.primary} disabled={busy}>{busy ? "Raising…" : "Raise for approval"}</button>
-        </>
-      )}
+        </label>
+      ) : loadingPeople ? <p className={styles.hint}>Loading people…</p> : null}
+      <div className={styles.toggle} role="group" aria-label="Hold type">
+        <button type="button" aria-pressed={holdType === "amount"} onClick={() => setHoldType("amount")}>Amount</button>
+        <button type="button" aria-pressed={holdType === "days"} onClick={() => setHoldType("days")}>Days of salary</button>
+      </div>
+      {holdType === "amount"
+        ? <label>Amount to hold (₹)<input type="number" min="0.01" step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} /></label>
+        : <label>Days to hold<input type="number" min="0.5" max="31" step="0.5" value={days} onChange={(e) => setDays(e.target.value)} disabled={busy} /><span className={styles.hint}>Converted at that month&apos;s day rate in payroll.</span></label>}
+      <label>Reason<textarea rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} placeholder="What happened and why salary should be held" /></label>
+      {chosen ? <p className={styles.summary}>Hold <b>{holdType === "amount" ? (amount ? `₹${amount}` : "—") : `${days || "—"} day(s)`}</b> for <b>{chosen.displayName}</b></p> : null}
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      <button className={styles.primary} disabled={busy || !chosen}>{busy ? "Raising…" : "Send for approval"}</button>
     </form>
   );
 }

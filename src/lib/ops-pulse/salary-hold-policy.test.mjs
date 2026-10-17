@@ -26,6 +26,9 @@ test("cluster managers approve; AOMs only when no cluster manager is mapped", ()
   assert.deepEqual(holdApprovers({ clusterManagers: [p("c1", "CM")], areaOperationsManagers: [p("a1", "AOM")] }), { level: "cluster_manager", personIds: ["c1"], names: ["CM"] });
   assert.deepEqual(holdApprovers({ clusterManagers: [], areaOperationsManagers: [p("a1", "AOM")] }), { level: "aom", personIds: ["a1"], names: ["AOM"] });
   assert.deepEqual(holdApprovers(undefined), { level: "none", personIds: [], names: [] });
+  // A cluster manager who raised the hold never approves it; it moves to the AOM.
+  assert.deepEqual(holdApprovers({ clusterManagers: [p("c1", "CM")], areaOperationsManagers: [p("a1", "AOM")] }, new Set(["c1"])), { level: "aom", personIds: ["a1"], names: ["AOM"] });
+  assert.deepEqual(holdApprovers({ clusterManagers: [p("c1", "CM"), p("c2", "CM2")] }, new Set(["c1"])), { level: "cluster_manager", personIds: ["c2"], names: ["CM2"] });
 });
 
 test("raise validation matches the database", () => {

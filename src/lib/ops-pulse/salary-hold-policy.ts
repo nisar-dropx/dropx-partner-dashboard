@@ -83,10 +83,18 @@ export function approverActions(
   return DECISIONS_BY_STATUS[hold.status] ?? [];
 }
 
-/** Cluster managers decide; with none mapped, the station's Area Operations Managers do. */
-export function holdApprovers(entry: { clusterManagers?: { personId: string; name: string }[]; areaOperationsManagers?: { personId: string; name: string }[] } | undefined) {
-  const cms = entry?.clusterManagers ?? [];
-  const owners = cms.length ? cms : entry?.areaOperationsManagers ?? [];
+/**
+ * Cluster managers decide; with none mapped, the station's Area Operations Managers do. The person who
+ * made the request is never their own approver: when a cluster manager raises it, it goes to the AOM.
+ */
+export function holdApprovers(
+  entry: { clusterManagers?: { personId: string; name: string }[]; areaOperationsManagers?: { personId: string; name: string }[] } | undefined,
+  excludePersonIds: ReadonlySet<string> = new Set(),
+) {
+  const keep = (list: { personId: string; name: string }[] | undefined) => (list ?? []).filter((p) => !excludePersonIds.has(p.personId));
+  const cms = keep(entry?.clusterManagers);
+  const aoms = keep(entry?.areaOperationsManagers);
+  const owners = cms.length ? cms : aoms;
   return {
     level: cms.length ? ("cluster_manager" as const) : owners.length ? ("aom" as const) : ("none" as const),
     personIds: [...new Set(owners.map((p) => p.personId))],

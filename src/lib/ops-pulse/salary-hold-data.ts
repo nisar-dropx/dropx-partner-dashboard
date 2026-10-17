@@ -180,7 +180,12 @@ export type SalaryHoldRecord = {
   history: SalaryHoldEvent[];
 };
 
+export type HoldStation = { id: string; code: string };
+export type HoldTarget = { workerType: "employee" | "contractor"; workerId: string; displayName: string; code: string | null; designation: string | null; stationCode: string | null };
+
 export type SalaryHoldWorkspace = {
+  /** Stations the viewer may raise holds for (their Ops location scope). */
+  stations: HoldStation[];
   checkedAt: string;
   viewerId: string;
   designationTierCleared: boolean;
@@ -248,13 +253,21 @@ async function describeHolds(companyId: string, viewerId: string, viewerPeople: 
   const locationIds = [...new Set([...locations.values()].filter(Boolean) as string[])];
   const employeeIds = [...new Set(rows.filter((h) => h.worker_type === "employee").map((h) => h.worker_id))];
   const contractorIds = [...new Set(rows.filter((h) => h.worker_type === "contractor").map((h) => h.worker_id))];
-  const [hierarchy, employees, contractors, stations, events] = await Promise.all([
+  const requesterIds = [...new Set(rows.map((h) => h.requested_by_user_id).filter(Boolean) as string[])];
+  const [hierarchy, employees, contractors, stations, events, requesterLinks] = await Promise.all([
     loadPeopleOperationalHierarchy(companyId, locationIds),
     employeeIds.length ? supabaseAdmin!.from("employees").select("id,employee_code,full_name").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [] as NamedRow[], error: null }),
     contractorIds.length ? supabaseAdmin!.from("contractors").select("id,dropx_id,full_name").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [] as NamedRow[], error: null }),
     locationIds.length ? supabaseAdmin!.from("stations").select("id,station_code").eq("company_id", companyId).in("id", locationIds) : Promise.resolve({ data: [] as Array<{ id: string; station_code: string }>, error: null }),
     supabaseAdmin!.from("ops_salary_hold_events").select("hold_id,action,to_status,actor_name,note,created_at").eq("company_id", companyId).in("hold_id", rows.map((r) => r.id)).order("created_at"),
+    requesterIds.length ? supabaseAdmin!.from("hr_user_person_links").select("user_id,person_id").eq("company_id", companyId).eq("status", "active").in("user_id", requesterIds) : Promise.resolve({ data: [] as Array<{ user_id: string; person_id: string }>, error: null }),
   ]);
+  const requesterPeople = new Map<string, Set<string>>();
+  for (const link of (requesterLinks.data ?? []) as Array<{ user_id: string; person_id: string }>) {
+    const set = requesterPeople.get(link.user_id) ?? new Set<string>();
+    set.add(link.person_id);
+    requesterPeople.set(link.user_id, set);
+  }
   if (hierarchy.error) throw new Error("Cluster managers could not be resolved from People. Please retry.");
   if (employees.error || contractors.error || stations.error || events.error) throw new Error("Salary hold details could not be loaded.");
   const people = new Map<string, { name: string; code: string | null }>([
@@ -270,7 +283,7 @@ async function describeHolds(companyId: string, viewerId: string, viewerPeople: 
   }
   return rows.map((h) => {
     const location = locations.get(h.id) ?? null;
-    const approvers = holdApprovers(location ? hierarchy.byLocation.get(location) : undefined);
+    const approvers = holdApprovers(location ? hierarchy.byLocation.get(location) : undefined, requesterPeople.get(h.requested_by_user_id ?? "") ?? new Set());
     const isApprover = approvers.personIds.some((id) => viewerPeople.has(id));
     const person = people.get(`${h.worker_type}:${h.worker_id}`);
     const mine = h.requested_by_user_id === viewerId;
@@ -371,6 +384,7 @@ export async function loadSalaryHoldWorkspace(auth: AuthorizationContext): Promi
   const approvals = described.filter((h) => openIds.has(h.id) && h.actions.some((a) => decisions.has(a)));
   const approvalIds = new Set(approvals.map((h) => h.id));
   return {
+    stations: designationTierCleared ? await loadHoldStations(auth) : [],
     checkedAt,
     viewerId: auth.userId,
     designationTierCleared,
@@ -379,4 +393,56 @@ export async function loadSalaryHoldWorkspace(auth: AuthorizationContext): Promi
     approvals,
     decided: described.filter((h) => decidedIds.has(h.id) && !approvalIds.has(h.id)),
   };
+}
+
+/** The viewer's Ops stations: everything for all-location access, else their location scope. */
+export async function loadHoldStations(auth: AuthorizationContext): Promise<HoldStation[]> {
+  if (!supabaseAdmin) return [];
+  const companyId = requireCompanyId(auth);
+  let q = supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).order("station_code").limit(1000);
+  if (!auth.hasAllLocationAccess) q = q.in("id", auth.locationScopeIds.length ? auth.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
+  const result = await q;
+  if (result.error) throw new Error("Your stations could not be loaded.");
+  return (result.data ?? []).map((r) => ({ id: r.id as string, code: r.station_code as string }));
+}
+
+/**
+ * Active People (employees and contractors) at one station the viewer may act for. Loaded only when a
+ * station is picked, so the page never reads the whole company.
+ */
+export async function loadStationHoldTargets(auth: AuthorizationContext, stationId: string): Promise<HoldTarget[]> {
+  if (!supabaseAdmin) throw new Error("Salary hold service unavailable.");
+  if (!/^[0-9a-f-]{36}$/i.test(stationId)) throw new Error("Choose a station.");
+  if (!auth.hasAllLocationAccess && !auth.locationScopeIds.includes(stationId)) throw new Error("That station is outside your access.");
+  const companyId = requireCompanyId(auth);
+  const [station, employees, contractors] = await Promise.all([
+    supabaseAdmin.from("stations").select("station_code").eq("company_id", companyId).eq("id", stationId).maybeSingle(),
+    supabaseAdmin.from("employees").select("id,employee_code,full_name,people_lifecycle_status,designations(name)").eq("company_id", companyId).eq("location_id", stationId).eq("is_active", true).order("full_name").limit(500),
+    supabaseAdmin.from("contractors").select("id,dropx_id,full_name,designation,people_lifecycle_status").eq("company_id", companyId).eq("location_id", stationId).eq("is_active", true).order("full_name").limit(500),
+  ]);
+  if (station.error || !station.data) throw new Error("Station not found.");
+  if (employees.error || contractors.error) throw new Error("Station people could not be loaded.");
+  const leaving = new Set(["offboarded", "exited", "closed"]);
+  const code = station.data.station_code as string;
+  const rel = <T,>(v: T | T[] | null | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
+  return [
+    ...((employees.data ?? []) as Array<{ id: string; employee_code: string | null; full_name: string | null; people_lifecycle_status: string | null; designations: { name: string } | { name: string }[] | null }>)
+      .filter((e) => !leaving.has(String(e.people_lifecycle_status ?? "")))
+      .map((e) => ({ workerType: "employee" as const, workerId: e.id, displayName: e.full_name ?? "Unnamed", code: e.employee_code, designation: rel(e.designations)?.name ?? null, stationCode: code })),
+    ...((contractors.data ?? []) as Array<{ id: string; dropx_id: string | null; full_name: string | null; designation: string | null; people_lifecycle_status: string | null }>)
+      .filter((c) => !leaving.has(String(c.people_lifecycle_status ?? "")))
+      .map((c) => ({ workerType: "contractor" as const, workerId: c.id, displayName: c.full_name ?? "Unnamed", code: c.dropx_id, designation: c.designation, stationCode: code })),
+  ].sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+/** Server check before raising: the person is a direct report, or active at one of the viewer's stations. */
+export async function holdTargetAllowed(auth: AuthorizationContext, workerType: "employee" | "contractor", workerId: string) {
+  const companyId = requireCompanyId(auth);
+  const { reports } = await loadDirectReportsForSalaryHold(companyId, auth.userId);
+  const direct = reports.find((r) => r.workerType === workerType && r.workerId === workerId);
+  if (direct) return { allowed: true, name: direct.displayName };
+  const row = await supabaseAdmin!.from(workerType === "employee" ? "employees" : "contractors").select("full_name,location_id,is_active").eq("company_id", companyId).eq("id", workerId).maybeSingle();
+  if (row.error || !row.data || row.data.is_active !== true || !row.data.location_id) return { allowed: false, name: "" };
+  const inScope = auth.hasAllLocationAccess || auth.locationScopeIds.includes(row.data.location_id as string);
+  return { allowed: inScope, name: (row.data.full_name as string | null) ?? "this person" };
 }

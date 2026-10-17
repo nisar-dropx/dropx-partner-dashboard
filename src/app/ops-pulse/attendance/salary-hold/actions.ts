@@ -5,7 +5,7 @@ import { isStationFloorRosterDesignation } from "@/lib/approval-designation-labe
 import { requirePagePermissionOrThrow } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadPeopleDesignations } from "@/lib/people-designation";
-import { loadDirectReportsForSalaryHold, loadHoldForViewer, workerLocation } from "@/lib/ops-pulse/salary-hold-data";
+import { holdTargetAllowed, loadHoldForViewer, workerLocation } from "@/lib/ops-pulse/salary-hold-data";
 import { ACTION_COPY, noteError, validateRaise, type SalaryHoldAction } from "@/lib/ops-pulse/salary-hold-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -39,8 +39,8 @@ const dbMessage = (error: { code?: string; message: string }, fallback: string) 
   : fallback;
 
 /**
- * Raises a salary hold on one of the signed-in manager's current direct reports (re-resolved here, not
- * trusted from the form). It waits for the cluster manager of the person's station; payroll never sees
+ * Raises a salary hold on a direct report or an active person at one of the signed-in manager's stations
+ * (re-checked here, not trusted from the form). It waits for the cluster manager of the person's station; payroll never sees
  * it until it is approved.
  */
 export async function placeSalaryHold(formData: FormData): Promise<ActionResult> {
@@ -69,10 +69,9 @@ export async function placeSalaryHold(formData: FormData): Promise<ActionResult>
     const companyId = requireCompanyId(auth);
     await assertDesignationTierCleared(companyId, auth.userId);
 
-    const { reports, error: reportsError } = await loadDirectReportsForSalaryHold(companyId, auth.userId);
-    if (reportsError) return { ok: false, message: "Your reporting team could not be resolved. Please contact HR." };
-    const target = reports.find((r) => r.workerType === workerType && r.workerId === workerId);
-    if (!target) return { ok: false, message: "That worker is not currently one of your direct reports." };
+    // A direct report, or an active person at one of the viewer's stations; re-checked here, never trusted from the form.
+    const target = await holdTargetAllowed(auth, workerType, workerId);
+    if (!target.allowed) return { ok: false, message: "That person is not your direct report or an active member of your stations." };
 
     const result = await db().rpc("ops_salary_hold_raise", {
       p_company: companyId,
@@ -89,7 +88,7 @@ export async function placeSalaryHold(formData: FormData): Promise<ActionResult>
     if (result.error) return { ok: false, message: dbMessage(result.error, "The salary hold could not be saved.") };
 
     revalidatePath("/attendance/salary-hold");
-    return { ok: true, message: `Salary hold raised for ${target.displayName}. It waits for the cluster manager's approval.` };
+    return { ok: true, message: `Salary hold raised for ${target.name}. It waits for the cluster manager's approval.` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The salary hold could not be placed." };
   }

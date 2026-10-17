@@ -52,3 +52,11 @@
 .timeline time { color: #8a97a8; margin-left: 6px; }
 .empty { text-align: center; color: #72839a; font-size: 13px; padding: 28px; background: white; border: 1px dashed #dbe3ed; border-radius: 14px; }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.people { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; border: 1px solid #e8edf3; border-radius: 10px; padding: 4px; margin-top: 4px; }
+.person, .personOn { display: grid; gap: 1px; text-align: left; border: 1px solid transparent; background: none; border-radius: 8px; padding: 6px 9px; font: inherit; cursor: pointer; }
+.person:hover { background: #f6f8fb; }
+.personOn { background: #fff0e8; border-color: #f3b9a4; }
+.person b, .personOn b { font-size: 13px; font-weight: 650; color: #1c2940; }
+.person small, .personOn small { font-size: 11px; color: #72839a; font-weight: 400; }
+.toggle button:disabled { opacity: .45; cursor: not-allowed; }
+.summary { margin: 0; font-size: 13px; background: #f6f8fb; border-radius: 9px; padding: 8px 11px; }
