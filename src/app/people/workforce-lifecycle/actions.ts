@@ -99,7 +99,9 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
         onboarding_review_remarks: remarks,
         profile_return_remarks: action === "return" ? remarks : null,
         profile_returned_at: action === "return" ? reviewedAt : null,
-        is_active: false,
+        // Rejection ends access; Return only asks for corrections and must keep
+        // the profile's current operational status unchanged.
+        ...(action === "reject" ? { is_active: false } : {}),
         updated_at: reviewedAt
       }).eq("company_id", companyId).eq("id", id);
       if (update.error) throw new Error(update.error.message);

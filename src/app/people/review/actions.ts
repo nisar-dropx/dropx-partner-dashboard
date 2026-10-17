@@ -77,10 +77,12 @@ export async function reviewPeopleProfile(formData: FormData) {
     const approvesWorkforceIdentityException = action === "approve" &&
       profileType === "workforce" &&
       Boolean((current.data as { identity_exception_required?: unknown }).identity_exception_required);
+    // Returning a registration requests corrections; it is not an operational
+    // deactivation. Preserve the profile's existing is_active value.
     const workforceLifecycleUpdate = profileType === "workforce"
       ? action === "approve"
         ? { lifecycle_status: "active", is_active: true }
-        : { lifecycle_status: "onboarding", is_active: false }
+        : { lifecycle_status: "onboarding" }
       : {};
     const update = action === "approve"
       ? {
