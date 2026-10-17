@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { CodCashPosition } from "@/components/cod-cash-position";
+import { UrlPager, readPaging } from "@/components/url-pager";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { requirePagePermission } from "@/lib/authorization";
@@ -46,9 +47,10 @@ type SearchParams = {
   to?: string;
   page?: string;
   spage?: string;
+  size?: string;
+  ssize?: string;
 };
 
-const PAGE_SIZE = 50;
 const shiftDays = (ymd: string, days: number) => {
   const d = new Date(`${ymd}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -286,8 +288,9 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
   const toDate = validYmd(searchParams?.to) || yesterday;
   const requestedFrom = validYmd(searchParams?.from) || shiftDays(toDate, -13);
   const fromDate = requestedFrom > toDate ? toDate : requestedFrom < shiftDays(toDate, -91) ? shiftDays(toDate, -91) : requestedFrom;
-  const page = Math.max(1, Number.parseInt(searchParams?.page ?? "1", 10) || 1);
-  const spage = Math.max(1, Number.parseInt(searchParams?.spage ?? "1", 10) || 1);
+  const { page, size: PAGE_SIZE } = readPaging(searchParams?.page, searchParams?.size, 50);
+  const { page: spage, size: SLIP_SIZE } = readPaging(searchParams?.spage, searchParams?.ssize, 50);
+  const pagerParams = { ...(searchParams ?? {}) } as Record<string, string | undefined>;
   const locationFilter = searchParams?.location ?? "";
   const statusFilter = searchParams?.status ?? "";
 
@@ -619,7 +622,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                   </tr>
                 </thead>
                 <tbody>
-                  {stationDayRows.length ? stationDayRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => (
+                  {stationDayRows.length ? stationDayRows.slice((Math.min(page, Math.max(1, Math.ceil(stationDayRows.length / PAGE_SIZE))) - 1) * PAGE_SIZE).slice(0, PAGE_SIZE).map((row) => (
                     <tr key={row.key}>
                       <td>{formatDate(row.date)}</td>
                       <td><strong>{row.stationLabel}</strong></td>
@@ -645,7 +648,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                 </tbody>
               </table>
             </div>
-            <CodPager total={stationDayRows.length} page={page} param="page" searchParams={searchParams} />
+            <UrlPager basePath="/ops-pulse/cod/reports" params={pagerParams} total={stationDayRows.length} page={page} size={PAGE_SIZE} label="station-days" />
           </section>
 
           <section className="panel">
@@ -671,7 +674,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                   </tr>
                 </thead>
                 <tbody>
-                  {submissionsResult.rows.length ? submissionsResult.rows.slice((spage - 1) * PAGE_SIZE, spage * PAGE_SIZE).map((row) => {
+                  {submissionsResult.rows.length ? submissionsResult.rows.slice((Math.min(spage, Math.max(1, Math.ceil(submissionsResult.rows.length / SLIP_SIZE))) - 1) * SLIP_SIZE).slice(0, SLIP_SIZE).map((row) => {
                     const station = firstRelation(row.stations);
                     const slips = depositAttachmentsFor(row);
                     return (
@@ -698,7 +701,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                 </tbody>
               </table>
             </div>
-            <CodPager total={submissionsResult.rows.length} page={spage} param="spage" searchParams={searchParams} />
+            <UrlPager basePath="/ops-pulse/cod/reports" params={pagerParams} total={submissionsResult.rows.length} page={spage} size={SLIP_SIZE} pageKey="spage" sizeKey="ssize" label="slips" />
           </section>
         </>
       ) : null}
@@ -706,21 +709,3 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
   );
 }
 
-function CodPager({ total, page, param, searchParams }: { total: number; page: number; param: "page" | "spage"; searchParams?: SearchParams }) {
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (pages <= 1) return null;
-  const current = Math.min(page, pages);
-  const href = (n: number) => {
-    const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(searchParams ?? {})) if (typeof v === "string" && v) q.set(k, v);
-    q.set(param, String(n));
-    return `/ops-pulse/cod/reports?${q}`;
-  };
-  return (
-    <nav className="panel-body" aria-label="Pages" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "flex-end", fontSize: 13 }}>
-      {current > 1 ? <Link href={href(current - 1)} prefetch={false}>← Previous</Link> : <span className="subtle">← Previous</span>}
-      <span className="subtle">Page {current} of {pages} · {total} rows</span>
-      {current < pages ? <Link href={href(current + 1)} prefetch={false}>Next →</Link> : <span className="subtle">Next →</span>}
-    </nav>
-  );
-}

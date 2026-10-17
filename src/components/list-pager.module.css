@@ -1,0 +1,12 @@
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 14px; font-size: 12px; color: #51627c; border-top: 1px solid #eef1f6; }
+.count { font-weight: 650; color: #24344d; margin-right: auto; }
+.size { display: inline-flex; align-items: center; gap: 6px; }
+.size label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.size select { border: 1px solid #dbe3ed; border-radius: 7px; padding: 4px 6px; font: inherit; background: #fff; width: auto !important; min-height: 0 !important; }
+.apply { border: 1px solid #dbe3ed; background: #fff; border-radius: 7px; padding: 4px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+.pages { display: inline-flex; gap: 3px; align-items: center; }
+.pages button, .pages a, .off { min-width: 30px; height: 30px; display: inline-grid; place-items: center; padding: 0 8px; border: 1px solid #e1e6ef; border-radius: 8px; background: #fff; color: #24344d; font: inherit; font-size: 12px; font-weight: 650; text-decoration: none; cursor: pointer; }
+.pages button:hover:not(:disabled), .pages a:hover { border-color: #f3b9a4; color: #c8461c; }
+.pages button:disabled, .off { opacity: .4; cursor: default; }
+.on { background: #ee4b22 !important; border-color: #ee4b22 !important; color: #fff !important; }
+.gap { padding: 0 4px; color: #8a97a8; }
