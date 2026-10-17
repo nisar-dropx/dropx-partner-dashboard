@@ -8,7 +8,7 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canonicalizeProviderFirstMembers, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
+import { canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
@@ -61,10 +61,11 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const allStations = stationsResult.data ?? [];
   const stations = allStations.filter((station) => allowed(station.id));
   const stationByCode = new Map(stations.map((station) => [String(station.station_code ?? "").trim().toUpperCase(), station]));
+  const stationById = new Map(stations.map((station) => [String(station.id), station]));
   const stationCodeById = new Map(allStations.map((station) => [String(station.id), String(station.station_code ?? "").trim()]));
   const allMappingHistory = (mappingsResult.data ?? []) as Mapping[];
   const mappingHistory = allMappingHistory.filter((mapping) => allowed(mapping.station_id));
-  const hasCurrentOrScheduledPeriod = (mapping: Mapping) => (mapping.status === "active" && !mapping.effective_to) || (mapping.status === "closed" && Boolean(mapping.effective_to) && mapping.effective_to! >= today);
+  const hasCurrentOrScheduledPeriod = (mapping: Mapping) => providerFirstMappingIsCurrentOrScheduled({ status: mapping.status, effectiveTo: mapping.effective_to }, today);
   const activeMappings = mappingHistory.filter(hasCurrentOrScheduledPeriod);
   const restrictedWorkerIds = new Set(allMappingHistory.filter(mapping => hasCurrentOrScheduledPeriod(mapping) && !allowed(mapping.station_id)).map(mapping => mapping.workforce_id));
   const topology = stations.map(station => ({ ...station, modelCode: (Array.isArray(station.location_models) ? station.location_models[0] : station.location_models)?.code ?? "" }));
@@ -172,18 +173,34 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     outboundMonths: provider.outbound_months ?? [],
     workDate: String(provider.work_date ?? "")
   })), mappedSourceMemberKeys);
-  const latestMembers = new Map<string, { id: string; name: string; stationId: string; stationLabel: string; providerId: string; outboundMonths: string[] }>();
+  const sourceLocationMembers: Array<{ id: string; name: string; stationId: string; stationLabel: string; providerId: string; outboundMonths: string[] }> = [];
   for (const provider of providerMembers) {
     const id = provider.providerMemberId;
     const station = stationByCode.get(provider.stationCode.toUpperCase());
-    const memberKey = station ? providerMemberKey(station.id, id) : "";
-    if (!id || !station || latestMembers.has(memberKey)) continue;
-    latestMembers.set(memberKey, { outboundMonths: provider.outboundMonths, id, name: provider.providerMemberName || "Unnamed provider member", stationId: station.id, stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code, providerId: station.provider_id ?? "" });
+    if (!id || !station) continue;
+    sourceLocationMembers.push({ outboundMonths: provider.outboundMonths, id, name: provider.providerMemberName || "Unnamed provider member", stationId: station.id, stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code, providerId: station.provider_id ?? "" });
   }
-  const mappings: ProviderFirstMappingRow[] = Array.from(latestMembers.values()).map((member) => {
-    const link = mappingByMember.get(providerMemberKey(member.stationId, member.id));
+  const latestMembers = new Map(mergeProviderFirstLocationMembers(
+    sourceLocationMembers,
+    activeMappings.flatMap((mapping) => {
+      const station = mapping.station_id ? stationById.get(String(mapping.station_id)) : null;
+      if (!station || !mapping.provider_member_id) return [];
+      const worker = mapping.workforce_id ? workforceById.get(mapping.workforce_id) : null;
+      return [{
+        id: mapping.provider_member_id,
+        name: String(worker?.full_name ?? ""),
+        stationId: String(station.id),
+        stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code,
+        providerId: String(mapping.provider_id ?? station.provider_id ?? "")
+      }];
+    })
+  ).map((member) => [providerMemberKey(member.stationId, member.id), member]));
+  const mappings: ProviderFirstMappingRow[] = providerFirstLocationMappingEntries(
+    Array.from(latestMembers.values()),
+    mappingByMember,
+    historyByMember
+  ).map(({ member, mapping: link, history: exactMemberHistory }) => {
     const worker = link?.workforce_id ? workforceById.get(link.workforce_id) : null;
-    const exactMemberHistory = historyByMember.get(providerMemberKey(member.stationId, member.id)) ?? [];
     // A provider member can move between locations. History is identity-wide
     // evidence for the operator, but the current row remains location-specific:
     // never turn a prior-location mapping into a mapping at this location.

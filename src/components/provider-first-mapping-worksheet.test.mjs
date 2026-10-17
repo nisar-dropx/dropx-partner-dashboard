@@ -411,7 +411,7 @@ test('current month uses IST at month and year boundaries and is passed by the s
   const page = readFileSync(new URL('../app/provider-id-mapping/page.tsx', import.meta.url), 'utf8');
   assert.match(page, /const today = dashboardDateInputValue\(\)/);
   assert.equal(page.match(/dashboardDateInputValue\(\)/g)?.length, 1, 'The request should compute the India business date once');
-  assert.match(page, /mapping\.effective_to! >= today/);
+  assert.match(page, /providerFirstMappingIsCurrentOrScheduled\([^;]+today\)/);
   assert.match(page, /providerMappingEntryFilters\(searchParams, today\)/);
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.match(pkg.scripts['test:provider-mapping-period'], /provider-first-mapping-worksheet\.test\.mjs/);
@@ -452,4 +452,26 @@ test('multi-month CPS entry can show the matching ID across outbound months',()=
  const ui=worksheet({mappings:[{...row,outboundMonths:['2026-08']}],initialOutboundMonth:'',initialMappingStatus:'all',initialQuery:row.providerMemberId});
  assert.deepEqual(ui.filter('Outbound month').selected,[]);
  assert.equal(ui.cards().length,1);
+});
+
+test('one provider member mapped at two active locations renders two independent worksheet rows',()=>{
+ const monthly={...method,id:'fixed-monthly',code:'FIXED_MONTHLY',name:'Fixed monthly',components:[{code:'FIXED_PAYMENT_PER_MONTH',label:'Fixed payment per month',type:'amount'}]};
+ const packet={...method,id:'per-packet',code:'PER_PACKET',name:'Per packet',components:[{code:'DELIVERY',label:'Delivery',type:'amount'}]};
+ const identity={providerMemberId:'2000032289280',providerMemberName:'MODUGULA RAMPRASAD',providerId:'amazon',workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName,productionThresholdConfig:null,productionThresholdMinimumUnits:'',effectiveTo:'',outboundMonths:[]};
+ const completeHistory=[{id:'history-xapi',locationLabel:'XAPI'},{id:'history-gntf',locationLabel:'GNTF'}];
+ const xapi={...identity,stationId:'xapi',stationLabel:'XAPI - Bhakarapeta',mappingId:'mapping-xapi',paymentMethodId:monthly.id,paymentValues:{FIXED_PAYMENT_PER_MONTH:'13000'},effectiveFrom:'2026-10-01',history:completeHistory};
+ const gntf={...identity,stationId:'gntf',stationLabel:'GNTF',mappingId:'mapping-gntf',paymentMethodId:packet.id,paymentValues:{DELIVERY:'17'},effectiveFrom:'2025-02-21',history:completeHistory};
+ const mappedWorker={...worker,providerId:'amazon',mappedProviderMemberId:identity.providerMemberId};
+ const ui=worksheet({mappings:[xapi,gntf],workers:[mappedWorker],paymentMethods:[monthly,packet],initialOutboundMonth:'',initialMappingStatus:'all',initialQuery:identity.providerMemberId});
+
+ assert.equal(ui.cards().length,2);
+ assert.match(JSON.stringify(ui.cards()),/XAPI - Bhakarapeta/);
+ assert.match(JSON.stringify(ui.cards()),/GNTF/);
+ assert.equal(ui.select('provider_first_worker_0').value,worker.id);
+ assert.equal(ui.select('provider_first_worker_1').value,worker.id);
+ assert.equal(ui.select('provider_first_payment_method_0').value,monthly.id);
+ assert.equal(ui.select('provider_first_payment_method_1').value,packet.id);
+ assert.deepEqual(ui.all(node=>node.type==='input'&&node.props.type==='number').map(node=>node.props.value),['13000','17']);
+ assert.deepEqual(ui.all(node=>node.type==='input'&&node.props.type==='date'&&node.props.required).map(node=>node.props.value),['2026-10-01','2025-02-21']);
+ assert.deepEqual(ui.all(node=>node.type==='History').map(node=>node.props.entries.map(entry=>entry.id)),[['history-xapi','history-gntf'],['history-xapi','history-gntf']]);
 });
