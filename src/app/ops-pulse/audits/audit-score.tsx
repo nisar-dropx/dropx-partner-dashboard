@@ -4,6 +4,7 @@ import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
 import { useEffect, useState } from "react";
 import type {
   AuditAssessment,
+  AuditResponsibilityIssue,
   AuditScoreSnapshot,
 } from "@/lib/ops-pulse/station-audit-scoring";
 import type {
@@ -48,8 +49,10 @@ export function ResponsibilityAssessment({
   options,
   evidence,
   labels = {},
+  issue,
 }: {
   labels?: Record<string, string>;
+  issue?: AuditResponsibilityIssue | null;
   keys: string[];
   initial?: Record<string, AuditAssessment>;
   options: AuditOption[];
@@ -110,7 +113,10 @@ export function ResponsibilityAssessment({
     }));
   const payload = Object.fromEntries(
     keys.map((key) => {
-      const { entry } = resolveAssessment(key, values[key] || emptyAssessment());
+      const { entry } = resolveAssessment(
+        key,
+        values[key] || emptyAssessment(),
+      );
       return [key, entry];
     }),
   );
@@ -164,6 +170,7 @@ export function ResponsibilityAssessment({
                 <label className={styles.inputLabel}>
                   Station responsibility
                   <select
+                    name={`assessment_code_${key}`}
                     value={selected?.code || "pending"}
                     onChange={(e) => update(key, "code", e.target.value)}
                   >
@@ -178,6 +185,11 @@ export function ResponsibilityAssessment({
                   Reason / reference
                   <input
                     name={`assessment_reason_${key}`}
+                    aria-label={`Responsibility reason for ${key === "cash" ? "COD difference" : labels[key] || key}`}
+                    aria-invalid={
+                      issue?.fieldName === `assessment_reason_${key}` ||
+                      undefined
+                    }
                     value={v.reason}
                     onChange={(e) => update(key, "reason", e.target.value)}
                     required={needsReason}
@@ -189,11 +201,17 @@ export function ResponsibilityAssessment({
                   ) : null}
                 </label>
               </div>
+              {issue?.key === key && (
+                <p role="alert" style={{ color: "#b91c1c", marginTop: 8 }}>
+                  {issue.message}
+                </p>
+              )}
               {excluded && (
                 <div className={styles.twoCol}>
                   <label className={styles.inputLabel}>
                     Verified proof already attached
                     <select
+                      name={`assessment_evidenceId_${key}`}
                       value={v.evidenceId}
                       onChange={(e) =>
                         update(key, "evidenceId", e.target.value)

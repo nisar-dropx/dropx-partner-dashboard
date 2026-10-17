@@ -15,7 +15,12 @@ type Item = {
   label: string;
   score_weight?: number;
   score_source?: string;
-  response_options: { value: string; label: string; score?: number | null }[];
+  response_options: {
+    value: string;
+    label: string;
+    score?: number | null;
+    is_compliant?: boolean | null;
+  }[];
 };
 export type AuditScoreSnapshot = {
   inputs?: AuditScoreInput;
@@ -70,40 +75,161 @@ export function auditAssessmentSubject(
   }
   return `tracking ID ${key}`;
 }
+export type AuditResponsibilityIssue = {
+  key: string;
+  fieldName: string;
+  message: string;
+};
+export class AuditResponsibilityError extends Error {
+  issue: AuditResponsibilityIssue;
+  constructor(issue: AuditResponsibilityIssue) {
+    super(issue.message);
+    this.issue = issue;
+  }
+}
+
+/** Match the same scored checklist outcomes in the editor and the scorer. */
+export function auditCheckHasScoreDifference(item: Item, response: string) {
+  const score = item.response_options.find((o) => o.value === response)?.score;
+  return (
+    item.score_source !== "cash_match" &&
+    item.score_source !== "shipment_match" &&
+    score != null &&
+    score < 100
+  );
+}
+
+/** Keep a retained assessment editable after a better, but still scored, outcome. */
+export function auditCheckNeedsResponsibility(
+  item: Item,
+  response: string,
+  hasAssessment = false,
+) {
+  return (
+    auditCheckHasScoreDifference(item, response) &&
+    (hasAssessment ||
+      item.response_options.find((o) => o.value === response)?.is_compliant ===
+        false)
+  );
+}
+
+export function auditResponsibilityIssue(
+  key: string,
+  value: AuditAssessment,
+  options: Option[],
+  evidenceIds: string[],
+  label: string,
+): AuditResponsibilityIssue | null {
+  const issue = (field: keyof AuditAssessment, message: string) => ({
+    key,
+    fieldName: `assessment_${field}_${key}`,
+    message,
+  });
+  const option = options.find(
+    (o) => o.code === value.code && "exclude_from_score" in o.metadata,
+  );
+  if (!option)
+    return issue(
+      "code",
+      `Choose a configured responsibility outcome for ${label}.`,
+    );
+  const scope =
+    key === "cash" ? "cash" : key.startsWith("check:") ? "check" : "shipment";
+  if (
+    Array.isArray(option.metadata.applies_to) &&
+    !option.metadata.applies_to.includes(scope)
+  )
+    return issue(
+      "code",
+      `This responsibility option does not apply to ${label}.`,
+    );
+  if (option.metadata.pending !== true && !value.reason.trim())
+    return issue(
+      "reason",
+      `Add the responsibility reason for ${label} in Responsibility & score exclusions.`,
+    );
+  if (
+    option.metadata.exclude_from_score === true &&
+    !evidenceIds.includes(value.evidenceId)
+  )
+    return issue(
+      "evidenceId",
+      `Select saved proof for the exclusion: ${label}.`,
+    );
+  return null;
+}
+
+/** Runs before uploads; saved proof is still independently checked by the server. */
+export function auditResponsibilityFormIssue(
+  data: FormData,
+  keys: string[],
+  options: Option[],
+  evidenceIds: string[],
+  labels: Record<string, string>,
+) {
+  let assessments: Record<string, AuditAssessment>;
+  try {
+    assessments = JSON.parse(String(data.get("score_assessments") || "{}"));
+    if (
+      !assessments ||
+      typeof assessments !== "object" ||
+      Array.isArray(assessments)
+    )
+      throw new Error("Invalid responsibility assessment.");
+  } catch {
+    return {
+      key: "",
+      fieldName: "",
+      message: "Invalid responsibility assessment.",
+    };
+  }
+  for (const key of keys) {
+    // An untouched checklist outcome keeps its configured score, as on the server.
+    if (key.startsWith("check:") && !assessments[key]) continue;
+    const value = assessments[key] || {
+      code: "pending",
+      reason: "",
+      evidenceId: "",
+    };
+    const proof = data.get(`assessment_proof_${key}`);
+    const hasNewProof = proof instanceof File && proof.size > 0;
+    const issue = auditResponsibilityIssue(
+      key,
+      hasNewProof ? { ...value, evidenceId: "new-proof" } : value,
+      options,
+      hasNewProof ? [...evidenceIds, "new-proof"] : evidenceIds,
+      labels[key] || auditAssessmentSubject(key),
+    );
+    if (issue) return issue;
+  }
+  return null;
+}
+
 export function calculateAuditScore(
   input: AuditScoreInput,
 ): AuditScoreSnapshot {
   const assessments: AuditScoreSnapshot["assessments"] = {};
   let provisional = false;
   const classify = (key: string) => {
-    const subject = auditAssessmentSubject(key, input.items);
     const value = input.assessments[key] || {
       code: "pending",
       reason: "",
       evidenceId: "",
     };
+    const label = auditAssessmentSubject(key, input.items);
+    const issue = auditResponsibilityIssue(
+      key,
+      value,
+      input.options,
+      input.evidenceIds,
+      label,
+    );
+    if (issue) throw new AuditResponsibilityError(issue);
     const option = input.options.find(
       (o) => o.code === value.code && "exclude_from_score" in o.metadata,
-    );
-    if (!option)
-      throw new Error(
-        `Choose a configured responsibility outcome for ${subject}.`,
-      );
-    const scope =
-      key === "cash" ? "cash" : key.startsWith("check:") ? "check" : "shipment";
-    if (
-      Array.isArray(option.metadata.applies_to) &&
-      !option.metadata.applies_to.includes(scope)
-    )
-      throw new Error(
-        `This responsibility option does not apply to ${subject}.`,
-      );
+    )!;
     const pending = option.metadata.pending === true;
     const excluded = option.metadata.exclude_from_score === true;
-    if (!pending && !value.reason.trim())
-      throw new Error(`Add the responsibility reason for ${subject}.`);
-    if (excluded && !input.evidenceIds.includes(value.evidenceId))
-      throw new Error(`Select saved proof for the exclusion: ${subject}.`);
     assessments[key] = { ...value, label: option.label, excluded, pending };
     provisional ||= pending;
     return { excluded: excluded || pending, pending };
@@ -168,11 +294,7 @@ export function calculateAuditScore(
         } else if (!response || (score == null && response !== "na"))
           provisional = true;
         if (
-          item.score_source !== "cash_match" &&
-          item.score_source !== "shipment_match" &&
-          response &&
-          score != null &&
-          score < 100 &&
+          auditCheckHasScoreDifference(item, response) &&
           input.assessments[`check:${item.id}`]
         ) {
           const assessment = classify(`check:${item.id}`);

@@ -4,12 +4,16 @@ import {
   isAuditEvidenceFolder,
   isAuditDriveLink,
 } from "@/lib/ops-pulse/station-audit-evidence";
-import { auditAssessmentSubject } from "@/lib/ops-pulse/station-audit-scoring";
 import {
   AuditScore,
   ResponsibilityAssessment,
   ScoreReview,
 } from "./audit-score";
+import {
+  auditCheckNeedsResponsibility,
+  auditResponsibilityFormIssue,
+  type AuditResponsibilityIssue,
+} from "@/lib/ops-pulse/station-audit-scoring";
 import { AuditDownloads } from "./audit-downloads";
 import {
   ShipmentResponses,
@@ -35,10 +39,7 @@ import {
   auditMonthRange,
   auditResponseLabel,
 } from "@/lib/ops-pulse/station-audit-planning";
-import {
-  ShipmentInspection,
-  EmployeePicker,
-} from "./shipment-inspection";
+import { ShipmentInspection, EmployeePicker } from "./shipment-inspection";
 import {
   auditKeyCustodianPeople,
   type AuditEmployee,
@@ -75,7 +76,18 @@ import {
 } from "@/lib/ops-pulse/station-audit-planning";
 import { StationSnapshot } from "./audit-station-snapshot";
 import styles from "./audit-workspace.module.css";
-type Result = { ok: boolean; message: string };
+type Result = { ok: boolean; message: string; fieldName?: string };
+function focusAuditField(form: HTMLFormElement, name: string) {
+  const field = form.elements.namedItem(name);
+  if (!(field instanceof HTMLElement)) return;
+  let parent = field.parentElement;
+  while (parent && parent !== form) {
+    if (parent instanceof HTMLDetailsElement) parent.open = true;
+    parent = parent.parentElement;
+  }
+  field.scrollIntoView({ block: "center" });
+  field.focus();
+}
 const value = (input: unknown) => String(input ?? "");
 const formatDateTime = (input: string) =>
   new Intl.DateTimeFormat("en-IN", {
@@ -97,8 +109,9 @@ const selectedProofCount = (form: HTMLFormElement) => {
   for (const element of Array.from(form.elements)) {
     if (!(element instanceof HTMLInputElement) || element.type !== "file")
       continue;
-    count += Array.from(element.files || []).filter((file) => file.size > 0)
-      .length;
+    count += Array.from(element.files || []).filter(
+      (file) => file.size > 0,
+    ).length;
   }
   return count;
 };
@@ -184,11 +197,26 @@ export function AuditDetail({
   const [differenceKeys, setDifferenceKeys] = useState<string[]>([]);
   const [checkDifferenceKeys, setCheckDifferenceKeys] = useState<string[]>(() =>
     workspace.responses
-      .filter((r) => r.audit_id === audit.id && r.is_compliant === false)
+      .filter((r) => {
+        const item = workspace.checklistItems.find(
+          (i) => i.id === r.checklist_item_id,
+        );
+        return (
+          r.audit_id === audit.id &&
+          item &&
+          auditCheckNeedsResponsibility(
+            item,
+            responseValue(r.response_value),
+            Boolean(audit.score_snapshot?.assessments[`check:${item.id}`]),
+          )
+        );
+      })
       .map((r) => `check:${r.checklist_item_id}`),
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
+  const [responsibilityIssue, setResponsibilityIssue] =
+    useState<AuditResponsibilityIssue | null>(null);
   const [draftEvidence, setDraftEvidence] = useState<
     StationAuditWorkspace["evidence"]
   >([]);
@@ -281,9 +309,7 @@ export function AuditDetail({
       else {
         serverDirty.current = true;
         if (announce)
-          setDraftNotice(
-            `Draft saved on this device only. ${result.message}`,
-          );
+          setDraftNotice(`Draft saved on this device only. ${result.message}`);
       }
     } catch {
       serverDirty.current = true;
@@ -328,15 +354,13 @@ export function AuditDetail({
   const saveDraftWithFiles = async () => {
     const form = formRef.current;
     if (!form || submitting.current || !draftReady.current) return;
-    const inputs = (
-      Array.from(form.elements).filter(
-        (element) =>
-          element instanceof HTMLInputElement &&
-          element.type === "file" &&
-          draftFileFields(element.name) &&
-          (element.files?.length ?? 0) > 0,
-      ) as HTMLInputElement[]
-    );
+    const inputs = Array.from(form.elements).filter(
+      (element) =>
+        element instanceof HTMLInputElement &&
+        element.type === "file" &&
+        draftFileFields(element.name) &&
+        (element.files?.length ?? 0) > 0,
+    ) as HTMLInputElement[];
     if (!inputs.length) {
       saveDraft(true);
       return;
@@ -448,7 +472,8 @@ export function AuditDetail({
       if (serverTimer.current) window.clearTimeout(serverTimer.current);
       // Closing the audit sends any unsent draft so it is not left on this device only.
       const text = serverDirty.current ? readAuditDraftText(audit.id) : null;
-      if (text) void saveStationAuditDraft(audit.id, text).catch(() => undefined);
+      if (text)
+        void saveStationAuditDraft(audit.id, text).catch(() => undefined);
     },
     [audit.id],
   );
@@ -670,21 +695,29 @@ export function AuditDetail({
               )
                 return;
               if (draftTimer.current) window.clearTimeout(draftTimer.current);
-              draftTimer.current = window.setTimeout(() => saveDraft(false), 1500);
+              draftTimer.current = window.setTimeout(
+                () => saveDraft(false),
+                1500,
+              );
             }}
             onChange={(event) => {
+              setResponsibilityIssue(null);
               if (draftTimer.current) window.clearTimeout(draftTimer.current);
-              draftTimer.current = window.setTimeout(() => saveDraft(false), 1500);
+              draftTimer.current = window.setTimeout(
+                () => saveDraft(false),
+                1500,
+              );
               const target = event.target as HTMLInputElement;
               if (!target.name?.startsWith("check_")) return;
               const data = new FormData(event.currentTarget);
               setCheckDifferenceKeys(
                 items
-                  .filter(
-                    (i) =>
-                      i.response_options.find(
-                        (o) => o.value === data.get(`check_${i.id}`),
-                      )?.is_compliant === false,
+                  .filter((i) =>
+                    auditCheckNeedsResponsibility(
+                      i,
+                      value(data.get(`check_${i.id}`)),
+                      checkDifferenceKeys.includes(`check:${i.id}`),
+                    ),
                   )
                   .map((i) => `check:${i.id}`),
               );
@@ -734,107 +767,41 @@ export function AuditDetail({
                 submit.run(async () => ({ ok: false, message: block }));
                 return;
               }
-              if (type?.scoring_enabled) {
-                const assessmentKeys = [
-                  ...(variance ? ["cash"] : []),
-                  ...differenceKeys,
-                  ...checkDifferenceKeys,
-                ];
-                let assessments: Record<
-                  string,
-                  { code?: string; reason?: string; evidenceId?: string }
-                > = {};
-                try {
-                  assessments = JSON.parse(
-                    value(data.get("score_assessments")) || "{}",
-                  );
-                } catch {
-                  submitting.current = false;
-                  submit.run(async () => ({
-                    ok: false,
-                    message: "Invalid responsibility assessment.",
-                  }));
-                  return;
-                }
-                const responsibilityOptions = workspace.options.filter(
-                  (o) => o.option_group === "audit_responsibility",
-                );
-                for (const key of assessmentKeys) {
-                  const entry = assessments[key] || {
-                    code: "pending",
-                    reason: "",
-                    evidenceId: "",
-                  };
-                  const option = responsibilityOptions.find(
-                    (o) => o.code === (entry.code || "pending"),
-                  );
-                  const subject = auditAssessmentSubject(key, items);
-                  if (!option) {
-                    submitting.current = false;
-                    const field = form.querySelector(
-                      `[data-assessment-key="${CSS.escape(key)}"]`,
-                    );
-                    if (field instanceof HTMLElement) {
-                      field.scrollIntoView({ block: "center" });
-                    }
-                    submit.run(async () => ({
-                      ok: false,
-                      message: `Choose a configured responsibility outcome for ${subject}.`,
-                    }));
-                    return;
-                  }
-                  if (
-                    option.metadata.pending !== true &&
-                    !value(entry.reason).trim()
-                  ) {
-                    submitting.current = false;
-                    const reasonField = form.elements.namedItem(
-                      `assessment_reason_${key}`,
-                    );
-                    if (reasonField instanceof HTMLElement) {
-                      const details = reasonField.closest("details");
-                      if (details) details.open = true;
-                      reasonField.scrollIntoView({ block: "center" });
-                      reasonField.focus();
-                    } else {
-                      document
-                        .getElementById("audit-responsibility")
-                        ?.scrollIntoView({ block: "center" });
-                    }
-                    submit.run(async () => ({
-                      ok: false,
-                      message: `Add the responsibility reason for ${subject}.`,
-                    }));
-                    return;
-                  }
-                  if (
-                    option.metadata.exclude_from_score === true &&
-                    !value(entry.evidenceId).trim() &&
-                    !(
-                      form.elements.namedItem(
-                        `assessment_proof_${key}`,
-                      ) instanceof HTMLInputElement &&
-                      (
-                        form.elements.namedItem(
-                          `assessment_proof_${key}`,
-                        ) as HTMLInputElement
-                      ).files?.length
-                    )
-                  ) {
-                    submitting.current = false;
-                    const field = form.querySelector(
-                      `[data-assessment-key="${CSS.escape(key)}"]`,
-                    );
-                    if (field instanceof HTMLElement) {
-                      field.scrollIntoView({ block: "center" });
-                    }
-                    submit.run(async () => ({
-                      ok: false,
-                      message: `Select saved proof for the exclusion: ${subject}.`,
-                    }));
-                    return;
-                  }
-                }
+              const responsibilityIssue = type?.scoring_enabled
+                ? auditResponsibilityFormIssue(
+                    data,
+                    [
+                      ...(variance ? ["cash"] : []),
+                      ...differenceKeys,
+                      ...items
+                        .filter((i) =>
+                          auditCheckNeedsResponsibility(
+                            i,
+                            value(data.get(`check_${i.id}`)),
+                            checkDifferenceKeys.includes(`check:${i.id}`),
+                          ),
+                        )
+                        .map((i) => `check:${i.id}`),
+                    ],
+                    workspace.options.filter(
+                      (o) => o.option_group === "audit_responsibility",
+                    ),
+                    evidence.map((e) => e.id),
+                    Object.fromEntries(
+                      items.map((i) => [`check:${i.id}`, i.label]),
+                    ),
+                  )
+                : null;
+              setResponsibilityIssue(responsibilityIssue);
+              if (responsibilityIssue) {
+                submitting.current = false;
+                saveDraft(false);
+                focusAuditField(form, responsibilityIssue.fieldName);
+                submit.run(async () => ({
+                  ok: false,
+                  message: responsibilityIssue.message,
+                }));
+                return;
               }
               submit.run(async () => {
                 try {
@@ -845,6 +812,17 @@ export function AuditDetail({
                   );
                   setUploadProgress("Saving audit…");
                   const result = await submitStationAudit(data);
+                  if (!result.ok && result.fieldName) {
+                    setResponsibilityIssue({
+                      key: result.fieldName.replace(
+                        /^assessment_(code|reason|evidenceId)_/,
+                        "",
+                      ),
+                      fieldName: result.fieldName,
+                      message: result.message,
+                    });
+                    focusAuditField(form, result.fieldName);
+                  }
                   if (result.ok) {
                     if (draftTimer.current)
                       window.clearTimeout(draftTimer.current);
@@ -862,6 +840,7 @@ export function AuditDetail({
                   return result;
                 } finally {
                   submitting.current = false;
+                  saveDraft(false);
                 }
               });
             }}
@@ -1181,6 +1160,7 @@ export function AuditDetail({
                   items.map((i) => [`check:${i.id}`, i.label]),
                 )}
                 initial={audit.score_snapshot?.assessments}
+                issue={responsibilityIssue}
                 options={workspace.options.filter(
                   (o) => o.option_group === "audit_responsibility",
                 )}
@@ -1407,7 +1387,9 @@ export function AuditDetail({
                       key={item.id}
                       className={styles.photoLink}
                       href={`/api/ops-pulse/audits/evidence/${item.id}`}
-                      label={item.file_name || item.evidence_kind_code || "Evidence"}
+                      label={
+                        item.file_name || item.evidence_kind_code || "Evidence"
+                      }
                       fileName={item.file_name}
                       contentType={item.content_type}
                     />
@@ -1902,9 +1884,9 @@ function Reschedule({
       <details className={styles.reschedule}>
         <summary>Change audit date</summary>
         <p className={styles.muted}>
-          {slot?.label || "This slot"} ended on {max}, more than 31 days ago,
-          so this audit’s date can no longer be changed. Start it now or
-          schedule the station’s next audit.
+          {slot?.label || "This slot"} ended on {max}, more than 31 days ago, so
+          this audit’s date can no longer be changed. Start it now or schedule
+          the station’s next audit.
         </p>
       </details>
     );
