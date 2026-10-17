@@ -44,7 +44,17 @@ type SearchParams = {
   location?: string;
   status?: string;
   to?: string;
+  page?: string;
+  spage?: string;
 };
+
+const PAGE_SIZE = 50;
+const shiftDays = (ymd: string, days: number) => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+const validYmd = (v: string | undefined) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "");
 
 type StationDayRow = {
   key: string;
@@ -272,8 +282,12 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
   const companyId = requireCompanyId(authorization);
   const selectedClient = searchParams?.client === "amazon" || searchParams?.client === "flipkart" ? searchParams.client : "";
   const yesterday = yesterdayKolkata();
-  const fromDate = searchParams?.from ?? "";
-  const toDate = searchParams?.to ?? "";
+  // Always a bounded range (default: the last 14 closed days, at most 92 days) so the report never scans all history.
+  const toDate = validYmd(searchParams?.to) || yesterday;
+  const requestedFrom = validYmd(searchParams?.from) || shiftDays(toDate, -13);
+  const fromDate = requestedFrom > toDate ? toDate : requestedFrom < shiftDays(toDate, -91) ? shiftDays(toDate, -91) : requestedFrom;
+  const page = Math.max(1, Number.parseInt(searchParams?.page ?? "1", 10) || 1);
+  const spage = Math.max(1, Number.parseInt(searchParams?.spage ?? "1", 10) || 1);
   const locationFilter = searchParams?.location ?? "";
   const statusFilter = searchParams?.status ?? "";
 
@@ -284,13 +298,18 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
       fromDate,
       locationId: locationFilter,
       toDate,
-      validationStatus: ""
+      validationStatus: "",
+      lean: true,
+      limit: 2000
     }),
-    // Unscoped by date so Pending COD does not false-positive when filters are narrow
+    // Slips that can cover a closed day in range: periods may start up to 31 days earlier and deposits land later.
     loadCodSubmissions(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess, {
       formType: selectedClient === "flipkart" ? "flipkart" : selectedClient === "amazon" ? "amazon" : "",
       locationId: locationFilter,
-      validationStatus: ""
+      fromDate: shiftDays(fromDate, -31),
+      validationStatus: "",
+      lean: true,
+      limit: 2000
     })
   ]);
 
@@ -404,8 +423,8 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
           <section className="panel">
             <div className="panel-body">
               <form action="/ops-pulse/cod/reports" className="form-grid five report-filter-grid">
-                <label>From<input className="field" name="from" type="date" defaultValue={fromDate} /></label>
-                <label>To<input className="field" name="to" type="date" defaultValue={toDate} /></label>
+                <label>From<input className="field" name="from" type="date" defaultValue={fromDate} max={toDate} /></label>
+                <label>To<input className="field" name="to" type="date" defaultValue={toDate} max={yesterday} /></label>
                 <label>Station
                   <select className="field" name="location" defaultValue={locationFilter}>
                     <option value="">All permitted stations</option>
@@ -580,7 +599,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                 <h2>Station-day register</h2>
                 <p className="subtle">Executive Reconciliation cash joined with COD Submission deposit proof. Includes in-progress days — check Status for the pipeline stage.</p>
               </div>
-              <span className="count-badge">{stationDayRows.length} rows</span>
+              <span className="count-badge">{stationDayRows.length} rows · {formatDate(fromDate)} – {formatDate(toDate)}</span>
             </div>
             <div className="table-wrap">
               <table>
@@ -600,7 +619,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                   </tr>
                 </thead>
                 <tbody>
-                  {stationDayRows.length ? stationDayRows.map((row) => (
+                  {stationDayRows.length ? stationDayRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => (
                     <tr key={row.key}>
                       <td>{formatDate(row.date)}</td>
                       <td><strong>{row.stationLabel}</strong></td>
@@ -626,6 +645,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                 </tbody>
               </table>
             </div>
+            <CodPager total={stationDayRows.length} page={page} param="page" searchParams={searchParams} />
           </section>
 
           <section className="panel">
@@ -651,7 +671,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                   </tr>
                 </thead>
                 <tbody>
-                  {submissionsResult.rows.length ? submissionsResult.rows.map((row) => {
+                  {submissionsResult.rows.length ? submissionsResult.rows.slice((spage - 1) * PAGE_SIZE, spage * PAGE_SIZE).map((row) => {
                     const station = firstRelation(row.stations);
                     const slips = depositAttachmentsFor(row);
                     return (
@@ -678,9 +698,29 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                 </tbody>
               </table>
             </div>
+            <CodPager total={submissionsResult.rows.length} page={spage} param="spage" searchParams={searchParams} />
           </section>
         </>
       ) : null}
     </>
+  );
+}
+
+function CodPager({ total, page, param, searchParams }: { total: number; page: number; param: "page" | "spage"; searchParams?: SearchParams }) {
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (pages <= 1) return null;
+  const current = Math.min(page, pages);
+  const href = (n: number) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(searchParams ?? {})) if (typeof v === "string" && v) q.set(k, v);
+    q.set(param, String(n));
+    return `/ops-pulse/cod/reports?${q}`;
+  };
+  return (
+    <nav className="panel-body" aria-label="Pages" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "flex-end", fontSize: 13 }}>
+      {current > 1 ? <Link href={href(current - 1)} prefetch={false}>← Previous</Link> : <span className="subtle">← Previous</span>}
+      <span className="subtle">Page {current} of {pages} · {total} rows</span>
+      {current < pages ? <Link href={href(current + 1)} prefetch={false}>Next →</Link> : <span className="subtle">Next →</span>}
+    </nav>
   );
 }

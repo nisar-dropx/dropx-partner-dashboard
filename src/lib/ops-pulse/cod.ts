@@ -695,12 +695,14 @@ export async function loadCodSubmissions(
   companyId: string,
   locationScopeIds: string[],
   hasAllLocationAccess: boolean,
-  params: { fromDate?: string; toDate?: string; locationId?: string; validationStatus?: string; formType?: string; submissionId?: string }
+  params: { fromDate?: string; toDate?: string; locationId?: string; validationStatus?: string; formType?: string; submissionId?: string; lean?: boolean; limit?: number }
 ) {
   if (!supabaseAdmin) return { rows: [] as CodSubmissionRow[], error: "Supabase service role key is not configured." };
-  let query = supabaseAdmin
+  // Reports need amounts, dates, status and slip presence only; skip the large AI and validation payloads.
+  const LEAN = "id, submission_no, form_type, client, location_id, station_code, cod_period_from, cod_period_to, cod_date, deposit_date, remittance_amount, cod_as_per_erp, cod_amount, deposited_amount, remittance_code, reference_no, remarks, status, validation_status, validated_amount, validation_remarks, attachments, deposit_slip_attachments, created_at, stations (id, station_code, station_name, state, providers (code, name), location_models (code, name))";
+  let query = (supabaseAdmin as any)
     .from("cod_submissions")
-    .select("id, submission_no, form_type, client, channel, location_id, station_code, cod_period_from, cod_period_to, cod_date, deposit_date, remittance_creation_date, remittance_creation_time, remittance_submission_date, remittance_amount, cod_as_per_erp, cod_amount, deposited_amount, remittance_code, deposit_window, cod_master_id, payment_mode, reference_no, proof_url, submitter_name, remarks, status, validation_status, validated_amount, validated_at, validation_remarks, validation_payload, attachments, deposit_slip_attachments, ai_status, ai_confidence, ai_summary, ai_result, proof_checked_at, proof_version, returned_at, return_reason, returned_by_name, created_at, stations (id, station_code, station_name, state, providers (code, name), location_models (code, name))")
+    .select((params.lean ? LEAN : "id, submission_no, form_type, client, channel, location_id, station_code, cod_period_from, cod_period_to, cod_date, deposit_date, remittance_creation_date, remittance_creation_time, remittance_submission_date, remittance_amount, cod_as_per_erp, cod_amount, deposited_amount, remittance_code, deposit_window, cod_master_id, payment_mode, reference_no, proof_url, submitter_name, remarks, status, validation_status, validated_amount, validated_at, validation_remarks, validation_payload, attachments, deposit_slip_attachments, ai_status, ai_confidence, ai_summary, ai_result, proof_checked_at, proof_version, returned_at, return_reason, returned_by_name, created_at, stations (id, station_code, station_name, state, providers (code, name), location_models (code, name))") as string)
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 
@@ -712,9 +714,9 @@ export async function loadCodSubmissions(
   if (params.validationStatus) query = query.eq("validation_status", params.validationStatus);
   if (params.formType) query = query.eq("form_type", params.formType);
 
-  const { data, error } = await query.limit(250);
+  const { data, error } = await query.limit(Math.min(Math.max(params.limit ?? 250, 1), 2000));
   if (error) return { rows: [] as CodSubmissionRow[], error: error.message };
-  return { rows: (data ?? []) as CodSubmissionRow[], error: null };
+  return { rows: (data ?? []) as unknown as CodSubmissionRow[], error: null };
 }
 
 export async function loadDailySubmissions(
