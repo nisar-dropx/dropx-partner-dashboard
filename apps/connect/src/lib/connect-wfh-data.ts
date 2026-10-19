@@ -1,7 +1,7 @@
 import "server-only";
 import { loadTimeOffAttachments, type TimeOffAttachmentFields } from "./connect-time-off-attachments";
 
-import { isManagingPartnerDesignation, isWfhHardBlockedDesignation } from "./approval-designation-labels";
+import { isManagingPartnerDesignation } from "./approval-designation-labels";
 import { adoptPendingStepForHigherManager } from "./connect-approver-identity";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import type { ConnectAccount } from "./connect-auth";
@@ -10,7 +10,7 @@ import {
   loadConnectAccessibleWorkforceIds,
   loadConnectAttendanceApproveScope
 } from "./connect-people-attendance-access";
-import { connectWfhEligible, loadConnectWfhPolicies, type ConnectWfhPolicy } from "./connect-wfh-access";
+import { loadConnectWfhPolicies, resolveConnectWfhAccess, type ConnectWfhPolicy } from "./connect-wfh-access";
 import { notifyApproverMobile } from "./approver-mobile-notifications";
 import { supabaseAdmin } from "./supabase-admin";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
@@ -33,6 +33,14 @@ function indiaToday() {
 
 function daysBetween(fromDate: string, toDate: string) {
   return Math.floor((Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+function datesInRange(fromDate: string, toDate: string) {
+  const values: string[] = [];
+  for (let current = Date.parse(`${fromDate}T00:00:00Z`), end = Date.parse(`${toDate}T00:00:00Z`); current <= end; current += 86_400_000) {
+    values.push(new Date(current).toISOString().slice(0, 10));
+  }
+  return values;
 }
 
 async function activeWorkforceContext(companyId: string, workerId: string, workerType: WfhWorkerType) {
@@ -109,13 +117,26 @@ export async function assertConnectWfhAccess(companyId: string, workerId: string
     designationLabel(companyId, designationId)
   ]);
   const policy = policies.get(companyId) ?? null;
-  if (!connectWfhEligible({ policy, designationId, designation: label })) {
-    if (isWfhHardBlockedDesignation(label)) {
-      throw new Error("Work from home is not available for Team Lead, Station Manager, or Store Manager roles.");
-    }
+  const accessRule = resolveConnectWfhAccess({
+    policy,
+    designationId,
+    personId: context.engagement.person_id
+  });
+  if (!policy || !accessRule) {
     throw new Error("Work from home is not enabled for your designation. Ask HR to grant access in the WFH policy.");
   }
-  return { context, policy: policy as ConnectWfhPolicy, designationId, designation: label };
+  return {
+    context,
+    policy: {
+      ...policy,
+      max_request_days: accessRule.max_request_days,
+      max_monthly_days: accessRule.max_monthly_days,
+      max_yearly_days: accessRule.max_yearly_days
+    } as ConnectWfhPolicy,
+    accessRule,
+    designationId,
+    designation: label
+  };
 }
 
 export async function listConnectWfhRequests(companyId: string, workerId: string, workerType: WfhWorkerType) {
@@ -140,6 +161,7 @@ export async function listConnectWfhRequests(companyId: string, workerId: string
     policy: {
       enabled: access.policy.is_enabled,
       maxRequestDays: access.policy.max_request_days,
+      maxMonthlyDays: access.policy.max_monthly_days,
       allowBackdated: access.policy.allow_backdated,
       requiresHrFinalization: access.policy.requires_hr_finalization
     },
@@ -195,6 +217,34 @@ export async function createConnectWfhRequest(input: {
   const today = access.context.today;
   if (!access.policy.allow_backdated && input.fromDate < today) {
     throw new Error("Backdated WFH requests are not allowed.");
+  }
+
+  if (access.policy.max_monthly_days !== null) {
+    const firstMonth = `${input.fromDate.slice(0, 7)}-01`;
+    const lastMonthEnd = new Date(Date.UTC(Number(input.toDate.slice(0, 4)), Number(input.toDate.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    const existing = await db().from("hr_wfh_requests")
+      .select("start_date,end_date")
+      .eq("company_id", input.companyId)
+      .eq("profile_type", input.workerType)
+      .eq("profile_id", input.workerId)
+      .in("status", ["pending_manager", "pending_hr", "approved"])
+      .lte("start_date", lastMonthEnd)
+      .gte("end_date", firstMonth);
+    if (existing.error) throw new Error(existing.error.message);
+    const daysByMonth = new Map<string, Set<string>>();
+    for (const row of existing.data ?? []) for (const day of datesInRange(String(row.start_date), String(row.end_date))) {
+      const month = day.slice(0, 7);
+      if (!daysByMonth.has(month)) daysByMonth.set(month, new Set());
+      daysByMonth.get(month)?.add(day);
+    }
+    for (const day of datesInRange(input.fromDate, input.toDate)) {
+      const month = day.slice(0, 7);
+      if (!daysByMonth.has(month)) daysByMonth.set(month, new Set());
+      daysByMonth.get(month)?.add(day);
+    }
+    for (const [month, usedDays] of daysByMonth) if (usedDays.size > access.policy.max_monthly_days) {
+      throw new Error(`The WFH limit for ${month} is ${access.policy.max_monthly_days} day(s). Change the dates or ask HR to update the People WFH master.`);
+    }
   }
 
   const overlap = await db().from("hr_wfh_requests")
@@ -282,6 +332,10 @@ export async function createConnectWfhRequest(input: {
     start_date: input.fromDate,
     end_date: input.toDate,
     reason,
+    access_rule_source: access.accessRule.source,
+    max_request_days_snapshot: access.accessRule.max_request_days,
+    max_monthly_days_snapshot: access.accessRule.max_monthly_days,
+    max_yearly_days_snapshot: access.accessRule.max_yearly_days,
     status,
     requested_by: requesterUserId,
     manager_user_id: first?.approver_user_id ?? null,

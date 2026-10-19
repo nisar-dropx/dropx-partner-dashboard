@@ -21,7 +21,7 @@ type WfhRequest = {
   attachment?: TimeOffAttachment | null;
 };
 type WfhData = {
-  policy: { enabled: boolean; maxRequestDays: number; allowBackdated: boolean; requiresHrFinalization: boolean };
+  policy: { enabled: boolean; maxRequestDays: number; maxMonthlyDays: number | null; allowBackdated: boolean; requiresHrFinalization: boolean };
   requests: WfhRequest[];
   summary: { pending: number };
 };
@@ -156,6 +156,7 @@ export function ConnectWfh({
     <>
       <div className="dx-leave-summary">
         <div><i><Home /></i><span><small>Max days / request</small><strong>{loading ? "—" : data?.policy.maxRequestDays ?? "—"}</strong></span></div>
+        <div><i><CalendarDays /></i><span><small>Max days / month</small><strong>{loading ? "—" : data?.policy.maxMonthlyDays ?? "—"}</strong></span></div>
         <div><i><Clock3 /></i><span><small>Pending</small><strong>{loading ? "—" : data?.summary.pending ?? 0}</strong></span></div>
       </div>
 
