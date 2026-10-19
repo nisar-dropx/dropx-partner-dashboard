@@ -16256,6 +16256,37 @@ tbody tr:hover td {
   width: 100%;
 }
 
+.payment-attachment-preview-canvas {
+  align-items: center;
+  background: #eef1f5;
+  display: flex;
+  justify-content: center;
+  min-height: 420px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.payment-attachment-preview-image {
+  display: block;
+  height: auto;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.payment-attachment-preview-unavailable {
+  align-items: center;
+  background: #f8fafc;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  min-height: 420px;
+  padding: 28px;
+  text-align: center;
+}
+
 .payment-attachment-preview-actions {
   align-items: center;
   border-top: 1px solid var(--line);

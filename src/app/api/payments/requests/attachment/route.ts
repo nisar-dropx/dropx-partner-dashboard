@@ -18,6 +18,26 @@ function sanitizeFilename(value: string) {
   return value.replace(/[\r\n"]/g, "").trim() || "payment-request-attachment";
 }
 
+function browserContentType(filename: string, storedType: string | null | undefined) {
+  const normalizedStoredType = storedType?.trim().toLowerCase();
+  if (normalizedStoredType && normalizedStoredType !== "application/octet-stream") return normalizedStoredType;
+
+  const extension = filename.toLowerCase().split(".").pop();
+  const byExtension: Record<string, string> = {
+    avif: "image/avif",
+    bmp: "image/bmp",
+    gif: "image/gif",
+    jfif: "image/jpeg",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    pdf: "application/pdf",
+    png: "image/png",
+    svg: "image/svg+xml",
+    webp: "image/webp"
+  };
+  return extension ? byExtension[extension] || "application/octet-stream" : "application/octet-stream";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const authorization = await getAuthorization();
@@ -68,8 +88,9 @@ export async function GET(request: NextRequest) {
     return new NextResponse(file.data, {
       headers: {
         "Content-Disposition": `inline; filename="${filename}"`,
-        "Content-Type": file.data.type || "application/octet-stream",
-        "Cache-Control": "private, max-age=0, no-store"
+        "Content-Type": browserContentType(filename, file.data.type),
+        "Cache-Control": "private, max-age=0, no-store",
+        "X-Content-Type-Options": "nosniff"
       }
     });
   } catch (error) {

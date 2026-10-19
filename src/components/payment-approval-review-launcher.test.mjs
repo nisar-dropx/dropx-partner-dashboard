@@ -24,7 +24,9 @@ test("slow evidence is fetched separately from the fast decision shell", () => {
 });
 
 test("attachments use an embedded viewer with an explicit full-size escape hatch", () => {
+  assert.match(launcher, /className="payment-attachment-preview-image"/);
   assert.match(launcher, /<iframe className="payment-attachment-preview-frame"/);
+  assert.match(launcher, /Preview is not available for this file type\./);
   assert.match(launcher, />Open full size<\/a>/);
   assert.equal((launcher.match(/target="_blank"/g) ?? []).length, 1);
 });

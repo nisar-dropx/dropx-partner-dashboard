@@ -90,6 +90,13 @@ function hasValue(value: string | null) {
   return Boolean(value && value.trim() && value.trim() !== "-");
 }
 
+function attachmentPreviewKind(name: string) {
+  const extension = name.toLowerCase().split(".").pop();
+  if (extension && ["avif", "bmp", "gif", "jfif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension)) return "image";
+  if (extension === "pdf") return "document";
+  return "unsupported";
+}
+
 export function PaymentApprovalReviewLauncher({
   canAct,
   initiallyOpen = false,
@@ -261,7 +268,9 @@ export function PaymentApprovalReviewLauncher({
       {attachment ? <div className="modal-backdrop payment-attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setAttachment(null); }}>
         <section aria-label={`Attachment ${attachment.name}`} aria-modal="true" className="modal-panel payment-attachment-preview-modal" role="dialog">
           <div className="panel-head"><div><small>Request attachment</small><h2>{attachment.name}</h2></div><button aria-label="Close attachment" className="icon-button" onClick={() => setAttachment(null)} type="button"><X size={18} /></button></div>
-          <iframe className="payment-attachment-preview-frame" src={attachment.url} title={attachment.name} />
+          {attachmentPreviewKind(attachment.name) === "image" ? <div className="payment-attachment-preview-canvas"><img alt={attachment.name} className="payment-attachment-preview-image" src={attachment.url} /></div> : null}
+          {attachmentPreviewKind(attachment.name) === "document" ? <iframe className="payment-attachment-preview-frame" src={attachment.url} title={attachment.name} /> : null}
+          {attachmentPreviewKind(attachment.name) === "unsupported" ? <div className="payment-attachment-preview-unavailable"><strong>Preview is not available for this file type.</strong><span>Use Open full size to view or download the attachment.</span></div> : null}
           <div className="payment-attachment-preview-actions"><a className="button secondary" href={attachment.url} rel="noreferrer" target="_blank"><ExternalLink size={16} />Open full size</a></div>
         </section>
       </div> : null}
