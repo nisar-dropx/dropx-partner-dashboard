@@ -1,3 +1,4 @@
+import { OpsMenuClose } from "@/components/ops-menu-close";
 import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
@@ -135,11 +136,14 @@ export async function AppShell({ children, active, pageCode }: { children: React
   return (
     <PaymentNotificationProvider key={`${authorization.userId}:${authorization.isPreview}`} initialData={paymentNotifications} refreshOnMount={isOpsHost}>
     <AppShellFrame
+      opsDesignPreview={isOpsHost}
+      pageTitle={active}
       desktopActions={topActions}
       mobileActions={topActions}
       mobileBrand={isOpsHost ? <OpsPulseBrand /> : undefined}
       sidebar={(
         <aside className="sidebar">
+          {isOpsHost && <OpsMenuClose />}
           <div className="brand">
             <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />
             {isOpsHost ? (
@@ -154,7 +158,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
           </div>
 
           {isOpsHost&&<OpsWorkspaceSwitcher modes={opsContext.availableModes} mode={opsContext.mode}/>}
-          <SidebarNav active={active} items={visibleNavItems} prefetch={!(isOpsHost && pageCode === "ops_pulse")} />
+          <SidebarNav opsDesign={isOpsHost} active={active} items={visibleNavItems} prefetch={!(isOpsHost && pageCode === "ops_pulse")} />
 
           <div className="sidebar-footer">
             <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong>

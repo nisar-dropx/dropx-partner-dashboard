@@ -1,9 +1,11 @@
 "use client";
 
-import { Menu, X } from "lucide-react";
+import { Menu, Paintbrush, RotateCcw, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { OpsDesignContext } from "@/components/ops-design-context";
+import { opsDesignPreference } from "@/lib/ops-pulse/design-navigation";
 import { EventLogTracker } from "@/components/event-log-tracker";
 
 type AppShellFrameProps = {
@@ -12,15 +14,83 @@ type AppShellFrameProps = {
   mobileActions: ReactNode;
   mobileBrand?: ReactNode;
   sidebar: ReactNode;
+  opsDesignPreview?: boolean;
+  pageTitle?: string;
 };
 
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [modern, setModern] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const designInitialized = useRef(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const designQuery = searchParams.get("opsUi");
+  useEffect(() => {
+    if (!opsDesignPreview) return;
+    const hasDesignQuery = designQuery === "people" || designQuery === "classic";
+    if (designInitialized.current && !hasDesignQuery) return;
+    designInitialized.current = true;
+    let stored: string | null = null;
+    try { stored = localStorage.getItem("opspulse:design:v1"); } catch { /* Private browsing may block storage. */ }
+    const next = opsDesignPreference(designQuery, stored);
+    setModern(next);
+    if (designQuery === "people" || designQuery === "classic") {
+      try { localStorage.setItem("opspulse:design:v1", next ? "people" : "classic"); } catch {}
+      const url = new URL(window.location.href);
+      url.searchParams.delete("opsUi");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, [opsDesignPreview, designQuery]);
+
+  useEffect(() => {
+    if (!opsDesignPreview || !modern) return;
+    document.body.dataset.opsAppearance = "people";
+    return () => { delete document.body.dataset.opsAppearance; };
+  }, [opsDesignPreview, modern]);
+
+  function toggleDesign() {
+    const next = !modern;
+    setModern(next);
+    try { localStorage.setItem("opspulse:design:v1", next ? "people" : "classic"); } catch {}
+  }
+
+  useEffect(() => {
+    if (!modern || !sidebarOpen) return;
+    const sidebar = shellRef.current?.querySelector<HTMLElement>(".sidebar");
+    if (!sidebar) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    sidebar.setAttribute("role", "dialog");
+    sidebar.setAttribute("aria-modal", "true");
+    sidebar.setAttribute("aria-label", "OpsPulse menu");
+    const focusable = () => Array.from(sidebar.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), [tabindex="0"]')).filter(element => element.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setSidebarOpen(false); }
+      if (event.key !== "Tab") return;
+      const targets = focusable();
+      const first = targets[0], last = targets[targets.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !sidebar.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    const desktop = window.matchMedia("(min-width: 1081px)");
+    const closeOnDesktop = () => { if (desktop.matches) setSidebarOpen(false); };
+    document.addEventListener("keydown", keydown);
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => {
+      sidebar.removeAttribute("role"); sidebar.removeAttribute("aria-modal"); sidebar.removeAttribute("aria-label");
+      document.removeEventListener("keydown", keydown);
+      desktop.removeEventListener("change", closeOnDesktop);
+      (previousFocus?.isConnected ? previousFocus : menuRef.current)?.focus();
+    };
+  }, [modern, sidebarOpen]);
+
+  const designToggle = opsDesignPreview ? <button className="ops-design-toggle" type="button" onClick={toggleDesign} title={modern ? "Return to the original interface. Your entries stay in place." : "Preview the new OpsPulse design on this browser. Your entries stay in place."}>{modern ? <RotateCcw size={14} /> : <Paintbrush size={14} />}<span>{modern ? "Original design" : "Try new design"}</span></button> : null;
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -32,7 +102,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
   }, [sidebarOpen]);
 
   useEffect(() => {
-    const cleanParams = new URLSearchParams(searchParams.toString());
+    const cleanParams = new URL(window.location.href).searchParams;
     let removedFlash = false;
 
     for (const key of Array.from(cleanParams.keys())) {
@@ -53,12 +123,18 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
   }, [pathname, searchParams]);
 
   return (
-    <div className={`shell ${sidebarOpen ? "sidebar-open" : ""}`}>
+    <OpsDesignContext.Provider value={opsDesignPreview && modern}>
+    <div ref={shellRef} className={`shell ${opsDesignPreview && modern ? "ops-modern" : ""} ${sidebarOpen ? "sidebar-open" : ""}`} onClick={event => {
+      const target = event.target as HTMLElement;
+      if (modern && (target.closest("[data-close-ops-menu]") || target.closest(".sidebar a[href]"))) setSidebarOpen(false);
+    }}>
+      {modern && <a className="ops-skip-link" href="#ops-page-content">Skip to content</a>}
       <EventLogTracker />
       <header className="mobile-topbar">
         <button
           type="button"
           className="mobile-menu-button"
+          ref={menuRef}
           aria-label={sidebarOpen ? "Close menu" : "Open menu"}
           aria-expanded={sidebarOpen}
           onClick={() => setSidebarOpen((current) => !current)}
@@ -66,7 +142,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
           {sidebarOpen ? <X size={21} strokeWidth={2.4} /> : <Menu size={21} strokeWidth={2.4} />}
         </button>
         {mobileBrand ?? <img className="mobile-brand-logo" src="/dropx-logo.png" alt="DropX" />}
-        <div className="mobile-top-actions">{mobileActions}</div>
+        <div className="mobile-top-actions">{designToggle}{mobileActions}</div>
       </header>
 
       {sidebarOpen ? (
@@ -82,11 +158,12 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
 
       <main className="main">
         <header className="topbar">
-          <div />
-          <div className="top-actions">{desktopActions}</div>
+          {modern ? <div className="ops-page-context"><span>OpsPulse</span><span aria-hidden="true">/</span><strong>{pageTitle}</strong></div> : <div />}
+          <div className="top-actions">{designToggle}{desktopActions}</div>
         </header>
-        <div className="content">{children}</div>
+        <div className="content" id="ops-page-content" tabIndex={-1}>{children}</div>
       </main>
     </div>
+    </OpsDesignContext.Provider>
   );
 }
