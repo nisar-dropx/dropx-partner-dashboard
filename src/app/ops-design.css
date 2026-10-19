@@ -346,3 +346,10 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
   .ops-modern .payment-responsive-list tbody{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .ops-modern .payment-responsive-list .payment-record{margin:0;align-content:start}
 }
+
+@media(max-width:1000px){
+  .ops-modern .payment-expense-workspace .payment-record{grid-template-areas:'location amount' 'head head' 'reference created' 'status action'}
+  .ops-modern .payment-entry-workspace>.panel-head,.ops-modern .payment-entry-workspace>.panel-body{padding:12px}
+  .ops-modern .payment-entry-workspace>.panel-head h2{font-size:15px}
+  .ops-modern .payment-entry-workspace>.panel-head p{font-size:12px;margin-top:4px}
+}
