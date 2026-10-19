@@ -11,6 +11,13 @@ export type ReportImportShipmentMonthRow = {
   work_date: string;
 };
 
+export type ReportImportReplacementScope = {
+  client: string;
+  fromDate: string;
+  stationCodes: readonly string[];
+  toDate: string;
+};
+
 function normalized(value: unknown) {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -38,6 +45,25 @@ export function mergeReportImportShipmentMonthRows<T extends ReportImportShipmen
   existingRows.forEach((row) => rows.set(reportImportShipmentMonthKey(row), row));
   incomingRows.forEach((row) => rows.set(reportImportShipmentMonthKey(row), row));
   return [...rows.values()].sort((left, right) => reportImportShipmentMonthKey(left).localeCompare(reportImportShipmentMonthKey(right)));
+}
+
+/**
+ * Removes stored rows that an authoritative import is about to replace. This
+ * happens before threshold allocation so a corrected half-month file cannot
+ * keep paying against a source row that the same transaction will delete.
+ */
+export function retainRowsOutsideReportImportReplacement<T extends ReportImportShipmentMonthRow>(
+  existingRows: readonly T[],
+  scope: ReportImportReplacementScope
+) {
+  const client = normalized(scope.client);
+  const stations = new Set(scope.stationCodes.map(normalized));
+  return existingRows.filter((row) => !(
+    normalized(row.client) === client
+    && stations.has(normalized(row.station_code))
+    && row.work_date >= scope.fromDate
+    && row.work_date <= scope.toDate
+  ));
 }
 
 export function reportImportCalendarMonthEnd(date: string) {

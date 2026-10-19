@@ -38,6 +38,27 @@ test("shipment mapping uses provider ID, date, station and client", () => {
   assert.equal(payoutMappingMatchesShipment({ ...mapping, effectiveFrom: "2026-09-11" }, shipment), false);
 });
 
+test("Flipkart production resolves through the same location-effective mapping path", () => {
+  const flipkartShipment = {
+    ...shipment,
+    client: "Flipkart",
+    provider_employee_id: "2000074312195",
+    station_code: "PHN",
+    work_date: "2026-09-16"
+  };
+  const flipkartMapping = {
+    ...mapping,
+    providerIdentity: "FLIPKART Flipkart",
+    providerMemberId: "2000074312195",
+    stationCode: "PHN",
+    effectiveFrom: "2026-09-16"
+  };
+
+  assert.equal(payoutMappingMatchesShipment(flipkartMapping, flipkartShipment), true);
+  assert.equal(payoutMappingMatchesShipment({ ...flipkartMapping, providerIdentity: "Amazon" }, flipkartShipment), false);
+  assert.equal(payoutMappingMatchesShipment({ ...flipkartMapping, stationCode: "PMB" }, flipkartShipment), false);
+});
+
 test("mapping resolution distinguishes unmapped, mapped and conflicting identities", () => {
   assert.equal(resolveShipmentPayoutMapping(shipment, []).kind, "unmapped");
   assert.deepEqual(resolveShipmentPayoutMapping(shipment, [mapping]), {

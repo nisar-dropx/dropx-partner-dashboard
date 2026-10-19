@@ -15,8 +15,13 @@ import {
   allocateReportImportProductionThresholds,
   mergeReportImportShipmentMonthRows,
   reportImportCalendarMonthEnd,
-  reportImportShipmentMonthKey
+  reportImportShipmentMonthKey,
+  retainRowsOutsideReportImportReplacement
 } from "./report-import-production-threshold.ts";
+import {
+  aggregateShipmentDeliveriesByWorkforceDay,
+  shipmentAttendanceRecord
+} from "../../../lib/workforce-attendance-capture.ts";
 
 function thresholdShipment(overrides = {}) {
   return {
@@ -208,6 +213,52 @@ test("monthly report-import threshold includes stored earlier rows instead of on
   assert.equal(allocations.get("uploaded-day")?.thresholdDeducted, 20);
   assert.equal(allocations.get("uploaded-day")?.payableUnits, 10);
   assert.equal(allocations.get("uploaded-day")?.amount, 200);
+});
+
+test("authoritative Flipkart replacement removes omitted cycle rows before monthly threshold allocation", () => {
+  const existing = [
+    thresholdShipment({ client: "Flipkart", station_code: "PHN", work_date: "2026-09-10", total_delivery: 20 }),
+    thresholdShipment({ client: "Flipkart", station_code: "PHN", work_date: "2026-09-16", total_delivery: 80 }),
+    thresholdShipment({ client: "Flipkart", station_code: "OTHER", work_date: "2026-09-16", total_delivery: 90 }),
+    thresholdShipment({ client: "Amazon", station_code: "PHN", work_date: "2026-09-16", total_delivery: 90 })
+  ];
+  const retained = retainRowsOutsideReportImportReplacement(existing, {
+    client: "Flipkart",
+    fromDate: "2026-09-16",
+    stationCodes: ["PHN"],
+    toDate: "2026-09-30"
+  });
+  const merged = mergeReportImportShipmentMonthRows(retained, [
+    thresholdShipment({ client: "Flipkart", station_code: "PHN", work_date: "2026-09-20", total_delivery: 30, source_batch_id: "corrected" })
+  ]);
+
+  assert.equal(merged.some((row) => row.client === "Flipkart" && row.station_code === "PHN" && row.work_date === "2026-09-16"), false);
+  assert.equal(merged.some((row) => row.client === "Flipkart" && row.station_code === "PHN" && row.work_date === "2026-09-10"), true);
+  assert.equal(merged.some((row) => row.client === "Flipkart" && row.station_code === "OTHER"), true);
+  assert.equal(merged.some((row) => row.client === "Amazon"), true);
+
+  const scopedUnits = merged
+    .filter((row) => row.client === "Flipkart" && row.station_code === "PHN")
+    .map((row, index) => thresholdProduction({
+      id: `flipkart-${index}`,
+      date: row.work_date,
+      reportedUnits: row.total_delivery
+    }));
+  const allocations = allocateReportImportProductionThresholds(scopedUnits);
+  const corrected = allocations.get("flipkart-1");
+  assert.equal(corrected?.thresholdDeducted, 30);
+  assert.equal(corrected?.payableUnits, 0);
+  assert.equal(corrected?.amount, 0);
+
+  const shipmentAttendance = aggregateShipmentDeliveriesByWorkforceDay(merged
+    .filter((row) => row.client === "Flipkart" && row.station_code === "PHN")
+    .map((row) => ({ workforce_id: "worker-1", work_date: row.work_date, total_delivery: row.total_delivery })));
+  assert.equal(shipmentAttendance.has("worker-1|2026-09-16"), false);
+  assert.equal(shipmentAttendance.get("worker-1|2026-09-20"), 30);
+  assert.equal(shipmentAttendanceRecord("2026-09-20", 30, {
+    capture_method: "shipment_data",
+    minimum_daily_deliveries: 20
+  }).status, "P");
 });
 
 test("report import fails closed when a threshold method has no person-specific minimum snapshot", () => {

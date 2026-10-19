@@ -7,6 +7,11 @@ import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { directPayAttendanceUnit, directPayForDay } from "@/lib/direct-workforce-pay";
+import {
+  FLIPKART_PICKUPSHEET,
+  FLIPKART_RUNSHEET,
+  parseFlipkartProductionMatrix
+} from "@/lib/flipkart-production-import";
 import { getServiceAuthorization, ServiceAuthError } from "@/lib/service-auth";
 import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -36,11 +41,13 @@ import {
   allocateReportImportProductionThresholds,
   mergeReportImportShipmentMonthRows,
   reportImportCalendarMonthEnd,
-  reportImportShipmentMonthKey
+  reportImportShipmentMonthKey,
+  retainRowsOutsideReportImportReplacement,
+  type ReportImportReplacementScope
 } from "./report-import-production-threshold";
 
 type SourceType = string;
-type CoreSourceType = "amazon_shipments" | "iocl_fuel" | "bpcl_fuel" | "cashbook";
+type CoreSourceType = "amazon_shipments" | "flipkart_production" | "iocl_fuel" | "bpcl_fuel" | "cashbook";
 type SheetRow = Array<string | number | boolean | null | undefined>;
 type RawRecord = Record<string, string>;
 type NormalizedImport = {
@@ -124,6 +131,7 @@ const sourceLabels: Record<SourceType, string> = {
   amazon_hawkeye_daily: "Amazon Hawkeye daily",
   bpcl_fuel: "BPCL fuel",
   cashbook: "Cashbook",
+  flipkart_production: "Flipkart production",
   iocl_fuel: "IOC fuel",
   edsp_sls_scorecard: "EDSP SLS scorecard",
   daily_edsp_metrics: "Daily EDSP metrics"
@@ -885,7 +893,9 @@ async function loadAmazonMappingAttendance(
   scope: {
     providerLabelsById: Map<string, string[]>;
     stationCodeById: Map<string, string>;
-  }
+  },
+  replacementScope?: ReportImportReplacementScope,
+  strict = false
 ) {
   const emptyIndex = createReportImportWorkforceIndex([]);
   if (!supabaseAdmin || !sourceRows.length || !mappings.length) {
@@ -913,7 +923,11 @@ async function loadAmazonMappingAttendance(
     return requests;
   });
   const workforceResults = await Promise.all(workforceRequests);
-  if (workforceResults.some((result) => result.error)) return null;
+  const workforceError = workforceResults.find((result) => result.error)?.error;
+  if (workforceError) {
+    if (strict) throw new Error(`Workforce identity read failed: ${readableError(workforceError)}`);
+    return null;
+  }
   const workforceRows = [...new Map(workforceResults
     .flatMap((result) => result.data ?? [])
     .map((row) => [row.id, row as ReportImportWorkforceIdentity])).values()];
@@ -977,7 +991,11 @@ async function loadAmazonMappingAttendance(
     return requests;
   });
   const attendanceResults = await Promise.all(attendanceRequests);
-  if (attendanceResults.some((result) => result.error)) return null;
+  const attendanceError = attendanceResults.find((result) => result.error)?.error;
+  if (attendanceError) {
+    if (strict) throw new Error(`Attendance read failed: ${readableError(attendanceError)}`);
+    return null;
+  }
   const attendanceRows = [...new Map(attendanceResults
     .flatMap((result) => result.data ?? [])
     .map((row) => [row.id, row as ReportImportAttendanceRow])).values()];
@@ -999,9 +1017,15 @@ async function loadAmazonMappingAttendance(
       .order("work_date")
       .order("id"))
     : { data: [], error: null };
-  if (existingShipments.error) return null;
+  if (existingShipments.error) {
+    if (strict) throw new Error(`Existing production read failed: ${readableError(existingShipments.error)}`);
+    return null;
+  }
   const shipmentRowsByKey = new Map<string, { provider_employee_id: string; work_date: string; station_code?: string | null; client?: string | null; total_delivery: number }>();
-  for (const shipment of existingShipments.data ?? []) {
+  const retainedExistingShipments = replacementScope
+    ? retainRowsOutsideReportImportReplacement(existingShipments.data ?? [], replacementScope)
+    : existingShipments.data ?? [];
+  for (const shipment of retainedExistingShipments) {
     const shipmentKey = `${key(shipment.client)}|${shipment.work_date}|${normalizeStation(shipment.station_code)}|${clean(shipment.provider_employee_id).toUpperCase()}`;
     shipmentRowsByKey.set(shipmentKey, {
       provider_employee_id: clean(shipment.provider_employee_id),
@@ -1060,15 +1084,33 @@ async function loadAmazonMappingAttendance(
   return { attendanceByWorkforceDate, cumulativeAttendanceUnitsBefore, workforceIndex };
 }
 
-async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnType<typeof aggregateAmazonRows>) {
-  if (!supabaseAdmin || !sourceRows.length) return sourceRows as AmazonAggregateRow[];
+async function applyProviderPaymentMappings(
+  companyId: string,
+  sourceRows: ReturnType<typeof aggregateAmazonRows>,
+  providerKey: "amazon" | "flipkart",
+  options: {
+    replacementScope?: ReportImportReplacementScope;
+    strict?: boolean;
+  } = {}
+) {
   const incomingRows = sourceRows as AmazonAggregateRow[];
+  const replacementScope = options.replacementScope;
+  const strict = options.strict ?? false;
+  if (!sourceRows.length) return incomingRows;
+  if (!supabaseAdmin) {
+    if (strict) throw new Error("Payment-mapping database client is unavailable");
+    return incomingRows;
+  }
+  const failMappingRead = (step: string, error: unknown) => {
+    if (strict) throw new Error(`${step}: ${readableError(error)}`);
+    return incomingRows;
+  };
   const providerMemberIds = [...new Set(incomingRows.map((row) => row.provider_employee_id))];
   const historyFrom = workforcePaymentMonthStart(incomingRows.map((row) => row.work_date).sort()[0]);
   const policyThrough = incomingRows.map((row) => row.work_date).sort().at(-1)!;
   const affectedThrough = reportImportCalendarMonthEnd(policyThrough);
   const [stationsResult, providersResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
-    readAllRows(supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).order("id")),
+    readAllRows(supabaseAdmin.from("stations").select("id,station_code,location_model_id").eq("company_id", companyId).order("id")),
     readAllRows(supabaseAdmin.from("providers").select("id,code,name").eq("company_id", companyId).order("id")),
     supabaseAdmin.from("workforce_payment_settings")
       .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
@@ -1081,17 +1123,23 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       .lte("effective_from", affectedThrough)
       .order("effective_from")
   ]);
-  if (stationsResult.error || providersResult.error || paymentPolicyResult.error || attendanceCaptureResult.error) return incomingRows;
+  const setupError = stationsResult.error
+    ?? providersResult.error
+    ?? paymentPolicyResult.error
+    ?? attendanceCaptureResult.error;
+  if (setupError) return failMappingRead("Payment-mapping setup read failed", setupError);
   const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
-  const amazonProviderIds = (providersResult.data ?? []).filter((provider) => /amazon/i.test(`${provider.code ?? ""} ${provider.name ?? ""}`)).map((provider) => provider.id);
-  if (!amazonProviderIds.length) return incomingRows;
+  const providerIds = (providersResult.data ?? []).filter((provider) =>
+    [provider.code, provider.name].some((value) => key(value) === providerKey)
+  ).map((provider) => provider.id);
+  if (!providerIds.length) return failMappingRead("Payment-mapping provider lookup failed", `${providerKey} provider is unavailable`);
   const amazonMappingSelect = "id,status,provider_id,provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,production_threshold_config,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate,workforce_id,employee_id,contractor_id,field_executive_id";
   const currentMappingsResult = await supabaseAdmin.from("field_executive_provider_mappings")
     .select(amazonMappingSelect)
     .eq("company_id", companyId).in("status", ["active", "closed"])
-    .in("provider_id", amazonProviderIds).in("provider_member_id", providerMemberIds);
-  if (currentMappingsResult.error) return incomingRows;
+    .in("provider_id", providerIds).in("provider_member_id", providerMemberIds);
+  if (currentMappingsResult.error) return failMappingRead("Current provider mappings read failed", currentMappingsResult.error);
   const currentMappings = currentMappingsResult.data ?? [];
   const canonicalLookupIds = [...new Set(currentMappings.flatMap((mapping) => [
     mapping.workforce_id,
@@ -1117,7 +1165,8 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     return requests;
   });
   const currentWorkforceResults = await Promise.all(currentWorkforceRequests);
-  if (currentWorkforceResults.some((result) => result.error)) return incomingRows;
+  const currentWorkforceError = currentWorkforceResults.find((result) => result.error)?.error;
+  if (currentWorkforceError) return failMappingRead("Current Workforce identities read failed", currentWorkforceError);
   const currentWorkers = [...new Map(currentWorkforceResults
     .flatMap((result) => result.data ?? [])
     .map((worker) => [worker.id, worker])).values()];
@@ -1136,7 +1185,7 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
         .select(amazonMappingSelect)
         .eq("company_id", companyId)
         .in("status", ["active", "closed"])
-        .in("provider_id", amazonProviderIds)
+        .in("provider_id", providerIds)
         .in(group.column, group.ids.slice(index, index + 100))
         .lte("effective_from", affectedThrough)
         .or(`effective_to.is.null,effective_to.gte.${historyFrom}`)
@@ -1145,22 +1194,28 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     }
     return requests;
   }));
-  if (historyMappingResults.some((result) => result.error)) return incomingRows;
+  const historyMappingError = historyMappingResults.find((result) => result.error)?.error;
+  if (historyMappingError) return failMappingRead("Provider mapping history read failed", historyMappingError);
   const mappings = [...new Map([...currentMappings, ...historyMappingResults.flatMap((result) => result.data ?? [])]
     .map((mapping) => [mapping.id, mapping])).values()];
   const methodIds = [...new Set(mappings.map((mapping) => mapping.payment_method_id).filter(Boolean))] as string[];
-  const [componentsResult, paymentMethodsResult] = methodIds.length
+  const [componentsResult, paymentMethodsResult, productionSourcesResult] = methodIds.length
     ? await Promise.all([
       supabaseAdmin.from("payment_method_components")
-        .select("payment_method_id,component_code,component_type,pay_schedule,sort_order,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source,provider_calculation_sources)")
+        .select("payment_method_id,payment_field_id,component_code,component_type,pay_schedule,sort_order,payment_fields(id,code,label,field_type,pay_schedule,calculation_type,calculation_source,provider_calculation_sources)")
         .in("payment_method_id", methodIds).eq("is_active", true).order("sort_order"),
       supabaseAdmin.from("payment_methods")
         .select("id,production_threshold_config")
         .eq("company_id", companyId)
-        .in("id", methodIds)
+        .in("id", methodIds),
+      supabaseAdmin.from("payment_field_provider_metrics")
+        .select("payment_field_id,provider_id,provider_model_id,provider_production_metrics(source_key)")
+        .eq("company_id", companyId)
+        .in("provider_id", providerIds)
     ])
-    : [{ data: [], error: null }, { data: [], error: null }];
-  if (componentsResult.error || paymentMethodsResult.error) return incomingRows;
+    : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+  const configurationError = componentsResult.error ?? paymentMethodsResult.error ?? productionSourcesResult.error;
+  if (configurationError) return failMappingRead("Payment configuration read failed", configurationError);
   const methodThresholdConfigById = new Map(
     (paymentMethodsResult.data ?? []).map((method) => [method.id, method.production_threshold_config])
   );
@@ -1182,18 +1237,44 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
         .order("work_date")));
     }
     const existingResults = await Promise.all(existingRequests);
-    if (existingResults.some((result) => result.error)) return incomingRows;
+    const existingError = existingResults.find((result) => result.error)?.error;
+    if (existingError) return failMappingRead("Existing production history read failed", existingError);
+    const existingRows = existingResults.flatMap((result) => (result.data ?? []) as AmazonAggregateRow[]);
     rows = mergeReportImportShipmentMonthRows(
-      existingResults.flatMap((result) => (result.data ?? []) as AmazonAggregateRow[]),
+      replacementScope
+        ? retainRowsOutsideReportImportReplacement(existingRows, replacementScope)
+        : existingRows,
       incomingRows
     );
   }
   const stationCodeById = new Map((stationsResult.data ?? []).map((station) => [station.id, String(station.station_code)]));
+  const stationModelById = new Map((stationsResult.data ?? []).map((station) => [station.id, station.location_model_id]));
   const providerLabelsById = new Map((providersResult.data ?? []).map((provider) => [
     provider.id,
     [provider.code, provider.name].filter((label): label is string => Boolean(label))
   ]));
   const mappingScope = { providerLabelsById, stationCodeById };
+  const productionSources = (productionSourcesResult.data ?? []) as Array<{
+    payment_field_id: string;
+    provider_id: string;
+    provider_model_id: string | null;
+    provider_production_metrics: { source_key?: string | null } | Array<{ source_key?: string | null }> | null;
+  }>;
+  const productionSourceFor = (mapping: (typeof mappings)[number], fieldId: string | null | undefined) => {
+    if (!fieldId || !mapping.provider_id) return "";
+    const stationModelId = mapping.station_id ? stationModelById.get(mapping.station_id) : null;
+    const candidates = productionSources.filter((selection) =>
+      selection.payment_field_id === fieldId
+      && selection.provider_id === mapping.provider_id
+      && (!selection.provider_model_id || selection.provider_model_id === stationModelId)
+    );
+    const selected = candidates.find((selection) => selection.provider_model_id === stationModelId)
+      ?? candidates.find((selection) => !selection.provider_model_id);
+    const metric = Array.isArray(selected?.provider_production_metrics)
+      ? selected?.provider_production_metrics[0]
+      : selected?.provider_production_metrics;
+    return clean(metric?.source_key);
+  };
   const componentsByMethod = new Map<string, typeof componentsResult.data>();
   (componentsResult.data ?? []).forEach((component) => {
     const list = componentsByMethod.get(component.payment_method_id) ?? [];
@@ -1210,14 +1291,16 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       rows,
       mappings,
       attendanceCaptureHistory,
-      mappingScope
+      mappingScope,
+      replacementScope,
+      strict
     )
     : {
       attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(),
       cumulativeAttendanceUnitsBefore: new Map<string, number>(),
       workforceIndex: currentWorkforceIndex
     };
-  if (!attendanceContext) return incomingRows;
+  if (!attendanceContext) return failMappingRead("Attendance context read failed", "Attendance data is unavailable");
 
   const mappingSelections = rows.map((row) => ({
     row,
@@ -1242,7 +1325,9 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       const calculationType = clean(field?.calculation_type || (component.component_type === "production" ? "count_x_rate" : "fixed_daily"));
       const productionComponent = component.component_type === "production" || calculationType === "count_x_rate";
       if (!productionComponent) return;
-      const source = clean((field?.provider_calculation_sources as Record<string, unknown> | null)?.amazon || field?.calculation_source || componentCode);
+      const legacySources = field?.provider_calculation_sources as Record<string, unknown> | null;
+      const source = productionSourceFor(mapping, field?.id || component.payment_field_id)
+        || clean(legacySources?.[providerKey] || field?.calculation_source || componentCode);
       const rawRate = Number(values[componentCode] ?? values[component.component_code] ?? 0);
       productionThresholdInputs.push({
         id: amazonProductionAllocationId(row, mapping.id, componentCode, componentIndex),
@@ -1303,7 +1388,9 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
       const componentCode = clean(field?.code || component.component_code).toUpperCase();
       const fieldText = `${componentCode} ${field?.label ?? ""}`.toUpperCase();
-      const source = clean((field?.provider_calculation_sources as Record<string, unknown> | null)?.amazon || field?.calculation_source || componentCode);
+      const legacySources = field?.provider_calculation_sources as Record<string, unknown> | null;
+      const source = productionSourceFor(mapping, field?.id || component.payment_field_id)
+        || clean(legacySources?.[providerKey] || field?.calculation_source || componentCode);
       const rate = Number(values[componentCode] ?? values[component.component_code] ?? 0);
       const calculationType = clean(field?.calculation_type || (component.component_type === "production" ? "count_x_rate" : "fixed_daily"));
       const schedule = clean(field?.pay_schedule || component.pay_schedule);
@@ -1678,7 +1765,11 @@ async function mapFuelStations(companyId: string, rows: Array<{ normalized: Norm
   });
 }
 
-async function recalculateCps(companyId: string, touched: Array<{ stationCode?: string; workDate?: string }>) {
+async function recalculateCps(
+  companyId: string,
+  touched: Array<{ stationCode?: string; workDate?: string }>,
+  options: { strict?: boolean } = {}
+) {
   if (!supabaseAdmin) return;
   const pairs = Array.from(new Map(touched
     .filter((item) => item.stationCode && item.workDate)
@@ -1716,7 +1807,13 @@ async function recalculateCps(companyId: string, touched: Array<{ stationCode?: 
         .limit(1)
         .maybeSingle()
     ]);
-    if (shipments.error || fuel.error || cashbook.error || target.error) continue;
+    const readError = shipments.error ?? fuel.error ?? cashbook.error ?? target.error;
+    if (readError) {
+      if (options.strict) {
+        throw new Error(`CPS source read failed for ${pair.stationCode} on ${pair.workDate}: ${readableError(readError)}`);
+      }
+      continue;
+    }
 
     const totalDelivery = (shipments.data ?? []).reduce((sum, row) => sum + Number(row.total_delivery ?? 0), 0);
     const totalActivity = (shipments.data ?? []).reduce((sum, row) => sum + Number(row.total_activity ?? 0), 0);
@@ -1759,22 +1856,30 @@ async function recalculateCps(companyId: string, touched: Array<{ stationCode?: 
       });
     };
 
-    addBreakup("DA Variable CPS", "Mapped DA payout", "Amazon payroll mapping", shipmentDaPay);
+    addBreakup("DA Variable CPS", "Mapped DA payout", "Provider payroll mapping", shipmentDaPay);
     addBreakup("DA Variable CPS", "Cashbook DA payout", "Cashbook", daPayCost - shipmentDaPay);
     addBreakup("UTR CPS", "Staff / UTR payout", "Cashbook / Payroll", utrCost);
     addBreakup("VAN CPS", "Fuel card spend", "Fuel import", fuelCost);
     addBreakup("VAN CPS", "Vehicle cashbook spend", "Cashbook", vehicleCost);
     addBreakup("Other CPS", "Other operating expense", "Cashbook", otherCost);
 
-    await supabaseAdmin
+    const deletedBreakup = await supabaseAdmin
       .from("cps_cost_breakup_daily")
       .delete()
       .eq("company_id", companyId)
       .eq("work_date", pair.workDate)
       .eq("station_code", pair.stationCode);
-    if (breakupRows.length) await supabaseAdmin.from("cps_cost_breakup_daily").insert(breakupRows);
+    if (deletedBreakup.error && options.strict) {
+      throw new Error(`CPS breakup reset failed for ${pair.stationCode} on ${pair.workDate}: ${readableError(deletedBreakup.error)}`);
+    }
+    if (breakupRows.length) {
+      const insertedBreakup = await supabaseAdmin.from("cps_cost_breakup_daily").insert(breakupRows);
+      if (insertedBreakup.error && options.strict) {
+        throw new Error(`CPS breakup save failed for ${pair.stationCode} on ${pair.workDate}: ${readableError(insertedBreakup.error)}`);
+      }
+    }
 
-    await supabaseAdmin.from("cps_station_daily").upsert({
+    const savedCps = await supabaseAdmin.from("cps_station_daily").upsert({
       company_id: companyId,
       work_date: pair.workDate,
       station_code: pair.stationCode,
@@ -1803,6 +1908,9 @@ async function recalculateCps(companyId: string, touched: Array<{ stationCode?: 
       calculated_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }, { onConflict: "company_id,work_date,station_code" });
+    if (savedCps.error && options.strict) {
+      throw new Error(`CPS daily save failed for ${pair.stationCode} on ${pair.workDate}: ${readableError(savedCps.error)}`);
+    }
   }
 }
 
@@ -2386,6 +2494,275 @@ export async function POST(request: Request) {
         totalRows: parsedFacts.sourceRows
       });
     }
+    if (masterData.parser_type === "flipkart_production") {
+      const flipkartProviders = await importStep("Load Flipkart provider", async () => await db.from("providers")
+        .select("id, code, name")
+        .eq("company_id", companyId));
+      if (flipkartProviders.error) throw new Error(flipkartProviders.error.message);
+      const flipkartProviderIds = (flipkartProviders.data ?? [])
+        .filter((provider) => [provider.code, provider.name]
+          .some((value) => clean(value).toUpperCase() === "FLIPKART"))
+        .map((provider) => provider.id);
+      if (!flipkartProviderIds.length) {
+        throw new Error("No Flipkart provider is configured for this company.");
+      }
+      const companyVendor = await importStep("Load Flipkart vendor identity", async () => await db.from("companies")
+        .select("code, name")
+        .eq("id", companyId)
+        .maybeSingle());
+      if (companyVendor.error) throw new Error(companyVendor.error.message);
+      if (!companyVendor.data) throw new Error("The company vendor identity is not configured.");
+      const expectedVendorNames = [companyVendor.data.code, companyVendor.data.name];
+      const flipkartStations = await importStep("Load permitted historical Flipkart locations", () => readAllRows(
+        db.from("stations")
+          .select("id, station_code, hide_from_location_list")
+          .eq("company_id", companyId)
+          .in("provider_id", flipkartProviderIds)
+          .order("id")
+      ));
+      if (flipkartStations.error) throw new Error(flipkartStations.error.message);
+      const permittedStationIds = new Set(authorization.locationScopeIds);
+      const allowedStationCodes = Array.from(new Set((flipkartStations.data ?? [])
+        .filter((location) => authorization.hasAllLocationAccess
+          || (permittedStationIds.has(location.id) && !location.hide_from_location_list))
+        .map((location) => normalizeStation(location.station_code))
+        .filter(Boolean))).sort();
+      if (!allowedStationCodes.length) {
+        throw new Error("No permitted Flipkart locations are configured for this account.");
+      }
+      const allowedStations = new Set(allowedStationCodes);
+
+      const production = await importStep("Parse Flipkart production cycle", () => Promise.resolve(
+        parseFlipkartProductionMatrix(workbookRows, {
+          allowedStationCodes,
+          expectedVendorNames,
+          rejectInvalidRows: true,
+          requireBothSheetTypes: true,
+          requireCompleteCycle: true
+        })
+      ));
+      if (!production.daily.length) throw new Error("No valid Flipkart production totals were found in this file.");
+
+      const uploadedStationCodes = Array.from(new Set(production.rows.map((row) => row.stationCode))).sort();
+      const existingCycleRows = await importStep("Check existing Flipkart cycle coverage", () => readAllRows(
+        db.from("cps_shipment_daily")
+          .select("id, station_code")
+          .eq("company_id", companyId)
+          .eq("client", "Flipkart")
+          .gte("work_date", production.cycle.startDate)
+          .lte("work_date", production.cycle.endDate)
+          .order("id")
+      ));
+      if (existingCycleRows.error) throw new Error(existingCycleRows.error.message);
+      const uploadedStations = new Set(uploadedStationCodes);
+      const omittedExistingStations = Array.from(new Set((existingCycleRows.data ?? [])
+        .map((row) => normalizeStation(row.station_code))
+        .filter((stationCode) => allowedStations.has(stationCode) && !uploadedStations.has(stationCode)))).sort();
+      if (omittedExistingStations.length) {
+        throw new Error(
+          `This re-upload omits Flipkart station${omittedExistingStations.length === 1 ? "" : "s"} already stored for `
+          + `${production.cycle.key}: ${omittedExistingStations.join(", ")}. Upload the complete cycle file; no production was changed.`
+        );
+      }
+
+      const sourceRecords = rowsToRecords(workbookRows, production.headerRowNumber - 1);
+      const rawByRowNumber = new Map(sourceRecords.map((record) => [record.rowNumber, record.raw]));
+      const selectedRows = production.rows.map((row) => {
+        const raw = rawByRowNumber.get(row.rowNumber) ?? {
+          casper_employee_id: row.providerEmployeeId,
+          sheet_create_date_time: row.workDate,
+          sheet_id: row.sheetId,
+          sheet_type: row.sheetType,
+          sheet_update_date_time: row.updatedAt
+        };
+        return {
+          normalized: {
+            externalWorkerId: row.providerEmployeeId,
+            normalizedData: {
+              assigned_count: row.assigned,
+              client: "Flipkart",
+              completed: row.completed,
+              metric: row.metric,
+              provider_employee_id: row.providerEmployeeId,
+              provider_employee_name: row.providerEmployeeName,
+              sheet_id: row.sheetId,
+              sheet_type: row.sheetType,
+              sheet_update_date_time: row.updatedAt,
+              station_code: row.stationCode,
+              work_date: row.workDate
+            },
+            shipmentCount: row.completed,
+            stationCode: row.stationCode,
+            workDate: row.workDate
+          } satisfies NormalizedImport,
+          raw,
+          rowNumber: row.rowNumber
+        };
+      });
+      const selectedAudit = await importStep("Audit Flipkart source rows", () => auditParsedRows(
+        companyId,
+        sourceType,
+        selectedRows,
+        (masterData.dedupe_fields as string[] | null) ?? []
+      ));
+      const appliedAudit = selectedAudit.map<ParsedImportRow>((row) => row.isDuplicate
+        ? {
+            ...row,
+            issue: "Previously imported source row reapplied as part of the authoritative cycle refresh.",
+            status: "Imported"
+          }
+        : row);
+
+      const selectedRowNumbers = new Set(production.rows.map((row) => row.rowNumber));
+      const issuesByRow = new Map<number, string[]>();
+      production.issues.forEach((issue) => {
+        issuesByRow.set(issue.rowNumber, [...(issuesByRow.get(issue.rowNumber) ?? []), issue.message]);
+      });
+      const rejectedAudit = sourceRecords
+        .filter((record) => !selectedRowNumbers.has(record.rowNumber))
+        .map<ParsedImportRow>((record) => {
+          const issues = issuesByRow.get(record.rowNumber);
+          const superseded = !issues?.length;
+          return {
+            duplicateScope: superseded ? "file" : null,
+            hash: dedupeHash(record.raw, (masterData.dedupe_fields as string[] | null) ?? []),
+            isDuplicate: superseded,
+            issue: superseded
+              ? "Superseded duplicate row; the newest sheet_update_date_time was used."
+              : Array.from(new Set(issues)).join(" "),
+            normalized: null,
+            raw: record.raw,
+            rowNumber: record.rowNumber,
+            status: "Skipped"
+          };
+        });
+      const audited = [...appliedAudit, ...rejectedAudit].sort((left, right) => left.rowNumber - right.rowNumber);
+      const rowPayload = audited.map((row) => ({
+        amount: row.normalized?.amount ?? null,
+        batch_id: batch.data.id,
+        company_id: companyId,
+        external_worker_id: row.normalized?.externalWorkerId ?? null,
+        normalized_data: row.normalized?.normalizedData ?? {},
+        raw_data: rawAddsNothing(row.raw, row.normalized?.normalizedData) ? {} : row.raw,
+        row_hash: row.hash,
+        row_number: row.rowNumber,
+        shipment_count: row.normalized?.shipmentCount ?? null,
+        source_type: sourceType,
+        station_code: row.normalized?.stationCode ?? null,
+        status: row.status,
+        issue: row.issue,
+        work_date: row.normalized?.workDate ?? null
+      }));
+      await importStep("Save Flipkart import audit rows", () => insertInChunks("report_import_rows", rowPayload, 250));
+
+      const flipkartFacts = production.daily.map((row) => ({
+        amazon_delivery: 0,
+        assigned_count: row.assignedCount,
+        c_return: row.customerReturn,
+        client: "Flipkart",
+        company_id: companyId,
+        mfn: 0,
+        mfn_return: 0,
+        provider_employee_id: row.providerEmployeeId,
+        provider_employee_name: row.providerEmployeeName,
+        raw_row_count: row.rawRowCount,
+        shipment_type: [FLIPKART_RUNSHEET, FLIPKART_PICKUPSHEET]
+          .filter((sheetType) => row.sheetTypes.includes(sheetType))
+          .join(" + "),
+        source_batch_id: batch.data.id,
+        station_code: row.stationCode,
+        swa_delivery: 0,
+        total_activity: row.totalActivity,
+        total_delivery: row.delivery,
+        updated_at: new Date().toISOString(),
+        work_date: row.workDate
+      }));
+      const mappedFlipkartFacts = await importStep("Apply configured Flipkart payment mappings", () =>
+        applyProviderPaymentMappings(companyId, flipkartFacts, "flipkart", {
+          replacementScope: {
+            client: "Flipkart",
+            fromDate: production.cycle.startDate,
+            stationCodes: uploadedStationCodes,
+            toDate: production.cycle.endDate
+          },
+          strict: true
+        }));
+      const incomingFactKeys = new Set(flipkartFacts.map((row) =>
+        `${row.work_date}|${normalizeStation(row.station_code)}|${clean(row.provider_employee_id).toUpperCase()}`));
+      const payload = mappedFlipkartFacts
+        .filter((row) => incomingFactKeys.has(
+          `${row.work_date}|${normalizeStation(row.station_code)}|${clean(row.provider_employee_id).toUpperCase()}`
+        ))
+        .map((row) => ({
+          assigned_count: row.assigned_count,
+          c_return: row.c_return,
+          c_return_rate: row.c_return_rate ?? 0,
+          da_total_pay: row.da_total_pay ?? 0,
+          del_rate: row.del_rate ?? 0,
+          fuel_pay: row.fuel_pay ?? 0,
+          fuel_rate: row.fuel_rate ?? 0,
+          mapped_at: row.mapped_at ?? null,
+          mapping_status: row.mapping_status ?? "Unmapped",
+          mfn_rate: row.mfn_rate ?? 0,
+          mfn_return_rate: row.mfn_return_rate ?? 0,
+          mg_pay: row.mg_pay ?? 0,
+          mg_salary: row.mg_salary ?? 0,
+          pay_type: row.pay_type ?? null,
+          provider_employee_id: row.provider_employee_id,
+          provider_employee_name: row.provider_employee_name,
+          raw_row_count: row.raw_row_count,
+          shipment_type: row.shipment_type,
+          station_code: row.station_code,
+          total_activity: row.total_activity,
+          total_delivery: row.total_delivery,
+          variable_pay: row.variable_pay ?? 0,
+          work_date: row.work_date
+        }));
+      // The file is authoritative only for the permitted stations it contains.
+      // A re-upload that omits a previously imported station is rejected above,
+      // preventing a partial file from deleting historical payable production.
+      const stationCodes = uploadedStationCodes;
+      const replacement = await importStep("Replace Flipkart production cycle", async () => db.rpc(
+        "replace_flipkart_production_cycle",
+        {
+          p_batch_id: batch.data.id,
+          p_company_id: companyId,
+          p_cycle_from: production.cycle.startDate,
+          p_cycle_to: production.cycle.endDate,
+          p_rows: payload,
+          p_station_codes: stationCodes
+        }
+      ));
+      if (replacement.error) throw new Error(replacement.error.message);
+
+      const invalidRows = new Set(production.issues.map((issue) => issue.rowNumber)).size;
+      const historicalDuplicates = selectedAudit.filter((row) => row.duplicateScope === "existing").length;
+      const duplicateRows = production.deduplicatedRowCount + historicalDuplicates;
+      const skipped = rejectedAudit.length;
+      const delivery = production.daily.reduce((sum, row) => sum + row.delivery, 0);
+      const customerReturns = production.daily.reduce((sum, row) => sum + row.customerReturn, 0);
+      const message = `${payload.length} Flipkart daily provider total${payload.length === 1 ? "" : "s"} refreshed for ${production.cycle.startDate} to ${production.cycle.endDate}: ${delivery} deliveries and ${customerReturns} customer returns. ${production.deduplicatedRowCount} superseded duplicate row${production.deduplicatedRowCount === 1 ? "" : "s"} consolidated and ${invalidRows} invalid row${invalidRows === 1 ? "" : "s"} skipped.`;
+      const update = await importStep("Mark Flipkart import completed", async () => db.from("report_import_batches").update({
+        completed_at: new Date().toISOString(),
+        imported_row_count: production.rows.length,
+        message,
+        report_from: production.cycle.startDate,
+        report_to: production.cycle.endDate,
+        row_count: sourceRecords.length,
+        skipped_row_count: skipped,
+        station_code: stationCodes.join(", "),
+        status: "Completed"
+      }).eq("id", batch.data.id).eq("company_id", companyId));
+      if (update.error) throw new Error(update.error.message);
+
+      return Response.json({
+        duplicateRows,
+        imported: payload.length,
+        message,
+        skipped,
+        totalRows: sourceRecords.length
+      });
+    }
     const parsed = await importStep("Parse uploaded report rows", async () => masterData.parser_type === "generic_table"
       ? parseGenericFile(workbookRows)
       : parseFile(sourceType as CoreSourceType, workbookRows));
@@ -2436,9 +2813,10 @@ export async function POST(request: Request) {
       workDate: row.normalized?.workDate
     }));
     if (sourceType === "amazon_shipments") {
-      const payload = await importStep("Apply configured DA payment mappings", () => applyAmazonPaymentMappings(
+      const payload = await importStep("Apply configured DA payment mappings", () => applyProviderPaymentMappings(
         companyId,
-        aggregateAmazonRows(factRows, batch.data.id, companyId)
+        aggregateAmazonRows(factRows, batch.data.id, companyId),
+        "amazon"
       ));
       await importStep("Refresh Amazon shipment totals", () => upsertInChunks("cps_shipment_daily", payload, "company_id,client,work_date,station_code,provider_employee_id", 250));
       cpsRecalculationRows = payload.map((row) => ({ stationCode: row.station_code, workDate: row.work_date }));
