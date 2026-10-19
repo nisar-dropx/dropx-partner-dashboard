@@ -42,7 +42,7 @@ const checks = [
   [dashboardNavigation.includes('{ code: "provider_mapping", label: "ID Mapping", href: "/provider-id-mapping"'), "Dashboard navigation must use the canonical provider ID mapping URL."],
   [navigation.includes('{ code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping"'), "Ops navigation must use the canonical provider ID mapping URL."],
   [opsCodes.includes('"ops_provider_mapping"'), "The Ops ID Mapping permission must admit granted users to the Ops surface."],
-  [permissions.includes('{ key: "ops_provider_mapping", label: "ID Mapping", codes: ["ops_provider_mapping"] }'), "Ops role setup must expose ID Mapping with View/Add/Edit controls."],
+  [permissions.includes("OpsPermissionMatrix") && navigation.includes('code: "ops_provider_mapping", label: "ID Mapping"'), "Ops role setup must expose ID Mapping with View/Add/Edit controls."],
   [accessPages.includes('{ code: "ops_provider_mapping", name: "ID Mapping"') && migration.includes("'ops_provider_mapping'"), "The Ops ID Mapping page must be provisioned without copying Dashboard grants."],
   [authorization.includes('"ops_provider_mapping"'), "The authorization catalog must recognize the Ops ID Mapping page."],
   [access.includes('headers().get("host")') && access.includes("providerMappingPageCodeForCurrentHost") && !access.includes("x-forwarded-host"), "Provider mapping permission selection must use the same trusted Host value as middleware."],

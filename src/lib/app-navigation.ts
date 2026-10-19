@@ -1,6 +1,8 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 
 export type NavItem = {
+  /** Non-sidebar actions configured inside this menu in the permission editor. */
+  permissionCodes?: string[];
   children?: Array<{ code?: string; hideBadge?: boolean; href?: string; label: string }>;
   code: string;
   href?: string;

@@ -8,6 +8,7 @@ const commonStart: NavItem[] = [
   {
     code: "performance",
     label: "Performance",
+    permissionCodes: ["performance_review_cluster_filter"],
     icon: "P",
     children: [
       { code: "performance", label: "Daily Performance", href: "/performance?view=daily" },
@@ -44,7 +45,7 @@ const commonStart: NavItem[] = [
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
-const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Team Ops", icon: "T", children: [
+const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Team Ops", permissionCodes: ["ops_loss_recovered"], icon: "T", children: [
   { code: "ops_my_team", label: "My Team & Org", href: "/attendance/my-team" },
   { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
   { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" },
@@ -67,6 +68,7 @@ const businessDocuments: NavItem = {
 const payments: NavItem = {
   code: "payments",
   label: "Payments",
+  permissionCodes: ["expense_requests"],
   icon: "₹",
   children: [
     { code: "advance_requests", label: "Advance Request", href: "/payments/advance-request" },
@@ -80,6 +82,7 @@ const payments: NavItem = {
 const cps: NavItem = {
   code: "cps",
   label: "CPS",
+  permissionCodes: ["cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_unmapped"],
   icon: "C",
   children: [
     { code: "cps_overview", label: "Cost overview", href: "/cps" },
@@ -140,6 +143,7 @@ function modelOperations(mode: OperatingMode): NavItem {
     return {
       code: "cod",
       label: "Operations",
+      permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
       icon: "O",
       children: [
         networkPlanning,
@@ -154,6 +158,7 @@ function modelOperations(mode: OperatingMode): NavItem {
   return {
     code: "cod",
     label: "Operations",
+    permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
     icon: "O",
     children: [
       networkPlanning,
@@ -172,7 +177,8 @@ function modelOperations(mode: OperatingMode): NavItem {
 const networkPlanning = { code: "service_network", label: "Network Planning", href: "/service-network" };
 const eddDashboard = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash" };
 
-export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
+/** Unfiltered menu catalogue shared by the sidebar and designation editor. */
+export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
   if (mode === "amazon_now") return [
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
@@ -196,7 +202,11 @@ export function opsNavItemsForMode(mode: OperatingMode, authorization?: Authoriz
       ...(fleetNavItem.children ?? [])
     ]
   };
-  const items=[...commonStart, modelOperations(mode), businessDocuments, payments, cps, opsFleet, attendanceReports, reports, ...administration];
+  return [...commonStart, modelOperations(mode), businessDocuments, payments, cps, opsFleet, attendanceReports, reports, ...administration];
+}
+
+export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
+  const items = opsNavCatalogForMode(mode);
   return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
 }
 

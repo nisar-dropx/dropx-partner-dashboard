@@ -365,3 +365,42 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
   .ops-modern :is(.payment-entry-workspace,.payment-create-request) .form-grid{grid-template-columns:minmax(0,1fr);padding:8px 0;gap:14px}
   .ops-modern :is(.payment-entry-workspace,.payment-create-request) .form-actions>.button{width:100%;justify-content:center}
 }
+
+/* Designation access follows the sidebar tree; only parent menus are initially visible. */
+.ops-permission-tools{display:flex;gap:12px;align-items:end;margin-bottom:10px}
+.ops-permission-tools label{display:grid;gap:5px;font-size:12px;color:#667085;min-width:0}
+.ops-permission-search{flex:1}
+.ops-permission-tools :is(input,select){height:42px;width:100%;min-width:0;border:1px solid #d5dce5;border-radius:8px;padding:8px 10px;background:white;font:inherit;color:#172033}
+.ops-permission-help,.ops-permission-footnote{font-size:12px;line-height:1.5;color:#667085;margin:8px 0 12px}
+.ops-permission-table-wrap .ops-permission-table{width:100%;min-width:0;table-layout:fixed}
+.ops-permission-table :is(th,td){white-space:normal;overflow-wrap:anywhere;padding:8px}
+.ops-permission-table :is(th,td):not(:first-child){width:64px;text-align:center}
+.ops-permission-column-head{display:grid;justify-items:center}
+.ops-permission-check{display:grid;place-items:center;min-height:40px;width:100%;cursor:pointer}
+.ops-permission-table input[type=checkbox]{width:20px;height:20px;min-height:20px;min-width:20px;accent-color:#c64424;cursor:pointer}
+.ops-permission-table input:disabled{cursor:default}
+.ops-permission-menu-row{background:#f8fafc}
+.ops-permission-menu-row td:first-child{padding:0 8px}
+.ops-permission-menu-row button{display:flex;align-items:center;gap:9px;min-height:44px;width:100%;background:transparent;border:0;color:#172033;text-align:left;font:inherit;cursor:pointer;padding:7px 0}
+.ops-permission-menu-row button>span{display:grid;place-items:center;flex:0 0 24px;height:24px;border:1px solid #d5dce5;background:white;border-radius:6px;color:#c64424;font-size:18px}
+.ops-permission-menu-row small,.ops-permission-table th small{color:#667085;font-size:11px;font-weight:400}
+.ops-permission-single{display:block;min-height:44px;align-content:center;padding-left:33px}
+.ops-permission-submenu-row td:first-child{padding-left:41px;font-size:12px}
+.ops-permission-shared{margin-top:4px;color:#667085;font-size:11px}
+.ops-permission-shared summary{cursor:pointer}
+.ops-permission-shared small{display:block;margin-top:4px;line-height:1.45}
+.ops-permission-additional{margin-top:14px}
+@media(max-width:600px){
+  .ops-permission-tools{flex-wrap:wrap;gap:8px}
+  .ops-permission-tools label{width:100%;flex-basis:100%}
+  .ops-permission-tools :is(input,select){font-size:16px;min-height:44px}
+  .ops-permission-table :is(th,td):not(:first-child){width:40px;padding:2px 0}
+  .ops-permission-table th{font-size:10px}
+  .ops-permission-table td:first-child,.ops-permission-menu-row strong{font-size:12px}
+  .ops-permission-menu-row button{gap:5px}
+  .ops-permission-menu-row button>span{flex-basis:22px;height:22px}
+  .ops-permission-menu-row small{display:none}
+  .ops-permission-single{padding-left:27px}
+  .ops-permission-submenu-row td:first-child{padding-left:14px}
+  .ops-permission-table-wrap{overflow-x:auto}
+}

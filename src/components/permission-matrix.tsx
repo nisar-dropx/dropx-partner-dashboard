@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { OpsPermissionMatrix } from "@/components/ops-permission-matrix";
+import type { PermissionNavigationView } from "@/lib/ops-pulse/permission-navigation";
 import type { AdminAccessSurface } from "@/lib/access-surface";
 
 type PermissionPage = {
@@ -50,30 +52,6 @@ const dashboardGroups: PermissionGroup[] = [
   { key: "settings", label: "Settings", codes: ["app_settings", "payment_settings", "ai_connector", "amazon_connector", "developer_mode"] }
 ];
 
-const opsGroups: PermissionGroup[] = [
-  { key: "ops_attendance", label: "Team Ops", codes: ["ops_my_team", "ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_losses", "ops_loss_recovered"] },
-  { key: "ops_pulse", label: "Command Center", codes: ["ops_pulse"] },
-  { key: "performance", label: "Performance", codes: ["performance", "performance_review", "performance_review_cluster_filter", "performance_review_status"] },
-  { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
-  { key: "service_network", label: "Network Planning", codes: ["service_network"] },
-  { key: "workforce_register", label: "Workforce Register", codes: ["delivery_associates"] },
-  { key: "ops_provider_mapping", label: "ID Mapping", codes: ["ops_provider_mapping"] },
-  { key: "ops_workforce_payouts", label: "Workforce Payouts", codes: ["ops_workforce_payouts"] },
-  { key: "ops_workforce_payout_disputes", label: "Payout Disputes", codes: ["ops_workforce_payout_disputes"] },
-  { key: "ops_workforce_advances", label: "Workforce Advance Register", codes: ["ops_workforce_advances"] },
-  { key: "ops_rostering", label: "Rostering", codes: ["ops_rostering"] },
-  { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
-  { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"], hiddenCodes: ["station_edd"] },
-  { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
-  { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },
-  { key: "cpu", label: "Dark Store CPU", codes: ["cpu_overview"] },
-  { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },
-  { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
-  { key: "ops_reports", label: "Reports", codes: ["ops_reports"] },
-  { key: "ops_masters", label: "Ops Masters", codes: ["cod_master", "master_locations", "master_providers", "master_models", "performance_master", "capacity_master", "service_network_master"] },
-  { key: "users", label: "Users & Access", codes: ["users"] }
-];
-
 const peopleGroups: PermissionGroup[] = [
   {
     key: "people",
@@ -96,7 +74,12 @@ function emptyPermissionState(pages: PermissionPage[]) {
   return Object.fromEntries(pages.map((page) => [page.id, { view: false, add: false, edit: false }])) as Record<string, Record<PermissionAction, boolean>>;
 }
 
-export function PermissionMatrix({
+export function PermissionMatrix(props: {initialPermissions?: Array<{ page_id: string; can_view: boolean; can_add: boolean; can_edit: boolean }>; pages: PermissionPage[]; surface: AdminAccessSurface; navigationViews?: PermissionNavigationView[]; initialNavigationView?: string}) {
+  if (props.surface === "ops" && props.navigationViews) return <OpsPermissionMatrix {...props} navigationViews={props.navigationViews} />;
+  return <StandardPermissionMatrix {...props} />;
+}
+
+function StandardPermissionMatrix({
   initialPermissions = [],
   pages,
   surface
@@ -120,7 +103,7 @@ export function PermissionMatrix({
   });
 
   const groups = useMemo(() => {
-    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : dashboardGroups;
+    const definitions = surface === "people" ? peopleGroups : dashboardGroups;
     const definedGroups = definitions.map((definition) => ({
       ...definition,
       pages: pages.filter((page) => definition.codes.includes(page.code) || definition.matches?.(page)),
