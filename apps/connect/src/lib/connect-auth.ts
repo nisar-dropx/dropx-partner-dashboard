@@ -122,6 +122,7 @@ type DesignationCategoryRow = {
 type PeopleEngagementRow = {
   id: string;
   company_id: string;
+  person_id: string;
   worker_type: string;
   employee_id: string | null;
   contractor_id: string | null;
@@ -136,6 +137,7 @@ type PeopleAssignmentRow = {
 };
 
 type PeopleAssignmentMetadata = {
+  personId: string;
   designationId: string | null;
   positionTitle: string | null;
 };
@@ -244,12 +246,12 @@ async function loadPeopleAssignmentMetadata(accounts: AccountRow[]) {
   const [employeeResult, contractorResult] = await Promise.all([
     employeeIds.length
       ? supabaseAdmin.from("hr_engagements")
-        .select("id,company_id,worker_type,employee_id,contractor_id")
+        .select("id,company_id,person_id,worker_type,employee_id,contractor_id")
         .eq("worker_type", "employee").eq("status", "active").in("employee_id", employeeIds)
       : Promise.resolve(empty),
     contractorIds.length
       ? supabaseAdmin.from("hr_engagements")
-        .select("id,company_id,worker_type,employee_id,contractor_id")
+        .select("id,company_id,person_id,worker_type,employee_id,contractor_id")
         .eq("worker_type", "contractor").eq("status", "active").in("contractor_id", contractorIds)
       : Promise.resolve(empty)
   ]);
@@ -288,6 +290,7 @@ async function loadPeopleAssignmentMetadata(accounts: AccountRow[]) {
       engagement.company_id,
       workerId
     ), {
+      personId: engagement.person_id,
       designationId: assignment.designation_id,
       positionTitle: assignment.position_title
     });
@@ -1028,7 +1031,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
         && connectWfhEligible({
           policy: wfhPolicies.get(account.company_id),
           designationId,
-          designation: designationLabel
+          personId: assignmentMetadata.get(peopleWorkerKey(account.profile_type, account.company_id, account.id))?.personId ?? null
         })
       ) {
         pageAccess.push("wfh");
