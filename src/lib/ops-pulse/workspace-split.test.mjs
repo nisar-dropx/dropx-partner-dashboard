@@ -11,3 +11,13 @@ test('workspace selection cannot use a cookie to grant another business location
 test('dual access offers both workspaces, excluding HO and hidden locations',()=>{const r=ctx.resolveOperatingContext([lm,ds,{...ds,id:'h',is_ho:true},{...ds,id:'x',hide_from_location_list:true}]);assert.equal(r.mode,'amazon_now');assert.deepEqual(r.modeLocations,[ds]);assert.equal(r.availableModes.length,2);});
 test('DS has unit costs and generic menus, without last-mile specialist workflows',()=>{const menus=nav.opsNavItemsForMode('amazon_now');assert(menus.some(x=>x.href==='/cpu'));for(const code of ['ops_rostering','business_documents','payments','ops_reports','master_data','users'])assert(menus.some(x=>x.code===code));for(const code of ['cod','fleet','performance','capacity'])assert(!menus.some(x=>x.code===code));});
 test('both workspaces lead to the same complete approvals queue',()=>{const approvals=mode=>nav.opsNavItemsForMode(mode).find(x=>x.code==='payments').children.find(x=>x.code==='payment_approvals');assert.deepEqual(approvals('amazon_edsp'),approvals('amazon_now'));assert.equal(approvals('amazon_now').href,'/payments/approvals');});
+
+
+test('every workspace exposes Shift Attendance immediately after Command Center using existing roster access',()=>{
+  for(const mode of ['amazon_edsp','flipkart_odh_mdh','amazon_now']){
+    const menus=nav.opsNavItemsForMode(mode);
+    assert.equal(menus[0].label,'Command Center');
+    assert.deepEqual(menus[1],{code:'ops_rostering',label:'Shift Attendance',href:'/ops-pulse?view=manpower',icon:'S'});
+    assert.equal(menus.filter(item=>item.label==='Shift Attendance').length,1);
+  }
+});

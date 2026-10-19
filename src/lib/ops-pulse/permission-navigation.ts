@@ -32,7 +32,7 @@ export function permissionMenuGroups(pages: PermissionPage[], items: NavItem[], 
         if (page) append(code, page.name, `${item.code}:action:${code}`);
       }
     } else append(item.code, item.label, item.code);
-    return rows.length ? [{key: item.code, label: item.label, rows, expandable: Boolean(item.children?.length) || rows.length > 1}] : [];
+    return rows.length ? [{key: item.href ? `${item.code}:${item.href}` : item.code, label: item.label, rows, expandable: Boolean(item.children?.length) || rows.length > 1}] : [];
   });
 }
 

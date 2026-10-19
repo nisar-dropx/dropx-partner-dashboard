@@ -6,8 +6,8 @@ import { shiftAttendanceWorkbook, shiftExportResponse } from "@/lib/shift-attend
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const auth = await getAuthorization();
-  if (!auth || auth.readOnly || !hasPermission(auth, "ops_pulse", "access") || !hasPermission(auth, "ops_reports", "access"))
-    return Response.json({ error: "OpsPulse and Reports access are required." }, { status: 403 });
+  if (!auth || auth.readOnly || !hasPermission(auth, "ops_rostering", "access") || !hasPermission(auth, "ops_reports", "access"))
+    return Response.json({ error: "Rostering and Reports access are required." }, { status: 403 });
   const q = new URL(request.url).searchParams, date = q.get("date") ?? "", locationId = q.get("location") ?? "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || !locationId)
     return Response.json({ error: "Select a date and location." }, { status: 400 });

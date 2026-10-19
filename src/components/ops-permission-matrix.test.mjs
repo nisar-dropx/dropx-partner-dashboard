@@ -70,3 +70,16 @@ test('unfiltered configuration catalogue does not bypass live sidebar COD review
   assert.equal(hasSlip(nav.opsNavItemsForMode('amazon_edsp',{allowCod:false})),false);
   assert.equal(hasSlip(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true})),true);
 });
+
+
+test('attendance and roster links share the existing grant while keeping separate menu row identities',()=>{
+  const groups=grouping.permissionMenuGroups(pages,views[1].items,views);
+  assert.equal(new Set(groups.map(g=>g.key)).size,groups.length);
+  const attendance=groups.find(g=>g.label==='Shift Attendance'),roster=groups.find(g=>g.label==='Rostering');
+  assert.equal(attendance.rows[0].page.id,roster.rows[0].page.id);
+  assert(attendance.rows[0].sharedWith.includes('Rostering'));
+  const h=mount({initialNavigationView:'amazon_now'});h.render();
+  h.all().find(n=>n.props.label==='Shift Attendance: View').props.onChange(true);h.render();
+  assert.equal(h.all().find(n=>n.props.label==='Rostering: View').props.checked,true);
+  assert.deepEqual(h.payload().filter(p=>p.can_view),[{page_id:'ops_rostering',can_view:true,can_add:false,can_edit:false}]);
+});
