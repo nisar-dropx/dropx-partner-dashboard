@@ -15,7 +15,7 @@ export function searchOpsNavigation(items: NavItem[], query: string): NavItem[] 
 /** Prefer the most specific route, including query-based Fleet/Performance tabs. */
 export function activeOpsHref(items: NavItem[], pathname: string, search: string, active: string): string | undefined {
   const current = new URLSearchParams(search);
-  const links = items.flatMap(item => item.children ?? [item]);
+  const links = items.flatMap<Pick<NavItem, "href" | "label">>(item => item.children ?? [item]);
   const ranked = links.flatMap(item => {
     if (!item.href?.startsWith("/")) return [];
     const url = new URL(item.href, "https://ops.local");
