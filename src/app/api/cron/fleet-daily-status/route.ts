@@ -1,10 +1,13 @@
+import { effectiveVehicleAvailability } from "@/lib/fleet/vehicle-maintenance";
+import { vehicleIsOperational, vehicleIsTerminal } from "@/lib/fleet/vehicle-status-policy";
+import { readAllRows } from "@/lib/supabase-pagination";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { sendEmail } from "@/lib/email";
 import { loadAdHocActivity, isAdHocActivityLocation } from "@/lib/ops-pulse/adhoc-activity";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { fleetAdHocRequestType } from "@/lib/fleet-control-adhoc-scope";
-import { buildFleetDailyStatusEmail, normalizeFleetDailyStatusEmailConfig, type FleetDailyStatusAdHocSummary, type FleetDailyStatusSummary as Summary, type FleetDailyStatusVehicle as Vehicle } from "@/lib/fleet/daily-status-email";
+import { buildFleetDailyStatusEmail, normalizeFleetDailyStatusEmailConfig, type FleetDailyStatusAdHocSummary, type FleetDailyStatusSummary as Summary } from "@/lib/fleet/daily-status-email";
 import { loadFleetDailyStatusRecipients, resolveFleetDailyStatusDeliveryRecipients } from "@/lib/fleet/daily-status-recipients";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { fleetDailyStatusDue, deliverFleetStatusBatch } from "@/lib/fleet/daily-status-delivery";
@@ -14,8 +17,6 @@ export const maxDuration = 60;
 
 const clean = (value: unknown) => String(value ?? "").trim();
 const email = (value: unknown) => { const result = clean(value).toLowerCase(); return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(result) ? result : null; };
-const active = (status: unknown) => clean(status).toLowerCase() === "active";
-const closed = (status: unknown) => ["sold", "disposed", "returned", "archived"].includes(clean(status).toLowerCase());
 const own = (type: unknown) => clean(type).toLowerCase() === "own";
 const approved = (status: unknown, source: string) => {
   const value = clean(status).toLowerCase();
@@ -40,16 +41,25 @@ async function processCompany(company: { id: string; name: string | null }, date
   if (!setting.data?.daily_status_email_enabled || (!force && !fleetDailyStatusDue(time, clean(setting.data.daily_status_send_time)))) return "disabled";
   const config = normalizeFleetDailyStatusEmailConfig(setting.data.daily_status_email_config);
   const locationsResult = await loadCodLocations(company.id, [], true);
+  if (locationsResult.error) throw new Error(locationsResult.error);
   const excludedCodes = new Set(config.excludedStationCodes);
   const amazonNowCodes = new Set(locationsResult.locations.filter(isAmazonNow).map((location) => clean(location.station_code).toUpperCase()).filter(Boolean));
   const reportLocations = locationsResult.locations.filter((location) => { const code = clean(location.station_code).toUpperCase(); return !excludedCodes.has(code) && !(config.excludeAmazonNow && amazonNowCodes.has(code)); });
   const activity = await loadAdHocActivity(company.id, reportLocations.filter(isAdHocActivityLocation), `${date.slice(0, 7)}-01`, date);
-  const [vehiclesResult, recipientsResult] = await Promise.all([
-    supabaseAdmin.from("fleet_vehicles").select("vehicle_no,station_code,model,ownership_type,status,non_operational_since,expected_operational_date,status_comment,status_reason_key").eq("company_id", company.id),
-    supabaseAdmin.from("fleet_status_report_recipients").select("name,email,station_codes").eq("company_id", company.id).eq("is_active", true)
+  const snapshotAt = new Date().toISOString();
+  const [vehiclesResult, recipientsResult, availabilityResult, statusesResult] = await Promise.all([
+    readAllRows(supabaseAdmin.from("fleet_vehicles").select("id,vehicle_no,station_code,model,ownership_type,status,status_updated_at,non_operational_since,expected_operational_date,status_comment,status_reason_key").eq("company_id", company.id).order("id")),
+    supabaseAdmin.from("fleet_status_report_recipients").select("name,email,station_codes").eq("company_id", company.id).eq("is_active", true),
+    readAllRows(supabaseAdmin.from("fleet_vehicle_day_availability").select("id,vehicle_id,status,work_date,created_at").eq("company_id", company.id).eq("work_date", date).is("revoked_at", null).order("id")),
+    readAllRows(supabaseAdmin.from("fleet_vehicle_status_master").select("id,status_key,is_operational,is_terminal").eq("company_id", company.id).order("id"))
   ]);
   if (vehiclesResult.error || recipientsResult.error || activity.error) throw new Error(vehiclesResult.error?.message || recipientsResult.error?.message || activity.error || "Fleet data could not be loaded.");
-  const vehicles = ((vehiclesResult.data ?? []) as Vehicle[]).filter((row) => { const code = clean(row.station_code).toUpperCase(); return !closed(row.status) && !excludedCodes.has(code) && !(config.excludeAmazonNow && amazonNowCodes.has(code)); });
+  if (availabilityResult.error || statusesResult.error) throw new Error(availabilityResult.error?.message || statusesResult.error?.message);
+  const policies = (statusesResult.data ?? []).map(row => ({ key: row.status_key, isOperational: Boolean(row.is_operational), isTerminal: Boolean(row.is_terminal) }));
+  const active = (status: unknown) => vehicleIsOperational(status, policies);
+  const closed = (status: unknown) => vehicleIsTerminal(status, policies);
+  const availabilityById = new Map((availabilityResult.data ?? []).map(row => [row.vehicle_id, row]));
+  const vehicles = (vehiclesResult.data ?? []).map(row => effectiveVehicleAvailability(row, availabilityById.get(row.id))).filter((row) => { const code = clean(row.station_code).toUpperCase(); return !closed(row.status) && !excludedCodes.has(code) && !(config.excludeAmazonNow && amazonNowCodes.has(code)); });
   const typedActivity = activity.stations.flatMap((station) => station.days.flatMap((day) => day.entries.flatMap((entry) => { const type = fleetAdHocRequestType(entry); return type ? [{ station: clean(station.code).toUpperCase(), date: day.date, type, amount: Number(entry.amount) || 0, approvalStatus: entry.approvalStatus, source: entry.source }] : []; })));
   const approvedActivity = typedActivity.filter((row) => approved(row.approvalStatus, row.source));
   const pendingActivity = typedActivity.filter((row) => pending(row.approvalStatus, row.source));
@@ -114,7 +124,7 @@ async function processCompany(company: { id: string; name: string | null }, date
       if (prior.error) throw new Error(prior.error.message);
       const subject = prior.data?.subject || `${config.subjectPrefix} | ${delivery.region} | ${config.monthlyThread ? monthLabel : dailyLabel}`; const root = prior.data?.root_message_id || prior.data?.message_id || null; const last = prior.data?.message_id || null;
       const messageId = last ? `<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>` : `<dropx.fleet-status.${company.id}.${config.monthlyThread ? month : date}.${randomUUID()}@partner.dropxlogistics.com>`;
-      const presentation = buildFleetDailyStatusEmail({ companyName: company.name, region: delivery.region, date, rows: scopedFleetRows, exceptions: scopedVehicles.filter((row) => own(row.ownership_type) && !active(row.status)), adHocRows: scopedAdHocRows, totals, config });
+      const presentation = buildFleetDailyStatusEmail({ companyName: company.name, region: delivery.region, date, snapshotAt, rows: scopedFleetRows, exceptions: scopedVehicles.filter((row) => own(row.ownership_type) && !active(row.status)), adHocRows: scopedAdHocRows, totals, config });
       const result = await sendEmail({ companyId: company.id, to: [deliveryEmail], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined, timeoutMs: 8_000 });
       acceptedByMailServer = true;
       const log = await database.from("fleet_status_report_logs").update({ affected_station_codes: scopedAttention.map((row) => row.station), recipients: [deliveryEmail], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }).eq("company_id", company.id).eq("report_date", date).eq("recipient_email", deliveryEmail).eq("region_key", delivery.region).eq("status", "skipped");

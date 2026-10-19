@@ -15,15 +15,16 @@ const deferred=await policy.deliverFleetStatusBatch([1,2,3],async()=>{calls++;cl
 assert.equal(calls,1);assert.equal(deferred.deferred,2);
 
 // Exercise the real cron route with an isolated DB and SMTP stub: no live mail or writes.
-const logs=[];let smtpCalls=0,smtpFails=true,logFails=false;
+const logs=[];let smtpCalls=0,smtpFails=true,logFails=false,lastMail,tableFailure;
 const tables={fleet_control_settings:[{company_id:'fixture',daily_status_email_enabled:true,daily_status_send_time:'20:00:00',daily_status_only_affected:false}],companies:[{id:'fixture',name:'Fixture'}],fleet_vehicles:[{vehicle_no:'FIXTURE',station_code:'TLPB',model:'Fixture van',ownership_type:'own',status:'active'}],fleet_status_report_recipients:[{name:'Fixture',email:'fixture@example.com',station_codes:[]}],fleet_status_report_logs:logs};
 for(const name of ['fleet_vehicles','fleet_status_report_recipients'])for(const row of tables[name])Object.assign(row,{company_id:'fixture',is_active:true});
-function query(table){let filters=[],op='read',payload,single=false,desc=false,max=Infinity;
- const q={select(){return q;},eq(k,v){filters.push(r=>r[k]===v);return q;},in(k,vs){filters.push(r=>vs.includes(r[k]));return q;},order(k,o){desc=o?.ascending===false;return q;},limit(n){max=n;return q;},maybeSingle(){single=true;return q;},upsert(p){op='upsert';payload=p;return q;},update(p){op='update';payload=p;return q;},then(resolve,reject){return Promise.resolve().then(()=>{
+function query(table){let filters=[],op='read',payload,single=false,desc=false,max=Infinity,start=0;
+ const q={select(){return q;},is(k,v){filters.push(r=>(r[k]??null)===v);return q;},range(a,b){start=a;max=b-a+1;return q;},eq(k,v){filters.push(r=>r[k]===v);return q;},in(k,vs){filters.push(r=>vs.includes(r[k]));return q;},order(k,o){desc=o?.ascending===false;return q;},limit(n){max=n;return q;},maybeSingle(){single=true;return q;},upsert(p){op='upsert';payload=p;return q;},update(p){op='update';payload=p;return q;},then(resolve,reject){return Promise.resolve().then(()=>{
+  if(table===tableFailure)return{data:null,error:{message:'Fixture unavailable table'}};
   let rows=(tables[table]||[]).filter(r=>filters.every(f=>f(r)));
   if(op==='upsert'){const found=logs.some(r=>['company_id','report_date','recipient_email','region_key'].every(k=>r[k]===payload[k]));rows=found?[]:[{id:`log-${logs.length}`,...payload}];logs.push(...rows);}
   if(op==='update'){if(logFails&&payload.status==='sent')return{data:null,error:{message:'Fixture logging failure'}};rows.forEach(r=>Object.assign(r,payload));}
-  if(desc)rows=[...rows].reverse();rows=rows.slice(0,max);return{data:single?rows[0]||null:rows,error:null};
+  if(desc)rows=[...rows].reverse();rows=rows.slice(start,start+max);return{data:single?rows[0]||null:rows,error:null};
  }).then(resolve,reject);}};return q;}
 const recipients=load('src/lib/fleet/daily-status-recipients.ts',{'server-only':{},'@/lib/adhoc-digest-scope':{adHocOpsRoles:new Set()}});
 const template=load('src/lib/fleet/daily-status-email.ts');
@@ -31,11 +32,14 @@ let iso='2026-10-09T14:29:00Z';
 class ClockDate extends Date{constructor(value){super(value===undefined?iso:value);}}
 const route=load('src/app/api/cron/fleet-daily-status/route.ts',{
  'node:crypto':{randomUUID:()=>`fixture-${smtpCalls}`},'next/server':{NextResponse:{json:(body,options)=>({body,status:options?.status||200})}},
- '@/lib/email':{sendEmail:async args=>{smtpCalls++;assert.equal(args.timeoutMs,8000);assert.deepEqual(args.to,['fixture@example.com']);if(smtpFails)throw Error('421 Temporary System Problem');return{messageId:'fixture-message'};}},
+ '@/lib/email':{sendEmail:async args=>{smtpCalls++;lastMail=args;assert.equal(args.timeoutMs,8000);assert.deepEqual(args.to,['fixture@example.com']);if(smtpFails)throw Error('421 Temporary System Problem');return{messageId:'fixture-message'};}},
  '@/lib/ops-pulse/adhoc-activity':{loadAdHocActivity:async()=>({stations:[],error:null}),isAdHocActivityLocation:()=>true},
  '@/lib/ops-pulse/cod':{loadCodLocations:async()=>({locations:[{id:'station',station_code:'TLPB',region:'KL'}]})},
  '@/lib/fleet-control-adhoc-scope':{fleetAdHocRequestType:()=>null},
  '@/lib/fleet/daily-status-email':template,
+ '@/lib/fleet/vehicle-maintenance':load('src/lib/fleet/vehicle-maintenance.ts'),
+ '@/lib/fleet/vehicle-status-policy':load('src/lib/fleet/vehicle-status-policy.ts'),
+ '@/lib/supabase-pagination':load('src/lib/supabase-pagination.ts'),
  '@/lib/fleet/daily-status-recipients':{...recipients,loadFleetDailyStatusRecipients:async()=>[]},
  '@/lib/supabase-admin':{supabaseAdmin:{from:query}},'@/lib/fleet/daily-status-delivery':policy
 },{Date:ClockDate,process:{env:{CRON_SECRET:'fixture-secret'}},console:{error:()=>{}}});
@@ -49,3 +53,29 @@ iso='2026-10-10T14:30:00Z';logFails=true;assert.equal((await run()).status,500);
 logFails=false;iso='2026-10-10T15:00:00Z';assert.equal((await run()).body.already_sent,1);assert.equal(smtpCalls,3);
 assert.equal((await route.GET(new Request('https://fleet.example/api/cron/fleet-daily-status'))).status,401);
 console.log('Fleet mail recovery passed: scheduled daily start, later retry, bounded SMTP, deferred work, no duplicates after sent/accepted, authentication; isolated fixtures only.');
+
+// The scheduled email must interpret exactly the same availability as the portal.
+iso='2026-10-20T14:30:00Z';
+const base={company_id:'fixture',station_code:'TLPB',model:'Fixture van',ownership_type:'own',status:'active',non_operational_since:null,expected_operational_date:null,status_comment:null};
+tables.fleet_vehicles=[
+ {...base,id:'daily',vehicle_no:'DAILY-OVERRIDE'},
+ {...base,id:'returned',vehicle_no:'BACK-IN-SERVICE',status_updated_at:'2026-10-20T10:00:00Z'},
+ {...base,id:'custom',vehicle_no:'CUSTOM-READY',status:'ready'},
+ {...base,id:'terminal',vehicle_no:'TERMINAL-HIDDEN',status:'retired'},
+ {...base,id:'null',vehicle_no:'LEGACY-ACTIVE',status:null},
+ {...base,id:'down',vehicle_no:'SAVED-BREAKDOWN',status:'breakdown'},
+ {...base,id:'archived',vehicle_no:'ARCHIVED-HIDDEN',status:'archived'},
+];
+tables.fleet_vehicle_day_availability=['daily','returned','archived'].map(vehicle_id=>({company_id:'fixture',vehicle_id,status:'breakdown',work_date:'2026-10-20',created_at:'2026-10-20T09:00:00Z',revoked_at:null}));
+tables.fleet_vehicle_status_master=[{company_id:'fixture',status_key:'ready',is_operational:true,is_terminal:false},{company_id:'fixture',status_key:'retired',is_operational:false,is_terminal:true}];
+assert.equal((await run()).body.sent,1);
+assert.match(lastMail.body,/5 vehicles \| 3 operational \| 2 owned non-operational/);
+assert.match(lastMail.html,/DAILY-OVERRIDE/);assert.match(lastMail.html,/SAVED-BREAKDOWN/);
+assert.doesNotMatch(lastMail.html,/BACK-IN-SERVICE|CUSTOM-READY|LEGACY-ACTIVE|TERMINAL-HIDDEN|ARCHIVED-HIDDEN/);
+assert.match(lastMail.body,/Status as of 20 Oct 2026, 08:00 pm IST/);
+assert.match(lastMail.html,/Later availability updates appear in the live Fleet portal/);
+iso='2026-10-21T14:30:00Z';const before=smtpCalls;
+for(const table of ['fleet_vehicle_day_availability','fleet_vehicle_status_master','fleet_vehicles']){
+ tableFailure=table;assert.equal((await run()).status,500);assert.equal(smtpCalls,before,'Never email incomplete availability totals');
+}
+console.log('Mail/portal reconciliation passed: daily overrides, return-to-service precedence, custom status masters, null legacy status, terminal exclusion, explicit IST snapshot and failed-source guard.');
