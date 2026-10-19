@@ -506,7 +506,7 @@ export default async function PaymentRequestsPage({
       <PageHead
         eyebrow="Payments"
         title="Payment Requests"
-        subtitle="Track your requests and submit payment details."
+        subtitle="Track requests and submit payment details."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -557,7 +557,7 @@ export default async function PaymentRequestsPage({
         <section className="panel payment-workspace payment-request-workspace">
           <div className="panel-head">
             <div>
-              <h2>Your requests</h2>
+              <h2>Recent requests</h2>
               <p className="subtle">{requests.length} latest records</p>
             </div>
           </div>
