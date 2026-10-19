@@ -353,3 +353,15 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
   .ops-modern .payment-entry-workspace>.panel-head h2{font-size:15px}
   .ops-modern .payment-entry-workspace>.panel-head p{font-size:12px;margin-top:4px}
 }
+
+/* Payment entry uses the full phone width, including legacy two-column groups. */
+.ops-modern :is(.payment-entry-workspace,.payment-create-request) textarea.field{height:auto;min-height:96px;padding:10px 12px;resize:vertical}
+@media(max-width:1000px){
+  .ops-modern :is(.payment-entry-workspace,.payment-create-request) .form-grid>:is(.span-2,.span-3){grid-column:1/-1}
+  .ops-modern :is(.payment-entry-workspace,.payment-create-request) :is(input.field,select.field,textarea.field,.searchable-input){font-size:16px;width:100%}
+  .ops-modern :is(.payment-entry-workspace,.payment-create-request) :is(input.field,select.field,.searchable-control,.searchable-input){min-height:44px}
+}
+@media(max-width:650px){
+  .ops-modern :is(.payment-entry-workspace,.payment-create-request) .form-grid{grid-template-columns:minmax(0,1fr);padding:8px 0;gap:14px}
+  .ops-modern :is(.payment-entry-workspace,.payment-create-request) .form-actions>.button{width:100%;justify-content:center}
+}
