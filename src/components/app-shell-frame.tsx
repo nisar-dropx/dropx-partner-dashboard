@@ -1,11 +1,10 @@
 "use client";
 
-import { Menu, Paintbrush, RotateCcw, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { OpsDesignContext } from "@/components/ops-design-context";
-import { opsDesignPreference } from "@/lib/ops-pulse/design-navigation";
 import { EventLogTracker } from "@/components/event-log-tracker";
 
 type AppShellFrameProps = {
@@ -23,48 +22,27 @@ const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|u
 
 export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [modern, setModern] = useState(false);
+  // OpsPulse always uses the new shell, including server render and storage-restricted browsers.
+  const modern = opsDesignPreview;
   const shellRef = useRef<HTMLDivElement>(null);
-  const designInitialized = useRef(false);
   const menuRef = useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const designQuery = searchParams.get("opsUi");
   useEffect(() => {
-    if (!opsDesignPreview) return;
-    const hasDesignQuery = designQuery === "people" || designQuery === "classic";
-    if (designInitialized.current && !hasDesignQuery) return;
-    designInitialized.current = true;
-    let stored: string | null = null;
-    try { stored = localStorage.getItem("opspulse:design:v1"); } catch { /* Private browsing may block storage. */ }
-    const next = opsDesignPreference(designQuery, stored);
-    setModern(next);
-    if (designQuery === "people" || designQuery === "classic") {
-      try { localStorage.setItem("opspulse:design:v1", next ? "people" : "classic"); } catch {}
-      const url = new URL(window.location.href);
-      url.searchParams.delete("opsUi");
-      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    }
-  }, [opsDesignPreview, designQuery]);
-
-  useEffect(() => {
-    if (!opsDesignPreview || !modern) return;
+    if (!modern) return;
     document.body.dataset.opsAppearance = "people";
     return () => { delete document.body.dataset.opsAppearance; };
-  }, [opsDesignPreview, modern]);
-
-  function toggleDesign() {
-    const next = !modern;
-    setModern(next);
-    try { localStorage.setItem("opspulse:design:v1", next ? "people" : "classic"); } catch {}
-  }
+  }, [modern]);
 
   useEffect(() => {
     if (!modern || !sidebarOpen) return;
     const sidebar = shellRef.current?.querySelector<HTMLElement>(".sidebar");
     if (!sidebar) return;
     const previousFocus = document.activeElement as HTMLElement | null;
+    const background = Array.from(shellRef.current?.querySelectorAll<HTMLElement>(":scope > main, :scope > .mobile-topbar") ?? []);
+    const previousInert = background.map(element => element.hasAttribute("inert"));
+    background.forEach(element => { element.setAttribute("inert", ""); });
     sidebar.setAttribute("role", "dialog");
     sidebar.setAttribute("aria-modal", "true");
     sidebar.setAttribute("aria-label", "OpsPulse menu");
@@ -83,14 +61,13 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
     document.addEventListener("keydown", keydown);
     desktop.addEventListener("change", closeOnDesktop);
     return () => {
+      background.forEach((element, index) => { if (!previousInert[index]) element.removeAttribute("inert"); });
       sidebar.removeAttribute("role"); sidebar.removeAttribute("aria-modal"); sidebar.removeAttribute("aria-label");
       document.removeEventListener("keydown", keydown);
       desktop.removeEventListener("change", closeOnDesktop);
       (previousFocus?.isConnected ? previousFocus : menuRef.current)?.focus();
     };
   }, [modern, sidebarOpen]);
-
-  const designToggle = opsDesignPreview ? <button className="ops-design-toggle" type="button" onClick={toggleDesign} title={modern ? "Return to the original interface. Your entries stay in place." : "Preview the new OpsPulse design on this browser. Your entries stay in place."}>{modern ? <RotateCcw size={14} /> : <Paintbrush size={14} />}<span>{modern ? "Original design" : "Try new design"}</span></button> : null;
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -107,6 +84,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
 
     for (const key of Array.from(cleanParams.keys())) {
       if (
+        (modern && key === "opsUi") ||
         flashQueryKeyPattern.test(key) ||
         compoundFlashQueryKeyPattern.test(key) ||
         /(?:Error|Notice|Success)$/.test(key)
@@ -120,7 +98,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
 
     const query = cleanParams.toString();
     window.history.replaceState(window.history.state, "", `${pathname}${query ? `?${query}` : ""}${window.location.hash}`);
-  }, [pathname, searchParams]);
+  }, [pathname, searchParams, modern]);
 
   return (
     <OpsDesignContext.Provider value={opsDesignPreview && modern}>
@@ -142,7 +120,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
           {sidebarOpen ? <X size={21} strokeWidth={2.4} /> : <Menu size={21} strokeWidth={2.4} />}
         </button>
         {mobileBrand ?? <img className="mobile-brand-logo" src="/dropx-logo.png" alt="DropX" />}
-        <div className="mobile-top-actions">{designToggle}{mobileActions}</div>
+        <div className="mobile-top-actions">{mobileActions}</div>
       </header>
 
       {sidebarOpen ? (
@@ -159,7 +137,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
       <main className="main">
         <header className="topbar">
           {modern ? <div className="ops-page-context"><span>OpsPulse</span><span aria-hidden="true">/</span><strong>{pageTitle}</strong></div> : <div />}
-          <div className="top-actions">{designToggle}{desktopActions}</div>
+          <div className="top-actions">{desktopActions}</div>
         </header>
         <div className="content" id="ops-page-content" tabIndex={-1}>{children}</div>
       </main>

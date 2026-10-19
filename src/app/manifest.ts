@@ -9,9 +9,11 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     scope: "/",
     display: "standalone",
+    display_override: ["standalone"],
     orientation: "any",
     background_color: "#f5f6fa",
-    theme_color: "#ef4b22",
+    theme_color: "#172033",
+    shortcuts: [{ name: "Command Center", short_name: "Home", url: "/", icons: [{ src: "/opspulse/icon-192.png?v=2", sizes: "192x192" }] }],
     categories: ["business", "productivity"],
     icons: [
       { src: "/opspulse/icon-192.png?v=2", sizes: "192x192", type: "image/png", purpose: "any" },

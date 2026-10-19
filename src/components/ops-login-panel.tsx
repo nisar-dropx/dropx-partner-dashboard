@@ -1,8 +1,8 @@
 "use client";
 
 import { OpsPulseBrand } from "@/components/ops-pulse-brand";
-import { useEffect, useState } from "react";
-import { Download, LockKeyhole, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import { OpsAppInstall } from "@/components/ops-app-install";
+import { LockKeyhole, MonitorSmartphone, ShieldCheck } from "lucide-react";
 import { signInWithGoogle } from "@/app/login/actions";
 
 type OpsLoginPanelProps = {
@@ -10,30 +10,7 @@ type OpsLoginPanelProps = {
   nextPath?: string;
 };
 
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
 export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelProps) {
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as InstallPromptEvent);
-    };
-    window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
-  }, []);
-
-  async function installWebApp() {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-    await installPrompt.userChoice;
-    setInstallPrompt(null);
-  }
-
   return (
     <main className="ops-login-page">
       <section className="ops-login-story" aria-label="OpsPulse overview">
@@ -77,19 +54,7 @@ export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelP
           <p className="ops-access-footnote">Access is available only to active users enabled for OpsPulse.</p>
         </div>
 
-        <div className="ops-app-downloads">
-          <a className="ops-apk-download" href="/downloads/DropX-OpsPulse.apk" download>
-            <Download size={18} />
-            <span><strong>Download Android app</strong><small>Latest verified APK</small></span>
-          </a>
-          {installPrompt ? (
-            <button type="button" onClick={() => void installWebApp()}>
-              <MonitorSmartphone size={18} /> Install web app
-            </button>
-          ) : (
-            <p>iPhone: open in Safari, tap Share, then “Add to Home Screen”.</p>
-          )}
-        </div>
+        <OpsAppInstall compact />
       </section>
     </main>
   );
