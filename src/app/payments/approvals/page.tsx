@@ -398,13 +398,13 @@ export default async function PaymentApprovalsPage({
       <PageHead
         eyebrow="Payments"
         title="Approvals"
-        subtitle="Your approval queue across Last Mile and Dark Store, including requests assigned to you as fallback or leave cover."
+        subtitle="Review requests assigned to you, including leave cover."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
-      <nav className="payment-approval-stage-legend" aria-label="Approval views">
+      <nav className="payment-approval-stage-legend payment-approval-views" aria-label="Approval views">
         <PendingLink className={`button compact ${oversight ? "secondary" : ""}`} aria-current={!oversight ? "page" : undefined} prefetch={false} href="/payments/approvals">Needs my action</PendingLink>
-        <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} aria-current={oversight ? "page" : undefined} prefetch={false} href="/payments/approvals?view=scope">Track requests in my locations</PendingLink>
+        <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} aria-current={oversight ? "page" : undefined} prefetch={false} href="/payments/approvals?view=scope" title="Track requests in my permitted locations">Track locations</PendingLink>
       </nav>
       {error ? (
         <section className="panel message-panel error">
@@ -427,15 +427,15 @@ export default async function PaymentApprovalsPage({
       ) : null}
 
       {!error ? (
-        <section className="panel">
+        <section className="panel payment-workspace payment-approval-workspace">
           <div className="panel-head">
             <div>
               <h2>{oversight ? "Requests in my locations" : "My approval queue"}</h2>
-              {oversight ? <p className="subtle">Read-only tracking across your permitted locations. See who each request is waiting with, or filter for approved and completed requests.</p> : null}
+              {oversight ? <p className="subtle">Read-only · see who each request is waiting with.</p> : null}
               <p className="subtle">{matchingRequests.length} records · page {pageNumber} of {pageCount}</p>
             </div>
             {!oversight && canDownloadProcessData ? (
-              <a className="button secondary compact" href="/api/payments/approvals/download">Download raw Excel</a>
+              <a className="button secondary compact" href="/api/payments/approvals/download" title="Download raw Excel">Export Excel</a>
             ) : null}
           </div>
           {pageCount > 1 ? <div className="panel-body" style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
@@ -473,7 +473,7 @@ export default async function PaymentApprovalsPage({
               </PendingLink>
             ))}
           </div>
-          <div className="table-wrap">
+          <div className="table-wrap payment-responsive-list">
             <table>
               <thead>
                 <tr>
@@ -493,20 +493,20 @@ export default async function PaymentApprovalsPage({
                 {requests.length ? requests.map((request) => {
                   const displayAmount = paymentApprovalAmount(request);
                   return (
-                    <tr key={request.id}>
-                      <td><strong>{request.request_no}</strong></td>
-                      <td>{request.location_code}</td>
-                      <td>{request.payment_heads?.name ?? "-"}</td>
-                      <td>
+                    <tr key={request.id} className="payment-record">
+                      <td className="payment-cell-reference"><strong>{request.request_no}</strong></td>
+                      <td className="payment-cell-location">{request.location_code}</td>
+                      <td className="payment-cell-head">{request.payment_heads?.name ?? "-"}</td>
+                      <td className="payment-cell-amount">
                         <span>{displayAmount.text}</span>
                         {displayAmount.isEstimated ? <small className="subtle" style={{ display: "block" }}>Estimated</small> : null}
                       </td>
-                      <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
-                      <td><StatusPill status={paymentStatusLabel(request)} tone={paymentApprovalStatusTone(request)} /></td>
-                      <td><strong>{request.currentOwner}</strong><small className="subtle" style={{ display: "block" }}>{request.currentRole}{request.total_steps ? ` · ${request.current_step_order ?? 1} of ${request.total_steps}` : ""}</small>{request.approval_routing_reason ? <small className="subtle" style={{ display: "block", maxWidth: 240 }}>{request.approval_routing_reason}</small> : null}</td>
-                      <td>{isPendingPaymentApproval(request) ? <><strong>{paymentPendingAge(request.approval_pending_since)}</strong><small className="subtle" style={{ display: "block" }}>{request.approval_pending_since ? formatDashboardDateTime(request.approval_pending_since) : ""}</small></> : "—"}</td>
-                      <td>{formatDashboardDate(request.created_at)}</td>
-                      <td>
+                      <td className="payment-cell-secondary">{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
+                      <td className="payment-cell-status"><StatusPill status={paymentStatusLabel(request)} tone={paymentApprovalStatusTone(request)} /></td>
+                      <td className="payment-cell-owner"><span className="payment-mobile-label">With </span><strong>{request.currentOwner}</strong><small className="subtle" style={{ display: "block" }}>{request.currentRole}{request.total_steps ? ` · ${request.current_step_order ?? 1} of ${request.total_steps}` : ""}</small>{request.approval_routing_reason ? <small className="subtle" style={{ display: "block", maxWidth: 240 }}>{request.approval_routing_reason}</small> : null}</td>
+                      <td className="payment-cell-age">{isPendingPaymentApproval(request) ? <><strong>{paymentPendingAge(request.approval_pending_since)}</strong><small className="subtle" style={{ display: "block" }}>{request.approval_pending_since ? formatDashboardDateTime(request.approval_pending_since) : ""}</small></> : "—"}</td>
+                      <td className="payment-cell-created">{formatDashboardDate(request.created_at)}</td>
+                      <td className="payment-cell-action">
                         <PaymentApprovalReviewLauncher
                           canAct={canActOnRow(request)}
                           initiallyOpen={manageId === request.id}

@@ -217,3 +217,139 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 .ops-route-loading > span { font-size:13px; color:#667085; }
 .ops-route-loading .page-spinner { margin-top:6px; }
 @media(prefers-reduced-motion:reduce) { .ops-route-loading .page-spinner { animation:none; } }
+
+/* Payment workspaces: the list stays in view; secondary controls open on demand. */
+.payment-mobile-label,.payment-mobile-filter-toggle{display:none}
+.payment-approval-filter-options{display:contents}
+.payment-create-request>summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;color:var(--brand-dark)}
+.payment-create-request>summary span{font-size:12px;color:var(--muted)}
+.payment-create-request>summary::after{content:'⌄';font-size:18px}
+.payment-create-request[open]>summary::after{content:'⌃'}
+.ops-modern .payment-workspace>.panel-head{align-items:center;padding:13px 16px;gap:12px}
+.ops-modern .payment-workspace>.panel-head h2{font-size:16px}
+.ops-modern .payment-workspace>.panel-head p{margin-top:4px;font-size:12px}
+.ops-modern .payment-approval-views{padding:0;margin:0 0 14px;gap:6px}
+.ops-modern .payment-responsive-list td{padding:12px 10px;vertical-align:middle}
+.ops-modern .payment-responsive-list .payment-cell-amount{font-weight:700;font-variant-numeric:tabular-nums}
+.ops-modern .payment-responsive-list .payment-cell-amount small{font-weight:400}
+.ops-modern .payment-cell-owner{max-width:220px}
+.ops-modern .payment-cell-owner small{line-height:1.4}
+.ops-modern .payment-create-request{margin-bottom:14px}
+.ops-modern .payment-create-request>summary{min-height:54px}
+body:has(.ops-modern) .payment-review-section-head p{font-size:12px}
+body:has(.ops-modern) .payment-review-client-modal .payment-review-summary-cards{gap:8px}
+body:has(.ops-modern) .payment-review-answers td{overflow-wrap:anywhere}
+body:has(.ops-modern) .payment-review-client-modal .panel-body{min-width:0}
+@media(max-width:1000px){
+  .ops-modern:has(.payment-workspace) .page-head{margin-bottom:12px;gap:6px}
+  .ops-modern:has(.payment-workspace) .page-head>.status-pill.good{display:none}
+  .ops-modern:has(.payment-workspace) .page-head .subtle{font-size:12px;line-height:1.45;max-width:34ch}
+  .ops-modern:has(.payment-workspace) .page-head .eyebrow{display:none}
+  .ops-modern .payment-workspace>.panel-head{padding:12px;flex-direction:row}
+  .ops-modern .payment-workspace>.panel-head h2{font-size:14px}
+  .ops-modern .payment-workspace>.panel-head p{font-size:11px}
+  .ops-modern .payment-workspace>.panel-head>a{font-size:12px;white-space:nowrap;padding:8px}
+  .ops-modern .payment-approval-views{flex-wrap:nowrap;margin-bottom:12px}
+  .ops-modern .payment-approval-views .button{flex:1;padding:8px;font-size:12px;text-align:center;justify-content:center;min-width:0}
+  .ops-modern .payment-approval-filter-bar{gap:8px;padding:10px 12px;align-items:start}
+  .ops-modern .payment-approval-search{flex:1;min-width:0;max-width:none}
+  .ops-modern .payment-approval-search input{width:100%;min-width:0}
+  .ops-modern .payment-mobile-filter-toggle{display:inline-flex;flex:none;gap:6px;align-items:center;padding:8px 10px;font-size:12px}
+  .ops-modern .payment-approval-filter-options{display:none;width:100%;padding:6px 0;gap:8px;flex-wrap:wrap}
+  .ops-modern .payment-approval-filter-options[data-open=true]{display:flex}
+  .ops-modern .payment-approval-filter-options>:is(select,div){width:100%;max-width:none}
+  .ops-modern .payment-approval-filter-options>.button{flex:1}
+  .ops-modern .payment-approval-filter-menu{max-width:100%;width:100%}
+  .ops-modern .payment-workspace>.payment-approval-stage-legend{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;padding:4px 12px 10px;gap:6px;margin:0;scrollbar-width:thin}
+  .ops-modern .payment-workspace>.payment-approval-stage-legend>span{display:none}
+  .ops-modern .payment-approval-stage-chip{flex-shrink:0;min-height:36px;font-size:11px;display:inline-flex;align-items:center}
+  .ops-modern .payment-responsive-list{overflow:visible;background:#f5f7fa;padding:8px}
+  .ops-modern .payment-responsive-list table,.ops-modern .payment-responsive-list tbody{display:block;width:100%;min-width:0}
+  .ops-modern .payment-responsive-list thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .ops-modern .payment-responsive-list .payment-record{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:'location amount' 'head head' 'reference created' 'owner owner' 'age age' 'status action';gap:5px 10px;margin:0 0 8px;padding:13px 12px;background:white;border:1px solid var(--ops-line,#e2e8f0);border-radius:10px;box-shadow:0 1px 2px #13203804}
+  .ops-modern .payment-responsive-list .payment-record:last-child{margin-bottom:0}
+  .ops-modern .payment-responsive-list .payment-record>td{display:block;border:0!important;padding:0;min-width:0;max-width:none;white-space:normal;overflow-wrap:anywhere;font-size:12px;line-height:1.4}
+  .ops-modern .payment-responsive-list .payment-cell-location{grid-area:location;font-size:13px!important;font-weight:750;letter-spacing:.02em}
+  .ops-modern .payment-responsive-list .payment-cell-amount{grid-area:amount;text-align:right;font-size:15px!important}
+  .ops-modern .payment-responsive-list .payment-cell-head{grid-area:head;font-size:15px!important;font-weight:650;color:var(--ops-ink,#172033)}
+  .ops-modern .payment-responsive-list .payment-cell-reference{grid-area:reference;color:#64748b;font-size:11px!important}
+  .ops-modern .payment-cell-reference>strong{font-weight:500}
+  .ops-modern .payment-cell-reference>div{display:none}
+  .ops-modern .payment-responsive-list .payment-cell-created{grid-area:created;text-align:right;font-size:11px!important;color:#64748b}
+  .ops-modern .payment-responsive-list .payment-cell-owner{grid-area:owner;padding-top:4px}
+  .ops-modern .payment-cell-owner>strong{font-size:11px;font-weight:600}
+  .ops-modern .payment-cell-owner>small,.ops-modern .payment-cell-age>small{display:none!important}
+  .ops-modern .payment-responsive-list .payment-cell-age{grid-area:age;color:#64748b;font-size:11px!important}
+  .ops-modern .payment-cell-age>strong{font-weight:500}
+  .ops-modern .payment-responsive-list .payment-cell-status{grid-area:status;align-self:center;padding-top:5px}
+  .ops-modern .payment-cell-status .status-pill{white-space:normal;font-size:11px;line-height:1.4;padding:5px 8px}
+  .ops-modern .payment-responsive-list .payment-cell-action{grid-area:action;align-self:end;padding-top:5px}
+  .ops-modern .payment-cell-action .button{min-width:70px;justify-content:center;font-size:13px}
+  .ops-modern .payment-responsive-list .payment-cell-secondary{display:none!important}
+  .ops-modern .payment-mobile-label{display:inline;font-size:11px;color:#64748b;font-weight:400}
+  .ops-modern .payment-request-workspace .payment-record{grid-template-areas:'location amount' 'head head' 'reference created' 'estimate estimate' 'status status' 'action action'}
+  .ops-modern .payment-responsive-list .payment-cell-estimate{grid-area:estimate;color:#64748b}
+  .ops-modern .payment-request-workspace .payment-row-actions{justify-content:flex-end;flex-wrap:wrap}
+  .ops-modern .payment-create-request>summary{padding:12px;font-size:14px}
+  .ops-modern .payment-create-request>summary span{display:none}
+  .ops-modern .payment-create-request>.panel-head{padding:12px;gap:10px}
+  .ops-modern .payment-create-request .panel-body{padding:12px}
+  body:has(.ops-modern) .payment-review-client-backdrop{padding:0;align-items:stretch}
+  body:has(.ops-modern) .payment-review-client-modal{width:100%;max-width:100%;max-height:100dvh;height:100dvh;margin:0;border-radius:0;overflow:auto;overscroll-behavior:contain}
+  body:has(.ops-modern) .payment-review-sticky-head{padding:12px 14px;padding-top:max(12px,env(safe-area-inset-top));gap:10px}
+  body:has(.ops-modern) .payment-review-sticky-head h2{font-size:16px}
+  body:has(.ops-modern) .payment-modal-reference{font-size:11px;gap:8px;flex-wrap:wrap}
+  body:has(.ops-modern) .payment-review-client-modal>.panel-body{padding:12px 14px max(20px,env(safe-area-inset-bottom))}
+  body:has(.ops-modern) .payment-review-summary-cards{grid-template-columns:1fr 1fr;border:1px solid #e2e8f0;border-radius:10px;padding:10px;gap:10px!important}
+  body:has(.ops-modern) .payment-review-summary-cards>article{border:0;padding:0;background:none;gap:4px;min-width:0}
+  body:has(.ops-modern) .payment-review-summary-cards strong{font-size:14px;overflow-wrap:anywhere}
+  body:has(.ops-modern) .payment-review-summary-cards .status-pill{font-size:11px;white-space:normal;line-height:1.4}
+  body:has(.ops-modern) .payment-review-summary-cards>article>span:not(.status-pill){font-size:11px}
+  body:has(.ops-modern) .payment-review-routing-note{font-size:12px;padding:8px 10px}
+  body:has(.ops-modern) .payment-review-routing-note p{margin:3px 0 0}
+  body:has(.ops-modern) .payment-review-fast-actions{padding:12px;margin-top:12px}
+  body:has(.ops-modern) .payment-approval-decision-intro>.status-pill{display:none}
+  body:has(.ops-modern) .payment-approval-action-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  body:has(.ops-modern) .payment-approval-action-buttons .payment-approve-button{grid-column:1/-1}
+  body:has(.ops-modern) .payment-approval-action-buttons .button{font-size:12px;padding:9px 8px;min-width:0}
+  body:has(.ops-modern) .payment-review-additional-details>summary{font-size:13px;min-height:48px;padding:10px}
+  body:has(.ops-modern) .payment-review-additional-details>summary>small{display:none}
+  body:has(.ops-modern) .payment-review-answers table,body:has(.ops-modern) .payment-review-answers tbody{display:block;min-width:0;width:100%}
+  body:has(.ops-modern) .payment-review-answers tr{display:block;border-bottom:1px solid #e2e8f0;padding:10px 0}
+  body:has(.ops-modern) .payment-review-answers th,body:has(.ops-modern) .payment-review-answers td{display:block;border:0;padding:4px 0;white-space:normal;width:100%;min-width:0;font-size:13px}
+  body:has(.ops-modern) .payment-review-answers th{font-size:11px;background:none;color:#64748b}
+  body:has(.ops-modern) .payment-review-answer-value{max-height:180px;overflow:auto;display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+}
+
+/* Dialogs must cover the sticky app header and floating assistant. */
+body:has(.ops-modern) .modal-backdrop{z-index:1100}
+body:has(.ops-modern) .payment-attachment-preview-backdrop{z-index:1120}
+body:has(.ops-modern):has(.modal-backdrop) .ops-ai{visibility:hidden}
+
+body:has(.ops-modern) .payment-review-sticky-head{flex-direction:row;align-items:flex-start}
+body:has(.ops-modern) .payment-review-sticky-head>.icon-button{width:44px;height:44px;flex:0 0 44px}
+body:has(.ops-modern) .payment-review-client-modal .payment-approve-button{background:#c64424;border-color:#c64424;color:white}
+body:has(.ops-modern) .payment-review-client-modal .payment-return-button{background:white;border:1px solid #d9bc7f;color:#835800}
+body:has(.ops-modern) .payment-review-client-modal .payment-reject-button{background:#fff6f5;border:1px solid #eec2bd;color:#ac2f27}
+body:has(.ops-modern) .payment-review-client-modal .payment-review-routing-note{padding:0;background:white}
+body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-size:12px}
+@media(max-width:1000px){
+  body:has(.ops-modern) .ops-modern .content:has(.payment-workspace){gap:10px}
+  .ops-modern:has(.payment-workspace) .page-head,.ops-modern .payment-approval-views{margin-bottom:0}
+  body:has(.ops-modern) .payment-approval-action-buttons .button{min-height:44px}
+}
+
+.ops-modern .payment-create-options{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}.ops-modern .payment-new-expense{min-height:48px;display:inline-flex;align-items:center}.ops-modern .payment-create-options>.payment-create-request{flex:1 1 300px;margin-bottom:0}.ops-modern .payment-create-options>.payment-create-request[open]{flex-basis:100%}
+@media(max-width:1000px){.ops-modern .payment-create-options{gap:8px}.ops-modern .payment-new-expense{width:100%;justify-content:center}}
+
+@media(min-width:650px) and (max-width:1000px){
+  .ops-modern .payment-responsive-list tbody{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .ops-modern .payment-responsive-list .payment-record{margin:0;align-content:start}
+}
+
+@media(max-width:1000px){
+  .ops-modern .payment-expense-workspace .payment-record{grid-template-areas:'location amount' 'head head' 'reference created' 'status action'}
+  .ops-modern .payment-entry-workspace>.panel-head,.ops-modern .payment-entry-workspace>.panel-body{padding:12px}
+  .ops-modern .payment-entry-workspace>.panel-head h2{font-size:15px}
+  .ops-modern .payment-entry-workspace>.panel-head p{font-size:12px;margin-top:4px}
+}

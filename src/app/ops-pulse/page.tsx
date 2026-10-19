@@ -1,3 +1,4 @@
+import { OpsCommandDateRange } from '@/components/ops-command-date-range';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/app-shell';
@@ -51,7 +52,7 @@ function LastMile({authorization:a,context,searchParams}:ContentProps) {
     [context.mode==='flipkart_odh_mdh'?'cod_submission':'cod_executive_reconciliation','COD workspace',context.mode==='flipkart_odh_mdh'?'/ops-pulse/cod/submission?client=flipkart':'/ops-pulse/cod/executive-reconciliation?client=amazon'],
   ].filter(([permission])=>hasPermission(a,permission,'access') && (context.mode==='amazon_edsp'||!['performance_review','capacity_overview'].includes(permission)));
   return <div className={styles.command}>
-    <header className={styles.hero}><div><p className={styles.eyebrow}>LM · {operatingModeLabel(context.mode).toUpperCase()} · {locations.length} SELECTED LOCATIONS</p><h1>Last Mile command center</h1><p>Operational priorities, service performance and shipment economics.</p></div><form action="/ops-pulse" className={styles.dateForm}><label>From<input type="date" name="from" defaultValue={period.from} max={today} required/></label><label>Through<input type="date" name="to" defaultValue={period.to} max={today} required/></label><button>Refresh</button></form></header>
+    <header className={styles.hero}><div><p className={styles.eyebrow}>LM · {operatingModeLabel(context.mode).toUpperCase()} · {locations.length} SELECTED LOCATIONS</p><h1>Last Mile command center</h1><p>Operational priorities, service performance and shipment economics.</p></div><OpsCommandDateRange from={period.from} to={period.to} today={today}/></header>
     <nav className={styles.tools} aria-label="Operational workspaces">{links.map(([,label,href])=><Link prefetch={false} key={label} href={href}>{label} ↗</Link>)}{context.mode==='amazon_edsp'&&hasEddAccess(a)&&<Link prefetch={false} href="/ops-pulse/edd/flash">Live delivery view ↗</Link>}</nav>
     <Suspense fallback={<CommandLoading label="Checking audits, people and operational queues"/>}><OpsCommandAttention authorization={a} locations={locations} today={today} mode={context.mode} extraItems={result.then(data=>commandMetricAttention({...data,period,codes,today}))}/></Suspense>
     {!locations.length ? <div className={styles.notice}>No operational locations are assigned to this workspace.</div> : <Suspense key={`${period.from}:${period.to}:${codes.join(',')}`} fallback={<CommandLoading label="Loading shipment and cost summaries"/>}><LastMileSnapshots result={result} period={period} codes={codes}/></Suspense>}

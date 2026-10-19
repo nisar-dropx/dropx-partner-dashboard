@@ -24,3 +24,13 @@
 :global(.ops-modern) .panel{border-radius:12px;box-shadow:var(--ops-shadow)}
 :global(.ops-modern) .panel>header{padding:15px 18px}
 :global(.ops-modern) .command :is(a,button,summary,input):focus-visible{outline-color:var(--ops-focus)}
+
+/* Compact overview, with normal-size text and date controls that can reflow. */
+.hero{flex-wrap:wrap;align-items:center}.hero>div:first-child{min-width:0;flex:1 1 320px}.dateOptions{max-width:100%;flex:0 1 auto}.dateToggle{display:none}.dateForm{max-width:100%}.dateForm label{min-width:0}.dateForm input{max-width:100%;box-sizing:border-box}.tools{margin-bottom:16px}
+@media(max-width:1100px){.hero{flex-direction:row}.hero>div:first-child{flex-basis:100%}}
+@media(max-width:650px){
+  .hero{gap:10px;margin-bottom:10px}.hero>div:first-child{flex-basis:100%}.hero p:last-child{display:none}.hero .eyebrow{font-size:9px!important;letter-spacing:.7px}.command h1{font-size:23px!important}
+  .dateOptions{width:100%}.dateToggle{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;background:white;padding:8px 10px;min-height:44px;color:#42536c;font-size:12px;width:100%;text-align:left}.dateToggle svg:last-child{margin-left:auto}.dateForm{margin-top:10px;display:none}.dateOptions[data-open=true] .dateForm{display:flex}.dateForm label{flex:1 1 40%}.dateForm button{flex:1 1 100%;min-height:44px}
+  .tools{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px;margin-bottom:12px;scrollbar-width:thin}.tools a{flex-shrink:0;display:flex;align-items:center;min-height:44px;font-size:12px}
+  .snapshots{grid-template-columns:1fr;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:8px}.snapshots a{border:0;border-bottom:1px solid var(--line);border-radius:0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:12px}.snapshots a:last-child{border-bottom:0}.snapshots a>span{font-size:12px}.snapshots a>span svg{display:none}.snapshots a>strong{font-size:18px}.snapshots a>small{display:none}.snapshots em{font-size:10px}
+}

@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, ChevronDown, Search, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 export type PaymentApprovalFilterOption = {
@@ -142,6 +142,9 @@ export function PaymentApprovalFilters({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = useId();
+  const activeFilterCount = selectedStations.length + selectedPaymentHeads.length + selectedDates.length + (status !== "pending" ? 1 : 0);
   const [draftStations, setDraftStations] = useState(selectedStations);
   const [draftPaymentHeads, setDraftPaymentHeads] = useState(selectedPaymentHeads);
   const [draftDates, setDraftDates] = useState(selectedDates);
@@ -182,6 +185,10 @@ export function PaymentApprovalFilters({
           value={query}
         />
       </div>
+      <button type="button" className="button secondary payment-mobile-filter-toggle" aria-expanded={filtersOpen} aria-controls={filtersId} onClick={() => setFiltersOpen(value => !value)}>
+        <SlidersHorizontal size={16} aria-hidden="true" /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}{hasDraftChanges ? " •" : ""}
+      </button>
+      <div className="payment-approval-filter-options" id={filtersId} data-open={filtersOpen}>
       <select
         aria-label="Approval status"
         className="field compact payment-approval-status-filter"
@@ -246,6 +253,7 @@ export function PaymentApprovalFilters({
           Clear
         </button>
       ) : null}
+      </div>
     </div>
   );
 }

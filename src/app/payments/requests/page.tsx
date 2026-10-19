@@ -506,7 +506,7 @@ export default async function PaymentRequestsPage({
       <PageHead
         eyebrow="Payments"
         title="Payment Requests"
-        subtitle="Lifecycle: request → approval → requester submits verified payout details → Finance processing → paid."
+        subtitle="Track requests and submit payment details."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -531,16 +531,16 @@ export default async function PaymentRequestsPage({
       ) : null}
 
       {!error && pagePermission.canAdd ? (
-        <section className="panel">
+        <div className="payment-create-options">
+        <PendingLink className="button payment-new-expense" href="/payments/expense-request">+ New expense request{expenseActionCount > 0 ? <span className="nav-badge">{expenseActionCount > 99 ? "99+" : expenseActionCount}</span> : null}</PendingLink>
+        <details className="panel payment-create-request" open={Boolean(searchParams?.paymentError)}>
+          <summary><strong>+ New payment request</strong><span>Choose a payment head to get started</span></summary>
           <div className="panel-head">
             <div>
               <h2>New payment request</h2>
               <p className="subtle">Use this for payment heads that do not require expense approval.</p>
             </div>
-            <PendingLink className="button secondary" href="/payments/expense-request">
-              New expense request
-              {expenseActionCount > 0 ? <span className="nav-badge">{expenseActionCount > 99 ? "99+" : expenseActionCount}</span> : null}
-            </PendingLink>
+
           </div>
           <PaymentRequestForm
             action={createPaymentRequest}
@@ -549,18 +549,19 @@ export default async function PaymentRequestsPage({
             locationOptions={locationOptions}
             savedContacts={savedContacts}
           />
-        </section>
+        </details>
+        </div>
       ) : null}
 
       {!error && pagePermission.canView ? (
-        <section className="panel">
+        <section className="panel payment-workspace payment-request-workspace">
           <div className="panel-head">
             <div>
-              <h2>Payment detail requests</h2>
+              <h2>Recent requests</h2>
               <p className="subtle">{requests.length} latest records</p>
             </div>
           </div>
-          <div className="table-wrap">
+          <div className="table-wrap payment-responsive-list">
             <table>
               <thead>
                 <tr>
@@ -582,19 +583,19 @@ export default async function PaymentRequestsPage({
                 {requests.length ? requests.map((request) => {
                   const head = headById.get(request.payment_head_id);
                   return (
-                    <tr key={request.id}>
-                      <td><strong>{request.request_no}</strong>{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}</td>
-                      <td>{request.location_code}</td>
-                      <td>{head?.name ?? "-"}</td>
-                      <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
-                      <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
-                      <td>{request.payment_mode ? paymentModeLabel(request.payment_mode) : "-"}</td>
-                      <td>{request.account_holder_name ?? "-"}</td>
-                      <td>{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
-                      <td>{request.payment_mode === "online_payment" ? request.payment_portal ?? "-" : request.ifsc ?? "-"}</td>
-                      <td><StatusPill status={paymentLifecycleLabel(request, authorization.userId)} tone={paymentApprovalStatusTone(request)} /></td>
-                      <td>{formatDashboardDate(request.created_at)}</td>
-                      <td>
+                    <tr key={request.id} className="payment-record">
+                      <td className="payment-cell-reference"><strong>{request.request_no}</strong>{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}</td>
+                      <td className="payment-cell-location">{request.location_code}</td>
+                      <td className="payment-cell-head">{head?.name ?? "-"}</td>
+                      <td className="payment-cell-estimate"><span className="payment-mobile-label">Estimate </span>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
+                      <td className="payment-cell-amount"><span className="payment-mobile-label">Amount </span>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
+                      <td className="payment-cell-secondary">{request.payment_mode ? paymentModeLabel(request.payment_mode) : "-"}</td>
+                      <td className="payment-cell-secondary">{request.account_holder_name ?? "-"}</td>
+                      <td className="payment-cell-secondary">{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
+                      <td className="payment-cell-secondary">{request.payment_mode === "online_payment" ? request.payment_portal ?? "-" : request.ifsc ?? "-"}</td>
+                      <td className="payment-cell-status"><StatusPill status={paymentLifecycleLabel(request, authorization.userId)} tone={paymentApprovalStatusTone(request)} /></td>
+                      <td className="payment-cell-created">{formatDashboardDate(request.created_at)}</td>
+                      <td className="payment-cell-action">
                         <div className="payment-row-actions">
                           <PendingLink className="button secondary compact" href={`/payments/requests?view=${request.id}`} scroll={false}>View</PendingLink>
                           {pagePermission.canAdd && canSubmitBankDetails(request, authorization.userId) ? (

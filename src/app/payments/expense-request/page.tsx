@@ -382,7 +382,7 @@ export default async function ExpenseRequestPage({
       <PageHead
         eyebrow="Payments"
         title="Expense Request"
-        subtitle="Request approval for an expense before collecting bank details for payment processing."
+        subtitle="Request approval first. Add payment details after approval."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -405,11 +405,11 @@ export default async function ExpenseRequestPage({
       ) : null}
 
       {!error && pagePermission.canAdd ? (
-        <section className="panel">
+        <section className="panel payment-entry-workspace">
           <div className="panel-head">
             <div>
               <h2>New expense request</h2>
-              <p className="subtle">Select a location and payment head, then enter the estimated amount and required fields.</p>
+              <p className="subtle">Choose a location, expense type and estimate.</p>
             </div>
           </div>
           <PaymentRequestForm
@@ -425,14 +425,14 @@ export default async function ExpenseRequestPage({
       ) : null}
 
       {!error && pagePermission.canView ? (
-        <section className="panel">
+        <section className="panel payment-workspace payment-expense-workspace">
           <div className="panel-head">
             <div>
               <h2>Recent expense requests</h2>
               <p className="subtle">{requests.length} latest records</p>
             </div>
           </div>
-          <div className="table-wrap">
+          <div className="table-wrap payment-responsive-list">
             <table>
               <thead>
                 <tr>
@@ -447,15 +447,15 @@ export default async function ExpenseRequestPage({
               </thead>
               <tbody>
                 {requests.length ? requests.map((request) => (
-                  <tr key={request.id}>
-                    <td><strong>{request.request_no}</strong></td>
-                    <td>{request.location_code}</td>
-                    <td>{headById.get(request.payment_head_id)?.name ?? "-"}</td>
-                    <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
-                    <td><StatusPill status={displayApprovalStatus(request)} tone={paymentApprovalStatusTone(request)} /></td>
-                    <td>{formatDashboardDate(request.created_at)}</td>
+                  <tr key={request.id} className="payment-record">
+                    <td className="payment-cell-reference"><strong>{request.request_no}</strong></td>
+                    <td className="payment-cell-location">{request.location_code}</td>
+                    <td className="payment-cell-head">{headById.get(request.payment_head_id)?.name ?? "-"}</td>
+                    <td className="payment-cell-amount"><span className="payment-mobile-label">Estimate </span>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
+                    <td className="payment-cell-status"><StatusPill status={displayApprovalStatus(request)} tone={paymentApprovalStatusTone(request)} /></td>
+                    <td className="payment-cell-created">{formatDashboardDate(request.created_at)}</td>
                     {pagePermission.canAdd ? (
-                      <td>
+                      <td className="payment-cell-action">
                         {isResubmittable(request, authorization.userId) ? (
                           <PendingLink className="button compact" href={`/payments/expense-request?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
                         ) : canSubmitBankDetails(request, authorization.userId) ? (

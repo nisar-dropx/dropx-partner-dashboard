@@ -23,14 +23,17 @@ export function CommandAttentionResult({id,items}:{id:number;items:AttentionItem
 
 const icons={audits:ClipboardCheck,people:Users,vehicles:Truck,cod:Wallet,capacity:Boxes,documents:FileCheck,payments:Banknote,rosters:CalendarDays};
 export function CommandAttentionView({items,today,pending=0}:{items:AttentionItem[];today:string;pending?:number}) {
+  const [showDetails,setShowDetails]=useState(false);
+  const [showAll,setShowAll]=useState(false);
   if(!items.length&&!pending)return null;
   const active=items.filter(i=>i.tone!=='clear'),clear=items.filter(i=>i.tone==='clear');
   const actions=items.filter(i=>i.tone==='urgent'||i.tone==='action').length;
   const card=(i:AttentionItem)=>{const Icon=icons[i.key as keyof typeof icons]||ClipboardCheck;return <Link className={styles.card} data-tone={i.tone} key={i.key} href={i.href} prefetch={false}><span className={styles.label}><Icon size={15}/>{i.title}<ArrowUpRight size={14}/></span><strong>{i.value}</strong><small>{i.detail}</small><span className={styles.action}>{i.action} →</span></Link>;};
-  return <section className={styles.watch} aria-label="Operational attention"><header><div><p>OPERATIONS · {new Date(today+'T12:00:00+05:30').toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'})} IST</p><h2>{actions?`${actions} areas need attention`:'Operational checks'}</h2></div><span>Urgent first · current work, separate from the cost period</span></header>
+  return <section className={styles.watch} data-details={showDetails} data-all={showAll} aria-label="Operational attention"><header><div><p>OPERATIONS · {new Date(today+'T12:00:00+05:30').toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'})} IST</p><h2>{actions?`${actions} areas need attention`:'Operational checks'}</h2></div><button type="button" className={styles.detailToggle} aria-pressed={showDetails} onClick={()=>setShowDetails(value=>!value)}>{showDetails?'Hide details':'Show details'}</button></header>
     {active.length>0&&<div className={styles.grid}>{active.map(card)}</div>}
+    {active.length>5&&<button type="button" className={styles.showAll} aria-expanded={showAll} onClick={()=>setShowAll(value=>!value)}>{showAll?'Show top 5':`View all ${active.length} areas`} <span aria-hidden="true">{showAll?'↑':'↓'}</span></button>}
     {clear.length>0&&<details className={styles.checked}><summary>{clear.length} other checks · no current action or not applicable</summary><div className={styles.grid}>{clear.map(card)}</div></details>}
     {pending>0&&<p role="status" className={styles.note}>Checking remaining sources… Ready items are available now.</p>}
-    <p className={styles.note}>Priority updates from current records: overdue first, then due date and affected count. Location checks use your selection; approvals are your assigned inbox. Details stay in their own sections.</p>
+    <details className={styles.about}><summary>How priorities work</summary><p className={styles.note}>Priority updates from current records: overdue first, then due date and affected count. Location checks use your selection; approvals are your assigned inbox. Details stay in their own sections.</p></details>
   </section>;
 }

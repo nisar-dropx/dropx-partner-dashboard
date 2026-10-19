@@ -18,7 +18,7 @@ test('Last Mile heading, controls and checks render while the CPS snapshot is st
  let costStarted=0;
  const mod=compile('../../app/ops-pulse/page.tsx',{
   'react':{Suspense:'Suspense'},'next/link':'Link','@/components/app-shell':{AppShell:'Shell'},'@/components/page-head':{PageHead:'PageHead'},
-  '@/components/ops-command-attention':{OpsCommandAttention:'Attention'},'@/components/ops-station-manpower-board':{OpsStationManpowerBoard:'People'},'@/components/ops-command-center':{OpsCommandCenter:'Snapshots'},
+  '@/components/ops-command-date-range':{OpsCommandDateRange:'DateRange'},'@/components/ops-command-attention':{OpsCommandAttention:'Attention'},'@/components/ops-station-manpower-board':{OpsStationManpowerBoard:'People'},'@/components/ops-command-center':{OpsCommandCenter:'Snapshots'},
   '@/lib/authorization':{requirePagePermission:async()=>auth,hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=> 'company'},
   '@/lib/ops-pulse/cod':{loadCodLocations:async()=>({locations}),todayKolkata:()=> '2026-10-16'},
   '@/lib/ops-pulse/operating-context':{resolveOperatingContext:()=>({mode:'amazon_edsp',selectedLocations:locations}),operatingModeLabel:()=> 'Amazon EDSP'},
@@ -33,7 +33,7 @@ test('Last Mile heading, controls and checks render while the CPS snapshot is st
  const nodes=descendants(rendered);
  assert(nodes.some(node=>node.type==='h1'&&node.props.children==='Last Mile command center'));
  assert(nodes.some(node=>node.type==='Attention'&&node.props.extraItems instanceof Promise));
- assert(nodes.some(node=>node.type==='form'));
+ assert(nodes.some(node=>node.type==='DateRange'&&node.props.from===period.from&&node.props.to===period.to));
  assert.equal(costStarted,1,'share a single snapshot across cost cards and priority flags');
  assert(nodes.filter(node=>node.type==='Link').every(node=>node.props.prefetch===false));
 });
