@@ -351,3 +351,8 @@ button.thumb { padding: 0; cursor: zoom-in; font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .tile, .chevron, .switch input, .switch input::after { transition: none; }
 }
+
+:global(.ops-modern) .page{max-width:none;width:100%;margin:0;padding:0 0 24px;--accent:var(--brand-dark);--accent-soft:var(--ops-selected-bg)}
+:global(.ops-modern) .hero h1{font-size:clamp(24px,2vw,29px);letter-spacing:-.035em}
+:global(.ops-modern) .button.primary{background:var(--ops-action);border-color:transparent}
+:global(.ops-modern) .button.primary:hover{background:var(--ops-action-hover)}
