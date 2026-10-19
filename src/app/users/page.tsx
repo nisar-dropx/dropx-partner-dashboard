@@ -1,3 +1,6 @@
+import { cookies } from "next/headers";
+import { opsNavCatalogForMode } from "@/lib/ops-pulse/navigation";
+import { operatingModes } from "@/lib/ops-pulse/operating-context";
 import { AppShell } from "@/components/app-shell";
 import { AddUserForm } from "@/components/add-user-form";
 import { DismissibleModal, DismissModalButton } from "@/components/dismissible-modal";
@@ -602,6 +605,8 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const companyId = requireCompanyId(authorization);
   const accessSurface = currentAdminAccessSurface();
   const pagePermission = authorization.permissions.users;
+  const permissionNavigationViews = accessSurface === "ops" ? operatingModes.map(mode => ({key: mode.code, label: mode.label, items: opsNavCatalogForMode(mode.code)})) : undefined;
+  const permissionNavigationMode = cookies().get("dropx-ops-mode")?.value;
   const activeSection = searchParams?.section === "roles" || searchParams?.addRole || searchParams?.editRole ? "roles" : "users";
   const showUsersSection = activeSection === "users";
   const showRolesSection = activeSection === "roles";
@@ -980,6 +985,8 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                     key={`${accessSurface}:${editRole.id}:${editRolePermissions.map((permission) => `${permission.page_id}:${Number(permission.can_view)}${Number(permission.can_add)}${Number(permission.can_edit)}`).sort().join("|")}`}
                     pages={pages}
                     initialPermissions={editRolePermissions}
+                    navigationViews={permissionNavigationViews}
+                    initialNavigationView={permissionNavigationMode}
                     surface={accessSurface}
                   />
                   <div className="form-actions modal-actions">

@@ -41,7 +41,7 @@ const component=read("src/components/ops-unplanned-leaves.tsx");
 assert(!component.includes('formAction='));assert(!component.includes('hr_note'));assert(component.includes('No punch · confirm'));
 assert(component.includes('r.manager_name'));assert(component.includes('next_manager_name'));
 assert(read("src/lib/access-surface.ts").includes('"ops_unplanned_leaves"'));
-assert(read("src/components/permission-matrix.tsx").includes('"ops_unplanned_leaves"'));
+assert(read("src/components/permission-matrix.tsx").includes("OpsPermissionMatrix") && read("src/lib/ops-pulse/navigation.ts").includes('"ops_unplanned_leaves"'));
 assert(read("src/app/api/ops-pulse/unplanned-leaves/route.ts").includes('"Reporting manager"'));
 assert(read("src/app/api/ops-pulse/unplanned-leaves/route.ts").includes('"Next-level manager"'));
 console.log("PASS: dates, hierarchy drill-down, People identity parity, blank cluster, N+1 manager, scope rejection, filters/export parity, no-store, server-only auth and read-only contract.");

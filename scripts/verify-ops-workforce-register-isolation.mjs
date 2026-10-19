@@ -25,7 +25,7 @@ const checks = [
   [helperRoute.includes('redirect("/work-force-register")') && vendorRoute.includes('redirect("/work-force-register")'), "Legacy helper and vendor OpsPulse URLs must return to Workforce."],
   [profiles.includes('return { ...nonEmployeeProfileConfigs.field_executive, route };'), "OpsPulse submissions must resolve to the field-executive Workforce profile configuration."],
   [navigation.includes('{ code: "delivery_associates", label: "Workforce Register"') && !navigation.includes('{ code: "contractors", label: "Work Force Register"'), "OpsPulse navigation must authorize the Workforce register, not Independent Contractors."],
-  [permissions.includes('{ key: "workforce_register", label: "Workforce Register", codes: ["delivery_associates"] }'), "OpsPulse role setup must expose only Workforce Register permissions."],
+  [permissions.includes("OpsPermissionMatrix") && navigation.includes('code: "delivery_associates", label: "Workforce Register"'), "OpsPulse role setup must expose only Workforce Register permissions."],
   [opsCodes.includes('"delivery_associates"') && !/"contractors"|"workers"|"vendors"/.test(opsCodes), "Independent contractor, helper and vendor pages must not belong to the OpsPulse surface."],
   [!middleware.match(/CLEAN_OPS_ROOTS[^;]+/)?.[0].includes('"/helpers"'), "The standalone Helper register must not be reachable on the OpsPulse host."],
   [permissionMigration.includes("role.product_code = 'operations'") && permissionMigration.includes("page.code in ('contractors', 'workers', 'vendors')"), "Existing Operations-role access must be moved to Workforce without retaining unrelated register grants."],
