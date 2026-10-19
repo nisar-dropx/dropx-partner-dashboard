@@ -27,13 +27,15 @@ test("actual amounts take precedence; zeros and missing values remain distinct",
   assert.deepEqual(paymentApprovalAmount({ amount: null, amount_requested: null }), { text: "-", isEstimated: false });
 });
 
-test("approval list and Manage use the same display rule and label estimates", () => {
+test("approval list and instant review use the same display rule and label estimates", () => {
   const page = readFileSync(new URL("../app/payments/approvals/page.tsx", import.meta.url), "utf8");
+  const review = readFileSync(new URL("../components/payment-approval-review-launcher.tsx", import.meta.url), "utf8");
   assert.match(page, /const displayAmount = paymentApprovalAmount\(request\)/);
-  assert.match(page, /const selectedAmount = selectedRequest \? paymentApprovalAmount\(selectedRequest\)/);
+  assert.match(page, /amountEstimated: displayAmount\.isEstimated/);
+  assert.match(page, /amountText: displayAmount\.text/);
   assert.match(page, /displayAmount\.text/);
   assert.match(page, /displayAmount\.isEstimated \? <small[^>]*>Estimated<\/small>/);
-  assert.match(page, /selectedAmount\?\.isEstimated \? "Estimated Amount"/);
-  assert.match(page, /selectedAmount\?\.text \?\? "-"/);
+  assert.match(review, /summary\.amountEstimated \? "Estimated amount" : "Amount"/);
+  assert.match(review, /<strong>\{summary\.amountText\}<\/strong>/);
   assert.doesNotMatch(page, /<td>\{request\.amount == null \? "-"/);
 });

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const auth = await getAuthorization();
   if (!auth) return Response.json({ error: 'Login required.' }, { status: 401 });
-  if (!hasPermission(auth, 'expense_requests', 'add') && !hasPermission(auth, 'payment_requests', 'add')) {
+  if (!hasPermission(auth, 'expense_requests', 'add') && !hasPermission(auth, 'payment_requests', 'add') && !hasPermission(auth, 'payment_approvals', 'access')) {
     return Response.json({ error: 'Payment request access denied.' }, { status: 403 });
   }
   const params = new URL(request.url).searchParams;
