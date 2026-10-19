@@ -7,6 +7,10 @@ type Action = "view" | "add" | "edit";
 type Permission = { page_id: string; can_view: boolean; can_add: boolean; can_edit: boolean };
 const actions: Action[] = ["view", "add", "edit"];
 
+function SharedAccess({labels}:{labels:string[]}) {
+  return labels.length ? <details className="ops-permission-shared"><summary>Shared access</summary><small>Also controls: {labels.join(", ")}. These menus use the same saved permission.</small></details> : null;
+}
+
 function AccessCheckbox({label, checked, mixed, disabled, onChange}: {label: string; checked: boolean; mixed: boolean; disabled?: boolean; onChange: (checked: boolean) => void}) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { if (ref.current) ref.current.indeterminate = mixed; }, [mixed]);
@@ -77,8 +81,8 @@ export function OpsPermissionMatrix({pages, initialPermissions = [], navigationV
         const open = expanded.has(group.key) || Boolean(search.trim());
         const ids = menuPermissionIds([group]);
         return <Fragment key={group.key}>
-          <tr className="ops-permission-menu-row"><td>{group.expandable ? <button type="button" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`} onClick={() => toggle(group.key)}><span aria-hidden="true">{open ? "−" : "+"}</span><strong>{group.label}</strong><small>{group.rows.length}</small></button> : <strong className="ops-permission-single">{group.label}</strong>}</td>{cells(ids, group.label)}</tr>
-          {group.expandable && open ? group.rows.map(row => <tr className="ops-permission-submenu-row" key={row.key}><td><span>{row.label}</span>{row.sharedWith.length ? <details className="ops-permission-shared"><summary>Shared access</summary><small>Also controls: {row.sharedWith.join(", ")}. These menus use the same saved permission.</small></details> : null}</td>{cells([row.page.id], `${group.label} / ${row.label}`)}</tr>) : null}
+          <tr className="ops-permission-menu-row"><td>{group.expandable ? <button type="button" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`} onClick={() => toggle(group.key)}><span aria-hidden="true">{open ? "−" : "+"}</span><strong>{group.label}</strong><small>{group.rows.length}</small></button> : <><strong className="ops-permission-single">{group.label}</strong><SharedAccess labels={group.rows[0]?.sharedWith ?? []}/></>}</td>{cells(ids, group.label)}</tr>
+          {group.expandable && open ? group.rows.map(row => <tr className="ops-permission-submenu-row" key={row.key}><td><span>{row.label}</span><SharedAccess labels={row.sharedWith}/></td>{cells([row.page.id], `${group.label} / ${row.label}`)}</tr>) : null}
         </Fragment>;
       })}{!visible.length && <tr><td colSpan={5}>No matching menu in this workspace.</td></tr>}</tbody>
     </table></div>

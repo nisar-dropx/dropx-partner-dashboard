@@ -3,8 +3,11 @@ import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/
 import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
 import { canAccessDailyCodPending } from "@/lib/ops-pulse/cod-pending-access";
 
+export const shiftAttendanceNavItem: NavItem = { code: "ops_rostering", label: "Shift Attendance", href: "/ops-pulse?view=manpower", icon: "S" };
+
 const commonStart: NavItem[] = [
   { code: "ops_pulse", label: "Command Center", href: "/", icon: "#" },
+  shiftAttendanceNavItem,
   {
     code: "performance",
     label: "Performance",
@@ -181,6 +184,7 @@ const eddDashboard = { code: "edd_dashboard", label: "Delivery Performance", hre
 export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
   if (mode === "amazon_now") return [
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
+    shiftAttendanceNavItem,
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
     {code:'ops_report_bot',label:'Report Bot',href:'/report-bot',icon:'W'},

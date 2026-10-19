@@ -19,6 +19,7 @@ test('Last Mile heading, controls and checks render while the CPS snapshot is st
  const mod=compile('../../app/ops-pulse/page.tsx',{
   'react':{Suspense:'Suspense'},'next/link':'Link','@/components/app-shell':{AppShell:'Shell'},'@/components/page-head':{PageHead:'PageHead'},
   '@/components/ops-command-date-range':{OpsCommandDateRange:'DateRange'},'@/components/ops-command-attention':{OpsCommandAttention:'Attention'},'@/components/ops-station-manpower-board':{OpsStationManpowerBoard:'People'},'@/components/ops-command-center':{OpsCommandCenter:'Snapshots'},
+  '@/components/ops-workspace-shortcuts':{OpsWorkspaceShortcuts:'Shortcuts'},
   '@/lib/authorization':{requirePagePermission:async()=>auth,hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=> 'company'},
   '@/lib/ops-pulse/cod':{loadCodLocations:async()=>({locations}),todayKolkata:()=> '2026-10-16'},
   '@/lib/ops-pulse/operating-context':{resolveOperatingContext:()=>({mode:'amazon_edsp',selectedLocations:locations}),operatingModeLabel:()=> 'Amazon EDSP'},

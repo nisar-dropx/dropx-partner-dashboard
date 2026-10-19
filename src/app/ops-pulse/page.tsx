@@ -1,3 +1,4 @@
+import { OpsWorkspaceShortcuts } from '@/components/ops-workspace-shortcuts';
 import { OpsCommandDateRange } from '@/components/ops-command-date-range';
 import { Suspense } from 'react';
 import Link from 'next/link';
@@ -23,13 +24,15 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export default async function OpsPulsePage({searchParams = {}}:{searchParams?:SearchParams}) {
-  const authorization = await requirePagePermission('ops_pulse','access');
+  const pageCode = searchParams.view === 'manpower' ? 'ops_rostering' : 'ops_pulse';
+  const active = searchParams.view === 'manpower' ? 'Shift Attendance' : 'Command Center';
+  const authorization = await requirePagePermission(pageCode,'access');
   const companyId = requireCompanyId(authorization);
   const locationsResult = await loadCodLocations(companyId,authorization.locationScopeIds,authorization.hasAllLocationAccess);
   const context = resolveOperatingContext(locationsResult.locations);
-  if (locationsResult.error) return <AppShell active="Command Center" pageCode="ops_pulse"><div className={styles.notice} role="alert">Location access could not be loaded. Refresh to retry; no totals are shown.</div></AppShell>;
+  if (locationsResult.error) return <AppShell active={active} pageCode={pageCode}><div className={styles.notice} role="alert">Location access could not be loaded. Refresh to retry; no totals are shown.</div></AppShell>;
   if (context.mode==='amazon_now' && searchParams.view!=='manpower') return <DarkStoreHome authorization={authorization} locations={context.selectedLocations} searchParams={searchParams}/>;
-  return <AppShell active="Command Center" pageCode="ops_pulse"><Suspense fallback={<CommandLoading label="Loading your command center"/>}>
+  return <AppShell active={active} pageCode={pageCode}><Suspense fallback={<CommandLoading label="Loading your command center"/>}>
     {searchParams.view==='manpower' ? <Manpower authorization={authorization} context={context} searchParams={searchParams}/> : <LastMile authorization={authorization} context={context} searchParams={searchParams}/>}
   </Suspense></AppShell>;
 }
@@ -45,15 +48,16 @@ function LastMile({authorization:a,context,searchParams}:ContentProps) {
   const result = loadCommandCenter(a,locations,period,context.mode==='amazon_edsp',today);
   const performanceDate = new Date(Date.parse(today+'T00:00:00Z')-86400000).toISOString().slice(0,10);
   const links = [
+    ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${locations.length===1?`&location=${encodeURIComponent(locations[0].id)}`:''}`],
     ['performance_review','Review Desk',`/ops-pulse/performance?view=reviews&date=${performanceDate}&stations=${encodeURIComponent(codes.join(','))}`],
-    ['ops_rostering','Shift attendance','/ops-pulse?view=manpower'],
+    [context.mode==='flipkart_odh_mdh'?'cod_submission':'cod_executive_reconciliation','COD workspace',context.mode==='flipkart_odh_mdh'?'/ops-pulse/cod/submission?client=flipkart':'/ops-pulse/cod/executive-reconciliation?client=amazon'],
     ['capacity_overview','Capacity',`/ops-pulse/capacity?stations=${encodeURIComponent(codes.join(','))}`],
     ['delivery_associates','Workforce','/work-force-register'],
-    [context.mode==='flipkart_odh_mdh'?'cod_submission':'cod_executive_reconciliation','COD workspace',context.mode==='flipkart_odh_mdh'?'/ops-pulse/cod/submission?client=flipkart':'/ops-pulse/cod/executive-reconciliation?client=amazon'],
+    ['payment_approvals','Payment Approvals','/payments/approvals'],
   ].filter(([permission])=>hasPermission(a,permission,'access') && (context.mode==='amazon_edsp'||!['performance_review','capacity_overview'].includes(permission)));
   return <div className={styles.command}>
     <header className={styles.hero}><div><p className={styles.eyebrow}>LM · {operatingModeLabel(context.mode).toUpperCase()} · {locations.length} SELECTED LOCATIONS</p><h1>Last Mile command center</h1><p>Operational priorities, service performance and shipment economics.</p></div><OpsCommandDateRange from={period.from} to={period.to} today={today}/></header>
-    <nav className={styles.tools} aria-label="Operational workspaces">{links.map(([,label,href])=><Link prefetch={false} key={label} href={href}>{label} ↗</Link>)}{context.mode==='amazon_edsp'&&hasEddAccess(a)&&<Link prefetch={false} href="/ops-pulse/edd/flash">Live delivery view ↗</Link>}</nav>
+    <OpsWorkspaceShortcuts items={[...links.map(([,label,href])=>({label,href})),...(context.mode==='amazon_edsp'&&hasEddAccess(a)?[{label:'Live delivery view',href:'/ops-pulse/edd/flash'}]:[])]}/>
     <Suspense fallback={<CommandLoading label="Checking audits, people and operational queues"/>}><OpsCommandAttention authorization={a} locations={locations} today={today} mode={context.mode} extraItems={result.then(data=>commandMetricAttention({...data,period,codes,today}))}/></Suspense>
     {!locations.length ? <div className={styles.notice}>No operational locations are assigned to this workspace.</div> : <Suspense key={`${period.from}:${period.to}:${codes.join(',')}`} fallback={<CommandLoading label="Loading shipment and cost summaries"/>}><LastMileSnapshots result={result} period={period} codes={codes}/></Suspense>}
   </div>;
@@ -75,7 +79,7 @@ async function Manpower({authorization:a,context,searchParams}:ContentProps) {
   try { manpower=await loadOpsStationManpower(companyId,locations,date); }
   catch { error='Attendance could not be loaded. Refresh to retry.'; }
   return <div className="ops-command-center"><PageHead eyebrow="Live workforce · scope controlled" title="Shift Attendance" subtitle="Scheduled shifts, reporting times and attendance exceptions."/>
-    <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views"><Link prefetch={false} href="/ops-pulse">Command center</Link><Link prefetch={false} className="active" href="/ops-pulse?view=manpower">Shift attendance</Link></nav>
+    <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">{hasPermission(a,'ops_pulse','access')&&<Link prefetch={false} href="/ops-pulse">Command center</Link>}<Link prefetch={false} className="active" href="/ops-pulse?view=manpower">Shift attendance</Link></nav>
     <form className="ops-station-manpower-filter" action="/ops-pulse"><input name="view" type="hidden" value="manpower"/><label>Date<input name="date" type="date" defaultValue={date} max={today}/></label><label>Office, station or store<select name="location" defaultValue={location?.id ?? ''}>{available.map(l=><option key={l.id} value={l.id}>{l.station_code} · {l.station_name || l.city || l.station_code}</option>)}</select></label><button>Apply location</button></form>
     {error ? <div className={styles.notice} role="alert">{error}</div> : <OpsStationManpowerBoard canExport={!a.readOnly&&hasPermission(a,'ops_reports','access')} asOf={manpower.asOf} locations={locations} people={manpower.people}/>}
   </div>;

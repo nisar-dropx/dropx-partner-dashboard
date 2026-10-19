@@ -29,3 +29,13 @@ test("active page follows nested routes and query tabs without losing filters", 
   assert.equal(activeOpsHref(nav, "/", "from=2026-10-01", ""), "/");
   assert.equal(activeOpsHref(nav, "/unavailable", "", ""), undefined);
 });
+
+
+test('attendance query selects Shift Attendance on both public and internal command-center routes',()=>{
+  const items=[...nav,{code:'ops_rostering',label:'Shift Attendance',href:'/ops-pulse?view=manpower',icon:'S'},{code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'}];
+  for(const path of ['/','/ops-pulse']){
+    assert.equal(activeOpsHref(items,path,'view=manpower&location=store&date=2026-10-20','Shift Attendance'),'/ops-pulse?view=manpower');
+    assert.equal(activeOpsHref(items,path,'','Command Center'),'/');
+  }
+  assert.equal(activeOpsHref(items,'/rostering','','Rostering'),'/rostering');
+});

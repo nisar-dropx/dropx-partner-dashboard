@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { OpsWorkspaceShortcuts } from '@/components/ops-workspace-shortcuts';
 import { Suspense } from 'react';
 import { ArrowUpRight, Store, Clock3 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
@@ -78,11 +79,19 @@ export function DarkStoreHome({authorization:a,locations,searchParams={}}:Props)
   const today=todayKolkata(),month=searchParams.month&&validMonth(searchParams.month)&&searchParams.month<=today.slice(0,7)?searchParams.month:today.slice(0,7);
   const selected=locations.filter(l=>(!searchParams.station||l.station_code===searchParams.station)&&(!searchParams.city||l.city===searchParams.city));
   const scopeLabel=searchParams.station?selected[0]?.station_code||'Store not found':searchParams.city||'All your dark stores';
-  const links=[['cpu_overview','CPU','/cpu'],['ops_rostering','Rostering','/rostering'],['payment_requests','Payments','/payments/requests'],['business_documents','Business Docs','/business-documents'],['ops_reports','Reports','/reports']];
+  const links=[
+    ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${selected.length===1?`&location=${encodeURIComponent(selected[0].id)}`:''}`],
+    ['ops_rostering','Rostering',`/rostering${selected.length===1?`?station=${encodeURIComponent(selected[0].station_code)}`:''}`],
+    ['store_audits','Store Audits','/store-audits'],
+    ['payment_approvals','Payment Approvals','/payments/approvals'],
+    ['cpu_overview','CPU',`/cpu?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`],
+    ['ops_report_bot','Report Bot','/report-bot']
+  ].filter(([code])=>hasPermission(a,code,'access'));
   return <AppShell active="Command Center" pageCode="ops_pulse"><div className={styles.command}>
     <header className={styles.hero}><div><p className={styles.eyebrow}><span className={styles.workspaceMark}><Store size={13}/> DS</span> DARK STORE OPERATIONS</p><h1>Command center</h1><p>Your priorities first. Open a section to act or inspect actuals.</p></div><div className={styles.today}><span><Clock3 size={15}/>{date(today)} · IST</span><DarkStoreRefresh/></div></header>
+    <OpsWorkspaceShortcuts items={links.map(([,label,href])=>({label,href}))}/>
     <DarkStoreFilters key={`${searchParams.station||''}:${searchParams.city||''}:${month}`} stores={locations.map(l=>({code:l.station_code,name:l.station_name||l.station_code,city:l.city||''}))} station={searchParams.station||''} city={searchParams.city||''} month={month} maxMonth={today.slice(0,7)}/>
-    <div className={styles.contextBar}><p><strong>{scopeLabel}</strong><span>{selected.length} stores in view</span></p><nav aria-label="Quick actions">{links.filter(([code])=>hasPermission(a,code,'access')).map(([code,label,href])=><Link prefetch={false} key={code} href={code==='cpu_overview'?`${href}?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`:href}>{label}<ArrowUpRight size={13}/></Link>)}</nav></div>
+    <div className={styles.contextBar}><p><strong>{scopeLabel}</strong><span>{selected.length} stores in view</span></p></div>
     {!selected.length?<div className={styles.notice}>No store in your authorized scope matches this selection. <Link prefetch={false} href="/ops-pulse">View my stores</Link></div>:<Suspense key={`${month}:${searchParams.station||''}:${searchParams.city||''}`} fallback={<CommandLoading/>}><StoreCommand authorization={a} locations={selected} month={month} today={today}/></Suspense>}
   </div></AppShell>;
 }

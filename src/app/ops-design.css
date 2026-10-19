@@ -404,3 +404,11 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
   .ops-permission-submenu-row td:first-child{padding-left:14px}
   .ops-permission-table-wrap{overflow-x:auto}
 }
+.ops-workspace-shortcuts{display:flex;align-items:stretch;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.ops-workspace-shortcuts-extra{display:contents}
+.ops-modern .ops-workspace-shortcuts a,.ops-modern .ops-workspace-shortcuts button{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-height:38px;padding:8px 11px;border:1px solid var(--line,#e2e7ee);border-radius:8px;background:#fff;color:#42536c;font:inherit;font-size:12px;font-weight:500;text-decoration:none}
+.ops-modern .ops-workspace-shortcuts a:hover,.ops-modern .ops-workspace-shortcuts button:hover{background:#f8fafc;border-color:#bdc7d5}
+.ops-modern .ops-workspace-shortcuts a:focus-visible,.ops-modern .ops-workspace-shortcuts button:focus-visible{outline:2px solid var(--ops-focus,#c45325);outline-offset:3px}
+.ops-modern .ops-workspace-shortcuts button{display:none;cursor:pointer}
+.ops-workspace-shortcuts svg{flex-shrink:0;color:#7b889a}
+@media(max-width:650px){.ops-workspace-shortcuts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.ops-modern .ops-workspace-shortcuts a,.ops-modern .ops-workspace-shortcuts button{min-height:44px;min-width:0;font-size:12px;padding:8px 10px}.ops-modern .ops-workspace-shortcuts button{display:inline-flex}.ops-workspace-shortcuts[data-expanded=false] .ops-workspace-shortcuts-extra{display:none}}

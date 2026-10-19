@@ -35,3 +35,13 @@ test('opening and closing mobile date controls keeps the same form, date names a
  const inputs=nodes(tree).filter(n=>n.type==='input').map(n=>n.props);assert.deepEqual(inputs.map(p=>[p.name,p.defaultValue,p.max]),[['from','2026-10-01','2026-10-20'],['to','2026-10-19','2026-10-20']]);
  nodes(tree).find(n=>n.props.className==='dateToggle').props.onClick();tree=h.render();assert.equal(tree.props['data-open'],true);assert.equal(nodes(tree).find(n=>n.type==='form').props.action,'/ops-pulse');
 });
+
+test('frequent workspace shortcuts retain scoped destinations when mobile More is opened and closed',()=>{
+ const items=['Shift Attendance','Review Desk','COD workspace','Capacity','Payment Approvals'].map((label,i)=>({label,href:`/workspace/${i}?location=assigned&date=2026-10-20`}));
+ const h=mount('./ops-workspace-shortcuts.tsx','OpsWorkspaceShortcuts',{items});let tree=h.render();
+ const links=()=>nodes(h.tree).filter(n=>n.type==='a').map(n=>({href:n.props.href,label:n.props.children[0].props.children}));
+ assert.equal(tree.props['data-expanded'],false);assert.equal(nodes(tree).find(n=>n.props.className==='ops-workspace-shortcuts-extra').props.children.length,2);
+ const before=links();nodes(tree).find(n=>n.type==='button').props.onClick();tree=h.render();assert.equal(tree.props['data-expanded'],true);assert.deepEqual(links(),before);
+ nodes(tree).find(n=>n.type==='button').props.onClick();tree=h.render();assert.equal(tree.props['data-expanded'],false);assert.deepEqual(links(),before);
+ assert.equal(mount('./ops-workspace-shortcuts.tsx','OpsWorkspaceShortcuts',{items:[]}).render(),null);
+});
