@@ -16,3 +16,13 @@
 @media(max-width:550px){.tableHeader{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:10px}.stationRow{grid-template-columns:1fr}.tableHeader>div:nth-child(2n) .filterMenu{left:auto;right:0}.tableHeader>div:nth-child(3) .filterMenu,.tableHeader>div:last-child .filterMenu{left:0;right:auto}.summary button{padding:10px;gap:8px}.summary strong{font-size:22px}.teamList article{flex-direction:column;gap:12px}.teamShift{max-width:none}.teamDialog header,.teamBody{padding:16px}.teamDialog h2 span{display:block;margin-top:3px}.filters>.compactFilter:nth-child(2n+1) .filterMenu{left:auto;right:0}}
 
 .cmsFollowUp{display:grid;gap:5px;margin-top:6px;padding:9px 10px;border:1px solid #f1cdd1;border-radius:8px;background:#fffafb;font-size:11px;line-height:1.5;color:#475569;overflow-wrap:anywhere}.cmsFollowUp>strong{color:#a42635;font-size:11px}.cmsFollowUp a{display:flex;align-items:center;gap:5px;color:#175c65;text-decoration:underline;text-underline-offset:2px;max-width:100%;width:fit-content}.cmsFollowUp a svg{flex-shrink:0}.cmsFollowUp a:focus-visible{outline:2px solid #175c65;outline-offset:3px}.cmsFollowUp small{font-size:10px;color:#64748b}.cmsEmails{display:grid;gap:3px;border-top:1px solid #f0e2e4;padding-top:5px;margin-top:2px}
+
+/* Shared preview branding; cash/risk status colours retain their operational meaning. */
+:global(.ops-modern) .root{--ink:#1f2937;--muted:#667085}
+:global(.ops-modern) .refresh{background:var(--ops-action);border-radius:8px}
+:global(.ops-modern) .summary button:hover{border-color:var(--ops-selected-border)}
+:global(.ops-modern) .summary button[aria-pressed=true]{background:var(--ops-selected-bg);border-color:var(--ops-selected-border);box-shadow:inset 0 0 0 1px var(--ops-selected-border)}
+:global(.ops-modern) .summary button[aria-pressed=true] span small,:global(.ops-modern) .checked button,:global(.ops-modern) .retry,:global(.ops-modern) .close,:global(.ops-modern) .filterMenuHead button,:global(.ops-modern) .filterDone,:global(.ops-modern) .stationTitle span:last-child,:global(.ops-modern) .lead a,:global(.ops-modern) .lead .teamLink,:global(.ops-modern) .teamList article a{color:var(--ops-selected-ink)}
+:global(.ops-modern) .filterTrigger[data-selected=true],:global(.ops-modern) .filterTrigger b{background:var(--ops-selected-bg);border-color:var(--ops-selected-border);color:var(--ops-selected-ink)}
+:global(.ops-modern) .filterOptions input{accent-color:var(--brand-dark)}
+:global(.ops-modern) .root :is(button,input,select):focus-visible{outline-color:var(--ops-focus)}

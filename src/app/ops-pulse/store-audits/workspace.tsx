@@ -1045,7 +1045,7 @@ export function StoreAuditWorkspace(p: Props) {
           </button>
         ))}
       </div>
-      <div className={styles.card}>
+      <div className={`${styles.card} ${styles.filterPanel}`}>
         <form className={styles.filters} action="/store-audits">
           <label>
             From

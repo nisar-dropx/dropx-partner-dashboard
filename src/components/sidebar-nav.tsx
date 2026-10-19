@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useOpsDesign } from "@/components/ops-design-context";
+import { OpsDesignNavigation } from "@/components/ops-design-navigation";
 import { Icon } from "@/components/icons";
 import { PaymentNavBadge } from "@/components/payment-notification-provider";
 import { PendingLink } from "@/components/pending-link";
@@ -10,9 +12,11 @@ type SidebarNavProps = {
   active: string;
   items: NavItem[];
   prefetch?: boolean;
+  opsDesign?: boolean;
 };
 
-export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) {
+export function SidebarNav({ active, items, prefetch = true, opsDesign = false }: SidebarNavProps) {
+  const modern = useOpsDesign() && opsDesign;
   const hasMappingItem=items.some(item=>item.code==='fleet_da_mapping'||item.children?.some(child=>child.code==='fleet_da_mapping'));
   const [mappingAvailable,setMappingAvailable]=useState(false);
   // Vehicle eligibility is optional navigation data and never delays the app shell.
@@ -50,6 +54,7 @@ export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) 
   }, []);
 
   useEffect(() => {
+    if (modern) return;
     function handleViewportChange() {
       for (const item of items) {
         if (item.children?.length) updateSubmenuPosition(item.label);
@@ -62,7 +67,9 @@ export function SidebarNav({ active, items, prefetch = true }: SidebarNavProps) 
       window.removeEventListener("resize", handleViewportChange);
       window.removeEventListener("scroll", handleViewportChange, true);
     };
-  }, [items, updateSubmenuPosition]);
+  }, [items, updateSubmenuPosition, modern]);
+
+  if (modern) return <OpsDesignNavigation items={visibleItems} active={active} />;
 
   return (
     <nav className="nav" aria-label="Primary">

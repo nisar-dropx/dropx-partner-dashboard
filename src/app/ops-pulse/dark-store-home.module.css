@@ -177,3 +177,8 @@
 }
 @media (max-width: 370px) { .insights { grid-template-columns: 1fr; } .insights section + section { border-top: 1px solid var(--line); padding-top: 16px; } }
 .sectionCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.sectionCard{display:grid;gap:10px;padding:16px 18px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;color:#243247;text-decoration:none}.sectionCard>span{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#52637b}.sectionCard strong{font-size:27px;font-variant-numeric:tabular-nums}.sectionCard small{font-size:11px;color:#64748b;line-height:1.5}.sectionCard:hover{border-color:#bd421d}
+
+:global(.ops-modern) .command{max-width:none;width:100%;margin:0;padding:0 0 24px;--accent:var(--brand-dark);--accent-soft:var(--ops-selected-bg)}
+:global(.ops-modern) .hero h1{font-size:clamp(24px,2vw,29px);letter-spacing:-.035em}
+:global(.ops-modern) .filters input,:global(.ops-modern) .filters select{min-height:36px;padding:7px 10px}
+:global(.ops-modern) .refresh{min-height:34px}

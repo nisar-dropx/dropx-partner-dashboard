@@ -61,6 +61,7 @@ test('background refresh is age-gated, visible-only, single-flight and cleaned u
 test('Command Center sidebar disables both top-level and submenu preloads',()=>{
  const mod=compile('../../components/sidebar-nav.tsx',{
   react:{useCallback:fn=>fn,useEffect:()=>{},useRef:()=>({current:{}}),useState:value=>[value,()=>{}]},
+  '@/components/ops-design-context':{useOpsDesign:()=>false}, '@/components/ops-design-navigation':{OpsDesignNavigation:'ModernNav'},
   '@/components/icons':{Icon:'Icon'},'@/components/payment-notification-provider':{PaymentNavBadge:'Badge'},'@/components/pending-link':{PendingLink:'Link'}
  });
  const node=mod.SidebarNav({active:'Command Center',prefetch:false,items:[{label:'Command Center',href:'/ops-pulse'},{label:'Payments',children:[{label:'Approvals',href:'/payments/approvals'}]}]});

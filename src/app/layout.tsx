@@ -5,6 +5,7 @@ import { OpsPwaRegister } from "@/components/ops-pwa-register";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { isFinanceHostName } from "@/lib/finance/surface";
 import "./globals.css";
+import "./ops-design.css";
 
 function isOpsHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
