@@ -1,0 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
+const read=p=>readFileSync(new URL('../'+p,import.meta.url));
+const release=JSON.parse(read('public/downloads/opspulse-android.json'));
+const apk=read('public/downloads/DropX-OpsPulse.apk');
+assert.equal(apk.length,release.bytes);
+assert.equal(createHash('sha256').update(apk).digest('hex'),release.sha256,'APK differs from verified release metadata');
+const associations=JSON.parse(read('public/.well-known/assetlinks.json'));
+assert(associations.some(a=>a.target.package_name===release.packageName && a.target.sha256_cert_fingerprints.includes(release.signingCertificateSha256)),'Signing identity must match the verified site association');
+const gradle=read('apps/opspulse-android/app/build.gradle').toString();
+assert(gradle.includes(`versionCode ${release.versionCode}`));
+assert(gradle.includes(`versionName '${release.version}'`));
+assert(gradle.includes(`minSdk ${release.minimumSdk}`));
+assert(gradle.includes(`applicationId '${release.packageName}'`));
+console.log(`OpsPulse APK ${release.version}: size, SHA-256, app identity and site association verified.`);

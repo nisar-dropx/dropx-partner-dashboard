@@ -1,3 +1,5 @@
+import { Download, LogOut } from "lucide-react";
+import { SubmitButton } from "@/components/submit-button";
 import { OpsMenuClose } from "@/components/ops-menu-close";
 import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 import type { ReactNode } from "react";
@@ -132,6 +134,10 @@ export async function AppShell({ children, active, pageCode }: { children: React
       <UserMenu {...userMenuProps} />
     </>
   );
+  const sidebarIdentity = <>
+    <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong><br />
+    {authorization.designationName ?? authorization.roleName ?? "Portal user"}
+  </>;
 
   return (
     <PaymentNotificationProvider key={`${authorization.userId}:${authorization.isPreview}`} initialData={paymentNotifications} refreshOnMount={isOpsHost}>
@@ -161,9 +167,13 @@ export async function AppShell({ children, active, pageCode }: { children: React
           <SidebarNav opsDesign={isOpsHost} active={active} items={visibleNavItems} prefetch={!(isOpsHost && pageCode === "ops_pulse")} />
 
           <div className="sidebar-footer">
-            <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong>
-            <br />
-            {authorization.designationName ?? authorization.roleName ?? "Portal user"}
+            {isOpsHost ? <div className="ops-sidebar-profile">{sidebarIdentity}</div> : sidebarIdentity}
+            {isOpsHost && <a className="ops-sidebar-install" href="/downloads/app"><Download size={16} aria-hidden="true" /> Get the OpsPulse app</a>}
+            {isOpsHost && <form action={signOut} className="ops-sidebar-signout">
+              <SubmitButton className="user-menu-action" pendingText="Signing out">
+                <LogOut size={16} aria-hidden="true" /> Sign out
+              </SubmitButton>
+            </form>}
           </div>
         </aside>
       )}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { activeOpsHref, opsDesignPreference, searchOpsNavigation } from "./design-navigation.ts";
+import { activeOpsHref, searchOpsNavigation } from "./design-navigation.ts";
 
 const nav = [
   { code: "home", label: "Command Center", href: "/", icon: "#" },
@@ -13,13 +13,6 @@ const nav = [
     { label: "Tracking", href: "/fleet?tab=tracking" },
   ] },
 ];
-test("current users stay on the original design until explicitly opting in", () => {
-  assert.equal(opsDesignPreference(null, null), false);
-  assert.equal(opsDesignPreference("unexpected", "corrupted"), false);
-  assert.equal(opsDesignPreference("people", null), true);
-  assert.equal(opsDesignPreference(null, "people"), true);
-  assert.equal(opsDesignPreference("classic", "people"), false);
-});
 test("menu search retains only authorized items and never mutates their routes", () => {
   const before = JSON.stringify(nav);
   assert.deepEqual(searchOpsNavigation(nav, "operations COD")[0].children, [nav[1].children[0]]);

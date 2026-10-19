@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, LogOut } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 
 export function UserMenu({
@@ -17,29 +17,42 @@ export function UserMenu({
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
 
   useEffect(() => {
-    function closeOnOutsideClick(event: MouseEvent) {
+    if (!open) return;
+    wrapperRef.current?.querySelector<HTMLButtonElement>(".user-menu-panel button")?.focus();
+    function closeOnOutsideClick(event: PointerEvent) {
       if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false);
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     }
 
-    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, []);
+  }, [open]);
 
   return (
-    <div className="user-menu" ref={wrapperRef}>
+    <div className="user-menu" ref={wrapperRef} onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }}>
       <button
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
+        aria-controls={open ? panelId : undefined}
+        aria-label={`Account menu for ${name}`}
+        ref={triggerRef}
         className={`user-menu-trigger ${open ? "open" : ""}`}
         onClick={() => setOpen((current) => !current)}
         type="button"
@@ -50,7 +63,7 @@ export function UserMenu({
       </button>
 
       {open ? (
-        <div className="user-menu-panel" role="menu">
+        <div className="user-menu-panel" id={panelId} role="dialog" aria-label="Your account">
           <div className="user-menu-profile">
             <strong>{name}</strong>
             {role ? <span>{role}</span> : null}

@@ -1,0 +1,37 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.dropxlogistics.opspulse'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.dropxlogistics.opspulse'
+        minSdk 24
+        targetSdk 36
+        versionCode 2
+        versionName '2.0.0'
+    }
+    // Signing material is external to the repository. Never generate a replacement key for an update.
+    def signingPath = System.getenv('OPSPULSE_KEYSTORE')
+    def passwordFile = System.getenv('OPSPULSE_KEYSTORE_PASSWORD_FILE')
+    signingConfigs {
+        release {
+            if (signingPath && passwordFile) {
+                storeFile file(signingPath)
+                storePassword file(passwordFile).text.trim()
+                keyAlias 'opspulse'
+                keyPassword file(passwordFile).text.trim()
+            }
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.release; minifyEnabled false } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4' }
+
+// Release tasks must fail rather than quietly publish an unsigned APK.
+gradle.taskGraph.whenReady { graph ->
+    if ((graph.hasTask(':app:assembleRelease') || graph.hasTask(':app:bundleRelease')) &&
+        (!System.getenv('OPSPULSE_KEYSTORE') || !System.getenv('OPSPULSE_KEYSTORE_PASSWORD_FILE'))) {
+        throw new GradleException('Set OPSPULSE_KEYSTORE and OPSPULSE_KEYSTORE_PASSWORD_FILE to the original OpsPulse signing material.')
+    }
+}

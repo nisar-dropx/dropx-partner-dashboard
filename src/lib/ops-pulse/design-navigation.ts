@@ -28,7 +28,3 @@ export function activeOpsHref(items: NavItem[], pathname: string, search: string
   const defaultTab = activeGroup?.children?.find(child => child.href && new URL(child.href, "https://ops.local").pathname === pathname);
   return ranked[0]?.href ?? links.find(item => item.label === active)?.href ?? defaultTab?.href;
 }
-
-export function opsDesignPreference(query: string | null, stored: string | null): boolean {
-  return (query === "people" || query === "classic" ? query : stored) === "people";
-}
