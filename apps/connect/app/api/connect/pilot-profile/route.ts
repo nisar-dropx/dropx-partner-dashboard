@@ -2,6 +2,7 @@ import { betaJourney } from "@/lib/beta-journey";
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { normalizeStoredConnectMobile } from "@/lib/country-codes";
 import { connectSessionCookieName, findConnectSessionAccounts } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
@@ -49,8 +50,11 @@ export async function GET(request: Request) {
     if (candidate.error || !candidate.data) throw new Error("Private beta candidate was not found.");
     const station = Array.isArray(candidate.data.stations) ? candidate.data.stations[0] : candidate.data.stations;
     const designation = Array.isArray(candidate.data.designations) ? candidate.data.designations[0] : candidate.data.designations;
+    const mobile = normalizeStoredConnectMobile(candidate.data.mobile, "91", null);
     return NextResponse.json({ ok: true, profile: {
       id: candidate.data.id,
+      mobileCountryCode: mobile.countryCode,
+      mobileNumber: mobile.localMobile,
       betaRegistrationReady: betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus:registration.data?.status}).ready,
       readOnly: {
         biometricId: candidate.data.biometric_id,
@@ -59,7 +63,7 @@ export async function GET(request: Request) {
         location: station?.station_code ?? station?.station_name ?? "-",
         designation: designation?.name ?? designation?.code ?? "-",
         dateOfJoin: candidate.data.reported_on,
-        mobile: `+91 ${candidate.data.mobile}`
+        mobile: `+${mobile.countryCode} ${mobile.localMobile}`
       },
       editable: {},
       statutoryApplicability: [],

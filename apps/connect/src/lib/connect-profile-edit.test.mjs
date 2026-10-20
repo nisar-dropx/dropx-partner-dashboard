@@ -378,6 +378,71 @@ test("profile edit database guards apply legacy identity rules only when those f
   assert.match(sql, /raise exception 'connect_commit_profile_edit identity guards do not match the expected prior definition'/);
 });
 
+test("profile edit allows shared mobiles and enforces the same-profile emergency contact guard", () => {
+  const sql = fs.readFileSync(
+    new URL("../../../../supabase/migrations/20261020130717_connect_profile_shared_mobile_contact_guard.sql", import.meta.url),
+    "utf8"
+  );
+  const route = fs.readFileSync(
+    new URL("../../app/api/connect/profile-edit/route.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(sql, /Cross-profile mobile reuse is allowed; only the per-profile contact guard applies/);
+  assert.match(sql, /final_emergency_contact[\s\S]*?edit_request\.new_mobile_value[\s\S]*?edit_request\.new_mobile_number/);
+  assert.match(sql, /Mobile number and Emergency contact number cannot be same/);
+  assert.match(sql, /target_phone_already_in_use boolean := false/);
+  assert.match(sql, /wrapped_target_cleanup_start[\s\S]*?if not target_phone_already_in_use then[\s\S]*?connect_login_sessions/);
+  assert.match(sql, /wrapped_target_cleanup_end[\s\S]*?end if;/);
+  assert.doesNotMatch(route, /reservation\?\.code === "target_unavailable"/);
+  assert.match(route, /emergencyContactMatchesMobile\(targetMobile, finalValues\.emergency_contact_number\)/);
+});
+
+test("registration and profile-update surfaces enforce only the same-profile phone conflict", () => {
+  const employeeRoute = fs.readFileSync(
+    new URL("../../app/api/connect/profile/route.ts", import.meta.url),
+    "utf8"
+  );
+  const workforceRoute = fs.readFileSync(
+    new URL("../../app/api/connect/field-executive-profile/route.ts", import.meta.url),
+    "utf8"
+  );
+  const pilotDraftRoute = fs.readFileSync(
+    new URL("../../app/api/connect/profile-draft/route.ts", import.meta.url),
+    "utf8"
+  );
+  const profileApp = fs.readFileSync(
+    new URL("../components/connect-profile-app.tsx", import.meta.url),
+    "utf8"
+  );
+
+  for (const route of [employeeRoute, workforceRoute]) {
+    assert.match(route, /emergencyContactMatchesMobile\(profileMobile, emergencyContactNumber\)/);
+    assert.match(route, /throw new Error\(MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR\)/);
+    assert.match(route, /mobileCountryCode: mobile\.countryCode,[\s\S]*?mobileNumber: mobile\.localMobile/);
+  }
+  assert.ok(
+    employeeRoute.indexOf("emergencyContactMatchesMobile(profileMobile, emergencyContactNumber)") <
+      employeeRoute.indexOf("const uploads = await Promise.all"),
+    "employee registration must reject before document uploads"
+  );
+  assert.ok(
+    workforceRoute.indexOf("emergencyContactMatchesMobile(profileMobile, emergencyContactNumber)") <
+      workforceRoute.indexOf("const profileUpdateResult"),
+    "workforce registration must reject before the profile update"
+  );
+  assert.match(
+    pilotDraftRoute,
+    /const submitted = draftData\._beta_status === "submitted"[\s\S]*?submitted &&[\s\S]*?emergencyContactMatchesMobile[\s\S]*?MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR/
+  );
+  assert.equal(
+    (profileApp.match(/const contactConflictError = mobileEmergencyContactConflictError\(\);/g) ?? []).length,
+    2,
+    "registration and profile-edit submit checks must both apply the conflict guard"
+  );
+  assert.match(profileApp, /Mobile number and Emergency contact number cannot be same|MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR/);
+});
+
 test("profile-edit identity checks bind name matching to the immutable server profile", () => {
   const verificationRoute = fs.readFileSync(
     new URL("../../../../src/app/api/connect/verification/route.ts", import.meta.url),
@@ -463,7 +528,7 @@ test("registration profile routes stay independent from profile-edit migration c
   ]) {
     const route = fs.readFileSync(new URL(routeUrl, import.meta.url), "utf8");
     assert.doesNotMatch(route, /profile_edit_review_pending|profileEditReviewPending/);
-    assert.doesNotMatch(route, /mobile_number_format|normalizeStoredConnectMobile|profileEditLocalMobile/);
+    assert.doesNotMatch(route, /mobile_number_format|profileEditLocalMobile/);
     assert.match(route, /\.select\("id, country_code, mobile_number, expires_at, revoked_at"\)/);
     assert.match(route, /if \(!\["pending", "returned"\]\.includes\(currentStatus\)\)/);
   }
@@ -779,6 +844,12 @@ test("profile edit migration deploys over the supported production schema bounda
   );
   await db.exec(changedIdentityGuards);
   await db.exec(changedIdentityGuards);
+  const sharedMobileContactGuard = fs.readFileSync(
+    new URL("../../../../supabase/migrations/20261020130717_connect_profile_shared_mobile_contact_guard.sql", import.meta.url),
+    "utf8"
+  );
+  await db.exec(sharedMobileContactGuard);
+  await db.exec(sharedMobileContactGuard);
   const functions = await db.query(`
     select proname from pg_proc
     where proname in (
@@ -966,7 +1037,7 @@ test("profile edit migration deploys over the supported production schema bounda
   `);
   assert.equal(parallelRequestCount.rows[0].count, 1);
 
-  const unavailableTarget = await db.query(`
+  const sharedTargetReservation = await db.query(`
     select connect_reserve_profile_edit_request(
       '00000000-0000-0000-0000-000000000025',
       '00000000-0000-0000-0000-000000000001',
@@ -976,17 +1047,20 @@ test("profile edit migration deploys over the supported production schema bounda
       repeat('3', 64),
       '91', '7777777777', '917777777777', 'rejected-current-hash',
       '91', '9876543210', '919876543210', 'occupied-target-hash', true,
-      '{"address":"Secret change"}'::jsonb, '{"address":"Secret old"}'::jsonb,
+      '{"address":"Secret change","emergency_contact_number":"919876543210"}'::jsonb,
+      '{"address":"Secret old","emergency_contact_number":null}'::jsonb,
       'rejected-payload-hash', now() + interval '30 minutes',
       '203.0.113.23', 'fixture', 1, 1, 1
     ) as result
   `);
-  assert.deepEqual(unavailableTarget.rows[0].result, {
-    ok: false,
-    code: "target_unavailable"
+  assert.equal(sharedTargetReservation.rows[0].result.ok, true);
+  assert.equal(sharedTargetReservation.rows[0].result.request.status, "created");
+  assert.deepEqual(sharedTargetReservation.rows[0].result.request.payload, {
+    address: "Secret change",
+    emergency_contact_number: "919876543210"
   });
 
-  const rejectedProbeHitsLimit = await db.query(`
+  const sharedTargetRateLimit = await db.query(`
     select connect_reserve_profile_edit_request(
       '00000000-0000-0000-0000-000000000026',
       '00000000-0000-0000-0000-000000000001',
@@ -1001,59 +1075,56 @@ test("profile edit migration deploys over the supported production schema bounda
       '203.0.113.23', 'fixture', 1, 1, 1
     ) as result
   `);
-  assert.deepEqual(rejectedProbeHitsLimit.rows[0].result, {
+  assert.deepEqual(sharedTargetRateLimit.rows[0].result, {
     ok: false,
     code: "rate_limited"
   });
-  const rejectedReservation = await db.query(`
+  const retainedReservation = await db.query(`
     select status, current_mobile_country_code, current_mobile_value,
       current_mobile_number, new_mobile_country_code, new_mobile_value,
       new_mobile_number, new_mobile_hash, payload, before_values,
-      redacted_at is not null as redacted
+      redacted_at is null as retained
     from connect_profile_edit_requests
     where account_id = '00000000-0000-0000-0000-000000000023'
   `);
-  assert.deepEqual(rejectedReservation.rows, [{
-    status: "failed",
-    current_mobile_country_code: "",
-    current_mobile_value: "",
-    current_mobile_number: "",
-    new_mobile_country_code: "",
-    new_mobile_value: "",
-    new_mobile_number: "",
+  assert.deepEqual(retainedReservation.rows, [{
+    status: "created",
+    current_mobile_country_code: "91",
+    current_mobile_value: "7777777777",
+    current_mobile_number: "917777777777",
+    new_mobile_country_code: "91",
+    new_mobile_value: "9876543210",
+    new_mobile_number: "919876543210",
     new_mobile_hash: "occupied-target-hash",
-    payload: {},
-    before_values: {},
-    redacted: true
+    payload: {
+      address: "Secret change",
+      emergency_contact_number: "919876543210"
+    },
+    before_values: {
+      address: "Secret old",
+      emergency_contact_number: null
+    },
+    retained: true
   }]);
-  const rejectedAudit = await db.query(`
+  const sharedTargetAudit = await db.query(`
     select event_code, metadata
     from connect_profile_edit_audit
     where request_id = '00000000-0000-0000-0000-000000000025'
   `);
-  assert.deepEqual(rejectedAudit.rows, [{
-    event_code: "start_rejected",
-    metadata: { reason: "target_unavailable" }
-  }]);
+  assert.deepEqual(sharedTargetAudit.rows, []);
 
+  await db.exec(`
+    update connect_profile_edit_requests
+    set status = 'verified', current_otp_verified_at = now(), new_otp_verified_at = now()
+    where id = '00000000-0000-0000-0000-000000000025'
+  `);
   await assert.rejects(
     db.exec(`select connect_commit_profile_edit(
-      '00000000-0000-0000-0000-000000000005',
-      '00000000-0000-0000-0000-000000000003'
+      '00000000-0000-0000-0000-000000000025',
+      '00000000-0000-0000-0000-000000000024'
     )`),
-    /cannot be used for self-service profile editing/
+    /Mobile number and Emergency contact number cannot be same/
   );
-  const credentialsAfterRejectedMove = await db.query(`
-    select
-      (select revoked_at is null from connect_login_sessions where id = '00000000-0000-0000-0000-000000000004') as session_active,
-      (select reset_required from connect_user_pins where id = '00000000-0000-0000-0000-000000000006') as pin_reset,
-      (select status from connect_whatsapp_otp_requests where id = '00000000-0000-0000-0000-000000000010') as whatsapp_status
-  `);
-  assert.deepEqual(credentialsAfterRejectedMove.rows[0], {
-    session_active: true,
-    pin_reset: false,
-    whatsapp_status: "pending"
-  });
 
   const pinSessionBeforeMove = await db.query(`
     select connect_authenticate_pin_and_create_session(
@@ -1065,7 +1136,6 @@ test("profile edit migration deploys over the supported production schema bounda
   assert.deepEqual(pinSessionBeforeMove.rows[0].result, { ok: true });
 
   await db.exec(`
-    delete from workforce where id = '00000000-0000-0000-0000-000000000009';
     select connect_commit_profile_edit(
       '00000000-0000-0000-0000-000000000005',
       '00000000-0000-0000-0000-000000000003'
@@ -1080,8 +1150,8 @@ test("profile edit migration deploys over the supported production schema bounda
     ) order by id
   `);
   assert.ok(sessions.rows[0].revoked_at, "the initiating session must be revoked");
-  assert.ok(sessions.rows[1].revoked_at, "a recycled destination session must be revoked");
-  assert.ok(sessions.rows[2].revoked_at, "a credential-bound session issued before the move must be revoked");
+  assert.equal(sessions.rows[1].revoked_at, null, "an existing shared-target session must be preserved");
+  assert.equal(sessions.rows[2].revoked_at, null, "a credential-bound shared-target session must be preserved");
   const retiredSourceCredentials = await db.query(`
     select
       (select revoked_at is not null from connect_login_sessions
@@ -1103,32 +1173,32 @@ test("profile edit migration deploys over the supported production schema bounda
     select attempt_count, reset_required from connect_user_pins
     where id = '00000000-0000-0000-0000-000000000006'
   `);
-  assert.deepEqual(recycledPin.rows[0], { attempt_count: 0, reset_required: true });
-  const expiredTargetOtps = await db.query(`
+  assert.deepEqual(recycledPin.rows[0], { attempt_count: 2, reset_required: false });
+  const preservedTargetOtps = await db.query(`
     select id, status from (
       select id, status from connect_whatsapp_otp_requests
       union all
       select id, status from connect_sms_otp_requests
     ) target_otps order by id
   `);
-  assert.deepEqual(expiredTargetOtps.rows, [
-    { id: "00000000-0000-0000-0000-000000000010", status: "expired" },
-    { id: "00000000-0000-0000-0000-000000000011", status: "expired" },
-    { id: "00000000-0000-0000-0000-000000000012", status: "expired" },
+  assert.deepEqual(preservedTargetOtps.rows, [
+    { id: "00000000-0000-0000-0000-000000000010", status: "pending" },
+    { id: "00000000-0000-0000-0000-000000000011", status: "pending" },
+    { id: "00000000-0000-0000-0000-000000000012", status: "pending" },
     { id: "00000000-0000-0000-0000-000000000032", status: "expired" },
     { id: "00000000-0000-0000-0000-000000000033", status: "expired" }
   ]);
 
-  const stalePinResult = await db.query(`
+  const preservedPinResult = await db.query(`
     select connect_authenticate_pin_and_create_session(
       '65', '6591234567', '123456',
       '00000000-0000-0000-0000-000000000015', repeat('b', 64),
       now() + interval '1 day', '127.0.0.1', 'fixture'
     ) as result
   `);
-  assert.deepEqual(stalePinResult.rows[0].result, { ok: false, code: "pin_setup_required" });
+  assert.deepEqual(preservedPinResult.rows[0].result, { ok: true });
 
-  const staleOtpResult = await db.query(`
+  const preservedOtpResult = await db.query(`
     select connect_set_pin_and_create_session(
       '65', '6591234567', '654321',
       'fresh-pin-salt:' || encode(digest('fresh-pin-salt:111111', 'sha256'), 'hex'),
@@ -1136,8 +1206,8 @@ test("profile edit migration deploys over the supported production schema bounda
       now() + interval '1 day', '127.0.0.1', 'fixture'
     ) as result
   `);
-  assert.deepEqual(staleOtpResult.rows[0].result, { ok: false, code: "otp_missing" });
-  const staleSessions = await db.query(`
+  assert.deepEqual(preservedOtpResult.rows[0].result, { ok: true });
+  const preservedSessions = await db.query(`
     select
       (select count(*)::integer from connect_login_sessions
         where id in (
@@ -1147,7 +1217,95 @@ test("profile edit migration deploys over the supported production schema bounda
       (select reset_required from connect_user_pins
         where country_code = '65' and mobile_number = '6591234567') as pin_reset
   `);
-  assert.deepEqual(staleSessions.rows[0], { count: 0, pin_reset: true });
+  assert.deepEqual(preservedSessions.rows[0], { count: 2, pin_reset: false });
+
+  await db.exec(`
+    insert into employees(
+      id, company_id, full_name, mobile_country_code, mobile,
+      profile_completion_status, is_active, updated_at
+    ) values (
+      '00000000-0000-0000-0000-000000000040',
+      '00000000-0000-0000-0000-000000000001',
+      'Unused Target Move', '91', '5555555555', 'active', true,
+      '2026-10-15T05:00:00Z'
+    );
+    insert into connect_login_sessions(
+      id, country_code, mobile_number, session_hash, expires_at, revoked_at
+    ) values
+      (
+        '00000000-0000-0000-0000-000000000041', '91', '915555555555',
+        'unused-target-current-session', now() + interval '1 day', null
+      ),
+      (
+        '00000000-0000-0000-0000-000000000042', '971', '971501234567',
+        'unused-target-stale-session', now() + interval '1 day', null
+      );
+    insert into connect_user_pins(
+      id, country_code, mobile_number, pin_hash, attempt_count,
+      locked_until, reset_required, updated_at
+    ) values (
+      '00000000-0000-0000-0000-000000000043', '971', '501234567',
+      'unused-target-pin', 3, now() + interval '5 minutes', false, now()
+    );
+    insert into connect_whatsapp_otp_requests(
+      id, country_code, mobile_number, purpose, otp_hash, status,
+      expires_at, attempt_count, max_attempts, created_at, updated_at
+    ) values (
+      '00000000-0000-0000-0000-000000000044', '971', '971501234567',
+      'connect_login', 'unused-target-otp', 'pending',
+      now() + interval '10 minutes', 0, 5, now(), now()
+    );
+    insert into connect_sms_otp_requests(
+      id, country_code, mobile_number, purpose, status, updated_at
+    ) values (
+      '00000000-0000-0000-0000-000000000045', '971', '501234567',
+      'connect_pin_reset', 'pending', now()
+    );
+    insert into connect_profile_edit_requests(
+      id, company_id, account_id, profile_type, login_session_id,
+      source_updated_at, current_mobile_country_code, current_mobile_value,
+      current_mobile_number, current_mobile_hash, new_mobile_country_code,
+      new_mobile_value, new_mobile_number, new_mobile_hash, mobile_changed,
+      payload, before_values, payload_hash, status, current_otp_verified_at,
+      new_otp_verified_at, request_expires_at
+    ) values (
+      '00000000-0000-0000-0000-000000000046',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000040', 'employee',
+      '00000000-0000-0000-0000-000000000041',
+      '2026-10-15T05:00:00Z', '91', '5555555555', '915555555555',
+      'unused-current-hash', '971', '501234567', '971501234567',
+      'unused-target-hash', true, '{}'::jsonb, '{}'::jsonb,
+      'unused-payload-hash', 'verified', now(), now(), now() + interval '30 minutes'
+    );
+    select connect_commit_profile_edit(
+      '00000000-0000-0000-0000-000000000046',
+      '00000000-0000-0000-0000-000000000041'
+    );
+  `);
+  const unusedTargetCredentials = await db.query(`
+    select
+      (select revoked_at is not null from connect_login_sessions
+        where id = '00000000-0000-0000-0000-000000000042') as session_revoked,
+      (select attempt_count from connect_user_pins
+        where id = '00000000-0000-0000-0000-000000000043') as pin_attempts,
+      (select locked_until is null from connect_user_pins
+        where id = '00000000-0000-0000-0000-000000000043') as pin_unlocked,
+      (select reset_required from connect_user_pins
+        where id = '00000000-0000-0000-0000-000000000043') as pin_reset,
+      (select status from connect_whatsapp_otp_requests
+        where id = '00000000-0000-0000-0000-000000000044') as whatsapp_status,
+      (select status from connect_sms_otp_requests
+        where id = '00000000-0000-0000-0000-000000000045') as sms_status
+  `);
+  assert.deepEqual(unusedTargetCredentials.rows[0], {
+    session_revoked: true,
+    pin_attempts: 0,
+    pin_unlocked: true,
+    pin_reset: true,
+    whatsapp_status: "expired",
+    sms_status: "expired"
+  });
 
   await db.exec(`
     insert into connect_whatsapp_otp_requests(

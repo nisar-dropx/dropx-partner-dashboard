@@ -17,6 +17,20 @@ const supportedCountryCodes = new Set<string>(countryCodeOptions.map((option) =>
 
 export class ConnectMobileValidationError extends Error {}
 
+export const MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR =
+  "Mobile number and Emergency contact number cannot be same";
+
+export function emergencyContactMatchesMobile(
+  mobile: { localMobile: string; mobile: string },
+  emergencyContactValue: unknown
+) {
+  const emergencyContact = String(emergencyContactValue ?? "").replace(/\D/g, "");
+  return Boolean(
+    emergencyContact &&
+    (emergencyContact === mobile.localMobile || emergencyContact === mobile.mobile)
+  );
+}
+
 export function normalizeSupportedCountryCode(value: unknown) {
   const raw = String(value ?? "91").trim();
   if (!/^\+?\d{1,4}$/.test(raw)) {

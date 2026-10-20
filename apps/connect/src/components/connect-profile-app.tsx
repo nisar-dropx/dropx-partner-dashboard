@@ -11,7 +11,12 @@ import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
 import { compressFormImages, formFileBytes, MAX_UPLOAD_REQUEST_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from "../lib/compress-form-images";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
-import { countryCodeOptions } from "@/lib/country-codes";
+import {
+  countryCodeOptions,
+  emergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
+  normalizeProfileEditMobile
+} from "@/lib/country-codes";
 import {
   matchingProfileVerification,
   profileEditVerificationPlan,
@@ -726,9 +731,27 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     return "";
   }
 
+  function mobileEmergencyContactConflictError() {
+    if (!values.mobileNumber || !values.emergencyContactNumber) return "";
+    try {
+      const mobile = normalizeProfileEditMobile(
+        values.mobileNumber,
+        values.mobileCountryCode || "91"
+      );
+      return emergencyContactMatchesMobile(mobile, values.emergencyContactNumber)
+        ? MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR
+        : "";
+    } catch {
+      // The existing mobile-format validation owns malformed mobile errors.
+      return "";
+    }
+  }
+
   function registrationSubmissionError() {
     const fieldError = registrationFieldError();
     if (fieldError) return fieldError;
+    const contactConflictError = mobileEmergencyContactConflictError();
+    if (contactConflictError) return contactConflictError;
 
     // Keep registration verification rules independent from self-service edit.
     // Optional blank fields have nothing to verify and do not block submission.
@@ -764,6 +787,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
 
     if (!countryCodeOptions.some((option) => option.code === values.mobileCountryCode)) return "Select a supported mobile country code.";
     if (!/^\d{6,14}$/.test(values.mobileNumber || "")) return "Enter a 6 to 14 digit mobile number.";
+    const contactConflictError = mobileEmergencyContactConflictError();
+    if (contactConflictError) return contactConflictError;
 
     if (editVerificationPlan.error) return editVerificationPlan.error;
 

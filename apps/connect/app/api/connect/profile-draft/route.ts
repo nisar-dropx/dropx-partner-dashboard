@@ -12,6 +12,11 @@ import {
 } from "../../../../src/lib/profile-drafts";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import {
+  emergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
+  normalizeStoredConnectMobile
+} from "@/lib/country-codes";
+import {
   isWorkforceProfileType,
   type WorkforceProfileType
 } from "../../../../src/lib/workforce-profiles";
@@ -173,15 +178,27 @@ export async function POST(request: Request) {
     const profileType = String(formData.get("profile_type") ?? "");
     const account = await authenticatedAccount(accountId, profileType);
     const isolatedPilot = isIsolatedPilot(account);
+    const draftData = parseObject(formData.get("draft_data"));
+    const submitted = draftData._beta_status === "submitted";
+    const now = new Date().toISOString();
     const current = isolatedPilot
       ? await loadIsolatedPilotDraft(account.id, account.companyId)
       : await loadProfileDraft({ accountId: account.id, companyId: account.companyId, profileType: account.profileType });
     if (isolatedPilot) {
       const candidate = await supabaseAdmin.from("workforce_amazon_email_pilot_candidates")
-        .select("continuation_status").eq("company_id", account.companyId).eq("id", account.id).is("closed_at", null).maybeSingle();
+        .select("continuation_status,mobile").eq("company_id", account.companyId).eq("id", account.id).is("closed_at", null).maybeSingle();
       if (candidate.error || !candidate.data) throw new Error("Private beta candidate is unavailable.");
       const ready = betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus:current && "status" in current ? String(current.status) : null}).ready;
       if (!ready) throw new Error("Start with your station buddy, then choose Continue to registration in Work setup.");
+      if (
+        submitted &&
+        emergencyContactMatchesMobile(
+          normalizeStoredConnectMobile(candidate.data.mobile, "91", null),
+          draftData.emergency_contact_number
+        )
+      ) {
+        throw new Error(MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR);
+      }
     }
     const nextPaths = { ...(current?.filePaths ?? {}) };
     const replacedPaths: string[] = [];
@@ -200,9 +217,6 @@ export async function POST(request: Request) {
       nextPaths[slot] = path;
     }
 
-    const draftData = parseObject(formData.get("draft_data"));
-    const now = new Date().toISOString();
-    const submitted = draftData._beta_status === "submitted";
     const saveResult = isolatedPilot
       ? await supabaseAdmin.from("workforce_amazon_email_pilot_registrations").upsert({
         candidate_id: account.id,

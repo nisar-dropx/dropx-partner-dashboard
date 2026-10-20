@@ -31,6 +31,8 @@ import { loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { profileFieldRuleCategory, type NonEmployeeProfileType } from "@/lib/workforce-profiles";
 import {
   ConnectMobileValidationError,
+  emergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
   normalizeProfileEditMobile,
   normalizeStoredConnectMobile,
   normalizeSupportedCountryCode
@@ -458,7 +460,7 @@ async function enforceEditFieldRules({
   if (missingRequired) {
     throw new ProfileEditError(`${missingRequired.replaceAll("_", " ")} is required.`);
   }
-  return { payload };
+  return { payload, finalValues };
 }
 
 function statutoryAnswer(value: unknown, label: string) {
@@ -708,7 +710,7 @@ async function start(request: Request, body: Record<string, unknown>, session: A
   }
   const hasPfUan = statutoryAnswer(body.hasPfUan, "PF UAN selection");
   const hasEsiNo = statutoryAnswer(body.hasEsiNo, "ESI selection");
-  const { payload } = await enforceEditFieldRules({
+  const { payload, finalValues } = await enforceEditFieldRules({
     account,
     profile,
     profileType,
@@ -717,6 +719,9 @@ async function start(request: Request, body: Record<string, unknown>, session: A
     hasPfUan,
     hasEsiNo
   });
+  if (emergencyContactMatchesMobile(targetMobile, finalValues.emergency_contact_number)) {
+    throw new ProfileEditError(MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR);
+  }
   if (!Object.keys(payload).length && !mobileChanged) {
     throw new ProfileEditError("No profile changes were found.");
   }
@@ -769,12 +774,6 @@ async function start(request: Request, body: Record<string, unknown>, session: A
   if (!reservation?.ok) {
     if (reservation?.code === "rate_limited") {
       throw new ProfileEditError("Too many profile edit OTP requests. Try again later.", 429);
-    }
-    if (reservation?.code === "target_unavailable") {
-      throw new ProfileEditError(
-        "This mobile number cannot be used for self-service profile editing. Contact an administrator.",
-        409
-      );
     }
     throw new Error("Profile edit request could not be reserved.");
   }
