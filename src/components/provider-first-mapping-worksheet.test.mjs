@@ -228,7 +228,17 @@ function saved(data) {
   return { ok: true, message: 'Mapping saved.', savedRows: [{ clientKey: value('client_key'), workforceId: value('id'), mappingId: 'saved-1', paymentMethodId: value('payment_method_id'), paymentValues: JSON.parse(value('payment_values_json')), productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: value('effective_from'), effectiveTo: value('effective_to') }] };
 }
 
-test('unmapped selection never inherits a closed September method, rates, thresholds or dates', async () => {
+test('unmapped selection without exact closed history keeps Effective from blank', () => {
+  const ui = worksheet();
+  ui.change('provider_first_worker_0', worker.id);
+  assert.deepEqual(
+    ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value),
+    ['', '']
+  );
+  assert.doesNotMatch(JSON.stringify(ui.all(node => node.props?.role === 'status')), /Resuming this location/);
+});
+
+test('unmapped selection resumes after exact closed history without inheriting its mapping ID or pay details', async () => {
   const oldPeriod = { mappingId: 'september-closed', stationId: row.stationId, locationLabel: 'KOZA', providerId: row.providerId, mappedProviderMemberId: row.providerMemberId, paymentMethodId: 'old-method', paymentValues: { DELIVERY: '13' }, productionThresholdConfig: { period: 'day', component_codes: ['DELIVERY'] }, productionThresholdMinimumUnits: '20', effectiveFrom: '2026-09-01', effectiveTo: '2026-09-30', status: 'closed' };
   const historicWorker = { ...worker, dateOfJoin: '2026-09-01', mappingHistory: [oldPeriod], registeredLocationMappings: [oldPeriod] };
   const historyEntry = { id: oldPeriod.mappingId, paymentMethodId: oldPeriod.paymentMethodId, paymentMethodName: 'Old method', paymentValues: oldPeriod.paymentValues, effectiveFrom: oldPeriod.effectiveFrom, effectiveTo: oldPeriod.effectiveTo, storedStatus: 'closed' };
@@ -238,7 +248,8 @@ test('unmapped selection never inherits a closed September method, rates, thresh
   assert.equal(ui.cards().length, 1);
   assert.equal(ui.select('provider_first_payment_method_0').value, '');
   assert.equal(ui.all(node => node.type === 'input' && node.props.type === 'number').length, 0);
-  assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['', '']);
+  assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['2026-10-01', '']);
+  assert.match(JSON.stringify(ui.all(node => node.props?.role === 'status')), /Resuming this location.*2026-09-30.*2026-10-01.*new period.*history stay unchanged/);
   assert.deepEqual(ui.one(node => node.type === 'History').props.entries, [historyEntry]);
   assert.equal(ui.one(node => node.type === 'button' && node.props.children === '+ Add payment period').props.disabled, true);
   await ui.save();
@@ -294,7 +305,8 @@ test('previous payment details are copied only on request, explain their source,
   assert.equal(ui.select('provider_first_payment_method_0').value, method.id);
   assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '13');
   assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['2026-10-01', '']);
-  const notice = ui.one(node => node.type === 'div' && node.props.role === 'status');
+  const notice = ui.one(node => node.type === 'div' && node.props.role === 'status'
+    && /Previous payment details loaded/.test(JSON.stringify(node.props.children)));
   const text = JSON.stringify(notice.props.children);
   assert.match(text, /Previous payment details loaded/);
   assert.match(text, /Variable pay/);

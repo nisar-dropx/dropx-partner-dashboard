@@ -12,6 +12,7 @@ import {
   providerFirstLocationMappingEntries,
   providerFirstMappingIsCurrentOrScheduled,
   providerFirstPageWindow,
+  providerFirstResumePeriodForRow,
   providerFirstLocationRemap,
   providerFirstLocationNeedsDates,
   providerFirstLocationIsAllowed,
@@ -628,6 +629,81 @@ test("does not reuse a future current mapping for an earlier bounded period", ()
   });
 });
 
+test("starts a resumed unmapped location after its latest exact closed period without reusing its mapping ID", () => {
+  const older = {
+    mappingId: "mapping-old",
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "10" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30",
+    status: "closed"
+  };
+  const latest = {
+    ...older,
+    mappingId: "mapping-latest",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "2026-10-19"
+  };
+  const unmapped = {
+    ...row,
+    workforceId: "",
+    dropxId: "",
+    dropxName: "",
+    mappingId: "",
+    paymentMethodId: "",
+    paymentValues: {},
+    effectiveFrom: "",
+    effectiveTo: ""
+  };
+  const resumedWorker = {
+    ...worker,
+    dateOfJoin: "2026-09-01",
+    mappingId: "",
+    effectiveFrom: "",
+    mappedProviderMemberId: "",
+    currentMappings: [],
+    mappingHistory: [older, latest]
+  };
+
+  assert.deepEqual(providerFirstResumePeriodForRow(unmapped, resumedWorker), {
+    effectiveFrom: "2026-10-20",
+    previousEffectiveFrom: "2026-10-01",
+    previousEffectiveTo: "2026-10-19"
+  });
+  assert.equal("mappingId" in providerFirstResumePeriodForRow(unmapped, resumedWorker), false);
+});
+
+test("bounds a resumed provider-location mapping by date of join and exact identity", () => {
+  const closed = {
+    mappingId: "mapping-before-join",
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "10" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30",
+    status: "closed"
+  };
+  const unmapped = { ...row, workforceId: "", mappingId: "", effectiveFrom: "", effectiveTo: "" };
+  const joinedLater = { ...worker, dateOfJoin: "2026-10-05", mappingHistory: [closed] };
+
+  assert.equal(providerFirstResumePeriodForRow(unmapped, joinedLater)?.effectiveFrom, "2026-10-05");
+  assert.equal(providerFirstResumePeriodForRow({ ...unmapped, stationId: "other-station" }, joinedLater), undefined);
+  assert.equal(providerFirstResumePeriodForRow({ ...unmapped, providerId: "other-provider" }, joinedLater), undefined);
+  assert.equal(providerFirstResumePeriodForRow({ ...unmapped, providerMemberId: "other-member" }, joinedLater), undefined);
+  assert.equal(providerFirstResumePeriodForRow({ ...unmapped, mappingId: "existing-mapping" }, joinedLater), undefined);
+});
+
 test("keeps a current mapping reference when the requested period overlaps it", () => {
   const futureMapping = {
     mappingId: "mapping-october",
@@ -827,6 +903,33 @@ test("classifies every required mapped-row field consistently", () => {
     { ...row, paymentValues: {} },
     { ...row, paymentValues: { DELIVERY: "-1" } }
   ]) assert.equal(providerFirstValidationStatus(invalid, worker, method), "needs_attention");
+});
+
+test("explains that a registered-location mapping must be moved rather than ended as a rate edit", () => {
+  const current = {
+    mappingId: row.mappingId,
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: row.paymentMethodId,
+    paymentValues: row.paymentValues,
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: "",
+    status: "active"
+  };
+  const currentWorker = {
+    ...worker,
+    currentMappings: [current],
+    registeredLocationMappings: [current]
+  };
+
+  assert.match(
+    providerFirstRowIssue({ ...row, effectiveTo: "2026-10-22" }, currentWorker, method),
+    /registered-location mapping.*cannot be ended.*Move mapping/
+  );
 });
 
 test("allows an existing mapping to be cleared without selecting another worker", () => {

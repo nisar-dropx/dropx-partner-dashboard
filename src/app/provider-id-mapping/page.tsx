@@ -8,7 +8,7 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
+import { canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingForOutboundMonth, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
@@ -45,6 +45,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const allowed = (id: string | null) => allLocations || Boolean(id && scope.has(id));
   const notice = flash();
   const today = dashboardDateInputValue();
+  const entryFilters = providerMappingEntryFilters(searchParams, today);
 
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
@@ -119,8 +120,10 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const historyByProviderMember = new Map<string, PaymentAllocationHistoryEntry[]>();
   const historyByWorkforce = new Map<string, PaymentAllocationHistoryEntry[]>();
   const historyEntryByMappingId = new Map<string, PaymentAllocationHistoryEntry>();
+  const mappingHistoryByMember = new Map<string, Mapping[]>();
   for (const mapping of mappingHistory) {
     const key = providerMemberKey(String(mapping.station_id ?? ""), mapping.provider_member_id);
+    appendMapValue(mappingHistoryByMember, key, mapping);
     const method = rawMethodById.get(String(mapping.payment_method_id ?? ""));
     const worker = mapping.workforce_id ? workforceById.get(mapping.workforce_id) : null;
     const entry: PaymentAllocationHistoryEntry = {
@@ -144,6 +147,23 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
       : "";
     if (providerMemberIdentity) appendMapValue(historyByProviderMember, providerMemberIdentity, entry);
     if (mapping.workforce_id) appendMapValue(historyByWorkforce, mapping.workforce_id, entry);
+  }
+  // A month-scoped worksheet must edit the stored period that actually applies
+  // in that month. Do not add these historical rows to currentMappings or to
+  // the worker's current ownership fields.
+  const worksheetMappingByMember = new Map(mappingByMember);
+  if (entryFilters.month) {
+    worksheetMappingByMember.clear();
+    for (const [key, candidates] of mappingHistoryByMember) {
+      const selected = providerFirstMappingForOutboundMonth(candidates.map((mapping) => ({
+        mapping,
+        mappingId: mapping.id,
+        effectiveFrom: mapping.effective_from,
+        effectiveTo: mapping.effective_to,
+        status: mapping.status
+      })), entryFilters.month)?.mapping;
+      if (selected) worksheetMappingByMember.set(key, selected);
+    }
   }
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
     const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
@@ -184,7 +204,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   }
   const latestMembers = new Map(mergeProviderFirstLocationMembers(
     sourceLocationMembers,
-    activeMappings.flatMap((mapping) => {
+    (entryFilters.month ? Array.from(worksheetMappingByMember.values()) : activeMappings).flatMap((mapping) => {
       const station = mapping.station_id ? stationById.get(String(mapping.station_id)) : null;
       if (!station || !mapping.provider_member_id) return [];
       const worker = mapping.workforce_id ? workforceById.get(mapping.workforce_id) : null;
@@ -199,7 +219,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   ).map((member) => [providerMemberKey(member.stationId, member.id), member]));
   const mappings: ProviderFirstMappingRow[] = providerFirstLocationMappingEntries(
     Array.from(latestMembers.values()),
-    mappingByMember,
+    worksheetMappingByMember,
     historyByMember
   ).map(({ member, mapping: link, history: exactMemberHistory }) => {
     const worker = link?.workforce_id ? workforceById.get(link.workforce_id) : null;
@@ -231,7 +251,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     lookupEntries.push({ key: `provider:${providerMemberKey(row.stationId,row.providerMemberId)}`, stationId: row.stationId, stationLabel: row.stationLabel, workforceId: "", dropxId: "", fullName: "", providerMemberId: row.providerMemberId, providerMemberName: row.providerMemberName, profileLocationLabel: "", history: [] });
   }
   const shipmentMonths = [...new Set(providerMembers.filter((member) => stationByCode.has(member.stationCode.toUpperCase())).flatMap((member) => member.shipmentMonths))];
-  const entryFilters = providerMappingEntryFilters(searchParams, today);
   const requestedStation = String(searchParams?.station ?? "").trim();
   const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";
   // Resolve current People ownership only for authorized stations represented

@@ -322,6 +322,49 @@ function historicalWorkerMappings(worker: ProviderFirstWorkerView) {
   ).filter((mapping, index, mappings) => mappings.findIndex((candidate) => candidate.mappingId === mapping.mappingId) === index);
 }
 
+export type ProviderFirstResumePeriod = {
+  effectiveFrom: string;
+  previousEffectiveFrom: string;
+  previousEffectiveTo: string;
+};
+
+/**
+ * Suggests the first non-overlapping day for a new mapping at a location where
+ * this exact Provider ID / DropX owner previously had a closed period. This is
+ * deliberately only a date suggestion: the closed mapping ID is not returned,
+ * because resuming after it must create a new adjacent period and preserve the
+ * historical row unchanged.
+ */
+export function providerFirstResumePeriodForRow(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+): ProviderFirstResumePeriod | undefined {
+  if (!worker || row.mappingId) return undefined;
+  const previous = historicalWorkerMappings(worker)
+    .filter((mapping) => mapping.status === "closed"
+      && mapping.stationId === row.stationId
+      && isIsoCalendarDate(mapping.effectiveFrom)
+      && isIsoCalendarDate(mapping.effectiveTo)
+      && mappingIdentityMatchesRow(mapping, row))
+    .sort((left, right) => right.effectiveTo.localeCompare(left.effectiveTo)
+      || right.effectiveFrom.localeCompare(left.effectiveFrom)
+      || right.mappingId.localeCompare(left.mappingId))[0];
+  if (!previous) return undefined;
+
+  const nextDate = new Date(`${previous.effectiveTo}T00:00:00.000Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const afterPrevious = nextDate.toISOString().slice(0, 10);
+  if (!isIsoCalendarDate(afterPrevious)) return undefined;
+  const dateOfJoin = String(worker.dateOfJoin ?? "").trim();
+  return {
+    effectiveFrom: isIsoCalendarDate(dateOfJoin) && dateOfJoin > afterPrevious
+      ? dateOfJoin
+      : afterPrevious,
+    previousEffectiveFrom: previous.effectiveFrom,
+    previousEffectiveTo: previous.effectiveTo
+  };
+}
+
 function mappingIdentityMatchesRow(
   mapping: Pick<ProviderFirstRegisteredMappingView, "providerId" | "mappedProviderMemberId">,
   row: Pick<ProviderFirstMappingRowView, "providerId" | "providerMemberId">
@@ -823,6 +866,51 @@ export function providerFirstMappingIsCurrentOrScheduled(
     || (mapping.status === "closed" && Boolean(mapping.effectiveTo) && mapping.effectiveTo! >= today);
 }
 
+export type ProviderFirstOutboundMonthMapping = {
+  mappingId: string;
+  effectiveFrom: string;
+  effectiveTo: string | null | undefined;
+  status: string;
+};
+
+/**
+ * Select the latest canonical mapping period that intersects a worksheet's
+ * outbound month. This is deliberately independent of today's date: a closed
+ * period remains the editable source of truth when an operator opens its
+ * historical month, while current ownership continues to use
+ * providerFirstMappingIsCurrentOrScheduled.
+ */
+export function providerFirstMappingForOutboundMonth<T extends ProviderFirstOutboundMonthMapping>(
+  mappings: readonly T[],
+  outboundMonth: string
+) {
+  const month = String(outboundMonth ?? "").trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return undefined;
+  const monthStart = `${month}-01`;
+  if (!isIsoCalendarDate(monthStart)) return undefined;
+  const [year, monthNumber] = month.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const monthEnd = `${month}-${String(daysInMonth).padStart(2, "0")}`;
+
+  return mappings.filter((mapping) => {
+    const effectiveFrom = String(mapping.effectiveFrom ?? "").trim();
+    const effectiveTo = String(mapping.effectiveTo ?? "").trim();
+    const canonicalPeriod = (mapping.status === "active" && !effectiveTo)
+      || (mapping.status === "closed" && Boolean(effectiveTo));
+    return canonicalPeriod
+      && isIsoCalendarDate(effectiveFrom)
+      && (!effectiveTo || (isIsoCalendarDate(effectiveTo) && effectiveTo >= effectiveFrom))
+      && effectiveFrom <= monthEnd
+      && (!effectiveTo || effectiveTo >= monthStart);
+  }).sort((left, right) => {
+    const byStart = right.effectiveFrom.localeCompare(left.effectiveFrom);
+    if (byStart) return byStart;
+    const leftEnd = String(left.effectiveTo ?? "") || "9999-12-31";
+    const rightEnd = String(right.effectiveTo ?? "") || "9999-12-31";
+    return rightEnd.localeCompare(leftEnd) || right.mappingId.localeCompare(left.mappingId);
+  })[0];
+}
+
 function sameProviderMember(left: string, right: string) {
   return String(left ?? "").trim().toUpperCase() === String(right ?? "").trim().toUpperCase();
 }
@@ -955,6 +1043,15 @@ export function providerFirstRowIssue(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(row.effectiveFrom)) return "Effective from is required.";
   if (row.effectiveTo && !/^\d{4}-\d{2}-\d{2}$/.test(row.effectiveTo)) return "Effective to is invalid.";
   if (row.effectiveTo && row.effectiveTo < row.effectiveFrom) return "Effective to cannot be before effective from.";
+  const closesOngoingMapping = Boolean(row.effectiveTo
+    && mappingReference?.mappingId === row.mappingId
+    && mappingReference.stationId === row.stationId
+    && mappingReference.status === "active"
+    && !mappingReference.effectiveTo
+    && mappingReference.effectiveFrom === row.effectiveFrom);
+  if (closesOngoingMapping && mappingReference?.stationId === String(worker.profileStationId ?? "").trim()) {
+    return "This is the registered-location mapping and cannot be ended here. To change only the rate, use + Add payment period. To move the person, update the Workforce location and then use Move mapping from the required date.";
+  }
   if (row.effectiveTo && providerFirstLocationRemap(row, worker)) {
     return "Move or Keep all requires an ongoing mapping. Leave Effective to blank.";
   }
