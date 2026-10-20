@@ -184,12 +184,14 @@ export type MappingFilterOption = { value: string; label: string; searchText?: s
 
 export function MappingMultiFilter({
   allLabel,
+  disabled = false,
   label,
   options,
   selected,
   setSelected
 }: {
   allLabel: string;
+  disabled?: boolean;
   label: string;
   options: MappingFilterOption[];
   selected: string[];
@@ -242,7 +244,7 @@ export function MappingMultiFilter({
     <div className="mapping-filter-field mapping-bulk-filter" ref={rootRef}>
       <span className="mapping-field-label" id={filterLabelId}>{label}</span>
       <div className="bulk-multi-filter">
-        <button aria-controls={filterMenuId} aria-expanded={open} aria-labelledby={`${filterLabelId} ${filterSummaryId}`} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} onClick={() => { if (open) setQuery(""); setOpen(!open); }} type="button">
+        <button aria-controls={filterMenuId} aria-expanded={open} aria-labelledby={`${filterLabelId} ${filterSummaryId}`} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} disabled={disabled} onClick={() => { if (open) setQuery(""); setOpen(!open); }} type="button">
           <span className="mapping-filter-summary-text" id={filterSummaryId}>{summary}</span><span aria-hidden="true">v</span>
         </button>
         {open ? <div aria-labelledby={filterLabelId} className="bulk-multi-filter-menu mapping-filter-menu" id={filterMenuId} role="group">

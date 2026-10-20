@@ -15,6 +15,8 @@ import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-sna
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 
 import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 
@@ -232,6 +234,14 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const entryFilters = providerMappingEntryFilters(searchParams, today);
   const requestedStation = String(searchParams?.station ?? "").trim();
   const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";
+  // Resolve current People ownership only for authorized stations represented
+  // in this worksheet. An AOM is used only when that station has no cluster.
+  const mappingStationIds = new Set(mappings.map((row) => row.stationId));
+  const mappingStations = stations.filter((station) => mappingStationIds.has(station.id));
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, mappingStations.map((station) => station.id), { includeStationResponsibilities: true });
+  const clusters = hierarchy.error ? null : nlPeopleClusters(mappingStations, hierarchy.byLocation);
+  if (hierarchy.error) console.error("[provider-id-mapping] People cluster filter unavailable", { companyId, error: hierarchy.error });
+  const clusterKeysByStation = Object.fromEntries([...(clusters?.byStation ?? [])].map(([id, value]) => [id, value.clusterKeys]));
 
   return <AppShell active="ID Mapping" pageCode={pageCode}>
     <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
@@ -239,6 +249,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet lookupEntries={lookupEntries} initialOutboundMonth={entryFilters.month} initialMappingStatus={entryFilters.mapping} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet clusterOptions={clusters?.options ?? []} clusterKeysByStation={clusterKeysByStation} clusterFilterUnavailable={Boolean(hierarchy.error)} lookupEntries={lookupEntries} initialOutboundMonth={entryFilters.month} initialMappingStatus={entryFilters.mapping} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }

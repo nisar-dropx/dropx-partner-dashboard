@@ -8,6 +8,7 @@ import * as history from '../lib/payment-allocation-history.ts';
 import * as lookup from '../lib/provider-mapping-lookup.ts';
 import * as threshold from '../lib/production-threshold-snapshot.ts';
 import { dashboardDateInputValue } from '../lib/date-format.ts';
+import { nlPeopleClusters } from '../lib/ops-pulse/nl-loss-clusters.ts';
 
 const require = createRequire(import.meta.url);
 const compiled = ts.transpileModule(readFileSync(new URL('./provider-first-mapping-worksheet.tsx', import.meta.url), 'utf8'), {
@@ -327,6 +328,61 @@ test('opens with current outbound month and Unmapped, including when that month 
   ui.one(node => node.type === 'button' && node.props.children === 'Clear').props.onClick(); ui.render();
   assert.deepEqual(ui.filter('Outbound month').selected, []);
   assert.deepEqual(ui.filter('Mapping').selected, []);
+});
+
+test('cluster multi-select uses People cluster first, AOM fallback per station, and intersects existing filters', () => {
+  const mappings = [row, { ...row, stationId: 'station-2', stationLabel: 'GDRD' }, { ...row, stationId: 'station-3', stationLabel: 'XAPL' }];
+  const hierarchy = new Map([
+    ['station-1', { clusterManagers: [{ personId: 'cm-1', name: 'Same Name' }], areaOperationsManagers: [{ personId: 'aom-1', name: 'Area Manager' }] }],
+    ['station-2', { clusterManagers: [], areaOperationsManagers: [{ personId: 'aom-1', name: 'Area Manager' }] }],
+    ['station-3', { clusterManagers: [], areaOperationsManagers: [] }],
+    ['restricted', { clusterManagers: [{ personId: 'cm-private', name: 'Private Manager' }], areaOperationsManagers: [] }]
+  ]);
+  const clusters = nlPeopleClusters(mappings.map(r => ({ id: r.stationId })), hierarchy);
+  const clusterKeysByStation = Object.fromEntries([...clusters.byStation].map(([id, value]) => [id, value.clusterKeys]));
+  const ui = worksheet({ mappings, clusterOptions: clusters.options, clusterKeysByStation });
+  assert.deepEqual(ui.filter('Cluster / AOM').selected, []);
+  assert.equal(ui.filter('Cluster / AOM').options.some(option => option.value === 'cm:cm-private'), false);
+  ui.filter('Cluster / AOM').setSelected(['aom:aom-1']); ui.render();
+  assert.equal(ui.cards().length, 1);
+  assert.deepEqual(ui.all(node => node.props?.className === 'mapping-station-label').map(node => node.props.children), ['GDRD']);
+  ui.filter('Cluster / AOM').setSelected(['aom:aom-1', 'cm:cm-1']); ui.render();
+  assert.equal(ui.cards().length, 2);
+  ui.filter('Location').setSelected(['station-1']); ui.render();
+  assert.equal(ui.cards().length, 1);
+  ui.filter('Outbound month').setSelected(['2026-09']); ui.render();
+  assert.equal(ui.cards().length, 0);
+  ui.one(node => node.type === 'button' && node.props.children === 'Clear').props.onClick(); ui.render();
+  assert.deepEqual(ui.filter('Cluster / AOM').selected, []);
+  assert.equal(ui.cards().length, 3);
+  ui.filter('Cluster / AOM').setSelected(['unmapped']); ui.render();
+  assert.equal(ui.cards().length, 1);
+  assert.match(JSON.stringify(ui.cards()), /XAPL/);
+});
+
+test('changing cluster filters preserves an unsaved mapping and lookup clears the cluster selection', () => {
+  const ui = worksheet({
+    mappings: [row, { ...row, stationId: 'station-2', stationLabel: 'GDRD' }],
+    clusterOptions: [{ value: 'cm:one', label: 'Cluster One' }, { value: 'aom:two', label: 'Area Two (AOM)' }],
+    clusterKeysByStation: { 'station-1': ['cm:one'], 'station-2': ['aom:two'] }
+  });
+  ui.filter('Cluster / AOM').setSelected(['cm:one']); ui.render();
+  completeDraft(ui);
+  ui.filter('Cluster / AOM').setSelected(['aom:two']); ui.render();
+  assert.equal(ui.cards().length, 1);
+  ui.filter('Cluster / AOM').setSelected(['cm:one']); ui.render();
+  assert.equal(ui.select('provider_first_worker_0').value, worker.id);
+  assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '15');
+  ui.one(node => node.type === 'MappingLookup').props.onShowMapping('station-1', row.providerMemberId); ui.render();
+  assert.deepEqual(ui.filter('Cluster / AOM').selected, []);
+  assert.equal(ui.cards().length, 1);
+});
+
+test('a People lookup failure disables the cluster filter without hiding mapping rows', () => {
+  const ui = worksheet({ clusterFilterUnavailable: true });
+  assert.equal(ui.filter('Cluster / AOM').disabled, true);
+  assert.equal(ui.cards().length, 1);
+  assert.match(JSON.stringify(ui.all(node => node.props?.role === 'status')), /People assignments could not be loaded/);
 });
 
 test('associate, method, rate and date edits stay visible under all original filters until successful save', async () => {
