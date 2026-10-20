@@ -28,6 +28,7 @@ import {
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstPageWindow,
+  providerFirstResumePeriodForRow,
   providerFirstRowForMappingPeriod,
   providerFirstRowIssue,
   providerMemberKey,
@@ -522,6 +523,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     }
     const row = rows[index];
     if (!baselineRows[index].workforceId) {
+      const resumePeriod = providerFirstResumePeriodForRow(row, worker);
       update(index, {
         workforceId: worker.id,
         dropxId: worker.dropxId,
@@ -532,7 +534,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         paymentValues: {},
         productionThresholdConfig: null,
         productionThresholdMinimumUnits: "",
-        effectiveFrom: "",
+        effectiveFrom: resumePeriod?.effectiveFrom ?? "",
         effectiveTo: ""
       });
       return;
@@ -972,6 +974,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const row = rows[index];
         const selectedWorker = workerById.get(row.workforceId);
         const previousPayment = !baselineRows[index].workforceId ? providerFirstPaymentTemplateForRow(row, selectedWorker) : undefined;
+        const resumePeriod = !baselineRows[index].workforceId
+          ? providerFirstResumePeriodForRow(row, selectedWorker)
+          : undefined;
         const copiedPayment = !baselineRows[index].workforceId ? paymentTemplateSources[index] : undefined;
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationRemap = providerFirstLocationRemap(row, selectedWorker);
@@ -1007,6 +1012,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             </label> : null}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">{!baselineRows[index].workforceId && !row.paymentMethodId ? "Choose the payment method, rates and start date. Previous payment details are in History. " : ""}Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div>
             {copiedPayment ? <div className="mapping-period-help" role="status"><strong>Previous payment details loaded.</strong> Method and rates copied from {paymentMethodById.get(copiedPayment.paymentMethodId)?.name ?? "previous payment method"} · {copiedPayment.locationLabel} · {copiedPayment.effectiveFrom} to {copiedPayment.effectiveTo || "Ongoing"}. Review the rates and choose dates for this assignment before saving. Previous dates were not copied.</div> : previousPayment ? <div className="mapping-period-help">Previous payment details are available from {previousPayment.effectiveFrom} to {previousPayment.effectiveTo || "Ongoing"}. Use them below to copy the method and rates; enter dates for this assignment.</div> : null}
+            {resumePeriod ? <div className="mapping-period-help" role="status"><strong>Resuming this location.</strong> The previous exact mapping ran from {resumePeriod.previousEffectiveFrom} to {resumePeriod.previousEffectiveTo}. Effective from defaults to {resumePeriod.effectiveFrom}, the first available day (and never before date of join). Saving creates a new period; the earlier mapping and payout history stay unchanged.</div> : null}
             {!row.mappingId && priorMappingLocations.length ? <div className="mapping-period-help"><strong>Existing mapping history:</strong> {priorMappingLocations.join(", ")}. This {row.stationLabel} row is not mapped; save its own effective-dated mapping before using this location&apos;s activity for payout.</div> : null}
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationNeedsDates ? <div className="mapping-period-help" role="status">{row.stationId === selectedWorker?.profileStationId ? `Currently mapped at ${selectedWorker.locationLabel}. Enter Effective from to validate the move to the registered location ${selectedWorker.profileLocationLabel}.` : `Registered at ${selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional ${row.stationLabel} assignment.`} Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
