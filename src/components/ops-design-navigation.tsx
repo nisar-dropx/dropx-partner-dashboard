@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Activity, BarChart3, Boxes, CalendarDays, ChevronDown, ClipboardCheck, FileBarChart2, FolderOpen, LayoutGrid, ListTree, MapPin, Search, Settings2, ShieldCheck, Truck, UserRoundSearch, Users, WalletCards, X, type LucideIcon } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
@@ -25,6 +25,17 @@ export function OpsDesignNavigation({ items, active }: { items: NavItem[]; activ
   const searchParams = useSearchParams();
   const id = useId();
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const search = searchParams.toString();
+  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
+  useEffect(() => { setQuery(""); setSearchOpen(false); }, [pathname, search]);
+  function closeSearch() {
+    setQuery("");
+    setSearchOpen(false);
+    searchTrigger.current?.focus();
+  }
   const selected = activeOpsHref(items, pathname, searchParams.toString(), active);
   const currentGroup = items.find(item => item.children?.some(child => child.href === selected))?.code;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -38,7 +49,12 @@ export function OpsDesignNavigation({ items, active }: { items: NavItem[]; activ
     return item.href ? <PendingLink key={item.label} className={`ops-design-link ${child ? "ops-design-child" : ""} ${selected === item.href ? "is-current" : ""}`} href={item.href} prefetch={false} disableWhenCurrent aria-current={selected === item.href ? "page" : undefined}>{content}</PendingLink> : <span key={item.label} className="ops-design-link unavailable">{content}</span>;
   };
   return <div className="ops-design-navigation">
-    <div className="ops-menu-search"><Search size={15} aria-hidden="true" /><input aria-label="Find a menu" placeholder="Find a menu…" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") { setQuery(""); event.stopPropagation(); } }} />{query && <button type="button" aria-label="Clear menu search" onClick={() => setQuery("")}><X size={14} /></button>}</div>
+    <div className="ops-menu-search-control" onKeyDown={event => { if (searchOpen && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSearch(); } }}>
+      <button ref={searchTrigger} type="button" className="ops-menu-search-toggle" aria-expanded={searchOpen} aria-controls={`${id}-search`} onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}><Search size={15} aria-hidden="true" /><span>Search menus</span></button>
+      <div id={`${id}-search`} hidden={!searchOpen}>
+        {searchOpen && <div className="ops-menu-search"><input ref={searchInput} aria-label="Find a menu" placeholder="Type a menu name…" autoComplete="off" spellCheck={false} value={query} onChange={event => setQuery(event.target.value)} /><button type="button" aria-label="Close menu search" onClick={closeSearch}><X size={16} aria-hidden="true" /></button></div>}
+      </div>
+    </div>
     <nav aria-label="Primary" className="ops-design-nav">
       {[false, true].map(admin => {
         const group = visible.filter(item => administration.has(item.code) === admin);
