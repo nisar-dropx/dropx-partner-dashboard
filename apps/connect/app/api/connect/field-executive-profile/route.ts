@@ -18,6 +18,11 @@ import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-veri
 import { workforceRegistrationSubmission } from "../../../../src/lib/workforce-registration-submission";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 import {
+  emergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
+  normalizeStoredConnectMobile
+} from "@/lib/country-codes";
+import {
   isNonEmployeeProfileType,
   profileFieldRuleCategory,
   type NonEmployeeProfileType,
@@ -305,6 +310,7 @@ async function loadApplicableAgreement(row: FieldExecutiveRow): Promise<Workforc
 
 async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmployeeProfileType) {
   const station = firstRelation(row.stations);
+  const mobile = normalizeStoredConnectMobile(row.mobile, row.mobile_country_code, null);
   const designationResult = row.designation && supabaseAdmin
     ? await supabaseAdmin
       .from("designations")
@@ -324,6 +330,8 @@ async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmploy
   const designationCode = String(designationResult?.data?.code ?? "").trim().toUpperCase();
   return {
     id: row.id,
+    mobileCountryCode: mobile.countryCode,
+    mobileNumber: mobile.localMobile,
     readOnly: {
       reference: row.dropx_id ?? "-",
       biometricId: row.biometric_id ?? "-",
@@ -332,7 +340,7 @@ async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmploy
       location: station?.station_code ?? "-",
       designation: row.designation ?? workforceLabel(profileType),
       dateOfJoin: formatDisplayDate(row.date_of_join),
-      mobile: `+${row.mobile_country_code ?? "91"} ${row.mobile}`
+      mobile: `+${mobile.countryCode} ${mobile.localMobile}`
     },
     editable: {
       gender: row.gender ?? "",
@@ -477,6 +485,21 @@ export async function POST(request: Request) {
     const pfUanValue = isRequired("pf_uan") || cleanText(formData.get("pf_uan")) ? requiredTwelveDigits(formData.get("pf_uan"), "PF UAN") : null;
     const pfAccountValue = alphaNumValue(formData.get("pf_account_no"), "PF Account No", isRequired("pf_account_no"));
     const esiValue = alphaNumValue(formData.get("esi_no"), "ESI No", isRequired("esi_no"));
+    const emergencyContactNumber = digitsLengthValue(
+      formData.get("emergency_contact_number"),
+      "Emergency contact number",
+      4,
+      30,
+      isRequired("emergency_contact_number")
+    );
+    const profileMobile = normalizeStoredConnectMobile(
+      currentExecutive.mobile,
+      currentExecutive.mobile_country_code,
+      null
+    );
+    if (emergencyContactMatchesMobile(profileMobile, emergencyContactNumber)) {
+      throw new Error(MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR);
+    }
     const dateOfBirth = dateValue("date_of_birth", "Date of birth");
     assertMinimumProfileAge(dateOfBirth);
     const vehicleRegistrationNumber = alphaNumLengthValue(
@@ -514,7 +537,7 @@ export async function POST(request: Request) {
       pf_account_no: pfAccountValue,
       esi_no: esiValue,
       emergency_contact_name: textValue("emergency_contact_name", "Emergency contact name"),
-      emergency_contact_number: digitsLengthValue(formData.get("emergency_contact_number"), "Emergency contact number", 4, 30, isRequired("emergency_contact_number")),
+      emergency_contact_number: emergencyContactNumber,
       emergency_contact_relation: textValue("emergency_contact_relation", "Emergency relation"),
       driving_license_no: alphaNumLengthValue(formData.get("driving_license_no"), "Driving license number", 4, 30, isRequired("driving_license_no")),
       driving_license_exp_date: dateValue("driving_license_exp_date", "DL expiry date"),

@@ -15,6 +15,11 @@ import { assertMinimumProfileAge } from "../../../../src/lib/profile-age";
 import { createProfileSubmittedNotification } from "../../../../src/lib/app-notifications";
 import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-verification";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
+import {
+  emergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
+  normalizeStoredConnectMobile
+} from "@/lib/country-codes";
 
 type EmployeeProfileRow = {
   id: string;
@@ -219,6 +224,7 @@ async function signedProfileUrl(path: string | null) {
 async function serializeEmployee(row: EmployeeProfileRow) {
   const station = firstRelation(row.stations);
   const designation = firstRelation(row.designations);
+  const mobile = normalizeStoredConnectMobile(row.mobile, row.mobile_country_code, null);
   const fieldRules = (await loadWorkforceCategoryRules(
     row.company_id,
     "employees",
@@ -227,6 +233,8 @@ async function serializeEmployee(row: EmployeeProfileRow) {
   )).dropx_one;
   return {
     id: row.id,
+    mobileCountryCode: mobile.countryCode,
+    mobileNumber: mobile.localMobile,
     readOnly: {
       employeeId: row.employee_code ?? "-",
       biometricId: row.biometric_id ?? "-",
@@ -235,7 +243,7 @@ async function serializeEmployee(row: EmployeeProfileRow) {
       location: station?.station_code ?? "-",
       designation: designation?.name ?? designation?.code ?? "-",
       dateOfJoin: formatDisplayDate(row.date_of_join),
-      mobile: `+${row.mobile_country_code ?? "91"} ${row.mobile}`
+      mobile: `+${mobile.countryCode} ${mobile.localMobile}`
     },
     editable: {
       gender: row.gender ?? "",
@@ -336,6 +344,20 @@ export async function POST(request: Request) {
     const manualReviewRequired = String(formData.get("manual_review_required") ?? "") === "true";
     const dateOfBirth = normalizeDate(formData.get("date_of_birth"));
     assertMinimumProfileAge(dateOfBirth);
+    const emergencyContactNumber = normalizeDigitsLength(
+      formData.get("emergency_contact_number"),
+      "Emergency contact number",
+      4,
+      30
+    );
+    const profileMobile = normalizeStoredConnectMobile(
+      currentEmployee.mobile,
+      currentEmployee.mobile_country_code,
+      null
+    );
+    if (emergencyContactMatchesMobile(profileMobile, emergencyContactNumber)) {
+      throw new Error(MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR);
+    }
     const vehicleRegistrationNumber = normalizeAlphaNumLength(
       formData.get("vehicle_reg_no"),
       "Vehicle registration number",
@@ -390,7 +412,7 @@ export async function POST(request: Request) {
       bank_account_no: normalizeAlphaNumLength(formData.get("bank_account_no"), "Bank account number", 4, 30),
       ifsc: normalizeAlphaNumLength(formData.get("ifsc"), "IFSC", 11, 11),
       emergency_contact_name: cleanText(formData.get("emergency_contact_name")),
-      emergency_contact_number: normalizeDigitsLength(formData.get("emergency_contact_number"), "Emergency contact number", 4, 30),
+      emergency_contact_number: emergencyContactNumber,
       emergency_contact_relation: cleanText(formData.get("emergency_contact_relation")),
       driving_license_no: normalizeAlphaNumLength(formData.get("driving_license_no"), "Driving license number", 4, 30),
       driving_license_exp_date: normalizeDate(formData.get("driving_license_exp_date")),

@@ -8,6 +8,8 @@ import {
   ConnectMobileValidationError,
   connectMobileCountryFilter,
   countryCodeOptions,
+  emergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
   normalizeCanonicalConnectMobile,
   normalizeConnectMobile,
   normalizeProfileEditMobile,
@@ -17,6 +19,8 @@ import {
 import {
   connectMobileCountryFilter as rootConnectMobileCountryFilter,
   countryCodeOptions as rootCountryCodeOptions,
+  emergencyContactMatchesMobile as rootEmergencyContactMatchesMobile,
+  MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR as ROOT_MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
   normalizeConnectMobile as normalizeRootConnectMobile,
   normalizeProfileEditMobile as normalizeRootProfileEditMobile,
   normalizeStoredConnectMobile as normalizeRootStoredConnectMobile,
@@ -112,6 +116,23 @@ test("trusted stored sessions accept canonical and legacy local mobile values", 
     localMobile: "91234567",
     mobile: "6591234567"
   });
+});
+
+test("same-profile mobile and emergency contact comparison accepts local or canonical digits", () => {
+  const indiaMobile = normalizeProfileEditMobile("9876543210", "91");
+  assert.equal(emergencyContactMatchesMobile(indiaMobile, "98765 43210"), true);
+  assert.equal(emergencyContactMatchesMobile(indiaMobile, "+91 98765 43210"), true);
+  assert.equal(emergencyContactMatchesMobile(indiaMobile, "9876543211"), false);
+  assert.equal(emergencyContactMatchesMobile(indiaMobile, ""), false);
+  assert.equal(
+    MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
+    "Mobile number and Emergency contact number cannot be same"
+  );
+  assert.equal(
+    ROOT_MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR,
+    MOBILE_EMERGENCY_CONTACT_CONFLICT_ERROR
+  );
+  assert.equal(rootEmergencyContactMatchesMobile(indiaMobile, "919876543210"), true);
 });
 
 test("Connect account freshness compares identity sets, not presentation fields or order", () => {
