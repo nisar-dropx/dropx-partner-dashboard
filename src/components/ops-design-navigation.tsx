@@ -46,7 +46,9 @@ export function OpsDesignNavigation({ items, active }: { items: NavItem[]; activ
   const link = (item: { code?: string; href?: string; label: string; hideBadge?: boolean }, child = false, icon?: LucideIcon) => {
     const Symbol = icon;
     const content = <>{Symbol && <Symbol size={17} aria-hidden="true" />}<span>{item.label}</span><PaymentNavBadge code={item.hideBadge ? undefined : item.code} /></>;
-    return item.href ? <PendingLink key={item.label} className={`ops-design-link ${child ? "ops-design-child" : ""} ${selected === item.href ? "is-current" : ""}`} href={item.href} prefetch={false} disableWhenCurrent aria-current={selected === item.href ? "page" : undefined}>{content}</PendingLink> : <span key={item.label} className="ops-design-link unavailable">{content}</span>;
+    // Only the selected route may use PendingLink's current-page handling.
+    // Its pathname-only fallback would also select / on ?view=manpower.
+    return item.href ? <PendingLink key={item.label} className={`ops-design-link ${child ? "ops-design-child" : ""} ${selected === item.href ? "is-current" : ""}`} href={item.href} prefetch={false} disableWhenCurrent={selected === item.href} aria-current={selected === item.href ? "page" : undefined}>{content}</PendingLink> : <span key={item.label} className="ops-design-link unavailable">{content}</span>;
   };
   return <div className="ops-design-navigation">
     <div className="ops-menu-search-control" onKeyDown={event => { if (searchOpen && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSearch(); } }}>
