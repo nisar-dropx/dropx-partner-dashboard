@@ -61,6 +61,15 @@ export default async function WorkforcePaymentSettingsHubPage() {
               <span className="button secondary compact">Configure</span>
             </span>
           </PendingLink>
+          <PendingLink className="settings-tile actionable" href="/settings/payout-disputes">
+            <div>
+              <h3>Payout Dispute Workflow</h3>
+              <p className="subtle">Set independent initial approval, final approval, and processor role fallbacks, including station overrides.</p>
+            </div>
+            <span className="settings-tile-actions">
+              <span className="button secondary compact">Configure</span>
+            </span>
+          </PendingLink>
         </div>
       </section>
     </AppShell>

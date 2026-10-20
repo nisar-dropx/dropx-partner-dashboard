@@ -147,20 +147,52 @@ never blocks an exit.
 
 ## Payout disputes (Payments → Payout Disputes)
 
-Files: `supabase/migrations/20261016190000_payout_dispute_approval.sql`, `src/lib/payout-review-actions.ts`,
-`src/components/payout-review-desk.tsx`.
+Files: `supabase/migrations/20261016190000_payout_dispute_approval.sql`,
+`20261020100000_payout_dispute_processing_workflow.sql`,
+`20261020110000_payout_dispute_legacy_adapter_cleanup.sql`, `src/lib/payout-review-actions.ts`,
+`src/components/payout-review-desk.tsx`, `src/app/settings/payout-disputes`.
 
 ```
-open → (reviewer) propose resolve/reject + note → in_review → (another reviewer) approve → resolved | rejected
-                                                        └─ send back + reason → open
+open → (initial approver) propose exact correction/rejection → pending_final_approval
+  ├─ (final approver) reject → rejected
+  ├─ (final approver) send back → open
+  └─ (final approver) approve correction → approved_for_processing
+       → (processor) claim → processing → apply correction and publish revised payout
+                                   → verify publication/net change → resolved
+                                └─ block with reason → processing_blocked → claim again
 ```
 
-- Function `workforce_dispute_step`. Each step is a `workforce_payout_dispute_events` row. The approved
-  note becomes the `resolution` the associate sees in DropX One.
-- The older one-step `workforce_decide_payout_dispute` still exists only for backward compatibility. The
-  portal no longer calls it; remove it once nothing else does.
+- Configure ordered primary/fallback roles at **Settings → Payout Dispute Workflow**. A company default
+  is required and individual stations may override it. Initial approver, final approver and processor
+  are independent roles and three different people are enforced. No SLA is configured.
+- Function `workforce_dispute_transition_v2` enforces ordered role readiness, location scope, distinct
+  actors, optimistic versioning and the state machine. Every transition is an immutable,
+  version-numbered `workforce_payout_dispute_events` row.
+- A correction proposal records the exact field/current/corrected value and expected net-pay delta.
+  Final approval never marks that correction resolved. The processor must change the authoritative
+  payout input and publish a newer revision for the same person, station and period. The processor
+  attests that the approved field change was applied; completion independently verifies the newer
+  publication, its before/after net values and the exact approved net delta.
+- Open disputes are excluded per station row from new Workforce bank instructions. Existing paid or
+  partially paid history is never rewritten, and a payout already in bank processing must be finalized
+  or cancelled before a processor can claim its correction.
+- DropX One shows the associate the current stage, processor-applied correction and system-verified
+  publication/net result. Older already-closed records are labelled as legacy/unverified because no
+  revised publication was linked.
+- The older one-step `workforce_decide_payout_dispute` remains defined for rollback compatibility, but
+  this migration revokes its `service_role` execute grant and the portal no longer calls it.
+  `workforce_dispute_step` remains `service_role`-executable only as a rolling-deployment adapter; a
+  legacy correction approval enters processing instead of falsely resolving the dispute. After all
+  Dashboard and Ops instances run the new release, apply a separate cleanup migration that revokes
+  `service_role` execute on `workforce_dispute_step`.
 - The desk loads only the publications referenced by the disputes shown. Do not go back to loading the
   whole publication history.
+
+Deployment order: first confirm the currently deployed Dashboard/Ops release already uses
+`workforce_dispute_step` rather than `workforce_decide_payout_dispute`, then apply the processing
+migration, deploy Dashboard and Ops, and deploy DropX One. The migration keeps the two-reviewer adapter
+available during that rollout but immediately revokes the unsafe one-step function. After every old
+Dashboard/Ops instance has drained, apply the separate adapter-grant cleanup described above.
 
 ## Workforce payout cross-checks (Payments → Workforce payouts)
 

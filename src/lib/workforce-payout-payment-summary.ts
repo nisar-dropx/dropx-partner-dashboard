@@ -168,6 +168,7 @@ const PAYMENT_BALANCE_AVAILABLE_CODES = new Set([
   "eligible",
   "payment_processing",
   "payment_on_hold",
+  "payout_dispute_open",
   "pan_not_linked",
   "profile_not_active",
   "no_positive_balance",
@@ -215,6 +216,8 @@ export function workforcePayoutPaymentEligibilityLabel(
       return null;
     case "payment_on_hold":
       return "Payment on hold";
+    case "payout_dispute_open":
+      return "Open payout dispute";
     case "pan_not_linked":
       return "PAN not linked";
     default:

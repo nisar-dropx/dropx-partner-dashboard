@@ -23,6 +23,7 @@ const bulkCancellationMigration = readFileSync(new URL("../../../../../supabase/
 const creditRemarksDropxMigration = readFileSync(new URL("../../../../../supabase/migrations/20261013170000_payout_bank_credit_remarks_dropx_id.sql", import.meta.url), "utf8");
 const workforceBankLedger = readFileSync(new URL("../../../../../supabase/migrations/20261009112849_workforce_payout_bank_payment_ledger.sql", import.meta.url), "utf8");
 const helperBankLedger = readFileSync(new URL("../../../../../supabase/migrations/20261010210000_helper_payout_bank_payment_ledger.sql", import.meta.url), "utf8");
+const disputeWorkflowMigration = readFileSync(new URL("../../../../../supabase/migrations/20261020100000_payout_dispute_processing_workflow.sql", import.meta.url), "utf8");
 
 test("bank-file creation is company-scoped, privileged, transport-bounded and idempotent without a row cap", () => {
   assert.match(bankFileRoute, /sameOrigin\(request\)/);
@@ -49,7 +50,7 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
   assert.match(bankFileRoute, /payoutRows\.map\(\(row\) => \(\{/);
   assert.match(bankFileRoute, /p_operation_id: operationId/);
   assert.match(bankFileRoute, /p_request_fingerprint: requestFingerprint/);
-  assert.match(bankFileRoute, /rpc\("workforce_create_payout_payment_row_batch"/);
+  assert.match(bankFileRoute, /rpc\("workforce_create_payout_payment_row_batch_with_disputes"/);
   assert.match(bankFileRoute, /Cache-Control": "private, no-store"/);
 });
 
@@ -74,7 +75,7 @@ test("bank-file creation refreshes only the selected exact-period publications b
   assert.match(bankFileRoute, /limit: 10_000/);
   assert.ok(
     bankFileRoute.indexOf("refreshWorkforcePayoutPublicationJobs({")
-      < bankFileRoute.indexOf('rpc("workforce_create_payout_payment_row_batch"'),
+      < bankFileRoute.indexOf('rpc("workforce_create_payout_payment_row_batch_with_disputes"'),
     "the selected publication refresh must finish before transactional batch creation"
   );
   assert.match(bankFileRoute, /warning\.code !== "queue_status_failed"/);
@@ -85,6 +86,27 @@ test("bank-file creation refreshes only the selected exact-period publications b
   assert.match(publicationRefresh, /rpc\("workforce_claim_selected_payout_publication_row_refresh_jobs"/);
   assert.match(publicationRefresh, /workforce_id: row\.workforceId,[\s\S]*?station_id: row\.stationId/);
   assert.doesNotMatch(bankFileRoute, /body\.(?:currentTargetAmount|netAmount|snapshotHash)/);
+});
+
+test("open payout disputes are a row-level preview and bank-batch exclusion", () => {
+  assert.match(disputeWorkflowMigration, /create or replace function public\.workforce_payout_dispute_blocks_bank_row/);
+  assert.match(disputeWorkflowMigration, /create or replace function public\.workforce_payout_payment_row_candidates_with_disputes/);
+  assert.match(disputeWorkflowMigration, /case when dispute_state\.blocked then false else candidate\.eligible end/);
+  assert.match(disputeWorkflowMigration, /then 'payout_dispute_open' else candidate\.eligibility_code end/);
+  assert.match(disputeWorkflowMigration, /create or replace function public\.workforce_preview_payout_payment_rows[\s\S]*?with candidates as materialized[\s\S]*?workforce_payout_effective_paid_allocations[\s\S]*?dispute_state/);
+  assert.match(disputeWorkflowMigration, /create or replace function public\.workforce_create_payout_payment_row_batch_with_disputes/);
+  assert.match(disputeWorkflowMigration, /payment_item\.location_id_snapshot = v_dispute\.station_id/);
+  assert.match(disputeWorkflowMigration, /public\.workforce_payout_dispute_blocks_bank_row\([\s\S]*?\) as blocked/);
+  assert.match(disputeWorkflowMigration, /'skipped_dispute_count', v_skipped_count/);
+  assert.match(disputeWorkflowMigration, /'skipped_dispute_rows', v_skipped_rows/);
+  assert.match(disputeWorkflowMigration, /v_effective_fingerprint := pg_catalog\.encode\(pg_catalog\.sha256/);
+  assert.match(disputeWorkflowMigration, /v_result := public\.workforce_create_payout_payment_row_batch\(/);
+  assert.match(bankFileRoute, /"X-Workforce-Payout-Skipped-Dispute-Count": String\(skippedDisputeCount\)/);
+  assert.match(bankFileRoute, /review\|dispute\|active workforce profile/);
+  assert.match(bankDialog, /response\.headers\.get\("X-Workforce-Payout-Skipped-Dispute-Count"\)/);
+  assert.match(bankDialog, /Bank file created for eligible rows\./);
+  assert.match(bankDialog, /Open payout dispute/);
+  assert.doesNotMatch(disputeWorkflowMigration, /pg_get_functiondef|execute replace\(v_definition/);
 });
 
 test("bank-file re-download is permitted only for a wholly processing immutable batch", () => {

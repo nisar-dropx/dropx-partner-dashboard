@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveApprovalAccess, leaveRouteState, readConnectSessionResponse } from "./connect-navigation-state.ts";
+import { connectNotificationStep, resolveApprovalAccess, leaveRouteState, readConnectSessionResponse } from "./connect-navigation-state.ts";
 
 const partner = {id:"partner",companyId:"dropx",profileType:"contractor",pageAccess:["dashboard","attendance","wfh"]};
 const key = "contractor:dropx:partner";
@@ -27,6 +27,11 @@ test("explicit manager rights remain available; workforce remains excluded", () 
 test("the WFH URL resolves to a rendered Leave screen with WFH selected", () => {
   assert.deepEqual(leaveRouteState("wfh"),{screen:"leave",section:"wfh"});
   assert.deepEqual(leaveRouteState("leave"),{screen:"leave",section:"leave"});
+});
+test("saved payout notification routes open the Connect Payments screen", () => {
+  assert.equal(connectNotificationStep("payments"), "payments");
+  assert.equal(connectNotificationStep("communication_center"), "connect");
+  assert.equal(connectNotificationStep("https://people.dropxlogistics.com/payments"), null);
 });
 test("successful session restoration and explicit signed-out responses stay distinct", async () => {
   assert.deepEqual(await readConnectSessionResponse(Response.json({authenticated:true,accounts:[partner]})),{authenticated:true,accounts:[partner]});

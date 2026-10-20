@@ -11,6 +11,37 @@ export type ReporteeCheck = {
   hasReportees?: boolean;
 };
 
+const notificationSteps = [
+  "dashboard",
+  "profile",
+  "documents",
+  "salary",
+  "connect",
+  "approvals",
+  "requests",
+  "payments",
+  "advances",
+  "earnings",
+  "reimbursements",
+  "attendance",
+  "roster",
+  "leave",
+  "lop",
+  "wfh",
+  "performance",
+  "settings"
+] as const;
+
+export type ConnectNotificationStep = typeof notificationSteps[number];
+
+export function connectNotificationStep(route: unknown): ConnectNotificationStep | null {
+  const normalized = typeof route === "string" ? route.trim() : "";
+  const destination = normalized === "communication_center" ? "connect" : normalized;
+  return (notificationSteps as readonly string[]).includes(destination)
+    ? destination as ConnectNotificationStep
+    : null;
+}
+
 export function resolveApprovalAccess(
   account: Account | null,
   workforceWorkspace: boolean,

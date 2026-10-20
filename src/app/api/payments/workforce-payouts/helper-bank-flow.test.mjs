@@ -40,7 +40,7 @@ test("bank APIs opt into Helper ledgers without changing the Workforce default",
     "committed Helper batches must replay before mutable live payouts are loaded"
   );
   assert.match(bankFile, /rpc\("helper_create_payout_payment_row_batch"/);
-  assert.match(bankFile, /rpc\("workforce_create_payout_payment_row_batch"/);
+  assert.match(bankFile, /rpc\("workforce_create_payout_payment_row_batch_with_disputes"/);
   assert.match(bankFile, /referencePrefix: audience === "helpers" \? "HP" : "WF"/);
   assert.match(redownload, /referencePrefix: audience === "helpers" \? "HP" : "WF"/);
   assert.match(redownload, /rpc\("helper_get_payout_payment_redownload"/);

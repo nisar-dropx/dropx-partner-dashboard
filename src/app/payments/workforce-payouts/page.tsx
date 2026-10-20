@@ -741,6 +741,7 @@ export const dynamic = "force-dynamic";
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const period = resolvePeriod(searchParams);
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
+  const initialSearch = typeof searchParams.q === "string" ? searchParams.q.trim() : "";
   const accessSurface = currentAdminAccessSurface();
   const pageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   const authorization = await requirePagePermission(pageCode, "access");
@@ -876,7 +877,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
-        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div>{period.mode === "monthly" ? <div style={{ padding: "0 16px" }}><WorkforcePayoutChecks rows={rows} /></div> : null}<WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} banks={bankResult.banks} canDeductAdvances={canDeductAdvances} canEdit={canEdit} canManageMappingLocks={canManageMappingLocks} canProcessPayments={canProcessPayments} canPublishNotifications={canEdit} hasAllLocationAccess={authorization.hasAllLocationAccess} mappingUnlocks={mappingLocks.unlocks} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
+        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div>{period.mode === "monthly" ? <div style={{ padding: "0 16px" }}><WorkforcePayoutChecks rows={rows} /></div> : null}<WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} banks={bankResult.banks} canDeductAdvances={canDeductAdvances} canEdit={canEdit} canManageMappingLocks={canManageMappingLocks} canProcessPayments={canProcessPayments} canPublishNotifications={canEdit} hasAllLocationAccess={authorization.hasAllLocationAccess} initialSearch={initialSearch} mappingUnlocks={mappingLocks.unlocks} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
     </div>
   </AppShell>;
 }

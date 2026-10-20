@@ -133,6 +133,9 @@ export function WorkforcePayoutBankDialog({
         })
       });
       if (!response.ok) throw new Error(await responseError(response, `Unable to create the ${subjectLabel} bank file.`));
+      const skippedDisputeCount = Math.max(0, Math.trunc(Number(
+        response.headers.get("X-Workforce-Payout-Skipped-Dispute-Count")
+      ) || 0));
       const blob = await response.blob();
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -141,7 +144,13 @@ export function WorkforcePayoutBankDialog({
       link.click();
       URL.revokeObjectURL(href);
       operationIdRef.current = "";
-      setMode(null);
+      if (skippedDisputeCount > 0) {
+        setNotice(
+          `Bank file created for eligible rows. ${skippedDisputeCount} selected payout row${skippedDisputeCount === 1 ? " was" : "s were"} skipped because an open dispute was detected. The refreshed table marks ${skippedDisputeCount === 1 ? "it" : "them"} as Open payout dispute.`
+        );
+      } else {
+        setMode(null);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `Unable to create the ${subjectLabel} bank file.`);
     } finally {

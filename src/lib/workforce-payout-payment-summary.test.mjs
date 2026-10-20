@@ -413,6 +413,10 @@ test("computed balances remain visible when a separate payment constraint blocks
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(held), true);
   assert.equal(workforcePayoutPaymentEligibilityLabel(held), "Payment on hold");
 
+  const disputed = { eligible: false, eligibilityCode: "payout_dispute_open" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(disputed), true);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(disputed), "Open payout dispute");
+
   const panNotLinked = { eligible: false, eligibilityCode: "pan_not_linked" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(panNotLinked), true);
   assert.equal(workforcePayoutPaymentEligibilityLabel(panNotLinked), "PAN not linked");

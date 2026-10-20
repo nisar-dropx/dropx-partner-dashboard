@@ -397,11 +397,11 @@ function PayoutActionMenu({ children, label }: { children: ReactNode; label: str
   </details>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, mappingUnlocks = [], periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, initialSearch = "", mappingUnlocks = [], periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; initialSearch?: string; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
   const router = useRouter();
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [locations, setLocations] = useState<string[]>([]);
   const [designations, setDesignations] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
@@ -436,6 +436,11 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const mappingDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mappingDialogOpen = mappingDialog !== null;
   const deferredSearch = useDeferredValue(search);
+
+  useEffect(() => {
+    setSearch(initialSearch);
+    setPage(1);
+  }, [initialSearch]);
   const calendarMonthEnd = useMemo(() => {
     if (!/^\d{4}-\d{2}-01$/.test(periodStart)) return "";
     const date = new Date(`${periodStart}T00:00:00Z`);

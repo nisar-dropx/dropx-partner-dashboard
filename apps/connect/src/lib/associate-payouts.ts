@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentStatus } from "./workforce-payment-status";
-import { payoutReviewState } from "./payout-dispute";
+import { associatePayoutDispute, payoutReviewState } from "./payout-dispute";
 import { publishedPayoutBreakdown } from "./published-payout-breakdown";
 import {
   loadPayoutMappingRevisionState,
@@ -216,7 +216,7 @@ export async function loadAssociatePayouts(
   if (!publications.length) return [];
   const [items, disputes, mappingRevisions] = await Promise.all([
     rows(db.from("workforce_payroll_items").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at", { ascending: false }).order("id")),
-    rows(db.from("workforce_payout_disputes").select("id,publication_id,payroll_run_id,category,reason,status,resolution,created_at,updated_at").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id")),
+    rows(db.from("workforce_payout_disputes").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id")),
     loadPayoutMappingRevisionState(db, company, worker),
   ]);
   const runIds = [...new Set(publications.map((row) => row.payroll_run_id).filter(Boolean))];
@@ -226,6 +226,7 @@ export async function loadAssociatePayouts(
   }
 
   const output: Row[] = [];
+  const publicationById = new Map(publications.map((publication) => [publication.id, publication]));
   const modernKeys = new Set<string>();
   for (const publication of publications) {
     const snapshot = publication.snapshot ?? {};
@@ -264,7 +265,13 @@ export async function loadAssociatePayouts(
       status: "For your review",
       runStatus: "review",
       revisionPending: mappingRevision.revisionPending,
-      disputes: disputes.filter((dispute) => publicationIdsForPeriod.includes(dispute.publication_id)),
+      disputes: disputes
+        .filter((dispute) => publicationIdsForPeriod.includes(dispute.publication_id))
+        .map((dispute) => associatePayoutDispute(
+          dispute,
+          publicationById.get(dispute.publication_id),
+          publicationById.get(dispute.processed_publication_id),
+        )),
       payoutSlipAvailable: false,
       snapshot,
     }));
@@ -314,7 +321,14 @@ export async function loadAssociatePayouts(
       revisionPending,
       paymentDate,
       paymentReference,
-      disputes: disputes.filter((dispute) => dispute.payroll_run_id === run.id),
+      disputes: disputes
+        .filter((dispute) => dispute.payroll_run_id === run.id)
+        .map((dispute) => associatePayoutDispute(
+          dispute,
+          publicationById.get(dispute.publication_id),
+          publicationById.get(dispute.processed_publication_id),
+          final ? { status, date: paymentDate, reference: paymentReference } : null,
+        )),
       payoutSlipAvailable: true,
       snapshot: publication?.snapshot ?? null,
     }));

@@ -7,6 +7,7 @@ import {
   PAYOUT_DISPUTE_AREAS,
   payoutMonthForPeriod,
   payoutMonthLabel,
+  type AssociatePayoutDispute,
   type PayoutDisputeArea,
   type PayoutReviewState,
 } from "@/lib/payout-dispute";
@@ -32,7 +33,7 @@ type Payout = Row & {
   reviewState: PayoutReviewState;
   canDispute: boolean;
   revisionPending: boolean;
-  disputes: Row[];
+  disputes: AssociatePayoutDispute[];
   lines: Row[];
   earnings: PublishedPayoutEarning[];
   deductionLines: PublishedPayoutDeduction[];
@@ -41,6 +42,7 @@ type Payout = Row & {
 };
 
 const money = (value: unknown) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(Number(value ?? 0));
+const paiseMoney = (value: number) => money(value / 100);
 const quantity = (value: unknown) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(Number(value ?? 0));
 const localDate = (value: string) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}T00:00:00+05:30`));
 const localTime = (value: string) => new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -49,6 +51,78 @@ function periodLabel(from: string, to: string) {
   return isCompleteCalendarMonth(from, to)
     ? new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "UTC" }).format(start)
     : `${localDate(from)} – ${localDate(to)}`;
+}
+
+function friendlyField(value: string | null) {
+  if (!value) return "Approved payout value";
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function signedPaise(value: number) {
+  if (value > 0) return `+ ${paiseMoney(value)}`;
+  if (value < 0) return `− ${paiseMoney(Math.abs(value))}`;
+  return paiseMoney(0);
+}
+
+function DisputeProgress({ dispute }: { dispute: AssociatePayoutDispute }) {
+  const steps = ["Initial approval", "Final approval", "Payout correction", "Completed"];
+  const rejected = dispute.status === "rejected";
+  return <>
+    <div className={`${styles.workflowStatus} ${dispute.workflow.blocked ? styles.workflowBlocked : ""}`}>
+      <strong>{dispute.workflow.label}</strong>
+      <p>{dispute.workflow.detail}</p>
+      {dispute.processing?.processedAt ? <small>Correction completed {localTime(dispute.processing.processedAt)} IST</small>
+        : dispute.processing?.claimedAt ? <small>Processing started {localTime(dispute.processing.claimedAt)} IST</small> : null}
+    </div>
+    {!rejected && !dispute.legacyResolutionUnverified ? <ol className={styles.workflowProgress} aria-label="Dispute progress">
+      {steps.map((label, index) => {
+        const step = index + 1;
+        const complete = dispute.workflow.terminal || step < dispute.workflow.step;
+        const current = !dispute.workflow.terminal && step === dispute.workflow.step;
+        return <li key={label} className={complete ? styles.workflowComplete : current ? styles.workflowCurrent : ""} aria-current={current ? "step" : undefined}>
+          <span aria-hidden="true">{complete ? "✓" : step}</span><small>{label}</small>
+        </li>;
+      })}
+    </ol> : null}
+  </>;
+}
+
+function DisputeCorrection({ dispute }: { dispute: AssociatePayoutDispute }) {
+  const correction = dispute.correction;
+  if (!correction) return null;
+  const hasValues = correction.currentValue !== null || correction.proposedValue !== null;
+  const hasTotals = correction.beforeNetPaise !== null || correction.afterNetPaise !== null || correction.deltaPaise !== null;
+  if (!hasValues && !hasTotals) return null;
+  return <section className={styles.correction} aria-label="Approved payout correction">
+    <small>Approved correction</small>
+    <h4>{friendlyField(correction.targetField)}</h4>
+    {hasValues ? <p>
+      <span>{correction.currentValue ?? "Not recorded"}</span>
+      <b aria-label="changed to">→</b>
+      <strong>{correction.proposedValue ?? "Not recorded"}</strong>
+    </p> : null}
+    {correction.note ? <p className={styles.correctionNote}>{correction.note}</p> : null}
+    {hasTotals ? <div className={styles.correctionTotals}>
+      {correction.beforeNetPaise !== null ? <div><small>Earlier net payout</small><strong>{paiseMoney(correction.beforeNetPaise)}</strong></div> : null}
+      {correction.afterNetPaise !== null ? <div><small>{correction.netChangeVerified ? "Revised net payout" : "Expected revised net payout"}</small><strong>{paiseMoney(correction.afterNetPaise)}</strong></div> : null}
+      {correction.deltaPaise !== null ? <div><small>{correction.netChangeVerified ? "Payout difference" : "Expected difference"}</small><strong className={correction.deltaPaise < 0 ? styles.negative : ""}>{signedPaise(correction.deltaPaise)}</strong></div> : null}
+    </div> : null}
+  </section>;
+}
+
+function DisputePayment({ dispute }: { dispute: AssociatePayoutDispute }) {
+  const payment = dispute.payment;
+  if (!payment) return null;
+  return <section className={styles.disputePayment} aria-label="Payment status for this correction">
+    <small>Payment status</small>
+    <div>
+      {payment.status ? <p><span>Status</span><strong>{payment.status}</strong></p> : null}
+      {payment.paidAmountPaise !== null ? <p><span>Already paid</span><strong>{paiseMoney(payment.paidAmountPaise)}</strong></p> : null}
+      {payment.additionalBalancePaise !== null ? <p><span>Additional balance</span><strong>{paiseMoney(payment.additionalBalancePaise)}</strong></p> : null}
+      {payment.reference ? <p><span>Bank reference</span><strong>{payment.reference}</strong></p> : null}
+      {payment.date ? <p><span>Payment date</span><strong>{localTime(payment.date)} IST</strong></p> : null}
+    </div>
+  </section>;
 }
 
 export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void }) {
@@ -265,10 +339,14 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         </form> : <p>{reviewMessage} Contact Workforce if a later correction is required.</p>}
 
         <section className={styles.history}>{payout.canDispute ? <h3>Dispute history</h3> : null}
-          {payout.disputes.map((dispute: Row) => {
+          {payout.disputes.map((dispute: AssociatePayoutDispute) => {
             const decoded = decodePayoutDisputeReason(dispute.reason);
-            return <article key={dispute.id}><header><div><b>{decoded.areas.length ? decoded.areas.join(" · ") : String(dispute.category).replaceAll("_", " ")}</b><small>Raised {localTime(dispute.created_at)} IST</small></div><strong>{String(dispute.status).replaceAll("_", " ")}</strong></header>
+            return <article key={dispute.id} className={styles.disputeRecord}><header><div><b>{decoded.areas.length ? decoded.areas.join(" · ") : String(dispute.category).replaceAll("_", " ")}</b><small>Raised {localTime(dispute.created_at)} IST</small></div></header>
               {decoded.reason ? <p>{decoded.reason}</p> : null}
+              <DisputeProgress dispute={dispute} />
+              <DisputeCorrection dispute={dispute} />
+              {dispute.resolution ? <section className={styles.disputeDecision} aria-label="Final dispute decision"><small>Final decision</small><p>{dispute.resolution}</p></section> : null}
+              <DisputePayment dispute={dispute} />
             </article>;
           })}
           {!payout.disputes.length ? <p>No disputes raised for this month.</p> : null}
