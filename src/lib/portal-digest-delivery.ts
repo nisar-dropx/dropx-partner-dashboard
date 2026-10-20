@@ -8,7 +8,7 @@ import {loadCodPendingReport} from "./ops-pulse/cod-pending-data";
 import {loadAdHocMailScope} from "./adhoc-digest-scope";
 import {digestMailAttachments,type DigestAttachment} from "./portal-digest-attachments";
 import {loadIdMappingRecipientScope} from "./id-mapping-digest";
-import {loadRegistrationPendency} from "./registration-pendency-data";
+import type {RegistrationSnapshot} from "./registration-pendency";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
 export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>;attachments?:DigestAttachment[]};
@@ -69,7 +69,7 @@ export async function processPortalDigests(portal:"people"|"ops",eventKey:string
 /** Shared SMTP/thread/receipt handling; event queues have independent claim eligibility. */
 export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"|"ops",summary:DeliverySummary,claimRpc:"portal_claim_digest"|"portal_claim_ops_data_updates"="portal_claim_digest") {
  const codScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadCodMailRecipients>>>>();
- const registrationScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadRegistrationPendency>>>>();
+ const registrationScopes=new Map<string,Promise<RegistrationSnapshot>>();
  const deadline=Date.now()+180_000;
  let attempted=0,retryLater=false;
  const attemptedIds=new Set<string>();
@@ -142,7 +142,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      const control=controlResult.data as DigestControl;
      if(dueReportDate(control)!==delivery.report_date)throw Error('Registration reminder window ended; stale reminder held.');
      const scopeKey=delivery.company_id+':'+delivery.report_date;
-     if(!registrationScopes.has(scopeKey))registrationScopes.set(scopeKey,loadRegistrationPendency(db,delivery.company_id,delivery.report_date,String(control.config.email_domain||"")));
+     if(!registrationScopes.has(scopeKey))registrationScopes.set(scopeKey,import("./registration-pendency-data").then(({loadRegistrationPendency})=>loadRegistrationPendency(db,delivery.company_id,delivery.report_date,String(control.config.email_domain||""))));
      const snapshot=await registrationScopes.get(scopeKey)!;
      const recipient=snapshot.recipients.find(r=>r.email===delivery.recipient_email);
      const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
