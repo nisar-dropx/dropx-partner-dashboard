@@ -16,6 +16,7 @@ const publicationMigration = readFileSync(new URL("../supabase/migrations/202610
 const connectLoader = readFileSync(new URL("../apps/connect/src/lib/associate-payouts.ts", import.meta.url), "utf8");
 const connectRoute = readFileSync(new URL("../apps/connect/app/api/connect/payout-review/route.ts", import.meta.url), "utf8");
 const disputeDecisionMigration = readFileSync(new URL("../supabase/migrations/20261008030604_simplify_workforce_payout_disputes.sql", import.meta.url), "utf8");
+const disputeProcessingMigration = readFileSync(new URL("../supabase/migrations/20261020100000_payout_dispute_processing_workflow.sql", import.meta.url), "utf8");
 const opsDisputePage = new URL("../src/app/ops-pulse/attendance/payout-review/page.tsx", import.meta.url);
 const opsDisputeActions = new URL("../src/app/ops-pulse/attendance/payout-review/actions.ts", import.meta.url);
 
@@ -55,19 +56,24 @@ assert.match(
   "App-only publications must render as published instead of falling back to Under Review."
 );
 assert.doesNotMatch(tableSource, /Send Notification requires all-location access/);
-assert.match(reviewActionSource, /rpc\("workforce_dispute_step"/);
-assert.match(reviewActionSource, /\["propose", "approve", "send_back"\]/);
-assert.match(reviewActionSource, /p_step: step/);
-assert.match(reviewActionSource, /\["resolved", "rejected"\]/);
-assert.match(reviewDeskSource, />\s*Propose reject\s*</);
-assert.match(reviewDeskSource, />\s*Propose resolve\s*</);
-assert.match(reviewDeskSource, /name="step" value="approve"/);
-assert.match(reviewDeskSource, /name="step" value="send_back"/);
+assert.match(reviewActionSource, /rpc\("workforce_dispute_transition_v2"/);
+for (const action of ["propose_correction", "propose_rejection", "approve_final", "send_back", "claim_processing", "block_processing", "complete_processing"]) {
+  assert.match(reviewActionSource, new RegExp(`"${action}"`));
+}
+assert.match(reviewActionSource, /p_action: action/);
+assert.match(reviewActionSource, /p_payload: payload/);
+assert.match(reviewDeskSource, />\s*Propose payout correction\s*</);
+assert.match(reviewDeskSource, />\s*Propose rejection\s*</);
+assert.match(reviewDeskSource, /name="transition" value="approve_final"/);
+assert.match(reviewDeskSource, /name="transition" value="send_back"/);
+assert.match(reviewDeskSource, /name="transition" value="claim_processing"/);
+assert.match(reviewDeskSource, /name="transition" value="complete_processing"/);
 assert.doesNotMatch(reviewDeskSource, /Under review \/ reply|Save response|Correct a legacy payroll payout/);
-assert.equal(existsSync(opsDisputePage), false, "Ops Pulse must not expose the payout-dispute desk.");
-assert.equal(existsSync(opsDisputeActions), false, "Ops Pulse must not expose payout-dispute actions.");
+assert.equal(existsSync(opsDisputePage), false, "Ops Pulse must use the shared payout-dispute desk, not a duplicate station route.");
+assert.equal(existsSync(opsDisputeActions), false, "Ops Pulse must use the shared payout-dispute actions, not a duplicate station action.");
 assert.match(disputeDecisionMigration, /p_decision not in \('resolved', 'rejected'\)/);
 assert.match(disputeDecisionMigration, /grant execute on function public\.workforce_decide_payout_dispute[\s\S]*to service_role/);
+assert.match(disputeProcessingMigration, /revoke all on function public\.workforce_decide_payout_dispute[\s\S]*from service_role/);
 assert.match(routeSource, /notification_primary/);
 assert.match(routeSource, /recipient/);
 assert.match(routeSource, /chunkValues\(uniqueIds, WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK\)/);
