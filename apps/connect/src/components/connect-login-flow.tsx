@@ -39,7 +39,7 @@ import { canViewInterimSalary } from "@/lib/interim-salary";
 import { userFacingError } from "@/lib/user-facing-error";
 import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRouteAccount } from "@/lib/connect-account-routing";
 import { connectApprovalSection } from "@/lib/connect-approval-links";
-import { leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
+import { connectNotificationStep, leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "activation" | "betaInbox" | "dashboard" | "profile" | "documents" | "salary" | "connect" | "approvals" | "requests" | "payments" | "work" | "advances" | "earnings" | "refer" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
 const routeForStep: Partial<Record<Step, string>> = {
@@ -474,14 +474,14 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     navigateNotification(notification);
   }
   function navigateNotification(notification: ConnectNotification) {
-    const destination = (notification.route === "communication_center" ? "connect" : notification.route) as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "documents", "salary", "connect", "approvals", "requests", "advances", "earnings", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "settings"].includes(destination)) {
+    const destination = connectNotificationStep(notification.route);
+    if (destination) {
       setNotificationMenu(false);
       open(destination);
       if (destination === "connect") setConnectTarget({ caseId: String(notification.data?.caseId ?? ""), announcementId: String(notification.data?.announcementId ?? "") });
-    } else if (destination) {
+    } else if (notification.route) {
       try {
-        const url = new URL(destination);
+        const url = new URL(notification.route);
         if (url.protocol === "https:" || url.protocol === "http:") {
           setNotificationMenu(false);
           window.location.assign(url.toString());

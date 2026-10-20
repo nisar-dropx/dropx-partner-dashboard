@@ -494,6 +494,179 @@
   text-transform: capitalize;
 }
 
+.disputeRecord > p {
+  margin: 10px 0 14px;
+  color: #344157;
+}
+
+.workflowStatus {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-left: 4px solid #d76836;
+  border-radius: 9px;
+  background: #fff6ef;
+}
+
+.workflowStatus strong {
+  color: #873919;
+}
+
+.workflowStatus p {
+  margin: 3px 0 0;
+  color: #5f4b42;
+  font-size: 13px;
+}
+
+.workflowStatus > small {
+  margin-top: 6px;
+  color: #735b50;
+}
+
+.workflowBlocked {
+  border-left-color: #bc6e10;
+  background: #fff8df;
+}
+
+.workflowProgress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflowProgress li {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: #8a94a6;
+  text-align: center;
+}
+
+.workflowProgress li > span {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border: 1px solid #d5dce7;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workflowProgress li > small {
+  color: inherit;
+  font-size: 10px;
+}
+
+.workflowProgress .workflowComplete {
+  color: #277346;
+}
+
+.workflowProgress .workflowComplete > span {
+  border-color: #8bc7a1;
+  background: #ecf9f0;
+}
+
+.workflowProgress .workflowCurrent {
+  color: #a1431e;
+}
+
+.workflowProgress .workflowCurrent > span {
+  border-color: #dc774d;
+  background: #fff0e7;
+}
+
+.correction,
+.disputeDecision,
+.disputePayment {
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid #e1e6ee;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.correction h4 {
+  margin: 3px 0 8px;
+  font-size: 14px;
+}
+
+.correction > p {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  color: #526078;
+}
+
+.correction > p strong {
+  color: #1f6c3d;
+}
+
+.correction > .correctionNote {
+  margin-top: 9px;
+  color: #46546a;
+  font-size: 13px;
+}
+
+.correctionTotals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.correctionTotals > div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f6f8fb;
+}
+
+.correctionTotals strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.disputeDecision {
+  border-color: #b9dfc6;
+  background: #f1faf4;
+}
+
+.disputeDecision p {
+  margin: 4px 0 0;
+  color: #235e38;
+  font-weight: 650;
+}
+
+.disputePayment > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 14px;
+  margin-top: 7px;
+}
+
+.disputePayment p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.disputePayment p span {
+  color: #68758a;
+  font-size: 11px;
+}
+
+.disputePayment p strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
 .card small {
   display: block;
   color: #68758a;
@@ -545,7 +718,9 @@
   }
 
   .disputeIdentity,
-  .areas > div {
+  .areas > div,
+  .correctionTotals,
+  .disputePayment > div {
     grid-template-columns: 1fr;
   }
 

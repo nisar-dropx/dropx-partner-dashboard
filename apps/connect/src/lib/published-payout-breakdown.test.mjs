@@ -105,3 +105,24 @@ test("payout disputes stay with Workforce and the associate view has no conversa
   assert.doesNotMatch(route, /workforce_reply_payout_dispute|ownOpenDispute/);
   assert.doesNotMatch(loader, /workforce_payout_dispute_events/);
 });
+
+test("associate payout disputes show approvals, correction progress and final payment context", () => {
+  const component = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../components/associate-payouts.module.css", import.meta.url), "utf8");
+  const loader = readFileSync(new URL("./associate-payouts.ts", import.meta.url), "utf8");
+
+  assert.match(loader, /associatePayoutDispute/);
+  assert.match(loader, /processed_publication_id/);
+  assert.match(component, /aria-label="Dispute progress"/);
+  assert.match(component, /Initial approval/);
+  assert.match(component, /Final approval/);
+  assert.match(component, /Payout correction/);
+  assert.match(component, /aria-label="Approved payout correction"/);
+  assert.match(component, /Earlier net payout/);
+  assert.match(component, /Revised net payout/);
+  assert.match(component, /aria-label="Final dispute decision"/);
+  assert.match(component, /aria-label="Payment status for this correction"/);
+  assert.match(component, /Additional balance/);
+  assert.match(styles, /\.workflowProgress/);
+  assert.match(styles, /\.correctionTotals/);
+});

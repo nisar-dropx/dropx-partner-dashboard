@@ -7,6 +7,7 @@ export type AdminAccessSurface = AccessSurface | "people" | "finance";
 
 export const opsAccessPageCodes = [
   'ops_notification_settings',
+  "payment_settings",
   "ops_pulse",
   "performance",
   "performance_review",
@@ -94,6 +95,7 @@ export const opsAccessPageCodes = [
 const opsPageCodes = new Set<string>(opsAccessPageCodes);
 
 const sharedPageCodes = new Set([
+  "payment_settings",
   "imports",
   "business_documents",
   "advance_requests",

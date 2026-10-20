@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  associatePayoutDispute,
   currentPayoutMonth,
   decodePayoutDisputeReason,
   encodePayoutDisputeReason,
@@ -12,6 +13,7 @@ import {
   payoutMonthLabel,
   payoutMonthLongLabel,
   payoutReviewState,
+  payoutDisputeWorkflow,
   shiftPayoutMonth,
 } from "./payout-dispute.ts";
 
@@ -68,4 +70,108 @@ test("files a payout under the month in which its pay period ends", () => {
   assert.equal(payoutMonthForPeriod("2026-09-01", "2026-09-30"), "2026-09");
   assert.equal(payoutMonthForPeriod("2026-08-26", "2026-09-25"), "2026-09");
   assert.equal(payoutMonthForPeriod("invalid", "invalid"), "");
+});
+
+test("uses friendly four-stage labels for dispute workflow states", () => {
+  assert.deepEqual(
+    ["open", "pending_final_approval", "approved_for_processing", "processing", "resolved"].map((status) => payoutDisputeWorkflow(status).label),
+    [
+      "Awaiting initial approval",
+      "Awaiting final approval",
+      "Approved for payout correction",
+      "Payout correction in progress",
+      "Resolved",
+    ],
+  );
+  assert.equal(payoutDisputeWorkflow("processing_blocked").blocked, true);
+  assert.equal(payoutDisputeWorkflow("in_review").label, "Awaiting final approval");
+  assert.equal(payoutDisputeWorkflow("resolved", true).label, "Previous decision recorded");
+});
+
+test("builds an associate-safe dispute view with verified payout and payment context", () => {
+  const view = associatePayoutDispute({
+    id: "dispute-1",
+    category: "other",
+    reason: "Allowance is missing",
+    status: "resolved",
+    resolution: "The missing allowance was added.",
+    created_at: "2026-10-01T00:00:00Z",
+    updated_at: "2026-10-03T00:00:00Z",
+    initial_reviewed_by_name: "Internal Reviewer",
+    processor_name: "Internal Processor",
+    processing_note: "Internal note that must not be sent",
+    correction_plan: {
+      kind: "additional_payment",
+      target_field: "allowance",
+      current_value: 0,
+      proposed_value: 500,
+      expected_delta_paise: 50000,
+      note: "Add the approved allowance.",
+    },
+    processing_result: {
+      before_net_paise: 100000,
+      after_net_paise: 150000,
+      additional_balance_paise: 50000,
+      paid_amount_paise: 100000,
+    },
+    processor_claimed_at: "2026-10-02T00:00:00Z",
+    processed_at: "2026-10-03T00:00:00Z",
+  }, null, null, { status: "Partially paid", reference: "UTR-1", date: "2026-10-04T00:00:00Z" });
+
+  assert.equal(view.workflow.label, "Resolved");
+  assert.equal(view.resolution, "The missing allowance was added.");
+  assert.deepEqual(view.correction, {
+    kind: "additional_payment",
+    targetField: "allowance",
+    note: "Add the approved allowance.",
+    currentValue: 0,
+    proposedValue: 500,
+    beforeNetPaise: 100000,
+    afterNetPaise: 150000,
+    deltaPaise: 50000,
+    netChangeVerified: true,
+  });
+  assert.deepEqual(view.payment, {
+    status: "Partially paid",
+    date: "2026-10-04T00:00:00Z",
+    reference: "UTR-1",
+    paidAmountPaise: 100000,
+    additionalBalancePaise: 50000,
+  });
+  assert.equal("processor_name" in view, false);
+  assert.equal("processing_note" in view, false);
+});
+
+test("derives before and after totals from linked publications and hides unapproved details", () => {
+  const publications = [
+    { snapshot: { item: { net_amount: 1000.25 } } },
+    { snapshot: { item: { net_amount: 1250.75 } } },
+  ];
+  const approved = associatePayoutDispute({
+    id: "dispute-2",
+    status: "approved_for_processing",
+    correction_plan: { expected_delta_paise: 25050 },
+  }, publications[0]);
+  assert.equal(approved.correction.beforeNetPaise, 100025);
+  assert.equal(approved.correction.afterNetPaise, 125075);
+  assert.equal(approved.correction.deltaPaise, 25050);
+  assert.equal(approved.correction.netChangeVerified, false);
+
+  const pending = associatePayoutDispute({
+    id: "dispute-3",
+    status: "pending_final_approval",
+    resolution: "Draft internal recommendation",
+    correction_plan: { current_value: 1, proposed_value: 2 },
+  }, publications[0], publications[1]);
+  assert.equal(pending.correction, null);
+  assert.equal(pending.resolution, null);
+
+  const legacy = associatePayoutDispute({
+    id: "dispute-4",
+    status: "resolved",
+    resolution: "Closed under the previous workflow",
+    correction_plan: { current_value: 1, proposed_value: 2 },
+  }, publications[0]);
+  assert.equal(legacy.workflow.label, "Previous decision recorded");
+  assert.equal(legacy.correction, null);
 });

@@ -271,6 +271,7 @@ export async function middleware(request: NextRequest) {
     !isMovedOpsPaymentPath(path) &&
     !isSharedOpsPath &&
     path !== "/settings/notifications" &&
+    path !== "/settings/payout-disputes" &&
     !path.startsWith("/cps") &&
     !path.startsWith("/cpu") &&
     !path.startsWith("/master/") &&

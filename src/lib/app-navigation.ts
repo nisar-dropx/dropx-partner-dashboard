@@ -137,6 +137,7 @@ export const navItems: NavItem[] = [
       { code: "app_settings", label: "Verification APIs", href: "/settings/verification-apis" },
       { code: "app_settings", label: "Biometric Config", href: "/settings/biometric" },
       { code: "app_settings", label: "Biometric Monitor", href: "/biometric" },
+      { code: "payment_settings", label: "Payout Dispute Workflow", href: "/settings/payout-disputes" },
       { code: "ai_connector", label: "AI Connector", href: "/settings/ai" },
       { code: "amazon_connector", label: "Amazon Connector", href: "/settings/amazon" },
       { code: "developer_mode", label: "Developer Mode", href: "/developer" }

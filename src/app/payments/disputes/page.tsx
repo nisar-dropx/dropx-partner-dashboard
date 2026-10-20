@@ -35,7 +35,7 @@ export default async function WorkforcePayoutDisputesPage({
       <PageHead
         eyebrow="Payments"
         title="Payout Disputes"
-        subtitle="Review associate payout concerns and record a final decision."
+        subtitle="Approve payout corrections, apply them through the payout source, and verify the revised publication and net change."
       />
       {message ? <p role={searchParams.error ? "alert" : "status"}>{message}</p> : null}
       <PayoutReviewDesk

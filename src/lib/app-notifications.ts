@@ -24,14 +24,17 @@ export const appNotificationEvents = [
   "advance_request_withdrawn",
   "exit_request_raised",
   "exit_request_approved",
-  "exit_request_rejected"
+  "exit_request_rejected",
+  "payout_dispute_approved",
+  "payout_dispute_rejected",
+  "payout_dispute_resolved"
 ] as const;
 export type AppNotificationEvent = typeof appNotificationEvents[number];
 
 export const appNotificationDefaults: Record<AppNotificationEvent, {
   bodyTemplate: string;
   label: string;
-  route: "advances" | "attendance" | "profile";
+  route: "advances" | "attendance" | "payments" | "profile";
   titleTemplate: string;
 }> = {
   attendance_punch_in: {
@@ -129,6 +132,24 @@ export const appNotificationDefaults: Record<AppNotificationEvent, {
     route: "profile",
     titleTemplate: "Exit request rejected",
     bodyTemplate: "Your exit request was rejected. {remarks}"
+  },
+  payout_dispute_approved: {
+    label: "Payout dispute approved",
+    route: "payments",
+    titleTemplate: "Payout correction approved",
+    bodyTemplate: "Your payout dispute was approved. The payout team is now applying the correction."
+  },
+  payout_dispute_rejected: {
+    label: "Payout dispute rejected",
+    route: "payments",
+    titleTemplate: "Payout dispute decision",
+    bodyTemplate: "{decision}"
+  },
+  payout_dispute_resolved: {
+    label: "Payout dispute resolved",
+    route: "payments",
+    titleTemplate: "Payout corrected",
+    bodyTemplate: "{decision}"
   }
 };
 
@@ -163,6 +184,7 @@ export async function createAppNotification({
   data = {},
   eventCode,
   profileType,
+  routeOverride,
   sourceKey,
   variables = {}
 }: {
@@ -171,6 +193,7 @@ export async function createAppNotification({
   data?: Record<string, unknown>;
   eventCode: AppNotificationEvent;
   profileType: string;
+  routeOverride?: string;
   sourceKey: string;
   variables?: Record<string, string>;
 }) {
@@ -197,6 +220,9 @@ export async function createAppNotification({
     String(ruleResult.data?.body_template ?? defaults.bodyTemplate),
     variables
   ).replace(/\s+/g, " ").trim();
+  // A company rule is an administrator's explicit destination choice. The
+  // caller override supplies an exact deep link only when no rule owns it.
+  const route = String(ruleResult.data?.route ?? routeOverride ?? defaults.route);
   const notificationResult = await supabaseAdmin
     .from("mob_app_notifications")
     .upsert({
@@ -207,7 +233,7 @@ export async function createAppNotification({
       push_status: "not_configured",
       recipient_account_id: accountId,
       recipient_profile_type: profileType,
-      route: String(ruleResult.data?.route ?? defaults.route),
+      route,
       source_key: sourceKey,
       title
     }, {
@@ -228,7 +254,7 @@ export async function createAppNotification({
       accountId,
       title,
       body,
-      route: String(ruleResult.data?.route ?? defaults.route),
+      route,
       data
     });
   }

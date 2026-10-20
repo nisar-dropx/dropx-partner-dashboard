@@ -44,6 +44,14 @@ test("payout workspace keeps search and every filter directly visible while grou
   assert.match(source, /className="payout-selection-hint"/);
 });
 
+test("a dispute payout-editor link seeds and keeps the DropX ID search", () => {
+  assert.match(pageSource, /const initialSearch = typeof searchParams\.q === "string" \? searchParams\.q\.trim\(\) : ""/);
+  assert.match(pageSource, /<WorkforcePayoutTable[\s\S]*?initialSearch=\{initialSearch\}/);
+  assert.match(source, /initialSearch = ""/);
+  assert.match(source, /const \[search, setSearch\] = useState\(initialSearch\)/);
+  assert.match(source, /useEffect\(\(\) => \{\s*setSearch\(initialSearch\);\s*setPage\(1\);\s*\}, \[initialSearch\]\)/);
+});
+
 test("global payout actions are hidden without payout edit permission", () => {
   assert.match(source, /\{canEdit \? <div className="payout-global-actions">[\s\S]*?Export full CSV[\s\S]*?<\/div> : null\}/);
 });

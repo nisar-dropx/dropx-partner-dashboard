@@ -123,7 +123,7 @@ function resultRecord(value: unknown) {
 }
 
 function databaseStatus(message: string) {
-  return /processing|changed|refresh|mapping|published|balance|payable|bank detail|operation|already|current payout|review|active workforce profile/i.test(message) ? 409 : 400;
+  return /processing|changed|refresh|mapping|published|balance|payable|bank detail|operation|already|current payout|review|dispute|active workforce profile/i.test(message) ? 409 : 400;
 }
 
 function immutableLocationsAreInScope(authorization: AuthorizationContext, locationIds: unknown[]) {
@@ -211,6 +211,7 @@ function workbookResponse(result: Record<string, unknown>, audience: PayoutAudie
   const periodStart = String(result.period_start ?? `${audience}-payout`);
   const batchSuffix = UUID.test(batchId) ? `-${batchId.slice(0, 8)}` : "";
   const filename = `${filePrefix}-${periodStart.slice(0, 7)}-${valueDate.replaceAll("-", "")}${batchSuffix}.xlsx`;
+  const skippedDisputeCount = Math.max(0, Math.trunc(Number(result.skipped_dispute_count) || 0));
   return new Response(Buffer.from(workbook), {
     headers: {
       ...noStore,
@@ -219,7 +220,8 @@ function workbookResponse(result: Record<string, unknown>, audience: PayoutAudie
       "X-Workforce-Payout-Batch-Id": batchId,
       "X-Workforce-Payout-Format-Version": "fedone-v1",
       "X-Workforce-Payout-Payload-SHA256": payloadSha256,
-      "X-Workforce-Payout-Batch-Replayed": result.replayed === true ? "true" : "false"
+      "X-Workforce-Payout-Batch-Replayed": result.replayed === true ? "true" : "false",
+      "X-Workforce-Payout-Skipped-Dispute-Count": String(skippedDisputeCount)
     }
   });
 }
@@ -541,7 +543,7 @@ export async function POST(request: Request) {
     };
     const created = audience === "helpers"
       ? await supabaseAdmin!.rpc("helper_create_payout_payment_row_batch", rpcParameters)
-      : await supabaseAdmin!.rpc("workforce_create_payout_payment_row_batch", rpcParameters);
+      : await supabaseAdmin!.rpc("workforce_create_payout_payment_row_batch_with_disputes", rpcParameters);
     if (created.error) return errorResponse(created.error.message, databaseStatus(created.error.message));
     return workbookResponse(resultRecord(created.data), audience);
   } catch (error) {

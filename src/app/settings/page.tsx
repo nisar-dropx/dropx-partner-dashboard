@@ -235,6 +235,17 @@ export default async function SettingsPage() {
               </span>
             </PendingLink>
           ) : null}
+          {canViewWorkforcePayment ? (
+            <PendingLink className="settings-tile actionable" href="/settings/payout-disputes">
+              <div>
+                <h3>Payout Dispute Workflow</h3>
+                <p className="subtle">Configure independent initial approval, final approval, and payout processing roles with station overrides.</p>
+              </div>
+              <span className="settings-tile-actions">
+                <span className="button secondary compact">Configure</span>
+              </span>
+            </PendingLink>
+          ) : null}
           <PendingLink className="settings-tile actionable" href="/settings/payment-approvals">
             <div>
               <h3>Payment Approval Steps</h3>

@@ -95,7 +95,10 @@ const cps: NavItem = {
 };
 
 const administration: NavItem[] = [
-  {code:'ops_notification_settings',label:'Settings',icon:'*',children:[{code:'ops_notification_settings',label:'Notifications',href:'/settings/notifications'}]},
+  {code:'ops_notification_settings',label:'Settings',icon:'*',children:[
+    {code:'ops_notification_settings',label:'Notifications',href:'/settings/notifications'},
+    {code:'payment_settings',label:'Payout Dispute Workflow',href:'/settings/payout-disputes'}
+  ]},
   {
     code: "master_data",
     label: "Ops Masters",
