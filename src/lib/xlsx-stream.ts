@@ -8,6 +8,8 @@ type StreamingWorkbookOptions = {
   headers: string[];
   rows: Iterable<WorkbookCell[]>;
   sheetName: string;
+  /** Opt-in report styling; existing exports retain their layout. */
+  wrapText?: boolean;
 };
 
 function xmlText(value: unknown) {
@@ -40,8 +42,8 @@ function cellXml(value: WorkbookCell, column: number, row: number, style = 0) {
   return `<c r="${reference}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xmlText(value)}</t></is></c>`;
 }
 
-function rowXml(values: WorkbookCell[], row: number, style = 0) {
-  return `<row r="${row}">${values.map((value, column) => cellXml(value, column, row, style)).join("")}</row>`;
+function rowXml(values: WorkbookCell[], row: number, style = 0, height?: number) {
+  return `<row r="${row}"${height ? ` ht="${height}" customHeight="1"` : ""}>${values.map((value, column) => cellXml(value, column, row, style)).join("")}</row>`;
 }
 
 function* worksheetXml(options: StreamingWorkbookOptions) {
@@ -52,10 +54,11 @@ function* worksheetXml(options: StreamingWorkbookOptions) {
   if (options.columnWidths?.length) {
     yield `<cols>${options.columnWidths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>`;
   }
-  yield `<sheetData>${rowXml(options.headers, 1, 1)}`;
+  yield `<sheetData>${rowXml(options.headers, 1, options.wrapText ? 2 : 1, options.wrapText ? 34 : undefined)}`;
   let rowNumber = 2;
   for (const values of options.rows) {
-    yield rowXml(values, rowNumber);
+    const lines = options.wrapText ? Math.max(2, ...values.map((v, i) => Math.ceil(String(v ?? "").length / Math.max(10, (options.columnWidths?.[i] || 20) - 3)))) : 0;
+    yield rowXml(values, rowNumber, options.wrapText ? (rowNumber % 2 ? 4 : 3) : 0, lines ? Math.min(400, lines * 16 + 8) : undefined);
     rowNumber += 1;
   }
   yield `</sheetData><autoFilter ref="A1:${lastColumn}${Math.max(rowNumber - 1, 1)}"/>`;
@@ -224,5 +227,19 @@ export function createStreamingXlsx(options: StreamingWorkbookOptions) {
       content: worksheetXml(options)
     }
   ];
+  if (options.wrapText) {
+    const styles = entries.find(entry => entry.name === "xl/styles.xml")!;
+    styles.content = values(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><color rgb="FF1B2942"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF24314D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF0F5FA"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyAlignment="1" applyFont="1" applyFill="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyAlignment="1" applyFill="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`);
+  }
   return Readable.from(streamingZip(entries));
 }

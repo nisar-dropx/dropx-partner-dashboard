@@ -7,6 +7,7 @@ import {requireCompanyId} from '@/lib/company-scope';
 import {digestDatabase} from '@/lib/portal-digest-delivery';
 import {saveAdHocDigestSettings,saveDigestSettings,savePerformanceDataUpdateSettings} from './actions';
 import {PerformanceDataUpdateSettings} from '@/components/performance-data-update-settings';
+import {RegistrationNotificationSettings} from '@/components/registration-notification-settings';
 export const dynamic='force-dynamic';
 export default async function NotificationSettings({searchParams}:{searchParams?:{error?:string;saved?:string}}){
  const auth=await requirePagePermission('ops_notification_settings','access');const company=requireCompanyId(auth);const db=digestDatabase();
@@ -21,6 +22,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  if(control.error||history.error||dataUpdate.error||updateHistory.error)throw new Error('Notification settings are temporarily unavailable.');
  return <AppShell active="Notifications" pageCode="ops_notification_settings"><PageHead title="Notifications" eyebrow="Ops Pulse settings" subtitle="Performance updates and daily review status · portal-run, individually scoped emails."/>
  {searchParams?.error?<p role="alert">{searchParams.error}</p>:searchParams?.saved?<p role="status">Notification settings saved.</p>:null}
+ <RegistrationNotificationSettings companyId={company} canEdit={hasPermission(auth,'ops_notification_settings','edit')}/>
  {adhoc.data?<section id="adhoc-report"><h2>Ad hoc costs · Morning report</h2><a className="button" href="/api/ops-pulse/adhoc-email-preview" target="_blank" rel="noreferrer">Preview / send sample to me</a><p>Van, Driver and DA · Previous day and MTD · Estimated vs actual Excel · Monthly replies.</p><DigestSettingsForm control={adhoc.data} action={saveAdHocDigestSettings} canEdit={hasPermission(auth,'ops_notification_settings','edit')} receipts={adhocHistory.data||[]}/></section>:null}
  <CodNotificationSettings companyId={company} auth={auth}/>
  <PerformanceDataUpdateSettings control={dataUpdate.data} action={savePerformanceDataUpdateSettings} canEdit={hasPermission(auth,'ops_notification_settings','edit')} receipts={updateHistory.data||[]}/>
