@@ -22371,7 +22371,7 @@ td strong,
 
 .provider-first-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(5, minmax(125px, 1fr)) minmax(76px, .45fr) auto;
+  grid-template-columns: minmax(200px, 1.4fr) repeat(6, minmax(120px, 1fr)) minmax(68px, .45fr) auto;
   gap: 8px;
   align-items: end;
   padding: 10px 12px;
@@ -22430,6 +22430,7 @@ td strong,
 
 .provider-first-filters .bulk-multi-filter,
 .provider-first-filters .bulk-multi-filter-trigger {
+  min-width: 0;
   width: 100%;
 }
 
@@ -22685,7 +22686,11 @@ td strong,
   font-weight: 600;
 }
 
-@media (max-width: 1400px) {
+.mapping-cluster-unavailable {
+  margin: 8px 12px;
+}
+
+@media (max-width: 1650px) {
   .provider-first-filters {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

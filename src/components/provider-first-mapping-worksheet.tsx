@@ -94,8 +94,8 @@ function appendRow(
   formData.set(`${prefix}[clear_workforce_id]`, clearWorkforceId);
 }
 
-type ExportFilters = { months: string[]; stations: string[]; methods: string[]; mapping: string[]; validation: string[] };
-const emptyExportFilters: ExportFilters = { months: [], stations: [], methods: [], mapping: [], validation: [] };
+type ExportFilters = { months: string[]; stations: string[]; clusters: string[]; methods: string[]; mapping: string[]; validation: string[] };
+const emptyExportFilters: ExportFilters = { months: [], stations: [], clusters: [], methods: [], mapping: [], validation: [] };
 
 type ReplacementSaveConfirmation = {
   indexes: number[];
@@ -158,7 +158,10 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, initialMappingStatus = "unmapped", lookupEntries = [], canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, initialMappingStatus = "unmapped", clusterOptions = [], clusterKeysByStation = {}, clusterFilterUnavailable = false, lookupEntries = [], canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+  clusterOptions?: { value: string; label: string }[];
+  clusterKeysByStation?: Readonly<Record<string, readonly string[]>>;
+  clusterFilterUnavailable?: boolean;
   shipmentMonths: string[];
   lookupEntries?: ProviderMappingLookupEntry[];
   initialOutboundMonth: string;
@@ -177,6 +180,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [query, setQuery] = useState(initialQuery);
   const deferredQuery = useDeferredValue(query);
   const [stationFilters, setStationFilters] = useState<string[]>(initialStationId ? [initialStationId] : []);
+  const [clusterFilters, setClusterFilters] = useState<string[]>([]);
   const [monthFilters, setMonthFilters] = useState<string[]>(initialOutboundMonth ? [initialOutboundMonth] : []);
   const monthOptions = useMemo(() => providerMappingMonthOptions([...shipmentMonths, initialOutboundMonth]), [shipmentMonths, initialOutboundMonth]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
@@ -230,7 +234,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     rows: baselineRows,
     workerById,
     paymentMethodById,
+    clusterKeysByStation,
     filters: {
+      clusterKeys: clusterFilters,
       outboundMonths: monthFilters,
       query: deferredQuery,
       stationIds: stationFilters,
@@ -238,7 +244,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       mappingStatuses: mappingFilters,
       validationStatuses: validationFilters
     }
-  }), [baselineRows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  }), [baselineRows, workerById, paymentMethodById, clusterKeysByStation, clusterFilters, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
   const selectableWorkerOptionsByIndex = useMemo(() => new Map(paginatedIndexes.map((index) => {
@@ -255,13 +261,14 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [exportFilters, setExportFilters] = useState<ExportFilters>(emptyExportFilters);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
-  const hasFilters = Boolean(query || monthFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
+  const hasFilters = Boolean(query || monthFilters.length || stationFilters.length || clusterFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
 
   function resetPage() { setCurrentPage(1); }
 
   function clearFilters() {
     setQuery("");
     setStationFilters([]);
+    setClusterFilters([]);
     setMonthFilters([]);
     setMethodFilters([]);
     setMappingFilters([]);
@@ -275,7 +282,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     rows: baselineRows,
     workerById,
     paymentMethodById,
+    clusterKeysByStation,
     filters: {
+      clusterKeys: exportFilters.clusters,
       outboundMonths: exportFilters.months,
       query: "",
       stationIds: exportFilters.stations,
@@ -283,7 +292,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       mappingStatuses: exportFilters.mapping,
       validationStatuses: exportFilters.validation
     }
-  }) : [], [exportOpen, baselineRows, workerById, paymentMethodById, exportFilters]);
+  }) : [], [exportOpen, baselineRows, workerById, paymentMethodById, clusterKeysByStation, exportFilters]);
 
   function openExport() {
     setExportFilters(emptyExportFilters);
@@ -904,10 +913,12 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <div><h2>Provider member mapping</h2><p className="subtle">Available associates across your permitted locations. Use Find mapping to locate an ID already assigned.</p>{saveNotice ? <p aria-live="polite" className={saveNotice.kind === "error" ? "mapping-upload-error" : "mapping-upload-success"}>{saveNotice.message}</p> : null}</div>
         <button className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict || hasDirtyLocationMismatch || isSaving} onClick={() => void saveIndexes(dirtyIndexes)} type="button">{isSaving ? "Saving..." : !canEdit ? "No edit access" : hasDirtyLocationMismatch ? "Fix location mismatches" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : hasDirty ? "Save changes" : "No edits"}</button>
       </div>
+      {clusterFilterUnavailable ? <p className="subtle mapping-cluster-unavailable" role="status">People assignments could not be loaded. Refresh to use the Cluster / AOM filter; other filters are available.</p> : null}
       <div className="provider-first-filters">
         <label className="provider-first-search"><span>Search</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); resetPage(); }} placeholder="Provider member, DropX ID or name" /></label>
         <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={monthFilters} setSelected={(values) => { setMonthFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={clusterOptions} selected={clusterFilters} setSelected={(values) => { setClusterFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
@@ -926,6 +937,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               <div className="provider-mapping-download-filters">
                 <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={exportFilters.months} setSelected={(months) => setExportFilters((current) => ({ ...current, months }))} />
                 <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={exportFilters.stations} setSelected={(stations) => setExportFilters((current) => ({ ...current, stations }))} />
+                <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={clusterOptions} selected={exportFilters.clusters} setSelected={(clusters) => setExportFilters((current) => ({ ...current, clusters }))} />
                 <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={exportFilters.methods} setSelected={(methods) => setExportFilters((current) => ({ ...current, methods }))} />
                 <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.mapping} setSelected={(mapping) => setExportFilters((current) => ({ ...current, mapping }))} />
                 <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.validation} setSelected={(validation) => setExportFilters((current) => ({ ...current, validation }))} />

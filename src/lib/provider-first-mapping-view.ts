@@ -593,6 +593,7 @@ export type ProviderFirstPaymentMethodView = {
 };
 
 export type ProviderFirstFilters = {
+  clusterKeys?: string[];
   outboundMonths?: string[];
   query: string;
   stationIds: string[];
@@ -988,11 +989,13 @@ export function filterProviderFirstRowIndexes({
   rows,
   workerById,
   paymentMethodById,
+  clusterKeysByStation = {},
   filters
 }: {
   rows: ProviderFirstMappingRowView[];
   workerById: Map<string, ProviderFirstWorkerView>;
   paymentMethodById: Map<string, ProviderFirstPaymentMethodView>;
+  clusterKeysByStation?: Readonly<Record<string, readonly string[]>>;
   filters: ProviderFirstFilters;
 }) {
   const query = filters.query.trim().toLocaleLowerCase();
@@ -1007,6 +1010,7 @@ export function filterProviderFirstRowIndexes({
     const matches = (!query || searchable.includes(query))
       && (!filters.outboundMonths?.length || filters.outboundMonths.some((month) => row.outboundMonths?.includes(month)))
       && (!filters.stationIds.length || filters.stationIds.includes(row.stationId))
+      && (!filters.clusterKeys?.length || filters.clusterKeys.some((key) => clusterKeysByStation[row.stationId]?.includes(key)))
       && (!filters.paymentMethodIds.length || filters.paymentMethodIds.includes(row.paymentMethodId || "unassigned"))
       && (!filters.mappingStatuses.length || filters.mappingStatuses.includes(mappingStatus))
       && (!filters.validationStatuses.length || filters.validationStatuses.includes(validationStatus));
