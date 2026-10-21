@@ -1858,6 +1858,127 @@ export type ProviderFirstInlineSaveResult = {
   paidHistoryTransfer?: ProviderFirstPaidHistoryTransferConfirmation;
 };
 
+export type ClearProviderMappingPeriodResult = {
+  ok: boolean;
+  message: string;
+  mappingId?: string;
+  workforceId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+};
+
+export type ClearProviderMappingPeriodInput = {
+  mappingId: string;
+  expectedUpdatedAt: string;
+};
+
+/** Cancels one exact saved provider-mapping period. The mapping row remains in
+ * history, but neither its DropX association nor its payment method applies to
+ * the stored dates after cancellation. Other periods are never retargeted. */
+export async function clearProviderMappingPeriod(input: ClearProviderMappingPeriodInput): Promise<ClearProviderMappingPeriodResult> {
+  try {
+    const authorization = await getAuthorization();
+    if (!authorization) return { ok: false, message: "Your sign-in session has expired. Reload the page and sign in again." };
+    const companyId = requireCompanyId(authorization);
+    if (!canEditProviderMappings(authorization)) {
+      return { ok: false, message: "You do not have permission to edit provider mappings." };
+    }
+    if (!supabaseAdmin) return { ok: false, message: "Supabase service role key is not configured." };
+
+    const normalizedMappingId = String(input?.mappingId ?? "").trim();
+    const expectedUpdatedAt = String(input?.expectedUpdatedAt ?? "").trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizedMappingId)) {
+      return { ok: false, message: "The selected mapping period is invalid. Reload the page and try again." };
+    }
+    if (!expectedUpdatedAt || !Number.isFinite(Date.parse(expectedUpdatedAt))) {
+      return { ok: false, message: "This mapping period is missing its saved version. Reload the page and try again." };
+    }
+
+    const { data: mapping, error: mappingError } = await supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, workforce_id, provider_member_id, station_id, effective_from, effective_to, status, updated_at")
+      .eq("company_id", companyId)
+      .eq("id", normalizedMappingId)
+      .maybeSingle();
+    if (mappingError) throw new Error(mappingError.message);
+    if (!mapping?.workforce_id || !mapping.station_id) {
+      return { ok: false, message: "This mapping period no longer exists. Reload the page and try again." };
+    }
+
+    const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+      ? null
+      : new Set(authorization.locationScopeIds);
+    const { data: workforce, error: workforceError } = await supabaseAdmin
+      .from("workforce")
+      .select("location_id")
+      .eq("company_id", companyId)
+      .eq("id", mapping.workforce_id)
+      .is("deleted_at", null)
+      .neq("migration_state", "reclassified")
+      .maybeSingle();
+    if (workforceError) throw new Error(workforceError.message);
+    if (!workforce) {
+      return { ok: false, message: "The mapped Workforce profile no longer exists. Reload the page and try again." };
+    }
+    if (allowedLocationIds && (!allowedLocationIds.has(mapping.station_id)
+      || !workforce.location_id
+      || !allowedLocationIds.has(workforce.location_id))) {
+      return { ok: false, message: "This mapping period is outside your allocated locations." };
+    }
+    const canonicalPeriod = (mapping.status === "active" && !mapping.effective_to)
+      || (mapping.status === "closed" && Boolean(mapping.effective_to));
+    if (!canonicalPeriod) {
+      return {
+        ok: false,
+        message: mapping.status === "cancelled"
+          ? "This mapping period is already cleared. Reload the page to see its updated history."
+          : "This mapping period changed. Reload the page and try again."
+      };
+    }
+
+    const { data: station, error: stationError } = await supabaseAdmin
+      .from("stations")
+      .select("station_code, station_name")
+      .eq("company_id", companyId)
+      .eq("id", mapping.station_id)
+      .maybeSingle();
+    if (stationError) throw new Error(stationError.message);
+
+    const { data: clearResult, error: clearError } = await supabaseAdmin.rpc("workforce_clear_mapping_period", {
+      p_company: companyId,
+      p_actor: authorization.userId,
+      p_workforce: mapping.workforce_id,
+      p_mapping: normalizedMappingId,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+      p_actor_name: authorization.fullName || authorization.email || "Dashboard mapping reviewer"
+    });
+    if (clearError) throw new Error(clearError.message);
+
+    const cleared = (clearResult ?? {}) as Record<string, unknown>;
+    const effectiveFrom = String(cleared.effective_from ?? mapping.effective_from ?? "");
+    const effectiveTo = String(cleared.effective_to ?? mapping.effective_to ?? "");
+    const locationLabel = String(station?.station_code ?? station?.station_name ?? mapping.station_id);
+    revalidateTag("ops-cps");
+    revalidatePath("/cps");
+    revalidatePath("/provider-id-mapping");
+    revalidatePath("/payments/workforce-payouts");
+    return {
+      ok: true,
+      message: `Mapping and payment method cleared for the ${locationLabel} location-period, ${formatDashboardDate(effectiveFrom)} through ${effectiveTo ? formatDashboardDate(effectiveTo) : "ongoing"}. Other locations and periods were not changed.`,
+      mappingId: normalizedMappingId,
+      workforceId: mapping.workforce_id,
+      effectiveFrom,
+      effectiveTo
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Unable to clear this mapping period."
+    };
+  }
+}
+
 /** Saves provider-first rows without redirecting or reloading the worksheet.
  * The authoritative validation and history-safe write remain in
  * saveExecutiveMappingRow; this wrapper only changes response delivery. */

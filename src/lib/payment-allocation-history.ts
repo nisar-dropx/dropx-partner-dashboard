@@ -8,6 +8,8 @@ export type PaymentAllocationHistoryRate = {
 
 export type PaymentAllocationHistoryEntry = {
   id: string;
+  /** Concurrency token for destructive actions against this exact saved row. */
+  updatedAt?: string;
   paymentMethodId: string;
   paymentMethodName: string;
   effectiveFrom: string;

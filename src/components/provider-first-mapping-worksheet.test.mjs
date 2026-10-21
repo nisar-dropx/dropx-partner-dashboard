@@ -22,7 +22,11 @@ const row = { providerMemberId: '12345678901', providerMemberName: 'Asha Devi', 
 // Drive the real worksheet's event handlers and hook state. Only rendering-only
 // children and the server boundary are substituted; filtering/validation/save
 // reconciliation use production code. Nothing writes to a live database.
-function worksheet(props = {}, save = async () => ({ ok: false, savedRows: [], message: 'Retry required' })) {
+function worksheet(
+  props = {},
+  save = async () => ({ ok: false, savedRows: [], message: 'Retry required' }),
+  clearPeriod = async () => ({ ok: false, message: 'Retry required' })
+) {
   const slots = [];
   let cursor = 0;
   const hooks = {
@@ -41,7 +45,7 @@ function worksheet(props = {}, save = async () => ({ ok: false, savedRows: [], m
   };
   const boundaries = {
     react: hooks,
-    '@/app/provider-mapping/actions': { saveProviderFirstMappingsInline: save },
+    '@/app/provider-mapping/actions': { clearProviderMappingPeriod: clearPeriod, saveProviderFirstMappingsInline: save },
     '@/components/provider-mapping-lookup': { ProviderMappingLookup: 'MappingLookup' },
     '@/components/provider-mapping-schedule': { ProviderMappingSchedule: 'MappingSchedule' },
     '@/components/searchable-select': { SearchableSelect: 'SearchableSelect' },
@@ -94,6 +98,49 @@ test('historical month rows show their end date and cannot submit another clear'
 
   const active = worksheet({ mappings: [{ ...historical, mappingId: 'active-map', effectiveTo: '' }], initialMappingStatus: 'all' });
   assert.equal(active.select('provider_first_worker_0').allowClear, true);
+});
+
+test('editable history exposes exact-period clearing and forwards the saved mapping ID', async () => {
+  const entry = {
+    id: '40000000-0000-4000-8000-000000000001',
+    updatedAt: '2026-10-21T05:26:00.123456+00:00',
+    paymentMethodId: method.id,
+    paymentMethodName: method.name,
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '2026-10-22',
+    storedStatus: 'closed',
+    rates: []
+  };
+  let clearInput = null;
+  const mapped = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: entry.id,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: entry.effectiveFrom,
+    effectiveTo: entry.effectiveTo,
+    history: [entry]
+  };
+  const ui = worksheet(
+    { mappings: [mapped], initialMappingStatus: 'all' },
+    undefined,
+    async input => {
+      clearInput = input;
+      return { ok: true, message: 'Exact period cleared.' };
+    }
+  );
+  const historyButton = ui.one(node => node.type === 'History');
+  assert.equal(historyButton.props.canClearMappingPeriod, true);
+  await historyButton.props.onClearMappingPeriod(entry);
+  ui.render();
+  assert.deepEqual(clearInput, { mappingId: entry.id, expectedUpdatedAt: entry.updatedAt });
+  assert.match(JSON.stringify(ui.all(node => node.props?.['aria-live'] === 'polite')), /Exact period cleared/);
+
+  const readOnly = worksheet({ mappings: [mapped], initialMappingStatus: 'all', canEdit: false });
+  assert.equal(readOnly.one(node => node.type === 'History').props.canClearMappingPeriod, false);
 });
 function completeDraft(ui, index = 0) {
   ui.change(`provider_first_worker_${index}`, worker.id);

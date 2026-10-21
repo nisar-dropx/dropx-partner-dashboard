@@ -21,7 +21,7 @@ import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 
 type PaymentMethodRow = { id: string; code: string; name: string; is_active: boolean; production_threshold_config: unknown; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number }> | null };
-type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; production_threshold_config: unknown; effective_from: string; effective_to: string | null; status: string; reason: string | null };
+type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; production_threshold_config: unknown; effective_from: string; effective_to: string | null; status: string; reason: string | null; updated_at: string };
 type ProviderMemberSource = { provider_employee_id: unknown; provider_employee_name: unknown; station_code: unknown; work_date: unknown; shipment_months?: string[]; outbound_months?: string[] };
 
 function flash() {
@@ -56,7 +56,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, parent_station_id, location_models(code)").eq("company_id", companyId).order("station_code"),
     readAllRows(supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("id")),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
-    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason, updated_at").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
     supabaseAdmin.from("payment_methods").select("id, code, name, is_active, production_threshold_config, payment_method_components(component_code, component_type, label, sort_order)").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
@@ -128,6 +128,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     const worker = mapping.workforce_id ? workforceById.get(mapping.workforce_id) : null;
     const entry: PaymentAllocationHistoryEntry = {
       id: mapping.id,
+      updatedAt: mapping.updated_at,
       paymentMethodId: String(mapping.payment_method_id ?? ""),
       paymentMethodName: method?.name ?? "Payment method unavailable",
       effectiveFrom: mapping.effective_from,

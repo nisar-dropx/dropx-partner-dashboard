@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import { Download, FileSpreadsheet, FileText, X } from "lucide-react";
-import { saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
+import { clearProviderMappingPeriod, saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { ProviderMappingLookup } from "@/components/provider-mapping-lookup";
@@ -11,7 +11,7 @@ import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 import { SearchableSelect } from "@/components/searchable-select";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
-import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
+import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { formatDashboardDate } from "@/lib/date-format";
 import {
@@ -907,6 +907,28 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     }
   }
 
+  async function clearSavedMappingPeriod(entry: PaymentAllocationHistoryEntry) {
+    if (isSaving) return { ok: false, message: "Another mapping change is still saving. Wait for it to finish and try again." };
+    if (!entry.updatedAt) return { ok: false, message: "This mapping period is missing its saved version. Reload the page and try again." };
+    setSavingIndexes(new Set([-1]));
+    setSaveNotice(null);
+    try {
+      const result = await clearProviderMappingPeriod({ mappingId: entry.id, expectedUpdatedAt: entry.updatedAt });
+      setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
+      if (result.ok && typeof window !== "undefined") window.location.reload();
+      return result;
+    } catch (error) {
+      const result = {
+        ok: false,
+        message: error instanceof Error ? error.message : "Unable to clear this mapping period."
+      };
+      setSaveNotice({ kind: "error", message: result.message });
+      return result;
+    } finally {
+      setSavingIndexes(new Set());
+    }
+  }
+
 
 
   return <div className="worksheet-form">
@@ -1026,7 +1048,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions">{previousPayment && !row.paymentMethodId && paymentMethodById.has(previousPayment.paymentMethodId) ? <button type="button" className="button secondary compact" disabled={!canEditRow} onClick={() => usePreviousPaymentDetails(index)}>Use previous payment details</button> : null}<button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton loadMappingAudit entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
+          <div className="mapping-row-actions">{previousPayment && !row.paymentMethodId && paymentMethodById.has(previousPayment.paymentMethodId) ? <button type="button" className="button secondary compact" disabled={!canEditRow} onClick={() => usePreviousPaymentDetails(index)}>Use previous payment details</button> : null}<button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton canClearMappingPeriod={canEdit && !isSaving} loadMappingAudit entries={row.history} onClearMappingPeriod={clearSavedMappingPeriod} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
         </div>;
       })}{!paginatedIndexes.length ? <div className="empty-state"><strong>No matching provider members.</strong><p className="subtle">Change or clear the filters to see more records.</p></div> : null}</div>
       <div className="mapping-pagination">

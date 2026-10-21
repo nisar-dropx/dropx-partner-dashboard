@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   paymentAllocationDisplayStatus,
@@ -47,18 +47,25 @@ export function PaymentAllocationHistoryButton({
   entries,
   subjectLabel,
   buttonLabel = "History",
-  loadMappingAudit = false
+  loadMappingAudit = false,
+  canClearMappingPeriod = false,
+  onClearMappingPeriod
 }: {
   entries: PaymentAllocationHistoryEntry[];
   subjectLabel: string;
   buttonLabel?: string;
   loadMappingAudit?: boolean;
+  canClearMappingPeriod?: boolean;
+  onClearMappingPeriod?: (entry: PaymentAllocationHistoryEntry) => Promise<{ ok: boolean; message: string }>;
 }) {
   const [open, setOpen] = useState(false);
   const [audit, setAudit] = useState<Record<string, MappingAuditEvent[]>>({});
   const [auditError, setAuditError] = useState("");
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditRetry, setAuditRetry] = useState(0);
+  const [clearTargetId, setClearTargetId] = useState("");
+  const [clearingEntryId, setClearingEntryId] = useState("");
+  const [clearError, setClearError] = useState("");
   const idsKey = entries.map(entry => entry.id).sort().join(",");
   useEffect(() => {
     if (!open || !loadMappingAudit || !idsKey) return;
@@ -80,6 +87,34 @@ export function PaymentAllocationHistoryButton({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<HTMLElement>(null);
+  const clearPendingRef = useRef(false);
+  clearPendingRef.current = Boolean(clearingEntryId);
+
+  const closeModal = useCallback(() => {
+    if (clearPendingRef.current) return;
+    setClearTargetId("");
+    setClearError("");
+    setOpen(false);
+  }, []);
+
+  async function clearMappingPeriod(entry: PaymentAllocationHistoryEntry) {
+    if (!onClearMappingPeriod || clearPendingRef.current) return;
+    setClearingEntryId(entry.id);
+    setClearError("");
+    try {
+      const result = await onClearMappingPeriod(entry);
+      if (!result.ok) {
+        setClearError(result.message || "The mapping could not be cleared. Try again.");
+        return;
+      }
+      setClearTargetId("");
+      setOpen(false);
+    } catch (error) {
+      setClearError(error instanceof Error ? error.message : "The mapping could not be cleared. Try again.");
+    } finally {
+      setClearingEntryId("");
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -88,7 +123,7 @@ export function PaymentAllocationHistoryButton({
     function handleModalKeys(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        setOpen(false);
+        if (!clearPendingRef.current) closeModal();
         return;
       }
       if (event.key !== "Tab") return;
@@ -111,13 +146,13 @@ export function PaymentAllocationHistoryButton({
       document.removeEventListener("keydown", handleModalKeys);
       trigger?.focus();
     };
-  }, [open]);
+  }, [open, closeModal]);
 
   const today = todayIso();
   const modal = open && typeof document !== "undefined"
     ? createPortal(
       <div className="modal-backdrop payment-history-backdrop" onMouseDown={(event) => {
-        if (event.target === event.currentTarget) setOpen(false);
+        if (event.target === event.currentTarget) closeModal();
       }}>
         <section aria-labelledby={titleId} aria-modal="true" className="modal-panel wide payment-history-modal" ref={modalRef} role="dialog">
           <div className="panel-head payment-history-head">
@@ -125,7 +160,7 @@ export function PaymentAllocationHistoryButton({
               <h2 id={titleId}>Payment method history</h2>
               <p className="subtle">{subjectLabel}</p>
             </div>
-            <button className="button secondary compact" onClick={() => setOpen(false)} ref={closeRef} type="button">Close</button>
+            <button className="button secondary compact" disabled={Boolean(clearingEntryId)} onClick={closeModal} ref={closeRef} type="button">Close</button>
           </div>
           <div className="payment-history-body">
             {auditLoading ? <p role="status">Loading update history…</p> : null}
@@ -133,6 +168,7 @@ export function PaymentAllocationHistoryButton({
             {entries.length ? <div className="payment-history-list">
               {entries.map((entry) => {
                 const displayStatus = paymentAllocationDisplayStatus(entry, today);
+                const locationLabel = entry.locationLabel?.trim() || "selected location";
                 return <article className="payment-history-entry" key={entry.id}>
                   <div className="payment-history-entry-head">
                     <div>
@@ -159,6 +195,18 @@ export function PaymentAllocationHistoryButton({
                   </p> : null}
                   {loadMappingAudit && !auditLoading && !auditError ? <div className="mapping-audit-list"><strong>Updated by · date and time</strong>{audit[entry.id]?.length ? audit[entry.id].map(event => <div key={event.id}><b>{event.action}</b> · {event.actor} · <time dateTime={event.at}>{mappingAuditDateTime(event.at)}</time></div>) : <span className="subtle">No updater information was recorded for this entry.</span>}</div> : null}
                   {entry.reason ? <p className="payment-history-reason"><b>Reason:</b> {entry.reason}</p> : null}
+                  {(canClearMappingPeriod || clearTargetId === entry.id || clearingEntryId === entry.id) && onClearMappingPeriod && Boolean(entry.updatedAt) && entry.storedStatus.trim().toLowerCase() !== "cancelled" ? <div className="payment-history-clear">
+                    {clearTargetId === entry.id ? <div aria-label={`Confirm clearing ${locationLabel} mapping from ${readableDate(entry.effectiveFrom)} to ${readableDate(entry.effectiveTo)}`} className="payment-history-clear-confirmation" role="group">
+                      <strong>Clear the {locationLabel} location-period?</strong>
+                      <p><b>{readableDate(entry.effectiveFrom)} – {readableDate(entry.effectiveTo)}</b>{entry.sourceLabel ? <> · {entry.sourceLabel}</> : null}</p>
+                      <p>Both the DropX mapping and the payment method/rates for only this location-period will become unmapped. History remains available, and all other locations and periods remain unchanged.</p>
+                      {clearError ? <p className="error-text" role="alert">{clearError}</p> : null}
+                      <div className="toolbar-actions">
+                        <button className="button secondary compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(""); setClearError(""); }} type="button">Cancel</button>
+                        <button aria-busy={clearingEntryId === entry.id} className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => void clearMappingPeriod(entry)} type="button">{clearingEntryId === entry.id ? "Clearing…" : "Clear and save"}</button>
+                      </div>
+                    </div> : <button className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(entry.id); setClearError(""); }} type="button">Clear mapping</button>}
+                  </div> : null}
                 </article>;
               })}
             </div> : <div className="empty-state payment-history-empty"><strong>No saved payment history</strong><p className="subtle">A history entry will appear after a payment method is allocated.</p></div>}
@@ -170,7 +218,7 @@ export function PaymentAllocationHistoryButton({
     : null;
 
   return <>
-    <button aria-expanded={open} aria-haspopup="dialog" className="button secondary compact payment-history-button" onClick={() => setOpen(true)} ref={triggerRef} type="button">
+    <button aria-expanded={open} aria-haspopup="dialog" className="button secondary compact payment-history-button" onClick={() => { setClearTargetId(""); setClearError(""); setOpen(true); }} ref={triggerRef} type="button">
       {buttonLabel}{entries.length ? ` (${entries.length})` : ""}
     </button>
     {modal}
