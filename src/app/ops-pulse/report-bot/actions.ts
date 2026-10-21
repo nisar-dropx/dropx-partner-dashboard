@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
-import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
+import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isTestingGroupName, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
   generateWorkerToken,
@@ -91,9 +91,9 @@ async function pushWorkerConfig(settings: ReportBotSettings) {
 }
 
 async function scopedGroup(authorization: AuthorizationContext, companyId: string, groupId: string) {
-  const group = check(await reportBotDb().from("report_bot_groups").select("id,location_id,is_enabled,wa_group_id,mode").eq("company_id", companyId).eq("id", groupId).maybeSingle(), "Load group");
+  const group = check(await reportBotDb().from("report_bot_groups").select("id,location_id,is_enabled,wa_group_id,mode,group_name").eq("company_id", companyId).eq("id", groupId).maybeSingle(), "Load group");
   if (!group || !canSeeGroup(authorization, group)) throw new Error("This group is not available to you.");
-  return group as { id: string; location_id: string | null; is_enabled: boolean; wa_group_id: string; mode: GroupMode };
+  return group as { id: string; location_id: string | null; is_enabled: boolean; wa_group_id: string; mode: GroupMode; group_name: string | null };
 }
 
 export async function saveBotSettings(form: FormData) {
@@ -360,8 +360,12 @@ export async function approveFeedback(form: FormData) {
     const feedback = requiredText(form, "feedback_text", "Feedback", 3000);
     const settings = await loadReportBotSettings(companyId);
     const group = await scopedGroup(authorization, companyId, submission.group_id);
-    if (!canSendToGroup(settings.mode, group.mode ?? "observe")) {
-      throw new Error("Company must be Live and this group must be Review or Live to send a reply.");
+    if (!canSendToGroup(settings.mode, group.mode ?? "observe", group.group_name)) {
+      throw new Error("Company must be Live and this group must be Review or Live to send a reply. For the Testing pilot, keep company Live — replies are allowed there.");
+    }
+    // Testing pilot: bump Observe → Review so drafts stay approvable after the first send.
+    if (isTestingGroupName(group.group_name) && (group.mode ?? "observe") === "observe") {
+      await reportBotDb().from("report_bot_groups").update({ mode: "review", updated_at: new Date().toISOString() }).eq("id", group.id);
     }
     // Conditional on the status we expect, so two reviewers can't both send it.
     const updated = check(await reportBotDb().from("report_bot_submissions").update({
@@ -396,14 +400,23 @@ export async function sendAllWaiting() {
   await mutate("review", async ({ authorization, companyId }) => {
     const settings = await loadReportBotSettings(companyId);
     const waiting = check(await reportBotDb().from("report_bot_submissions")
-      .select("id,company_id,group_id,wa_message_id,sender_jid,feedback_text, group:report_bot_groups(location_id)")
+      .select("id,company_id,group_id,wa_message_id,sender_jid,feedback_text, group:report_bot_groups(location_id,mode,is_enabled,group_name)")
       .eq("company_id", companyId).eq("status", "awaiting_approval").order("message_at").limit(25), "Load waiting") as unknown as Array<{
-        id: string; company_id: string; group_id: string; wa_message_id: string; sender_jid: string | null; feedback_text: string | null; group: { location_id: string | null } | null;
+        id: string; company_id: string; group_id: string; wa_message_id: string; sender_jid: string | null; feedback_text: string | null;
+        group: { location_id: string | null; mode: GroupMode; is_enabled: boolean; group_name: string | null } | null;
       }>;
-    const sendable = waiting.filter((row) => row.feedback_text?.trim() && canSeeGroup(authorization, { location_id: row.group?.location_id ?? null }));
-    if (!sendable.length) throw new Error("Nothing is waiting that has a reply ready.");
+    const sendable = waiting.filter((row) =>
+      row.feedback_text?.trim()
+      && row.group?.is_enabled
+      && canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })
+      && canSendToGroup(settings.mode, row.group?.mode ?? "observe", row.group?.group_name)
+    );
+    if (!sendable.length) throw new Error("Nothing is waiting that can be sent (need company Live and group Review/Live, or Testing).");
     const approved: string[] = [];
     for (const row of sendable) {
+      if (isTestingGroupName(row.group?.group_name) && (row.group?.mode ?? "observe") === "observe") {
+        await reportBotDb().from("report_bot_groups").update({ mode: "review", updated_at: new Date().toISOString() }).eq("id", row.group_id);
+      }
       const updated = check(await reportBotDb().from("report_bot_submissions").update({
         status: "queued_to_send", reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString()
       }).eq("id", row.id).eq("status", "awaiting_approval").select("id"), "Approve") as Array<{ id: string }>;
@@ -432,8 +445,11 @@ export async function sendTestReminder(form: FormData) {
     if (!schedule) throw new Error("Schedule not found.");
     await scopedGroup(authorization, companyId, schedule.group_id);
     if (!schedule.group?.is_enabled) throw new Error("This group is not on the bot. Add it on the Groups tab first.");
-    if (!canSendToGroup(settings.mode, schedule.group.mode ?? "observe")) {
-      throw new Error("This group is in Observe mode. Switch it to Review (or Live) before sending a test reminder.");
+    if (!canSendToGroup(settings.mode, schedule.group.mode ?? "observe", schedule.group.group_name)) {
+      throw new Error("This group is in Observe mode. Switch it to Review (or Live) before sending a test reminder. Testing may send while company is Live.");
+    }
+    if (isTestingGroupName(schedule.group.group_name) && (schedule.group.mode ?? "observe") === "observe") {
+      await reportBotDb().from("report_bot_groups").update({ mode: "review", updated_at: new Date().toISOString() }).eq("id", schedule.group_id);
     }
     const today = localClock(new Date(), settings.timezone).date;
     const body = renderTemplate(schedule.first_reminder_template, {
@@ -573,26 +589,45 @@ export async function installTcc3Templates() {
   });
 }
 
-/** Create inactive draft schedules for one group from TCC3 templates. Never enables them. */
+/**
+ * Seed TCC3 schedules for one group. On Testing, timed/interval reminders are activated
+ * so the pilot can verify posting; event-driven types stay inactive. Other groups get
+ * inactive drafts only.
+ */
 export async function seedDraftSchedulesForGroup(form: FormData) {
   await mutate("reports", async ({ authorization, companyId }) => {
     const group = await scopedGroup(authorization, companyId, field(form, "group_id"));
     const groupRow = check(await reportBotDb().from("report_bot_groups").select("group_name").eq("id", group.id).single(), "Load group") as { group_name: string | null };
-    if (/tcc3/i.test(groupRow.group_name ?? "") && !/testing/i.test(groupRow.group_name ?? "")) {
+    if (/tcc3/i.test(groupRow.group_name ?? "") && !isTestingGroupName(groupRow.group_name)) {
       throw new Error("Do not seed schedules onto TCC3 · Adayar during the pilot. Use the Testing group, then Duplicate configuration later.");
     }
+    const testing = isTestingGroupName(groupRow.group_name);
     const db = reportBotDb();
     const types = check(await db.from("report_bot_report_types").select("id,slug").eq("company_id", companyId).not("slug", "is", null), "Load types") as Array<{ id: string; slug: string }>;
     const bySlug = new Map(types.map((row) => [row.slug, row.id]));
     let seeded = 0;
+    let activated = 0;
     let skipped = 0;
     for (const template of TCC3_REPORT_TEMPLATES) {
       if (!template.schedule) continue;
       const reportTypeId = bySlug.get(template.slug);
       if (!reportTypeId) throw new Error(`Install TCC3 templates first (missing ${template.slug}).`);
-      const existing = check(await db.from("report_bot_schedules").select("id").eq("group_id", group.id).eq("report_type_id", reportTypeId).maybeSingle(), "Check schedule");
+      const active = testing && template.schedule.schedule_kind !== "event_driven" && template.schedule.reminder_times.length > 0;
+      const existing = check(await db.from("report_bot_schedules").select("id,is_active").eq("group_id", group.id).eq("report_type_id", reportTypeId).maybeSingle(), "Check schedule") as { id: string; is_active: boolean } | null;
       if (existing) {
-        skipped += 1;
+        if (testing && active && !existing.is_active) {
+          check(await db.from("report_bot_schedules").update({
+            is_active: true,
+            reminder_times: template.schedule.reminder_times,
+            due_time: template.schedule.due_time,
+            stop_when_received: template.schedule.stop_when_received,
+            schedule_kind: template.schedule.schedule_kind,
+            updated_at: new Date().toISOString()
+          }).eq("id", existing.id), "Activate schedule");
+          activated += 1;
+        } else {
+          skipped += 1;
+        }
         continue;
       }
       check(await db.from("report_bot_schedules").insert({
@@ -605,15 +640,23 @@ export async function seedDraftSchedulesForGroup(form: FormData) {
         first_reminder_template: template.schedule.first_reminder_template,
         followup_template: template.schedule.followup_template,
         overdue_template: template.schedule.overdue_template,
-        is_active: false,
+        is_active: active,
         stop_when_received: template.schedule.stop_when_received,
         review_only: template.schedule.review_only,
         schedule_kind: template.schedule.schedule_kind,
         created_by: authorization.userId
       }), "Seed schedule");
       seeded += 1;
+      if (active) activated += 1;
     }
-    return { notice: `Draft schedules for ${groupRow.group_name ?? "group"}: ${seeded} created (inactive), ${skipped} already present. Confirm timings before enabling any.` };
+    if (testing) {
+      check(await db.from("report_bot_groups").update({ mode: "review", updated_at: new Date().toISOString() }).eq("id", group.id), "Set Testing to Review");
+    }
+    return {
+      notice: testing
+        ? `Testing schedules: ${seeded} created, ${activated} with active reminders, ${skipped} unchanged. Group set to Review so replies can post.`
+        : `Draft schedules for ${groupRow.group_name ?? "group"}: ${seeded} created (inactive), ${skipped} already present.`
+    };
   });
 }
 
@@ -667,16 +710,19 @@ export async function approveReviewItem(form: FormData) {
     const feedback = requiredText(form, "feedback_text", "Feedback", 3000);
     const settings = await loadReportBotSettings(companyId);
     const row = check(await reportBotDb().from("report_bot_review_items")
-      .select("id,group_id,submission_id,review_status, primary_event:report_bot_inbound_events(wa_message_id,sender_jid), group:report_bot_groups(location_id,mode,is_enabled)")
+      .select("id,group_id,submission_id,review_status, primary_event:report_bot_inbound_events(wa_message_id,sender_jid), group:report_bot_groups(location_id,mode,is_enabled,group_name)")
       .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load review") as unknown as {
         id: string; group_id: string; submission_id: string | null; review_status: string;
         primary_event: { wa_message_id: string; sender_jid: string | null } | null;
-        group: { location_id: string | null; mode: GroupMode; is_enabled: boolean } | null;
+        group: { location_id: string | null; mode: GroupMode; is_enabled: boolean; group_name: string | null } | null;
       } | null;
     if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
     if (!["draft_ready", "observe_only"].includes(row.review_status)) throw new Error("This item was already handled.");
-    if (!row.group?.is_enabled || !canSendToGroup(settings.mode, row.group.mode ?? "observe")) {
-      throw new Error("Company must be Live and this group must be Review or Live to send.");
+    if (!row.group?.is_enabled || !canSendToGroup(settings.mode, row.group.mode ?? "observe", row.group.group_name)) {
+      throw new Error("Company must be Live and this group must be Review or Live to send. Testing may send while company is Live.");
+    }
+    if (isTestingGroupName(row.group.group_name) && (row.group.mode ?? "observe") === "observe") {
+      await reportBotDb().from("report_bot_groups").update({ mode: "review", updated_at: new Date().toISOString() }).eq("id", row.group_id);
     }
     const updated = check(await reportBotDb().from("report_bot_review_items").update({
       review_status: "approved",

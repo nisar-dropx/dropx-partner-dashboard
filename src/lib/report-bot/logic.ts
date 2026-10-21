@@ -327,13 +327,30 @@ export function reviewStatusFor(groupMode: GroupMode, decision: DeliveryDecision
   return "draft_ready";
 }
 
-/** Manual WhatsApp send / test reminder allowed for this group. */
-export function canSendToGroup(companyMode: BotMode, groupMode: GroupMode) {
-  return companyMode === "live" && (groupMode === "review" || groupMode === "live");
+/** Pilot WhatsApp group used for safe end-to-end send/reminder tests. */
+export function isTestingGroupName(name: string | null | undefined) {
+  return /^testing$/i.test(String(name ?? "").trim());
+}
+
+/**
+ * Manual WhatsApp send / test reminder allowed for this group.
+ * The Testing pilot group may send while company is Live even if still on Observe,
+ * so replies can be verified without flipping production groups.
+ */
+export function canSendToGroup(companyMode: BotMode, groupMode: GroupMode, groupName?: string | null) {
+  if (companyMode !== "live") return false;
+  if (groupMode === "review" || groupMode === "live") return true;
+  return isTestingGroupName(groupName);
 }
 
 export function canAutoSendToGroup(companyMode: BotMode, groupMode: GroupMode) {
   return companyMode === "live" && groupMode === "live";
+}
+
+/** Effective review behaviour: Testing in Observe still produces approvable drafts. */
+export function effectiveGroupModeForReview(groupMode: GroupMode, groupName?: string | null): GroupMode {
+  if (groupMode === "observe" && isTestingGroupName(groupName)) return "review";
+  return groupMode;
 }
 
 /**

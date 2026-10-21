@@ -5,6 +5,8 @@ import {
   composeFeedback,
   decideDelivery,
   decideGroupDelivery,
+  effectiveGroupModeForReview,
+  isTestingGroupName,
   dueReminderSteps,
   extractJsonText,
   findCorrelationBundle,
@@ -126,6 +128,19 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(reviewStatusFor("review", "needs_approval", true), "draft_ready");
   assert.equal(canSendToGroup("live", "review"), true);
   assert.equal(canSendToGroup("live", "observe"), false);
+  assert.equal(canSendToGroup("live", "observe", "Testing"), true, "Testing pilot may send while company is Live");
+  assert.equal(canSendToGroup("live", "observe", "  testing  "), true, "Testing name is trimmed/case-insensitive");
+  assert.equal(canSendToGroup("live", "observe", "TCC3 · Adayar"), false);
+  assert.equal(canSendToGroup("live", "observe", "Testing War Room"), false, "partial name must not match");
+  assert.equal(canSendToGroup("listen", "review", "Testing"), false, "company must be Live even for Testing");
+  assert.equal(canSendToGroup("off", "live", "Testing"), false);
+  assert.equal(canSendToGroup("live", "live", "TCC3 · Adayar"), true);
+  assert.equal(isTestingGroupName("Testing"), true);
+  assert.equal(isTestingGroupName(null), false);
+  assert.equal(isTestingGroupName(""), false);
+  assert.equal(effectiveGroupModeForReview("observe", "Testing"), "review");
+  assert.equal(effectiveGroupModeForReview("live", "Testing"), "live");
+  assert.equal(effectiveGroupModeForReview("observe", "TCC3 · Adayar"), "observe");
   assert.equal(findCorrelationBundle([{ id: "a", bundle_id: null, message_at: "2026-10-21T10:00:00Z" }], new Date("2026-10-21T10:05:00Z"), 10), "a");
   assert.equal(findCorrelationBundle([{ id: "a", bundle_id: null, message_at: "2026-10-21T09:00:00Z" }], new Date("2026-10-21T10:05:00Z"), 10), null);
   assert.ok(previewReminderSlots(["09:00", "10:00", "15:00"], "18:00", 10 * 60).upcoming.length >= 1);

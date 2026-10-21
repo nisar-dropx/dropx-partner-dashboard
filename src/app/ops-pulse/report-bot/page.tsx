@@ -165,19 +165,19 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
 
         <div className={s.tiles}>
           <Link className={s.tile} href={`${SETUP_HREF}#mode`}>
-            <span className={`${s.tileIcon} ${settings.mode === "live" ? s.good : settings.mode === "listen" ? s.warn : ""}`}><Bot size={18} aria-hidden /></span>
+            <span className={`${s.tileIcon} ${settings.mode === "live" ? s.good : settings.mode === "listen" ? s.warn : ""}`}><Bot size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>Mode</span><div className={s.tileValue}>{modeLabel}</div><div className={s.tileHint}>{settings.mode === "live" ? "Sends reminders and replies" : settings.mode === "listen" ? "Checks photos, sends nothing" : "Not listening to groups"}</div></span>
           </Link>
           <Link className={s.tile} href={`${SETUP_HREF}#whatsapp`}>
-            <span className={`${s.tileIcon} ${s[linked ? "good" : "bad"]}`}><Smartphone size={18} aria-hidden /></span>
+            <span className={`${s.tileIcon} ${s[linked ? "good" : "bad"]}`}><Smartphone size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>WhatsApp</span><div className={s.tileValue}>{linked ? "Connected" : "Not linked"}</div><div className={s.tileHint}>{settings.connected_number ? `+${settings.connected_number}` : "Link a number to start"}</div></span>
           </Link>
           <Link className={s.tile} href={`${SETUP_HREF}#worker`}>
-            <span className={`${s.tileIcon} ${s[workerOnline ? "good" : settings.last_worker_seen_at ? "warn" : "bad"]}`}><Server size={18} aria-hidden /></span>
+            <span className={`${s.tileIcon} ${s[workerOnline ? "good" : settings.last_worker_seen_at ? "warn" : "bad"]}`}><Server size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>Worker</span><div className={s.tileValue}>{workerOnline ? "Online" : settings.last_worker_seen_at ? "Not responding" : "Not started"}</div><div className={s.tileHint}>{settings.last_worker_seen_at ? `Last seen ${when(settings.last_worker_seen_at, settings.timezone)}` : "Start it from Setup"}</div></span>
           </Link>
           <Link className={s.tile} href={`${SETUP_HREF}#ai`}>
-            <span className={`${s.tileIcon} ${s[aiReady ? "good" : "bad"]}`}><Sparkles size={18} aria-hidden /></span>
+            <span className={`${s.tileIcon} ${s[aiReady ? "good" : "bad"]}`}><Sparkles size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>AI check</span><div className={s.tileValue}>{aiReady ? `${aiProviderLabel(settings.ai_provider)} ready` : "Key missing"}</div><div className={s.tileHint}>{aiReady ? settings.ai_model : `Add ${aiKeyName(settings.ai_provider)} in Vercel`}</div></span>
           </Link>
         </div>
@@ -190,17 +190,17 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         ) : null}
 
         {await MigrationWarning()}
-        <div className={`${s.flash} ${s.flashSuccess}`} role="note">
-          <Bot size={18} aria-hidden />
+        <div className={`${s.flash} ${s.flashSuccess} ${s.flashCompact}`} role="note">
+          <Bot size={14} aria-hidden />
           <div>
-            <strong>Operational groups only</strong>
-            Private chats are never read. Disabled groups are forgotten immediately. Pilot work must stay on the <strong>Testing</strong> group — do not enable or message <strong>TCC3 · Adayar</strong> until you use Duplicate configuration after Observe → Review.
+            <strong>Pilot:</strong>
+            Use <strong>Testing</strong> only. Do not enable or message <strong>TCC3 · Adayar</strong> until Duplicate configuration after Observe → Review. Private chats are never read.
           </div>
         </div>
         <FlashMessage />
 
         <ReportBotNav active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
-        <div className={s.formActions} style={{ marginBottom: 12 }}>
+        <div className={s.formActions} style={{ marginBottom: 8 }}>
           <Link className={`${s.button} ${s.small} ${tab === "actions" ? s.primary : ""}`} href="/report-bot?tab=actions">Open actions</Link>
           <Link className={`${s.button} ${s.small} ${tab === "summary" ? s.primary : ""}`} href="/report-bot?tab=summary">Daily site summary</Link>
         </div>
@@ -828,9 +828,9 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
             {testingGroup ? (
               <form action={seedDraftSchedulesForGroup}>
                 <input type="hidden" name="group_id" value={testingGroup.id} />
-                <ActionButton className={s.button} confirm="Create inactive draft schedules for the Testing group only?">Seed draft schedules for Testing</ActionButton>
+                <ActionButton className={s.button} confirm="Seed TCC3 schedules on Testing, activate timed reminders, and set the group to Review so replies can post?">Seed &amp; activate Testing reminders</ActionButton>
               </form>
-            ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed draft schedules.</span>}
+            ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed reminders.</span>}
           </div>
         ) : null}
         <div className={s.itemList}>

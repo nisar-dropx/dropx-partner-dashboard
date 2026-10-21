@@ -104,10 +104,10 @@ export function FlashMessage() {
   const flash = readFlash();
   if (!flash.error && !flash.notice) return null;
   return (
-    <div className={`${s.flash} ${flash.error ? s.flashError : s.flashSuccess}`} role={flash.error ? "alert" : "status"}>
-      {flash.error ? <AlertTriangle size={18} aria-hidden /> : <CheckCircle2 size={18} aria-hidden />}
+    <div className={`${s.flash} ${s.flashCompact} ${flash.error ? s.flashError : s.flashSuccess}`} role={flash.error ? "alert" : "status"}>
+      {flash.error ? <AlertTriangle size={14} aria-hidden /> : <CheckCircle2 size={14} aria-hidden />}
       <div>
-        <strong>{flash.error ? "That didn't work" : "Done"}</strong>
+        <strong>{flash.error ? "That didn't work." : "Done."}</strong>
         {flash.error ?? flash.notice}
         {flash.token ? (
           <div className={s.tokenBox}>
@@ -125,10 +125,10 @@ export async function MigrationWarning() {
   const missing = await missingReportBotMigrations().catch(() => []);
   if (!missing.length) return null;
   return (
-    <div className={`${s.flash} ${s.flashError}`} role="alert">
-      <AlertTriangle size={18} aria-hidden />
+    <div className={`${s.flash} ${s.flashCompact} ${s.flashError}`} role="alert">
+      <AlertTriangle size={14} aria-hidden />
       <div>
-        <strong>Database update needed</strong>
+        <strong>Database update needed.</strong>
         Apply {missing.length === 1 ? "this migration" : "these migrations"} to the Supabase project, in this order:
         <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
           {missing.map((item) => <li key={item.migration}><code>{item.migration}</code> — until then {item.effect}.</li>)}

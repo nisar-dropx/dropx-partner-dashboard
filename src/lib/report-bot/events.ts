@@ -6,6 +6,7 @@ import {
   composeFeedback,
   decideGroupDelivery,
   displayDate,
+  effectiveGroupModeForReview,
   findCorrelationBundle,
   localClock,
   mentionFor,
@@ -195,7 +196,8 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
       station: { station_code: string; station_name: string | null } | null;
     };
   if (!group.is_enabled) return;
-  const groupMode: GroupMode = group.mode === "review" || group.mode === "live" ? group.mode : "observe";
+  const storedMode: GroupMode = group.mode === "review" || group.mode === "live" ? group.mode : "observe";
+  const groupMode = effectiveGroupModeForReview(storedMode, group.group_name);
 
   const windowMinutes = Number(settings.correlation_window_minutes ?? 10);
   let bundleId = event.bundle_id;

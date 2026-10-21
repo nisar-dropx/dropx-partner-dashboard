@@ -106,8 +106,8 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
   for (const request of requests) {
     const schedule = request.schedule;
     if (!schedule || !schedule.is_active || !request.report?.is_active || !request.group?.is_enabled) continue;
-    // Observe groups never receive reminders; Review/Live may when company is live.
-    if (!canSendToGroup(settings.mode, request.group.mode ?? "observe")) continue;
+    // Observe groups never receive reminders; Review/Live (and Testing pilot) may when company is live.
+    if (!canSendToGroup(settings.mode, request.group.mode ?? "observe", request.group.group_name)) continue;
     if ((schedule as ScheduleRow & { schedule_kind?: string }).schedule_kind === "event_driven") continue;
     // A received report ends the day's reminders unless the schedule asks at every interval.
     const received = request.status === "received";
@@ -450,12 +450,12 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
         continue;
       }
     }
-    const group = must(await db.from("report_bot_groups").select("wa_group_id,is_enabled,bot_in_group,mode").eq("id", item.group_id).single(), "Load group") as Pick<GroupRow, "wa_group_id" | "is_enabled" | "bot_in_group" | "mode">;
+    const group = must(await db.from("report_bot_groups").select("wa_group_id,group_name,is_enabled,bot_in_group,mode").eq("id", item.group_id).single(), "Load group") as Pick<GroupRow, "wa_group_id" | "group_name" | "is_enabled" | "bot_in_group" | "mode">;
     if (!group.is_enabled) {
       await release({ status: "cancelled", status_reason: "Group is disabled." });
       continue;
     }
-    if (!canSendToGroup(settings.mode, group.mode ?? "observe")) {
+    if (!canSendToGroup(settings.mode, group.mode ?? "observe", group.group_name)) {
       await release({ status: "cancelled", status_reason: "Group is in Observe mode (or the company bot is not Live)." });
       continue;
     }
