@@ -4,7 +4,44 @@ export function canViewInterimSalary(account: { profileType: string; workspace?:
 }
 
 type Money = number | string | null;
-export type SalaryItem = { code: string; name: string; item_type: string; amount: Money; display_order: number };
+export type SalaryItem = {
+  code: string;
+  name: string;
+  item_type: string;
+  amount: Money;
+  display_order: number;
+  source?: string | null;
+  metadata?: unknown;
+};
+
+function metaRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/** Manual + Ops loss lines stay as separate case splits on salary calculation (payslip merges them). */
+export function isLossRecoverySalaryItem(item: Pick<SalaryItem, "code" | "source">) {
+  const code = String(item.code ?? "").toUpperCase();
+  return code === "LOSS_DEDUCTION" || code === "OPS_LOSS_RECOVERY" || item.source === "ops_loss_recovery";
+}
+
+/** Prefer the payroll label; fall back to month · TID from metadata when the name is generic. */
+export function lossRecoverySplitLabel(item: Pick<SalaryItem, "code" | "name" | "source" | "metadata">) {
+  const name = String(item.name || "").trim();
+  const meta = metaRecord(item.metadata);
+  const month = typeof meta.month === "string" ? meta.month : "";
+  const caseKey = typeof meta.case_key === "string" ? meta.case_key : "";
+  const tid = caseKey.replace(/^slp:/i, "");
+  const generic = !name
+    || /^loss(\s+recovery)?(\s+deduction)?$/i.test(name)
+    || name.toUpperCase() === "LOSS_DEDUCTION"
+    || name.toUpperCase() === "OPS_LOSS_RECOVERY";
+  if (!generic) return name;
+  if (!month && !tid) return name || "Loss recovery";
+  const parts = ["Loss recovery"];
+  if (month) parts.push(month);
+  if (tid) parts.push(tid);
+  return parts.join(" · ");
+}
 export type SalaryPerson = {
   id: string; run_id: string; gross_pay: Money; other_earnings: Money; net_pay: Money; adjusted_net_pay: Money;
   payable_days: Money; expected_days: Money; present_days: Money; half_days: Money; absence_days: Money;
@@ -63,7 +100,14 @@ export function buildInterimSalary(run: SalaryRun, person: SalaryPerson | null, 
   const net = person ? money(money(person.adjusted_net_pay ?? person.net_pay) + (person.adjusted_net_pay == null && legacyHold ? hold : 0)) : null;
   const payable = net == null ? null : Math.max(0, money(legacyHold && person?.adjusted_net_pay != null ? person.adjusted_net_pay : net - hold));
   const earnings = items.filter(row => row.item_type === "earning" && money(row.amount) !== 0).map(row => ({ name: row.name, amount: money(row.amount) }));
-  const deductions = items.filter(row => row.item_type === "deduction" && row.code.toUpperCase() !== "SALARY_HOLD" && money(row.amount) !== 0).map(row => ({ name: row.name, amount: money(row.amount) }));
+  // Loss recoveries are never rolled up here — each case/instalment stays its own split line.
+  const deductions = items
+    .filter(row => row.item_type === "deduction" && row.code.toUpperCase() !== "SALARY_HOLD" && money(row.amount) !== 0)
+    .map(row => ({
+      name: isLossRecoverySalaryItem(row) ? lossRecoverySplitLabel(row) : row.name,
+      amount: money(row.amount),
+      lossSplit: isLossRecoverySalaryItem(row),
+    }));
   const totalEarnings = person ? money(money(person.gross_pay) + money(person.other_earnings)) : null;
   const deductionTotal = money(deductions.reduce((sum, row) => sum + row.amount, 0));
   // Explicitly reconcile manual net changes/legacy snapshots instead of inventing a deduction label.

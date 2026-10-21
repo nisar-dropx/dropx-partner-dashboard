@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Files, Info, RefreshCw, WalletCards } from "lucide-react";
 import type { AppAccount } from "./connect-profile-app";
 import type { InterimSalary } from "../lib/interim-salary";
+import { ConnectLossRecoveries } from "./connect-loss-recoveries";
 import styles from "./connect-interim-salary.module.css";
 
 const money = (amount: number | null) => amount == null ? "—" : amount.toLocaleString("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 });
@@ -77,7 +78,19 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
           {salary.net == null ? <p className={styles.helper}>The breakup is unavailable. Payment history is shown below.</p> : <>
             <div className={styles.breakup}>
               <section><h3>Earnings</h3>{salary.earnings.map((row, index) => <div className={styles.line} key={index}><span>{row.name}</span><b>{money(row.amount)}</b></div>)}<div className={styles.total}><span>Total earnings</span><b>{money(salary.totalEarnings)}</b></div></section>
-              <section><h3>Deductions</h3>{salary.deductions.length ? salary.deductions.map((row, index) => <div className={styles.line} key={index}><span>{row.name}</span><b>{money(row.amount)}</b></div>) : <p className={styles.helper}>No deductions in this calculation.</p>}<div className={styles.total}><span>Total deductions</span><b>{money(salary.deductionTotal)}</b></div></section>
+              <section>
+                <h3>Deductions</h3>
+                {salary.deductions.length ? salary.deductions.map((row, index) => (
+                  <div className={styles.line} key={index}>
+                    <span>
+                      {row.name}
+                      {row.lossSplit ? <small className={styles.helper}>Loss case split · payslip combines these as Loss Recovery Deduction</small> : null}
+                    </span>
+                    <b>{money(row.amount)}</b>
+                  </div>
+                )) : <p className={styles.helper}>No deductions in this calculation.</p>}
+                <div className={styles.total}><span>Total deductions</span><b>{money(salary.deductionTotal)}</b></div>
+              </section>
             </div>
             {salary.reconciliation !== 0 ? <div className={styles.line}><span>Payroll adjustment / rounding</span><b>{money(salary.reconciliation)}</b></div> : null}
             {salary.hold > 0 ? <div className={styles.line}><span>Salary on hold</span><b>{money(salary.hold)}</b></div> : null}
@@ -86,6 +99,7 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
         </details>
         {salary.calculatedAt ? <p className={styles.helper}>Payroll snapshot updated {new Date(salary.calculatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST.</p> : null}
       </div>
+      <ConnectLossRecoveries accountId={account.id} profileType={account.profileType} />
       {salary.attendance ? <div className={styles.card}><details key={`attendance-${salary.id}`}><summary><span>Days used in payroll <b>{salary.attendance.payable} / {salary.attendance.expected}</b></span><ChevronRight size={18}/></summary><PayrollDays attendance={salary.attendance}/><p className={styles.helper}>Calculation: {date(salary.calculatedFrom)} – {date(salary.calculatedThrough)}. Attendance corrections appear here after payroll is recalculated.</p>{onAttendance ? <button className={styles.textButton} onClick={onAttendance}>Review attendance <ChevronRight size={16}/></button> : null}</details></div> : null}
       <div className={styles.card}><details open key={`history-${salary.id}`}><summary>Payment history <ChevronRight size={18}/></summary>{salary.history.length ? <ul className={styles.history}>{salary.history.map(row => <li key={row.id}><div><strong>{money(row.amount)}</strong><span className={row.status === "paid" ? styles.paid : styles.pending}>{paymentLabels[row.status] ?? "Under review"}</span></div><small>Value date {date(row.date)} · {row.utr ? `UTR ${row.utr}` : `Reference ${row.reference}`}</small></li>)}</ul> : <p className={styles.helper}>No bank-confirmed payment recorded.</p>}</details></div>
     </>}

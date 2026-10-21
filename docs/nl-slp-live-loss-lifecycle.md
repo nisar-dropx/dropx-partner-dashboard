@@ -41,9 +41,9 @@ Station claim approve           ──► nl_loss_month_cases (report=station, s
 ### Existing states (pre-lifecycle)
 
 - **Case source:** Amazon NL statuses (Master recoverable list), SLP `SLP Initial` / `SLP Final`, station `Approved`.
-- **Cloak dispute request:** `draft` → `submitted` → (`returned` \| `filed`).
-- **Station claim:** `submitted` → (`returned` \| `approved` \| `rejected` \| `withdrawn`).
-- **Ledger line:** `scheduled` \| `in_progress` \| `recovered` \| `needs_review` \| `exit_balance` \| `written_off`.
+- **Cloak dispute request:** `draft` → `submitted` → (`returned`  `filed`).
+- **Station claim:** `submitted` → (`returned`  `approved`  `rejected`  `withdrawn`).
+- **Ledger line:** `scheduled`  `in_progress`  `recovered`  `needs_review`  `exit_balance`  `written_off`.
 
 ### Existing transition functions
 
@@ -226,8 +226,10 @@ supabase migration repair --status applied <version> --linked
 
 ### DropX One payslips
 
-People payslips in Connect map both `LOSS_DEDUCTION` (manual) and `OPS_LOSS_RECOVERY` (Ops NL/SLP)
-to “Loss Recovery Deduction”, matching HRMS `pay-document-input.ts`.
+People payslips in Connect roll every loss into one **Loss Recovery Deduction** row
+(`LOSS_DEDUCTION` + `OPS_LOSS_RECOVERY` / `ops_loss_recovery`). Salary Calculation keeps each
+case/instalment as its own split line (month · TID). DropX One “Loss recoveries” has a details
+modal for month, TID, category and outstanding.
 
 ### Manual-review cases
 

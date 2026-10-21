@@ -50,6 +50,29 @@ test('issued is not paid; failures and returns never inflate paid amounts; insta
   assert.equal(result.deductionTotal, 2000); assert.equal(result.earnings.length, 1);
   assert.equal(result.reconciliation, 0); assert.equal(result.provisional, true);
 });
+test('salary calculation lists each loss recovery split; never merges LOSS_DEDUCTION with OPS lines', () => {
+  const detailed = {
+    ...person,
+    hr_payroll_run_items: [
+      item('BASIC', 20000, 'earning'),
+      item('PF', 2000),
+      { code: 'OPS_LOSS_RECOVERY', name: 'NL loss · Sep 2026 · TID1', item_type: 'deduction', amount: 300, display_order: 3, source: 'ops_loss_recovery', metadata: { month: '2026-09', case_key: 'TID1' } },
+      { code: 'OPS_LOSS_RECOVERY', name: 'Loss', item_type: 'deduction', amount: 200, display_order: 4, source: 'ops_loss_recovery', metadata: { month: '2026-08', case_key: 'slp:TID2' } },
+      { code: 'LOSS_DEDUCTION', name: 'Loss Deduction', item_type: 'deduction', amount: 100, display_order: 5 },
+    ],
+  };
+  const result = salary.buildInterimSalary(run, detailed, [], null);
+  const losses = result.deductions.filter(row => row.lossSplit);
+  assert.equal(losses.length, 3);
+  assert.deepEqual(losses.map(row => [row.name, row.amount]), [
+    ['NL loss · Sep 2026 · TID1', 300],
+    ['Loss recovery · 2026-08 · TID2', 200],
+    ['Loss Deduction', 100],
+  ]);
+  assert.equal(result.deductionTotal, 2600);
+  assert.equal(salary.isLossRecoverySalaryItem({ code: 'OPS_LOSS_RECOVERY', source: 'ops_loss_recovery' }), true);
+  assert.equal(salary.lossRecoverySplitLabel({ code: 'OPS_LOSS_RECOVERY', name: 'Loss', metadata: { month: '2026-08', case_key: 'slp:TID2' } }), 'Loss recovery · 2026-08 · TID2');
+});
 test('hold calculations mirror current and legacy People payroll, including manual adjustments', () => {
   for (const [holdType, net, adjusted, expected] of [['hold', 18000, null, 17000], ['deduction', 17000, null, 17000], ['deduction', 17000, 17500, 17500], ['hold', 18000, 19000, 18000]]) {
     const result = salary.buildInterimSalary(run, { ...person, net_pay: net, adjusted_net_pay: adjusted, hr_payroll_run_items: [...person.hr_payroll_run_items, item('SALARY_HOLD', 1000, holdType)] }, [], null);

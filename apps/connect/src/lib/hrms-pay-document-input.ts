@@ -122,13 +122,18 @@ const VARIABLE_LINES: Record<string, { label: string; order: number }> = {
   EXCEPTION_ADD: { label: "Other Earnings", order: 3 },
   PAY_ADVANCE_RECOVERY: { label: "Advance Deduction", order: 1 },
   MANUAL_ADVANCE: { label: "Advance Deduction", order: 1 },
+  // Payslip prints one LOSS_DEDUCTION row: manual People losses + Ops NL/SLP recoveries.
   LOSS_DEDUCTION: { label: "Loss Recovery Deduction", order: 2 },
-  // Ops Pulse NL/SLP recovery lines from shared payroll (same label as manual LOSS_DEDUCTION).
-  OPS_LOSS_RECOVERY: { label: "Loss Recovery Deduction", order: 2 },
   EXCEPTION_DEBIT: { label: "Other Deductions", order: 3 }
 };
 
 type PayItemAmount = Pick<PayDocumentItemRow, "code" | "item_type" | "amount">;
+
+/** Manual LOSS_DEDUCTION and Ops OPS_LOSS_RECOVERY both print as one Loss Recovery Deduction. */
+export function isLossRecoveryPayItem(item: Pick<PayItemAmount, "code"> & { source?: string | null }) {
+  const code = String(item.code ?? "").toUpperCase();
+  return code === "LOSS_DEDUCTION" || code === "OPS_LOSS_RECOVERY" || item.source === "ops_loss_recovery";
+}
 
 /** A salary hold is pay kept back for now, not a deduction, so it never prints on the payslip. */
 function isSalaryHold(item: PayItemAmount) {
@@ -153,6 +158,8 @@ export function payslipNetPay(netPaid: number, items: PayItemAmount[], grossPay:
 function variableLine(item: PayDocumentItemRow) {
   // Incentive schemes carry their own code and name, so they are recognised by where they came from.
   if (item.item_type === "earning" && item.source === "incentive_scheme") return VARIABLE_LINES.OTHER_INCENTIVE;
+  // All loss recoveries roll into the LOSS_DEDUCTION payslip line (case splits stay on salary calculation).
+  if (isLossRecoveryPayItem(item)) return VARIABLE_LINES.LOSS_DEDUCTION;
   return VARIABLE_LINES[String(item.code ?? "").toUpperCase()] ?? null;
 }
 

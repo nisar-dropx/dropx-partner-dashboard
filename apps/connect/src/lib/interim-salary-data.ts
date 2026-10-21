@@ -21,7 +21,7 @@ export async function loadInterimSalaries(db: SupabaseClient, account: { id: str
   const [runs, people] = await Promise.all([
     db.from("hr_payroll_runs").select("id,label,period_start,period_end,calculation_from,calculation_through,calculated_at,status")
       .eq("company_id", account.companyId).in("id", runIds).order("period_start", { ascending: false }).order("created_at", { ascending: false }),
-    db.from("hr_payroll_run_people").select("id,run_id,gross_pay,other_earnings,net_pay,adjusted_net_pay,payable_days,expected_days,present_days,half_days,absence_days,paid_leave_days,weekoff_days,missing_punch_days,calculation_snapshot,hr_payroll_run_items(code,name,item_type,amount,display_order)")
+    db.from("hr_payroll_run_people").select("id,run_id,gross_pay,other_earnings,net_pay,adjusted_net_pay,payable_days,expected_days,present_days,half_days,absence_days,paid_leave_days,weekoff_days,missing_punch_days,calculation_snapshot,hr_payroll_run_items(code,name,item_type,amount,display_order,source,metadata)")
       .eq("company_id", account.companyId).eq("worker_type", account.profileType).eq("worker_id", account.id).in("run_id", runIds)
   ]);
   if (runs.error || people.error) throw new Error("Unable to load the salary breakup. Please retry.");

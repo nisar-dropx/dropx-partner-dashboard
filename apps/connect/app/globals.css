@@ -18487,3 +18487,21 @@ img.dx-selfie-live {
   .dx-workforce-ui .dx-mobile-nav { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
 }
 .dx-tab-count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#ee4b22;color:#fff;font-size:10px;font-weight:800}
+
+.dx-loss-recoveries{display:grid;gap:12px;padding:18px;background:#fff;border:1px solid #e4e7ec;border-radius:18px;box-shadow:0 8px 22px rgba(16,24,40,.05)}
+.dx-loss-recoveries>header h2{margin:0 0 4px;color:#101828;font-size:17px}
+.dx-loss-recoveries>header p,.dx-loss-recovery-detail-note{margin:0;color:#667085;font-size:12px;line-height:1.5}
+.dx-loss-recoveries ul{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.dx-loss-recoveries li{display:grid;gap:6px;padding:14px;border:1px solid #f2f4f7;border-radius:14px;background:#fcfcfd}
+.dx-loss-recoveries li strong{color:#101828;font-size:14px}
+.dx-loss-recoveries li small,.dx-loss-recoveries li p{color:#667085;font-size:12px;line-height:1.45;margin:0}
+.dx-loss-recoveries-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:start}
+.dx-loss-recoveries-actions>button,.dx-loss-recoveries-actions div button{min-height:36px;padding:8px 12px;border:1px solid #fed7aa;border-radius:10px;background:#fff7ed;color:#b54708;font-size:12px;font-weight:700;cursor:pointer}
+.dx-loss-recoveries-actions div{display:grid;gap:8px;width:100%}
+.dx-loss-recoveries-actions textarea{width:100%;min-height:72px;padding:10px;border:1px solid #e4e7ec;border-radius:10px;font:inherit}
+.dx-loss-recovery-detail{display:grid;gap:10px;margin:0}
+.dx-loss-recovery-detail>div{display:grid;grid-template-columns:minmax(120px,34%) 1fr;gap:10px;padding:8px 0;border-bottom:1px solid #f2f4f7}
+.dx-loss-recovery-detail dt{color:#98a2b3;font-size:11px;font-weight:700}
+.dx-loss-recovery-detail dd{margin:0;color:#101828;font-size:13px;overflow-wrap:anywhere}
+.dx-loss-recovery-detail-note{margin-top:14px}
+.dx-loss-recovery-modal{width:min(560px,calc(100vw - 28px))}
