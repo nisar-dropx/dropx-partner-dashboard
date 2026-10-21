@@ -1071,7 +1071,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     } catch (error) {
       const result = {
         ok: false,
-        message: error instanceof Error ? error.message : "Unable to clear this mapping period."
+        message: error instanceof Error ? error.message : "Unable to remove this mapping period."
       };
       setSaveNotice({ kind: "error", message: result.message });
       return result;

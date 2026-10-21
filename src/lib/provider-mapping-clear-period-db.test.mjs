@@ -17,11 +17,14 @@ const additionalStation = id(5);
 const otherStation = id(6);
 const methodA = id(7);
 const methodB = id(8);
+const providerB = id(9);
 const worker = id(10);
 const otherWorker = id(11);
 const anchorWorker = id(12);
 const scheduledWorker = id(13);
 const futureOnlyWorker = id(14);
+const nonOverlapWorker = id(15);
+const boundaryWorker = id(16);
 const historicalMapping = id(20);
 const currentMapping = id(21);
 const soleMapping = id(22);
@@ -32,6 +35,13 @@ const scheduledCurrentMapping = id(26);
 const scheduledFutureMapping = id(27);
 const clearingCurrentMapping = id(28);
 const futureOnlyMapping = id(29);
+const nonOverlapHistoricalMapping = id(30);
+const nonOverlapRegisteredMapping = id(31);
+const nonOverlapAdditionalMapping = id(32);
+const boundaryHistoricalMapping = id(33);
+const boundaryRegisteredMapping = id(34);
+const boundaryAdditionalMapping = id(35);
+const publication = id(40);
 const mappingVersion = "2026-10-20T04:00:00.000Z";
 
 async function database() {
@@ -94,6 +104,14 @@ async function database() {
       details jsonb,
       created_at timestamptz default now()
     );
+    create table public.workforce_payout_publications (
+      id uuid primary key default gen_random_uuid(),
+      company_id uuid not null,
+      workforce_id uuid not null,
+      period_start date not null,
+      period_end date not null,
+      publication_kind text not null
+    );
     create unique index field_executive_provider_mappings_one_current_member_station_idx
       on public.field_executive_provider_mappings(
         company_id, provider_id, station_id, upper(btrim(provider_member_id))
@@ -119,6 +137,9 @@ async function database() {
   // Shared Supabase migrations are applied one file at a time and must remain
   // safe when an interrupted deployment retries the same file.
   await db.exec(clearPeriodMigration);
+  const removalRulesMigration = await migration("20261021160000_workforce_mapping_history_period_removal_rules.sql");
+  await db.exec(removalRulesMigration);
+  await db.exec(removalRulesMigration);
 
   await db.exec(`
     insert into public.workforce(
@@ -279,6 +300,192 @@ test("clearing the sole open period makes the profile unmapped without erasing i
     `)).rows, [{ provider_employee_id: null, provider_id_status: "pending" }]);
   } finally {
     await db.close();
+  }
+});
+
+test("allows an additional-location period to be removed while preserving its registered anchor", async () => {
+  const db = await database();
+  try {
+    const result = (await call(db, {
+      workforce: anchorWorker,
+      mapping: dependentMapping,
+      locations: [registeredStation, additionalStation]
+    })).rows[0].result;
+
+    assert.equal(result.mapping_id, dependentMapping);
+    assert.equal(result.remaining_mapping.mapping_id, anchorMapping);
+    assert.deepEqual((await db.query(`
+      select id::text, status
+      from public.field_executive_provider_mappings
+      where id in ('${anchorMapping}', '${dependentMapping}')
+      order by id;
+    `)).rows, [
+      { id: anchorMapping, status: "active" },
+      { id: dependentMapping, status: "cancelled" }
+    ]);
+    assert.equal((await db.query(`
+      select count(*)::integer as count
+      from public.workforce_joining_events
+      where workforce_id = '${anchorWorker}'
+        and event_code = 'provider_mapping_period_cleared';
+    `)).rows[0].count, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test("allows a registered-location period when additional mappings do not overlap it", async () => {
+  const db = await database();
+  try {
+    await db.exec(`
+      insert into public.workforce(
+        id, company_id, dropx_id, location_id, provider_employee_id, provider_id_status
+      ) values (
+        '${nonOverlapWorker}', '${company}', 'DX-NON-OVERLAP', '${registeredStation}',
+        'MEMBER-NON-OVERLAP', 'created'
+      );
+
+      insert into public.field_executive_provider_mappings(
+        id, company_id, workforce_id, provider_id, station_id,
+        provider_member_id, effective_from, effective_to, payment_method_id,
+        payment_values, pay_type, status, created_by, updated_at
+      ) values
+        (
+          '${nonOverlapHistoricalMapping}', '${company}', '${nonOverlapWorker}', '${provider}',
+          '${registeredStation}', 'MEMBER-NON-OVERLAP', '2026-09-01', '2026-09-30',
+          '${methodA}', '{"DELIVERY":12}', 'PER_PACKET', 'closed', '${actor}', '${mappingVersion}'
+        ),
+        (
+          '${nonOverlapRegisteredMapping}', '${company}', '${nonOverlapWorker}', '${provider}',
+          '${registeredStation}', 'MEMBER-NON-OVERLAP', '2026-10-01', null,
+          '${methodB}', '{"DELIVERY":13}', 'PER_PACKET', 'active', '${actor}', '${mappingVersion}'
+        ),
+        (
+          '${nonOverlapAdditionalMapping}', '${company}', '${nonOverlapWorker}', '${provider}',
+          '${additionalStation}', 'MEMBER-NON-OVERLAP', '2026-10-01', null,
+          '${methodB}', '{"DELIVERY":13}', 'PER_PACKET', 'active', '${actor}', '${mappingVersion}'
+        );
+    `);
+
+    const result = (await call(db, {
+      workforce: nonOverlapWorker,
+      mapping: nonOverlapHistoricalMapping,
+      locations: [registeredStation]
+    })).rows[0].result;
+
+    assert.equal(result.mapping_id, nonOverlapHistoricalMapping);
+    assert.equal(result.remaining_mapping.mapping_id, nonOverlapRegisteredMapping);
+    assert.deepEqual((await db.query(`
+      select id::text, status
+      from public.field_executive_provider_mappings
+      where id in (
+        '${nonOverlapHistoricalMapping}',
+        '${nonOverlapRegisteredMapping}',
+        '${nonOverlapAdditionalMapping}'
+      )
+      order by id;
+    `)).rows, [
+      { id: nonOverlapHistoricalMapping, status: "cancelled" },
+      { id: nonOverlapRegisteredMapping, status: "active" },
+      { id: nonOverlapAdditionalMapping, status: "active" }
+    ]);
+  } finally {
+    await db.close();
+  }
+});
+
+test("blocks registered-location removal when an additional period touches its inclusive boundary", async () => {
+  const db = await database();
+  try {
+    await db.exec(`
+      insert into public.workforce(
+        id, company_id, dropx_id, location_id, provider_employee_id, provider_id_status
+      ) values (
+        '${boundaryWorker}', '${company}', 'DX-BOUNDARY', '${registeredStation}',
+        'MEMBER-BOUNDARY', 'created'
+      );
+
+      insert into public.field_executive_provider_mappings(
+        id, company_id, workforce_id, provider_id, station_id,
+        provider_member_id, effective_from, effective_to, payment_method_id,
+        payment_values, pay_type, status, created_by, updated_at
+      ) values
+        (
+          '${boundaryHistoricalMapping}', '${company}', '${boundaryWorker}', '${provider}',
+          '${registeredStation}', 'MEMBER-BOUNDARY-A', '2026-09-01', '2026-09-30',
+          '${methodA}', '{"DELIVERY":12}', 'PER_PACKET', 'closed', '${actor}', '${mappingVersion}'
+        ),
+        (
+          '${boundaryRegisteredMapping}', '${company}', '${boundaryWorker}', '${providerB}',
+          '${registeredStation}', 'MEMBER-BOUNDARY-B', '2026-09-30', null,
+          '${methodB}', '{"DELIVERY":13}', 'PER_PACKET', 'active', '${actor}', '${mappingVersion}'
+        ),
+        (
+          '${boundaryAdditionalMapping}', '${company}', '${boundaryWorker}', '${providerB}',
+          '${additionalStation}', 'MEMBER-BOUNDARY-B', '2026-09-30', null,
+          '${methodB}', '{"DELIVERY":13}', 'PER_PACKET', 'active', '${actor}', '${mappingVersion}'
+        );
+    `);
+
+    await assert.rejects(
+      call(db, {
+        workforce: boundaryWorker,
+        mapping: boundaryHistoricalMapping,
+        locations: [registeredStation]
+      }),
+      /registered-location mapping cannot be removed.*additional-location mapping overlaps/i
+    );
+    assert.equal((await db.query(`
+      select status from public.field_executive_provider_mappings
+      where id = '${boundaryHistoricalMapping}';
+    `)).rows[0].status, "closed");
+    assert.equal((await db.query(`
+      select count(*)::integer as count
+      from public.workforce_joining_events
+      where workforce_id = '${boundaryWorker}'
+        and event_code = 'provider_mapping_period_cleared';
+    `)).rows[0].count, 0);
+  } finally {
+    await db.close();
+  }
+});
+
+test("blocks overlapping worksheet publication but permits a non-overlapping publication", async () => {
+  const overlapping = await database();
+  try {
+    await overlapping.exec(`
+      insert into public.workforce_payout_publications(
+        id, company_id, workforce_id, period_start, period_end, publication_kind
+      ) values (
+        '${publication}', '${company}', '${worker}', '2026-09-01', '2026-09-30', 'worksheet'
+      );
+    `);
+    await assert.rejects(call(overlapping), /payout 2026-09-01 to 2026-09-30 was published/i);
+    assert.equal((await overlapping.query(`
+      select status from public.field_executive_provider_mappings
+      where id = '${historicalMapping}';
+    `)).rows[0].status, "closed");
+  } finally {
+    await overlapping.close();
+  }
+
+  const nonOverlapping = await database();
+  try {
+    await nonOverlapping.exec(`
+      insert into public.workforce_payout_publications(
+        id, company_id, workforce_id, period_start, period_end, publication_kind
+      ) values (
+        '${publication}', '${company}', '${worker}', '2026-08-01', '2026-08-31', 'worksheet'
+      );
+    `);
+    const result = (await call(nonOverlapping)).rows[0].result;
+    assert.equal(result.mapping_id, historicalMapping);
+    assert.equal((await nonOverlapping.query(`
+      select status from public.field_executive_provider_mappings
+      where id = '${historicalMapping}';
+    `)).rows[0].status, "cancelled");
+  } finally {
+    await nonOverlapping.close();
   }
 });
 

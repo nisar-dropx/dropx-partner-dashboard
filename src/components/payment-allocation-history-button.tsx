@@ -97,7 +97,7 @@ export function PaymentAllocationHistoryButton({
     setOpen(false);
   }, []);
 
-  async function clearMappingPeriod(entry: PaymentAllocationHistoryEntry) {
+  async function removeMappingPeriod(entry: PaymentAllocationHistoryEntry) {
     if (!onClearMappingPeriod || clearPendingRef.current) return;
     setClearingEntryId(entry.id);
     setClearError("");
@@ -169,6 +169,10 @@ export function PaymentAllocationHistoryButton({
               {entries.map((entry) => {
                 const displayStatus = paymentAllocationDisplayStatus(entry, today);
                 const locationLabel = entry.locationLabel?.trim() || "selected location";
+                // Past, current and scheduled periods are all removable. Only
+                // unsaved or already-cancelled history cards omit the action.
+                const removableSavedPeriod = Boolean(entry.updatedAt)
+                  && entry.storedStatus.trim().toLowerCase() !== "cancelled";
                 return <article className="payment-history-entry" key={entry.id}>
                   <div className="payment-history-entry-head">
                     <div>
@@ -195,17 +199,18 @@ export function PaymentAllocationHistoryButton({
                   </p> : null}
                   {loadMappingAudit && !auditLoading && !auditError ? <div className="mapping-audit-list"><strong>Updated by · date and time</strong>{audit[entry.id]?.length ? audit[entry.id].map(event => <div key={event.id}><b>{event.action}</b> · {event.actor} · <time dateTime={event.at}>{mappingAuditDateTime(event.at)}</time></div>) : <span className="subtle">No updater information was recorded for this entry.</span>}</div> : null}
                   {entry.reason ? <p className="payment-history-reason"><b>Reason:</b> {entry.reason}</p> : null}
-                  {(canClearMappingPeriod || clearTargetId === entry.id || clearingEntryId === entry.id) && onClearMappingPeriod && Boolean(entry.updatedAt) && entry.storedStatus.trim().toLowerCase() !== "cancelled" ? <div className="payment-history-clear">
-                    {clearTargetId === entry.id ? <div aria-label={`Confirm clearing ${locationLabel} mapping from ${readableDate(entry.effectiveFrom)} to ${readableDate(entry.effectiveTo)}`} className="payment-history-clear-confirmation" role="group">
-                      <strong>Clear the {locationLabel} location-period?</strong>
+                  {(canClearMappingPeriod || clearTargetId === entry.id || clearingEntryId === entry.id) && onClearMappingPeriod && removableSavedPeriod ? <div className="payment-history-clear">
+                    {clearTargetId === entry.id ? <div aria-label={`Confirm removing ${locationLabel} mapping from ${readableDate(entry.effectiveFrom)} to ${readableDate(entry.effectiveTo)}`} className="payment-history-clear-confirmation" role="group">
+                      <strong>Remove the {locationLabel} mapping for this period?</strong>
                       <p><b>{readableDate(entry.effectiveFrom)} – {readableDate(entry.effectiveTo)}</b>{entry.sourceLabel ? <> · {entry.sourceLabel}</> : null}</p>
                       <p>Both the DropX mapping and the payment method/rates for only this location-period will become unmapped. History remains available, and all other locations and periods remain unchanged.</p>
+                      <p>Removal is blocked only when this period has a published or locked payment, or when this is the registered-location mapping and an additional-location mapping overlaps it.</p>
                       {clearError ? <p className="error-text" role="alert">{clearError}</p> : null}
                       <div className="toolbar-actions">
                         <button className="button secondary compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(""); setClearError(""); }} type="button">Cancel</button>
-                        <button aria-busy={clearingEntryId === entry.id} className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => void clearMappingPeriod(entry)} type="button">{clearingEntryId === entry.id ? "Clearing…" : "Clear and save"}</button>
+                        <button aria-busy={clearingEntryId === entry.id} className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => void removeMappingPeriod(entry)} type="button">{clearingEntryId === entry.id ? "Removing…" : "Remove this period"}</button>
                       </div>
-                    </div> : <button className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(entry.id); setClearError(""); }} type="button">Clear mapping</button>}
+                    </div> : <button className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(entry.id); setClearError(""); }} type="button">Remove mapping</button>}
                   </div> : null}
                 </article>;
               })}
