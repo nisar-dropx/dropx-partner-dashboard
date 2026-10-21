@@ -17,11 +17,12 @@ type SearchableSelectProps = {
   placeholder: string;
   required?: boolean;
   disabled?: boolean;
+  allowClear?: boolean;
   maxOptions?: number;
   onValueChange?: (value: string) => void;
 };
 
-export function SearchableSelect({ name, options, defaultValue, value: controlledValue, placeholder, required, disabled, maxOptions = 30, onValueChange }: SearchableSelectProps) {
+export function SearchableSelect({ name, options, defaultValue, value: controlledValue, placeholder, required, disabled, allowClear = true, maxOptions = 30, onValueChange }: SearchableSelectProps) {
   const isControlled = controlledValue !== undefined;
   const initialValue = isControlled ? controlledValue ?? "" : defaultValue ?? "";
   const initialOption = options.find((option) => option.value === initialValue);
@@ -35,6 +36,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
   const defaultValueRef = useRef(defaultValue ?? "");
   const optionsRef = useRef(options);
   const disabledRef = useRef(disabled);
+  const allowClearRef = useRef(allowClear);
   const onValueChangeRef = useRef(onValueChange);
 
   const filteredOptions = useMemo(() => {
@@ -61,7 +63,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
   }
 
   function clearSelection() {
-    if (disabledRef.current) return;
+    if (disabledRef.current || !allowClearRef.current) return;
     const changed = Boolean(valueRef.current);
     valueRef.current = "";
     queryRef.current = "";
@@ -83,7 +85,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
       return;
     }
 
-    if (!queryValue.trim()) {
+    if (!queryValue.trim() && allowClearRef.current) {
       valueRef.current = "";
       queryRef.current = "";
       setValue("");
@@ -117,8 +119,9 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
   useEffect(() => {
     optionsRef.current = options;
     disabledRef.current = disabled;
+    allowClearRef.current = allowClear;
     onValueChangeRef.current = onValueChange;
-  }, [disabled, onValueChange, options]);
+  }, [allowClear, disabled, onValueChange, options]);
 
   useEffect(() => {
     if (isControlled) return;
@@ -166,7 +169,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
             const nextQuery = event.target.value;
             queryRef.current = nextQuery;
             setQuery(nextQuery);
-            if (!nextQuery.trim()) {
+            if (!nextQuery.trim() && allowClearRef.current) {
               valueRef.current = "";
               setValue("");
               onValueChangeRef.current?.("");
@@ -179,7 +182,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
           required={required}
           value={query}
         />
-        {value && !disabled ? (
+        {value && !disabled && allowClear ? (
           <button
             aria-label="Clear selected option"
             className="searchable-clear"

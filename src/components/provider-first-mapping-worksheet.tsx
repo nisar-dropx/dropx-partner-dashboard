@@ -13,6 +13,7 @@ import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
 import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
+import { formatDashboardDate } from "@/lib/date-format";
 import {
   buildProviderFirstWorkerSelectionIndex,
   filterProviderFirstRowIndexes,
@@ -992,6 +993,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const components = selectedPaymentMethod?.components ?? [];
         const roundedSourceId = isScientificProviderMemberId(row.providerMemberId);
         const canEditRow = canEdit && !roundedSourceId && !isSaving;
+        const historicalMappingEnd = baselineRows[index].mappingId && baselineRows[index].effectiveTo
+          ? baselineRows[index].effectiveTo
+          : "";
         return <div className={`mapping-row-card provider-first-row ${dirtyRows[index] ? "unsaved-row" : ""}`} key={providerMemberKey(row.stationId, row.providerMemberId)}>
           {dirtyRows[index] ? <span className="unsaved-badge mapping-unsaved-badge">Unsaved</span> : null}
           <div className="mapping-identity">
@@ -1002,7 +1006,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear={!historicalMappingEnd} disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>

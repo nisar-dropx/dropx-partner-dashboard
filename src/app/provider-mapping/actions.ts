@@ -19,6 +19,7 @@ import {
   type MappingProductionThresholdSnapshot
 } from "@/lib/production-threshold-snapshot";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { formatDashboardDate } from "@/lib/date-format";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -1895,18 +1896,24 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         }
         const { data: currentMapping, error: currentMappingError } = await supabaseAdmin
           .from("field_executive_provider_mappings")
-          .select("id, workforce_id, station_id, provider_member_id, effective_from")
+          .select("id, workforce_id, station_id, provider_member_id, effective_from, effective_to, status")
           .eq("company_id", companyId)
           .eq("id", mappingId)
           .eq("workforce_id", workforceId)
           .eq("station_id", stationId)
-          .eq("status", "active")
-          .is("effective_to", null)
           .maybeSingle();
         if (currentMappingError) throw new Error(currentMappingError.message);
         if (!currentMapping
           || providerMemberIdentity(currentMapping.provider_member_id) !== providerMemberIdentity(providerMemberId)) {
           throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
+        }
+        if (currentMapping.status !== "active" || currentMapping.effective_to) {
+          const lifecycle = currentMapping.effective_to
+            ? `is a bounded period from ${formatDashboardDate(currentMapping.effective_from)} through ${formatDashboardDate(currentMapping.effective_to)}`
+            : currentMapping.status === "cancelled"
+              ? "is already cancelled"
+              : "is no longer active";
+          throw new Error(`Row ${index + 1}: This mapping ${lifecycle}. Its history is preserved; choose an active, ongoing row to clear.`);
         }
         const { data: clearResult, error: clearError } = await supabaseAdmin.rpc("workforce_clear_joining_mapping", {
           p_company: companyId,

@@ -8,6 +8,7 @@ import * as history from '../lib/payment-allocation-history.ts';
 import * as lookup from '../lib/provider-mapping-lookup.ts';
 import * as threshold from '../lib/production-threshold-snapshot.ts';
 import { dashboardDateInputValue } from '../lib/date-format.ts';
+import { formatDashboardDate } from '../lib/date-format.ts';
 import { nlPeopleClusters } from '../lib/ops-pulse/nl-loss-clusters.ts';
 
 const require = createRequire(import.meta.url);
@@ -49,7 +50,8 @@ function worksheet(props = {}, save = async () => ({ ok: false, savedRows: [], m
     '@/lib/provider-first-mapping-view': mapping,
     '@/lib/provider-mapping-lookup': lookup,
     '@/lib/payment-allocation-history': history,
-    '@/lib/production-threshold-snapshot': threshold
+    '@/lib/production-threshold-snapshot': threshold,
+    '@/lib/date-format': { formatDashboardDate }
   };
   const module = { exports: {} };
   new Function('require', 'exports', 'module', compiled)(name => boundaries[name] ?? require(name), module.exports, module);
@@ -72,6 +74,27 @@ function worksheet(props = {}, save = async () => ({ ok: false, savedRows: [], m
     async save() { one(node => node.type === 'button' && node.props.className?.includes('mapping-save-all')).props.onClick(); await new Promise(setImmediate); render(); }
   };
 }
+
+test('historical month rows show their end date and cannot submit another clear', () => {
+  const historical = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: 'closed-map',
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '2026-10-19'
+  };
+  const ui = worksheet({ mappings: [historical], initialMappingStatus: 'all' });
+
+  assert.equal(ui.select('provider_first_worker_0').allowClear, false);
+  assert.match(JSON.stringify(ui.cards()), /Mapped period 01\/10\/2026–19\/10\/2026 · history preserved/);
+
+  const active = worksheet({ mappings: [{ ...historical, mappingId: 'active-map', effectiveTo: '' }], initialMappingStatus: 'all' });
+  assert.equal(active.select('provider_first_worker_0').allowClear, true);
+});
 function completeDraft(ui, index = 0) {
   ui.change(`provider_first_worker_${index}`, worker.id);
   assert.equal(ui.select(`provider_first_worker_${index}`).value, worker.id);

@@ -67,6 +67,21 @@ test("inline mapping saves immediately invalidate the payout worksheet", () => {
   );
 });
 
+test("clearing a historical row never retargets a later active mapping", () => {
+  const clearFlow = inlineSave.slice(
+    inlineSave.indexOf('const clearRequested = rowValue(formData, index, "clear_mapping")'),
+    inlineSave.indexOf('const workforceId = rowRequired(formData, index, "id"')
+  );
+
+  assert.match(clearFlow, /select\("id, workforce_id, station_id, provider_member_id, effective_from, effective_to, status"\)/);
+  assert.match(clearFlow, /\.eq\("id", mappingId\)/);
+  assert.match(clearFlow, /currentMapping\.status !== "active" \|\| currentMapping\.effective_to/);
+  assert.match(clearFlow, /This mapping \$\{lifecycle\}/);
+  assert.match(clearFlow, /Its history is preserved; choose an active, ongoing row to clear/);
+  assert.match(clearFlow, /p_mapping: mappingId/);
+  assert.doesNotMatch(clearFlow, /order\("effective_from"/);
+});
+
 test("bounded historical actions ignore only current mappings that start later", () => {
   assert.match(actions, /function currentProviderMappingOverlapsRequestedPeriod\(/);
   assert.match(actions, /!validProviderMappingDate\(requestedEffectiveFrom\)/);
