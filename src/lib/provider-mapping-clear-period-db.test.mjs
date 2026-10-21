@@ -137,7 +137,7 @@ async function database() {
   // Shared Supabase migrations are applied one file at a time and must remain
   // safe when an interrupted deployment retries the same file.
   await db.exec(clearPeriodMigration);
-  const removalRulesMigration = await migration("20261021160000_workforce_mapping_history_period_removal_rules.sql");
+  const removalRulesMigration = await migration("20261021220000_workforce_mapping_history_period_removal_rules.sql");
   await db.exec(removalRulesMigration);
   await db.exec(removalRulesMigration);
 
