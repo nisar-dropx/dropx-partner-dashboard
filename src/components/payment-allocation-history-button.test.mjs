@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const component = await readFile(new URL("./payment-allocation-history-button.tsx", import.meta.url), "utf8");
+const globalStyles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("history exposes period clearing only through the explicit permission and callback", () => {
   assert.match(component, /canClearMappingPeriod\?: boolean/);
@@ -31,4 +32,11 @@ test("the modal catches save failures and cannot close while clearing", () => {
   assert.match(component, /disabled=\{Boolean\(clearingEntryId\)\} onClick=\{closeModal\}/);
   assert.match(component, /aria-busy=\{clearingEntryId === entry\.id\}/);
   assert.match(component, /role="alert">\{clearError\}/);
+});
+
+test("mapping-period removal actions retain a visible danger treatment", () => {
+  assert.match(globalStyles, /--danger:\s*#[0-9a-f]{3,8}\s*;/i);
+  assert.match(globalStyles, /\.button\.danger\s*\{[\s\S]*?background:\s*var\(--danger\)[\s\S]*?color:\s*#fff\s*;/i);
+  assert.match(component, /className="button danger compact"[\s\S]*?>Remove mapping<\/button>/);
+  assert.match(component, /className="button danger compact"[\s\S]*?"Remove this period"/);
 });
