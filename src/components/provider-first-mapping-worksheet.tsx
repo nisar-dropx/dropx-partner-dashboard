@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import { Download, FileSpreadsheet, FileText, X } from "lucide-react";
-import { saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
+import { clearProviderMappingPeriod, saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { ProviderMappingLookup } from "@/components/provider-mapping-lookup";
@@ -11,7 +11,7 @@ import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 import { SearchableSelect } from "@/components/searchable-select";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
-import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
+import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { formatDashboardDate } from "@/lib/date-format";
 import {
@@ -141,6 +141,75 @@ type PaidHistorySaveConfirmation = {
   confirmedActions: Record<number, "move" | "keep">;
   confirmedPaidHistoryDecisions: Record<number, PaidHistoryDecision>;
 };
+
+type BoundedMappingClearTarget = {
+  index: number;
+  mappingId: string;
+  expectedUpdatedAt: string;
+};
+
+function boundedMappingClearTarget(
+  index: number,
+  previous: ProviderFirstMappingRow,
+  draft: ProviderFirstMappingRow
+): BoundedMappingClearTarget | null {
+  if (!previous.mappingId
+    || !previous.workforceId
+    || !previous.effectiveTo
+    || draft.workforceId
+    || draft.mappingId !== previous.mappingId) return null;
+  const savedPeriod = previous.history.find((entry) => entry.id === previous.mappingId);
+  return {
+    index,
+    mappingId: previous.mappingId,
+    expectedUpdatedAt: savedPeriod?.updatedAt ?? ""
+  };
+}
+
+function removeWorkerMappingPeriods(worker: ProviderFirstWorker, mappingIds: ReadonlySet<string>): ProviderFirstWorker {
+  if (!mappingIds.size) return worker;
+  const currentMappings = (worker.currentMappings ?? []).filter((mapping) => !mappingIds.has(mapping.mappingId));
+  const mappingHistory = (worker.mappingHistory ?? []).filter((mapping) => !mappingIds.has(mapping.mappingId));
+  const registeredLocationMappings = (worker.registeredLocationMappings ?? []).filter((mapping) => !mappingIds.has(mapping.mappingId));
+  if (!mappingIds.has(worker.mappingId)) {
+    return {
+      ...worker,
+      currentMappings,
+      mappingHistory,
+      registeredLocationMappings,
+      registeredLocationMapping: registeredLocationMappings[0]
+    };
+  }
+  const current = currentMappings[0];
+  return {
+    ...worker,
+    currentMappings,
+    mappingHistory,
+    registeredLocationMappings,
+    registeredLocationMapping: registeredLocationMappings[0],
+    mappingId: current?.mappingId ?? "",
+    stationId: current?.stationId ?? worker.profileStationId ?? worker.stationId,
+    locationLabel: current?.locationLabel ?? worker.profileLocationLabel ?? worker.locationLabel,
+    providerId: current?.providerId ?? "",
+    paymentMethodId: current?.paymentMethodId ?? "",
+    paymentValues: current?.paymentValues ?? {},
+    productionThresholdConfig: current?.productionThresholdConfig ?? null,
+    productionThresholdMinimumUnits: current?.productionThresholdMinimumUnits ?? "",
+    effectiveFrom: current?.effectiveFrom ?? worker.dateOfJoin,
+    effectiveTo: current?.effectiveTo ?? "",
+    mappedProviderMemberId: current?.mappedProviderMemberId ?? ""
+  };
+}
+
+function markMappingPeriodsCancelled(
+  history: ProviderFirstMappingRow["history"],
+  mappingIds: ReadonlySet<string>
+) {
+  if (!history.some((entry) => mappingIds.has(entry.id))) return history;
+  return uniquePaymentAllocationHistory(history.map((entry) => (
+    mappingIds.has(entry.id) ? { ...entry, storedStatus: "cancelled" } : entry
+  )));
+}
 
 const rupees = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -577,12 +646,22 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     indexes: number[],
     confirmedMappingIds: Record<number, string> = {},
     confirmedActions: Record<number, "move" | "keep"> = {},
-    confirmedPaidHistoryDecisions: Record<number, PaidHistoryDecision> = {}
+    confirmedPaidHistoryDecisions: Record<number, PaidHistoryDecision> = {},
+    excludedMappingIds: ReadonlySet<string> = new Set()
   ) {
     if (isSaving) return;
     const selected = Array.from(new Set(indexes)).filter((index) => dirtyRows[index]);
     const nextErrors: Record<number, string> = {};
+    const boundedClearTargets = selected.flatMap((index) => {
+      const target = boundedMappingClearTarget(index, baselineRows[index], rows[index]);
+      if (!target) return [];
+      if (!target.expectedUpdatedAt) {
+        nextErrors[index] = "This mapping period is missing its saved version. Reload the page and try again.";
+      }
+      return [target];
+    });
     for (const index of selected) {
+      if (nextErrors[index]) continue;
       const message = providerFirstRowIssue(rows[index], workerById.get(rows[index].workforceId), paymentMethodById.get(rows[index].paymentMethodId));
       if (message) nextErrors[index] = message;
     }
@@ -600,6 +679,77 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     });
     if (replacements.length) {
       setReplacementConfirmation({ indexes: selected, replacements, cursor: 0, confirmedMappingIds, confirmedActions });
+      return;
+    }
+
+    if (boundedClearTargets.length) {
+      const targetIndexes = new Set(boundedClearTargets.map((target) => target.index));
+      setSavingIndexes(new Set(selected));
+      setSaveNotice(null);
+      const outcomes = await Promise.all(boundedClearTargets.map(async (target) => {
+        try {
+          const result = await clearProviderMappingPeriod({
+            mappingId: target.mappingId,
+            expectedUpdatedAt: target.expectedUpdatedAt
+          });
+          return { target, result };
+        } catch (error) {
+          return {
+            target,
+            result: {
+              ok: false,
+              message: error instanceof Error ? error.message : "Unable to clear this mapping period."
+            }
+          };
+        }
+      }));
+      const successful = outcomes.filter((outcome) => outcome.result.ok);
+      const failed = outcomes.filter((outcome) => !outcome.result.ok);
+      const successfulMappingIds = new Set(successful.map((outcome) => outcome.target.mappingId));
+
+      if (successful.length) {
+        const successfulTargetByIndex = new Map(successful.map((outcome) => [outcome.target.index, outcome.target]));
+        const reconcileClearedRow = (row: ProviderFirstMappingRow, index: number) => {
+          const history = markMappingPeriodsCancelled(row.history, successfulMappingIds);
+          return successfulTargetByIndex.has(index)
+            ? clearCurrentMapping(row, history)
+            : history === row.history ? row : { ...row, history };
+        };
+        setBaselineRows((current) => current.map(reconcileClearedRow));
+        setRows((current) => current.map(reconcileClearedRow));
+        setWorkerRows((current) => current.map((worker) => removeWorkerMappingPeriods(worker, successfulMappingIds)));
+      }
+
+      setErrors((current) => {
+        const next = { ...current };
+        for (const outcome of successful) delete next[outcome.target.index];
+        for (const outcome of failed) next[outcome.target.index] = outcome.result.message;
+        return next;
+      });
+      setSavingIndexes(new Set());
+      const remaining = selected.filter((index) => !targetIndexes.has(index));
+      if (remaining.length) {
+        await saveIndexes(
+          remaining,
+          confirmedMappingIds,
+          confirmedActions,
+          confirmedPaidHistoryDecisions,
+          new Set([...excludedMappingIds, ...successfulMappingIds])
+        );
+      }
+      if (failed.length) {
+        const prefix = successful.length ? `${successful.length} mapping period${successful.length === 1 ? " was" : "s were"} cleared. ` : "";
+        const suffix = remaining.length ? " Other changed rows were also processed." : "";
+        setSaveNotice({ kind: "error", message: `${prefix}${failed[0].result.message}${suffix}` });
+        return;
+      }
+      if (remaining.length) return;
+      setSaveNotice({
+        kind: "success",
+        message: successful.length === 1
+          ? successful[0].result.message
+          : `${successful.length} mapping periods were cleared. Other locations and periods were not changed.`
+      });
       return;
     }
 
@@ -704,6 +854,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             }
           }
         }
+        canonical = { ...canonical, history: markMappingPeriodsCancelled(canonical.history, excludedMappingIds) };
         if (canonical.effectiveTo) {
           // Closed mappings belong in history. Keeping one in the current row
           // or worker state makes the no-refresh view disagree with a reload
@@ -810,7 +961,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         }
         setWorkerRows((current) => current.map((worker) => {
           const update = workerUpdates.get(worker.id);
-          let next = update ? { ...worker, ...update } : worker;
+          let next = removeWorkerMappingPeriods(update ? { ...worker, ...update } : worker, excludedMappingIds);
           const clearedMappingId = workerClears.get(worker.id);
           if (clearedMappingId && next.mappingId === clearedMappingId) {
             next = { ...next, mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" };
@@ -902,6 +1053,28 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
     } catch (error) {
       setSaveNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to save provider mappings." });
+    } finally {
+      setSavingIndexes(new Set());
+    }
+  }
+
+  async function clearSavedMappingPeriod(entry: PaymentAllocationHistoryEntry) {
+    if (isSaving) return { ok: false, message: "Another mapping change is still saving. Wait for it to finish and try again." };
+    if (!entry.updatedAt) return { ok: false, message: "This mapping period is missing its saved version. Reload the page and try again." };
+    setSavingIndexes(new Set([-1]));
+    setSaveNotice(null);
+    try {
+      const result = await clearProviderMappingPeriod({ mappingId: entry.id, expectedUpdatedAt: entry.updatedAt });
+      setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
+      if (result.ok && typeof window !== "undefined") window.location.reload();
+      return result;
+    } catch (error) {
+      const result = {
+        ok: false,
+        message: error instanceof Error ? error.message : "Unable to clear this mapping period."
+      };
+      setSaveNotice({ kind: "error", message: result.message });
+      return result;
     } finally {
       setSavingIndexes(new Set());
     }
@@ -1006,7 +1179,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear={!historicalMappingEnd} disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping period. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>
@@ -1026,7 +1199,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions">{previousPayment && !row.paymentMethodId && paymentMethodById.has(previousPayment.paymentMethodId) ? <button type="button" className="button secondary compact" disabled={!canEditRow} onClick={() => usePreviousPaymentDetails(index)}>Use previous payment details</button> : null}<button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton loadMappingAudit entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
+          <div className="mapping-row-actions">{previousPayment && !row.paymentMethodId && paymentMethodById.has(previousPayment.paymentMethodId) ? <button type="button" className="button secondary compact" disabled={!canEditRow} onClick={() => usePreviousPaymentDetails(index)}>Use previous payment details</button> : null}<button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton canClearMappingPeriod={canEdit && !isSaving} loadMappingAudit entries={row.history} onClearMappingPeriod={clearSavedMappingPeriod} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
         </div>;
       })}{!paginatedIndexes.length ? <div className="empty-state"><strong>No matching provider members.</strong><p className="subtle">Change or clear the filters to see more records.</p></div> : null}</div>
       <div className="mapping-pagination">
