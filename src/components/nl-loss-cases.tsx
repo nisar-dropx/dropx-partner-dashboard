@@ -53,6 +53,7 @@ export function NlLossCases({
   settings,
   canEdit,
   canRecovered = false,
+  canApprove = false,
   showPeriod = false,
 }: {
   cases: NlCase[];
@@ -61,6 +62,8 @@ export function NlLossCases({
   canEdit: boolean;
   /** May use restricted outcomes such as "Already recovered". */
   canRecovered?: boolean;
+  /** SLP / Loss Recovery Master may final-approve a proposed plan. */
+  canApprove?: boolean;
   showPeriod?: boolean;
 }) {
   const [query, setQuery] = useState(""),
@@ -230,6 +233,7 @@ export function NlLossCases({
                 settings={settings}
                 canEdit={canEdit}
                 canRecovered={canRecovered}
+                canApprove={canApprove}
               />
             ) : null}
           </article>
@@ -248,12 +252,14 @@ function RecoveryForm({
   settings,
   canEdit: mayEdit,
   canRecovered,
+  canApprove = false,
 }: {
   row: NlCase;
   outcomes: RecoveryOutcome[];
   settings: LossSettings | null;
   canEdit: boolean;
   canRecovered: boolean;
+  canApprove?: boolean;
 }) {
   const router = useRouter();
   const old = row.recovery && !row.recovery.is_deleted ? row.recovery : null;
@@ -566,6 +572,58 @@ function RecoveryForm({
         <p className={styles.notice}>
           Amazon’s amount or decision changed since the saved plan. Review and
           save the correct allocation again.
+        </p>
+      ) : null}
+      {(recovery as { approval_status?: string } | null)?.approval_status ===
+      "proposed" ? (
+        <p className={styles.notice}>
+          Recovery proposal awaiting SLP final confirmation. It is not deducted
+          until approved by a different authorised person.
+          {canApprove ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className={styles.button}
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  setSuccess("");
+                  try {
+                    const res = await fetch("/api/ops-pulse/losses/lifecycle", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "approve",
+                        month: row.month,
+                        case_key: caseKey,
+                        version: recovery?.version || 0,
+                        lifecycle_version:
+                          (row as { lifecycle_version?: number })
+                            .lifecycle_version ?? 1,
+                      }),
+                    });
+                    const j = await res.json();
+                    if (!res.ok) throw Error(j.error);
+                    setRecovery(j.recovery);
+                    setSuccess("Recovery approved and scheduled for payroll.");
+                    router.refresh();
+                  } catch (e) {
+                    setError(
+                      e instanceof Error
+                        ? e.message
+                        : "Approval could not be completed.",
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Approve recovery (SLP)
+              </button>
+            </>
+          ) : null}
         </p>
       ) : null}
       {error ? (

@@ -296,6 +296,7 @@ export function NlLossReport({
           settings={v.settings}
           canEdit={v.canEdit}
           canRecovered={v.canRecovered}
+          canApprove={v.canApprove}
           showPeriod={v.kind !== "nl" && v.month === ALL_PERIODS}
         />
       ) : null}

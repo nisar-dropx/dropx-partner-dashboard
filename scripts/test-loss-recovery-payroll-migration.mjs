@@ -8,8 +8,8 @@ create table companies(id uuid primary key, code text);
 create table stations(id uuid primary key, company_id uuid, station_code text);
 create table cod_station_settings(location_id uuid, company_id uuid, portal_station_code text);
 create table designations(id uuid primary key, company_id uuid, name text);
-create table employees(id uuid primary key, company_id uuid, employee_code text, full_name text, designation_id uuid, is_active boolean default true, location_id uuid, deleted_at timestamptz);
-create table workforce(id uuid primary key, company_id uuid, dropx_id text, full_name text, designation text, is_active boolean default true, location_id uuid, deleted_at timestamptz);
+create table employees(id uuid primary key, company_id uuid, employee_code text, full_name text, designation_id uuid, is_active boolean default true, location_id uuid, deleted_at timestamptz, last_working_date date);
+create table workforce(id uuid primary key, company_id uuid, dropx_id text, full_name text, designation text, is_active boolean default true, location_id uuid, deleted_at timestamptz, last_working_date date);
 create function station_audit_employee_directory(p_company uuid,p_station uuid)
 returns table(ref text,employee_code text,full_name text,designation text,is_active boolean) language sql stable as $$
  select 'employee:'||e.id,e.employee_code,e.full_name,'People',e.is_active from employees e where e.company_id=p_company and e.location_id=p_station
@@ -35,6 +35,7 @@ create function workforce_bump_payout_period_dependency_revision(p_company_id uu
 `);
 const C = "00000000-0000-0000-0000-000000000001", S = "00000000-0000-0000-0000-0000000000a1";
 const E1 = "00000000-0000-0000-0000-0000000000e1", W1 = "00000000-0000-0000-0000-0000000000f1", ACT = "00000000-0000-0000-0000-0000000000aa";
+const SLP = "00000000-0000-0000-0000-0000000000bb";
 await db.exec(`insert into companies values('${C}','X'); insert into stations values('${S}','${C}','BLR1');
  insert into employees(id,company_id,employee_code,full_name,location_id) values('${E1}','${C}','D0001','IC One','${S}');
  insert into workforce(id,company_id,dropx_id,full_name,location_id) values('${W1}','${C}','W0001','DA One','${S}');
@@ -44,14 +45,26 @@ await db.exec(`insert into companies values('${C}','X'); insert into stations va
   ('${C}','nl','2026-09','N1','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','N2','BLR1',500,'Recoverable'),
   ('${C}','slp','2026-09','slp:S1','BLR1',300,'SLP Initial');`);
 // Applied twice: the migration must be safe to re-run.
-const migration = readFileSync("supabase/migrations/20261015130000_loss_recovery_payroll_deductions.sql", "utf8");
-await db.exec(migration);
-await db.exec(migration);
+for (const file of [
+  "20261015130000_loss_recovery_payroll_deductions.sql",
+  "20261016161000_loss_recovery_installments.sql",
+  "20261022120000_nl_slp_loss_lifecycle.sql",
+]) {
+  const migration = readFileSync(`supabase/migrations/${file}`, "utf8");
+  await db.exec(migration);
+  await db.exec(migration);
+}
 let fails = 0;
 const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
 const one = async (sql) => (await db.query(sql)).rows[0];
 const throws = async (name, sql, re) => { try { await db.query(sql); fails++; console.log("FAIL", name, "did not raise"); } catch (e) { const ok = re.test(e.message); if (!ok) fails++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : e.message); } };
 const m = async (report, cm, at, fin, t) => (await one(`select nl_recovery_deduction_month('${report}','${cm}','${at}'::timestamptz,${fin ? `'${fin}'::timestamptz` : "null"},'${t}') v`)).v;
+const approve = async (cs) => {
+  const row = await one(`select r.version, c.lifecycle_version lv from nl_loss_recoveries r join nl_loss_month_cases c using(company_id,month,case_key) where r.case_key='${cs}'`);
+  if (row && (await one(`select approval_status s from nl_loss_recoveries where case_key='${cs}'`)).s === "proposed") {
+    await db.query(`select nl_loss_recovery_approve('${C}','2026-09','${cs}',${row.version},'${SLP}','SLP Mgr',null,${row.lv})`);
+  }
+};
 // Salary month rule
 eq("NL Sep assigned 4 Nov → Oct", await m("nl", "2026-09", "2026-11-04T10:00:00+05:30", null, "current_month"), "2026-10");
 eq("NL Sep assigned 6 Nov 23:59 IST → Oct", await m("nl", "2026-09", "2026-11-06T23:59:00+05:30", null, "current_month"), "2026-10");
@@ -71,6 +84,8 @@ await db.query(save("N1", 0, "deduct", [{ employee_ref: `employee:${E1}`, amount
 const r1 = await one(`select deduction_month,assigned_at is not null a from nl_loss_recoveries where case_key='N1'`);
 const today = new Date().toISOString();
 eq("Save stamps the assignment and its salary month", r1, { deduction_month: await m("nl", "2026-09", today, null, "current_month"), a: true });
+eq("Proposal is not payroll-due before SLP approval", (await db.query(`select * from nl_loss_recovery_due('${C}','2026-10','hrms')`)).rows.length, 0);
+await approve("N1");
 // Pin the plan to 15 Oct so the rest of the run does not depend on today's date.
 const pin = (cs) => db.exec(`update nl_loss_recoveries set assigned_at='2026-10-15T10:00:00+05:30', deduction_month=nl_recovery_deduction_month(case when '${cs}' like 'slp:%' then 'slp' else 'nl' end,'2026-09','2026-10-15T10:00:00+05:30',(select final_seen_at from nl_loss_month_cases where case_key='${cs}'),deduction_timing) where case_key='${cs}'`);
 await pin("N1");
@@ -88,14 +103,18 @@ await db.exec(`insert into hr_payroll_runs values('${R10}','${C}','2026-10-01','
 eq("Carried by Oct run → not due in Nov", await dueH("2026-11"), []);
 eq("Still due when recalculating the Oct run itself", (await dueH("2026-10", R10)).length, 1);
 // Draft/calculated runs don't lock; reviewed does
-await db.query(save("N1", 1, "deduct", [{ employee_ref: `employee:${E1}`, amount: "500" }, { employee_ref: `workforce:${W1}`, amount: "500" }]));
-eq("Calculated (unreviewed) run allows a change", (await one(`select version from nl_loss_recoveries where case_key='N1'`)).version, 2);
+let n1Ver = Number((await one(`select version from nl_loss_recoveries where case_key='N1'`)).version);
+await db.query(save("N1", n1Ver, "deduct", [{ employee_ref: `employee:${E1}`, amount: "500" }, { employee_ref: `workforce:${W1}`, amount: "500" }]));
+await approve("N1");
+await pin("N1");
+n1Ver = Number((await one(`select version from nl_loss_recoveries where case_key='N1'`)).version);
+eq("Calculated (unreviewed) run allows a change", n1Ver >= 2, true);
 await db.exec(`update hr_payroll_run_items set amount=500, metadata=metadata; update hr_payroll_runs set status='approved'`);
-await throws("Approved run locks the employee amount", save("N1", 2, "deduct", [{ employee_ref: `employee:${E1}`, amount: "700" }, { employee_ref: `workforce:${W1}`, amount: "300" }]), /already deducted in October 2026 payroll for D0001/);
-await throws("Approved run blocks switching to a non-deduct outcome", `select save_nl_recovery('${C}','2026-09','N1',2,'post_dispute','none','[]','Re-dispute','${ACT}','Ops','{}')`, /already deducted/);
-await throws("Approved run blocks clearing", `select clear_nl_recovery('${C}','2026-09','N1',2,'${ACT}','Ops')`, /already deducted in October 2026 payroll/);
-await db.query(save("N1", 2, "deduct", [{ employee_ref: `employee:${E1}`, amount: "500" }, { employee_ref: `workforce:${W1}`, amount: "500" }]).replace("Recover loss", "Recover loss, remark edit"));
-eq("Remark-only edit allowed and keeps month", (await one(`select version,deduction_month from nl_loss_recoveries where case_key='N1'`)), { version: 4 - 1, deduction_month: "2026-10" });
+await throws("Approved run locks the employee amount", save("N1", n1Ver, "deduct", [{ employee_ref: `employee:${E1}`, amount: "700" }, { employee_ref: `workforce:${W1}`, amount: "300" }]), /already deducted in October 2026 payroll for D0001/);
+await throws("Approved run blocks switching to a non-deduct outcome", `select save_nl_recovery('${C}','2026-09','N1',${n1Ver},'post_dispute','none','[]','Re-dispute','${ACT}','Ops','{}')`, /already deducted/);
+await throws("Approved run blocks clearing", `select clear_nl_recovery('${C}','2026-09','N1',${n1Ver},'${ACT}','Ops')`, /already deducted in October 2026 payroll/);
+await db.query(save("N1", n1Ver, "deduct", [{ employee_ref: `employee:${E1}`, amount: "500" }, { employee_ref: `workforce:${W1}`, amount: "500" }]).replace("Recover loss", "Recover loss, remark edit"));
+eq("Remark-only edit allowed and keeps month", (await one(`select deduction_month from nl_loss_recoveries where case_key='N1'`)).deduction_month, "2026-10");
 // DA line published in Oct → not due in Nov; locks DA amount
 await db.exec(`insert into workforce_payout_publications(company_id,workforce_id,station_id,revision,snapshot,period_start,period_end) values('${C}','${W1}','${S}',1,'{"worksheet":{"deduction_breakdown":[{"code":"LOSS_RECOVERY","label":"x","amount":500,"recoveryKey":"2026-09|N1|workforce:${W1}"}]}}','2026-10-01','2026-10-31')`);
 eq("Published in Oct → DA not due in Nov", await dueW("2026-11"), []);
@@ -105,26 +124,29 @@ await db.exec(`insert into workforce_payout_publications(company_id,workforce_id
 eq("Latest publication without the line → carries to Nov", (await dueW("2026-11")).length, 1);
 // NL status flips non-recoverable → not due; source amount change → waits for review
 await db.query(save("N2", 0, "deduct", [{ employee_ref: `employee:${E1}`, amount: "500" }]));
+await approve("N2");
 await pin("N2");
 await db.exec(`update nl_loss_month_cases set source_status='Not Recoverable' where case_key='N2'`);
 eq("Non-recoverable NL case is not deducted", (await dueH("2026-11")).filter((r) => r.recovery_key.includes("N2")), []);
 await db.exec(`update nl_loss_month_cases set source_status='Recoverable', amount=450 where case_key='N2'`);
 eq("Changed amount waits for review", (await dueH("2026-11")).filter((r) => r.recovery_key.includes("N2")), []);
-await db.exec(`update nl_loss_month_cases set amount=500 where case_key='N2'`);
+await db.exec(`alter table nl_loss_month_cases disable trigger nl_loss_case_lifecycle_defaults; update nl_loss_month_cases set amount=500, lifecycle_status='recovery_approved_scheduled' where case_key='N2'; alter table nl_loss_month_cases enable trigger nl_loss_case_lifecycle_defaults`);
+await db.exec(`update nl_loss_recoveries set approval_status='approved', source_amount=500 where case_key='N2'`);
 eq("Restored → due (carry forward from Oct to Nov)", (await dueH("2026-11")).filter((r) => r.recovery_key.includes("N2")).length, 1);
 // SLP: not due until Final; Final arrival reschedules
 const saveS1 = `select save_nl_recovery('${C}','2026-09','slp:S1',0,'deduct','custom','${JSON.stringify([{ employee_ref: `workforce:${W1}`, amount: "300" }])}','Recover SLP','${ACT}','Ops')`;
 await throws("SLP Initial cannot be assigned", saveS1, /still in SLP Initial/);
 // A plan saved on Initial before this release waits for Final.
-await db.exec(`insert into nl_loss_recoveries(company_id,month,case_key,outcome_code,outcome_label,split_mode,allocations,source_amount,source_status,updated_by,updated_by_name,deduction_timing,deduction_month,assigned_at)
- values('${C}','2026-09','slp:S1','deduct','Deduct','custom','[{"ref":"workforce:${W1}","employee_code":"W0001","amount":300}]',300,'SLP Initial','${ACT}','Ops','current_month','2026-09',now())`);
+await db.exec(`insert into nl_loss_recoveries(company_id,month,case_key,outcome_code,outcome_label,split_mode,allocations,source_amount,source_status,updated_by,updated_by_name,deduction_timing,deduction_month,assigned_at,approval_status)
+ values('${C}','2026-09','slp:S1','deduct','Deduct','custom','[{"ref":"workforce:${W1}","employee_code":"W0001","amount":300}]',300,'SLP Initial','${ACT}','Ops','current_month','2026-09',now(),'approved')`);
 await pin("slp:S1");
 eq("SLP Initial plan not due", (await dueW("2026-12")).filter((r) => r.recovery_key.includes("S1")), []);
 await db.exec(`delete from bumps; update nl_loss_month_cases set source_status='SLP Final', details='{"in_final":true}' where case_key='slp:S1'`);
 eq("SLP Final can be assigned", await (async () => { try { await db.query(saveS1.replace(",0,'deduct'", ",1,'deduct'")); return true; } catch (e) { return e.message; } })(), true);
+await approve("slp:S1");
 const s1 = await one(`select c.final_seen_at is not null f, r.deduction_month from nl_loss_month_cases c join nl_loss_recoveries r using(company_id,month,case_key) where case_key='slp:S1'`);
 eq("SLP Final arrival stamps and reschedules to the day it arrived", s1, { f: true, deduction_month: await m("slp", "2026-09", "2026-10-15T10:00:00+05:30", today, "current_month") });
-await db.exec(`alter table nl_loss_month_cases disable trigger nl_case_final_seen; update nl_loss_month_cases set final_seen_at='2026-10-15T10:00:00+05:30' where case_key='slp:S1'; alter table nl_loss_month_cases enable trigger nl_case_final_seen`);
+await db.exec(`alter table nl_loss_month_cases disable trigger nl_case_final_seen; alter table nl_loss_month_cases disable trigger nl_loss_case_lifecycle_defaults; update nl_loss_month_cases set final_seen_at='2026-10-15T10:00:00+05:30', lifecycle_status='recovery_approved_scheduled' where case_key='slp:S1'; alter table nl_loss_month_cases enable trigger nl_case_final_seen; alter table nl_loss_month_cases enable trigger nl_loss_case_lifecycle_defaults`);
 await pin("slp:S1");
 eq("SLP Final with same amount is due without re-saving", (await dueW("2026-10")).filter((r) => r.recovery_key.includes("S1")).length, 1);
 eq("Source change bumps payout months", Number((await one(`select count(*) n from bumps`)).n) > 0, true);

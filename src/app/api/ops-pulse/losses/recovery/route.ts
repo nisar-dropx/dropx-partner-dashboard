@@ -1,5 +1,6 @@
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
+import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { deductionMonth } from "@/lib/ops-pulse/nl-loss-policy";
 import { hasPermission } from "@/lib/authorization";
@@ -134,7 +135,9 @@ export async function POST(request: Request) {
       if (locked)
         return reply({ error: `This case is marked “${locked}”. Only people with that access can change it.` }, 403);
     }
-    if (outcome.data?.allocation_required)
+    if (outcome.data?.allocation_required) {
+      // Station users may dispute/clarify only — recovery plans are Cluster propose → SLP approve.
+      await assertLifecycleAction(auth, station.id, "propose");
       await loadRecoveryPayables(
         auth,
         scope.company,
@@ -144,6 +147,7 @@ export async function POST(request: Request) {
         settings!.recovery_policy,
         settings!.updated_at,
       );
+    }
     if (JSON.stringify(body.recovery_details || {}).length > 20000)
       return reply({ error: "Re-dispute details are too long." }, 400);
     // Full or recurring debit; the database validates the schedule and the salary cap.
@@ -212,13 +216,15 @@ export async function DELETE(request: Request) {
     )
       return reply({ error: "Invalid request origin." }, 403);
     const b = await request.json();
-    const { auth, scope, caseKey } = await recoveryContext(
+    const { auth, scope, station, caseKey } = await recoveryContext(
       String(b.month || ""),
       String(b.case_key || ""),
       true,
     );
     if (!Number.isInteger(b.version) || b.version < 1)
       return reply({ error: "Invalid recovery version." }, 400);
+    // Station users may dispute/clarify only — clearing a plan is Cluster/SLP.
+    await assertLifecycleAction(auth, station.id, "propose");
     if (!hasPermission(auth, "ops_loss_recovered", "edit")) {
       const locked = await lockedPlan(scope.company, b.month, caseKey);
       if (locked)

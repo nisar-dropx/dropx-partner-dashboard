@@ -8,6 +8,7 @@ import type { CodLocationRow } from './cod';
 import { loadPerformanceTargets, resolvePerformanceTargets } from './performance-targets';
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from './performance-source-policy';
 import { buildCommandCenter, type CommandPeriod, type CommandPerformanceFact, type CommandReview } from './command-center';
+import { loadLossRecoveryCommand } from './loss-recovery-command';
 
 export async function loadCommandCenter(a: AuthorizationContext, locations: CodLocationRow[], period: CommandPeriod, amazon: boolean, today: string) {
   const company = requireCompanyId(a);
@@ -15,12 +16,13 @@ export async function loadCommandCenter(a: AuthorizationContext, locations: CodL
   const canCost = hasPermission(a, 'cps_overview', 'access');
   const canReview = amazon && hasPermission(a, 'performance_review', 'access');
   const canPerformance = amazon && (hasPermission(a, 'performance', 'access') || canReview);
+  const canLosses = hasPermission(a, 'ops_losses', 'access');
   const performanceDate = new Date(Date.parse(today + 'T00:00:00Z') - 86400000).toISOString().slice(0,10);
   const errors: string[] = [];
   async function attempt<T>(label: string, work: () => Promise<T>): Promise<T | null> {
     try { return await work(); } catch (error) { console.error('Command center', label, error instanceof Error ? error.message : 'unavailable'); errors.push(label); return null; }
   }
-  const [cost, perf, reviews] = await Promise.all([
+  const [cost, perf, reviews, losses] = await Promise.all([
     canCost && codes.length ? attempt('CPS cost source', async () => {
       // Reuse CPS topology, but intersect with the selected workspace scope.
       const scope = await cpsScope(a, {period:'custom', ...period}, true);
@@ -47,9 +49,11 @@ export async function loadCommandCenter(a: AuthorizationContext, locations: CodL
         .in('status',['open','in_review']).lte('source_date',today).order('id'));
       if (r.error) throw Error('Reviews unavailable');
       return r.data as CommandReview[];
-    }) : null
+    }) : null,
+    canLosses && codes.length ? attempt('Recoverable losses', () => loadLossRecoveryCommand(a, locations)) : null,
   ]);
   const places = cost?.places ?? locations.map(l => ({code:l.station_code,name:l.station_name || l.station_code,owner:l.cluster_manager_names?.join(', ') || l.cluster_manager || ''}));
   return { model:buildCommandCenter({snapshot:cost?.snapshot ?? null, places, period, performance:perf?.facts ?? null,
-    targets:perf?.targets ?? null,reviews,performanceDate}),errors,canCost,canCostAttention:hasPermission(a,'cps_unmapped','access'),canPerformance,canReview,performanceDate };
+    targets:perf?.targets ?? null,reviews,performanceDate}),errors,canCost,canCostAttention:hasPermission(a,'cps_unmapped','access'),canPerformance,canReview,canLosses,performanceDate,
+    lossRecovery: losses?.summary ?? null, lossHrefs: losses?.hrefs ?? {} };
 }

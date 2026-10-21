@@ -360,6 +360,8 @@ export async function loadRecoveryView(
     // Restricted outcomes ("Already recovered") need their own permission on top of edit access.
     canRecovered: canEdit && hasPermission(auth, "ops_loss_recovered", "edit"),
     canMaster: hasPermission(auth, "ops_loss_master", "access"),
+    canApprove:
+      !auth.readOnly && hasPermission(auth, "ops_loss_master", "edit"),
     canRefresh:
       !slp && !auth.readOnly && hasPermission(auth, "ops_loss_master", "edit"),
     monthLastSeen:

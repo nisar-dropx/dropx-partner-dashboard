@@ -15,6 +15,7 @@ import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
 import type {PaymentReference} from '@/lib/payment-reference';
 import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production-breakdown';
 import {AssociatePayouts} from './associate-payouts';
+import {ConnectLossRecoveries} from './connect-loss-recoveries';
 import {currentPayoutMonth,normalizePayoutMonth,payoutMonthLabel,payoutMonthLongLabel,shiftPayoutMonth} from '@/lib/payout-dispute';
 import monthStyles from './payout-month-control.module.css';
 import styles from './connect-workforce-payments.module.css';
@@ -95,6 +96,7 @@ function WorkforcePayments({account}:{account:AppAccount}){
     <p className={styles.note}>Base pay and allowances {money(calculated.summary.baseAmount)} · Incentives {money(calculated.summary.incentiveAmount)} · Adjustments {money(calculated.summary.additions-calculated.summary.deductionAmount)}</p>
     <section className="dx-workforce-payment-stats"><article><CalendarDays/><span><strong>{calculated.summary.workDays}</strong><small>Eligible work days</small></span></article>{fuels.length?<><article><Route/><span><strong>{fuels.filter(f=>f.status==='ready').reduce((n,f)=>n+(f.km??0),0).toLocaleString('en-IN',{maximumFractionDigits:2})} km</strong><small>Recorded fuel distance</small></span></article><article><IndianRupee/><span><strong>{money(fuels.reduce((n,f)=>n+(f.amount??0),0))}</strong><small>Known KM fuel allowance</small></span></article></>:<article><Route/><span><strong>{daily.reduce((n,d)=>n+d.deliveries,0)}</strong><small>Recorded deliveries</small></span></article>}</section>
     <ConnectPayAdjustments ledger={calculated.adjustments}/><ConnectPayIncentives incentives={calculated.incentives}/>
+    <ConnectLossRecoveries accountId={account.id} profileType={account.profileType}/>
     <section className={`dx-workforce-ledger ${styles.ledger}`}><header><h2>Daily earnings</h2><button type="button" onClick={()=>void load(true)} aria-label="Refresh earnings"><RefreshCw/></button></header>
      {daily.length?<div>{daily.map(day=>{
       const dayFuels=fuels.filter(f=>f.date===day.date),dayMappings=calculated.earnings.filter(e=>e.daily.some(d=>d.date===day.date));

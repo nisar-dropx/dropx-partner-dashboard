@@ -33,14 +33,31 @@ shared table, function or status value must be checked in both repos.
 ## Loss recovery (Team Ops → Losses)
 
 Files: `supabase/migrations/20261015130000_loss_recovery_payroll_deductions.sql`,
-`20261016161000_loss_recovery_installments.sql`; `src/lib/ops-pulse/nl-loss-policy.ts`,
-`nl-recovery-payables.ts`, `nl-recovery-ledger*.ts`; `src/components/nl-loss-cases.tsx`,
-`nl-recovery-ledger.tsx`; `src/app/api/ops-pulse/losses/recovery`, `.../ledger/write-off`;
-`src/lib/workforce-loss-recovery.ts` (Workforce payouts); HRMS `src/lib/payroll-ops-loss-recovery.ts`.
+`20261016161000_loss_recovery_installments.sql`, `20261022120000_nl_slp_loss_lifecycle.sql`,
+`20261022121000_loss_recovery_action_digest.sql`; `src/lib/ops-pulse/nl-loss-policy.ts`,
+`nl-loss-lifecycle*.ts`, `nl-recovery-payables.ts`, `nl-recovery-ledger*.ts`;
+`src/components/nl-loss-cases.tsx`, `nl-recovery-ledger.tsx`;
+`src/app/api/ops-pulse/losses/recovery`, `.../lifecycle`, `.../ledger/write-off`;
+`src/lib/workforce-loss-recovery.ts` (Workforce payouts); DropX One
+`apps/connect/.../loss-recoveries` + `connect-loss-recoveries.tsx`;
+HRMS `src/lib/payroll-ops-loss-recovery.ts`.
+
+**Full live lifecycle (states, access, digests, rollout):** see
+[`docs/nl-slp-live-loss-lifecycle.md`](./nl-slp-live-loss-lifecycle.md).
+
+```text
+imported → station_dispute_or_clarification_window → cluster_validation_pending
+  → slp_final_confirmation_pending → recovery_approved_scheduled → recovery_in_progress → recovered
+Exceptions: returned_to_station | rejected | not_recoverable | on_hold | needs_review | exit_balance | written_off
+```
 
 Cases come from Amazon (NL, SLP Final) or from approved station claims (`report = 'station'`), all in
 `nl_loss_month_cases`. A plan in `nl_loss_recoveries` assigns the full case amount to up to 50 people
 (employees `employee:<id>` → HRMS payroll; Workforce `workforce:<id>` → Workforce payout).
+**Allocating plans are `proposed` until SLP final approval** (`nl_loss_recovery_approve`); only
+`approval_status = approved` lines are returned by `nl_loss_recovery_due`. Legacy in-flight plans were
+backfilled to `approved`. Station users dispute/clarify only (Cloak NL disputes + `nl_loss_clarifications`);
+Cluster Managers propose; they cannot approve their own proposal.
 
 **Recovery mode** (`nl_loss_recoveries.recovery_mode`):
 
@@ -306,6 +323,10 @@ for every gate, so a wider list never gives anyone extra approval rights.
 
 ## Pending work
 
+- **NL/SLP lifecycle ops enablement (config, not code).** After applying `20261022120000` /
+  `20261022121000`, configure SLP location scope, keep the loss-recovery digest disabled until a dry-run
+  day, and walk one NL + one SLP Final case through propose → different-user approve → payroll draft.
+  Details: `docs/nl-slp-live-loss-lifecycle.md`.
 - **Automatic ID mapping by email** (workforce register and LSC ↔ DropX IDs). This is blocked: LSC
   provider IDs (`2000…`, from `cps_shipment_daily`) have no email anywhere in the database, and the Amazon
   transporter IDs linked by email in `workforce_amazon_portal_links` are a different ID system. It needs a
@@ -330,9 +351,11 @@ for every gate, so a wider list never gives anyone extra approval rights.
 
 Apply one file at a time after tests pass:
 
-1. `supabase/migrations/20261021120000_delivery_scorecard_assigned_success.sql` — scorecard success %.
-2. `supabase/migrations/20261021141000_station_claim_request_tracker_catalog.sql` — catalog pointer update.
-3. **Only with explicit approval:** `supabase/migrations/20261021140000_drop_workforce_decide_payout_dispute.sql`.
+1. `supabase/migrations/20261022120000_nl_slp_loss_lifecycle.sql` — case lifecycle + propose/approve gate.
+2. `supabase/migrations/20261022121000_loss_recovery_action_digest.sql` — daily digest control (disabled).
+3. `supabase/migrations/20261021120000_delivery_scorecard_assigned_success.sql` — scorecard success % (if not yet applied).
+4. `supabase/migrations/20261021141000_station_claim_request_tracker_catalog.sql` — catalog pointer update (if not yet applied).
+5. **Only with explicit approval:** `supabase/migrations/20261021140000_drop_workforce_decide_payout_dispute.sql`.
 
 For each file:
 

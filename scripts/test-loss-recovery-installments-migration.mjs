@@ -42,7 +42,12 @@ await db.exec(`insert into companies values('${C}','X'); insert into stations va
   ('${C}','nl','2026-09','I1','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','I2','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','F1','BLR1',200,'Recoverable'),
   ('${C}','nl','2026-09','CAP','BLR1',1200,'Recoverable'),('${C}','nl','2026-09','W1','BLR1',900,'Recoverable');`);
 // Each migration applied twice: both must be safe to re-run.
-for (const file of ["20261015130000_loss_recovery_payroll_deductions.sql", "20261016161000_loss_recovery_installments.sql", "20261016181000_station_loss_claims.sql"]) {
+for (const file of [
+  "20261015130000_loss_recovery_payroll_deductions.sql",
+  "20261016161000_loss_recovery_installments.sql",
+  "20261016181000_station_loss_claims.sql",
+  "20261022120000_nl_slp_loss_lifecycle.sql",
+]) {
   const sql = readFileSync(`supabase/migrations/${file}`, "utf8");
   await db.exec(sql); await db.exec(sql);
 }
@@ -50,6 +55,13 @@ let fails = 0;
 const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
 const one = async (sql) => (await db.query(sql)).rows[0];
 const throws = async (name, sql, re) => { try { await db.query(sql); fails++; console.log("FAIL", name, "did not raise"); } catch (e) { const ok = re.test(e.message); if (!ok) fails++; console.log(ok ? "PASS" : "FAIL", name, ok ? "" : e.message); } };
+const SLP = "00000000-0000-0000-0000-0000000000bb";
+const approve = async (cs) => {
+  const row = await one(`select r.version, c.lifecycle_version lv from nl_loss_recoveries r join nl_loss_month_cases c using(company_id,month,case_key) where r.case_key='${cs}'`);
+  if (row && (await one(`select approval_status s from nl_loss_recoveries where case_key='${cs}'`)).s === "proposed") {
+    await db.query(`select nl_loss_recovery_approve('${C}','2026-09','${cs}',${row.version},'${SLP}','SLP Mgr',null,${row.lv})`);
+  }
+};
 
 eq("Default cap moves to 50% with 24 instalments", (await one(`select recovery_policy->>'salary_cap_percent' p, recovery_policy->>'max_installments' k from nl_loss_sources`)), { p: "50", k: "24" });
 const payables = async (payable = 50000, gross = null) => db.exec(`delete from nl_recovery_payables; insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at) select '${C}',r,to_char(date_trunc('month',now() at time zone 'Asia/Kolkata')-interval '1 month','YYYY-MM'),true,${payable},${gross ?? "null"},'x',(select updated_at from nl_loss_sources) from unnest(array['employee:${E1}','employee:${E2}','workforce:${W1}']) r`);
@@ -73,6 +85,7 @@ await throws("Override without reason rejected", save("I1", 0, E1A(1000), { mode
 
 // --- Months basis: 1000 over 3 → 333.34 / 333.33 / 333.33
 await db.query(save("I1", 0, E1A(1000), { mode: "installments", basis: "months", value: "3" }));
+await approve("I1");
 await pin("I1");
 const i1 = await one(`select recovery_mode,installment_basis,installment_value::text v,allocations->0->'installments' s,allocations->0->>'monthly_amount' m from nl_loss_recoveries where case_key='I1'`);
 eq("Months schedule splits paise onto the first instalments", i1.s.map((x) => [x.n, x.amount]), [[1, 333.34], [2, 333.33], [3, 333.33]]);
@@ -106,14 +119,16 @@ await db.exec(`update hr_payroll_runs set status='approved' where id in ('${R10}
 eq("Ledger: approved runs are deducted", await led("I1"), [{ total: "1000.00", deducted: "666.67", in_payroll: "0", outstanding: "333.33", deducted_count: 2, installment_count: 3, status: "in_progress" }]);
 
 // --- Locks: a deducted schedule cannot be changed, a remark can
-await throws("Deducted schedule cannot be re-planned", save("I1", 1, E1A(1000), { mode: "installments", basis: "months", value: "4" }), /already deducted in October 2026 payroll for D0001/);
-await throws("Deducted plan cannot switch to full debit", save("I1", 1, E1A(1000), { mode: "full" }), /already deducted/);
-await throws("Deducted plan cannot be cleared", `select clear_nl_recovery('${C}','2026-09','I1',1,'${ACT}','Ops')`, /already deducted/);
-await db.query(save("I1", 1, E1A(1000), { mode: "installments", basis: "months", value: "3" }, "Remark edit only"));
-eq("Remark edit keeps salary month and schedule", (await one(`select version,deduction_month,jsonb_array_length(allocations->0->'installments') n from nl_loss_recoveries where case_key='I1'`)), { version: 2, deduction_month: "2026-10", n: 3 });
+const i1Ver = Number((await one(`select version from nl_loss_recoveries where case_key='I1'`)).version);
+await throws("Deducted schedule cannot be re-planned", save("I1", i1Ver, E1A(1000), { mode: "installments", basis: "months", value: "4" }), /already deducted in October 2026 payroll for D0001/);
+await throws("Deducted plan cannot switch to full debit", save("I1", i1Ver, E1A(1000), { mode: "full" }), /already deducted/);
+await throws("Deducted plan cannot be cleared", `select clear_nl_recovery('${C}','2026-09','I1',${i1Ver},'${ACT}','Ops')`, /already deducted/);
+await db.query(save("I1", i1Ver, E1A(1000), { mode: "installments", basis: "months", value: "3" }, "Remark edit only"));
+eq("Remark edit keeps salary month and schedule", (await one(`select version,deduction_month,jsonb_array_length(allocations->0->'installments') n from nl_loss_recoveries where case_key='I1'`)), { version: i1Ver + 1, deduction_month: "2026-10", n: 3 });
 
 // --- Amount basis and workforce payouts: 900 at 400/month → 400 / 400 / 100
 await db.query(save("W1", 0, [{ employee_ref: `workforce:${W1}`, amount: "900" }], { mode: "installments", basis: "amount", value: "400" }));
+await approve("W1");
 await pin("W1");
 eq("Amount schedule ends with the remainder", (await one(`select allocations->0->'installments' s from nl_loss_recoveries where case_key='W1'`)).s.map((x) => x.amount), [400, 400, 100]);
 eq("Workforce Oct payout: instalment 1", keys(await due("workforce", "2026-10"), "W1"), [["1", "400.00"]]);
@@ -126,6 +141,7 @@ eq("Oct republished without it → Nov takes instalment 1 again", keys(await due
 
 // --- Full debit keeps its original key
 await db.query(save("F1", 0, [{ employee_ref: `employee:${E2}`, amount: "200" }]));
+await approve("F1");
 await pin("F1");
 eq("Full debit key unchanged", (await due("hrms", "2026-10")).filter((r) => r.recovery_key.includes("|F1|")).map((r) => [r.recovery_key, r.installment_no, r.cap_exempt]), [[`2026-09|F1|employee:${E2}`, null, false]]);
 eq("Full debit plan defaults", (await one(`select recovery_mode,installment_basis,cap_override from nl_loss_recoveries where case_key='F1'`)), { recovery_mode: "full", installment_basis: null, cap_override: false });
@@ -139,14 +155,17 @@ eq("Same loss spread over 4 months fits the cap", (await one(`select allocations
 await throws("Override still cannot pass take-home", save("CAP", 1, E2A(1200), { mode: "full", cap_override: true, cap_override_reason: "Approved by finance head" }), /more than the take-home salary limit of ₹800\.00/);
 await db.query(save("CAP", 1, E2A(1200), { mode: "installments", basis: "months", value: "2", cap_override: true, cap_override_reason: "Approved by finance head" }));
 eq("Override with reason saves and is recorded", (await one(`select cap_override,cap_override_reason r,allocations->0->>'salary_gross' g from nl_loss_recoveries where case_key='CAP'`)), { cap_override: true, r: "Approved by finance head", g: "2000.00" });
+await approve("CAP");
 await db.exec(`update nl_loss_recoveries set deduction_month='2026-10' where case_key='CAP'`);
 eq("Override lines are cap-exempt in payroll", (await due("hrms", "2026-10")).filter((r) => r.recovery_key.includes("|CAP|")).map((r) => r.cap_exempt), [true]);
 await payables(5000, 500);
-await throws("Monthly recovery above gross pay is refused", save("CAP", 2, E2A(1200), { mode: "installments", basis: "months", value: "2", cap_override: true, cap_override_reason: "Approved by finance head" }), /more than their gross pay of ₹500/);
+const capVer = Number((await one(`select version from nl_loss_recoveries where case_key='CAP'`)).version);
+await throws("Monthly recovery above gross pay is refused", save("CAP", capVer, E2A(1200), { mode: "installments", basis: "months", value: "2", cap_override: true, cap_override_reason: "Approved by finance head" }), /more than their gross pay of ₹500/);
 await payables();
 
 // --- Exit: every remaining instalment in the final settlement, uncapped
 await db.query(save("I2", 0, [{ employee_ref: `employee:${E2}`, amount: "1000" }], { mode: "installments", basis: "months", value: "4" }));
+await approve("I2");
 await pin("I2");
 eq("Before exit: one instalment", keys(await due("hrms", "2026-10"), "I2"), [["1", "250.00"]]);
 await db.exec(`update employees set last_working_date='2026-10-20' where id='${E2}'`);
@@ -197,6 +216,10 @@ eq("Station case is recoverable at the approved amount", sc, { report: "station"
 await throws("Approved claim cannot be decided again", act(c1.id, "reject", 4, CM, "Changed my mind"), /now approved/);
 await payables();
 await db.query(`select save_nl_recovery('${C}','${a1.case_month}','station:BLR-CASH-001',0,'deduct','custom','${JSON.stringify([{ employee_ref: `workforce:${W1}`, amount: "750" }])}','Recover station cash','${ACT}','Ops','{}','{"mode":"installments","basis":"months","value":"3"}')`);
+{
+  const row = await one(`select r.version, c.lifecycle_version lv, c.month from nl_loss_recoveries r join nl_loss_month_cases c using(company_id,month,case_key) where r.case_key='station:BLR-CASH-001'`);
+  await db.query(`select nl_loss_recovery_approve('${C}','${row.month}','station:BLR-CASH-001',${row.version},'${SLP}','SLP Mgr',null,${row.lv})`);
+}
 await db.exec(`update nl_loss_recoveries set deduction_month='2026-10' where case_key='station:BLR-CASH-001'`);
 eq("Station loss is due in the Workforce payout, instalment 1", (await due("workforce", "2026-10")).filter((r) => r.recovery_key.includes("station:BLR-CASH-001")).map((r) => [r.amount, r.label.startsWith("STATION loss")]), [["250.00", true]]);
 eq("NL cases still use Amazon's decision", (await one(`select nl_case_recoverable('${C}','nl','Not Recoverable') a, nl_case_recoverable('${C}','station','Pending') b`)), { a: false, b: false });

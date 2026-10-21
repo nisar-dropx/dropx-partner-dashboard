@@ -11,6 +11,7 @@ import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production
 import {ConnectRouteFuel} from './connect-route-fuel';
 import type {DailyRouteFuel} from '../../../../src/lib/workforce-route-distance';
 import {ConnectProductionBreakdown} from './connect-production-breakdown';
+import {ConnectLossRecoveries} from './connect-loss-recoveries';
 
 type Account = { id: string; profileType: string };
 type ProductionLine = { label: string; count: number; rate: number; amount: number };
@@ -76,6 +77,7 @@ function MyEarnings({ account }: { account: Account }) {
       <p className="dx-workforce-payment-note">Production + eligible incentives + approved additions − approved deductions. This is not your unpaid balance. Training pay and other payroll-only entitlements are confirmed in statements.</p>
       <ConnectPayAdjustments key={month} ledger={data.adjustments}/>
       <ConnectPayIncentives incentives={data.incentives}/>
+      <ConnectLossRecoveries accountId={account.id} profileType={account.profileType}/>
       {rows.length && view === "monthly" ? <div className="dx-earnings-list">{rows.map((earning) => <article key={earning.id}>
         <header><span><strong>{earning.location}</strong><small>{earning.provider}</small></span><b>{money(earning.grossAmount)}</b></header>
         <div className="dx-earnings-meta"><span>Provider mapping: {earning.paymentMethod}</span><span>{earning.workDays} work day{earning.workDays === 1 ? "" : "s"}</span></div>

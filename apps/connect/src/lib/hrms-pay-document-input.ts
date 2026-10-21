@@ -123,6 +123,8 @@ const VARIABLE_LINES: Record<string, { label: string; order: number }> = {
   PAY_ADVANCE_RECOVERY: { label: "Advance Deduction", order: 1 },
   MANUAL_ADVANCE: { label: "Advance Deduction", order: 1 },
   LOSS_DEDUCTION: { label: "Loss Recovery Deduction", order: 2 },
+  // Ops Pulse NL/SLP recovery lines from shared payroll (same label as manual LOSS_DEDUCTION).
+  OPS_LOSS_RECOVERY: { label: "Loss Recovery Deduction", order: 2 },
   EXCEPTION_DEBIT: { label: "Other Deductions", order: 3 }
 };
 
