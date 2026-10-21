@@ -79,7 +79,7 @@ function worksheet(
   };
 }
 
-test('historical month rows show their end date and cannot submit another clear', () => {
+test('historical month rows show their end date and expose the clear icon', () => {
   const historical = {
     ...row,
     workforceId: worker.id,
@@ -93,11 +93,268 @@ test('historical month rows show their end date and cannot submit another clear'
   };
   const ui = worksheet({ mappings: [historical], initialMappingStatus: 'all' });
 
-  assert.equal(ui.select('provider_first_worker_0').allowClear, false);
+  assert.equal(ui.select('provider_first_worker_0').allowClear, true);
   assert.match(JSON.stringify(ui.cards()), /Mapped period 01\/10\/2026–19\/10\/2026 · history preserved/);
 
   const active = worksheet({ mappings: [{ ...historical, mappingId: 'active-map', effectiveTo: '' }], initialMappingStatus: 'all' });
   assert.equal(active.select('provider_first_worker_0').allowClear, true);
+});
+
+test('clearing a bounded worksheet row and saving cancels only its exact saved period', async () => {
+  const entry = {
+    id: '40000000-0000-4000-8000-000000000010',
+    updatedAt: '2026-10-21T05:26:00.123456+00:00',
+    paymentMethodId: method.id,
+    paymentMethodName: method.name,
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '2026-10-19',
+    storedStatus: 'closed',
+    rates: []
+  };
+  const bounded = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: entry.id,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: entry.effectiveFrom,
+    effectiveTo: entry.effectiveTo,
+    history: [entry]
+  };
+  let legacySaveCalls = 0;
+  let clearInput = null;
+  const ui = worksheet(
+    { mappings: [bounded], initialMappingStatus: 'all' },
+    async () => { legacySaveCalls += 1; return { ok: false, message: 'Wrong save path', savedRows: [] }; },
+    async input => {
+      clearInput = input;
+      return { ok: true, message: 'Exact bounded period cleared.' };
+    }
+  );
+
+  ui.change('provider_first_worker_0', '');
+  assert.equal(ui.select('provider_first_worker_0').value, '');
+  assert.match(JSON.stringify(ui.cards()), /Save to clear this mapping period/);
+  await ui.save();
+
+  assert.deepEqual(clearInput, { mappingId: entry.id, expectedUpdatedAt: entry.updatedAt });
+  assert.equal(legacySaveCalls, 0);
+  assert.equal(ui.select('provider_first_worker_0').value, '');
+  assert.equal(ui.one(node => node.type === 'History').props.entries[0].storedStatus, 'cancelled');
+  assert.match(JSON.stringify(ui.all(node => node.props?.['aria-live'] === 'polite')), /Exact bounded period cleared/);
+});
+
+test('clearing one location marks the shared history cancelled on every row but unmaps only its target', async () => {
+  const clearedEntry = {
+    id: '40000000-0000-4000-8000-000000000020',
+    updatedAt: '2026-10-21T05:27:00.000000+00:00',
+    paymentMethodId: method.id,
+    paymentMethodName: method.name,
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '2026-10-19',
+    storedStatus: 'closed',
+    rates: []
+  };
+  const otherEntry = {
+    ...clearedEntry,
+    id: '40000000-0000-4000-8000-000000000021',
+    updatedAt: '2026-10-21T05:28:00.000000+00:00',
+    effectiveFrom: '2026-10-23',
+    effectiveTo: '',
+    storedStatus: 'active'
+  };
+  const firstLocation = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: clearedEntry.id,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: clearedEntry.effectiveFrom,
+    effectiveTo: clearedEntry.effectiveTo,
+    history: [otherEntry, clearedEntry]
+  };
+  const secondLocation = {
+    ...firstLocation,
+    stationId: 'station-2',
+    stationLabel: 'GYMC',
+    mappingId: otherEntry.id,
+    effectiveFrom: otherEntry.effectiveFrom,
+    effectiveTo: otherEntry.effectiveTo
+  };
+  const ui = worksheet(
+    { mappings: [firstLocation, secondLocation], initialMappingStatus: 'all' },
+    undefined,
+    async () => ({ ok: true, message: 'Exact period cleared.' })
+  );
+
+  ui.change('provider_first_worker_0', '');
+  await ui.save();
+
+  assert.equal(ui.select('provider_first_worker_0').value, '');
+  assert.equal(ui.select('provider_first_worker_1').value, worker.id, 'the other location stays mapped');
+  const histories = ui.all(node => node.type === 'History');
+  for (const historyButton of histories) {
+    assert.equal(historyButton.props.entries.find(entry => entry.id === clearedEntry.id).storedStatus, 'cancelled');
+  }
+  assert.equal(histories[0].props.entries
+    .find(entry => entry.id === otherEntry.id).storedStatus, 'active');
+});
+
+test('a stale bounded-period clear stays staged and shows the server error for retry', async () => {
+  const entry = {
+    id: '40000000-0000-4000-8000-000000000011',
+    updatedAt: '2026-10-21T05:30:00.000000+00:00',
+    paymentMethodId: method.id,
+    paymentMethodName: method.name,
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '2026-10-19',
+    storedStatus: 'closed',
+    rates: []
+  };
+  const bounded = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: entry.id,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: entry.effectiveFrom,
+    effectiveTo: entry.effectiveTo,
+    history: [entry]
+  };
+  let legacySaveCalls = 0;
+  const ui = worksheet(
+    { mappings: [bounded], initialMappingStatus: 'all' },
+    async () => { legacySaveCalls += 1; return { ok: false, message: 'Wrong save path', savedRows: [] }; },
+    async () => ({ ok: false, message: 'The active mapping changed. Reload the page and try again.' })
+  );
+
+  ui.change('provider_first_worker_0', '');
+  await ui.save();
+
+  assert.equal(legacySaveCalls, 0);
+  assert.equal(ui.select('provider_first_worker_0').value, '', 'the clear draft remains staged');
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-row-error')), /active mapping changed/);
+  assert.match(JSON.stringify(ui.all(node => node.props?.['aria-live'] === 'polite')), /active mapping changed/);
+  assert.equal(ui.one(node => node.type === 'History').props.entries[0].storedStatus, 'closed');
+});
+
+test('a bounded clear failure does not skip other dirty rows in Save changes', async () => {
+  const entry = {
+    id: '40000000-0000-4000-8000-000000000012',
+    updatedAt: '2026-10-21T05:35:00.000000+00:00',
+    paymentMethodId: method.id,
+    paymentMethodName: method.name,
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '2026-10-19',
+    storedStatus: 'closed',
+    rates: []
+  };
+  const bounded = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: entry.id,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: entry.effectiveFrom,
+    effectiveTo: entry.effectiveTo,
+    history: [entry]
+  };
+  const secondWorker = { ...worker, id: 'worker-2', dropxId: 'DROPX2', fullName: 'Bina Devi' };
+  const ongoing = {
+    ...row,
+    providerMemberId: '12345678902',
+    providerMemberName: secondWorker.fullName,
+    workforceId: secondWorker.id,
+    dropxId: secondWorker.dropxId,
+    dropxName: secondWorker.fullName,
+    mappingId: 'ongoing-map',
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '17' },
+    effectiveFrom: '2026-10-01',
+    effectiveTo: ''
+  };
+  let submitted;
+  const ui = worksheet(
+    { mappings: [bounded, ongoing], workers: [worker, secondWorker], initialMappingStatus: 'all' },
+    async data => { submitted = data; return saved(data); },
+    async () => ({ ok: false, message: 'The bounded mapping changed. Reload and retry.' })
+  );
+
+  ui.change('provider_first_worker_0', '');
+  ui.one(node => node.type === 'input' && node.props.type === 'number').props.onChange({ target: { value: '20' } });
+  ui.render();
+  await ui.save();
+
+  assert.equal(submitted.get('row_count'), '1');
+  assert.equal(submitted.get('rows[0][provider_member_id]'), ongoing.providerMemberId);
+  assert.equal(submitted.get('rows[0][payment_values_json]'), '{"DELIVERY":"20"}');
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-row-error')), /bounded mapping changed/);
+  assert.match(JSON.stringify(ui.all(node => node.props?.['aria-live'] === 'polite')), /Other changed rows were also processed/);
+});
+
+test('mixed saves keep successfully cleared period IDs excluded from final worker reconciliation', () => {
+  const source = readFileSync(new URL('./provider-first-mapping-worksheet.tsx', import.meta.url), 'utf8');
+  assert.match(source, /new Set\(\[\.\.\.excludedMappingIds, \.\.\.successfulMappingIds\]\)/);
+  assert.match(source, /removeWorkerMappingPeriods\(update \? \{ \.\.\.worker, \.\.\.update \} : worker, excludedMappingIds\)/);
+});
+
+test('clearing an ongoing row keeps the legacy save path', async () => {
+  const ongoing = {
+    ...row,
+    workforceId: worker.id,
+    dropxId: worker.dropxId,
+    dropxName: worker.fullName,
+    mappingId: 'active-map',
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    effectiveFrom: '2026-10-01',
+    effectiveTo: ''
+  };
+  let submitted;
+  let exactClearCalls = 0;
+  const ui = worksheet(
+    { mappings: [ongoing], initialMappingStatus: 'all' },
+    async data => {
+      submitted = data;
+      return {
+        ok: true,
+        message: 'Ongoing mapping cleared.',
+        savedRows: [{
+          clientKey: data.get('rows[0][client_key]'),
+          workforceId: '',
+          mappingId: '',
+          paymentMethodId: '',
+          paymentValues: {},
+          productionThresholdConfig: null,
+          productionThresholdMinimumUnits: '',
+          effectiveFrom: '',
+          effectiveTo: '',
+          cleared: {
+            previousMappingId: ongoing.mappingId,
+            previousWorkforceId: ongoing.workforceId,
+            previousEffectiveTo: '2026-10-21',
+            previousStatus: 'cancelled'
+          }
+        }]
+      };
+    },
+    async () => { exactClearCalls += 1; return { ok: true, message: 'Wrong clear path' }; }
+  );
+
+  ui.change('provider_first_worker_0', '');
+  await ui.save();
+
+  assert.equal(exactClearCalls, 0);
+  assert.equal(submitted.get('rows[0][clear_mapping]'), 'yes');
+  assert.equal(submitted.get('rows[0][mapping_id]'), ongoing.mappingId);
 });
 
 test('editable history exposes exact-period clearing and forwards the saved mapping ID', async () => {
