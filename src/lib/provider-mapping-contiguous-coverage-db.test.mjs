@@ -120,6 +120,43 @@ test('rate changes preserve continuous registered-location coverage across the c
  await db.exec(finalCoverageMigration);
  // The final migration is safe to re-run after every historical writer.
  await db.exec(finalCoverageMigration);
+
+ await t.test('legacy Keep-all events do not misclassify a closed registered anchor period',async()=>{
+   const legacyWorker=id(40),legacyAnchor=id(41),legacyChild=id(42),legacyMember='LEGACY-111';
+   const legacyPeriod=(from,to,rate,target=station)=>({...period(from,to,rate,target),workforce_id:legacyWorker,provider_member_id:legacyMember});
+   await db.query("insert into workforce(id,company_id,location_id,dropx_id) values($1,$2,$3,'LEGACY1')",[legacyWorker,company,station]);
+   for(const row of [
+     {...legacyPeriod('2026-10-01',null,800),id:legacyAnchor},
+     {...legacyPeriod('2026-10-01','2026-10-19',800,extra),id:legacyChild},
+   ]) await db.query('insert into field_executive_provider_mappings select * from jsonb_populate_record(null::field_executive_provider_mappings,$1)',[JSON.stringify(row)]);
+   await db.query("insert into workforce_joining_events(company_id,workforce_id,event_code,details) values($1,$2,'provider_mapping_location_kept',$3)",[company,legacyWorker,{
+     existing_mapping_id:legacyChild,
+     new_mapping_id:legacyAnchor,
+     provider_id:provider,
+     provider_member_id:legacyMember,
+     existing_station_id:extra,
+     new_station_id:station,
+     effective_from:'2026-10-23'
+   }]);
+   const legacyVersions=async()=>(await db.query("select id,updated_at from field_executive_provider_mappings where workforce_id=$1 and station_id=$2 and status<>'cancelled'",[legacyWorker,station])).rows;
+   const legacyCall=async plan=>db.query('select workforce_save_mapping_schedule($1,$2,$3,$4,$5::jsonb,$6::uuid[],$7,$8::jsonb) as records',[company,actor,legacyWorker,'LEGACY1',JSON.stringify(plan),null,'Reviewer',JSON.stringify(await legacyVersions())]);
+   const legacyPlan=[legacyPeriod('2026-10-01','2026-10-22',800),{...legacyPeriod('2026-10-23',null,17),payment_method_id:id(25)}];
+   const legacyChildBefore=(await db.query('select * from field_executive_provider_mappings where id=$1',[legacyChild])).rows[0];
+   await assert.rejects(legacyCall(legacyPlan),/registered-location mapping must cover/,
+     'the old assertion mistakes the registered anchor named by new_mapping_id for an additional-location row');
+
+   const legacyAnchorMigration=await migration('20261021103000_provider_mapping_registered_anchor_legacy_keep.sql');
+   assert.match(legacyAnchorMigration,/mapping\.station_id is distinct from registered_station/);
+   await db.exec(legacyAnchorMigration);
+   const saved=await legacyCall(legacyPlan);
+   assert.deepEqual(saved.rows[0].records.map(row=>[row.effective_from,row.effective_to,row.payment_values.DELIVERY]),[
+     ['2026-10-01','2026-10-22',800],
+     ['2026-10-23',null,17]
+   ]);
+   assert.deepEqual((await db.query('select * from field_executive_provider_mappings where id=$1',[legacyChild])).rows,[legacyChildBefore],
+     'the historical additional-location mapping must remain unchanged');
+ });
+
  const result=await call(plan);
  assert.equal(result.rows[0].records.length,2);
  assert.equal(result.rows[0].records[1].payment_method_id,id(25));
