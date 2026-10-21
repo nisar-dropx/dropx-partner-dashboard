@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
-import { displayDate, formatClock, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, renderTemplate } from "@/lib/report-bot/logic";
+import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
   generateWorkerToken,
@@ -14,10 +14,11 @@ import {
   reportBotDb,
   type ReportBotSettings
 } from "@/lib/report-bot/settings";
+import { TCC3_REPORT_TEMPLATES } from "@/lib/report-bot/tcc3-templates";
 import { workerRequest } from "@/lib/report-bot/worker-client";
 
 const FLASH_COOKIE = "dropx_report_bot_flash";
-const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings"]);
+const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings", "actions", "summary"]);
 
 type Flash = { error?: string; notice?: string; token?: string };
 
@@ -90,9 +91,9 @@ async function pushWorkerConfig(settings: ReportBotSettings) {
 }
 
 async function scopedGroup(authorization: AuthorizationContext, companyId: string, groupId: string) {
-  const group = check(await reportBotDb().from("report_bot_groups").select("id,location_id,is_enabled,wa_group_id").eq("company_id", companyId).eq("id", groupId).maybeSingle(), "Load group");
+  const group = check(await reportBotDb().from("report_bot_groups").select("id,location_id,is_enabled,wa_group_id,mode").eq("company_id", companyId).eq("id", groupId).maybeSingle(), "Load group");
   if (!group || !canSeeGroup(authorization, group)) throw new Error("This group is not available to you.");
-  return group as { id: string; location_id: string | null; is_enabled: boolean; wa_group_id: string };
+  return group as { id: string; location_id: string | null; is_enabled: boolean; wa_group_id: string; mode: GroupMode };
 }
 
 export async function saveBotSettings(form: FormData) {
@@ -235,6 +236,7 @@ export async function saveGroupSelection(form: FormData) {
         participant_count: Number.isInteger(group.size) ? group.size as number : null,
         is_enabled: true,
         bot_in_group: true,
+        // mode defaults to observe on insert; never reset an existing group's Observe/Review/Live here.
         last_synced_at: now,
         updated_at: now
       })), { onConflict: "company_id,wa_group_id" }), "Save groups");
@@ -357,6 +359,10 @@ export async function approveFeedback(form: FormData) {
     const submission = await scopedSubmission(authorization, companyId, field(form, "id"));
     const feedback = requiredText(form, "feedback_text", "Feedback", 3000);
     const settings = await loadReportBotSettings(companyId);
+    const group = await scopedGroup(authorization, companyId, submission.group_id);
+    if (!canSendToGroup(settings.mode, group.mode ?? "observe")) {
+      throw new Error("Company must be Live and this group must be Review or Live to send a reply.");
+    }
     // Conditional on the status we expect, so two reviewers can't both send it.
     const updated = check(await reportBotDb().from("report_bot_submissions").update({
       status: "queued_to_send", feedback_text: feedback, reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString()
@@ -418,14 +424,17 @@ export async function sendTestReminder(form: FormData) {
     const settings = await loadReportBotSettings(companyId);
     if (settings.mode !== "live") throw new Error("Switch the bot to Live in Report Bot setup to post messages.");
     const schedule = check(await reportBotDb().from("report_bot_schedules")
-      .select("id,group_id,due_time,first_reminder_template, report:report_bot_report_types(name), group:report_bot_groups(group_name,is_enabled)")
+      .select("id,group_id,due_time,first_reminder_template, report:report_bot_report_types(name), group:report_bot_groups(group_name,is_enabled,mode)")
       .eq("company_id", companyId).eq("id", field(form, "id")).maybeSingle(), "Load schedule") as unknown as {
         id: string; group_id: string; due_time: string; first_reminder_template: string;
-        report: { name: string } | null; group: { group_name: string | null; is_enabled: boolean } | null;
+        report: { name: string } | null; group: { group_name: string | null; is_enabled: boolean; mode: GroupMode } | null;
       } | null;
     if (!schedule) throw new Error("Schedule not found.");
     await scopedGroup(authorization, companyId, schedule.group_id);
     if (!schedule.group?.is_enabled) throw new Error("This group is not on the bot. Add it on the Groups tab first.");
+    if (!canSendToGroup(settings.mode, schedule.group.mode ?? "observe")) {
+      throw new Error("This group is in Observe mode. Switch it to Review (or Live) before sending a test reminder.");
+    }
     const today = localClock(new Date(), settings.timezone).date;
     const body = renderTemplate(schedule.first_reminder_template, {
       group: schedule.group.group_name ?? "team",
@@ -509,5 +518,289 @@ export async function setRequestStatus(form: FormData) {
         .eq("request_id", request.id).eq("status", "pending");
     }
     return { notice: status === "received" ? "Marked as received; no more reminders today." : status === "cancelled" ? "Today's request cancelled; no reminders will be sent." : "Request reopened." };
+  });
+}
+
+export async function setGroupMode(form: FormData) {
+  await mutate("groups", async ({ authorization, companyId }) => {
+    const group = await scopedGroup(authorization, companyId, field(form, "group_id"));
+    const mode = field(form, "mode") as GroupMode;
+    if (!GROUP_MODES.has(mode)) throw new Error("Choose Observe, Review or Live.");
+    const name = (check(await reportBotDb().from("report_bot_groups").select("group_name").eq("id", group.id).maybeSingle(), "Load name") as { group_name: string | null } | null)?.group_name ?? "";
+    // Safety: never silently put a non-Testing production war-room group into Live from this UI without Review first.
+    if (mode === "live" && /tcc3/i.test(name) && !/testing/i.test(name)) {
+      throw new Error("Switch TCC3 · Adayar to Live only after an authorised reviewer explicitly confirms the pilot. Use Observe, then Review, first.");
+    }
+    check(await reportBotDb().from("report_bot_groups").update({ mode, updated_at: new Date().toISOString() }).eq("id", group.id), "Save group mode");
+    if (mode === "observe") {
+      check(await reportBotDb().from("report_bot_outbox").update({ status: "cancelled", status_reason: "Group switched to Observe.", updated_at: new Date().toISOString() })
+        .eq("group_id", group.id).eq("status", "pending"), "Cancel pending sends");
+    }
+    return { notice: mode === "observe" ? "Group is in Observe: messages are classified, nothing is sent." : mode === "review" ? "Group is in Review: drafts need approval before any send." : "Group is in Live: auto-replies may post for non high-risk reports when company mode is also Live." };
+  });
+}
+
+/** Install/update the 10 TCC3 War Room report types for this company (by slug). Does not touch groups. */
+export async function installTcc3Templates() {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const db = reportBotDb();
+    const now = new Date().toISOString();
+    let created = 0;
+    let updated = 0;
+    for (const template of TCC3_REPORT_TEMPLATES) {
+      const existing = check(await db.from("report_bot_report_types").select("id").eq("company_id", companyId).eq("slug", template.slug).maybeSingle(), "Load type") as { id: string } | null;
+      const row = {
+        name: template.name,
+        description: template.description,
+        rules: template.rules,
+        slug: template.slug,
+        category: template.category,
+        auto_reply_policy: template.auto_reply_policy,
+        subtypes: template.subtypes,
+        feedback_hint: template.feedback_hint,
+        is_active: true,
+        updated_at: now
+      };
+      if (existing) {
+        check(await db.from("report_bot_report_types").update(row).eq("id", existing.id), "Update type");
+        updated += 1;
+      } else {
+        check(await db.from("report_bot_report_types").insert({ ...row, company_id: companyId, created_by: authorization.userId }), "Create type");
+        created += 1;
+      }
+    }
+    return { notice: `TCC3 templates ready: ${created} created, ${updated} updated. Seed draft schedules only for the Testing group next.` };
+  });
+}
+
+/** Create inactive draft schedules for one group from TCC3 templates. Never enables them. */
+export async function seedDraftSchedulesForGroup(form: FormData) {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const group = await scopedGroup(authorization, companyId, field(form, "group_id"));
+    const groupRow = check(await reportBotDb().from("report_bot_groups").select("group_name").eq("id", group.id).single(), "Load group") as { group_name: string | null };
+    if (/tcc3/i.test(groupRow.group_name ?? "") && !/testing/i.test(groupRow.group_name ?? "")) {
+      throw new Error("Do not seed schedules onto TCC3 · Adayar during the pilot. Use the Testing group, then Duplicate configuration later.");
+    }
+    const db = reportBotDb();
+    const types = check(await db.from("report_bot_report_types").select("id,slug").eq("company_id", companyId).not("slug", "is", null), "Load types") as Array<{ id: string; slug: string }>;
+    const bySlug = new Map(types.map((row) => [row.slug, row.id]));
+    let seeded = 0;
+    let skipped = 0;
+    for (const template of TCC3_REPORT_TEMPLATES) {
+      if (!template.schedule) continue;
+      const reportTypeId = bySlug.get(template.slug);
+      if (!reportTypeId) throw new Error(`Install TCC3 templates first (missing ${template.slug}).`);
+      const existing = check(await db.from("report_bot_schedules").select("id").eq("group_id", group.id).eq("report_type_id", reportTypeId).maybeSingle(), "Check schedule");
+      if (existing) {
+        skipped += 1;
+        continue;
+      }
+      check(await db.from("report_bot_schedules").insert({
+        company_id: companyId,
+        group_id: group.id,
+        report_type_id: reportTypeId,
+        days_of_week: [0, 1, 2, 3, 4, 5, 6],
+        reminder_times: template.schedule.reminder_times,
+        due_time: template.schedule.due_time,
+        first_reminder_template: template.schedule.first_reminder_template,
+        followup_template: template.schedule.followup_template,
+        overdue_template: template.schedule.overdue_template,
+        is_active: false,
+        stop_when_received: template.schedule.stop_when_received,
+        review_only: template.schedule.review_only,
+        schedule_kind: template.schedule.schedule_kind,
+        created_by: authorization.userId
+      }), "Seed schedule");
+      seeded += 1;
+    }
+    return { notice: `Draft schedules for ${groupRow.group_name ?? "group"}: ${seeded} created (inactive), ${skipped} already present. Confirm timings before enabling any.` };
+  });
+}
+
+/** Explicit copy of schedules (+ optional report-type link) from one group to another. Never automatic. */
+export async function duplicateGroupConfiguration(form: FormData) {
+  await mutate("groups", async ({ authorization, companyId }) => {
+    const source = await scopedGroup(authorization, companyId, field(form, "source_group_id"));
+    const target = await scopedGroup(authorization, companyId, field(form, "target_group_id"));
+    if (source.id === target.id) throw new Error("Choose two different groups.");
+    const targetRow = check(await reportBotDb().from("report_bot_groups").select("group_name,mode").eq("id", target.id).single(), "Load target") as { group_name: string | null; mode: string };
+    if (/tcc3/i.test(targetRow.group_name ?? "") && targetRow.mode !== "observe") {
+      throw new Error("Set TCC3 · Adayar to Observe before duplicating configuration onto it.");
+    }
+    const db = reportBotDb();
+    const schedules = check(await db.from("report_bot_schedules").select("*").eq("company_id", companyId).eq("group_id", source.id), "Load source schedules") as Array<Record<string, unknown>>;
+    let copied = 0;
+    let skipped = 0;
+    for (const schedule of schedules) {
+      const exists = check(await db.from("report_bot_schedules").select("id").eq("group_id", target.id).eq("report_type_id", schedule.report_type_id as string).maybeSingle(), "Check target");
+      if (exists) {
+        skipped += 1;
+        continue;
+      }
+      check(await db.from("report_bot_schedules").insert({
+        company_id: companyId,
+        group_id: target.id,
+        report_type_id: schedule.report_type_id,
+        days_of_week: schedule.days_of_week,
+        reminder_times: schedule.reminder_times,
+        due_time: schedule.due_time,
+        first_reminder_template: schedule.first_reminder_template,
+        followup_template: schedule.followup_template,
+        overdue_template: schedule.overdue_template,
+        is_active: false,
+        stop_when_received: schedule.stop_when_received,
+        review_only: schedule.review_only ?? true,
+        escalation_delay_minutes: schedule.escalation_delay_minutes ?? 30,
+        schedule_kind: schedule.schedule_kind ?? "timed",
+        created_by: authorization.userId
+      }), "Copy schedule");
+      copied += 1;
+    }
+    check(await db.from("report_bot_groups").update({ mode: "observe", updated_at: new Date().toISOString() }).eq("id", target.id), "Reset target to Observe");
+    return { notice: `Copied ${copied} schedule(s) to ${targetRow.group_name ?? "target"} as inactive drafts (${skipped} skipped). Target left in Observe mode.` };
+  });
+}
+
+export async function approveReviewItem(form: FormData) {
+  await mutate("review", async ({ authorization, companyId }) => {
+    const id = field(form, "id");
+    const feedback = requiredText(form, "feedback_text", "Feedback", 3000);
+    const settings = await loadReportBotSettings(companyId);
+    const row = check(await reportBotDb().from("report_bot_review_items")
+      .select("id,group_id,submission_id,review_status, primary_event:report_bot_inbound_events(wa_message_id,sender_jid), group:report_bot_groups(location_id,mode,is_enabled)")
+      .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load review") as unknown as {
+        id: string; group_id: string; submission_id: string | null; review_status: string;
+        primary_event: { wa_message_id: string; sender_jid: string | null } | null;
+        group: { location_id: string | null; mode: GroupMode; is_enabled: boolean } | null;
+      } | null;
+    if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
+    if (!["draft_ready", "observe_only"].includes(row.review_status)) throw new Error("This item was already handled.");
+    if (!row.group?.is_enabled || !canSendToGroup(settings.mode, row.group.mode ?? "observe")) {
+      throw new Error("Company must be Live and this group must be Review or Live to send.");
+    }
+    const updated = check(await reportBotDb().from("report_bot_review_items").update({
+      review_status: "approved",
+      feedback_draft: feedback,
+      reviewed_by: authorization.userId,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq("id", id).in("review_status", ["draft_ready", "observe_only"]).select("id"), "Approve review") as Array<{ id: string }>;
+    if (!updated.length) throw new Error("Someone already handled this item.");
+    await reportBotDb().from("report_bot_review_audit").insert({
+      company_id: companyId, review_id: id, action: "approved", actor_user_id: authorization.userId, detail: { feedback }
+    });
+    if (row.submission_id) {
+      check(await reportBotDb().from("report_bot_submissions").update({
+        status: "queued_to_send", feedback_text: feedback, reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      }).eq("id", row.submission_id).in("status", ["awaiting_approval", "failed", "ignored"]), "Approve submission");
+      await reportBotDb().from("report_bot_outbox").delete().eq("company_id", companyId).eq("dedupe_key", `feedback:${row.submission_id}`).in("status", ["failed", "cancelled"]);
+      await queueFeedback(settings, {
+        id: row.submission_id,
+        company_id: companyId,
+        group_id: row.group_id,
+        wa_message_id: row.primary_event?.wa_message_id ?? "",
+        sender_jid: row.primary_event?.sender_jid ?? null
+      }, feedback, authorization.userId, { immediate: true });
+      const notice = await sendNow(settings, [row.submission_id]);
+      const sentRow = check(await reportBotDb().from("report_bot_submissions").select("status").eq("id", row.submission_id).single(), "Check send") as { status: string };
+      if (sentRow.status === "sent") {
+        await reportBotDb().from("report_bot_review_items").update({ review_status: "sent", sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", id);
+        await reportBotDb().from("report_bot_review_audit").insert({
+          company_id: companyId, review_id: id, action: "sent", actor_user_id: authorization.userId, detail: {}
+        });
+      }
+      return { notice };
+    }
+    const event = row.primary_event;
+    if (!event?.wa_message_id) throw new Error("No message to quote for this reply.");
+    const dedupe = `feedback-review:${id}`;
+    check(await reportBotDb().from("report_bot_outbox").insert({
+      company_id: companyId,
+      group_id: row.group_id,
+      kind: "feedback",
+      dedupe_key: dedupe,
+      body: feedback,
+      quoted_message_id: event.wa_message_id,
+      quoted_participant: event.sender_jid,
+      not_before: new Date().toISOString(),
+      stale_after: new Date(Date.now() + 12 * 3600 * 1000).toISOString(),
+      created_by: authorization.userId
+    }), "Queue feedback");
+    try {
+      await flushOutbox(settings, Date.now() + 45_000);
+    } catch {
+      // cron retries
+    }
+    const out = check(await reportBotDb().from("report_bot_outbox").select("status").eq("company_id", companyId).eq("dedupe_key", dedupe).single(), "Check send") as { status: string };
+    if (out.status === "sent") {
+      check(await reportBotDb().from("report_bot_review_items").update({ review_status: "sent", sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", id), "Mark sent");
+      await reportBotDb().from("report_bot_review_audit").insert({ company_id: companyId, review_id: id, action: "sent", actor_user_id: authorization.userId, detail: {} });
+      return { notice: "Reply posted in the group." };
+    }
+    return { notice: "Approved and queued; it goes out within a minute." };
+  });
+}
+
+export async function dismissReviewItem(form: FormData) {
+  await mutate("review", async ({ authorization, companyId }) => {
+    const id = field(form, "id");
+    const row = check(await reportBotDb().from("report_bot_review_items")
+      .select("id,submission_id, group:report_bot_groups(location_id)")
+      .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load review") as unknown as {
+        id: string; submission_id: string | null; group: { location_id: string | null } | null;
+      } | null;
+    if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
+    const updated = check(await reportBotDb().from("report_bot_review_items").update({
+      review_status: "dismissed", reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    }).eq("id", id).in("review_status", ["draft_ready", "observe_only", "approved"]).select("id"), "Dismiss") as Array<{ id: string }>;
+    if (!updated.length) throw new Error("This item was already handled.");
+    await reportBotDb().from("report_bot_review_audit").insert({
+      company_id: companyId, review_id: id, action: "dismissed", actor_user_id: authorization.userId, detail: {}
+    });
+    if (row.submission_id) {
+      await reportBotDb().from("report_bot_submissions").update({ status: "rejected", reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", row.submission_id).in("status", ["awaiting_approval", "queued_to_send", "failed"]);
+      await reportBotDb().from("report_bot_outbox").update({ status: "cancelled", status_reason: "Reviewer dismissed.", updated_at: new Date().toISOString() })
+        .eq("submission_id", row.submission_id).eq("status", "pending");
+    }
+    return { notice: "Dismissed. No reply will be sent." };
+  });
+}
+
+export async function closeOpenAction(form: FormData) {
+  await mutate("actions", async ({ authorization, companyId }) => {
+    const id = field(form, "id");
+    const note = field(form, "closure_note").slice(0, 500) || null;
+    const row = check(await reportBotDb().from("report_bot_actions")
+      .select("id, group:report_bot_groups(location_id)")
+      .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load action") as unknown as {
+        id: string; group: { location_id: string | null } | null;
+      } | null;
+    if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This action is not available to you.");
+    check(await reportBotDb().from("report_bot_actions").update({
+      status: "closed",
+      closure_note: note,
+      closed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq("id", id).in("status", ["open", "pending_evidence", "unmatched_closure"]), "Close action");
+    return { notice: "Action marked closed." };
+  });
+}
+
+/** Dry-run preview of today's remaining reminder slots for a schedule. */
+export async function previewScheduleReminders(form: FormData) {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const settings = await loadReportBotSettings(companyId);
+    const schedule = check(await reportBotDb().from("report_bot_schedules")
+      .select("id,group_id,due_time,reminder_times,is_active")
+      .eq("company_id", companyId).eq("id", field(form, "id")).maybeSingle(), "Load schedule") as {
+        id: string; group_id: string; due_time: string; reminder_times: string[]; is_active: boolean;
+      } | null;
+    if (!schedule) throw new Error("Schedule not found.");
+    await scopedGroup(authorization, companyId, schedule.group_id);
+    const clock = localClock(new Date(), settings.timezone);
+    const preview = previewReminderSlots(schedule.reminder_times ?? [], schedule.due_time, clock.minutes);
+    const upcoming = preview.upcoming.map((slot) => slot.label).join(", ") || "none left today";
+    return { notice: `Preview (${schedule.is_active ? "active" : "draft/inactive"}): due ${formatClock(schedule.due_time)}; upcoming reminders today: ${upcoming}; ${preview.past_today} slot(s) already past.` };
   });
 }

@@ -45,6 +45,7 @@ const fasterReplies = await readFile(new URL("../../../supabase/migrations/20261
 const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");
 const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
 const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
+const tcc3Pilot = await readFile(new URL("../../../supabase/migrations/20261021150000_report_bot_tcc3_pilot.sql", import.meta.url), "utf8");
 
 async function setup() {
   const db = new PGlite();
@@ -174,6 +175,37 @@ test("migration applies, enforces shape and keeps tables away from browser roles
       await db.exec(`set role ${role}`);
       await assert.rejects(db.query("select * from public.report_bot_settings"), /permission denied/);
       await assert.rejects(db.query("select * from public.report_bot_claim_outbox($1, 5, 60)", [COMPANY_A]), /permission denied/);
+      await db.exec("reset role");
+    }
+  } finally {
+    await db.close();
+  }
+});
+
+test("TCC3 pilot migration adds per-group mode, inbound events, review items and actions, and is safe to rerun", async () => {
+  const db = await setup();
+  try {
+    await db.exec(alwaysRemind);
+    await db.exec(tcc3Pilot);
+    await db.exec(tcc3Pilot);
+    const groupId = await seedGroup(db, COMPANY_A, "120363000000000001@g.us");
+    const mode = await db.query("select mode from public.report_bot_groups where id = $1", [groupId]);
+    assert.equal(mode.rows[0].mode, "observe");
+    await assert.rejects(db.query("update public.report_bot_groups set mode = 'sometimes' where id = $1", [groupId]), /check constraint/);
+    const settings = await db.query("insert into public.report_bot_settings (company_id) values ($1) returning correlation_window_minutes, inbound_retention_days", [COMPANY_A]);
+    assert.deepEqual(settings.rows[0], { correlation_window_minutes: 10, inbound_retention_days: 30 });
+    const type = await db.query("insert into public.report_bot_report_types (company_id, name, rules, slug, auto_reply_policy) values ($1, 'Load receipt', '{a}', 'load-receipt', 'never') returning id, auto_reply_policy", [COMPANY_A]);
+    assert.equal(type.rows[0].auto_reply_policy, "never");
+    await db.query("insert into public.report_bot_inbound_events (company_id, group_id, wa_message_id, message_at, message_type, text_body) values ($1, $2, 'T1', now(), 'text', 'Load Dry 1')", [COMPANY_A, groupId]);
+    await assert.rejects(db.query("insert into public.report_bot_inbound_events (company_id, group_id, wa_message_id, message_at, message_type) values ($1, $2, 'T1', now(), 'text')", [COMPANY_A, groupId]), /duplicate key/);
+    const review = await db.query("insert into public.report_bot_review_items (company_id, group_id, review_status, verdict) values ($1, $2, 'draft_ready', 'fail') returning review_status", [COMPANY_A, groupId]);
+    assert.equal(review.rows[0].review_status, "draft_ready");
+    await db.query("insert into public.report_bot_actions (company_id, group_id, title, category, status, high_risk) values ($1, $2, 'Shortage 2 totes', 'load', 'open', true)", [COMPANY_A, groupId]);
+    const pruned = await db.query("select public.report_bot_prune_inbound_events($1, 30) as n", [COMPANY_A]);
+    assert.equal(pruned.rows[0].n, 0);
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(db.query("select * from public.report_bot_inbound_events"), /permission denied/);
       await db.exec("reset role");
     }
   } finally {

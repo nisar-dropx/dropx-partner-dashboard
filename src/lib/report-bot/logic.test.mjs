@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  canSendToGroup,
   composeFeedback,
   decideDelivery,
+  decideGroupDelivery,
   dueReminderSteps,
   extractJsonText,
+  findCorrelationBundle,
   formatChecks,
   intervalTimes,
   isGroupJid,
@@ -14,8 +17,10 @@ import {
   normalizeTimeList,
   parseAnalysis,
   parseClockTime,
+  previewReminderSlots,
   randomDelaySeconds,
   renderTemplate,
+  reviewStatusFor,
   senderLabel,
   sniffImageType,
   truncateText
@@ -103,7 +108,7 @@ test("AI output is validated and never trusted blindly", () => {
 });
 
 test("delivery: memes are silent, doubtful results go to a person, confident ones may auto-send", () => {
-  const base = { is_report: true, matched_report_type_id: candidates[0], verdict: "pass", confidence: 0.95, checks: [{ rule: "r", status: "pass", note: "" }], extracted_summary: "", feedback: "Looks good." };
+  const base = { is_report: true, matched_report_type_id: candidates[0], verdict: "pass", confidence: 0.95, checks: [{ rule: "r", status: "pass", note: "" }], extracted_summary: "", feedback: "Looks good.", open_actions: [] };
   const auto = { approval_mode: "auto", auto_send_min_confidence: 0.85 };
   assert.equal(decideDelivery({ ...base, is_report: false, verdict: "not_report" }, auto), "silent");
   assert.equal(decideDelivery(base, auto), "auto_send");
@@ -112,6 +117,18 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(decideDelivery({ ...base, verdict: "needs_review" }, auto), "needs_approval");
   assert.equal(decideDelivery({ ...base, checks: [{ rule: "r", status: "unclear", note: "" }] }, auto), "needs_approval");
   assert.equal(decideDelivery({ ...base, feedback: "  " }, auto), "needs_approval");
+  assert.equal(decideGroupDelivery(base, auto, { companyMode: "live", groupMode: "observe" }), "needs_approval");
+  assert.equal(decideGroupDelivery(base, auto, { companyMode: "live", groupMode: "review" }), "needs_approval");
+  assert.equal(decideGroupDelivery(base, auto, { companyMode: "live", groupMode: "live" }), "auto_send");
+  assert.equal(decideGroupDelivery(base, auto, { companyMode: "live", groupMode: "live", autoReplyPolicy: "never" }), "needs_approval");
+  assert.equal(decideGroupDelivery(base, auto, { companyMode: "live", groupMode: "live", category: "cold_chain" }), "needs_approval");
+  assert.equal(reviewStatusFor("observe", "needs_approval", true), "observe_only");
+  assert.equal(reviewStatusFor("review", "needs_approval", true), "draft_ready");
+  assert.equal(canSendToGroup("live", "review"), true);
+  assert.equal(canSendToGroup("live", "observe"), false);
+  assert.equal(findCorrelationBundle([{ id: "a", bundle_id: null, message_at: "2026-10-21T10:00:00Z" }], new Date("2026-10-21T10:05:00Z"), 10), "a");
+  assert.equal(findCorrelationBundle([{ id: "a", bundle_id: null, message_at: "2026-10-21T09:00:00Z" }], new Date("2026-10-21T10:05:00Z"), 10), null);
+  assert.ok(previewReminderSlots(["09:00", "10:00", "15:00"], "18:00", 10 * 60).upcoming.length >= 1);
 });
 
 test("feedback message uses the configured layout and length limit", () => {

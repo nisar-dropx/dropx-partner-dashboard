@@ -21,7 +21,6 @@ import { clearRemoteSession, hasRemoteSession, useRemoteAuthState } from "./auth
 import {
   backoffMs,
   bearerMatches,
-  classifyContent,
   EventQueue,
   GROUP_JID,
   ChatLog,
@@ -32,6 +31,7 @@ import {
   messageSeconds,
   newRef,
   normalizeConfig,
+  normalizeOperationalEvent,
   pruneOlderThan,
   readJson,
   validateSend,
@@ -206,6 +206,7 @@ async function refreshGroups() {
 
 async function forwardMessage(msg) {
   const groupId = msg.key?.remoteJid;
+  // Private chats and disabled groups are never forwarded.
   if (!groupId || !GROUP_JID.test(groupId) || !config.groups.includes(groupId)) return;
   const messageId = msg.key.id;
   if (!messageId || botMessageIds.has(messageId)) return;
@@ -214,11 +215,23 @@ async function forwardMessage(msg) {
   // anyway, so don't spend bandwidth downloading its images.
   if (Date.now() / 1000 - messageSeconds(msg.messageTimestamp) > MAX_MESSAGE_AGE_SECONDS) return;
   messageCache.set(messageId, msg);
-  const content = normalizeMessageContent(msg.message);
-  const media = classifyContent(content);
-  if (!media) return; // text, stickers, video, voice: the portal only checks images
-  if (media.size && media.size > MAX_MEDIA_BYTES) {
-    logger.info({ groupId, messageId, size: media.size }, "skipping oversized image");
+  const base = normalizeOperationalEvent(msg, {
+    groupId,
+    groupName: session.groups.get(groupId)?.subject ?? null,
+    normalize: normalizeMessageContent,
+    isBot: (id) => botMessageIds.has(id)
+  });
+  if (!base) return; // voice, video, stickers, contacts, location, reactions, …
+  if (!base.needs_media) {
+    await queue.push({
+      ...base,
+      media: null,
+      message_record: null
+    });
+    return;
+  }
+  if (base.size && base.size > MAX_MEDIA_BYTES) {
+    logger.info({ groupId, messageId, size: base.size }, "skipping oversized image");
     return;
   }
   // Download now while WhatsApp's link is fresh; the bytes are only a local cache.
@@ -229,18 +242,9 @@ async function forwardMessage(msg) {
   // The message record (a few KB) lets any worker download this image again later.
   const record = JSON.stringify({ key: msg.key, message: msg.message, messageTimestamp: msg.messageTimestamp }, BufferJSON.replacer);
   await queue.push({
-    type: "message",
-    group_id: groupId,
-    group_name: session.groups.get(groupId)?.subject ?? null,
-    message_id: messageId,
-    sender_jid: msg.key.participant || msg.participant || null,
-    sender_name: msg.pushName || null,
-    from_me: Boolean(msg.key.fromMe),
-    sent_by_bot: false,
-    timestamp: messageSeconds(msg.messageTimestamp),
-    kind: media.kind,
-    caption: media.caption,
-    media: { ref, mime: media.mime, size: buffer.length },
+    ...base,
+    caption: base.caption,
+    media: { ref, mime: base.mime, size: buffer.length },
     message_record: record.length <= MAX_RECORD_BYTES ? record : null
   });
 }

@@ -20,6 +20,8 @@ export type ReportBotSettings = {
   reply_delay_max_seconds: number;
   group_min_gap_seconds: number;
   max_reminder_delay_minutes: number;
+  correlation_window_minutes: number;
+  inbound_retention_days: number;
   include_own_messages: boolean;
   accept_without_request: boolean;
   feedback_language: string;
@@ -42,7 +44,12 @@ export function reportBotDb() {
 }
 
 function normalizeSettings(row: Record<string, unknown>): ReportBotSettings {
-  return { ...(row as ReportBotSettings), auto_send_min_confidence: Number(row.auto_send_min_confidence ?? 0.85) };
+  return {
+    ...(row as ReportBotSettings),
+    auto_send_min_confidence: Number(row.auto_send_min_confidence ?? 0.85),
+    correlation_window_minutes: Number(row.correlation_window_minutes ?? 10),
+    inbound_retention_days: Number(row.inbound_retention_days ?? 30)
+  };
 }
 
 /** Loads the company's settings, creating the default row (mode off) on first use. */
@@ -129,6 +136,11 @@ const SCHEMA_PROBES: Array<{ migration: string; effect: string; probe: () => Pro
     migration: "20261017110000_report_bot_schedule_always_remind.sql",
     effect: "schedules can't be saved and interval reminders can't keep posting after the report arrives",
     probe: () => reportBotDb().from("report_bot_schedules").select("stop_when_received").limit(1)
+  },
+  {
+    migration: "20261021150000_report_bot_tcc3_pilot.sql",
+    effect: "per-group Observe/Review/Live, text events, review queue and open actions are unavailable",
+    probe: () => reportBotDb().from("report_bot_inbound_events").select("id").limit(1)
   }
 ];
 

@@ -56,7 +56,9 @@ link WhatsApp from Report Bot setup.
 ## What it reads and sends
 
 - Only groups enabled in the portal are read. Private chats are never read or forwarded.
-- Only photos (or image files sent as documents) are forwarded. Text, voice and video are ignored.
+- Photos (or image files sent as documents) and normal text/captions are forwarded for enabled groups.
+  Voice notes, video, stickers, contacts and location are ignored. Images are cached briefly in `/tmp`;
+  text events carry no media bytes.
 - It only sends to enabled groups, and only while the portal is in **Live** mode.
 - Downloaded photos are cached in `/tmp` for `MEDIA_TTL_HOURS` (48). After that, or after a redeploy, a photo is
   downloaded from WhatsApp again using its saved record, while WhatsApp still has it.

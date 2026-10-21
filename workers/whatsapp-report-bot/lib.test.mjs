@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, cleanMentions, EventQueue, Lru, messageSeconds, normalizeConfig, pruneOlderThan, validateSend } from "./lib.mjs";
+import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, classifyOperationalContent, cleanMentions, EventQueue, Lru, messageSeconds, normalizeConfig, normalizeOperationalEvent, pruneOlderThan, validateSend } from "./lib.mjs";
 
 test("chat view: text, captions, replies and mentions are read; reactions and protocol noise are skipped", () => {
   assert.deepEqual(chatContent({ conversation: "Hi team" }), { type: "text", text: "Hi team", context: null });
@@ -49,13 +49,56 @@ test("bearer check is exact and never passes with an empty secret", () => {
   assert.equal(bearerMatches(undefined, secret), false);
 });
 
-test("only images and image documents are forwarded", () => {
+test("only images and image documents are classified as media", () => {
   assert.equal(classifyContent({ imageMessage: { mimetype: "image/jpeg", caption: "EOD", fileLength: 12345 } }).kind, "image");
   assert.equal(classifyContent({ documentMessage: { mimetype: "image/png", fileName: "eod.png" } }).caption, "eod.png");
   assert.equal(classifyContent({ documentMessage: { mimetype: "application/pdf" } }), null);
   assert.equal(classifyContent({ conversation: "hello" }), null);
   assert.equal(classifyContent({ stickerMessage: {} }), null);
   assert.equal(classifyContent(null), null);
+});
+
+test("operational events: text, captions and quotes are normalised; voice/video/privacy types are dropped", () => {
+  assert.equal(classifyOperationalContent({ conversation: "Load Dry 1 received" }).message_type, "text");
+  assert.equal(classifyOperationalContent({ audioMessage: { mimetype: "audio/ogg" } }), null);
+  assert.equal(classifyOperationalContent({ videoMessage: {} }), null);
+  assert.equal(classifyOperationalContent({ stickerMessage: {} }), null);
+  assert.equal(classifyOperationalContent({ contactMessage: {} }), null);
+  assert.equal(classifyOperationalContent({ locationMessage: {} }), null);
+  const image = classifyOperationalContent({ imageMessage: { mimetype: "image/jpeg", caption: "shortage 2 totes", fileLength: 99, contextInfo: { stanzaId: "Q1", participant: "9198@s.whatsapp.net" } } });
+  assert.equal(image.needs_media, true);
+  assert.equal(image.caption, "shortage 2 totes");
+  const group = "120363000000000001@g.us";
+  const textEvent = normalizeOperationalEvent({
+    key: { id: "T1", remoteJid: group, participant: "919876543210@s.whatsapp.net", fromMe: false },
+    pushName: "Ravi",
+    messageTimestamp: 1760000000,
+    message: { extendedTextMessage: { text: "Handover complete", contextInfo: { stanzaId: "IMG1", participant: "919800000000@s.whatsapp.net" } } }
+  }, { groupId: group, groupName: "Testing", normalize: (message) => message, isBot: () => false });
+  assert.equal(textEvent.message_type, "text");
+  assert.equal(textEvent.text, "Handover complete");
+  assert.equal(textEvent.quoted_message_id, "IMG1");
+  assert.equal(textEvent.media, undefined);
+  assert.equal(textEvent.needs_media, false);
+  assert.equal(normalizeOperationalEvent({
+    key: { id: "V1", remoteJid: group, fromMe: false },
+    message: { audioMessage: {} }
+  }, { groupId: group, normalize: (message) => message }), null);
+  assert.equal(normalizeOperationalEvent({
+    key: { id: "P1", remoteJid: "919876543210@s.whatsapp.net", fromMe: false },
+    message: { conversation: "private" }
+  }, { groupId: "919876543210@s.whatsapp.net", normalize: (message) => message }), null, "private chats never become events");
+  assert.equal(normalizeOperationalEvent({
+    key: { id: "BOT1", remoteJid: group, fromMe: true },
+    message: { conversation: "bot reply" }
+  }, { groupId: group, normalize: (message) => message, isBot: (id) => id === "BOT1" }), null);
+});
+
+test("enabled-group filtering stays on the worker config path", () => {
+  const live = normalizeConfig({ mode: "live", groups: [GROUP] });
+  assert.ok(live.groups.includes(GROUP));
+  assert.deepEqual(normalizeConfig({ mode: "listen", groups: [] }).groups, []);
+  assert.equal(normalizeConfig({ mode: "off", groups: [GROUP] }).groups.length, 0, "disabled/off forgets groups immediately");
 });
 
 test("config: off means no groups; junk ids are dropped", () => {

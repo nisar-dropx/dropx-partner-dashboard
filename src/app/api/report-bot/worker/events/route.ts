@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
+import { processInboundEvent } from "@/lib/report-bot/events";
 import { isGroupJid, truncateText } from "@/lib/report-bot/logic";
 import { processNow } from "@/lib/report-bot/pipeline";
 import { reportBotDb, settingsForWorkerRequest } from "@/lib/report-bot/settings";
 
 export const dynamic = "force-dynamic";
-// New photos are checked in the background right after this responds (see waitUntil below).
+// New messages are checked in the background right after this responds (see waitUntil below).
 export const maxDuration = 300;
 
 const MAX_EVENTS = 50;
 // WhatsApp replays history after a re-link; anything older is not a fresh submission.
 const MAX_MESSAGE_AGE_MS = 6 * 60 * 60 * 1000;
 const CONNECTION_STATES = new Set(["idle", "connecting", "qr", "pairing", "open", "closed", "logged_out"]);
+const MESSAGE_TYPES = new Set(["text", "image", "document"]);
 
 type WorkerEvent = Record<string, unknown>;
 
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   const counts = { accepted: 0, ignored: 0 };
   let newPhotos = 0;
+  const inboundIds: string[] = [];
 
   // Every worker call proves it is alive, even an empty heartbeat batch.
   await db.from("report_bot_settings").update({ last_worker_seen_at: now }).eq("company_id", companyId);
@@ -98,10 +101,13 @@ export async function POST(request: Request) {
     const messageId = String(raw.message_id ?? "");
     const media = raw.media && typeof raw.media === "object" ? raw.media as { ref?: unknown; mime?: unknown; size?: unknown } : null;
     const mediaRef = typeof media?.ref === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(media.ref) ? media.ref : null;
+    const messageType = String(raw.message_type ?? (mediaRef ? raw.kind ?? "image" : "text"));
     const timestampMs = Number(raw.timestamp) * 1000;
     const tooOld = !Number.isFinite(timestampMs) || Date.now() - timestampMs > MAX_MESSAGE_AGE_MS;
     const fromMe = raw.from_me === true;
-    if (!/^[A-Za-z0-9_.:-]{6,128}$/.test(messageId) || !mediaRef || tooOld || raw.sent_by_bot === true || (fromMe && !settings.include_own_messages)) {
+    const isText = messageType === "text" && !mediaRef;
+    const isImage = (messageType === "image" || messageType === "document") && Boolean(mediaRef);
+    if (!/^[A-Za-z0-9_.:-]{6,128}$/.test(messageId) || !MESSAGE_TYPES.has(messageType) || (!isText && !isImage) || tooOld || raw.sent_by_bot === true || (fromMe && !settings.include_own_messages)) {
       counts.ignored += 1;
       continue;
     }
@@ -111,29 +117,82 @@ export async function POST(request: Request) {
       counts.ignored += 1;
       continue;
     }
-    const inserted = await db.from("report_bot_submissions").upsert({
+
+    let submissionId: string | null = null;
+    if (isImage) {
+      const inserted = await db.from("report_bot_submissions").upsert({
+        company_id: companyId,
+        group_id: group.data.id,
+        wa_message_id: messageId,
+        sender_jid: text(raw.sender_jid, 120),
+        sender_name: text(raw.sender_name, 120),
+        from_me: fromMe,
+        caption: text(raw.caption ?? raw.text, 1000),
+        message_at: new Date(Math.min(timestampMs, Date.now())).toISOString(),
+        media_ref: mediaRef,
+        media_mime: text(media?.mime, 100),
+        wa_message_record: typeof raw.message_record === "string" && raw.message_record.length <= 100_000 ? raw.message_record : null,
+        media_size: Number.isInteger(media?.size) ? media!.size as number : null
+      }, { onConflict: "group_id,wa_message_id", ignoreDuplicates: true }).select("id");
+      if (inserted.error) return NextResponse.json({ error: "Could not save message" }, { status: 500 });
+      if (inserted.data?.length) {
+        newPhotos += 1;
+        submissionId = inserted.data[0].id;
+      } else {
+        const existing = await db.from("report_bot_submissions").select("id").eq("group_id", group.data.id).eq("wa_message_id", messageId).maybeSingle();
+        submissionId = existing.data?.id ?? null;
+      }
+    }
+
+    const inbound = await db.from("report_bot_inbound_events").upsert({
       company_id: companyId,
       group_id: group.data.id,
       wa_message_id: messageId,
       sender_jid: text(raw.sender_jid, 120),
       sender_name: text(raw.sender_name, 120),
       from_me: fromMe,
-      caption: text(raw.caption, 1000),
       message_at: new Date(Math.min(timestampMs, Date.now())).toISOString(),
+      message_type: isText ? "text" : messageType === "document" ? "document" : "image",
+      text_body: text(raw.text ?? (isText ? raw.caption : null), 4000),
+      caption: text(raw.caption, 1000),
+      quoted_message_id: text(raw.quoted_message_id, 128),
+      quoted_participant: text(raw.quoted_participant, 120),
       media_ref: mediaRef,
       media_mime: text(media?.mime, 100),
+      media_size: Number.isInteger(media?.size) ? media!.size as number : null,
       wa_message_record: typeof raw.message_record === "string" && raw.message_record.length <= 100_000 ? raw.message_record : null,
-      media_size: Number.isInteger(media?.size) ? media!.size as number : null
+      submission_id: submissionId
     }, { onConflict: "group_id,wa_message_id", ignoreDuplicates: true }).select("id");
-    if (inserted.error) return NextResponse.json({ error: "Could not save message" }, { status: 500 });
-    if (inserted.data?.length) newPhotos += 1;
+    if (inbound.error) {
+      // Migration not applied yet: keep accepting image submissions so the bot does not stall.
+      if (/does not exist|schema cache/i.test(inbound.error.message)) {
+        counts.accepted += 1;
+        continue;
+      }
+      return NextResponse.json({ error: "Could not save inbound event" }, { status: 500 });
+    }
+    if (inbound.data?.length) inboundIds.push(inbound.data[0].id);
     counts.accepted += 1;
   }
-  // Start checking new photos now rather than on the next minute's cron. A redelivered
-  // photo (already stored) doesn't trigger anything.
-  if (newPhotos && settings.mode !== "off") {
+
+  if (settings.mode !== "off") {
     const owner = settings;
-    waitUntil(processNow(owner, Date.now() + 270_000).catch((error) => console.error("[report-bot] immediate processing failed", error)));
+    const deadline = Date.now() + 270_000;
+    // Prefer the unified inbound classifier when new events arrived; keep processNow for
+    // image submissions that landed before the inbound table existed.
+    if (inboundIds.length) {
+      waitUntil((async () => {
+        for (const id of inboundIds) {
+          try {
+            await processInboundEvent(owner, id, deadline);
+          } catch (error) {
+            console.error("[report-bot] inbound processing failed", error);
+          }
+        }
+      })());
+    } else if (newPhotos) {
+      waitUntil(processNow(owner, deadline).catch((error) => console.error("[report-bot] immediate processing failed", error)));
+    }
   }
   return NextResponse.json({ ok: true, ...counts });
 }

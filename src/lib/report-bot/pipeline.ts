@@ -1,9 +1,12 @@
 import "server-only";
 import { AI_TIMEOUT_MS, AiError, analyseReportImage, type CandidateReport } from "@/lib/report-bot/ai";
 import { fetchReportImage } from "@/lib/report-bot/image";
+import { pruneInboundEvents, refreshDailySummary } from "@/lib/report-bot/events";
 import {
+  canAutoSendToGroup,
+  canSendToGroup,
   composeFeedback,
-  decideDelivery,
+  decideGroupDelivery,
   displayDate,
   dueReminderSteps,
   formatClock,
@@ -13,14 +16,16 @@ import {
   randomDelaySeconds,
   renderTemplate,
   retryDelayMinutes,
+  reviewStatusFor,
   senderLabel,
   sniffImageType,
+  type GroupMode,
   type LocalClock
 } from "@/lib/report-bot/logic";
 import { reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 
-type GroupRow = { id: string; company_id: string; wa_group_id: string; group_name: string | null; location_id: string | null; is_enabled: boolean; bot_in_group: boolean };
+type GroupRow = { id: string; company_id: string; wa_group_id: string; group_name: string | null; location_id: string | null; is_enabled: boolean; bot_in_group: boolean; mode?: GroupMode };
 type ScheduleRow = {
   id: string; company_id: string; group_id: string; report_type_id: string; days_of_week: number[]; reminder_times: string[];
   due_time: string; first_reminder_template: string; followup_template: string; overdue_template: string | null; is_active: boolean;
@@ -54,7 +59,7 @@ function must<T>(result: { data: T | null; error: { message: string } | null }, 
 
 async function loadGroups(companyId: string) {
   const db = reportBotDb();
-  return must(await db.from("report_bot_groups").select("id,company_id,wa_group_id,group_name,location_id,is_enabled,bot_in_group").eq("company_id", companyId), "Load groups") as GroupRow[];
+  return must(await db.from("report_bot_groups").select("id,company_id,wa_group_id,group_name,location_id,is_enabled,bot_in_group,mode").eq("company_id", companyId), "Load groups") as GroupRow[];
 }
 
 /** Creates today's request rows; idempotent on (schedule, date). Also closes past days. */
@@ -91,16 +96,19 @@ export async function queueReminders(settings: ReportBotSettings, clock: LocalCl
   const db = reportBotDb();
   const companyId = settings.company_id;
   const requests = must(await db.from("report_bot_requests")
-    .select("*, schedule:report_bot_schedules(*), report:report_bot_report_types(name,is_active), group:report_bot_groups(id,group_name,is_enabled,wa_group_id)")
+    .select("*, schedule:report_bot_schedules(*), report:report_bot_report_types(name,is_active), group:report_bot_groups(id,group_name,is_enabled,wa_group_id,mode)")
     .eq("company_id", companyId)
     .eq("business_date", clock.date)
     .in("status", ["pending", "overdue", "received"]), "Load open requests") as Array<RequestRow & {
-      schedule: ScheduleRow | null; report: { name: string; is_active: boolean } | null; group: { id: string; group_name: string | null; is_enabled: boolean } | null;
+      schedule: ScheduleRow | null; report: { name: string; is_active: boolean } | null; group: { id: string; group_name: string | null; is_enabled: boolean; mode?: GroupMode } | null;
     }>;
   let queued = 0;
   for (const request of requests) {
     const schedule = request.schedule;
     if (!schedule || !schedule.is_active || !request.report?.is_active || !request.group?.is_enabled) continue;
+    // Observe groups never receive reminders; Review/Live may when company is live.
+    if (!canSendToGroup(settings.mode, request.group.mode ?? "observe")) continue;
+    if ((schedule as ScheduleRow & { schedule_kind?: string }).schedule_kind === "event_driven") continue;
     // A received report ends the day's reminders unless the schedule asks at every interval.
     const received = request.status === "received";
     if (received && schedule.stop_when_received !== false) continue;
@@ -248,9 +256,14 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
     if (!submission) break;
     processed += 1;
     try {
-      const group = must(await db.from("report_bot_groups").select("id,group_name,location_id,is_enabled, station:stations(station_code,station_name)").eq("id", submission.group_id).single(), "Load group") as unknown as GroupRow & { station: { station_code: string; station_name: string | null } | null };
+      const group = must(await db.from("report_bot_groups").select("id,group_name,location_id,is_enabled,mode, station:stations(station_code,station_name)").eq("id", submission.group_id).single(), "Load group") as unknown as GroupRow & { station: { station_code: string; station_name: string | null } | null; mode?: GroupMode };
       if (!group.is_enabled) {
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "Group was disabled before the image was analysed.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
+        continue;
+      }
+      // Unified inbound path may already have classified this image.
+      if ((submission as SubmissionRow & { review_id?: string | null }).review_id) {
+        must(await db.from("report_bot_submissions").update({ locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Release analysed submission");
         continue;
       }
       // Judge the image against the day it was posted, not the day it is analysed.
@@ -285,9 +298,12 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
       }
       const reportType = candidates.find((candidate) => candidate.id === analysis.matched_report_type_id) ?? null;
       const request = reportType ? requests.find((row) => row.report_type_id === reportType.id) ?? null : null;
-      // Listen mode is a dry run: nothing is queued to send without a person approving it.
-      const rawDecision = decideDelivery(analysis, settings);
-      const decision = rawDecision === "auto_send" && settings.mode !== "live" ? "needs_approval" : rawDecision;
+      const groupMode = group.mode ?? "observe";
+      const decision = decideGroupDelivery(analysis, settings, {
+        companyMode: settings.mode,
+        groupMode,
+        highRiskActions: analysis.open_actions.some((action) => action.high_risk)
+      });
       const feedback = decision === "silent" ? null : composeFeedback(settings, {
         verdict: analysis.verdict,
         feedback: analysis.feedback,
@@ -298,7 +314,8 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         date: displayDate(businessDate),
         checks: analysis.checks
       });
-      const status = decision === "silent" ? "ignored" : decision === "auto_send" ? "queued_to_send" : "awaiting_approval";
+      const autoOk = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
+      const status = decision === "silent" ? "ignored" : autoOk ? "queued_to_send" : "awaiting_approval";
       must(await db.from("report_bot_submissions").update({
         status,
         status_reason: decision === "silent" ? "Not a report image." : null,
@@ -313,6 +330,29 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         locked_until: null,
         updated_at: nowIso()
       }).eq("id", submission.id), "Save analysis");
+      // Best-effort review row for the legacy image path (inbound table may already have one).
+      const reviewStatus = reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
+      const reviewInsert = await db.from("report_bot_review_items").insert({
+        company_id: settings.company_id,
+        group_id: submission.group_id,
+        submission_id: submission.id,
+        report_type_id: reportType?.id ?? null,
+        request_id: request?.id ?? null,
+        review_status: reviewStatus,
+        verdict: analysis.verdict,
+        confidence: analysis.confidence,
+        reason: analysis.extracted_summary,
+        extracted_facts: analysis.extracted_fields,
+        open_actions: analysis.open_actions,
+        feedback_draft: feedback,
+        ai_result: analysis,
+        ai_provider: settings.ai_provider,
+        ai_model: settings.ai_model,
+        updated_at: nowIso()
+      });
+      if (reviewInsert.error && !/does not exist|schema cache/i.test(reviewInsert.error.message)) {
+        throw new Error(`Save review item: ${reviewInsert.error.message}`);
+      }
       if (request && analysis.is_report) {
         // A resubmission updates the verdict but keeps the first time the report arrived.
         must(await db.from("report_bot_requests").update({
@@ -322,7 +362,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
           updated_at: nowIso()
         }).eq("id", request.id).in("status", ["pending", "overdue", "received", "missed"]), "Mark request received");
       }
-      if (decision === "auto_send" && feedback) await queueFeedback(settings, submission, feedback, null);
+      if (autoOk && feedback) await queueFeedback(settings, submission, feedback, null);
     } catch (error) {
       if (await settleSubmissionFailure(submission, error)) break;
     }
@@ -410,9 +450,13 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
         continue;
       }
     }
-    const group = must(await db.from("report_bot_groups").select("wa_group_id,is_enabled,bot_in_group").eq("id", item.group_id).single(), "Load group") as Pick<GroupRow, "wa_group_id" | "is_enabled" | "bot_in_group">;
+    const group = must(await db.from("report_bot_groups").select("wa_group_id,is_enabled,bot_in_group,mode").eq("id", item.group_id).single(), "Load group") as Pick<GroupRow, "wa_group_id" | "is_enabled" | "bot_in_group" | "mode">;
     if (!group.is_enabled) {
       await release({ status: "cancelled", status_reason: "Group is disabled." });
+      continue;
+    }
+    if (!canSendToGroup(settings.mode, group.mode ?? "observe")) {
+      await release({ status: "cancelled", status_reason: "Group is in Observe mode (or the company bot is not Live)." });
       continue;
     }
     const lastSent = await db.from("report_bot_outbox").select("sent_at").eq("group_id", item.group_id).eq("status", "sent").order("sent_at", { ascending: false }).limit(1).maybeSingle();
@@ -437,6 +481,8 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
       await release({ status: "sent", sent_at: nowIso(), sent_wa_message_id: result?.id ?? null, status_reason: null });
       if (item.submission_id) {
         await db.from("report_bot_submissions").update({ status: "sent", sent_at: nowIso(), updated_at: nowIso() }).eq("id", item.submission_id);
+        await db.from("report_bot_review_items").update({ review_status: "sent", sent_at: nowIso(), updated_at: nowIso() })
+          .eq("submission_id", item.submission_id).in("review_status", ["approved", "draft_ready"]);
       }
       sent += 1;
     } catch (error) {
@@ -500,5 +546,12 @@ export async function runReportBotCycle(settings: ReportBotSettings, deadline: n
   if (settings.mode === "live") summary.sent = await stage("sending", () => flushOutbox(settings, Math.min(deadline, Date.now() + 60_000)), 0);
   summary.analysed = await stage("photo checks", () => processSubmissions(settings, deadline), 0);
   if (settings.mode === "live") summary.sent += await stage("sending", () => flushOutbox(settings, deadline), 0);
+  await stage("retention", () => pruneInboundEvents(settings), 0);
+  await stage("daily summaries", async () => {
+    const clock = localClock(new Date(), settings.timezone);
+    const groups = (await loadGroups(settings.company_id)).filter((group) => group.is_enabled);
+    for (const group of groups) await refreshDailySummary(settings, group.id, clock.date);
+    return groups.length;
+  }, 0);
   return summary;
 }

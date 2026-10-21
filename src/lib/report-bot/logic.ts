@@ -1,11 +1,27 @@
 // Pure Report Bot rules. No imports, so node --test can load this file directly.
 
 export type BotMode = "off" | "listen" | "live";
+/** Per-group operating mode for the TCC3 pilot. Company mode remains the master switch. */
+export type GroupMode = "observe" | "review" | "live";
+export type ReviewStatus = "observe_only" | "draft_ready" | "approved" | "sent" | "dismissed";
 export type Verdict = "pass" | "fail" | "needs_review" | "not_report";
 export type CheckStatus = "pass" | "fail" | "unclear";
+export type AutoReplyPolicy = "never" | "normal";
+
+export const GROUP_MODES = new Set<GroupMode>(["observe", "review", "live"]);
+export const REVIEW_STATUSES = new Set<ReviewStatus>(["observe_only", "draft_ready", "approved", "sent", "dismissed"]);
+export const HIGH_RISK_CATEGORIES = new Set(["cold_chain", "infrastructure", "workforce"]);
 
 export type AnalysisCheck = { rule: string; status: CheckStatus; note: string };
 export type ExtractedField = { label: string; value: string };
+export type OpenActionDraft = {
+  title: string;
+  category: string;
+  owner: string | null;
+  due_hint: string | null;
+  high_risk: boolean;
+};
+
 export type Analysis = {
   is_report: boolean;
   matched_report_type_id: string | null;
@@ -16,6 +32,8 @@ export type Analysis = {
   /** Key values read from the image. Kept as text so the image itself never needs storing. */
   extracted_fields: ExtractedField[];
   feedback: string;
+  /** Open follow-ups the model extracted; portal may create action rows from these. */
+  open_actions: OpenActionDraft[];
 };
 
 export type LocalClock = { date: string; minutes: number; weekday: number };
@@ -139,14 +157,14 @@ export function truncateText(value: string, maxChars: number) {
   return `${text.slice(0, Math.max(maxChars - 1, 1)).trimEnd()}…`;
 }
 
-/** JSON schema shared by both AI providers' structured-output modes. */
+/** JSON schema shared by AI providers' structured-output modes (image and text). */
 export function analysisJsonSchema() {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["is_report", "matched_report_type_id", "verdict", "confidence", "checks", "extracted_summary", "extracted_fields", "feedback"],
+    required: ["is_report", "matched_report_type_id", "verdict", "confidence", "checks", "extracted_summary", "extracted_fields", "feedback", "open_actions"],
     properties: {
-      is_report: { type: "boolean", description: "True only when the image is one of the candidate report types." },
+      is_report: { type: "boolean", description: "True only when the content matches one of the candidate report types." },
       matched_report_type_id: { anyOf: [{ type: "string" }, { type: "null" }], description: "id of the matching candidate report type, or null." },
       verdict: { type: "string", enum: ["pass", "fail", "needs_review", "not_report"] },
       confidence: { type: "number", description: "0 to 1: how sure you are of the verdict." },
@@ -163,10 +181,10 @@ export function analysisJsonSchema() {
           }
         }
       },
-      extracted_summary: { type: "string", description: "What the image shows, in one or two short sentences." },
+      extracted_summary: { type: "string", description: "What the message/evidence shows, in one or two short sentences." },
       extracted_fields: {
         type: "array",
-        description: "Key values visible in the image that the rules refer to (dates, amounts, codes, counts, station), exactly as shown. Empty when not a report.",
+        description: "Key values (dates, times, quantities, ticket IDs, metrics) exactly as stated or legible. Empty when not a report. Never invent numbers.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -174,7 +192,23 @@ export function analysisJsonSchema() {
           properties: { label: { type: "string" }, value: { type: "string" } }
         }
       },
-      feedback: { type: "string", description: "Short message to the person who posted the image." }
+      feedback: { type: "string", description: "Short message to the person who posted." },
+      open_actions: {
+        type: "array",
+        description: "Follow-ups that remain open (shortage, expiry, incident, ticket). Empty when none.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["title", "category", "owner", "due_hint", "high_risk"],
+          properties: {
+            title: { type: "string" },
+            category: { type: "string" },
+            owner: { anyOf: [{ type: "string" }, { type: "null" }] },
+            due_hint: { anyOf: [{ type: "string" }, { type: "null" }] },
+            high_risk: { type: "boolean" }
+          }
+        }
+      }
     }
   };
 }
@@ -213,6 +247,19 @@ export function parseAnalysis(raw: unknown, candidateIds: string[]): Analysis {
       note: truncateText(String(check.note ?? ""), 400)
     }];
   });
+  const openActions: OpenActionDraft[] = isReport ? (Array.isArray(record.open_actions) ? record.open_actions : []).slice(0, 10).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const action = entry as Record<string, unknown>;
+    const title = truncateText(String(action.title ?? ""), 300);
+    if (!title) return [];
+    return [{
+      title,
+      category: truncateText(String(action.category ?? "general"), 80) || "general",
+      owner: action.owner == null ? null : truncateText(String(action.owner), 120) || null,
+      due_hint: action.due_hint == null ? null : truncateText(String(action.due_hint), 80) || null,
+      high_risk: action.high_risk === true
+    }];
+  }) : [];
   return {
     is_report: isReport,
     // A single candidate is unambiguous even if the model forgot to echo its id.
@@ -229,7 +276,8 @@ export function parseAnalysis(raw: unknown, candidateIds: string[]): Analysis {
       const value = truncateText(String(field.value ?? ""), 200);
       return label && value ? [{ label, value }] : [];
     }) : [],
-    feedback: truncateText(String(record.feedback ?? ""), 2000)
+    feedback: truncateText(String(record.feedback ?? ""), 2000),
+    open_actions: openActions
   };
 }
 
@@ -243,6 +291,83 @@ export function decideDelivery(analysis: Analysis, settings: DeliverySettings): 
   if (analysis.verdict === "needs_review") return "needs_approval";
   if (analysis.checks.some((check) => check.status === "unclear")) return "needs_approval";
   return analysis.confidence >= settings.auto_send_min_confidence ? "auto_send" : "needs_approval";
+}
+
+export type DeliveryContext = {
+  companyMode: BotMode;
+  groupMode: GroupMode;
+  autoReplyPolicy?: AutoReplyPolicy | null;
+  category?: string | null;
+  highRiskActions?: boolean;
+};
+
+/**
+ * Final send decision after company mode, group mode and high-risk policy.
+ * Auto-send only when company is live, group is live, policy allows it, and decideDelivery says auto.
+ */
+export function decideGroupDelivery(analysis: Analysis, settings: DeliverySettings, context: DeliveryContext): DeliveryDecision {
+  const base = decideDelivery(analysis, settings);
+  if (base === "silent") return "silent";
+  if (context.companyMode === "off") return "silent";
+  if (context.groupMode === "observe" || context.companyMode === "listen") return "needs_approval";
+  const highRisk = context.autoReplyPolicy === "never"
+    || (context.category != null && HIGH_RISK_CATEGORIES.has(context.category))
+    || context.highRiskActions === true
+    || analysis.open_actions.some((action) => action.high_risk);
+  if (highRisk) return "needs_approval";
+  if (context.groupMode !== "live" || context.companyMode !== "live") return "needs_approval";
+  return base;
+}
+
+/** Review queue status from modes and whether a draft exists. */
+export function reviewStatusFor(groupMode: GroupMode, decision: DeliveryDecision, hasDraft: boolean): ReviewStatus {
+  if (decision === "silent") return groupMode === "observe" ? "observe_only" : "dismissed";
+  if (groupMode === "observe" || !hasDraft) return "observe_only";
+  if (decision === "auto_send") return "approved";
+  return "draft_ready";
+}
+
+/** Manual WhatsApp send / test reminder allowed for this group. */
+export function canSendToGroup(companyMode: BotMode, groupMode: GroupMode) {
+  return companyMode === "live" && (groupMode === "review" || groupMode === "live");
+}
+
+export function canAutoSendToGroup(companyMode: BotMode, groupMode: GroupMode) {
+  return companyMode === "live" && groupMode === "live";
+}
+
+/**
+ * Correlate messages from the same sender in a group within a short window.
+ * Returns the bundle id of an existing open event, or null when a new bundle should start.
+ */
+export function findCorrelationBundle(
+  candidates: Array<{ id: string; bundle_id: string | null; message_at: string | number | Date }>,
+  messageAt: Date,
+  windowMinutes: number
+): string | null {
+  const windowMs = Math.max(1, windowMinutes) * 60_000;
+  const target = messageAt.getTime();
+  let best: { bundle: string; at: number } | null = null;
+  for (const row of candidates) {
+    const at = new Date(row.message_at).getTime();
+    if (!Number.isFinite(at) || Math.abs(target - at) > windowMs) continue;
+    const bundle = row.bundle_id ?? row.id;
+    if (!best || at > best.at) best = { bundle, at };
+  }
+  return best?.bundle ?? null;
+}
+
+export function previewReminderSlots(reminderTimes: string[], dueTime: string, nowMinutes: number) {
+  const due = parseClockTime(dueTime);
+  const slots = [...new Set(reminderTimes.map(parseClockTime).filter((value): value is number => value !== null))].sort((a, b) => a - b);
+  return {
+    due_minute: due,
+    upcoming: slots.filter((minute) => minute >= nowMinutes).slice(0, 8).map((minute) => ({
+      minute,
+      label: formatClock(`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`)
+    })),
+    past_today: slots.filter((minute) => minute < nowMinutes).length
+  };
 }
 
 export type FeedbackTemplateSettings = {

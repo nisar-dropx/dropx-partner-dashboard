@@ -31,15 +31,23 @@ import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from
 import { aiKeyConfigured, aiKeyName, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import {
   approveFeedback,
+  approveReviewItem,
+  closeOpenAction,
+  dismissReviewItem,
+  duplicateGroupConfiguration,
+  installTcc3Templates,
+  previewScheduleReminders,
   reanalyseSubmission,
   rejectFeedback,
   removeGroup,
   saveGroupSelection,
   saveReportType,
   saveSchedule,
+  seedDraftSchedulesForGroup,
   sendAllWaiting,
   sendTestReminder,
   setAutoReply,
+  setGroupMode,
   setRequestStatus,
   updateGroup
 } from "./actions";
@@ -53,21 +61,27 @@ export const maxDuration = 60;
 const TABS = [
   { key: "today", label: "Today", icon: CalendarCheck },
   { key: "review", label: "Review", icon: Inbox },
+  { key: "actions", label: "Open actions", icon: AlertTriangle },
+  { key: "summary", label: "Site summary", icon: FileText },
   { key: "groups", label: "Groups", icon: Users },
   { key: "reports", label: "Reports & schedules", icon: FileText }
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const GROUP_MODE_LABEL: Record<string, string> = { observe: "Observe", review: "Review", live: "Live" };
 
 type GroupRow = {
   id: string; wa_group_id: string; group_name: string | null; participant_count: number | null; location_id: string | null;
-  is_enabled: boolean; bot_in_group: boolean;
+  is_enabled: boolean; bot_in_group: boolean; mode?: string;
 };
-type ReportTypeRow = { id: string; name: string; description: string | null; rules: string[]; is_active: boolean };
+type ReportTypeRow = {
+  id: string; name: string; description: string | null; rules: string[]; is_active: boolean;
+  slug?: string | null; category?: string | null; auto_reply_policy?: string | null; subtypes?: string[] | null;
+};
 type ScheduleRow = {
   id: string; group_id: string; report_type_id: string; days_of_week: number[]; reminder_times: string[]; due_time: string;
   first_reminder_template: string; followup_template: string; overdue_template: string | null; is_active: boolean;
-  stop_when_received: boolean;
+  stop_when_received: boolean; schedule_kind?: string | null; review_only?: boolean | null;
 };
 type SubmissionRow = {
   id: string; group_id: string; sender_name: string | null; sender_jid: string | null; caption: string | null; message_at: string;
@@ -141,7 +155,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           <div>
             <span className={s.eyebrow}><Bot size={13} aria-hidden /> Ops Pulse · Dark Store</span>
             <h1>Report Bot</h1>
-            <p>Reminds WhatsApp groups to share their daily reports, then checks each report photo and replies with feedback.</p>
+            <p>Approved operational-group assistant for WhatsApp report groups. It classifies messages and evidence, drafts feedback for review, and never reads private chats.</p>
           </div>
           <div className={s.formActions}>
             <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
@@ -176,12 +190,25 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         ) : null}
 
         {await MigrationWarning()}
+        <div className={`${s.flash} ${s.flashSuccess}`} role="note">
+          <Bot size={18} aria-hidden />
+          <div>
+            <strong>Operational groups only</strong>
+            Private chats are never read. Disabled groups are forgotten immediately. Pilot work must stay on the <strong>Testing</strong> group — do not enable or message <strong>TCC3 · Adayar</strong> until you use Duplicate configuration after Observe → Review.
+          </div>
+        </div>
         <FlashMessage />
 
-        <ReportBotNav active={tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
+        <ReportBotNav active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
+        <div className={s.formActions} style={{ marginBottom: 12 }}>
+          <Link className={`${s.button} ${s.small} ${tab === "actions" ? s.primary : ""}`} href="/report-bot?tab=actions">Open actions</Link>
+          <Link className={`${s.button} ${s.small} ${tab === "summary" ? s.primary : ""}`} href="/report-bot?tab=summary">Daily site summary</Link>
+        </div>
 
         {tab === "today" ? await TodayTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
         {tab === "review" ? await ReviewTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
+        {tab === "actions" ? await ActionsTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
+        {tab === "summary" ? await SummaryTab({ companyId, groupIds, lookup, settings }) : null}
         {tab === "groups" ? await GroupsTab({ authorization, groups, canEdit }) : null}
         {tab === "reports" ? <ReportsTab groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
       </div>
@@ -354,16 +381,67 @@ function CheckList({ checks }: { checks: AnalysisCheck[] }) {
 
 async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
   const db = reportBotDb();
-  const [waiting, attention, recent] = groupIds.length ? await Promise.all([
+  const [waiting, attention, recent, reviewItems] = groupIds.length ? await Promise.all([
     db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).eq("status", "awaiting_approval").order("message_at").limit(50),
     db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["failed", "blocked"]).order("message_at", { ascending: false }).limit(50),
-    db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["sent", "ignored", "rejected", "skipped", "queued_to_send"]).order("message_at", { ascending: false }).limit(30)
-  ]) : [{ data: [] }, { data: [] }, { data: [] }];
+    db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["sent", "ignored", "rejected", "skipped", "queued_to_send"]).order("message_at", { ascending: false }).limit(30),
+    db.from("report_bot_review_items").select("*").eq("company_id", companyId).in("group_id", groupIds).in("review_status", ["observe_only", "draft_ready"]).order("created_at", { ascending: false }).limit(50)
+  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [], error: null }];
   const waitingRows = (waiting.data ?? []) as SubmissionRow[];
   const attentionRows = (attention.data ?? []) as SubmissionRow[];
+  const reviewRows = (reviewItems.error ? [] : (reviewItems.data ?? [])) as Array<{
+    id: string; group_id: string; review_status: string; verdict: string | null; confidence: number | null; reason: string | null;
+    feedback_draft: string | null; report_type_id: string | null; extracted_facts: Array<{ label: string; value: string }> | null;
+    submission_id: string | null; created_at: string;
+  }>;
   const auto = settings.approval_mode === "auto";
   return (
     <>
+      <Card title="Review queue" icon={<Inbox size={18} aria-hidden />} description="Inbound operational messages and evidence with classification, facts and a feedback draft. Observe mode never sends; Review mode requires approval.">
+        {reviewRows.length ? (
+          <div className={s.reviewList}>
+            {reviewRows.map((row) => {
+              const verdict = VERDICT[row.verdict ?? "needs_review"] ?? VERDICT.needs_review;
+              return (
+                <article key={row.id} className={s.reviewCard}>
+                  <div className={s.reviewMain}>
+                    <div className={s.reviewMeta}>
+                      <strong>{lookup.groupName.get(row.group_id) ?? "Group"}</strong>
+                      <Badge tone={row.review_status === "draft_ready" ? "warn" : "info"}>{row.review_status}</Badge>
+                      {row.report_type_id ? <Badge tone="neutral">{lookup.reportName.get(row.report_type_id)}</Badge> : null}
+                      <Badge tone={verdict[1]}>{verdict[0]}</Badge>
+                    </div>
+                    {row.reason ? <p className={s.summary}>{row.reason}</p> : null}
+                    {row.extracted_facts?.length ? (
+                      <dl className={s.facts}>
+                        {row.extracted_facts.map((item, index) => [<dt key={`l${index}`}>{item.label}</dt>, <dd key={`v${index}`}>{item.value}</dd>])}
+                      </dl>
+                    ) : null}
+                    {canEdit && row.review_status === "draft_ready" ? (
+                      <form action={approveReviewItem} className={s.reply}>
+                        <input type="hidden" name="id" value={row.id} />
+                        <Field label="Feedback draft">
+                          <textarea className={s.textarea} name="feedback_text" rows={3} defaultValue={row.feedback_draft ?? ""} required maxLength={3000} />
+                        </Field>
+                        <div className={s.replyActions}>
+                          <ActionButton className={`${s.button} ${s.primary}`}><Send size={15} aria-hidden />Approve and send</ActionButton>
+                          <ActionButton className={`${s.button} ${s.danger}`} formAction={dismissReviewItem} skipValidation>Dismiss</ActionButton>
+                        </div>
+                      </form>
+                    ) : canEdit ? (
+                      <form action={dismissReviewItem} className={s.formActions}>
+                        <input type="hidden" name="id" value={row.id} />
+                        <span className={s.hint}>{row.feedback_draft || "Observe only — no send."}</span>
+                        <ActionButton className={`${s.button} ${s.small} ${s.ghost}`}>Dismiss</ActionButton>
+                      </form>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : <Empty icon={<CheckCircle2 size={28} aria-hidden />} title="Review queue is empty">Classified text and image reports appear here for the Testing pilot.</Empty>}
+      </Card>
       {canEdit ? (
         <section className={s.card}>
           <div className={s.reviewBar}>
@@ -497,10 +575,11 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
   // Only groups ticked in the picker are on the bot and shown here.
   const active = groups.filter((group) => group.is_enabled);
   return (
+    <>
     <Card
       title="WhatsApp groups"
       icon={<Users size={18} aria-hidden />}
-      description="The report groups the bot listens to. Add or remove them from the list of groups the linked number is in; the bot ignores every other chat and never reads private messages."
+      description="Per-group mode: Observe (classify only) → Review (approve drafts) → Live (limited auto-replies). Pilot on Testing only. Private chats are never read."
       action={canEdit ? <GroupPicker action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
       flush
     >
@@ -515,11 +594,25 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
                   <div className={s.groupName}>{group.group_name ?? "Unnamed group"}</div>
                   <div className={s.groupMeta}>
                     {group.participant_count ? <span>{group.participant_count} members</span> : null}
+                    <Badge tone={group.mode === "live" ? "good" : group.mode === "review" ? "warn" : "info"}>{GROUP_MODE_LABEL[group.mode ?? "observe"] ?? "Observe"}</Badge>
                     {group.bot_in_group ? <Badge tone="good">Listening</Badge> : <Badge tone="bad">Bot number not in group</Badge>}
                     <Link href={`/report-bot/chats?group=${group.id}`}>Open chat</Link>
                   </div>
                 </div>
               </div>
+              {canEdit ? (
+                <form action={setGroupMode} className={s.inlineForm}>
+                  <input type="hidden" name="group_id" value={group.id} />
+                  <Field label="Group mode">
+                    <select className={s.select} name="mode" defaultValue={group.mode ?? "observe"}>
+                      <option value="observe">Observe</option>
+                      <option value="review">Review</option>
+                      <option value="live">Live</option>
+                    </select>
+                  </Field>
+                  <ActionButton className={`${s.button} ${s.small}`}>Save mode</ActionButton>
+                </form>
+              ) : null}
               <form action={updateGroup} className={s.inlineForm}>
                 <input type="hidden" name="group_id" value={group.id} />
                 <Field label="Store">
@@ -545,6 +638,97 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
           {" "}The WhatsApp number must be <Link href={`${SETUP_HREF}#whatsapp`}>linked</Link> first.
         </Empty>
       )}
+    </Card>
+    {canEdit && active.length >= 2 ? (
+      <Card title="Duplicate configuration" icon={<Users size={18} aria-hidden />} description="Explicit copy of schedules to another group as inactive drafts. Target is forced to Observe. Never auto-copies to TCC3.">
+        <form action={duplicateGroupConfiguration} className={s.formGrid}>
+          <Field label="From group">
+            <select className={s.select} name="source_group_id" required>
+              <option value="">Choose source</option>
+              {active.map((group) => <option key={group.id} value={group.id}>{group.group_name ?? "Unnamed"}</option>)}
+            </select>
+          </Field>
+          <Field label="To group">
+            <select className={s.select} name="target_group_id" required>
+              <option value="">Choose target</option>
+              {active.map((group) => <option key={group.id} value={group.id}>{group.group_name ?? "Unnamed"}</option>)}
+            </select>
+          </Field>
+          <div className={s.span3}>
+            <ActionButton className={`${s.button} ${s.primary}`} confirm="Copy inactive schedule drafts to the target group and leave it in Observe?">Duplicate configuration</ActionButton>
+          </div>
+        </form>
+      </Card>
+    ) : null}
+    </>
+  );
+}
+
+async function ActionsTab({ companyId, groupIds, lookup, settings, canEdit }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
+  const result = groupIds.length
+    ? await reportBotDb().from("report_bot_actions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["open", "pending_evidence", "unmatched_closure"]).order("created_at", { ascending: false }).limit(100)
+    : { data: [] };
+  const rows = (result.data ?? []) as Array<{
+    id: string; group_id: string; title: string; category: string; owner_name: string | null; status: string; high_risk: boolean; created_at: string;
+  }>;
+  return (
+    <Card title="Open actions" icon={<AlertTriangle size={18} aria-hidden />} description="Incidents, shortages, expiry and tickets extracted from the group. Close with confirmation when evidence arrives." flush>
+      {rows.length ? (
+        <div className={s.tableWrap}>
+          <table className={s.table}>
+            <thead><tr><th>Opened</th><th>Group</th><th>Action</th><th>Owner</th><th>Status</th>{canEdit ? <th></th> : null}</tr></thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td>{when(row.created_at, settings.timezone)}</td>
+                  <td>{lookup.groupName.get(row.group_id) ?? "—"}</td>
+                  <td className={s.cellTitle}>{row.title}{row.high_risk ? <Badge tone="bad">High risk</Badge> : null}<span className={s.cellSub}>{row.category}</span></td>
+                  <td>{row.owner_name ?? "—"}</td>
+                  <td><Badge tone="warn">{row.status}</Badge></td>
+                  {canEdit ? (
+                    <td>
+                      <form action={closeOpenAction} className={s.rowActions}>
+                        <input type="hidden" name="id" value={row.id} />
+                        <input className={s.input} name="closure_note" placeholder="Closure note" maxLength={500} />
+                        <ActionButton className={`${s.button} ${s.small}`}>Close</ActionButton>
+                      </form>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <Empty icon={<CheckCircle2 size={28} aria-hidden />} title="No open actions">Tracked follow-ups from the Testing group appear here.</Empty>}
+    </Card>
+  );
+}
+
+async function SummaryTab({ companyId, groupIds, lookup, settings }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings }) {
+  const date = localClock(new Date(), settings.timezone).date;
+  const result = groupIds.length
+    ? await reportBotDb().from("report_bot_daily_summaries").select("*").eq("company_id", companyId).eq("business_date", date).in("group_id", groupIds)
+    : { data: [] };
+  const rows = (result.data ?? []) as Array<{ group_id: string; summary: Record<string, unknown>; updated_at: string }>;
+  return (
+    <Card title={`Daily site summary · ${date}`} icon={<FileText size={18} aria-hidden />} description="Portal rollup for loads, shortages, PPI/O2A exceptions, manpower, FEFO, temperature/infrastructure and unresolved actions. Not posted to WhatsApp until Live is explicitly enabled for that.">
+      {rows.length ? rows.map((row) => {
+        const summary = row.summary ?? {};
+        return (
+          <div key={row.group_id} className={s.item} style={{ marginBottom: 12 }}>
+            <div className={s.itemTitle}>{lookup.groupName.get(row.group_id) ?? "Group"}</div>
+            <div className={s.kpis}>
+              <div className={s.kpi}><span>Loads</span><strong>{Number(summary.loads_received ?? 0)}</strong></div>
+              <div className={s.kpi}><span>Shortage/damage/totes</span><strong>{Number(summary.shortages_damage_totes ?? 0)}</strong></div>
+              <div className={s.kpi}><span>PPI/O2A exceptions</span><strong>{Number(summary.ppi_o2a_exceptions ?? 0)}</strong></div>
+              <div className={s.kpi}><span>Manpower</span><strong>{Number(summary.manpower_exceptions ?? 0)}</strong></div>
+              <div className={s.kpi}><span>Expiry/FEFO</span><strong>{Number(summary.expiry_fefo ?? 0)}</strong></div>
+              <div className={s.kpi}><span>Temp / infra</span><strong>{Number(summary.temperature_infrastructure ?? 0)}</strong></div>
+            </div>
+            <p className={s.hint}>Updated {when(row.updated_at, settings.timezone)}. Unresolved: {Array.isArray(summary.unresolved_actions) ? summary.unresolved_actions.length : 0}</p>
+          </div>
+        );
+      }) : <Empty icon={<FileText size={28} aria-hidden />} title="No summary yet">Summaries refresh each cron minute for enabled groups once the TCC3 migration is applied.</Empty>}
     </Card>
   );
 }
@@ -632,16 +816,35 @@ function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRo
 }
 
 function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { groups: GroupRow[]; reportTypes: ReportTypeRow[]; schedules: ScheduleRow[]; lookup: Lookup; canEdit: boolean }) {
+  const testingGroup = groups.find((group) => group.is_enabled && /^testing$/i.test((group.group_name ?? "").trim()));
   return (
     <div className={s.twoCol}>
-      <Card title="Report types" icon={<FileText size={18} aria-hidden />} description="What each report photo must show.">
+      <Card title="Report types" icon={<FileText size={18} aria-hidden />} description="Configurable checklist/rules. TCC3 War Room templates install by slug; they are never hardcoded in the worker.">
+        {canEdit ? (
+          <div className={s.formActions} style={{ marginBottom: 12 }}>
+            <form action={installTcc3Templates}>
+              <ActionButton className={`${s.button} ${s.primary}`}>Install TCC3 War Room templates</ActionButton>
+            </form>
+            {testingGroup ? (
+              <form action={seedDraftSchedulesForGroup}>
+                <input type="hidden" name="group_id" value={testingGroup.id} />
+                <ActionButton className={s.button} confirm="Create inactive draft schedules for the Testing group only?">Seed draft schedules for Testing</ActionButton>
+              </form>
+            ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed draft schedules.</span>}
+          </div>
+        ) : null}
         <div className={s.itemList}>
           {reportTypes.map((report) => (
             <details key={report.id} className={s.item}>
               <summary>
                 <div>
                   <div className={s.itemTitle}>{report.name}</div>
-                  <div className={s.itemSub}>{report.rules.length} rules {report.is_active ? null : <Badge tone="neutral">Paused</Badge>}</div>
+                  <div className={s.itemSub}>
+                    {report.rules.length} rules
+                    {report.slug ? <Badge tone="neutral">{report.slug}</Badge> : null}
+                    {report.auto_reply_policy === "never" ? <Badge tone="warn">Review only</Badge> : null}
+                    {report.is_active ? null : <Badge tone="neutral">Paused</Badge>}
+                  </div>
                 </div>
                 <ChevronRight size={18} className={s.chevron} aria-hidden />
               </summary>
@@ -650,7 +853,7 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
               </div>
             </details>
           ))}
-          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">Add the first one, for example your EOD screenshot.</Empty> : null}
+          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">Install TCC3 templates or add one manually.</Empty> : null}
           {canEdit ? (
             <details className={`${s.item} ${s.addItem}`} open={!reportTypes.length}>
               <summary><span>+ Add report type</span><ChevronRight size={18} className={s.chevron} aria-hidden /></summary>
@@ -682,11 +885,21 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
               </summary>
               {canEdit ? (
                 <div className={s.itemBody}>
-                  <form action={sendTestReminder} className={s.formActions} style={{ justifyContent: "flex-start", marginBottom: 14 }}>
-                    <input type="hidden" name="id" value={schedule.id} />
-                    <ActionButton className={`${s.button} ${s.small}`}><Send size={14} aria-hidden />Send test reminder</ActionButton>
-                    <span className={s.hint}>Posts the first reminder in the group now, even if today&apos;s report is already in.</span>
-                  </form>
+                  <div className={s.formActions} style={{ justifyContent: "flex-start", marginBottom: 14, flexWrap: "wrap" }}>
+                    <form action={previewScheduleReminders}>
+                      <input type="hidden" name="id" value={schedule.id} />
+                      <ActionButton className={`${s.button} ${s.small} ${s.ghost}`}>Preview today&apos;s slots</ActionButton>
+                    </form>
+                    <form action={sendTestReminder} className={s.formActions}>
+                      <input type="hidden" name="id" value={schedule.id} />
+                      <ActionButton className={`${s.button} ${s.small}`}><Send size={14} aria-hidden />Send test reminder</ActionButton>
+                    </form>
+                    <span className={s.hint}>
+                      {schedule.is_active ? "Active" : "Draft/inactive"}
+                      {schedule.schedule_kind ? ` · ${schedule.schedule_kind}` : ""}
+                      . Test send needs company Live + group Review/Live (Testing only during pilot).
+                    </span>
+                  </div>
                   <ScheduleForm schedule={schedule} groups={groups} reportTypes={reportTypes} />
                 </div>
               ) : null}

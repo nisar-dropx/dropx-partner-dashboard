@@ -61,6 +61,68 @@ export function classifyContent(content) {
   return null;
 }
 
+/**
+ * Operational events the portal may ingest: plain text and report images only.
+ * Voice, video, stickers, contacts, location and other types are never forwarded.
+ * `normalize` unwraps ephemeral/view-once wrappers (Baileys normalizeMessageContent).
+ */
+export function classifyOperationalContent(content) {
+  if (!content || typeof content !== "object") return null;
+  if (typeof content.conversation === "string" && content.conversation.trim()) {
+    return { message_type: "text", kind: "text", text: content.conversation.slice(0, 4000), caption: null, mime: null, size: null, needs_media: false, context: null };
+  }
+  if (content.extendedTextMessage) {
+    const node = content.extendedTextMessage;
+    const text = typeof node.text === "string" ? node.text : "";
+    if (!text.trim()) return null;
+    return { message_type: "text", kind: "text", text: text.slice(0, 4000), caption: null, mime: null, size: null, needs_media: false, context: node.contextInfo ?? null };
+  }
+  const media = classifyContent(content);
+  if (!media) return null;
+  const node = content[media.node];
+  return {
+    message_type: media.kind,
+    kind: media.kind,
+    text: media.caption ? String(media.caption).slice(0, 4000) : null,
+    caption: media.caption,
+    mime: media.mime,
+    size: media.size,
+    needs_media: true,
+    context: node?.contextInfo ?? null
+  };
+}
+
+/** Compact portal event fields shared by text and image forwards. */
+export function normalizeOperationalEvent(msg, { groupId, groupName, normalize, isBot } = {}) {
+  if (!msg?.key?.id || !groupId || !GROUP_JID.test(groupId)) return null;
+  if (isBot?.(msg.key.id)) return null;
+  const content = normalize ? normalize(msg.message) : msg.message;
+  const classified = classifyOperationalContent(content);
+  if (!classified) return null;
+  const context = classified.context;
+  const quotedId = typeof context?.stanzaId === "string" ? context.stanzaId.slice(0, 128) : null;
+  return {
+    type: "message",
+    group_id: groupId,
+    group_name: groupName ?? null,
+    message_id: msg.key.id,
+    sender_jid: msg.key.fromMe ? null : msg.key.participant || msg.participant || null,
+    sender_name: msg.pushName || null,
+    from_me: Boolean(msg.key.fromMe),
+    sent_by_bot: false,
+    timestamp: messageSeconds(msg.messageTimestamp),
+    kind: classified.kind,
+    message_type: classified.message_type,
+    text: classified.text,
+    caption: classified.caption,
+    quoted_message_id: quotedId,
+    quoted_participant: typeof context?.participant === "string" ? context.participant.slice(0, 120) : null,
+    needs_media: classified.needs_media,
+    mime: classified.mime,
+    size: classified.size
+  };
+}
+
 /** WhatsApp timestamps are seconds, sometimes a protobuf Long. */
 export function messageSeconds(value) {
   if (value === null || value === undefined) return Math.floor(Date.now() / 1000);
