@@ -130,7 +130,8 @@ const REQUIRED_HEADERS: readonly HeaderField[] = [
   "sheetId",
   "sheetType",
   "hubName",
-  "completed"
+  "completed",
+  "assigned"
 ];
 
 function clean(value: unknown) {
@@ -393,7 +394,8 @@ export function parseFlipkartProductionMatrix(
       options.allowedStationCodes
     );
     const completed = parseNonNegativeInteger(rowValue(row, indexes, "completed"));
-    const assigned = parseNonNegativeInteger(rowValue(row, indexes, "assigned"), 0);
+    // Blank cells are invalid once the Assigned column is present; explicit 0 is allowed.
+    const assigned = parseNonNegativeInteger(rowValue(row, indexes, "assigned"));
     const vendorName = clean(rowValue(row, indexes, "vendorName"));
 
     if (!providerEmployeeId) rowIssues.push({ field: "casper_employee_id", message: "Casper employee ID must be stored as safe text or an integer.", rowNumber });
@@ -403,7 +405,7 @@ export function parseFlipkartProductionMatrix(
     if (!metric) rowIssues.push({ field: "sheet_type", message: "Sheet type must be BP_RUNSHEET or BP_PICKUPSHEET.", rowNumber });
     if (!stationCode) rowIssues.push({ field: "hub_name", message: "Hub name does not end with a permitted station code.", rowNumber });
     if (completed === null) rowIssues.push({ field: "completed", message: "Completed must be a non-negative whole number.", rowNumber });
-    if (assigned === null) rowIssues.push({ field: "assigned", message: "Assigned must be a non-negative whole number.", rowNumber });
+    if (assigned === null) rowIssues.push({ field: "assigned", message: "Assigned must be a non-negative whole number (use 0 when none were assigned).", rowNumber });
     if (expectedVendorKeys.size && !expectedVendorKeys.has(vendorKey(vendorName))) {
       rowIssues.push({
         field: "ODH Vendor",

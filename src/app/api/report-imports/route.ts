@@ -45,6 +45,11 @@ import {
   retainRowsOutsideReportImportReplacement,
   type ReportImportReplacementScope
 } from "./report-import-production-threshold";
+import {
+  assignedCountProvided,
+  mergeAssignedOnReimport,
+  parseOptionalAssignedCount
+} from "@/lib/shipment-assigned-count";
 
 type SourceType = string;
 type CoreSourceType = "amazon_shipments" | "flipkart_production" | "iocl_fuel" | "bpcl_fuel" | "cashbook";
@@ -693,6 +698,13 @@ function cashbookHead(raw: RawRecord) {
   return "Other CPS";
 }
 
+const AMAZON_ASSIGNED_ALIASES = ["Assigned", "Assigned Packages", "Total Assigned", "Shipment Assigned", "Packages Assigned"];
+
+function amazonAssignedColumnPresent(raw: RawRecord) {
+  const aliases = new Set(AMAZON_ASSIGNED_ALIASES.map(key));
+  return Object.keys(raw).some((label) => aliases.has(key(label)));
+}
+
 function parseAmazon(raw: RawRecord, rowNumber: number): NormalizedImport | null {
   const workDate = parseAmazonDate(findValue(raw, ["Report Date", "Date", "Shipment Date", "Business Date", "Delivery Date"]));
   const stationCode = normalizeStation(findValue(raw, ["Station Code", "Station", "Location", "DS", "Delivery Station"]));
@@ -715,7 +727,12 @@ function parseAmazon(raw: RawRecord, rowNumber: number): NormalizedImport | null
   const mfnReturn = toNumber(findValue(raw, ["final_seller_returns", "Final Seller Returns", "MFN Return"]));
   const totalDelivery = amazonDelivery + swa;
   const totalActivity = totalDelivery + cReturn + mfn + mfnReturn;
-  const assignedCount = toNumber(findValue(raw, ["Assigned", "Assigned Packages", "Total Assigned", "Shipment Assigned", "Packages Assigned"]));
+  // Live Amazon shipment files do not include an assigned column. Only persist when the file supplies one.
+  const assignedPresent = amazonAssignedColumnPresent(raw);
+  const assignedCount = parseOptionalAssignedCount(
+    findValue(raw, AMAZON_ASSIGNED_ALIASES),
+    assignedPresent
+  );
   if (totalActivity <= 0 && !externalWorkerId) return null;
 
   return {
@@ -723,7 +740,8 @@ function parseAmazon(raw: RawRecord, rowNumber: number): NormalizedImport | null
     normalizedData: {
       ...amazonWeekInfo(workDate),
       amazon_delivery: amazonDelivery,
-      assigned_count: assignedCount,
+      ...(assignedCountProvided(assignedCount) ? { assigned_count: assignedCount } : {}),
+      assigned_count_provided: assignedCountProvided(assignedCount),
       base_amazon_delivery: delivered,
       client: "Amazon",
       c_return: cReturn,
@@ -776,7 +794,8 @@ async function importStep<T>(step: string, action: () => Promise<T>) {
 function aggregateAmazonRows(rows: Array<{ normalized: NormalizedImport | null }>, batchId: string, companyId: string) {
   const map = new Map<string, {
     amazon_delivery: number;
-    assigned_count: number;
+    assigned_count: number | null;
+    assigned_count_provided: boolean;
     c_return: number;
     company_id: string;
     mfn: number;
@@ -802,7 +821,8 @@ function aggregateAmazonRows(rows: Array<{ normalized: NormalizedImport | null }
     const mapKey = `${normalized.workDate}|${normalized.stationCode}|${providerEmployeeId}`;
     const current = map.get(mapKey) ?? {
       amazon_delivery: 0,
-      assigned_count: 0,
+      assigned_count: null,
+      assigned_count_provided: false,
       c_return: 0,
       client: "Amazon",
       company_id: companyId,
@@ -821,7 +841,11 @@ function aggregateAmazonRows(rows: Array<{ normalized: NormalizedImport | null }
       work_date: normalized.workDate!
     };
     current.amazon_delivery += Number(normalized.normalizedData.amazon_delivery ?? 0);
-    current.assigned_count += Number(normalized.normalizedData.assigned_count ?? 0);
+    if (normalized.normalizedData.assigned_count_provided === true
+      && assignedCountProvided(Number(normalized.normalizedData.assigned_count))) {
+      current.assigned_count = (current.assigned_count ?? 0) + Number(normalized.normalizedData.assigned_count);
+      current.assigned_count_provided = true;
+    }
     current.c_return += Number(normalized.normalizedData.c_return ?? 0);
     current.mfn += Number(normalized.normalizedData.mfn ?? 0);
     current.mfn_return += Number(normalized.normalizedData.mfn_return ?? 0);
@@ -840,7 +864,60 @@ function aggregateAmazonRows(rows: Array<{ normalized: NormalizedImport | null }
   return Array.from(map.values());
 }
 
-type AmazonAggregateRow = ReturnType<typeof aggregateAmazonRows>[number] & {
+async function preserveAmazonAssignedCounts(
+  companyId: string,
+  rows: Array<ReturnType<typeof aggregateAmazonRows>[number]>
+) {
+  if (!rows.length || !supabaseAdmin) return rows.map((row) => ({
+    ...row,
+    assigned_count: mergeAssignedOnReimport(row.assigned_count_provided ? row.assigned_count : null, null)
+  }));
+  const dates = Array.from(new Set(rows.map((row) => row.work_date))).sort();
+  const stations = Array.from(new Set(rows.map((row) => row.station_code))).sort();
+  const existing = await readAllRows(supabaseAdmin.from("cps_shipment_daily")
+    .select("work_date,station_code,provider_employee_id,assigned_count")
+    .eq("company_id", companyId)
+    .eq("client", "Amazon")
+    .in("work_date", dates)
+    .in("station_code", stations)
+    .order("id"));
+  if (existing.error) throw new Error(existing.error.message);
+  const prior = new Map((existing.data ?? []).map((row) => [
+    `${row.work_date}|${normalizeStation(row.station_code)}|${clean(row.provider_employee_id).toUpperCase()}`,
+    Number(row.assigned_count)
+  ]));
+  return rows.map((row) => {
+    const key = `${row.work_date}|${normalizeStation(row.station_code)}|${clean(row.provider_employee_id).toUpperCase()}`;
+    const { assigned_count_provided: _provided, ...rest } = row;
+    return {
+      ...rest,
+      assigned_count: mergeAssignedOnReimport(
+        row.assigned_count_provided ? row.assigned_count : null,
+        prior.get(key)
+      )
+    };
+  });
+}
+
+type AmazonAggregateRow = {
+  amazon_delivery?: number;
+  assigned_count: number;
+  c_return: number;
+  client: string;
+  company_id: string;
+  mfn: number;
+  mfn_return: number;
+  provider_employee_id: string;
+  provider_employee_name: string | null;
+  raw_row_count: number;
+  shipment_type: string | null;
+  source_batch_id: string;
+  station_code: string;
+  swa_delivery?: number;
+  total_activity: number;
+  total_delivery: number;
+  updated_at: string;
+  work_date: string;
   c_return_rate?: number;
   da_total_pay?: number;
   del_rate?: number;
@@ -860,12 +937,12 @@ type AmazonAggregateRow = ReturnType<typeof aggregateAmazonRows>[number] & {
 
 function productionForSource(row: AmazonAggregateRow, source: string) {
   const normalizedSource = key(source);
-  if (normalizedSource === "amazondelivery" || normalizedSource === "delivery") return row.amazon_delivery;
-  if (normalizedSource === "swadelivery") return row.swa_delivery;
-  if (normalizedSource === "totaldelivery") return row.total_delivery;
-  if (normalizedSource === "customerreturn" || normalizedSource === "creturn") return row.c_return;
-  if (normalizedSource === "sellerpickup" || normalizedSource === "mfn") return row.mfn;
-  if (normalizedSource === "sellerreturn" || normalizedSource === "mfnreturn") return row.mfn_return;
+  if (normalizedSource === "amazondelivery" || normalizedSource === "delivery") return Number(row.amazon_delivery ?? 0);
+  if (normalizedSource === "swadelivery") return Number(row.swa_delivery ?? 0);
+  if (normalizedSource === "totaldelivery") return Number(row.total_delivery ?? 0);
+  if (normalizedSource === "customerreturn" || normalizedSource === "creturn") return Number(row.c_return ?? 0);
+  if (normalizedSource === "sellerpickup" || normalizedSource === "mfn") return Number(row.mfn ?? 0);
+  if (normalizedSource === "sellerreturn" || normalizedSource === "mfnreturn") return Number(row.mfn_return ?? 0);
   return 0;
 }
 
@@ -1086,14 +1163,14 @@ async function loadAmazonMappingAttendance(
 
 async function applyProviderPaymentMappings(
   companyId: string,
-  sourceRows: ReturnType<typeof aggregateAmazonRows>,
+  sourceRows: AmazonAggregateRow[],
   providerKey: "amazon" | "flipkart",
   options: {
     replacementScope?: ReportImportReplacementScope;
     strict?: boolean;
   } = {}
 ) {
-  const incomingRows = sourceRows as AmazonAggregateRow[];
+  const incomingRows = sourceRows;
   const replacementScope = options.replacementScope;
   const strict = options.strict ?? false;
   if (!sourceRows.length) return incomingRows;
@@ -2813,9 +2890,11 @@ export async function POST(request: Request) {
       workDate: row.normalized?.workDate
     }));
     if (sourceType === "amazon_shipments") {
+      const aggregated = await importStep("Preserve Amazon assigned counts", () =>
+        preserveAmazonAssignedCounts(companyId, aggregateAmazonRows(factRows, batch.data.id, companyId)));
       const payload = await importStep("Apply configured DA payment mappings", () => applyProviderPaymentMappings(
         companyId,
-        aggregateAmazonRows(factRows, batch.data.id, companyId),
+        aggregated as AmazonAggregateRow[],
         "amazon"
       ));
       await importStep("Refresh Amazon shipment totals", () => upsertInChunks("cps_shipment_daily", payload, "company_id,client,work_date,station_code,provider_employee_id", 250));

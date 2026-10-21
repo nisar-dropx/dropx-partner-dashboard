@@ -104,7 +104,9 @@ station raises → submitted → (cluster manager) approve → approved → loss
   `source_status = 'Approved'`. `nl_case_recoverable` treats it as recoverable, and the NL/SLP import jobs
   only touch their own report, so a station case is never overwritten by an Amazon import.
 - The legacy `workforce_station_loss_claims` / `workforce_adjustments` flow was not read by the current
-  Workforce payout loader, so it was replaced. It held 0 claims when replaced.
+  Workforce payout loader, so it was replaced. It held 0 claims when replaced and still holds 0 rows.
+  The portal and request-tracker catalog now use `ops_station_loss_claims` only. Do **not** drop
+  `workforce_station_loss_claims` without a separately approved archival migration; keep it read-only.
 
 ## People salary hold (Team Ops → Salary Hold; HRMS payroll)
 
@@ -179,20 +181,18 @@ open → (initial approver) propose exact correction/rejection → pending_final
 - DropX One shows the associate the current stage, processor-applied correction and system-verified
   publication/net result. Older already-closed records are labelled as legacy/unverified because no
   revised publication was linked.
-- The older one-step `workforce_decide_payout_dispute` remains defined for rollback compatibility, but
-  this migration revokes its `service_role` execute grant and the portal no longer calls it.
-  `workforce_dispute_step` remains `service_role`-executable only as a rolling-deployment adapter; a
-  legacy correction approval enters processing instead of falsely resolving the dispute. After all
-  Dashboard and Ops instances run the new release, apply a separate cleanup migration that revokes
-  `service_role` execute on `workforce_dispute_step`.
+- The portal calls `workforce_dispute_transition_v2` only (`src/lib/payout-review-actions.ts`).
+- `20261020100000` and `20261020110000` are applied remotely: execute is revoked on both
+  `workforce_decide_payout_dispute` and the rolling adapter `workforce_dispute_step`.
+- `workforce_decide_payout_dispute` may still exist as a definition with no grants. Drop it only with
+  the separately named approval-gated migration `20261021140000_drop_workforce_decide_payout_dispute.sql`
+  after confirming no runtime callers remain in Dashboard, HRMS, or Ops.
 - The desk loads only the publications referenced by the disputes shown. Do not go back to loading the
   whole publication history.
 
-Deployment order: first confirm the currently deployed Dashboard/Ops release already uses
-`workforce_dispute_step` rather than `workforce_decide_payout_dispute`, then apply the processing
-migration, deploy Dashboard and Ops, and deploy DropX One. The migration keeps the two-reviewer adapter
-available during that rollout but immediately revokes the unsafe one-step function. After every old
-Dashboard/Ops instance has drained, apply the separate adapter-grant cleanup described above.
+Deployment status (2026-10-21): processing workflow + adapter-grant cleanup are already on the shared
+project. Portal release uses v2. Remaining optional step: apply `20261021140000` only after explicit
+approval to drop the unused one-step function.
 
 ## Workforce payout cross-checks (Payments → Workforce payouts)
 
@@ -223,7 +223,10 @@ Files: `supabase/migrations/20261016200000_delivery_scorecard.sql` (`ops_deliver
   period, at most 92 days, using the station/date index (about 0.5 s for 30 days).
 - Station rows show deliveries, change, DAs, per-DA-per-day, return rate and trend. Each station expands
   to a DA leaderboard; DAs under 60% of the station average are highlighted.
-- `assigned_count` is 0 in the source today, so delivery success % is deliberately not shown.
+- Delivery success % is returned only when `assigned_count > 0` for the rollup; otherwise the UI shows
+  “Not available from source data”. Flipkart cycle imports supply assigned; live Amazon shipment files
+  do not include an assigned column, so Amazon rows stay at 0 unless a future Amazon export adds one.
+  Reimports must not overwrite a positive assigned value with a missing/default zero.
 
 ## Training written answers (DropX One + HRMS → Training)
 
@@ -313,9 +316,30 @@ for every gate, so a wider list never gives anyone extra approval rights.
 - **Mileage claims.** There are no station policies yet, and the Ops page has no review step (no `review`
   action is passed to the mileage desk). Approved claims go to `workforce_adjustments`, which Workforce
   payouts do not read, so they would not be paid today. Wiring them into the payout needs a decision.
-- **Training adoption.** Create real programmes and question banks. A ready-made starter programme could
-  be added if wanted.
-- **Clean-up.** Remove `workforce_decide_payout_dispute` once nothing calls it. The `workforce_station_loss_claims`
-  table is no longer used by the portal.
-- **Data quality.** `cps_shipment_daily.assigned_count` is always 0. Fix the import to enable a delivery
-  success % in the scorecard.
+- **Training adoption (business).** HRMS Training Master now has a readiness checklist and an optional
+  **draft-only** starter programme shell. Business owners still need to supply real programme content,
+  audience, materials, question banks and the publish decision. Nothing auto-publishes or auto-enrols.
+- **Clean-up (technical, approval-gated).**
+  - `workforce_decide_payout_dispute`: grants already revoked; drop via `20261021140000` only after approval.
+  - `workforce_station_loss_claims`: 0 rows, no portal writes; catalog points at `ops_station_loss_claims`.
+    Do not drop the legacy table without a separate archival decision.
+- **Data quality.** Amazon assigned counts remain unavailable from source files. Flipkart assigned counts
+  are imported. Scorecard shows delivery success % only when assigned > 0.
+
+## Migration runbook (shared Supabase — never blanket push)
+
+Apply one file at a time after tests pass:
+
+1. `supabase/migrations/20261021120000_delivery_scorecard_assigned_success.sql` — scorecard success %.
+2. `supabase/migrations/20261021141000_station_claim_request_tracker_catalog.sql` — catalog pointer update.
+3. **Only with explicit approval:** `supabase/migrations/20261021140000_drop_workforce_decide_payout_dispute.sql`.
+
+For each file:
+
+```text
+supabase db query --linked -f <file>
+supabase migration repair --status applied <version> --linked
+```
+
+Already applied (do not re-apply): `20261019101000`, `20261020100000`, `20261020110000`,
+`20261016200000`, `20261016190000`.

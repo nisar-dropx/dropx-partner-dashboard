@@ -260,6 +260,33 @@ test("exposes exact sheet and station mappings for route integration", () => {
   assert.equal(stationCodeFromFlipkartHub("SASCHEMPANODAMDH_CHM", ["PHN"]), null);
 });
 
+test("keeps explicit zero assigned and rejects a missing Assigned column", () => {
+  const withZero = parseFlipkartProductionMatrix(workbookRows([
+    HEADERS,
+    [1, "Worker", "90001", "16/09/2026", "16/09/2026 09:00:00", "RUN-1", "BP_RUNSHEET", "HUB_PHN", 0, 0],
+    [2, "Worker", "90001", "16/09/2026", "16/09/2026 09:05:00", "PICK-1", "BP_PICKUPSHEET", "HUB_PHN", 0, 0]
+  ]), { allowedStationCodes: ["PHN"], requireBothSheetTypes: true });
+  assert.equal(withZero.rows[0].assigned, 0);
+  assert.equal(withZero.daily[0].assignedCount, 0);
+
+  assert.throws(
+    () => parseFlipkartProductionMatrix(workbookRows([
+      ["casper_employee_id", "sheet_create_date_time", "sheet_update_date_time", "sheet_id", "sheet_type", "hub_name", "completed"],
+      ["90001", "16/09/2026", "16/09/2026 09:00:00", "RUN-1", "BP_RUNSHEET", "HUB_PHN", 1]
+    ]), { allowedStationCodes: ["PHN"] }),
+    /missing required columns:[\s\S]*assigned/i
+  );
+
+  const blankAssigned = parseFlipkartProductionMatrix(workbookRows([
+    HEADERS,
+    [1, "Worker", "90001", "16/09/2026", "16/09/2026 09:00:00", "RUN-1", "BP_RUNSHEET", "HUB_PHN", "", 1],
+    [2, "Worker", "90001", "16/09/2026", "16/09/2026 09:05:00", "PICK-1", "BP_PICKUPSHEET", "HUB_PHN", 2, 1]
+  ]), { allowedStationCodes: ["PHN"] });
+  assert.equal(blankAssigned.rows.length, 1);
+  assert.equal(blankAssigned.rows[0].assigned, 2);
+  assert.ok(blankAssigned.issues.some((issue) => /Assigned must be a non-negative whole number/i.test(issue.message)));
+});
+
 test("daily aggregation is separate for date, station and provider ID", () => {
   const base = {
     assigned: 1,

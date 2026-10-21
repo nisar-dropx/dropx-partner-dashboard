@@ -10,3 +10,9 @@ test("scores productivity, change, returns and flags", () => {
   assert.equal(stationScore(s({ prev_delivered: 700, returns: 100 })).flag, "high returns");
   assert.deepEqual(stationScore(s({ delivered: 0, returns: 0, da_days: 0 })).perDa, 0);
 });
+test("delivery success % only when assigned > 0", () => {
+  assert.equal(stationScore(s({ delivered: 80, assigned: 100 })).successPct, 80);
+  assert.equal(stationScore(s({ delivered: 80, assigned: 0 })).successPct, null);
+  assert.equal(stationScore(s({ delivered: 80, assigned: 0, delivery_success_pct: 99 })).successPct, null);
+  assert.equal(stationScore(s({ delivered: 40, assigned: 50, delivery_success_pct: 80 })).successPct, 80);
+});

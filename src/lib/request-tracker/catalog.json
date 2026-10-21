@@ -170,11 +170,24 @@
   {
     "key": "loss",
     "label": "Station loss claim",
+    "portal": "Ops",
+    "table": "ops_station_loss_claims",
+    "aliases": [
+      "reference"
+    ],
+    "history": [
+      "ops_station_loss_claim_events"
+    ],
+    "coverage": "Active station claims use ops_station_loss_claims. Legacy workforce_station_loss_claims is empty and read-only; do not write new rows there. Preserve any archival rows until a separately approved drop migration."
+  },
+  {
+    "key": "loss_legacy_workforce",
+    "label": "Station loss claim (legacy Workforce table)",
     "portal": "Workforce",
     "table": "workforce_station_loss_claims",
     "aliases": [],
     "history": [],
-    "coverage": "Loss report and applied salary deduction are different facts."
+    "coverage": "Deprecated. Live row count was 0 when Ops claims replaced this table. Catalog kept for historical request-tracker lookups only; no new portal writes."
   },
   {
     "key": "mileage",
