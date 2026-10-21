@@ -8,6 +8,7 @@ import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 
 import type { AuthorizationContext } from "@/lib/authorization";
 import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
+import { loadPostgrestInFilterBatches } from "@/lib/postgrest-in-filter-batching";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateAutomaticDeductionLines, type AutomaticDeductionHead, type DeductionWorkerContext } from "@/lib/workforce-deductions";
 import { allocationActiveOn, cumulativeDirectPayUnitsBefore, directPayAttendanceBasis, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
@@ -191,14 +192,32 @@ export async function loadWorkforcePayoutRows(
     ...allDirectAllocations
   ].map((row: any) => row.payment_method_id).filter(Boolean)));
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
-    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
+    loadPostgrestInFilterBatches({
+      values: sourceIds,
+      loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIdChunk)
+    }),
+    loadPostgrestInFilterBatches({
+      values: sourceIds,
+      loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIdChunk)
+    }),
     authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
-    contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
-    employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
-    fieldExecutiveIds.length ? supabaseAdmin.from("workforce").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null }),
-    workforceIds.length ? supabaseAdmin.from("connect_profile_verifications").select("account_id, verified").eq("company_id", companyId).eq("profile_type", "workforce").eq("kind", "pan_aadhaar").in("account_id", workforceIds) : Promise.resolve({ data: [], error: null }),
+    loadPostgrestInFilterBatches({
+      values: contractorIds,
+      loadBatch: (contractorIdChunk) => admin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIdChunk)
+    }),
+    loadPostgrestInFilterBatches({
+      values: employeeIds,
+      loadBatch: (employeeIdChunk) => admin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIdChunk)
+    }),
+    loadPostgrestInFilterBatches({
+      values: fieldExecutiveIds,
+      loadBatch: (fieldExecutiveIdChunk) => admin.from("workforce").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIdChunk)
+    }),
+    loadPostgrestInFilterBatches({
+      values: workforceIds,
+      loadBatch: (workforceIdChunk) => admin.from("connect_profile_verifications").select("account_id, verified").eq("company_id", companyId).eq("profile_type", "workforce").eq("kind", "pan_aadhaar").in("account_id", workforceIdChunk)
+    }),
     paymentMethodIds.length ? readAllRows(supabaseAdmin.from("payment_method_components").select("payment_method_id,payment_field_id,component_code,component_type,label,pay_schedule,sort_order,payment_fields(id,code,label,pay_schedule,field_type,calculation_type,calculation_source,is_custom_production)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds).order("payment_method_id").order("sort_order").order("id")) : Promise.resolve({ data: [], error: null })
   ]);
   if (workforceBySourceResult.error || workforceByIdResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error || panAadhaarResult.error || methodComponentsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceBySourceResult.error?.message || workforceByIdResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || panAadhaarResult.error?.message || methodComponentsResult.error?.message || "Unable to load payout data." };
