@@ -205,24 +205,28 @@ supabase migration repair --status applied <version> --linked
 
 ### Required configuration after migrate
 
-1. **SLP / final approver:** ensure `OPERATIONS_SLPM` (or equivalent) has `ops_loss_master` edit and station location scope for stations they own. Do not grant `has_all_location_access` unless intentional.
+Ops enablement (samples, digest dry-run, live NL/SLP walkthrough, edge-case matrix):
+[`docs/nl-slp-ops-enablement.md`](./nl-slp-ops-enablement.md).
+
+1. **SLP / final approver:** `OPERATIONS_SLPM` (or equivalent) with `ops_loss_master` edit and station location scope. Do not grant `has_all_location_access` unless intentional.
 2. **Loss Recovery Master:** cap override + write-off remain Master edit; confirm who holds it.
-3. **Email:** Settings → Notification templates → enable `loss_recovery_action_digest` (`delivery_ready`, schedule time IST, SMTP). Leave disabled until recipients verified.
-4. **Cron:** Ops host already runs `/api/cron/portal-notifications`; confirm the new builder is registered.
-5. **DropX One:** deploy dashboard `apps/connect` with Payments panel; no HRMS UI change required for associate visibility.
+3. **Email:** Settings → Notifications → **Loss recovery · Daily action digest**. Seeded `disabled` / `delivery_ready=false`. Dry-run via `/api/ops-pulse/loss-recovery-digest-preview`. Enable only after recipient verification (set `delivery_ready` then state=enabled).
+4. **Cron:** `/api/cron/portal-notifications` already registers `buildLossRecoveryActionDigest`.
+5. **DropX One:** Payments panel + loss recoveries details modal.
 
 ### Production rollout checklist
 
-- [ ] `pnpm run test:loss-recovery-payroll` green (Dashboard)
+- [x] `pnpm run test:loss-recovery-payroll` green (Dashboard) — includes digest + clarification-after-deduction
 - [ ] HRMS vitest `payroll-ops-loss-recovery` still green (due shape unchanged for approved lines)
-- [ ] Apply migration 1; spot-check one legacy plan still appears in `nl_loss_recovery_due`
-- [ ] Apply migration 2; leave digest **disabled** until a dry-run day
-- [ ] Pick one NL live case: station dispute → cluster propose → different SLP user approve → payroll draft shows key
-- [ ] Pick one SLP Initial-only case: confirm not allocatable / not due
+- [x] Apply migration 1 + 2 (ops confirmed)
+- [ ] Leave digest **disabled** for dry-run day; preview HTML only
+- [ ] Pick one NL live case → propose → different SLP approve → payroll draft key
+- [ ] Pick one SLP Final case through the same gate into draft pay
+- [ ] Pick one SLP Initial-only case: not allocatable / not due
 - [ ] Cap block + override; two-month instalment; Workforce published payout lock
-- [ ] Associate clarification after first deduction: future instalments `needs_review`, past reviewed line unchanged
-- [ ] Command Center cards match Losses filters for a scoped CM
-- [ ] Digest: empty day sends nothing; second cron same day does not duplicate
+- [x] Associate clarification after first deduction covered in PGlite (ops: spot-check one live case)
+- [x] Command Center scoped summary covered in PGlite
+- [x] Digest empty day / no double send covered in code + unit tests (ops: keep disabled until ready)
 
 ### DropX One payslips
 

@@ -70,6 +70,66 @@ export async function sendCodPendingCurrentStatus(){
  redirect('/settings/notifications?notice='+encodeURIComponent(notice)+'#cod-pending');
 }
 
+export async function saveLossRecoveryDigestSettings(form: FormData) {
+  const auth = await requirePagePermission("ops_notification_settings", "edit");
+  const company = requireCompanyId(auth);
+  const db = digestDatabase();
+  let error = "";
+  try {
+    const state = String(form.get("state") || "");
+    const time = String(form.get("schedule_time") || "");
+    const subject = String(form.get("subject") || "").trim();
+    if (!["enabled", "paused", "disabled"].includes(state)) throw new Error("Choose a valid delivery state.");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("Choose a valid daily time (IST).");
+    if (!subject || subject.length > 250 || /[\r\n]/.test(subject) || !subject.includes("{{date}}")) {
+      throw new Error("Subject must include {{date}} on one line.");
+    }
+    const old = await db
+      .from("portal_notification_controls")
+      .select("config")
+      .eq("company_id", company)
+      .eq("portal", "ops")
+      .eq("event_key", "loss_recovery_action_digest")
+      .single();
+    if (old.error) throw new Error("Loss recovery digest control is not configured yet.");
+    if (state === "enabled" && old.data.config.delivery_ready !== true) {
+      throw new Error(
+        "Mark delivery_ready after recipient verification (SQL or support) before enabling. Keep disabled for the dry-run day.",
+      );
+    }
+    const saved = await db
+      .from("portal_notification_controls")
+      .update({
+        state,
+        paused_until: null,
+        subject_template: subject,
+        config: {
+          ...old.data.config,
+          schedule_time: time,
+          timezone: "Asia/Kolkata",
+          day_offset: 0,
+          delivery_window_minutes: Number(old.data.config.delivery_window_minutes) || 90,
+        },
+        updated_by: auth.userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("company_id", company)
+      .eq("portal", "ops")
+      .eq("event_key", "loss_recovery_action_digest")
+      .select("event_key")
+      .single();
+    if (saved.error) throw new Error("Loss recovery digest settings could not be saved.");
+  } catch (e) {
+    error = e instanceof Error ? e.message : "Settings unavailable.";
+  }
+  revalidatePath("/settings/notifications");
+  redirect(
+    "/settings/notifications?" +
+      (error ? "error=" + encodeURIComponent(error) : "saved=1") +
+      "#loss-recovery-digest",
+  );
+}
+
 export async function saveAdHocDigestSettings(form:FormData){
  const auth=await requirePagePermission('ops_notification_settings','edit'),company=requireCompanyId(auth),db=digestDatabase();
  let error='';

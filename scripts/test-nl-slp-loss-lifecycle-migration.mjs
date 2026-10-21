@@ -183,5 +183,28 @@ await throws(
 
 eq("Lifecycle events recorded", Number((await one(`select count(*)::int n from nl_loss_lifecycle_events where case_key='L1'`)).n) >= 2, true);
 
+// Clarification after a reviewed payroll deduction: past key stays; future due pauses.
+const RUN = "00000000-0000-0000-0000-0000000000d1";
+const PERSON = "00000000-0000-0000-0000-0000000000d2";
+await db.exec(`insert into hr_payroll_runs(id,company_id,period_start,period_end,status) values('${RUN}','${C}','2026-10-01','2026-10-31','approved');
+ insert into hr_payroll_run_people(id,company_id,run_id,worker_type,worker_id) values('${PERSON}','${C}','${RUN}','employee','${E1}');
+ insert into hr_payroll_run_items(company_id,run_person_id,code,name,item_type,amount,source,metadata)
+ values('${C}','${PERSON}','OPS_LOSS_RECOVERY','Loss','deduction',1000,'ops_loss_recovery','{"recovery_key":"2026-09|L1|employee:${E1}","month":"2026-09","case_key":"L1"}')`);
+const beforeClarify = (await db.query(`select amount::numeric as amount, metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows;
+eq("Reviewed payroll key before clarification", beforeClarify.map((r) => [Number(r.amount), r.k]), [[1000, `2026-09|L1|employee:${E1}`]]);
+await db.query(`select nl_loss_clarification_submit('${C}','2026-09','L1','${E1}','IC One','POD uploaded after first payroll deduction for this TID','Delivered','clarification','employee:${E1}',null,'[]'::jsonb,'associate')`);
+eq(
+  "Clarification after deduction pauses plan",
+  (await one(`select lifecycle_status s, approval_status a from nl_loss_month_cases c join nl_loss_recoveries r using(company_id,month,case_key) where case_key='L1'`)),
+  { s: "needs_review", a: "needs_review" },
+);
+eq("Future due paused after clarification", (await db.query(`select * from nl_loss_recovery_due('${C}','2026-11','hrms') where case_key='L1'`)).rows.length, 0);
+const afterClarify = (await db.query(`select amount::numeric as amount, metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows;
+eq("Past reviewed deduction unchanged", afterClarify.map((r) => [Number(r.amount), r.k]), beforeClarify.map((r) => [Number(r.amount), r.k]));
+
+const otherStation = await one(`select nl_loss_recovery_command_summary('${C}', array['HYD9'], '2026-10') s`);
+eq("Command summary for other station is empty scope", Number(otherStation.s.total_recoverable || 0), 0);
+eq("Empty action day yields no rows", (await db.query(`select * from nl_loss_recovery_action_items('${C}') where station_code='HYD9'`)).rows.length, 0);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
