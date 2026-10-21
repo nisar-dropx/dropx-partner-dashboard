@@ -15,6 +15,7 @@ const payoutTable = readFileSync(new URL("../components/workforce-payout-table.t
 const payoutPage = readFileSync(new URL("../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
 const payoutLoader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
 const payoutPreviewBatching = readFileSync(new URL("./payout-payment-preview-batching.ts", import.meta.url), "utf8");
+const postgrestInFilterBatching = readFileSync(new URL("./postgrest-in-filter-batching.ts", import.meta.url), "utf8");
 
 test("payment setup conflict rows are excluded from every payout mutation", () => {
   assert.match(payoutTable, /function canManuallyEditPayout[\s\S]*?row\.mappingStatus !== "Payment setup conflict"/);
@@ -329,6 +330,10 @@ test("selected-month enrichment and high-cardinality loader reads use bounded pa
   assert.match(payoutPreviewBatching, /loadPreviewBatchWithTimeoutSplit/);
   assert.match(payoutLoader, /mapWithConcurrency\(chunkedValues\(payoutInputWorkforceIds, 100\), 3/);
   assert.match(payoutLoader, /mapWithConcurrency\(jobs, 4/);
+  assert.match(postgrestInFilterBatching, /POSTGREST_IN_FILTER_BATCH_SIZE = 100/);
+  assert.match(payoutLoader, /values: sourceIds,[\s\S]*?in\("source_profile_id", sourceIdChunk\)/);
+  assert.match(payoutLoader, /values: sourceIds,[\s\S]*?in\("id", sourceIdChunk\)/);
+  assert.match(payoutLoader, /values: workforceIds,[\s\S]*?in\("account_id", workforceIdChunk\)/);
 });
 
 test("published mapping corrections are audited, company-wide and explicitly relocked", () => {
