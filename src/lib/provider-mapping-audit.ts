@@ -1,7 +1,7 @@
 export type MappingAuditEvent = { id: string; action: string; actor: string; at: string };
 export type StoredMappingAuditRow = { id: string; workforce_id: string | null; provider_id: string | null; provider_member_id: string; station_id: string | null; effective_from: string; created_by: string | null; created_at: string; updated_at: string };
 export type StoredMappingEvent = { id: string; workforce_id: string; event_code: string; actor_id: string | null; actor_name: string | null; created_at: string; details: Record<string, unknown> | null };
-const labels: Record<string,string> = { provider_mapping_saved: 'Mapping saved', provider_mapping_cleared: 'Mapping cleared', provider_mapping_period_cleared: 'Mapping period cleared', provider_mapping_replaced: 'Associate replaced', provider_mapping_replacement_confirmed: 'Replacement confirmed', provider_mapping_location_kept: 'Location added', provider_mapping_location_moved: 'Location moved', provider_mapping_start_corrected: 'Start date corrected' };
+const labels: Record<string,string> = { provider_mapping_saved: 'Mapping saved', provider_mapping_cleared: 'Mapping cleared', provider_mapping_period_cleared: 'Mapping period removed', provider_mapping_replaced: 'Associate replaced', provider_mapping_replacement_confirmed: 'Replacement confirmed', provider_mapping_location_kept: 'Location added', provider_mapping_location_moved: 'Location moved', provider_mapping_start_corrected: 'Start date corrected' };
 const identity = (value: unknown) => String(value ?? '').trim().toUpperCase().replace(/\.0+$/, '');
 export function mappingEventMatches(mapping: StoredMappingAuditRow, event: StoredMappingEvent) {
   if (!event.event_code.startsWith('provider_mapping_')) return false;

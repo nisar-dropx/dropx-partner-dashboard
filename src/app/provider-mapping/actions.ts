@@ -1872,7 +1872,7 @@ export type ClearProviderMappingPeriodInput = {
   expectedUpdatedAt: string;
 };
 
-/** Cancels one exact saved provider-mapping period. The mapping row remains in
+/** Removes one exact saved provider-mapping period. The mapping row remains in
  * history, but neither its DropX association nor its payment method applies to
  * the stored dates after cancellation. Other periods are never retargeted. */
 export async function clearProviderMappingPeriod(input: ClearProviderMappingPeriodInput): Promise<ClearProviderMappingPeriodResult> {
@@ -1965,7 +1965,7 @@ export async function clearProviderMappingPeriod(input: ClearProviderMappingPeri
     revalidatePath("/payments/workforce-payouts");
     return {
       ok: true,
-      message: `Mapping and payment method cleared for the ${locationLabel} location-period, ${formatDashboardDate(effectiveFrom)} through ${effectiveTo ? formatDashboardDate(effectiveTo) : "ongoing"}. Other locations and periods were not changed.`,
+      message: `Mapping and payment method removed for the ${locationLabel} location-period, ${formatDashboardDate(effectiveFrom)} through ${effectiveTo ? formatDashboardDate(effectiveTo) : "ongoing"}. Other locations and periods were not changed.`,
       mappingId: normalizedMappingId,
       workforceId: mapping.workforce_id,
       effectiveFrom,
@@ -1974,7 +1974,7 @@ export async function clearProviderMappingPeriod(input: ClearProviderMappingPeri
   } catch (error) {
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Unable to clear this mapping period."
+      message: error instanceof Error ? error.message : "Unable to remove this mapping period."
     };
   }
 }

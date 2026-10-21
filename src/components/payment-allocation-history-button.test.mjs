@@ -7,17 +7,19 @@ const component = await readFile(new URL("./payment-allocation-history-button.ts
 test("history exposes period clearing only through the explicit permission and callback", () => {
   assert.match(component, /canClearMappingPeriod\?: boolean/);
   assert.match(component, /onClearMappingPeriod\?: \(entry: PaymentAllocationHistoryEntry\) => Promise<\{ ok: boolean; message: string \}>/);
-  assert.match(component, /\(canClearMappingPeriod \|\| clearTargetId === entry\.id \|\| clearingEntryId === entry\.id\) && onClearMappingPeriod/);
-  assert.match(component, /Boolean\(entry\.updatedAt\)/);
-  assert.match(component, />Clear mapping<\/button>/);
+  assert.match(component, /\(canClearMappingPeriod \|\| clearTargetId === entry\.id \|\| clearingEntryId === entry\.id\) && onClearMappingPeriod && removableSavedPeriod/);
+  assert.match(component, /const removableSavedPeriod = Boolean\(entry\.updatedAt\)[\s\S]*?entry\.storedStatus\.trim\(\)\.toLowerCase\(\) !== "cancelled"/);
+  assert.match(component, /Past, current and scheduled periods are all removable/);
+  assert.match(component, />Remove mapping<\/button>/);
 });
 
 test("period clearing confirms the exact range and explains its bounded effect", () => {
   assert.match(component, /readableDate\(entry\.effectiveFrom\).*readableDate\(entry\.effectiveTo\)/s);
-  assert.match(component, /Clear the \{locationLabel\} location-period\?/);
+  assert.match(component, /Remove the \{locationLabel\} mapping for this period\?/);
   assert.match(component, /Both the DropX mapping and the payment method\/rates for only this location-period will become unmapped\./);
   assert.match(component, /History remains available, and all other locations and periods remain unchanged\./);
-  assert.match(component, />Clear and save<|"Clear and save"/);
+  assert.match(component, /Removal is blocked only when this period has a published or locked payment/);
+  assert.match(component, />Remove this period<|"Remove this period"/);
   assert.doesNotMatch(component, /(?:window\.)?confirm\s*\(/);
 });
 

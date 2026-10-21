@@ -34,5 +34,5 @@ test("exact-period clear uses the saved row version and names the location-perio
 });
 
 test("period-clear events have a readable audit label", () => {
-  assert.match(audit, /provider_mapping_period_cleared: 'Mapping period cleared'/);
+  assert.match(audit, /provider_mapping_period_cleared: 'Mapping period removed'/);
 });
