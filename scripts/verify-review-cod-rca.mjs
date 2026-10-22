@@ -63,6 +63,9 @@ const actions = compile('src/app/ops-pulse/performance/actions.ts', {
   'next/cache': { revalidatePath() {} }, '@/lib/company-scope': { requireCompanyId: () => 'company1' }, '@/lib/supabase-admin': { supabaseAdmin: db },
   '@/lib/authorization': { requirePagePermission: async () => ({ userId: 'user1', fullName: 'Test reviewer', hasAllLocationAccess: false, locationScopeIds: ['station1'] }) },
   '@/lib/ops-pulse/performance-review': {}, '@/lib/ops-pulse/review-policy': { visibleReviewStep: () => true, reviewBypassReason: v => v },
+  '@/lib/ops-pulse/performance-source-policy': { dailyPerformanceSourceForMode: () => 'amazon_hawkeye_daily' },
+  '@/lib/ops-pulse/operating-context': { operatingModeForLocation: () => 'amazon_edsp' },
+  '@/lib/ops-pulse/store-health-scorecard': { STORE_HEALTH_DAILY_SOURCE: 'qc_store_health_daily' },
   '@/lib/ops-pulse/review-access': {
     isScorecardImported: async () => true,
     getReviewAccess: async () => ({ scorecardImported: true, canEditRca: canEdit, canComplete, canComment: true, canBypass, actor: { label: 'AOM' } })

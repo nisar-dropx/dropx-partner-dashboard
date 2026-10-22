@@ -47,6 +47,9 @@ const dependencies = {
   "next/cache": { revalidatePath() {} }, "@/lib/authorization": { requirePagePermission: async () => authorization },
   "@/lib/company-scope": { requireCompanyId: () => "company1" }, "@/lib/supabase-admin": { supabaseAdmin: db },
   "@/lib/ops-pulse/performance-review": {}, "@/lib/ops-pulse/review-policy": {},
+  "@/lib/ops-pulse/performance-source-policy": { dailyPerformanceSourceForMode: () => "amazon_hawkeye_daily" },
+  "@/lib/ops-pulse/operating-context": { operatingModeForLocation: () => "amazon_edsp" },
+  "@/lib/ops-pulse/store-health-scorecard": { STORE_HEALTH_DAILY_SOURCE: "qc_store_health_daily" },
   "@/lib/ops-pulse/review-access": {
     isScorecardImported: async () => true,
     getReviewAccess: async () => ({ scorecardImported: true, canEditRca: allowRca, canComplete: allowComplete, canComment: allowComplete, actor: { label: "AOM" } })
