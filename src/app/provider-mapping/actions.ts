@@ -1328,8 +1328,19 @@ async function providerFirstReplacementState({
       .neq("status", "cancelled")
       .maybeSingle()
     : Promise.resolve({ data: null, error: null });
+  const registeredCoverageQuery = registeredStationId && requestedEffectiveFrom
+    ? supabaseAdmin.rpc("workforce_provider_mapping_period_covered", {
+      p_company: companyId,
+      p_workforce: workforceId,
+      p_station: registeredStationId,
+      p_provider: providerId,
+      p_member: providerMemberId,
+      p_from: requestedEffectiveFrom,
+      p_to: requestedEffectiveTo || null
+    })
+    : Promise.resolve({ data: false, error: null });
 
-  const [targetResult, providerResult, registeredMappingResult, submittedMappingResult] = await Promise.all([
+  const [targetResult, providerResult, registeredMappingResult, submittedMappingResult, registeredCoverageResult] = await Promise.all([
     supabaseAdmin
       .from("field_executive_provider_mappings")
       .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id, effective_from, effective_to, status")
@@ -1344,12 +1355,14 @@ async function providerFirstReplacementState({
       p_provider_member_id: providerMemberId
     }),
     registeredMappingQuery,
-    submittedMappingQuery
+    submittedMappingQuery,
+    registeredCoverageQuery
   ]);
   if (targetResult.error) throw new Error(targetResult.error.message);
   if (providerResult.error) throw new Error(providerResult.error.message);
   if (registeredMappingResult.error) throw new Error(registeredMappingResult.error.message);
   if (submittedMappingResult.error) throw new Error(submittedMappingResult.error.message);
+  if (registeredCoverageResult.error) throw new Error(registeredCoverageResult.error.message);
   const rawTargetMappings = (targetResult.data ?? []) as ProviderFirstActiveMapping[];
   const rawProviderMappings = (providerResult.data ?? []) as ProviderFirstActiveMapping[];
   const providerMappingIds = [...new Set(rawProviderMappings.map((mapping) => String(mapping.id ?? "")).filter(Boolean))];
@@ -1420,18 +1433,24 @@ async function providerFirstReplacementState({
       || mapping.provider_id !== providerId)) {
     throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
   }
-  const registeredLocationMapping = registeredMappings.find((mapping) =>
+  const matchingRegisteredMappings = registeredMappings.filter((mapping) =>
     String(mapping.station_id ?? "") === registeredStationId
       && mapping.provider_id === providerId
       && providerMemberIdentity(mapping.provider_member_id) === normalizedMemberId
-      && providerFirstMappingPeriodContains(
+  );
+  // Rate changes split one registered-location assignment into adjacent rows.
+  // The database proves that their union has no gap; keep the exact row that
+  // is effective on the requested start date as the audited Keep-all anchor.
+  const registeredLocationMapping = matchingRegisteredMappings.find((mapping) =>
+    providerFirstMappingPeriodContains(
         String(mapping.effective_from ?? ""),
         String(mapping.effective_to ?? ""),
         requestedEffectiveFrom,
-        requestedEffectiveTo
+        requestedEffectiveFrom
       )
   ) ?? null;
-  if (needsRegisteredLocationException && !registeredLocationMapping) {
+  const registeredLocationPeriodCovered = registeredCoverageResult.data === true;
+  if (needsRegisteredLocationException && (!registeredLocationMapping || !registeredLocationPeriodCovered)) {
     throw new Error(`Row ${index + 1}: Location mismatch. Map this Provider ID to the DropX profile at its registered location for the complete requested period, then use Keep all for the additional location.`);
   }
 
@@ -1523,13 +1542,34 @@ async function providerFirstReplacementState({
   if (providerOwner && providerOwner !== workforceId && relevantProviderMappings.length > 1) {
     throw new Error(`Row ${index + 1}: This Provider ID is retained at multiple locations for another DropX ID and cannot be replaced here.`);
   }
+  // Reverse Keep all restores the registered-location anchor without
+  // backdating or rewriting an already-scheduled additional-location row.
+  // Pick a deterministic same-owner additional row for confirmation; Move is
+  // intentionally unavailable when that row starts after the requested date.
+  const reverseKeepCandidate = !needsRegisteredLocationException
+    && registeredStationId === stationId
+    && providerOwner === workforceId
+    ? (submittedMapping && submittedMapping.station_id !== registeredStationId
+      ? submittedMapping
+      : relevantProviderMappings
+        .filter((mapping) => mapping.station_id !== registeredStationId && canonicalOwner(mapping) === workforceId)
+        .sort((left, right) => String(left.effective_from ?? "").localeCompare(String(right.effective_from ?? ""))
+          || String(left.id).localeCompare(String(right.id)))[0] ?? null)
+    : null;
+  if (reverseKeepCandidate
+    && requestedEffectiveTo
+    && !currentProviderMappingStartedByRequestedDate(reverseKeepCandidate.effective_from, requestedEffectiveFrom)) {
+    throw new Error(`Row ${index + 1}: Move or Keep all requires an ongoing mapping. Leave Effective to blank.`);
+  }
+  const reverseKeepMapping = requestedEffectiveTo ? null : reverseKeepCandidate;
   const existingMapping = providerOwner && providerOwner !== workforceId
     ? providerMappingsAtRequestedStart[0]
     : needsRegisteredLocationException
       ? registeredLocationMapping
       : submittedMappingAtRequestedStart
         ?? targetMappingsAtRequestedStart[0]
-        ?? providerMappingsAtRequestedStart[0];
+        ?? providerMappingsAtRequestedStart[0]
+        ?? reverseKeepMapping;
   if (!existingMapping) {
     throw new Error(`Row ${index + 1}: No existing mapping is effective on the selected start date.`);
   }
@@ -1538,6 +1578,15 @@ async function providerFirstReplacementState({
   }
 
   const changeKind: "owner" | "location" = canonicalOwner(existingMapping) === workforceId ? "location" : "owner";
+  if (changeKind === "location"
+    && requestedEffectiveTo
+    && !needsRegisteredLocationException
+    && registeredStationId === stationId) {
+    throw new Error(`Row ${index + 1}: Move or Keep all requires an ongoing mapping. Leave Effective to blank.`);
+  }
+  const reverseKeepOnly = changeKind === "location"
+    && existingMapping.id === reverseKeepMapping?.id
+    && !currentProviderMappingStartedByRequestedDate(existingMapping.effective_from, requestedEffectiveFrom);
 
   let existingDropxId = "Existing profile";
   let existingDropxName = "Mapped associate";
@@ -1576,7 +1625,7 @@ async function providerFirstReplacementState({
     // When the destination is the registered location, the database records
     // the exact concurrent period without rewriting the older mapping.
     allowKeepAll: changeKind === "location",
-    allowMove: changeKind !== "location" || !needsRegisteredLocationException,
+    allowMove: changeKind !== "location" || (!needsRegisteredLocationException && !reverseKeepOnly),
     clientKey,
     mappingId: existingMapping.id,
     providerMemberId,
@@ -1590,6 +1639,9 @@ async function providerFirstReplacementState({
   if (expectedReplacementId === existingMapping.id) {
     if (changeKind === "owner" && replacementAction === "keep") {
       throw new Error(`Row ${index + 1}: Keep all is available only when the same DropX ID works at multiple locations.`);
+    }
+    if (changeKind === "location" && reverseKeepOnly && replacementAction === "move") {
+      throw new Error(`Row ${index + 1}: Keep all is required when restoring the registered location before a scheduled additional-location mapping.`);
     }
     if (changeKind === "location" && needsRegisteredLocationException && replacementAction === "move") {
       throw new Error(`Row ${index + 1}: Keep all is required for an additional location so the verified registered-location mapping remains preserved for that period.`);

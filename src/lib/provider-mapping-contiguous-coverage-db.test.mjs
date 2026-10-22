@@ -157,11 +157,31 @@ test('rate changes preserve continuous registered-location coverage across the c
      'the historical additional-location mapping must remain unchanged');
  });
 
+ const keepAnchorMigration=await migration('20261022210000_provider_mapping_contiguous_keep_anchor.sql');
+ assert.match(keepAnchorMigration,/workforce_provider_mapping_period_covered/);
+ assert.match(keepAnchorMigration,/existing_mapping\.effective_to < mapping_payload\.effective_from/);
+ await db.exec(keepAnchorMigration);
+ await db.exec(keepAnchorMigration);
+
  const result=await call(plan);
  assert.equal(result.rows[0].records.length,2);
  assert.equal(result.rows[0].records[1].payment_method_id,id(25));
  assert.deepEqual(result.rows[0].records.map(r=>[r.effective_from,r.effective_to,r.payment_values.DELIVERY]),[['2026-01-01','2026-10-20',1000],['2026-10-21',null,16]]);
  assert.deepEqual((await db.query('select * from field_executive_provider_mappings where id=$1',[childId])).rows,[before.mappings.find(r=>r.id===childId)]);
+
+ await t.test('Keep-all uses the contiguous timeline but requires the exact row effective on the requested start',async()=>{
+   const fullSpanStation=id(11),laterStation=id(12);
+   await db.query('insert into stations(id,company_id,provider_id) values($1,$2,$3),($4,$2,$3)',[fullSpanStation,company,provider,laterStation]);
+   const fullSpan=await keep(anchorId,period('2026-10-01',null,18,fullSpanStation));
+   assert.ok(fullSpan,'adjacent registered payment periods cover the complete open-ended assignment');
+   await assert.rejects(
+     keep(anchorId,period('2026-10-21',null,19,laterStation)),
+     /registered-location mapping must cover/i,
+     'the confirmed audit anchor must itself be effective on the requested start'
+   );
+   const openAnchor=(await db.query("select id from field_executive_provider_mappings where workforce_id=$1 and station_id=$2 and effective_from='2026-10-21' and effective_to is null",[worker,station])).rows[0].id;
+   assert.ok(await keep(openAnchor,period('2026-10-21',null,19,laterStation)));
+ });
 
  await t.test('starting the plan this month preserves the earlier payment history',async()=>{
    const result=await call([period('2026-10-01','2026-10-20',1000),plan[1]]);
@@ -185,7 +205,8 @@ test('rate changes preserve continuous registered-location coverage across the c
    assert.equal((await db.query('select location_id from workforce where id=$1',[worker])).rows[0].location_id,station);
  });
  await t.test('bounded historical Keep-all can span adjacent registered periods',async()=>{
-   const bounded=await keep(anchorId,period('2026-10-01','2026-10-31',15,otherStation));
+   const boundedAnchor=(await db.query("select id from field_executive_provider_mappings where workforce_id=$1 and station_id=$2 and effective_from<='2026-10-01' and (effective_to is null or effective_to>='2026-10-01') order by effective_from desc,id limit 1",[worker,station])).rows[0].id;
+   const bounded=await keep(boundedAnchor,period('2026-10-01','2026-10-31',15,otherStation));
    assert.ok(bounded);
    const saved=await state();
    await assert.rejects(db.query("update field_executive_provider_mappings set status='cancelled' where id=$1",[anchorId]),/registered-location mapping/);
