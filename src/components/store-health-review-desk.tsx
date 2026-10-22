@@ -81,9 +81,19 @@ function stationKey(value: string | null | undefined) {
 
 function formatActual(metric: StoreHealthReviewMetric) {
   if (metric.evidence) return metric.evidence;
-  if (metric.severity === "neutral" && metric.actual == null) return "Not scored";
+  if (metric.severity === "neutral" && metric.actual == null) return "—";
   if (metric.actual == null) return "—";
   return String(metric.actual);
+}
+
+function metricTarget(metric: StoreHealthReviewMetric) {
+  const definition = storeHealthMetricDefinitions.find((entry) => entry.key === metric.key);
+  if (metric.severity === "neutral") return "Not scored";
+  return definition?.targetText ? `tgt ${definition.targetText}` : metric.severity;
+}
+
+function severityRank(severity: StoreHealthReviewMetric["severity"]) {
+  return severity === "red" ? 0 : severity === "amber" ? 1 : severity === "green" ? 2 : 3;
 }
 
 export function StoreHealthReviewDesk(props: Props) {
@@ -194,15 +204,13 @@ export function StoreHealthReviewDesk(props: Props) {
     <section className="performance-review-statusbar">
       <div><span>Source</span><strong>Store Health D-2</strong></div>
       <div><span>Review</span><strong>{review ? review.status.replace("_", " ") : "Not started"}</strong></div>
-      <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.proxy_reviewer_name || activeStep.reviewer_name}${activeStep.proxy_reviewer_name ? " (proxy)" : ""}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
-      <div><span>Health band</span><strong className={`store-health-band ${bandTone}`}>{hero.band ?? "—"}</strong></div>
-      <div><span>Score</span><strong>{hero.scorePct == null ? "—" : `${hero.scorePct}%`}</strong></div>
+      <div><span>With</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.proxy_reviewer_name || activeStep.reviewer_name}${activeStep.proxy_reviewer_name ? " (proxy)" : ""}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
       {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button id="start-station-review" className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
-    {props.readOnlyPreview && !review ? <div className="alert warning" role="status">Read-only user preview hides Start review. Exit preview and open Review Desk as this user, or have them sign in, to start the review.</div> : null}
-    {!review && !canAdd && !props.readOnlyPreview && reviewChain.length ? <div className="alert warning" role="status">Only the first review manager on this route ({reviewChain[0]?.reviewerRole} · {reviewChain[0]?.reviewerName}) or Program Manager can start this review.</div> : null}
-    {!review && metricMisses.length ? <div className="performance-review-start-guide"><strong>{metricMisses.length} metrics need RCA</strong><span>{canAdd ? "Use Start review above, then record RCA below." : "Start review becomes available once the assigned manager opens this store."}</span></div> : null}
+    {props.readOnlyPreview && !review ? <div className="alert warning" role="status">Read-only preview — exit preview or sign in as this user to start the review.</div> : null}
+    {!review && !canAdd && !props.readOnlyPreview && reviewChain.length ? <div className="alert warning" role="status">Only {reviewChain[0]?.reviewerRole} · {reviewChain[0]?.reviewerName} or Program Manager can start this review.</div> : null}
+    {!review && metricMisses.length ? <div className="performance-review-start-guide"><strong>{metricMisses.length} need RCA</strong><span>{canAdd ? "Start review, then add RCA below." : "Waiting on the assigned manager to start."}</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
     {review ? <PerformanceReviewFlow key={`${review.id}-${review.current_step_order}-${review.updated_at}`} steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/> : <section className="performance-review-flow" aria-label="Review workflow">
@@ -211,44 +219,32 @@ export function StoreHealthReviewDesk(props: Props) {
     <p className="review-access-hint">{programManager ? "Program Manager · edit and comment at any stage" : isOriginalReviewer && reviewerEditReopened ? "Edit access reopened by oversight · you can update RCA, actions and takeaway again" : canEdit ? "Your review · update RCA, actions and takeaway" : canComment ? "Your review · add comments and complete your stage" : "View the full review · comments open at your review stage"}</p>
     <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at ?? "not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canUndoBypass={props.canUndoBypass} canStart={canAdd} hasRoute={Boolean(review || reviewChain.length)} routeLabel={reviewChain.map((step) => `${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step) => `${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")} reviewerEditReopened={Boolean(reviewerEditReopened)} firstReviewerName={reviewChain[0]?.reviewerName ?? selectedSteps.find((step) => visibleReviewStep(step))?.reviewer_name ?? null}/>
 
-    <nav className="review-section-nav" aria-label="Jump to review section"><a href="#review-performance">Scorecard</a>{rcaRows.length ? <a href="#review-rca">RCA <b>{rcaRows.length}</b></a> : null}<a href="#review-followups">Actions</a>{review ? <a href="#review-discussion">Discussion</a> : null}</nav>
+    <nav className="review-section-nav" aria-label="Jump to review section"><a href="#review-performance">Score</a>{rcaRows.length ? <a href="#review-rca">RCA <b>{rcaRows.length}</b></a> : null}{metrics.length ? <a href="#review-scorecard">Metrics</a> : null}<a href="#review-followups">Actions</a>{review ? <a href="#review-discussion">Discussion</a> : null}</nav>
 
     <section className="panel performance-review-section" id="review-performance">
-      <div className="panel-head"><div><span className="performance-review-kicker">01 · STORE HEALTH</span><h2>Store health scorecard</h2><p className="subtle">Quick Commerce Store Health Metrics v6.2 · Green full weight · Amber half · Red zero · unscored removed from available points.</p></div><strong className={metricMisses.length ? "review-risk" : "review-good"}>{metricMisses.length} miss{metricMisses.length === 1 ? "" : "es"}</strong></div>
+      <div className="panel-head"><div><span className="performance-review-kicker">01 · STORE HEALTH</span><h2>Scorecard</h2><p className="subtle">v6.2 · green full · amber half · red zero · unscored out of points</p></div><strong className={metricMisses.length ? "review-risk" : "review-good"}>{metricMisses.length} miss{metricMisses.length === 1 ? "" : "es"}</strong></div>
 
       <div className={`store-health-hero ${bandTone}`}>
-        <div><span>Overall score</span><strong>{hero.scorePct == null ? "—" : `${hero.scorePct}%`}</strong><small className={`store-health-band ${bandTone}`}>{hero.band ?? "No score"}</small></div>
-        <div><span>Points</span><strong>{hero.pointsEarned == null || hero.pointsAvailable == null ? "—" : `${hero.pointsEarned} / ${hero.pointsAvailable}`}</strong><small>Earned / available</small></div>
-        <div><span>Scored metrics</span><strong>{metrics.filter((metric) => metric.severity !== "neutral").length}/{metrics.length}</strong><small>With data today</small></div>
+        <div><span>Score</span><strong>{hero.scorePct == null ? "—" : `${hero.scorePct}%`}</strong><small className={`store-health-band ${bandTone}`}>{hero.band ?? "—"}</small></div>
+        <div><span>Points</span><strong>{hero.pointsEarned == null || hero.pointsAvailable == null ? "—" : `${hero.pointsEarned}/${hero.pointsAvailable}`}</strong></div>
+        <div><span>Scored</span><strong>{metrics.filter((metric) => metric.severity !== "neutral").length}/{metrics.length}</strong></div>
+        <div><span>Misses</span><strong className={metricMisses.length ? "review-risk" : "review-good"}>{metricMisses.length}</strong></div>
       </div>
 
-      {hero.storeInsight || hero.networkInsight ? <div className="store-health-insights">
-        {hero.storeInsight ? <p><strong>This store</strong>{hero.storeInsight}</p> : null}
-        {hero.networkInsight ? <p><strong>Network</strong>{hero.networkInsight}</p> : null}
-      </div> : null}
+      {hero.storeInsight || hero.networkInsight ? <details className="store-health-insights">
+        <summary>Store & network notes</summary>
+        <div className="store-health-insight-body">
+          {hero.storeInsight ? <p><strong>Store</strong>{hero.storeInsight}</p> : null}
+          {hero.networkInsight ? <p><strong>Network</strong>{hero.networkInsight}</p> : null}
+        </div>
+      </details> : null}
 
       {previousReview?.review_summary ? (
         <div className="performance-previous-takeaway">
-          <span><strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small></span>
+          <span><strong>Prior · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Done" : "Open"}</small></span>
           <p>{previousReview.review_summary}</p>
         </div>
       ) : null}
-
-      {!metrics.length ? <p className="review-scorecard-empty">No Store Health scorecard imported for this store and date.</p> : categories.map((category) => {
-        const rows = storeHealthMetricDefinitions
-          .filter((definition) => definition.category === category)
-          .map((definition) => metrics.find((metric) => metric.key === definition.key))
-          .filter((metric): metric is StoreHealthReviewMetric => Boolean(metric));
-        if (!rows.length) return null;
-        return <div className="store-health-category" key={category}>
-          <h3>{category}</h3>
-          <div className="performance-review-metrics">{rows.map((metric) => <article className={metric.severity} key={metric.key}>
-            <span title={metric.label}>{metric.short}</span>
-            <strong>{formatActual(metric)}</strong>
-            <small>{metric.severity === "neutral" ? "Not scored" : `Target ${storeHealthMetricDefinitions.find((entry) => entry.key === metric.key)?.targetText ?? "—"} · ${metric.severity}`}</small>
-          </article>)}</div>
-        </div>;
-      })}
 
       {rcaRows.length ? (
         <PerformanceRcaActions
@@ -264,9 +260,26 @@ export function StoreHealthReviewDesk(props: Props) {
           stationCode={selectedCode}
           reviewStarted={Boolean(review)}
           startControl={!review && canAdd && !props.readOnlyPreview ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review & add RCA</button></ReviewActionForm> : undefined}
-          editHint={!canEdit ? canCompleteStep ? "Performance RCA is editable by the first-stage reviewer or authorised oversight." : "View only at this stage. The assigned reviewer or authorised oversight can update these entries." : undefined}
+          editHint={!canEdit ? canCompleteStep ? "RCA editable by first-stage reviewer or oversight." : "View only — assigned reviewer or oversight can edit." : undefined}
         />
       ) : null}
+
+      {!metrics.length ? <p className="review-scorecard-empty">No Store Health scorecard imported for this store and date.</p> : <div className="store-health-scorecard" id="review-scorecard">{categories.map((category) => {
+        const rows = storeHealthMetricDefinitions
+          .filter((definition) => definition.category === category)
+          .map((definition) => metrics.find((metric) => metric.key === definition.key))
+          .filter((metric): metric is StoreHealthReviewMetric => Boolean(metric))
+          .sort((left, right) => severityRank(left.severity) - severityRank(right.severity) || left.short.localeCompare(right.short));
+        if (!rows.length) return null;
+        return <div className="store-health-category" key={category}>
+          <h3>{category}</h3>
+          <div className="performance-review-metrics">{rows.map((metric) => <article className={metric.severity} key={metric.key} title={metric.label}>
+            <span>{metric.short}</span>
+            <strong>{formatActual(metric)}</strong>
+            <small>{metricTarget(metric)}{metric.severity !== "neutral" ? ` · ${metric.severity}` : ""}</small>
+          </article>)}</div>
+        </div>;
+      })}</div>}
 
       <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
       {review && canEdit ? (
@@ -275,13 +288,13 @@ export function StoreHealthReviewDesk(props: Props) {
           <input type="hidden" name="source_date" value={date}/>
           <input type="hidden" name="station_code" value={selectedCode}/>
           <input type="hidden" name="review_version" value={review.updated_at}/>
-          <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
+          <label className="wide">Takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Key conclusion or escalation" rows={2}/></label>
           <button className="button secondary">Save takeaway</button>
         </ReviewActionForm>
       ) : review ? (
         <div className="review-takeaway-readonly">
-          <strong>Review takeaway</strong>
-          <p>{review.review_summary || "Awaiting the first manager’s review."}</p>
+          <strong>Takeaway</strong>
+          <p>{review.review_summary || "Awaiting first manager."}</p>
         </div>
       ) : null}
     </section>
