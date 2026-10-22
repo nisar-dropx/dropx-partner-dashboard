@@ -210,6 +210,98 @@
 .cardMine strong { font-size: 0.8rem; }
 .card small,
 .cardMine small { color: var(--si-muted); font-size: 0.7rem; }
+.cardTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.cardProgress {
+  height: 3px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+  margin-top: 0.15rem;
+}
+.cardProgressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #0d9488, #14b8a6);
+}
+.pctOk { color: #0f766e; font-weight: 800; font-size: 0.75rem; }
+.pctMid { color: #b45309; font-weight: 800; font-size: 0.75rem; }
+.pctLow { color: #b91c1c; font-weight: 800; font-size: 0.75rem; }
+
+.shiftList { display: grid; gap: 0.4rem; margin-top: 0.55rem; }
+.shiftListHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  align-items: end;
+}
+.filterBar .field { min-width: 7.5rem; flex: 1 1 7.5rem; }
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  font-size: 0.72rem;
+  color: #475569;
+  margin-top: 0.25rem;
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+.kpi,
+.kpiWarn {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--si-line);
+  border-radius: 8px;
+  background: #fff;
+}
+.kpiWarn { border-color: #fecaca; background: #fff7f7; }
+.kpi strong,
+.kpiWarn strong { font-size: 1.15rem; font-weight: 800; color: #0f172a; }
+.kpi span,
+.kpiWarn span { font-size: 0.68rem; color: var(--si-muted); font-weight: 650; }
+
+.tableWrap { overflow-x: auto; margin-top: 0.35rem; }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.35rem 0.4rem;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.table th { color: #64748b; font-weight: 700; font-size: 0.68rem; }
+.linkBtn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #0f766e;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 .section { display: grid; gap: 0.35rem; }
 .sectionTitle {

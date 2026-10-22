@@ -189,7 +189,15 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     shiftAttendanceNavItem,
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
-    {code:'si_handover',label:'Activities & Handover',href:'/si-handover?view=start',icon:'▶'},
+    {
+      code: "si_handover",
+      label: "Activities & Handover",
+      icon: "▶",
+      children: [
+        { code: "si_handover", label: "Workspace", href: "/si-handover?view=start" },
+        { code: "si_handover", label: "Manager report", href: "/si-handover/report" },
+      ],
+    },
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
     {
       code: "performance",

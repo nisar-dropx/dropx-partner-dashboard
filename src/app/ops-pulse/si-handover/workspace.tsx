@@ -13,6 +13,7 @@ import {
   emptyAnswer,
   emptyLine,
   escalationLevel,
+  isManager,
   progress,
   statusLabels,
   taskUnlocked,
@@ -26,6 +27,7 @@ import {
   type TaskAnswer,
   type WorkspaceView,
 } from "@/lib/ops-pulse/si-handover/model";
+import { enrichChecklistRows } from "@/lib/ops-pulse/si-handover/report";
 import {
   acceptHandover,
   deleteDraftChecklist,
@@ -35,6 +37,7 @@ import {
   submitHandover,
 } from "./actions";
 import { ProofPanel } from "./si-handover-proof";
+import { ShiftList } from "./shift-list";
 import styles from "./si-handover.module.css";
 
 type Store = {
@@ -55,15 +58,6 @@ type Props = {
   error: string;
   canMaster: boolean;
 };
-
-const stamp = (v: string | null | undefined) =>
-  v
-    ? new Date(v).toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        dateStyle: "medium",
-        timeStyle: "short",
-      }) + " IST"
-    : "—";
 
 function TaskCard({
   task,
@@ -388,14 +382,22 @@ export function SiHandoverWorkspace(props: Props) {
     ? Date.parse(`${focused.shift_date}T${focused.shift_slot}:00+05:30`)
     : cur.startMs;
   const emptyTemplate = Boolean(focused && !tasks(focused.template).length);
-  const mineRows = props.rows.filter(
-    (r) => r.outgoing_user_id === props.actor.userId,
+  const progressRows = useMemo(
+    () => enrichChecklistRows(props.rows, props.stores, props.settings),
+    [props.rows, props.stores, props.settings],
   );
-  const otherRows = props.rows.filter(
+  const mineRows = progressRows.filter(
+    (r) =>
+      r.outgoing_user_id === props.actor.userId &&
+      ["open", "rejected", "submitted"].includes(r.status),
+  );
+  const otherRows = progressRows.filter(
     (r) =>
       r.outgoing_user_id !== props.actor.userId &&
       ["open", "rejected", "submitted"].includes(r.status),
   );
+  const acceptRows = progressRows.filter((r) => r.status === "submitted");
+  const manager = isManager(props.actor, props.settings);
 
   const run = (
     work: () => Promise<{
@@ -443,6 +445,12 @@ export function SiHandoverWorkspace(props: Props) {
         <p>
           Compact shift checklist — live camera proofs where required, screenshots for
           dashboards. Clock-out: <strong>{modeLabel}</strong>
+          {manager ? (
+            <>
+              {" "}
+              · <Link href="/si-handover/report">Manager report</Link>
+            </>
+          ) : null}
           {props.canMaster ? (
             <>
               {" "}
@@ -522,28 +530,13 @@ export function SiHandoverWorkspace(props: Props) {
           </p>
 
           {mineRows.length ? (
-            <>
-              <h2 className={styles.sectionTitle}>Your open shifts</h2>
-              <div className={styles.list}>
-                {mineRows
-                  .filter((r) =>
-                    ["open", "rejected", "submitted"].includes(r.status),
-                  )
-                  .map((r) => (
-                    <Link
-                      key={r.id}
-                      prefetch={false}
-                      className={`${styles.card} ${styles.cardMine}`}
-                      href={`/si-handover?view=${props.view}&id=${r.id}`}
-                    >
-                      <strong>
-                        {r.store_code} · {r.shift_date} {r.shift_slot}
-                      </strong>
-                      <small>{statusLabels[r.status]} · continue</small>
-                    </Link>
-                  ))}
-              </div>
-            </>
+            <ShiftList
+              title="Your open shifts"
+              rows={mineRows}
+              view={props.view}
+              highlightMine
+              pageSize={10}
+            />
           ) : (
             <div className={styles.empty}>
               No open shift yet — pick a store and start the current window.
@@ -551,26 +544,12 @@ export function SiHandoverWorkspace(props: Props) {
           )}
 
           {otherRows.length ? (
-            <>
-              <h2 className={styles.sectionTitle}>Other stores</h2>
-              <div className={styles.list}>
-                {otherRows.slice(0, 12).map((r) => (
-                  <Link
-                    key={r.id}
-                    prefetch={false}
-                    className={styles.card}
-                    href={`/si-handover?view=${props.view}&id=${r.id}`}
-                  >
-                    <strong>
-                      {r.store_code} · {r.shift_date} {r.shift_slot}
-                    </strong>
-                    <small>
-                      {statusLabels[r.status]} · {r.outgoing_name}
-                    </small>
-                  </Link>
-                ))}
-              </div>
-            </>
+            <ShiftList
+              title="Other stores"
+              rows={otherRows}
+              view={props.view}
+              pageSize={12}
+            />
           ) : null}
         </section>
       ) : null}
@@ -580,33 +559,13 @@ export function SiHandoverWorkspace(props: Props) {
           <p className={styles.banner}>
             Accept a submitted handover to open your next shift with carried issues.
           </p>
-          <div className={styles.list}>
-            {props.rows.filter((r) => r.status === "submitted").length === 0 ? (
-              <div className={styles.empty}>No handovers waiting.</div>
-            ) : (
-              props.rows
-                .filter((r) => r.status === "submitted")
-                .map((r) => {
-                  const level = escalationLevel(r.submitted_at, props.settings);
-                  return (
-                    <Link
-                      key={r.id}
-                      prefetch={false}
-                      className={styles.card}
-                      href={`/si-handover?view=accept&id=${r.id}`}
-                    >
-                      <strong>
-                        {r.store_code} · {r.shift_date} {r.shift_slot}
-                      </strong>
-                      <small>
-                        From {r.outgoing_name} · {stamp(r.submitted_at)}
-                        {level !== "none" ? ` · escalate ${level}` : ""}
-                      </small>
-                    </Link>
-                  );
-                })
-            )}
-          </div>
+          <ShiftList
+            title="Awaiting acceptance"
+            rows={acceptRows}
+            view="accept"
+            empty="No handovers waiting."
+            pageSize={15}
+          />
         </section>
       ) : null}
 
