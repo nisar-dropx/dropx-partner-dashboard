@@ -86,6 +86,9 @@ export function DarkStoreHome({authorization:a,locations,searchParams={}}:Props)
   const links=[
     ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${selected.length===1?`&location=${encodeURIComponent(selected[0].id)}`:''}`],
     ['ops_rostering','Rostering',`/rostering${selected.length===1?`?station=${encodeURIComponent(selected[0].station_code)}`:''}`],
+    ['si_handover','Start Shift','/si-handover?view=start'],
+    ['si_handover','Station Handover','/si-handover?view=handover'],
+    ['si_handover','Acceptance','/si-handover?view=accept'],
     ['store_audits','Store Audits','/store-audits'],
     ['performance_review','Review Desk',`/performance?view=reviews&date=${performanceDate}${selected.length===1?`&review=${encodeURIComponent(selected[0].station_code)}`:''}`],
     ['payment_approvals','Payment Approvals','/payments/approvals'],

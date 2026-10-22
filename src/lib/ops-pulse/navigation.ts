@@ -189,6 +189,9 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     shiftAttendanceNavItem,
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
+    {code:'si_handover',label:'Start Shift',href:'/si-handover?view=start',icon:'▶'},
+    {code:'si_handover',label:'Station Handover',href:'/si-handover?view=handover',icon:'↔'},
+    {code:'si_handover',label:'Acceptance',href:'/si-handover?view=accept',icon:'✓'},
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
     {code:'performance_review',label:'Review Desk',href:'/performance?view=reviews',icon:'R'},
     {code:'performance_review_status',label:'Review Status',href:'/performance/review-status',icon:'R'},
@@ -199,6 +202,7 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
     {code:'master_data',label:'Ops Masters',icon:'*',children:[
       {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
       {code:'store_audit_master',label:'Audit Master',href:'/master/store-audits'},
+      {code:'si_handover_master',label:'SI Handover Master',href:'/master/si-handover'},
       {code:'master_locations',label:'Location Master',href:'/master/location'},
       {code:'master_providers',label:'Client / Provider Master',href:'/master/providers'},
       {code:'master_models',label:'Operation Models',href:'/master/models'}

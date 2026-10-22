@@ -54,6 +54,29 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       const s=storeAuditAttention(r.data??[],today,now);
       return{value:`${s.count} to action`,count:s.count,dueAt:s.focus?.scheduled_for,detail:`${s.overdue} overdue · ${s.upcoming} next 7 days · store audit programme`,href:s.focus?`/ops-pulse/store-audits?audit=${encodeURIComponent(s.focus.id)}`:'/ops-pulse/store-audits',action:'Open store audits',tone:s.overdue?'urgent':s.count||s.upcoming?'action':'clear'};
     }),
+    check(mode==='amazon_now'&&has('si_handover')&&ids.length>0,'si-handover','SI shift handover','/si-handover?view=accept',async()=>{
+      if(!supabaseAdmin)throw Error('Unavailable');
+      const master=await supabaseAdmin.from('ops_si_handover_master').select('settings').eq('company_id',company).maybeSingle();
+      if(master.error)throw Error('Unavailable');
+      const settings=master.data?.settings&&typeof master.data.settings==='object'?master.data.settings as {escalateStoreMinutes?:number;escalateClusterMinutes?:number}:{};
+      const storeMins=Number(settings.escalateStoreMinutes)||30;
+      const clusterMins=Number(settings.escalateClusterMinutes)||60;
+      const r=await readAllRows(supabaseAdmin.from('ops_si_shift_checklists').select('id,status,submitted_at,store_code,shift_date,shift_slot,outgoing_name').eq('company_id',company).in('location_id',ids).is('deleted_at',null).eq('status','submitted').order('submitted_at'));
+      if(r.error)throw Error('Unavailable');
+      const rows=r.data??[];
+      const cluster=rows.filter(x=>x.submitted_at&&(now-Date.parse(x.submitted_at))/60000>=clusterMins).length;
+      const store=rows.filter(x=>x.submitted_at&&(now-Date.parse(x.submitted_at))/60000>=storeMins).length;
+      const focus=rows[0];
+      return{
+        value:`${rows.length} awaiting acceptance`,
+        count:rows.length,
+        dueAt:focus?.submitted_at||undefined,
+        detail:`${store} past ${storeMins}m · ${cluster} past ${clusterMins}m · outgoing SI cannot close handover until accepted`,
+        href:focus?`/si-handover?view=accept&id=${encodeURIComponent(focus.id)}`:'/si-handover?view=accept',
+        action:'Review handovers',
+        tone:cluster?'urgent':rows.length?'action':'clear'
+      };
+    }),
     check(mode!=='amazon_now'&&has('ops_rostering')&&ids.length>0,'people','Shift readiness','/ops-pulse?view=manpower',async()=>{
       const data=await loadOpsStationManpower(company,selected,today),s=summarizeStorePeople(data.people,now);
       const affected=[...new Set(data.people.filter(p=>{const x=summarizeStorePeople([p],now);return x.notReported||x.missingOut||x.unplanned;}).map(p=>p.locationId))];
