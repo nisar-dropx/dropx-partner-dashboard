@@ -19,7 +19,7 @@ import { PerformanceOpeningCard } from "@/components/performance-opening-card";
 import { PerformanceEddClearanceCard, PerformanceUtrDisciplineCard } from "@/components/performance-review-operations";
 import { ReviewAttendanceProvider, ReviewAttendanceExceptionsCard } from "@/components/review-attendance-history";
 import type { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
-import { formatDashboardDate } from "@/lib/date-format";
+import { formatDashboardDate, formatDashboardDateMedium } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep, PerformanceConnection, PerformanceReviewUpdate, PerformanceReviewChainStep } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceReviewComment, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
@@ -245,7 +245,7 @@ export function PerformanceReviewDesk(props: Props) {
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
     <section className="ops-control-strip performance-review-control">
-      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
+      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDateMedium(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
       <PerformanceReviewPicker
         date={date}
         locations={locations.map((location) => ({

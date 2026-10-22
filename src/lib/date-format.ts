@@ -48,6 +48,32 @@ export function formatDashboardDate(
   }).format(date);
 }
 
+/** Readable review/context dates, e.g. "20 Oct 2026". */
+export function formatDashboardDateMedium(
+  value: string | Date | null | undefined,
+  fallback = "-"
+) {
+  if (!value) return fallback;
+
+  if (typeof value === "string") {
+    const parts = dateOnlyParts(value);
+    if (parts) {
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const month = months[Number(parts.month) - 1];
+      if (month) return `${Number(parts.day)} ${month} ${parts.year}`;
+    }
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: dashboardTimeZone
+  }).format(date);
+}
+
 export function formatDashboardDateTime(
   value: string | Date | null | undefined,
   fallback = "-"

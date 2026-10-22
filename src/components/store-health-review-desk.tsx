@@ -8,7 +8,7 @@ import { PerformanceReviewPicker } from "@/components/performance-review-picker"
 import { ReviewActionForm } from "@/components/review-action-form";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { savePerformanceReviewComment, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
-import { formatDashboardDate } from "@/lib/date-format";
+import { formatDashboardDate, formatDashboardDateMedium } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type {
   PerformanceFollowup,
@@ -179,7 +179,7 @@ export function StoreHealthReviewDesk(props: Props) {
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
     <section className="ops-control-strip performance-review-control">
-      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || hero.city || selectedLocation.city || "Store"}</small></div>
+      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDateMedium(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || hero.city || selectedLocation.city || "Store"}</small></div>
       <PerformanceReviewPicker
         date={date}
         locations={locations.map((location) => ({
