@@ -15,6 +15,9 @@ declare
   rec record;
   store_ids uuid[];
   role_text text;
+  replace_now boolean;
+  non_now uuid[];
+  next_scope uuid[];
 begin
   select coalesce(array_agg(m.id order by m.code), '{}'::uuid[])
   into now_model_ids
@@ -190,6 +193,7 @@ begin
   loop
     role_text := coalesce(rec.role_hay, '');
     store_ids := '{}'::uuid[];
+    replace_now := false;
 
     if role_text ~ '(^| )(RM|REGIONAL MANAGER|REGIONAL HEAD|NH|NATIONAL HEAD|PGM|PROGRAM MANAGER|PROGRAM HEAD)( |$)' then
       store_ids := now_station_ids;
@@ -240,49 +244,80 @@ begin
       if store_ids is null or cardinality(store_ids) = 0 then
         store_ids := now_station_ids;
       end if;
-    else
-      -- SI / Store Manager: People posting location(s) that are NOW stores + existing NOW scopes.
-      select coalesce(array_agg(distinct sid), '{}'::uuid[])
+    elsif role_text ~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC|STORE MANAGER|SENIOR STORE MANAGER|SRSM)( |$)' then
+      -- SI / Store Manager: People posting NOW store(s) only (do not keep stale scopes).
+      replace_now := true;
+      select coalesce(array_agg(distinct a.location_id), '{}'::uuid[])
       into store_ids
-      from (
-        select a.location_id as sid
-        from public.hr_user_person_links l
-        join public.hr_engagements e
-          on e.person_id = l.person_id and e.company_id = company and e.status = 'active'
-         and e.start_date <= today and (e.end_date is null or e.end_date >= today)
-        join public.hr_work_assignments a
-          on a.engagement_id = e.id and a.company_id = company and a.is_primary
-         and a.effective_from <= today and (a.effective_to is null or a.effective_to >= today)
-         and a.location_id = any(now_station_ids)
-        where l.company_id = company
-          and l.user_id = rec.user_id
-          and l.status = 'active'
-        union
-        select x
-        from unnest(coalesce(rec.location_scope_ids, '{}'::uuid[])) x
-        where x = any(now_station_ids)
-      ) q;
+      from public.hr_user_person_links l
+      join public.hr_engagements e
+        on e.person_id = l.person_id and e.company_id = company and e.status = 'active'
+       and e.start_date <= today and (e.end_date is null or e.end_date >= today)
+      join public.hr_work_assignments a
+        on a.engagement_id = e.id and a.company_id = company and a.is_primary
+       and a.effective_from <= today and (a.effective_to is null or a.effective_to >= today)
+       and a.location_id = any(now_station_ids)
+      where l.company_id = company
+        and l.user_id = rec.user_id
+        and l.status = 'active';
+    else
+      -- Other roles with page access: grant People-posted NOW stores (union; do not strip).
+      select coalesce(array_agg(distinct a.location_id), '{}'::uuid[])
+      into store_ids
+      from public.hr_user_person_links l
+      join public.hr_engagements e
+        on e.person_id = l.person_id and e.company_id = company and e.status = 'active'
+       and e.start_date <= today and (e.end_date is null or e.end_date >= today)
+      join public.hr_work_assignments a
+        on a.engagement_id = e.id and a.company_id = company and a.is_primary
+       and a.effective_from <= today and (a.effective_to is null or a.effective_to >= today)
+       and a.location_id = any(now_station_ids)
+      where l.company_id = company
+        and l.user_id = rec.user_id
+        and l.status = 'active';
     end if;
 
     if cardinality(store_ids) = 0 then
       continue;
     end if;
 
-    update public.company_product_memberships m
-    set
-      location_scope_ids = (
+    if replace_now then
+      select coalesce(array_agg(distinct x), '{}'::uuid[])
+      into non_now
+      from unnest(coalesce(rec.location_scope_ids, '{}'::uuid[])) x
+      where not (x = any(now_station_ids));
+
+      next_scope := (
         select array_agg(distinct x order by x)
-        from unnest(coalesce(m.location_scope_ids, '{}'::uuid[]) || store_ids) as x
-      ),
-      updated_at = now()
-    where m.id = rec.membership_id
-      and (
-        select count(*) from unnest(store_ids) s(id)
-        where not (s.id = any(coalesce(m.location_scope_ids, '{}'::uuid[])))
-      ) > 0;
-    get diagnostics n = row_count;
-    if n > 0 then
-      raise notice 'Granted % NOW store(s) to %', cardinality(store_ids), rec.user_label;
+        from unnest(coalesce(non_now, '{}'::uuid[]) || store_ids) as x
+      );
+
+      update public.company_product_memberships m
+      set location_scope_ids = next_scope,
+          updated_at = now()
+      where m.id = rec.membership_id
+        and m.location_scope_ids is distinct from next_scope;
+      get diagnostics n = row_count;
+      if n > 0 then
+        raise notice 'Aligned % NOW store(s) for SI/SM %', cardinality(store_ids), rec.user_label;
+      end if;
+    else
+      update public.company_product_memberships m
+      set
+        location_scope_ids = (
+          select array_agg(distinct x order by x)
+          from unnest(coalesce(m.location_scope_ids, '{}'::uuid[]) || store_ids) as x
+        ),
+        updated_at = now()
+      where m.id = rec.membership_id
+        and (
+          select count(*) from unnest(store_ids) s(id)
+          where not (s.id = any(coalesce(m.location_scope_ids, '{}'::uuid[])))
+        ) > 0;
+      get diagnostics n = row_count;
+      if n > 0 then
+        raise notice 'Granted % NOW store(s) to %', cardinality(store_ids), rec.user_label;
+      end if;
     end if;
   end loop;
 
