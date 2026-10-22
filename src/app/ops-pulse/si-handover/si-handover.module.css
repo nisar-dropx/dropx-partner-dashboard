@@ -38,11 +38,10 @@
 }
 .eyebrow {
   margin: 0;
-  font-size: 0.62rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
   color: var(--si-accent);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .tabBar {
@@ -92,12 +91,12 @@
 
 .field {
   display: grid;
-  gap: 0.15rem;
+  gap: 0.1rem;
   font-size: 0.68rem;
   color: #475569;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-weight: 650;
+  letter-spacing: 0;
+  min-width: 0;
 }
 .field select,
 .field input,
@@ -106,18 +105,25 @@
 .task textarea,
 .rejectRow input {
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 0.32rem 0.45rem;
+  border-radius: 5px;
+  padding: 0.22rem 0.35rem;
   min-width: 0;
   width: 100%;
+  max-width: 4.5rem;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 500;
-  text-transform: none;
   letter-spacing: 0;
   background: #fff;
   color: var(--si-ink);
-  min-height: 1.85rem;
+  min-height: 1.55rem;
+}
+.field select,
+.fieldsWide .field input,
+.task textarea,
+.rejectRow input,
+.startGrid .field select {
+  max-width: none;
 }
 .field select:disabled,
 .task input:disabled,
@@ -207,66 +213,88 @@
 
 .section { display: grid; gap: 0.35rem; }
 .sectionTitle {
-  margin: 0.25rem 0 0;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #475569;
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  color: #334155;
 }
 
 .task {
   display: grid;
-  gap: 0.35rem;
-  padding: 0.45rem 0.5rem;
+  gap: 0.28rem;
+  padding: 0.4rem 0.45rem;
   border: 1px solid var(--si-line);
   border-radius: 8px;
   background: #fff;
 }
 .task.overdue { border-color: #fdba74; background: #fffbeb; }
 .task.locked { opacity: 0.72; }
-.taskHead {
+.taskTop {
   display: flex;
   justify-content: space-between;
-  gap: 0.4rem;
-  align-items: baseline;
+  gap: 0.45rem;
+  align-items: flex-start;
 }
-.taskHead strong {
-  font-size: 0.8rem;
-  line-height: 1.3;
-  font-weight: 750;
+.taskTitle {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.taskHead span {
-  flex: 0 0 auto;
-  color: var(--si-muted);
-  font-size: 0.65rem;
+.taskTitle strong {
+  font-size: 0.78rem;
+  line-height: 1.25;
   font-weight: 700;
-  text-transform: uppercase;
 }
-.task > small {
+.taskTitle span {
+  color: var(--si-muted);
+  font-size: 0.62rem;
+  font-weight: 650;
+}
+.taskHint {
   color: #64748b;
-  font-size: 0.7rem;
-  line-height: 1.3;
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+.taskBody {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: flex-start;
+}
+.taskMain {
+  display: grid;
+  gap: 0.28rem;
+  flex: 1 1 160px;
+  min-width: 0;
 }
 
 .fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.45rem;
+  align-items: end;
+}
+.fieldsWide {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  gap: 0.35rem;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.3rem;
 }
 
 .outcomeRow {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
+  flex-wrap: nowrap;
+  gap: 0.2rem;
+  flex: 0 0 auto;
 }
 .outcome,
 .outcomeOn {
   border: 1px solid #cbd5e1;
   background: #fff;
   border-radius: 999px;
-  padding: 0.18rem 0.55rem;
-  font-size: 0.72rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
   font-weight: 750;
   cursor: pointer;
   color: #334155;
@@ -279,29 +307,37 @@
 .outcome:disabled,
 .outcomeOn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.proofs { display: grid; gap: 0.3rem; }
+.proofs {
+  display: grid;
+  gap: 0.18rem;
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+  max-width: 12rem;
+}
 .proofMeta {
   display: flex;
   justify-content: space-between;
-  gap: 0.4rem;
+  gap: 0.3rem;
   color: var(--si-muted);
-  font-size: 0.65rem;
-  font-weight: 700;
+  font-size: 0.6rem;
+  font-weight: 650;
 }
 .proofGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 .proofThumb {
   display: grid;
-  gap: 0.1rem;
+  gap: 0.05rem;
+  width: 2.6rem;
   min-width: 0;
 }
 .proofThumbBtn {
-  aspect-ratio: 1;
+  width: 2.6rem;
+  height: 2.6rem;
   border: 1px solid var(--si-line);
-  border-radius: 7px;
+  border-radius: 6px;
   overflow: hidden;
   padding: 0;
   background: #f8fafc;
@@ -315,32 +351,33 @@
   object-fit: cover;
 }
 .proofBadge {
-  font-size: 0.65rem;
+  font-size: 0.55rem;
   font-weight: 800;
   color: #0f766e;
-  text-transform: uppercase;
 }
 .proofThumb small {
   color: var(--si-muted);
-  font-size: 0.58rem;
-  line-height: 1.2;
+  font-size: 0.52rem;
+  line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .proofAdd {
-  aspect-ratio: 1;
+  width: 2.6rem;
+  height: 2.6rem;
   display: grid;
   place-items: center;
   border: 1px dashed #94a3b8;
-  border-radius: 7px;
+  border-radius: 6px;
   background: #f8fafc;
   color: #334155;
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-weight: 750;
   cursor: pointer;
   text-align: center;
-  padding: 0.25rem;
+  padding: 0.15rem;
+  line-height: 1.1;
 }
 .proofAddBusy { opacity: 0.6; pointer-events: none; }
 .linkDanger {
@@ -551,5 +588,6 @@
 }
 @media (max-width: 640px) {
   .row { grid-template-columns: 1fr; }
-  .fields { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .taskTop { flex-wrap: wrap; }
+  .proofs { max-width: none; width: 100%; }
 }

@@ -113,6 +113,7 @@ export async function getReviewAccess(
   const routingIssue = review?.routing_error || reviewRoutingIssue(steps);
   // Owner / NH / FSD / Tech / Program Manager may still Proxy or Skip when People mapping
   // is noisy — those tools are the recovery path, not blocked by the same mapping alert.
+  // Higher reviewers on the route (e.g. Regional Manager) may Skip a lower pending stage.
   const canOverride = Boolean(
     isCompanyOwner(authorization)
     || actor.programManager
@@ -126,7 +127,9 @@ export async function getReviewAccess(
     ...capabilities,
     canComplete: capabilities.canComplete && !routingIssue,
     canProxy: capabilities.canProxy && (!routingIssue || canOverride),
+    // Higher reviewers may Skip when the People route is healthy; oversight may Skip even when noisy.
     canBypass: capabilities.canBypass && (!routingIssue || canOverride),
+    canAccessBypass: capabilities.canAccessBypass && (!routingIssue || canOverride),
     // Exposed so the UI can show "you are the original reviewer" hints (e.g. the reopened-edit-access banner).
     isOriginalReviewer: Boolean(pendingSteps[0]?.reviewer_user_id && pendingSteps[0].reviewer_user_id === authorization.userId)
   };

@@ -87,11 +87,12 @@ export function reviewCapabilities(input: {
     canManageActions: canAct && (oversight || canOverride || reopenedForOriginalReviewer || first || (!input.closed && current)),
     // Oversight uses an explicit, reason-required bypass, never an unassigned approval.
     canComplete: canAct && !input.closed && Boolean(input.currentRole) && current,
-    // Visibility is separate from availability: every actor sees Proxy; Skip stays oversight-only.
-    // That keeps KOZA/TLPB tools discoverable even when the viewer is not on that station's route.
+    // Visibility is separate from availability: every actor sees Proxy.
+    // canAccessBypass gates oversight-only tools (Undo skip, reopen CM/AOM edit).
+    // canBypass also allows a higher assigned reviewer on the same route (e.g. RM skipping City).
     canAccessBypass: Boolean(visible && canOverride),
     canAccessProxy: Boolean(visible && (input.canEdit || canOverride)),
-    canBypass: Boolean(visible && canOverride && !input.closed),
+    canBypass: Boolean(visible && (canOverride || input.higherReviewer) && !input.closed),
     // Oversight can undo an accidental skip even after the review closed from skipping the last level.
     canUndoBypass: Boolean(visible && canOverride),
     canProxy: Boolean(canAct && !input.closed && input.currentRole && !current && (canOverride || (!input.hasProxy && input.higherReviewer))),

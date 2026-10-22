@@ -33,7 +33,7 @@ test("matrix keeps not-started days and historical saved reviewers", () => {
   assert.equal(rows[1].currentDependency, "Start review");
 });
 
-test("Dark Store register columns use Store Manager and City Manager from the People route", () => {
+test("Dark Store register columns use City Manager and Regional Manager from the People route", () => {
   const rows = buildReviewStatusRows({
     darkStore: true,
     dates: ["2026-10-21"],
@@ -47,15 +47,16 @@ test("Dark Store register columns use Store Manager and City Manager from the Pe
       "station-1": {
         error: null,
         chain: [
-          { reviewerName: "Asha", reviewerRole: "Shift Incharge", reviewerUserId: "u1", personId: "p1", assignmentId: "a1", designationId: "SIC", routingSource: "people" },
-          { reviewerName: "Bala", reviewerRole: "Store Manager", reviewerUserId: "u2", personId: "p2", assignmentId: "a2", designationId: "SM", routingSource: "people" },
-          { reviewerName: "Chitra", reviewerRole: "City Manager", reviewerUserId: "u3", personId: "p3", assignmentId: "a3", designationId: "CTM", routingSource: "people" }
+          { reviewerName: "Chitra", reviewerRole: "City Manager", reviewerUserId: "u3", personId: "p3", assignmentId: "a3", designationId: "CTM", routingSource: "people" },
+          { reviewerName: "Ramesh", reviewerRole: "Regional Manager", reviewerUserId: "u4", personId: "p4", assignmentId: "a4", designationId: "RM", routingSource: "people" },
+          { reviewerName: "Abdul", reviewerRole: "National Head", reviewerUserId: "u5", personId: "p5", assignmentId: "a5", designationId: "NH", routingSource: "people" }
         ]
       }
     }
   });
-  assert.equal(rows[0].clusterManager, "Bala");
-  assert.equal(rows[0].aom, "Chitra");
+  assert.equal(rows[0].clusterManager, "Chitra");
+  assert.equal(rows[0].aom, "Ramesh");
+  assert.equal(rows[0].nationalHead, "Abdul");
   assert.equal(rows[0].currentDependency, "Start review");
 });
 

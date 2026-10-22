@@ -67,7 +67,7 @@ export function PerformanceReviewExceptions({
   // Buttons stay visible even without oversight rights — a viewer who can open this review
   // should be able to discover Proxy/Skip exist and see why they're disabled for them,
   // rather than the section silently disappearing.
-  const noAccessReason = "You don't have oversight rights for this action — contact your Program Manager or an authorised oversight reviewer.";
+  const noAccessReason = "You don't have rights for this action — contact your Program Manager, Regional Manager, or an authorised oversight reviewer.";
 
   const inactiveReason = !hasRoute
     ? darkStore
@@ -90,8 +90,9 @@ export function PerformanceReviewExceptions({
             : null;
 
   const proxyEnabled = Boolean(review && pending.length && current && canProxy);
+  // Skip: oversight OR a higher reviewer on this route (e.g. Regional Manager skipping City).
   const skipEnabled = Boolean(review && pending.length && canBypass);
-  // Same audience as Skip (PGM / NH / Owner / FSD / Tech) — never Proxy-only editors.
+  // Undo skip + reopen edit stay oversight-only (canAccessBypass), never higher-reviewer Skip alone.
   const undoEnabled = Boolean(review && skipped.length && canAccessBypass && canUndoBypass);
 
   const proxyHint =
@@ -109,7 +110,7 @@ export function PerformanceReviewExceptions({
                 : hasRoute
                   ? "Proxy is for a higher manager or authorised oversight covering this station."
                   : "Proxy needs a People review route for this station.");
-  const skipHint = !canAccessBypass ? noAccessReason : inactiveReason;
+  const skipHint = !canBypass ? noAccessReason : inactiveReason;
 
   return (
     <section className="review-exceptions" aria-label="Review cover and exceptions">
@@ -127,9 +128,9 @@ export function PerformanceReviewExceptions({
         <button
           type="button"
           className="button secondary"
-          disabled={!canAccessBypass || !skipEnabled}
+          disabled={!skipEnabled}
           aria-describedby="review-exception-guidance"
-          title={!canAccessBypass ? noAccessReason : undefined}
+          title={!canBypass ? noAccessReason : undefined}
           onClick={() => setMode(mode === "skip" ? null : "skip")}
         >
           Skip a level…
@@ -169,7 +170,7 @@ export function PerformanceReviewExceptions({
           )
         ) : null}
       </div>
-      {inactiveReason || skipHint || (!proxyEnabled && canAccessProxy) || (review?.status === "closed" && skipped.length) || !canAccessProxy || !canAccessBypass ? (
+      {inactiveReason || skipHint || (!proxyEnabled && canAccessProxy) || (review?.status === "closed" && skipped.length) || !canAccessProxy || (!canAccessBypass && !canBypass) ? (
         <p id="review-exception-guidance" className="review-exception-guidance">
           {proxyHint || skipHint || inactiveReason}
           {!review && canStart && hasRoute ? (

@@ -141,11 +141,15 @@ function statusReviewRole(value: string | null | undefined) {
   if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(role)) return "sm";
   if (/\bSM\b/.test(role) && !/\b(STM|STATION MANAGER)\b/.test(role)) return "sm";
   if (/\b(CITY MANAGER|CTM)\b/.test(role)) return "city";
+  if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(role)) return "regional";
   if (/\b(NH|NATIONAL HEAD)\b/.test(role)) return "national";
   return "other";
 }
 
-function stepName(steps: ReviewStatusStep[], role: "cluster" | "aom" | "national" | "si" | "sm" | "city") {
+function stepName(
+  steps: ReviewStatusStep[],
+  role: "cluster" | "aom" | "national" | "si" | "sm" | "city" | "regional",
+) {
   return steps.find((step) => statusReviewRole(step.reviewer_role) === role)?.reviewer_name ?? "";
 }
 
@@ -155,7 +159,10 @@ function hierarchyName(location: ReviewStatusLocation, role: "cluster" | "aom" |
   return location.reporting_authorities?.find((person) => statusReviewRole(person.role) === "national")?.name ?? "";
 }
 
-function routeStageName(route: PeopleReviewRoute | undefined, role: "si" | "sm" | "city" | "national") {
+function routeStageName(
+  route: PeopleReviewRoute | undefined,
+  role: "si" | "sm" | "city" | "regional" | "national",
+) {
   return route?.chain.find((step) => statusReviewRole(step.reviewerRole) === role)?.reviewerName ?? "";
 }
 
@@ -172,7 +179,7 @@ export function buildReviewStatusRows(input: {
   items: ReviewStatusItem[];
   updates: ReviewStatusUpdate[];
   followups: ReviewStatusFollowup[];
-  /** When true, primary/secondary columns are Store Manager / City Manager (Dark Store). */
+  /** When true, primary/secondary columns are City Manager / Regional Manager (Dark Store). */
   darkStore?: boolean;
 }) {
   const reviewByKey = new Map<string, ReviewStatusReview>();
@@ -213,10 +220,10 @@ export function buildReviewStatusRows(input: {
       stationName: location.station_name || location.city || "Station",
       region: location.region ?? "",
       clusterManager: input.darkStore
-        ? stepName(steps, "sm") || routeStageName(peopleRoute, "sm") || stepName(steps, "si") || routeStageName(peopleRoute, "si")
+        ? stepName(steps, "city") || routeStageName(peopleRoute, "city")
         : stepName(steps, "cluster") || hierarchyName(location, "cluster"),
       aom: input.darkStore
-        ? stepName(steps, "city") || routeStageName(peopleRoute, "city")
+        ? stepName(steps, "regional") || routeStageName(peopleRoute, "regional")
         : stepName(steps, "aom") || hierarchyName(location, "aom"),
       nationalHead: stepName(steps, "national") || routeStageName(peopleRoute, "national") || hierarchyName(location, "national"),
       status,

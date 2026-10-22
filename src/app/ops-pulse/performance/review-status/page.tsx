@@ -180,12 +180,12 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
     ...dataset,
     darkStore
   });
-  const primaryLabel = darkStore ? "Store manager" : "Cluster manager";
-  const secondaryLabel = darkStore ? "City manager" : "AOM";
-  const primaryEmpty = darkStore ? "No Store Manager on route" : "Not configured";
-  const secondaryEmpty = darkStore ? "No City Manager layer" : "No AOM layer";
-  const secondaryHint = darkStore ? "City Manager" : "Area Operations Manager";
-  const secondaryMissingHint = darkStore ? "Route skips City Manager" : "Route skips AOM";
+  const primaryLabel = darkStore ? "City manager" : "Cluster manager";
+  const secondaryLabel = darkStore ? "Regional manager" : "AOM";
+  const primaryEmpty = darkStore ? "No City Manager on route" : "Not configured";
+  const secondaryEmpty = darkStore ? "No Regional Manager layer" : "No AOM layer";
+  const secondaryHint = darkStore ? "Regional Manager" : "Area Operations Manager";
+  const secondaryMissingHint = darkStore ? "Route skips Regional Manager" : "Route skips AOM";
   const filters: SearchParams = {
     from: range.from,
     to: range.to,
@@ -250,8 +250,8 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
         <label><span>To</span><input name="to" type="date" defaultValue={range.to} max={todayDate} /></label>
         <label><span>Status</span><select name="status" defaultValue={filters.status}><option value="all">All statuses</option><option value="not_started">Not started</option><option value="in_progress">In progress</option><option value="completed">Completed</option></select></label>
         <label><span>Region</span><select name="region" defaultValue={filters.region}><option value="all">All regions</option>{regions.map((region) => <option key={region}>{region}</option>)}</select></label>
-        <label><span>{primaryLabel}</span><select name="cluster" defaultValue={filters.cluster}><option value="all">{darkStore ? "All store managers" : "All clusters"}</option>{clusters.map((cluster) => <option key={cluster}>{cluster}</option>)}</select></label>
-        <label><span>{secondaryLabel}</span><select name="aom" defaultValue={filters.aom}><option value="all">{darkStore ? "All city managers" : "All AOMs"}</option>{aoms.map((aom) => <option key={aom}>{aom}</option>)}</select></label>
+        <label><span>{primaryLabel}</span><select name="cluster" defaultValue={filters.cluster}><option value="all">{darkStore ? "All city managers" : "All clusters"}</option>{clusters.map((cluster) => <option key={cluster}>{cluster}</option>)}</select></label>
+        <label><span>{secondaryLabel}</span><select name="aom" defaultValue={filters.aom}><option value="all">{darkStore ? "All regional managers" : "All AOMs"}</option>{aoms.map((aom) => <option key={aom}>{aom}</option>)}</select></label>
         <label><span>Station</span><select name="station" defaultValue={filters.station}><option value="all">All stations</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || "Station"}</option>)}</select></label>
         <label className="review-status-search"><span>Find</span><input name="q" defaultValue={filters.q} placeholder="Station or reviewer" /></label>
         <button className="button compact">Apply</button>
@@ -279,7 +279,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
             <summary>
               <span data-label="Date"><strong>{formatDashboardDate(row.date)}</strong><small>Performance day</small></span>
               <span data-label="Station"><strong>{row.stationCode}</strong><small>{row.stationName}</small></span>
-              <span data-label={primaryLabel}><strong>{row.clusterManager || primaryEmpty}</strong><small>{row.region || (darkStore ? "City / region from People" : "Region not set")}</small></span>
+              <span data-label={primaryLabel}><strong>{row.clusterManager || primaryEmpty}</strong><small>{row.region || (darkStore ? "From People route" : "Region not set")}</small></span>
               <span data-label={secondaryLabel}><strong>{row.aom || secondaryEmpty}</strong><small>{row.aom ? secondaryHint : secondaryMissingHint}</small></span>
               <span data-label="Status"><b className={`review-status-pill ${row.status}`}>{statusLabel(row.status)}</b></span>
               <span data-label="Progress"><strong>{row.totalSteps ? `${row.completedSteps + row.skippedSteps}/${row.totalSteps}` : "—"}</strong><small>{row.skippedSteps ? `${row.skippedSteps} skipped` : `${row.completedSteps} reviewed`}</small></span>

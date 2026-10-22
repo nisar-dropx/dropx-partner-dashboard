@@ -288,7 +288,7 @@ export async function bypassPerformanceReviewLevel(data: FormData): Promise<Revi
   const authorization = await requirePagePermission("performance_review", "access");
   try {
     const { companyId, station, review, access, steps } = await context(authorization, data);
-    if (!access.canBypass) throw new Error("Only Program Manager, National Head, Owner, FSD or Tech can skip a review level within their station access.");
+    if (!access.canBypass) throw new Error("Only a higher reviewer on this route, or Program Manager / National Head / Owner / FSD / Tech, can skip a review level within their station access.");
     const step = steps.find(entry => entry.id === text(data, "step_id") && entry.status === "pending" && visibleReviewStep(entry));
     if (!step) throw new Error("This review level is no longer pending. Refresh to continue.");
     const reason = reviewBypassReason(text(data, "reason"));

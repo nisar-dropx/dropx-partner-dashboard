@@ -123,7 +123,8 @@ test('proxy requires a higher assigned manager or oversight, not station or unre
     assert.equal(reviewCapabilities({...base,...role}).canComplete,false);
   }
   assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true,hasProxy:true}).canProxy,false);
-  assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true}).canBypass,false);
+  assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true}).canBypass,true);
+  assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true}).canAccessBypass,false);
 });
 test('recorded first-level proxy can edit RCA and complete; original manager cannot complete',()=>{
   const proxy={...base,userId:'aom',currentReviewerId:'aom',currentIsFirst:true,hasProxy:true};
@@ -142,6 +143,7 @@ test('authorised exception tools remain discoverable before starting and after c
   const aom=reviewCapabilities({...base,userId:'aom',higherReviewer:true,currentReviewerId:null,currentRole:null});
   assert.equal(aom.canAccessProxy,true);assert.equal(aom.canAccessBypass,false);
   assert.equal(aom.canProxy,false);assert.equal(aom.canUndoBypass,false);
+  assert.equal(aom.canBypass,true);
   const own=reviewCapabilities({...base,userId:'nh',nationalHead:true,currentReviewerId:'nh',currentRole:'National Head'});
   assert.equal(own.canAccessProxy,true);assert.equal(own.canProxy,false);
   const first=reviewCapabilities({...base,userId:'cm',currentReviewerId:null,currentRole:null});

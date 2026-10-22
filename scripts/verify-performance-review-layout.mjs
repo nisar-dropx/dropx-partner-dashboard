@@ -42,8 +42,8 @@ const checks = [
   [permissionMatrix.includes("OpsPermissionMatrix") && navigation.includes('permissionCodes: ["performance_review_cluster_filter"]') && navigation.includes('code: "performance_review_status"'), "review status permission stays grouped under Performance"],
   [statusPage.includes("buildReviewStatusRows") && statusPage.includes('status === "not_started"'), "review register includes station-days where nobody started a review"],
   [
-    statusPage.includes('primaryLabel = darkStore ? "Store manager" : "Cluster manager"')
-      && statusPage.includes('secondaryLabel = darkStore ? "City manager" : "AOM"')
+    statusPage.includes('primaryLabel = darkStore ? "City manager" : "Cluster manager"')
+      && statusPage.includes('secondaryLabel = darkStore ? "Regional manager" : "AOM"')
       && statusPage.includes("{primaryLabel}")
       && statusPage.includes("{secondaryLabel}")
       && statusPage.includes("All statuses"),

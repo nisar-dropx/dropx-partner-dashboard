@@ -99,17 +99,34 @@ function TaskCard({
     <article
       className={`${styles.task}${lock.overdue ? ` ${styles.overdue}` : ""}${!lock.unlocked ? ` ${styles.locked}` : ""}`}
     >
-      <div className={styles.taskHead}>
-        <strong>
-          {task.id}. {task.label}
-        </strong>
-        <span>
-          {task.when.replaceAll("_", " ")}
-          {!lock.unlocked ? " · later" : ""}
-          {lock.overdue ? " · overdue" : ""}
-        </span>
+      <div className={styles.taskTop}>
+        <div className={styles.taskTitle}>
+          <strong>
+            {task.id}. {task.label}
+          </strong>
+          <span>
+            {task.when.replaceAll("_", " ")}
+            {!lock.unlocked ? " · later" : ""}
+            {lock.overdue ? " · overdue" : ""}
+          </span>
+        </div>
+        {outcomes ? (
+          <div className={styles.outcomeRow} role="group" aria-label="Answer">
+            {outcomes.map((value) => (
+              <button
+                key={value}
+                type="button"
+                disabled={disabled}
+                className={answer.outcome === value ? styles.outcomeOn : styles.outcome}
+                onClick={() => setAnswer({ ...answer, outcome: value })}
+              >
+                {value === "na" ? "N/A" : value === "yes" ? "Yes" : "No"}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
-      {task.guidance ? <small>{task.guidance}</small> : null}
+      {task.guidance ? <small className={styles.taskHint}>{task.guidance}</small> : null}
       {task.answerType === "text" ? (
         <textarea
           disabled={disabled}
@@ -118,77 +135,74 @@ function TaskCard({
           onChange={(e) => setAnswer({ ...answer, text: e.target.value })}
         />
       ) : (
-        <>
-          {outcomes ? (
-            <div className={styles.outcomeRow} role="group" aria-label="Answer">
-              {outcomes.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={disabled}
-                  className={answer.outcome === value ? styles.outcomeOn : styles.outcome}
-                  onClick={() => setAnswer({ ...answer, outcome: value })}
-                >
-                  {value === "na" ? "N/A" : value === "yes" ? "Yes" : "No"}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {task.numberFields.length ? (
-            <div className={styles.fields}>
-              {task.numberFields.map((f) => (
-                <label key={f.key} className={styles.field}>
-                  {f.label}
-                  <input
-                    disabled={disabled}
-                    inputMode="decimal"
-                    value={answer.numbers[f.key] || ""}
-                    onChange={(e) =>
-                      setAnswer({
-                        ...answer,
-                        outcome: answer.outcome || "yes",
-                        numbers: { ...answer.numbers, [f.key]: e.target.value },
-                      })
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-          ) : null}
-          {answer.outcome === "no" || answer.outcome === "na" ? (
-            <div className={styles.fields}>
-              <label className={styles.field}>
-                Reason
-                <input
-                  disabled={disabled}
-                  value={answer.text}
-                  onChange={(e) => setAnswer({ ...answer, text: e.target.value })}
-                />
-              </label>
-              {answer.outcome === "no" ? (
+        <div className={styles.taskBody}>
+          <div className={styles.taskMain}>
+            {task.numberFields.length ? (
+              <div className={styles.fields}>
+                {task.numberFields.map((f) => (
+                  <label key={f.key} className={styles.field}>
+                    {f.label}
+                    <input
+                      disabled={disabled}
+                      inputMode="decimal"
+                      value={answer.numbers[f.key] || ""}
+                      onChange={(e) =>
+                        setAnswer({
+                          ...answer,
+                          outcome: answer.outcome || "yes",
+                          numbers: { ...answer.numbers, [f.key]: e.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
+            {answer.outcome === "no" || answer.outcome === "na" ? (
+              <div className={styles.fieldsWide}>
                 <label className={styles.field}>
-                  Informed
+                  Reason
                   <input
                     disabled={disabled}
-                    value={answer.informed}
-                    onChange={(e) =>
-                      setAnswer({ ...answer, informed: e.target.value })
-                    }
+                    value={answer.text}
+                    onChange={(e) => setAnswer({ ...answer, text: e.target.value })}
                   />
                 </label>
-              ) : null}
-            </div>
-          ) : null}
-        </>
+                {answer.outcome === "no" ? (
+                  <label className={styles.field}>
+                    Informed
+                    <input
+                      disabled={disabled}
+                      value={answer.informed}
+                      onChange={(e) =>
+                        setAnswer({ ...answer, informed: e.target.value })
+                      }
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <ProofPanel
+            checklist={checklist}
+            task={task}
+            proofs={proofs}
+            editable={!disabled}
+            onChange={setProofs}
+            onError={onError}
+          />
+        </div>
       )}
-      <ProofPanel
-        checklist={checklist}
-        task={task}
-        proofs={proofs}
-        editable={!disabled}
-        onChange={setProofs}
-        onError={onError}
-      />
+      {task.answerType === "text" ? (
+        <ProofPanel
+          checklist={checklist}
+          task={task}
+          proofs={proofs}
+          editable={!disabled}
+          onChange={setProofs}
+          onError={onError}
+        />
+      ) : null}
     </article>
   );
 }
