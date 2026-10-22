@@ -17,6 +17,8 @@ type LeaveType = {
   used: number;
   pending: number;
   available: number | null;
+  /** Earned-balance only: days already written off as lapsed on the ledger. */
+  lapsed?: number;
   isPaid: boolean;
   balanceMode: "annual_balance" | "unlimited_unpaid" | "earned_balance";
   /** Dates allowed for this type, from the server (null: nothing usable right now). */
@@ -303,13 +305,13 @@ export function ConnectLeave({
             Leave type
             <select disabled={!leaveMasterReady || submitting || Boolean(editingRequestId && data?.types.length === 1)} onChange={(event) => setLeaveTypeId(event.target.value)} value={leaveTypeId}>
               <option value="">{leaveMasterReady ? "Select leave type" : "No active leave types"}</option>
-              {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{type.name} · {type.balanceMode === "unlimited_unpaid" ? "Unpaid" : `${type.available} available`}</option>)}
+              {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{type.name} · {type.balanceMode === "unlimited_unpaid" ? "Unpaid" : `${type.available} available${type.balanceMode === "earned_balance" && (type.lapsed ?? 0) > 0 ? ` · ${type.lapsed} lapsed` : ""}`}</option>)}
             </select>
           </label>
           {selectedType ? <p className="dx-leave-balance">{selectedType.balanceMode === "unlimited_unpaid"
             ? `Unpaid leave · No balance limit · ${selectedType.pending} pending`
             : selectedType.balanceMode === "earned_balance"
-              ? `Earned comp off · ${selectedType.used} used · ${selectedType.pending} pending`
+              ? `Earned comp off · ${selectedType.available ?? 0} available${(selectedType.lapsed ?? 0) > 0 ? ` · ${selectedType.lapsed} lapsed` : ""} · ${selectedType.used} used · ${selectedType.pending} pending`
               : `${selectedType.allowance} yearly · ${selectedType.used} used · ${selectedType.pending} pending`}</p> : null}
           {!leaveMasterReady ? <p>No active leave type is available. HR can enable one in Leave Policy.</p> : null}
           <div className="dx-leave-dates">

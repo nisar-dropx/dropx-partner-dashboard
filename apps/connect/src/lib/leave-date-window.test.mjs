@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
+import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, earnedLeaveLapsedDays, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
 
 test('CL/SL: whole current month and next month (mid-month)', () => {
   assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-09-01', latest: '2026-10-31' });
@@ -44,6 +44,16 @@ test('earned leave available follows the date window, not a stale ledger remaini
   assert.equal(earnedLeaveAvailable(1, null), 0);
   assert.equal(earnedLeaveAvailable(1, { earliest: '2026-10-03', latest: '2026-10-16' }), 1);
   assert.equal(earnedLeaveAvailable(null, { earliest: '2026-10-03', latest: '2026-10-16' }), 0);
+});
+
+test('earned leave lapsed days sum absolute lapse ledger entries', () => {
+  assert.equal(earnedLeaveLapsedDays([
+    { source: 'comp_off_earned', days: 1 },
+    { source: 'comp_off_lapsed', days: -1 },
+    { source: 'comp_off_holiday_lapsed', days: -2 },
+    { source: 'hr_manual_adjustment', days: 1 }
+  ]), 3);
+  assert.equal(earnedLeaveLapsedDays([]), 0);
 });
 
 test('holiday comp-off on/before the 25th stays usable through the 2nd of next month', () => {

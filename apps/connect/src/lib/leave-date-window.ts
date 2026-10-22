@@ -127,6 +127,16 @@ export function earnedLeaveAvailable(remaining: number | null | undefined, dateW
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
+/** Days posted as lapse debits on the leave ledger (comp_off_lapsed / holiday lapsed). */
+export function earnedLeaveLapsedDays(entries: Array<{ source?: string | null; days?: number | null }>) {
+  return entries.reduce((total, entry) => {
+    if (!/lapsed/i.test(String(entry.source ?? ""))) return total;
+    const value = Number(entry.days);
+    if (!Number.isFinite(value)) return total;
+    return total + Math.abs(value);
+  }, 0);
+}
+
 /** null when allowed, otherwise the reason. */
 export function leaveDatesOutsideWindow(window: LeaveDateWindow | null, fromDate: string, toDate: string, leaveName: string) {
   if (!window) return `No ${leaveName} is available to use right now.`;

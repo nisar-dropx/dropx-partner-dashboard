@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveBalance, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
 import { notifyConnectLeaveSubmitted } from "../../../../src/lib/connect-leave-notifications";
-import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
+import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, earnedLeaveLapsedDays, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -223,18 +223,24 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
     const tracksBalance = leaveType.balance_mode === "annual_balance" || leaveType.balance_mode === "earned_balance";
-    const [balance, dateWindow] = await Promise.all([
+    const earned = leaveType.balance_mode === "earned_balance";
+    const [balance, dateWindow, lapseRows] = await Promise.all([
       tracksBalance
         ? resolveWorkforceLeaveBalance(account.companyId, type, account.id, leaveType.leave_type_id, leaveType.annual_allowance)
         : Promise.resolve({ entitlement: null, used: null, remaining: null }),
-      leaveWindowFor(account, type, leaveType, indiaToday())
+      leaveWindowFor(account, type, leaveType, indiaToday()),
+      earned
+        ? db().from("hr_leave_balance_ledger").select("source,days")
+          .eq("company_id", account.companyId).eq("worker_type", type).eq("worker_id", account.id)
+          .eq("leave_type_id", leaveType.leave_type_id).eq("leave_year", 0)
+        : Promise.resolve({ data: [] as Array<{ source: string | null; days: number | null }>, error: null })
     ]);
+    if (lapseRows.error) throw new Error(lapseRows.error.message);
     const remaining = tracksBalance ? balance.remaining : null;
     // Earned comp-off: do not advertise ledger remaining when every credit has
     // already passed its apply-by date (picker is closed).
-    const available = leaveType.balance_mode === "earned_balance"
-      ? earnedLeaveAvailable(remaining, dateWindow)
-      : remaining;
+    const available = earned ? earnedLeaveAvailable(remaining, dateWindow) : remaining;
+    const lapsed = earned ? earnedLeaveLapsedDays(lapseRows.data ?? []) : 0;
     return {
       id: leaveType.leave_type_id,
       name: leaveType.name,
@@ -244,6 +250,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
       used: tracksBalance ? balance.used : 0,
       pending,
       available,
+      lapsed,
       isPaid: leaveType.is_paid,
       balanceMode: leaveType.balance_mode,
       dateWindow
