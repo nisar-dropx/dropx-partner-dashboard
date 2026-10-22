@@ -483,7 +483,7 @@ test('a same-owner move to the registered location offers and submits both Keep 
   }
 });
 
-test('relocation choices recompute from Effective from and never use a future source period', async () => {
+test('a future additional-location source offers reverse Keep all but never Move before it starts', async () => {
   const futureSource = {
     mappingId: 'source-from-october-15',
     stationId: 'station-2',
@@ -524,8 +524,14 @@ test('relocation choices recompute from Effective from and never use a future so
   assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
   assert.doesNotMatch(JSON.stringify(ui.all(node => node.props?.className === 'mapping-period-help')), /Location change:/);
   await ui.save();
-  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
-  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-row-error')), /Location mismatch/);
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 1);
+  assert.match(
+    JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')),
+    /scheduled at SBPD from 2026-10-15.*Use Keep all to restore KDJE - Barbil from 2026-10-01/
+  );
+  assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Keep all').props.disabled, false);
+  assert.equal(ui.all(node => node.type === 'button' && node.props.children === 'Move mapping').length, 0);
+  assert.equal(ui.all(node => node.props?.className === 'mapping-row-error').length, 0);
 });
 
 test('read-only provider mapping cannot open either relocation action', async () => {

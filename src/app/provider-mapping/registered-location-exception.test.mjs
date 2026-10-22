@@ -140,12 +140,15 @@ test("the page exposes a historical registered-location mapping and selection in
   assert.match(component, /currentMappings = \(next\.currentMappings \?\? \[\]\)\.filter\(\(mapping\) => !closureById\.has\(mapping\.mappingId\)\)/);
 });
 
-test("server selects a same-owner historical registered anchor that contains the requested period", async () => {
+test("server proves a contiguous registered timeline and selects the anchor effective on the requested start", async () => {
   const actions = await readFile(new URL("./actions.ts", import.meta.url), "utf8");
   assert.match(actions, /providerFirstMappingPeriodContains/);
   assert.match(actions, /registeredMappingResult/);
   assert.match(actions, /effective_from, effective_to, status/);
-  assert.match(actions, /registeredMappings\.find/);
+  assert.match(actions, /matchingRegisteredMappings = registeredMappings\.filter/);
+  assert.match(actions, /registeredLocationMapping = matchingRegisteredMappings\.find/);
+  assert.match(actions, /workforce_provider_mapping_period_covered/);
+  assert.match(actions, /registeredCoverageResult\.data === true/);
   assert.match(actions, /currentProviderMappingStartedByRequestedDate/);
   assert.match(actions, /targetMappingsAtRequestedStart/);
   assert.match(actions, /providerMappingsAtRequestedStart/);
@@ -153,9 +156,10 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /String\(mapping\.station_id \?\? ""\) === registeredStationId/);
   assert.match(actions, /mapping\.provider_id === providerId/);
   assert.match(actions, /providerMemberIdentity\(mapping\.provider_member_id\) === normalizedMemberId/);
-  assert.match(actions, /providerFirstMappingPeriodContains\([\s\S]*?requestedEffectiveFrom,[\s\S]*?requestedEffectiveTo/);
+  assert.match(actions, /providerFirstMappingPeriodContains\([\s\S]*?requestedEffectiveFrom,[\s\S]*?requestedEffectiveFrom/);
   assert.match(actions, /mapping\.status === "active" && !mapping\.effective_to/);
   assert.match(actions, /mapping\.status === "closed" && Boolean\(mapping\.effective_to\)/);
+  assert.match(actions, /needsRegisteredLocationException && \(!registeredLocationMapping \|\| !registeredLocationPeriodCovered\)/);
   assert.match(actions, /!relevantProviderMappings\.length && !relevantTargetMappings\.length && !registeredLocationMapping/);
   assert.match(actions, /\.\.\.\(registeredLocationMapping \? \[registeredLocationMapping\] : \[\]\)/);
   assert.match(actions, /allowKeepAll: changeKind === "location"/);
@@ -171,6 +175,30 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /Keep all is required for an additional location/);
 });
 
+test("server offers reverse Keep all without allowing a move before the additional mapping starts", async () => {
+  const actions = await readFile(new URL("./actions.ts", import.meta.url), "utf8");
+  assert.match(actions, /const reverseKeepCandidate = !needsRegisteredLocationException/);
+  assert.match(actions, /registeredStationId === stationId/);
+  assert.match(actions, /providerOwner === workforceId/);
+  assert.match(actions, /mapping\.station_id !== registeredStationId && canonicalOwner\(mapping\) === workforceId/);
+  assert.match(actions, /reverseKeepCandidate[\s\S]*?requestedEffectiveTo[\s\S]*?!currentProviderMappingStartedByRequestedDate/);
+  assert.match(actions, /Move or Keep all requires an ongoing mapping\. Leave Effective to blank\./);
+  assert.match(actions, /const reverseKeepMapping = requestedEffectiveTo \? null : reverseKeepCandidate/);
+  assert.match(actions, /providerMappingsAtRequestedStart\[0\][\s\S]*?\?\? reverseKeepMapping/);
+  assert.match(
+    actions,
+    /changeKind === "location"[\s\S]*?requestedEffectiveTo[\s\S]*?!needsRegisteredLocationException[\s\S]*?registeredStationId === stationId/
+  );
+  assert.doesNotMatch(
+    actions,
+    /if \(changeKind === "location" && requestedEffectiveTo\) \{/
+  );
+  assert.match(actions, /const reverseKeepOnly = changeKind === "location"/);
+  assert.match(actions, /allowMove: changeKind !== "location" \|\| \(!needsRegisteredLocationException && !reverseKeepOnly\)/);
+  assert.match(actions, /reverseKeepOnly && replacementAction === "move"/);
+  assert.match(actions, /Keep all is required when restoring the registered location before a scheduled additional-location mapping/);
+});
+
 test("server and database repeat the registered-location proof for current and historical periods", async () => {
   const [actions, migration, historicalPeriodMigration] = await Promise.all([
     readFile(new URL("./actions.ts", import.meta.url), "utf8"),
@@ -178,8 +206,8 @@ test("server and database repeat the registered-location proof for current and h
     readFile(new URL("../../../supabase/migrations/20261013150000_provider_mapping_historical_registered_location_periods_final.sql", import.meta.url), "utf8")
   ]);
   assert.match(actions, /select\("id, dropx_id, full_name, location_id, source_profile_type, source_profile_id"\)/);
-  assert.match(actions, /registeredLocationMapping = registeredMappings\.find/);
-  assert.match(actions, /needsRegisteredLocationException && !registeredLocationMapping/);
+  assert.match(actions, /registeredLocationMapping = matchingRegisteredMappings\.find/);
+  assert.match(actions, /needsRegisteredLocationException && \(!registeredLocationMapping \|\| !registeredLocationPeriodCovered\)/);
   assert.match(actions, /Keep all is required for an additional location/);
   assert.match(actions, /if \(!mappingId && !confirmedReplacementMappingId && !options\.keepExistingLocationMappingId\)/);
   assert.match(migration, /anchor\.station_id = registered_station/);

@@ -163,8 +163,10 @@ export type ProviderFirstMappingReplacement = {
   existingDropxId: string;
   existingDropxName: string;
   existingLocationLabel?: string;
+  existingEffectiveFrom?: string;
   newLocationLabel?: string;
   effectiveFrom?: string;
+  reverseKeep?: boolean;
 };
 
 export function providerFirstMappingReplacement(
@@ -187,6 +189,8 @@ export function providerFirstLocationRemap(
   worker: ProviderFirstWorkerView | undefined
 ): ProviderFirstMappingReplacement | null {
   const reference = providerFirstMappingReferenceForRow(row, worker);
+  const movesToRegisteredLocation = row.stationId === String(worker?.profileStationId ?? "").trim();
+  const sourceExistsAtRequestedStart = Boolean(reference && reference.effectiveFrom <= row.effectiveFrom);
   if (!worker
     || !reference
     || !isIsoCalendarDate(row.effectiveFrom)
@@ -195,17 +199,16 @@ export function providerFirstLocationRemap(
     || !reference.mappingId
     || (row.mappingId && row.mappingId !== reference.mappingId)
     || reference.stationId === row.stationId
-    // A future mapping is valid evidence when its own start date is being
-    // edited at the same location, but it can never be the source of an
-    // earlier cross-location move. Relocation starts at Effective from; the
-    // source mapping must already exist on that date.
-    || reference.effectiveFrom > row.effectiveFrom
+    // A future additional-location mapping may prove the same owner/member
+    // identity while restoring the registered location for an earlier date.
+    // That reverse operation is Keep-all only: the future row does not yet
+    // exist at the requested start, so it cannot be moved or closed there.
+    || (!sourceExistsAtRequestedStart && !movesToRegisteredLocation)
     || reference.providerId !== row.providerId
     || !sameProviderMember(reference.mappedProviderMemberId, row.providerMemberId)
     || !providerFirstLocationIsAllowed(row, worker)) {
     return null;
   }
-  const movesToRegisteredLocation = row.stationId === String(worker.profileStationId ?? "").trim();
   return {
     kind: "location",
     // The same owner can either move the mapping or keep both locations when
@@ -213,13 +216,16 @@ export function providerFirstLocationRemap(
     // concurrent period explicitly, without changing the older mapping ID or
     // its effective-date history.
     allowKeepAll: true,
-    allowMove: movesToRegisteredLocation,
+    allowMove: movesToRegisteredLocation && sourceExistsAtRequestedStart,
     mappingId: reference.mappingId,
     providerMemberId: row.providerMemberId,
     providerMemberName: row.providerMemberName,
     existingDropxId: worker.dropxId,
     existingDropxName: worker.fullName,
     existingLocationLabel: reference.locationLabel,
+    ...(movesToRegisteredLocation && !sourceExistsAtRequestedStart
+      ? { existingEffectiveFrom: reference.effectiveFrom, reverseKeep: true }
+      : {}),
     newLocationLabel: row.stationLabel,
     effectiveFrom: row.effectiveFrom
   };
@@ -262,6 +268,51 @@ export function providerFirstMappingPeriodContains(
   if (anchorFrom > requestedFrom) return false;
   if (!anchorTo) return true;
   return Boolean(requestedTo) && requestedTo <= anchorTo;
+}
+
+function nextIsoCalendarDate(value: string) {
+  const next = new Date(`${value}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+/**
+ * Returns true when canonical mapping rows cover the complete requested
+ * interval as one continuous timeline. Adjacent rate/payment periods are one
+ * ownership proof: 01-22 plus 23-open covers 01-open even though neither row
+ * can contain that request on its own.
+ */
+export function providerFirstMappingTimelineCovers(
+  mappings: Array<Pick<ProviderFirstRegisteredMappingView, "effectiveFrom" | "effectiveTo" | "status">>,
+  requestedEffectiveFrom: string,
+  requestedEffectiveTo: string
+) {
+  const requestedFrom = String(requestedEffectiveFrom ?? "").trim();
+  const requestedTo = String(requestedEffectiveTo ?? "").trim();
+  if (!isIsoCalendarDate(requestedFrom)) return false;
+  if (requestedTo && (!isIsoCalendarDate(requestedTo) || requestedTo < requestedFrom)) return false;
+
+  const periods = mappings.filter((mapping) => {
+    const from = String(mapping.effectiveFrom ?? "").trim();
+    const to = String(mapping.effectiveTo ?? "").trim();
+    if (!isIsoCalendarDate(from) || (to && (!isIsoCalendarDate(to) || to < from))) return false;
+    if (mapping.status === "active") return !to;
+    if (mapping.status === "closed") return Boolean(to);
+    return false;
+  }).sort((left, right) => left.effectiveFrom.localeCompare(right.effectiveFrom)
+    || String(left.effectiveTo ?? "").localeCompare(String(right.effectiveTo ?? "")));
+
+  let nextUncovered = requestedFrom;
+  for (const period of periods) {
+    const from = String(period.effectiveFrom).trim();
+    const to = String(period.effectiveTo ?? "").trim();
+    if (to && to < nextUncovered) continue;
+    if (from > nextUncovered) return false;
+    if (!to) return true;
+    if (requestedTo && to >= requestedTo) return true;
+    nextUncovered = nextIsoCalendarDate(to);
+  }
+  return false;
 }
 
 function primaryWorkerMapping(worker: ProviderFirstWorkerView): ProviderFirstRegisteredMappingView | undefined {
@@ -385,6 +436,19 @@ function mappingPeriodContainsRow(
   );
 }
 
+function mappingEffectiveOnDate(
+  mappings: ProviderFirstRegisteredMappingView[],
+  effectiveDate: string
+) {
+  if (!isIsoCalendarDate(effectiveDate)) return undefined;
+  return [...mappings].filter((mapping) =>
+    isIsoCalendarDate(mapping.effectiveFrom)
+      && mapping.effectiveFrom <= effectiveDate
+      && (!mapping.effectiveTo || mapping.effectiveTo >= effectiveDate)
+  ).sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom)
+    || right.mappingId.localeCompare(left.mappingId))[0];
+}
+
 /**
  * Select the exact current mapping that exists on a relocation's start date.
  * More than one location may be open after Keep all, so input/query order must
@@ -451,7 +515,11 @@ export function providerFirstMappingReferenceForRow(
       && mapping.stationId === registeredStationId
       && mappingIdentityMatchesRow(mapping, row)
   );
-  const registeredForPeriod = registered.find((mapping) => mappingPeriodContainsRow(mapping, row));
+  const registeredForPeriod = providerFirstMappingTimelineCovers(
+    registered,
+    row.effectiveFrom,
+    row.effectiveTo
+  ) ? mappingEffectiveOnDate(registered, row.effectiveFrom) : undefined;
   const currentAtDestination = currentMappings.filter((mapping) => mapping.stationId === row.stationId);
   const currentForPeriod = currentAtDestination.find((mapping) =>
     mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
@@ -592,24 +660,38 @@ export function providerFirstLocationIsAllowed(
     // An unmapped profile may be bootstrapped at its own location. If a current
     // mapping exists, an exact historical interval wins over an unrelated
     // later current mapping; otherwise this must remain the same identity.
-    const historicalMatch = registeredWorkerMappings(worker).some((mapping) =>
-      mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
+    const registeredIdentityMappings = registeredWorkerMappings(worker).filter((mapping) =>
+      mappingIdentityMatchesRow(mapping, row)
+    );
+    const historicalMatch = providerFirstMappingTimelineCovers(
+      registeredIdentityMappings,
+      row.effectiveFrom,
+      row.effectiveTo
     );
     if (historicalMatch || !currentMappings.length) return true;
     if (!currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row))) return false;
     // Editing a mapping already at the destination may change its own start
-    // date. A cross-location relocation is different: its source must have
-    // started by the requested move date, otherwise that future location is
-    // being used outside its effective period.
+    // date. An already-effective cross-location source supports Move or Keep
+    // all. A future source supports only reverse Keep-all at the registered
+    // location; providerFirstLocationRemap keeps Move disabled for that case.
     return currentMappings.some((mapping) => mapping.stationId === row.stationId)
       || currentMappings.some((mapping) => isIsoCalendarDate(row.effectiveFrom)
-        && mapping.effectiveFrom <= row.effectiveFrom);
+        && mapping.effectiveFrom <= row.effectiveFrom)
+      // Reverse Keep-all may restore the profile's registered location before
+      // a scheduled additional-location row starts. The confirmation path
+      // keeps Move disabled until that source row is actually effective.
+      || currentMappings.some((mapping) => isIsoCalendarDate(row.effectiveFrom)
+        && mapping.effectiveFrom > row.effectiveFrom);
   }
-  return registeredWorkerMappings(worker).some((mapping) =>
+  const registeredIdentityMappings = registeredWorkerMappings(worker).filter((mapping) =>
     Boolean(mapping.mappingId)
       && mapping.stationId === registeredStationId
       && mappingIdentityMatchesRow(mapping, row)
-      && mappingPeriodContainsRow(mapping, row)
+  );
+  return providerFirstMappingTimelineCovers(
+    registeredIdentityMappings,
+    row.effectiveFrom,
+    row.effectiveTo
   );
 }
 
@@ -618,6 +700,9 @@ export function providerFirstMappingReplacementMessage(replacement: ProviderFirs
     const starts = replacement.effectiveFrom
       ? ` from ${replacement.effectiveFrom}`
       : "";
+    if (replacement.reverseKeep) {
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is scheduled at ${replacement.existingLocationLabel ?? "the additional location"}${replacement.existingEffectiveFrom ? ` from ${replacement.existingEffectiveFrom}` : ""}.\nUse Keep all to restore ${replacement.newLocationLabel ?? "the registered location"}${starts} for the same DropX ID while preserving that scheduled location mapping.`;
+    }
     if (replacement.allowMove === false) {
       return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"}${starts} for the same DropX ID while preserving the verified registered-location mapping for that period.`;
     }

@@ -17,6 +17,7 @@ import {
   providerFirstLocationNeedsDates,
   providerFirstLocationIsAllowed,
   providerFirstMappingReferenceForRow,
+  providerFirstMappingTimelineCovers,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstNamesMatch,
@@ -492,7 +493,7 @@ test("uses the effective mapping station and keeps both relocation choices when 
   assert.match(providerFirstMappingReplacementMessage(moveToProfile), /Keep all preserves both locations from this date/);
 });
 
-test("a future source location cannot be moved before its own effective date", () => {
+test("a future additional location can restore the registered location with Keep all but cannot Move early", () => {
   const futureSource = {
     mappingId: "mapping-future-source",
     stationId: "station-1",
@@ -530,12 +531,132 @@ test("a future source location cannot be moved before its own effective date", (
     effectiveTo: ""
   };
 
-  assert.equal(providerFirstLocationIsAllowed(destination, futureSourceWorker), false);
-  assert.equal(providerFirstLocationRemap(destination, futureSourceWorker), null);
-  assert.equal(providerFirstRowIssue(destination, futureSourceWorker, method), "Location mismatch.");
+  assert.equal(providerFirstLocationIsAllowed(destination, futureSourceWorker), true);
+  assert.equal(providerFirstLocationRemap(destination, futureSourceWorker)?.mappingId, futureSource.mappingId);
+  assert.equal(providerFirstLocationRemap(destination, futureSourceWorker)?.allowKeepAll, true);
+  assert.equal(providerFirstLocationRemap(destination, futureSourceWorker)?.allowMove, false);
+  assert.equal(providerFirstLocationRemap(destination, futureSourceWorker)?.reverseKeep, true);
+  assert.match(
+    providerFirstMappingReplacementMessage(providerFirstLocationRemap(destination, futureSourceWorker)),
+    /scheduled at JUGD from 2026-10-15.*Use Keep all to restore JUGF from 2026-10-01/s
+  );
+  assert.equal(providerFirstRowIssue(destination, futureSourceWorker, method), null);
   const validFromSourceStart = { ...destination, effectiveFrom: "2026-10-15" };
   assert.equal(providerFirstLocationIsAllowed(validFromSourceStart, futureSourceWorker), true);
   assert.equal(providerFirstLocationRemap(validFromSourceStart, futureSourceWorker)?.mappingId, futureSource.mappingId);
+  assert.equal(providerFirstLocationRemap(validFromSourceStart, futureSourceWorker)?.allowMove, true);
+});
+
+test("adjacent registered-location payment periods jointly cover an additional-location assignment", () => {
+  const firstRatePeriod = {
+    mappingId: "registered-rate-period-1",
+    stationId: "station-1",
+    locationLabel: "KOZA",
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "2026-10-22",
+    status: "closed"
+  };
+  const secondRatePeriod = {
+    ...firstRatePeriod,
+    mappingId: "registered-rate-period-2",
+    paymentValues: { DELIVERY: "15" },
+    effectiveFrom: "2026-10-23",
+    effectiveTo: "",
+    status: "active"
+  };
+  const splitRateWorker = {
+    ...worker,
+    stationId: secondRatePeriod.stationId,
+    mappingId: secondRatePeriod.mappingId,
+    paymentValues: secondRatePeriod.paymentValues,
+    effectiveFrom: secondRatePeriod.effectiveFrom,
+    currentMappings: [secondRatePeriod],
+    mappingHistory: [secondRatePeriod, firstRatePeriod],
+    registeredLocationMappings: [secondRatePeriod, firstRatePeriod]
+  };
+  const additionalLocation = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "KGQE - Nadapuram",
+    mappingId: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: ""
+  };
+
+  assert.equal(
+    providerFirstMappingTimelineCovers(
+      splitRateWorker.registeredLocationMappings,
+      additionalLocation.effectiveFrom,
+      additionalLocation.effectiveTo
+    ),
+    true
+  );
+  assert.equal(providerFirstLocationIsAllowed(additionalLocation, splitRateWorker), true);
+  assert.equal(
+    providerFirstMappingReferenceForRow(additionalLocation, splitRateWorker)?.mappingId,
+    firstRatePeriod.mappingId,
+    "the mapping effective on the requested start must anchor the save"
+  );
+  assert.equal(providerFirstRowIssue(additionalLocation, splitRateWorker, method), null);
+});
+
+test("a gap or identity change in the registered-location timeline cannot authorize another location", () => {
+  const firstPeriod = {
+    mappingId: "registered-before-gap",
+    stationId: "station-1",
+    locationLabel: "KOZA",
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "2026-10-21",
+    status: "closed"
+  };
+  const afterGap = {
+    ...firstPeriod,
+    mappingId: "registered-after-gap",
+    effectiveFrom: "2026-10-23",
+    effectiveTo: "",
+    status: "active"
+  };
+  const additionalLocation = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "KGQE - Nadapuram",
+    mappingId: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: ""
+  };
+  const workerWithGap = {
+    ...worker,
+    mappingId: afterGap.mappingId,
+    effectiveFrom: afterGap.effectiveFrom,
+    currentMappings: [afterGap],
+    mappingHistory: [afterGap, firstPeriod],
+    registeredLocationMappings: [afterGap, firstPeriod]
+  };
+
+  assert.equal(providerFirstMappingTimelineCovers([firstPeriod, afterGap], "2026-10-01", ""), false);
+  assert.equal(providerFirstLocationIsAllowed(additionalLocation, workerWithGap), false);
+  assert.equal(providerFirstMappingReferenceForRow(additionalLocation, workerWithGap), undefined);
+
+  const changedIdentity = { ...afterGap, mappedProviderMemberId: "different-member" };
+  const workerWithIdentityChange = {
+    ...workerWithGap,
+    currentMappings: [changedIdentity],
+    mappingHistory: [changedIdentity, { ...firstPeriod, effectiveTo: "2026-10-22" }],
+    registeredLocationMappings: [changedIdentity, { ...firstPeriod, effectiveTo: "2026-10-22" }]
+  };
+  assert.equal(providerFirstLocationIsAllowed(additionalLocation, workerWithIdentityChange), false);
 });
 
 test("relocation selects the latest mapping effective on the requested start instead of a later scheduled mapping", () => {
