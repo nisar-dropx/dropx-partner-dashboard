@@ -11,8 +11,16 @@ const partialMigration = readFileSync(new URL(
   "../supabase/migrations/20261017150000_central_bank_response_partial_rows.sql",
   import.meta.url
 ), "utf8");
+const debitAccountPolicyMigration = readFileSync(new URL(
+  "../supabase/migrations/20261022250000_central_bank_response_ignore_debit_account_mismatch.sql",
+  import.meta.url
+), "utf8");
 const executableMigration = migration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executablePartialMigration = partialMigration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableDebitAccountPolicyMigration = debitAccountPolicyMigration.replace(
+  /notify\s+pgrst\s*,\s*'reload schema'\s*;/gi,
+  ""
+);
 
 assert.match(migration, /create table if not exists public\.central_bank_response_imports/i);
 assert.match(migration, /normalized_payload_hash/i);
@@ -30,6 +38,9 @@ assert.match(migration, /public\.hr_sync_paid_pay_documents\(/i);
 assert.match(migration, /pg_advisory_xact_lock[\s\S]*central-bank-paid-utr/i);
 assert.match(migration, /from public, anon, authenticated, service_role/i);
 assert.match(migration, /to service_role/i);
+assert.match(debitAccountPolicyMigration, /Response debit account is audit evidence only/i);
+assert.match(debitAccountPolicyMigration, /finalize_central_bank_response_partially/i);
+assert.match(debitAccountPolicyMigration, /finalize_central_bank_response\(/i);
 
 const db = new PGlite();
 await db.exec(`
@@ -334,17 +345,43 @@ await db.exec(executableMigration);
 await db.exec(executablePartialMigration);
 await db.exec(executableMigration);
 await db.exec(executablePartialMigration);
+await db.exec(executableDebitAccountPolicyMigration);
+await db.exec(executableDebitAccountPolicyMigration);
+
+const effectiveDefinitions = await db.query(`
+  select pg_get_functiondef(signature::regprocedure) definition
+  from unnest(array[
+    'public.finalize_central_bank_response(uuid,uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb)',
+    'public.finalize_central_bank_response_partially(uuid,uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb)'
+  ]) signature
+`);
+const effectiveDefinitionText = effectiveDefinitions.rows
+  .map((row) => row.definition)
+  .join("\n");
+assert.match(effectiveDefinitionText, /Response debit account is audit evidence only/i);
+assert.doesNotMatch(
+  effectiveDefinitionText,
+  /Debit account does not match the generated (?:bank )?instruction/i
+);
+assert.doesNotMatch(
+  effectiveDefinitionText,
+  /v_debit_account\s*<>\s*public\.workforce_payout_bank_account_canonical\(v_expected_debit_account\)/i
+);
+assert.doesNotMatch(
+  effectiveDefinitionText,
+  /public\.workforce_payout_bank_account_canonical\(v_payroll_line\.debit_account_number\)/i
+);
 
 const rows = {
   workforce: [{
     row_number: 2, reference_no: "WFDA1001092026V1",
-    debit_account: "999988887777", credit_account: "523456789012",
+    debit_account: "111122223333", credit_account: "523456789012",
     ifsc: "SBIN0000002", value_date: "2026-10-17",
     debit_amount_paise: 30000, status: "PAID", utr_cin: "UTR-WORKFORCE-1", remarks: "Success"
   }],
   helpers: [{
     row_number: 3, reference_no: "HPH1001092026V1",
-    debit_account: "999988887777", credit_account: "623456789012",
+    debit_account: "222233334444", credit_account: "623456789012",
     ifsc: "SBIN0000003", value_date: "2026-10-17",
     debit_amount_paise: 40000, status: "CANCELLED", utr_cin: "", remarks: "Account closed"
   }],
@@ -354,11 +391,11 @@ const rows = {
     debit_amount_paise: 10025, status: "PAID", utr_cin: "UTR-GENERIC-1", remarks: "Success"
   }],
   payroll: [{
-    row_number: 5, reference_no: "E100092026", debit_account: "999988887777",
+    row_number: 5, reference_no: "E100092026", debit_account: "333344445555",
     credit_account: "223456789012", ifsc: "HDFC0000001", value_date: "2026-10-17",
     debit_amount_paise: 20050, status: "PAID", utr_cin: "UTR-PAYROLL-1", remarks: "Success"
   }, {
-    row_number: 6, reference_no: "E200092026", debit_account: "999988887777",
+    row_number: 6, reference_no: "E200092026", debit_account: "444455556666",
     credit_account: "323456789012", ifsc: "ICIC0000001", value_date: "2026-10-17",
     debit_amount_paise: 5000, status: "RETURNED", utr_cin: "", remarks: "Name differs"
   }]
@@ -420,6 +457,10 @@ assert.deepEqual(saved.rows[0], { status: "failed", bank_remarks: "Name differs"
 assert.equal((await db.query(`select count(*)::integer count from public.payment_request_approvals`)).rows[0].count, 1);
 assert.equal((await db.query(`select count(*)::integer count from public.test_hr_sync_calls`)).rows[0].count, 1);
 assert.equal((await db.query(`select count(*)::integer count from public.central_bank_response_imports`)).rows[0].count, 1);
+assert.equal((await db.query(`
+  select normalized_payload -> 'workforce' -> 0 ->> 'debit_account' response_debit_account
+  from public.central_bank_response_imports
+`)).rows[0].response_debit_account, "111122223333");
 
 const replay = await call({ operationId: "10000000-0000-4000-8000-000000000071" });
 assert.equal(replay.rows[0].result.replayed, true);
@@ -432,6 +473,16 @@ await assert.rejects(
   call({
     operationId: "10000000-0000-4000-8000-000000000070",
     payload: { ...rows, helpers: [] }
+  }),
+  /operation ID was already used for a different file or scoped payload/
+);
+await assert.rejects(
+  call({
+    operationId: "10000000-0000-4000-8000-000000000070",
+    payload: {
+      ...rows,
+      workforce: [{ ...rows.workforce[0], debit_account: "777788889999" }]
+    }
   }),
   /operation ID was already used for a different file or scoped payload/
 );
@@ -524,8 +575,8 @@ assert.equal(partialPlaceholder.error_rows, 1);
 assert.equal(partialPlaceholder.rejected, 1);
 assert.equal(partialPlaceholder.row_errors[0].reference_no, "E400092026");
 
-// A bank-side mismatch is a row error, not a reason to discard other valid
-// instructions in the same physical file.
+// A different source debit account is accepted and retained. An unrelated
+// value-date mismatch remains a row error without discarding the valid row.
 await db.exec(`
   insert into public.workforce_payout_payment_items values
     ('10000000-0000-4000-8000-000000000025',
@@ -542,13 +593,13 @@ await db.exec(`
 const mixedPayload = {
   workforce: [{
     row_number: 10, reference_no: "WFDA2001092026V1",
-    debit_account: "999988887777", credit_account: "123400000001",
+    debit_account: "111100000000", credit_account: "123400000001",
     ifsc: "SBIN0000001", value_date: "2026-10-17",
     debit_amount_paise: 10000, status: "PAID", utr_cin: "UTR-MIXED-VALID", remarks: "Success"
   }, {
     row_number: 11, reference_no: "WFDA3001092026V1",
-    debit_account: "000000000000", credit_account: "123400000002",
-    ifsc: "SBIN0000001", value_date: "2026-10-17",
+    debit_account: "222200000000", credit_account: "123400000002",
+    ifsc: "SBIN0000001", value_date: "2026-10-18",
     debit_amount_paise: 10000, status: "PAID", utr_cin: "UTR-MIXED-BAD", remarks: "Success"
   }],
   helpers: [], generic: [], payroll: []
@@ -564,7 +615,7 @@ assert.equal(mixed.paid, 1);
 assert.equal(mixed.row_errors.length, 1);
 assert.equal(mixed.row_errors[0].row_number, 11);
 assert.equal(mixed.row_errors[0].reference_no, "WFDA3001092026V1");
-assert.match(mixed.row_errors[0].message, /debit account/i);
+assert.match(mixed.row_errors[0].message, /value date/i);
 saved = await db.query(`
   select reference_no,status,utr_cin from public.workforce_payout_payment_items
   where reference_no in ('WFDA2001092026V1','WFDA3001092026V1') order by reference_no
@@ -616,7 +667,7 @@ assert.equal(mixedReplay.error_rows, 1);
 assert.equal(mixedReplay.paid, 1);
 assert.equal(mixedReplay.replayed, false, "the remaining row error keeps the file result partial");
 assert.equal(mixedReplay.row_errors[0].row_number, 11);
-assert.match(mixedReplay.row_errors[0].message, /debit account/i);
+assert.match(mixedReplay.row_errors[0].message, /value date/i);
 assert.equal((await db.query(`
   select count(*)::integer count from public.central_bank_response_imports
   where file_sha256='${"c".repeat(64)}'
@@ -635,7 +686,7 @@ await assert.rejects(
     payload: {
       workforce: [{
         ...mixedPayload.workforce[1],
-        debit_account: "999988887777",
+        value_date: "2026-10-17",
         utr_cin: "UTR-SYSTEMIC-FAILURE",
         remarks: "TEST_UNKNOWN_P0001"
       }],
@@ -752,7 +803,7 @@ assert.deepEqual(saved.rows, [
   { reference_no: "WFDA6001092026V1", status: "processing" }
 ]);
 
-// Known debit/value-date/ownership/UTR validations are classified in one set
+// Known value-date/ownership/UTR validations are classified in one set
 // before finalization. Many bad rows therefore do not create a 2n-1 isolation
 // tree, while all unrelated valid rows remain one central batch.
 await db.exec(`
@@ -773,9 +824,11 @@ const prevalidationPayload = {
     return {
       row_number: 100 + sequence,
       reference_no: `WFPERF${String(sequence).padStart(4, "0")}092026V1`,
-      debit_account: sequence % 10 === 0 ? "999988887777" : "000000000000",
+      debit_account: "000000000000",
       credit_account: `82340000${String(sequence).padStart(4, "0")}`,
-      ifsc: "SBIN0000001", value_date: "2026-10-17", debit_amount_paise: 10000,
+      ifsc: "SBIN0000001",
+      value_date: sequence % 10 === 0 ? "2026-10-17" : "2026-10-18",
+      debit_amount_paise: 10000,
       status: "PAID", utr_cin: `UTR-PREVALIDATION-${sequence}`, remarks: "Success"
     };
   }),
@@ -789,7 +842,7 @@ const prevalidationResult = (await partialCall({
 assert.equal(prevalidationResult.processed_rows, 4);
 assert.equal(prevalidationResult.error_rows, 36);
 assert.equal(prevalidationResult.paid, 4);
-assert.ok(prevalidationResult.row_errors.every((error) => /debit account/i.test(error.message)));
+assert.ok(prevalidationResult.row_errors.every((error) => /value date/i.test(error.message)));
 assert.equal((await db.query(`
   select count(*)::integer count from public.central_bank_response_imports
   where file_sha256='${"f".repeat(64)}'

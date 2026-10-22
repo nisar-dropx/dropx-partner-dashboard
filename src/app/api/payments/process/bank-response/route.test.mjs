@@ -4,6 +4,7 @@ import test from "node:test";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const route = read("./route.ts");
+const centralBankResponse = read("../../../../../lib/central-bank-response.ts");
 const panel = read("../../../../../components/payment-process-panel.tsx");
 const page = read("../../../../payments/process/page.tsx");
 const legacyProcessAction = read("../../../../payments/process/actions.ts");
@@ -11,6 +12,7 @@ const workforceDialog = read("../../../../../components/workforce-payout-bank-di
 const workforceRoute = read("../../workforce-payouts/bank-response/route.ts");
 const migration = read("../../../../../../supabase/migrations/20261017123000_central_bank_response_finalizer.sql");
 const partialMigration = read("../../../../../../supabase/migrations/20261017150000_central_bank_response_partial_rows.sql");
+const debitAccountPolicyMigration = read("../../../../../../supabase/migrations/20261022250000_central_bank_response_ignore_debit_account_mismatch.sql");
 
 test("central bank import accepts multiple bounded files and reports each file independently", () => {
   assert.match(route, /const MAX_FILES = 20;/);
@@ -103,6 +105,18 @@ test("mixed files finalize valid rows while returning row-specific failures for 
   assert.match(panel, /rowError\.referenceNo/);
   assert.match(panel, /rowError\.message/);
   assert.match(panel, /color: "#b91c1c"/);
+});
+
+test("central finalization treats the response debit account as audit evidence, not an instruction match", () => {
+  assert.match(debitAccountPolicyMigration, /finalize_central_bank_response\(/);
+  assert.match(debitAccountPolicyMigration, /finalize_central_bank_response_partially\(/);
+  assert.match(debitAccountPolicyMigration, /Response debit account is audit evidence only/i);
+  assert.match(debitAccountPolicyMigration, /v_payout_debit_check/);
+  assert.match(debitAccountPolicyMigration, /v_payroll_debit_check/);
+  assert.match(debitAccountPolicyMigration, /v_partial_workforce_check/);
+  assert.match(debitAccountPolicyMigration, /v_partial_helper_check/);
+  assert.match(centralBankResponse, /debit_account: row\.debitAccount/);
+  assert.doesNotMatch(route, /expectedDebitAccount|debitAccount\s*!==/);
 });
 
 test("route payload matches the service-only central finalizer contract", () => {
