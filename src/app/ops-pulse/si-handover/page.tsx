@@ -59,10 +59,12 @@ export default async function Page({
     <AppShell
       active={
         view === "accept"
-          ? "Acceptance"
+          ? "Accept handover"
           : view === "handover"
-            ? "Station Handover"
-            : "Start Shift"
+            ? "Handover"
+            : view === "during"
+              ? "During shift"
+              : "Activities & Handover"
       }
       pageCode="si_handover"
     >

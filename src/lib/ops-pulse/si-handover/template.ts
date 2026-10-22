@@ -14,13 +14,27 @@ type TaskSeed = {
   guidance?: string;
 };
 
-const photo = (min = 1, max = 5): import("./model").ProofRule => ({
-  kind: "photo",
+/** Live camera photo or short video (CLEAR-sensitive checks prefer camera). */
+const live = (min = 1, max = 5): import("./model").ProofRule => ({
+  kind: "live",
   min,
   max,
 });
+/** Dashboard / portal screenshots only (gallery OK). */
 const shot = (min = 1, max = 3): import("./model").ProofRule => ({
   kind: "screenshot",
+  min,
+  max,
+});
+/** Video clip only (camera preferred). */
+const video = (min = 1, max = 3): import("./model").ProofRule => ({
+  kind: "video",
+  min,
+  max,
+});
+/** Photos and/or PDF (stamped manifests). */
+const docs = (min = 1, max = 8): import("./model").ProofRule => ({
+  kind: "document",
   min,
   max,
 });
@@ -47,7 +61,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
             { key: "pickers_ft", label: "Pickers present · full-time" },
             { key: "pickers_pt", label: "Pickers present · part-time" },
           ],
-          proof: photo(),
+          proof: live(),
           noRequires: "both",
           mandatory: "yes",
           linksTo: "Picker HC",
@@ -60,7 +74,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           numberFields: [
             { key: "pickers_attended", label: "No. of pickers attended" },
           ],
-          proof: photo(),
+          proof: live(),
           noRequires: "reason",
           mandatory: "yes",
         },
@@ -110,7 +124,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           when: "shift_start",
           answerType: "yes_no",
           numberFields: [{ key: "dg_fuel_pct", label: "DG fuel level (%)" }],
-          proof: photo(),
+          proof: live(),
           noRequires: "both",
           mandatory: "yes",
         },
@@ -145,12 +159,12 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
             { key: "temp_chiller", label: "Chiller (°C)" },
             { key: "temp_freezer", label: "Freezer (°C)" },
           ],
-          proof: photo(4, 8),
+          proof: live(4, 8),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Apollo audit",
           guidance:
-            "Out-of-range readings are flagged. Photo of each meter required.",
+            "Out-of-range readings are flagged. Live photo/video of each meter required.",
         },
         {
           id: "B5",
@@ -191,7 +205,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           label: "Floor & restrooms clean",
           when: "shift_start",
           answerType: "yes_no",
-          proof: photo(2, 4),
+          proof: live(2, 4),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Apollo audit",
@@ -202,7 +216,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
             "Pick path & all aisles clean; no waste paper, damaged bags or crates blocking",
           when: "shift_start_mid",
           answerType: "yes_no",
-          proof: photo(2, 4),
+          proof: live(2, 4),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Apollo audit",
@@ -212,7 +226,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           label: "Parking & store premises clean",
           when: "shift_start",
           answerType: "yes_no",
-          proof: photo(),
+          proof: live(),
           noRequires: "reason",
           mandatory: "yes",
         },
@@ -221,7 +235,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           label: "DEQ / bad-stock area demarcated; dump collection done",
           when: "shift_end",
           answerType: "yes_no",
-          proof: photo(),
+          proof: live(),
           noRequires: "reason",
           mandatory: "yes",
         },
@@ -238,10 +252,11 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           when: "mid_shift",
           answerType: "yes_no",
           numberFields: [{ key: "issues_found", label: "Issues found" }],
-          proof: photo(3, 6),
+          proof: video(1, 3),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Apollo audit",
+          guidance: "Short walk-through video of aisles / planogram (camera).",
         },
         {
           id: "D2",
@@ -309,7 +324,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
             { key: "checks_done", label: "Checks done" },
             { key: "units_removed", label: "Units removed" },
           ],
-          proof: photo(1, 12),
+          proof: live(1, 12),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Apollo audit, shorts",
@@ -320,7 +335,7 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           when: "mid_shift",
           answerType: "yes_no",
           numberFields: [{ key: "issues_found", label: "Issues found" }],
-          proof: photo(),
+          proof: live(),
           noRequires: "reason",
           mandatory: "yes",
         },
@@ -433,12 +448,12 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           when: "when_disposal",
           answerType: "yes_no_na",
           numberFields: [{ key: "units_disposed", label: "Units disposed" }],
-          proof: photo(3, 8),
+          proof: docs(3, 8),
           noRequires: "reason",
           mandatory: "if_disposal",
           linksTo: "CLEAR audit",
           guidance:
-            "Use Not applicable when no disposal this shift. Min. 3 live photos + stamped manifest.",
+            "Use N/A when no disposal this shift. Upload ≥3 photos of goods destroyed / bagged waste, plus photo or PDF of the vendor-stamped manifest.",
         },
         {
           id: "E5",
@@ -486,9 +501,9 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
 
 export function defaultSiTemplate(): Template {
   return {
-    name: "Ops Pulse · Shift Incharge task list",
+    name: "Ops Pulse · Activities & Handover",
     description:
-      "One checklist per store per shift (6 AM, 2 PM, 10 PM). Spec v1. Outgoing SI completes & submits; incoming SI accepts before handover closes in Ops Pulse.",
+      "One checklist per store per shift (6 AM, 2 PM, 10 PM). Spec v1 — live camera proofs where required; screenshots for dashboards. Outgoing SI completes & submits; incoming SI accepts.",
     sections: sections.map((s) => ({
       id: s.id,
       name: s.name,

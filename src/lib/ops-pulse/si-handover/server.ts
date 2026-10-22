@@ -7,6 +7,7 @@ import {
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allAuditRows } from "../station-audit-query";
 import {
+  SI_TEMPLATE_FORMAT,
   canRead,
   defaultSettings,
   isManager,
@@ -50,21 +51,24 @@ export async function ensureMaster(companyId: string): Promise<Master> {
   if (existing.data) {
     const master = existing.data as Master;
     const settings = normalizeSettings(master.settings);
-    const template =
-      Array.isArray(master.template?.sections) &&
-      master.template.sections.length &&
-      tasks(master.template).length
-        ? master.template
-        : defaultSiTemplate();
-    const needsTemplate =
-      !tasks(master.template || { name: "", description: "", sections: [] })
-        .length;
-    if (needsTemplate) {
+    const emptyCatalogue = !tasks(
+      master.template || { name: "", description: "", sections: [] },
+    ).length;
+    const refreshCatalogue =
+      emptyCatalogue || settings.templateFormat < SI_TEMPLATE_FORMAT;
+    const template = refreshCatalogue
+      ? defaultSiTemplate()
+      : master.template;
+    if (refreshCatalogue) {
+      const nextSettings = {
+        ...settings,
+        templateFormat: SI_TEMPLATE_FORMAT,
+      };
       const patched = await db()
         .from("ops_si_handover_master")
         .update({
           template,
-          settings,
+          settings: nextSettings,
           updated_at: new Date().toISOString(),
           version: master.version + 1,
         })

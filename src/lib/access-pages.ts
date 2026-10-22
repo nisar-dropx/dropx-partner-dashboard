@@ -68,8 +68,8 @@ export const accessPages = [
   { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
   { code: "store_audits", name: "Store Audits", sort_order: 94 },
   { code: "store_audit_master", name: "Store Audit Master", sort_order: 94 },
-  { code: "si_handover", name: "SI Shift Handover", sort_order: 93 },
-  { code: "si_handover_master", name: "SI Handover Master", sort_order: 94 },
+  { code: "si_handover", name: "Activities and Handover", sort_order: 93 },
+  { code: "si_handover_master", name: "Activities and Handover Master", sort_order: 94 },
   { code: "station_audits", name: "Station Audits", sort_order: 94 },
   { code: "ops_loss_master", name: "Loss Recovery Master", sort_order: 94 },
   { code: "station_audit_master", name: "Audit Master", sort_order: 94 },
@@ -356,6 +356,73 @@ async function copyLegacyGroupPermissions(
   }
 }
 
+function roleLooksLikeShiftIncharge(code: string, name: string) {
+  const hay = `${code} ${name}`.toUpperCase().replace(/[^A-Z0-9]+/g, " ");
+  if (["OPERATIONS_SIC", "SIC", "SI", "SHIFT_INCHARGE"].includes(code.toUpperCase())) return true;
+  return /(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)( |$)/.test(hay);
+}
+
+function roleLooksLikeSiManager(code: string, name: string) {
+  if (roleLooksLikeShiftIncharge(code, name)) return false;
+  const upper = code.toUpperCase();
+  if ([
+    "OPERATIONS_SM", "OPERATIONS_SRSM", "OPERATIONS_STM",
+    "OPERATIONS_CTM", "OPERATIONS_CM", "OPERATIONS_CLM", "OPERATIONS_CLUSTER_HEAD",
+    "OPERATIONS_AOM",
+    "OPERATIONS_RM", "OPERATIONS_REGIONAL_HEAD",
+    "OPERATIONS_NH", "OPERATIONS_NATIONAL_HEAD",
+    "OPERATIONS_PGM", "OPERATIONS_PROGRAM_HEAD",
+    "OPERATIONS_BH", "OPERATIONS_HLM", "OPERATIONS_MANAGING_PARTNER",
+    "PROGRAM_HEAD", "CLUSTER_HEAD", "REGIONAL_HEAD", "NATIONAL_HEAD"
+  ].includes(upper)) return true;
+  const hay = `${code} ${name}`.toUpperCase().replace(/[^A-Z0-9]+/g, " ");
+  return /(^| )(STORE MANAGER|SENIOR STORE MANAGER|SRSM|CITY MANAGER|CTM|CLUSTER MANAGER|CLUSTER HEAD|AREA OPERATIONS MANAGER|AREA MANAGER|AOM|REGIONAL MANAGER|REGIONAL HEAD|NATIONAL HEAD|PROGRAM MANAGER|PROGRAM HEAD)( |$)/.test(hay);
+}
+
+async function ensureSiHandoverRoleGrants(supabase: SupabaseClient, companyId: string) {
+  const pages = await getPagesByCodes(supabase, companyId, ["si_handover"]);
+  const page = pages.get("si_handover");
+  if (!page || page.is_active === false) return;
+
+  const [{ data: roles, error }, existingResult] = await Promise.all([
+    supabase
+      .from("user_roles")
+      .select("id, code, name")
+      .eq("company_id", companyId)
+      .eq("is_active", true),
+    supabase
+      .from("role_page_permissions")
+      .select("role_id, can_view, can_add, can_edit")
+      .eq("company_id", companyId)
+      .eq("page_id", page.id)
+  ]);
+  if (error) throw new Error(error.message);
+  if (existingResult.error) throw new Error(existingResult.error.message);
+
+  const existingByRole = new Map(
+    (existingResult.data ?? []).map((row) => [row.role_id, row])
+  );
+  const rows: PermissionRow[] = [];
+  for (const role of roles ?? []) {
+    const code = String(role.code || "");
+    const name = String(role.name || "");
+    const existing = existingByRole.get(role.id);
+    if (roleLooksLikeShiftIncharge(code, name)) {
+      rows.push({ role_id: role.id, page_id: page.id, can_view: true, can_add: true, can_edit: true });
+    } else if (roleLooksLikeSiManager(code, name)) {
+      rows.push({
+        role_id: role.id,
+        page_id: page.id,
+        can_view: true,
+        // Keep add if already granted (e.g. copied from store_audits); do not force-add.
+        can_add: Boolean(existing?.can_add),
+        can_edit: true
+      });
+    }
+  }
+  await upsertPermissionRows(supabase, companyId, rows);
+}
+
 async function seedTargetPermissionsFromSources(
   supabase: SupabaseClient,
   companyId: string,
@@ -491,6 +558,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
   // Normal page visits should only validate the catalog. Permission migrations
   // and role repairs are needed when the catalog changes, not on every render.
   if (!pageCatalogChanged) return;
+
+  await ensureSiHandoverRoleGrants(supabase, companyId);
 
   if (pageTopologyChanged && expectedCodes.has("delivery_associates")) {
     await mergeRetiredPagePermissions(supabase, companyId, "onboarding", "delivery_associates");

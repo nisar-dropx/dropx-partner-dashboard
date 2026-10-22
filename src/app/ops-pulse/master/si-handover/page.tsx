@@ -23,7 +23,7 @@ export default async function Page() {
       .order("name"),
   ]);
   if (roles.error || models.error)
-    throw Error("SI handover configuration options could not be loaded.");
+    throw Error("Activities & Handover configuration options could not be loaded.");
   return (
     <AppShell active="Ops Masters" pageCode="si_handover_master">
       <SiHandoverMasterClient

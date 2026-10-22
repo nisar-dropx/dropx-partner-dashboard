@@ -150,8 +150,13 @@ test("submit validation requires mandatory answers, No reasons, and timed proofs
   answers.E4 = { outcome: "na", numbers: {}, text: "No disposal", informed: "" };
   const proofs = template.sections
     .flatMap((s) => s.tasks)
-    .filter((t) => t.proof.kind === "photo" || t.proof.kind === "screenshot")
-    .filter((t) => t.id !== "E3" && !(t.id === "E4"))
+    .filter(
+      (t) =>
+        t.proof.kind !== "none" &&
+        t.proof.kind !== "optional" &&
+        t.id !== "E3" &&
+        t.id !== "E4",
+    )
     .flatMap((t) =>
       Array.from({ length: t.proof.min }, (_, i) => ({
         id: `${t.id}-${i}`,

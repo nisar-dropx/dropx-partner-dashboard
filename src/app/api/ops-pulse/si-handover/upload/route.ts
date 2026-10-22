@@ -1,18 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { canFill, tasks } from "@/lib/ops-pulse/si-handover/model";
+import {
+  canFill,
+  proofMaxBytes,
+  proofMimeAllowed,
+  tasks,
+} from "@/lib/ops-pulse/si-handover/model";
 import { db, proofs, readChecklist } from "@/lib/ops-pulse/si-handover/server";
 
 export const dynamic = "force-dynamic";
 
 const bucket = "ops-pulse-documents";
-const types = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-]);
 
 export async function POST(request: Request) {
   try {
@@ -56,19 +53,24 @@ export async function POST(request: Request) {
         .replace(/[^a-zA-Z0-9._-]/g, "_")
         .slice(0, 120);
       const size = Number(input.size);
-      const mime = String(input.contentType);
+      const mime = String(input.contentType || "").toLowerCase();
+      const maxBytes = proofMaxBytes(task.proof.kind);
       if (
         !name ||
-        !types.has(mime) ||
+        !proofMimeAllowed(task.proof.kind, mime) ||
         !Number.isInteger(size) ||
         size < 1 ||
-        size > 30 * 1024 * 1024
-      )
-        throw Error("Use a photo or PDF up to 30 MB.");
+        size > maxBytes
+      ) {
+        const mb = Math.round(maxBytes / (1024 * 1024));
+        throw Error(
+          `Unsupported file for this task, or over ${mb} MB. Use the format shown on the task.`,
+        );
+      }
       const existing = await proofs(c.companyId, c.checklist.id);
-      if (
-        existing.filter((p) => p.task_id === task.id).length >= task.proof.max
-      )
+      const remaining =
+        task.proof.max - existing.filter((p) => p.task_id === task.id).length;
+      if (remaining <= 0)
         throw Error(`This task permits up to ${task.proof.max} files.`);
       const id = randomUUID();
       const path = `${prefix}${id}-${name}`;
@@ -109,11 +111,15 @@ export async function POST(request: Request) {
         .eq("id", id)
         .eq("uploaded_by", c.auth.userId)
         .eq("ready", false)
-        .select("id,captured_at,file_name,content_type,size,path,task_id,created_at,latitude,longitude")
+        .select(
+          "id,captured_at,file_name,content_type,size,path,task_id,created_at,latitude,longitude",
+        )
         .maybeSingle();
       if (r.error) throw Error(r.error.message);
       if (!r.data) throw Error("Upload could not be confirmed.");
-      return Response.json({ proof: { ...r.data, ready: true, uploaded_by: c.auth.userId } });
+      return Response.json({
+        proof: { ...r.data, ready: true, uploaded_by: c.auth.userId },
+      });
     }
 
     if (input.phase === "delete") {

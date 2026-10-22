@@ -1,6 +1,6 @@
 /**
  * Clock-out enforcement for SI handover.
- * Mode is read from Ops Masters → SI Handover Master (`settings.clockOutMode`).
+ * Mode is read from Ops Masters → Activities & Handover Master (`settings.clockOutMode`).
  * Connect attendance should call `resolveSiHandoverClockOut` when hard_block is enabled.
  */
 import "server-only";

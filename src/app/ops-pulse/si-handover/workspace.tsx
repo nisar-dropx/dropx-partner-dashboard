@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { supabase } from "@/lib/supabase";
 import {
   CLOCK_OUT_MODES,
   canAccept,
@@ -33,6 +32,7 @@ import {
   startShift,
   submitHandover,
 } from "./actions";
+import { ProofPanel } from "./si-handover-proof";
 import styles from "./si-handover.module.css";
 
 type Store = {
@@ -63,145 +63,6 @@ const stamp = (v: string | null | undefined) =>
       }) + " IST"
     : "—";
 
-async function readGps(): Promise<{
-  latitude: number | null;
-  longitude: number | null;
-}> {
-  if (typeof navigator === "undefined" || !navigator.geolocation)
-    return { latitude: null, longitude: null };
-  try {
-    const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-        timeout: 8000,
-        maximumAge: 60000,
-      }),
-    );
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-  } catch {
-    return { latitude: null, longitude: null };
-  }
-}
-
-function ProofPanel({
-  checklist,
-  task,
-  proofs,
-  editable,
-  onChange,
-  onError,
-}: {
-  checklist: SiChecklist;
-  task: Task;
-  proofs: Evidence[];
-  editable: boolean;
-  onChange: (next: Evidence[]) => void;
-  onError: (msg: string) => void;
-}) {
-  const mine = proofs.filter((p) => p.task_id === task.id);
-  if (task.proof.kind === "none") return null;
-  return (
-    <div className={styles.proofs}>
-      {mine.map((p) => (
-        <span key={p.id} className={styles.proofChip}>
-          <a
-            href={`/api/ops-pulse/si-handover/evidence/${p.id}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {p.file_name}
-          </a>
-          <span className={styles.stamp}>{stamp(p.captured_at)}</span>
-          {editable ? (
-            <button
-              type="button"
-              className={styles.btnGhost}
-              onClick={async () => {
-                const r = await fetch("/api/ops-pulse/si-handover/upload", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    phase: "delete",
-                    checklistId: checklist.id,
-                    taskId: task.id,
-                    id: p.id,
-                  }),
-                });
-                const j = await r.json();
-                if (!r.ok) return onError(j.error || "Could not remove proof.");
-                onChange(proofs.filter((x) => x.id !== p.id));
-              }}
-            >
-              Remove
-            </button>
-          ) : null}
-        </span>
-      ))}
-      {editable && mine.length < task.proof.max ? (
-        <label className={styles.btnGhost}>
-          Upload proof
-          <input
-            type="file"
-            accept="image/*,application/pdf"
-            hidden
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              try {
-                const gps = await readGps();
-                const capturedAt = new Date().toISOString();
-                const prep = await fetch("/api/ops-pulse/si-handover/upload", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    phase: "prepare",
-                    checklistId: checklist.id,
-                    taskId: task.id,
-                    fileName: file.name,
-                    size: file.size,
-                    contentType: file.type || "image/jpeg",
-                    capturedAt,
-                    latitude: gps.latitude,
-                    longitude: gps.longitude,
-                  }),
-                });
-                const prepared = await prep.json();
-                if (!prep.ok) throw Error(prepared.error || "Prepare failed.");
-                if (!supabase) throw Error("Upload client unavailable.");
-                const up = await supabase.storage
-                  .from("ops-pulse-documents")
-                  .uploadToSignedUrl(prepared.path, prepared.token, file);
-                if (up.error) throw Error(up.error.message);
-                const done = await fetch("/api/ops-pulse/si-handover/upload", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    phase: "complete",
-                    checklistId: checklist.id,
-                    taskId: task.id,
-                    id: prepared.id,
-                  }),
-                });
-                const body = await done.json();
-                if (!done.ok) throw Error(body.error || "Confirm failed.");
-                onChange([...proofs, body.proof as Evidence]);
-              } catch (err) {
-                onError(err instanceof Error ? err.message : "Upload failed.");
-              }
-            }}
-          />
-        </label>
-      ) : null}
-      <span className={styles.stamp}>
-        {task.proof.kind === "screenshot" ? "Screenshot OK" : "Photo / file"} ·
-        timestamp stamped on upload
-        {task.proof.min ? ` · min ${task.proof.min}` : ""}
-      </span>
-    </div>
-  );
-}
-
 function TaskCard({
   task,
   answer,
@@ -227,6 +88,13 @@ function TaskCard({
 }) {
   const lock = taskUnlocked(task, shiftStartMs, Date.now(), view);
   const disabled = !editable || !lock.unlocked;
+  const outcomes =
+    task.answerType === "yes_no_na"
+      ? (["yes", "no", "na"] as const)
+      : task.answerType === "yes_no"
+        ? (["yes", "no"] as const)
+        : null;
+
   return (
     <article
       className={`${styles.task}${lock.overdue ? ` ${styles.overdue}` : ""}${!lock.unlocked ? ` ${styles.locked}` : ""}`}
@@ -237,7 +105,7 @@ function TaskCard({
         </strong>
         <span>
           {task.when.replaceAll("_", " ")}
-          {!lock.unlocked ? " · unlocks later" : ""}
+          {!lock.unlocked ? " · later" : ""}
           {lock.overdue ? " · overdue" : ""}
         </span>
       </div>
@@ -251,28 +119,19 @@ function TaskCard({
         />
       ) : (
         <>
-          {task.answerType !== "number" && task.answerType !== "number_x4" ? (
-            <div className={styles.fields}>
-              <label className={styles.field}>
-                Answer
-                <select
+          {outcomes ? (
+            <div className={styles.outcomeRow} role="group" aria-label="Answer">
+              {outcomes.map((value) => (
+                <button
+                  key={value}
+                  type="button"
                   disabled={disabled}
-                  value={answer.outcome}
-                  onChange={(e) =>
-                    setAnswer({
-                      ...answer,
-                      outcome: e.target.value as TaskAnswer["outcome"],
-                    })
-                  }
+                  className={answer.outcome === value ? styles.outcomeOn : styles.outcome}
+                  onClick={() => setAnswer({ ...answer, outcome: value })}
                 >
-                  <option value="">Select</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                  {task.answerType === "yes_no_na" ? (
-                    <option value="na">Not applicable</option>
-                  ) : null}
-                </select>
-              </label>
+                  {value === "na" ? "N/A" : value === "yes" ? "Yes" : "No"}
+                </button>
+              ))}
             </div>
           ) : null}
           {task.numberFields.length ? (
@@ -303,14 +162,12 @@ function TaskCard({
                 <input
                   disabled={disabled}
                   value={answer.text}
-                  onChange={(e) =>
-                    setAnswer({ ...answer, text: e.target.value })
-                  }
+                  onChange={(e) => setAnswer({ ...answer, text: e.target.value })}
                 />
               </label>
               {answer.outcome === "no" ? (
                 <label className={styles.field}>
-                  Escalated / informed
+                  Informed
                   <input
                     disabled={disabled}
                     value={answer.informed}
@@ -397,9 +254,7 @@ export function SiHandoverWorkspace(props: Props) {
   const shiftStartMs = focused
     ? Date.parse(`${focused.shift_date}T${focused.shift_slot}:00+05:30`)
     : cur.startMs;
-  const emptyTemplate = Boolean(
-    focused && !tasks(focused.template).length,
-  );
+  const emptyTemplate = Boolean(focused && !tasks(focused.template).length);
   const mineRows = props.rows.filter(
     (r) => r.outgoing_user_id === props.actor.userId,
   );
@@ -441,32 +296,31 @@ export function SiHandoverWorkspace(props: Props) {
   };
 
   const titles: Record<WorkspaceView, string> = {
-    start: "Start shift",
+    start: "Start activities",
     during: "During shift",
-    handover: "Station handover",
-    accept: "Acceptance",
+    handover: "Handover",
+    accept: "Accept handover",
   };
 
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <p className={styles.eyebrow}>Dark Store · Shift Incharge</p>
+        <p className={styles.eyebrow}>Dark Store · Activities & Handover</p>
         <h1>{titles[props.view]}</h1>
         <p>
-          Complete your store checklist for this shift window, save drafts any
-          time, then hand over for the next SI to accept. Clock-out policy:{" "}
-          <strong>{modeLabel}</strong>
+          Compact shift checklist — live camera proofs where required, screenshots for
+          dashboards. Clock-out: <strong>{modeLabel}</strong>
           {props.canMaster ? (
             <>
               {" "}
-              · <Link href="/master/si-handover">Master settings</Link>
+              · <Link href="/master/si-handover">Master</Link>
             </>
           ) : null}
           .
         </p>
       </header>
 
-      <nav className={styles.tabBar} aria-label="Shift stages">
+      <nav className={styles.tabBar} aria-label="Activity stages">
         {(
           [
             ["start", "Start"],
@@ -499,7 +353,7 @@ export function SiHandoverWorkspace(props: Props) {
                 onChange={(e) => setLocationId(e.target.value)}
               >
                 {!props.stores.length ? (
-                  <option value="">No stores in your scope</option>
+                  <option value="">No stores in scope</option>
                 ) : null}
                 {props.stores.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -522,16 +376,15 @@ export function SiHandoverWorkspace(props: Props) {
                 )
               }
             >
-              Start current shift ({cur.shiftSlot})
+              Start {cur.shiftSlot}
             </button>
           </div>
           <p className={styles.meta}>
             <span className={styles.chipOk}>
-              Window · {cur.shiftDate} {cur.shiftSlot} IST
+              {cur.shiftDate} {cur.shiftSlot} IST
             </span>
             <span className={styles.chip}>
-              {props.stores.length} store
-              {props.stores.length === 1 ? "" : "s"} in scope
+              {props.stores.length} store{props.stores.length === 1 ? "" : "s"}
             </span>
           </p>
 
@@ -553,23 +406,20 @@ export function SiHandoverWorkspace(props: Props) {
                       <strong>
                         {r.store_code} · {r.shift_date} {r.shift_slot}
                       </strong>
-                      <small>
-                        {statusLabels[r.status]} · continue checklist
-                      </small>
+                      <small>{statusLabels[r.status]} · continue</small>
                     </Link>
                   ))}
               </div>
             </>
           ) : (
             <div className={styles.empty}>
-              No open shift for you yet. Pick a store and start the current
-              window.
+              No open shift yet — pick a store and start the current window.
             </div>
           )}
 
           {otherRows.length ? (
             <>
-              <h2 className={styles.sectionTitle}>Other stores (view)</h2>
+              <h2 className={styles.sectionTitle}>Other stores</h2>
               <div className={styles.list}>
                 {otherRows.slice(0, 12).map((r) => (
                   <Link
@@ -595,23 +445,16 @@ export function SiHandoverWorkspace(props: Props) {
       {props.view === "accept" && !focused ? (
         <section className={styles.panel}>
           <p className={styles.banner}>
-            Review submitted handovers for your stores. Accept opens your next
-            shift checklist with carried open issues.
+            Accept a submitted handover to open your next shift with carried issues.
           </p>
           <div className={styles.list}>
-            {props.rows.filter((r) => r.status === "submitted").length ===
-            0 ? (
-              <div className={styles.empty}>
-                No handovers waiting for acceptance.
-              </div>
+            {props.rows.filter((r) => r.status === "submitted").length === 0 ? (
+              <div className={styles.empty}>No handovers waiting.</div>
             ) : (
               props.rows
                 .filter((r) => r.status === "submitted")
                 .map((r) => {
-                  const level = escalationLevel(
-                    r.submitted_at,
-                    props.settings,
-                  );
+                  const level = escalationLevel(r.submitted_at, props.settings);
                   return (
                     <Link
                       key={r.id}
@@ -623,9 +466,8 @@ export function SiHandoverWorkspace(props: Props) {
                         {r.store_code} · {r.shift_date} {r.shift_slot}
                       </strong>
                       <small>
-                        From {r.outgoing_name} · submitted{" "}
-                        {stamp(r.submitted_at)}
-                        {level !== "none" ? ` · escalate to ${level}` : ""}
+                        From {r.outgoing_name} · {stamp(r.submitted_at)}
+                        {level !== "none" ? ` · escalate ${level}` : ""}
                       </small>
                     </Link>
                   );
@@ -641,16 +483,10 @@ export function SiHandoverWorkspace(props: Props) {
             <span className={styles.chipOk}>
               {focused.store_code} · {focused.shift_date} {focused.shift_slot}
             </span>
-            <span className={styles.chip}>
-              {statusLabels[focused.status]}
-            </span>
-            <span className={styles.chip}>
-              Outgoing · {focused.outgoing_name}
-            </span>
+            <span className={styles.chip}>{statusLabels[focused.status]}</span>
+            <span className={styles.chip}>Out · {focused.outgoing_name}</span>
             {focused.incoming_name ? (
-              <span className={styles.chip}>
-                Incoming · {focused.incoming_name}
-              </span>
+              <span className={styles.chip}>In · {focused.incoming_name}</span>
             ) : null}
           </div>
 
@@ -663,31 +499,28 @@ export function SiHandoverWorkspace(props: Props) {
                 />
               </div>
               <div className={styles.progressLabel}>
-                {liveProgress.answered}/{liveProgress.total} mandatory answered
-                ({liveProgress.pct}%)
+                {liveProgress.answered}/{liveProgress.total} mandatory ({liveProgress.pct}%)
               </div>
             </div>
           ) : null}
 
           {emptyTemplate ? (
             <div className={styles.warn}>
-              This checklist is missing its task list. Go back and tap{" "}
-              <strong>Start current shift</strong> again to restore it, or ask
-              an admin to open SI Handover Master once.
+              Task list missing — start the shift again, or open Master once to refresh the catalogue.
             </div>
           ) : null}
 
           {!editable && props.view !== "accept" ? (
             <div className={styles.readOnly}>
               {focused.outgoing_user_id === props.actor.userId
-                ? "This checklist is locked (already submitted or closed)."
-                : `Read-only · owned by ${focused.outgoing_name}. Open your own store from Start shift to fill answers.`}
+                ? "Locked (submitted or closed)."
+                : `Read-only · ${focused.outgoing_name}. Start your own store to edit.`}
             </div>
           ) : null}
 
           {focused.open_issues ? (
             <div className={styles.notice}>
-              <strong>Open issues carried in</strong>
+              <strong>Carried issues</strong>
               <div>{focused.open_issues}</div>
             </div>
           ) : null}
@@ -701,10 +534,8 @@ export function SiHandoverWorkspace(props: Props) {
           ) : null}
           {esc !== "none" ? (
             <div className={styles.warn}>
-              Not accepted within escalation window — alert level:{" "}
-              <strong>
-                {esc === "store" ? "Store Manager" : "Cluster Manager"}
-              </strong>
+              Escalation:{" "}
+              <strong>{esc === "store" ? "Store Manager" : "City / Cluster"}</strong>
             </div>
           ) : null}
 
@@ -733,7 +564,7 @@ export function SiHandoverWorkspace(props: Props) {
             ))}
             {!sections.length && !emptyTemplate ? (
               <div className={styles.empty}>
-                No tasks for this stage. Try During shift or Handover.
+                No tasks for this stage — try During or Handover.
               </div>
             ) : null}
           </div>
@@ -758,7 +589,7 @@ export function SiHandoverWorkspace(props: Props) {
                       )
                     }
                   >
-                    Save draft
+                    Save
                   </button>
                   {props.view === "handover" ? (
                     <button
@@ -783,7 +614,7 @@ export function SiHandoverWorkspace(props: Props) {
                       className={styles.btn}
                       href={`/si-handover?view=handover&id=${focused.id}`}
                     >
-                      Go to handover
+                      Handover →
                     </Link>
                   )}
                 </>
@@ -794,12 +625,7 @@ export function SiHandoverWorkspace(props: Props) {
                   className={styles.btnDanger}
                   disabled={pending}
                   onClick={() => {
-                    if (
-                      !confirm(
-                        "Delete this unsubmitted draft? You can start the shift again afterwards.",
-                      )
-                    )
-                      return;
+                    if (!confirm("Delete this unsubmitted draft?")) return;
                     run(() =>
                       deleteDraftChecklist({
                         checklistId: focused.id,
@@ -808,7 +634,7 @@ export function SiHandoverWorkspace(props: Props) {
                     );
                   }}
                 >
-                  Delete draft
+                  Delete
                 </button>
               ) : null}
               {acceptable ? (
@@ -826,16 +652,16 @@ export function SiHandoverWorkspace(props: Props) {
                       )
                     }
                   >
-                    Accept shift
+                    Accept
                   </button>
                   <div className={styles.rejectRow}>
                     <input
-                      placeholder="Reject reason (required)"
+                      placeholder="Reject reason"
                       value={rejectReason}
                       onChange={(e) => setRejectReason(e.target.value)}
                     />
                     <input
-                      placeholder="Task IDs (optional)"
+                      placeholder="Task IDs"
                       value={rejectTasks}
                       onChange={(e) => setRejectTasks(e.target.value)}
                     />

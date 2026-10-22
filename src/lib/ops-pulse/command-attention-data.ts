@@ -59,7 +59,7 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       const affected=[...new Set(data.people.filter(p=>{const x=summarizeStorePeople([p],now);return x.notReported||x.missingOut||x.unplanned;}).map(p=>p.locationId))];
       return{value:`${affected.length} locations to check`,count:s.notReported+s.missingOut+s.unplanned,href:`/ops-pulse?view=manpower&date=${today}${affected[0]?`&location=${affected[0]}`:''}`,detail:`${s.notReported} not reported · ${s.missingOut} punch-outs · ${s.unplanned} shift times missing`,action:'Check today’s attendance',tone:affected.length?'action':'clear'};
     }),
-    check(mode==='amazon_now'&&has('si_handover')&&ids.length>0,'si-handover','SI shift handover','/si-handover?view=accept',async()=>{
+    check(mode==='amazon_now'&&has('si_handover')&&ids.length>0,'si-handover','Activities & Handover','/si-handover?view=accept',async()=>{
       if(!supabaseAdmin)throw Error('Unavailable');
       const master=await supabaseAdmin.from('ops_si_handover_master').select('settings').eq('company_id',company).maybeSingle();
       if(master.error)throw Error('Unavailable');

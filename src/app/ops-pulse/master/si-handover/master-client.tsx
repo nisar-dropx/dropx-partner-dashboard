@@ -40,7 +40,7 @@ export function SiHandoverMasterClient({
       <header className={styles.hero}>
         <div>
           <p className={styles.eyebrow}>Ops Masters</p>
-          <h1>SI Handover Master</h1>
+          <h1>Activities & Handover Master</h1>
           <p>
             Configure who can fill/accept, which store models are in scope, and
             how clock-out is enforced until handover is accepted.{" "}
@@ -116,7 +116,7 @@ export function SiHandoverMasterClient({
         <section className={styles.masterCard}>
           <h2>Shift Incharge roles</h2>
           <p className={styles.meta}>
-            Empty = anyone with SI Handover add/edit can fill and accept.
+            Empty = anyone with Activities & Handover add/edit can fill and accept.
           </p>
           <div className={styles.roleList}>
             {roles.map((r) => (

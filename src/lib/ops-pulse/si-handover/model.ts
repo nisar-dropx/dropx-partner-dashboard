@@ -17,8 +17,110 @@ export type AnswerType =
   | "number_x4"
   | "text";
 
-export type ProofKind = "none" | "photo" | "screenshot" | "optional";
+/**
+ * Spec proof rules:
+ * - live / photo: camera capture preferred (photo or short video)
+ * - screenshot: system dashboards only (gallery OK)
+ * - video: video only
+ * - document: photos/PDF (e.g. stamped manifest)
+ * - optional: any supported media
+ */
+export type ProofKind =
+  | "none"
+  | "photo"
+  | "screenshot"
+  | "video"
+  | "live"
+  | "document"
+  | "optional";
 export type ProofRule = { kind: ProofKind; min: number; max: number };
+
+export const PROOF_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+] as const;
+export const PROOF_VIDEO_TYPES = [
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+] as const;
+export const PROOF_PDF_TYPES = ["application/pdf"] as const;
+
+export function proofAcceptAttribute(kind: ProofKind) {
+  if (kind === "none") return "";
+  if (kind === "screenshot" || kind === "photo") return "image/*";
+  if (kind === "video") return "video/mp4,video/webm,video/quicktime";
+  if (kind === "live") return "image/*,video/mp4,video/webm,video/quicktime";
+  if (kind === "document") return "image/*,application/pdf";
+  return "image/*,application/pdf,video/mp4,video/webm,video/quicktime";
+}
+
+/** Prefer device camera for live / photo / video (spec: no gallery for CLEAR). */
+export function proofPrefersCapture(kind: ProofKind) {
+  return kind === "live" || kind === "photo" || kind === "video";
+}
+
+export function proofMaxBytes(kind: ProofKind) {
+  if (kind === "video" || kind === "live" || kind === "optional")
+    return 80 * 1024 * 1024;
+  return 30 * 1024 * 1024;
+}
+
+export function proofMimeAllowed(kind: ProofKind, mime: string) {
+  const type = String(mime || "").toLowerCase();
+  if (kind === "none") return false;
+  if (kind === "screenshot" || kind === "photo")
+    return (PROOF_IMAGE_TYPES as readonly string[]).includes(type);
+  if (kind === "video")
+    return (PROOF_VIDEO_TYPES as readonly string[]).includes(type);
+  if (kind === "live")
+    return (
+      (PROOF_IMAGE_TYPES as readonly string[]).includes(type) ||
+      (PROOF_VIDEO_TYPES as readonly string[]).includes(type)
+    );
+  if (kind === "document")
+    return (
+      (PROOF_IMAGE_TYPES as readonly string[]).includes(type) ||
+      (PROOF_PDF_TYPES as readonly string[]).includes(type)
+    );
+  return (
+    (PROOF_IMAGE_TYPES as readonly string[]).includes(type) ||
+    (PROOF_VIDEO_TYPES as readonly string[]).includes(type) ||
+    (PROOF_PDF_TYPES as readonly string[]).includes(type)
+  );
+}
+
+export function proofKindHint(kind: ProofKind) {
+  switch (kind) {
+    case "screenshot":
+      return "Screenshot · dashboard only";
+    case "video":
+      return "Video · camera preferred";
+    case "live":
+      return "Live photo / video · camera";
+    case "document":
+      return "Photo or PDF · stamped docs OK";
+    case "optional":
+      return "Optional media";
+    case "photo":
+      return "Photo · camera preferred";
+    default:
+      return "";
+  }
+}
+
+export function isImageMime(mime: string) {
+  return String(mime || "").startsWith("image/");
+}
+export function isVideoMime(mime: string) {
+  return String(mime || "").startsWith("video/");
+}
+export function isPdfMime(mime: string) {
+  return String(mime || "").toLowerCase() === "application/pdf";
+}
 export type NoRequires = "reason" | "informed" | "both";
 export type MandatoryRule = "yes" | "hyderabad" | "if_disposal";
 
@@ -78,6 +180,9 @@ export const CLOCK_OUT_MODES: {
   },
 ];
 
+/** Bump when default catalogue proof/answer rules change; master template refreshes. */
+export const SI_TEMPLATE_FORMAT = 3;
+
 export type Settings = {
   managerRoles: string[];
   /** Roles that may fill and submit as Shift Incharge. */
@@ -89,6 +194,8 @@ export type Settings = {
   escalateStoreMinutes: number;
   escalateClusterMinutes: number;
   shiftSlots: string[];
+  /** Tracks which default catalogue format is stored on master. */
+  templateFormat: number;
 };
 
 export type Master = {
@@ -207,6 +314,7 @@ export function defaultSettings(partial?: Partial<Settings>): Settings {
     escalateStoreMinutes: 30,
     escalateClusterMinutes: 60,
     shiftSlots: [...DEFAULT_SHIFT_SLOTS],
+    templateFormat: SI_TEMPLATE_FORMAT,
     ...partial,
   };
 }
@@ -244,6 +352,9 @@ export function normalizeSettings(raw: unknown): Settings {
         ? Number(s.escalateClusterMinutes)
         : 60,
     shiftSlots: slots.length ? slots : [...DEFAULT_SHIFT_SLOTS],
+    templateFormat: Number.isFinite(Number(s.templateFormat))
+      ? Number(s.templateFormat)
+      : 0,
   });
 }
 
