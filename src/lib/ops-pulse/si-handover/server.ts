@@ -56,16 +56,17 @@ export async function ensureMaster(companyId: string): Promise<Master> {
       tasks(master.template).length
         ? master.template
         : defaultSiTemplate();
-    if (
+    const needsTemplate =
       !tasks(master.template || { name: "", description: "", sections: [] })
-        .length
-    ) {
+        .length;
+    if (needsTemplate) {
       const patched = await db()
         .from("ops_si_handover_master")
         .update({
           template,
           settings,
           updated_at: new Date().toISOString(),
+          version: master.version + 1,
         })
         .eq("company_id", companyId)
         .eq("version", master.version)

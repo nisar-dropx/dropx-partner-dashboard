@@ -179,7 +179,7 @@ select
   ),
   jsonb_build_object(
     'managerRoles', coalesce(to_jsonb(s.scheduler_role_ids), '[]'::jsonb),
-    'siRoles', coalesce(to_jsonb(s.responder_role_ids), '[]'::jsonb),
+    'siRoles', '[]'::jsonb,
     'modelIds', coalesce(
       (select jsonb_agg(m.id) from public.location_models m
         where m.company_id = c.id and upper(m.code) = 'NOW'),

@@ -263,13 +263,25 @@ export function isManager(a: Actor, s: Settings) {
   );
 }
 
+function hasSiPageWrite(a: Actor) {
+  return Boolean(
+    a.permissions.si_handover?.canAdd || a.permissions.si_handover?.canEdit,
+  );
+}
+
+function hasSiPageAccess(a: Actor) {
+  return Boolean(
+    a.permissions.si_handover?.canView ||
+      a.permissions.si_handover?.canAdd ||
+      a.permissions.si_handover?.canEdit,
+  );
+}
+
+/** Shift Incharge: page write grant, optionally narrowed by master siRoles allowlist. */
 export function isSi(a: Actor, s: Settings) {
   if (a.isMasterOwner) return true;
-  if (!s.siRoles.length) {
-    return Boolean(
-      a.permissions.si_handover?.canAdd || a.permissions.si_handover?.canEdit,
-    );
-  }
+  if (!hasSiPageWrite(a)) return false;
+  if (!s.siRoles.length) return true;
   return a.effectiveRoleIds.some((id) => s.siRoles.includes(id));
 }
 
@@ -281,22 +293,38 @@ export function canRead(a: Actor, s: Settings, row: SiChecklist) {
   return (
     !row.deleted_at &&
     inScope(a, row.location_id) &&
-    Boolean(a.permissions.si_handover?.canView) &&
+    hasSiPageAccess(a) &&
     (isManager(a, s) ||
       isSi(a, s) ||
+      hasSiPageWrite(a) ||
       a.userId === row.outgoing_user_id ||
       a.userId === row.incoming_user_id)
   );
 }
 
 export function canFill(a: Actor, s: Settings, row: SiChecklist) {
+  // Outgoing owner with page write can always edit their own open/rejected draft.
+  // Master siRoles only gates who may start / accept — never locks an owner's inputs.
   return (
     !a.readOnly &&
-    canRead(a, s, row) &&
-    isSi(a, s) &&
+    !row.deleted_at &&
+    inScope(a, row.location_id) &&
     ["open", "rejected"].includes(row.status) &&
     a.userId === row.outgoing_user_id &&
-    Boolean(a.permissions.si_handover?.canAdd || a.permissions.si_handover?.canEdit)
+    hasSiPageWrite(a)
+  );
+}
+
+/** Soft-delete only while still a draft (never submitted). */
+export function canDeleteDraft(a: Actor, s: Settings, row: SiChecklist) {
+  return (
+    !a.readOnly &&
+    !row.deleted_at &&
+    inScope(a, row.location_id) &&
+    row.status === "open" &&
+    !row.submitted_at &&
+    (a.userId === row.outgoing_user_id || isManager(a, s)) &&
+    (hasSiPageWrite(a) || isManager(a, s) || a.isMasterOwner)
   );
 }
 
@@ -304,10 +332,11 @@ export function canAccept(a: Actor, s: Settings, row: SiChecklist) {
   return (
     !a.readOnly &&
     canRead(a, s, row) &&
-    isSi(a, s) &&
     row.status === "submitted" &&
     a.userId !== row.outgoing_user_id &&
-    Boolean(a.permissions.si_handover?.canAdd || a.permissions.si_handover?.canEdit)
+    hasSiPageWrite(a) &&
+    // Optional allowlist: when configured, acceptor must be in siRoles (or master owner).
+    (a.isMasterOwner || !s.siRoles.length || isSi(a, s))
   );
 }
 
@@ -371,25 +400,46 @@ export function tasksForView(view: WorkspaceView, template: Template): Task[] {
   return all;
 }
 
+/**
+ * Timed unlock for mid/end tasks. Tasks shown on the Start Shift view are always
+ * editable for that stage — time gates only apply on During / Handover.
+ */
 export function taskUnlocked(
   task: Task,
   shiftStartMs: number,
   nowMs = Date.now(),
+  view: WorkspaceView = "during",
 ): { unlocked: boolean; overdue: boolean } {
+  if (view === "start" || view === "accept") {
+    return { unlocked: true, overdue: false };
+  }
   const elapsed = nowMs - shiftStartMs;
   if (task.when === "every_2hrs") {
     const unlocked = elapsed >= 0;
     const windows = Math.floor(elapsed / (2 * 60 * 60 * 1000));
-    return { unlocked, overdue: unlocked && windows >= 1 && elapsed % (2 * 60 * 60 * 1000) > 15 * 60 * 1000 };
+    return {
+      unlocked,
+      overdue:
+        unlocked &&
+        windows >= 1 &&
+        elapsed % (2 * 60 * 60 * 1000) > 15 * 60 * 1000,
+    };
   }
   if (task.when === "mid_shift" || task.when === "shift_start_mid") {
+    if (view === "during") return { unlocked: true, overdue: false };
     const mid = 4 * 60 * 60 * 1000;
-    return { unlocked: elapsed >= mid * 0.4, overdue: elapsed > mid + 30 * 60 * 1000 };
+    return {
+      unlocked: elapsed >= mid * 0.4,
+      overdue: elapsed > mid + 30 * 60 * 1000,
+    };
   }
   if (task.when === "mid_shift_end") {
+    if (view === "during" || view === "handover")
+      return { unlocked: true, overdue: false };
     return { unlocked: elapsed >= 3 * 60 * 60 * 1000, overdue: false };
   }
   if (task.when === "shift_end" || task.when === "when_disposal") {
+    if (view === "handover") return { unlocked: true, overdue: false };
     const endSoon = 6 * 60 * 60 * 1000;
     return { unlocked: elapsed >= endSoon * 0.5, overdue: false };
   }

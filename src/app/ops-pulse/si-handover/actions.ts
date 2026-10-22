@@ -3,17 +3,21 @@
 import { revalidatePath } from "next/cache";
 import {
   canAccept,
+  canDeleteDraft,
   canFill,
   currentShift,
   emptyAnswer,
+  isSi,
   nextShift,
   parseShiftSlot,
+  tasks,
   validateAnswersForSubmit,
   validateSettings,
   type ChecklistEvent,
   type Rejection,
   type TaskAnswer,
 } from "@/lib/ops-pulse/si-handover/model";
+import { defaultSiTemplate } from "@/lib/ops-pulse/si-handover/template";
 import {
   context,
   db,
@@ -43,7 +47,18 @@ export async function startShift(input: {
 }) {
   try {
     const c = await context(true);
-    if (!c.actor.permissions.si_handover?.canAdd && !c.actor.permissions.si_handover?.canEdit)
+    const canStart =
+      c.actor.isMasterOwner ||
+      Boolean(
+        c.actor.permissions.si_handover?.canAdd ||
+          c.actor.permissions.si_handover?.canEdit,
+      );
+    if (
+      !canStart ||
+      (c.master.settings.siRoles.length &&
+        !isSi(c.actor, c.master.settings) &&
+        !c.actor.isMasterOwner)
+    )
       throw Error("You do not have permission to start a shift checklist.");
     const locations = await stores(c.auth, c.master.settings);
     const store = locations.find((l) => l.id === input.locationId);
@@ -51,6 +66,9 @@ export async function startShift(input: {
     const cur = currentShift(new Date(), c.master.settings.shiftSlots);
     const shiftDate = input.shiftDate || cur.shiftDate;
     const shiftSlot = parseShiftSlot(input.shiftSlot || cur.shiftSlot);
+    const template = tasks(c.master.template).length
+      ? c.master.template
+      : defaultSiTemplate();
 
     const existing = await db()
       .from("ops_si_shift_checklists")
@@ -71,6 +89,22 @@ export async function startShift(input: {
         throw Error(
           `This shift is already owned by ${existing.data.outgoing_name}. Ask them to hand over, or open Acceptance if they have submitted.`,
         );
+      // Repair empty snapshots so the owner always sees the task form.
+      if (!tasks(existing.data.template || { name: "", description: "", sections: [] }).length) {
+        await db()
+          .from("ops_si_shift_checklists")
+          .update({
+            template,
+            template_version: c.master.version,
+            events: [
+              ...(existing.data.events || []),
+              event(c.actor, "template_repaired", "Task list restored"),
+            ].slice(-80),
+            version: existing.data.version + 1,
+          })
+          .eq("id", existing.data.id)
+          .eq("company_id", c.companyId);
+      }
       revalidate();
       return { ok: true as const, id: existing.data.id as string };
     }
@@ -83,7 +117,7 @@ export async function startShift(input: {
       shift_date: shiftDate,
       shift_slot: shiftSlot,
       status: "open",
-      template: c.master.template,
+      template,
       template_version: c.master.version,
       answers: {},
       open_issues: "",
@@ -100,6 +134,42 @@ export async function startShift(input: {
     if (inserted.error) throw Error(inserted.error.message);
     revalidate();
     return { ok: true as const, id: inserted.data.id as string };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deleteDraftChecklist(input: { checklistId: string; version: number }) {
+  try {
+    const c = await readChecklist(input.checklistId);
+    if (!canDeleteDraft(c.actor, c.master.settings, c.checklist))
+      throw Error(
+        "Only an unsubmitted draft can be deleted, by its owner or a programme manager.",
+      );
+    if (c.checklist.version !== input.version)
+      throw Error("Someone else updated this checklist. Refresh and try again.");
+    const r = await db()
+      .from("ops_si_shift_checklists")
+      .update({
+        status: "cancelled",
+        deleted_at: new Date().toISOString(),
+        events: [
+          ...c.checklist.events,
+          event(c.actor, "deleted", "Draft checklist removed"),
+        ].slice(-80),
+        version: c.checklist.version + 1,
+      })
+      .eq("company_id", c.companyId)
+      .eq("id", c.checklist.id)
+      .eq("version", input.version)
+      .eq("status", "open")
+      .is("submitted_at", null)
+      .select("id")
+      .maybeSingle();
+    if (r.error) throw Error(r.error.message);
+    if (!r.data) throw Error("Delete conflict. Refresh and try again.");
+    revalidate();
+    return { ok: true as const };
   } catch (e) {
     return fail(e);
   }

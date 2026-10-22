@@ -35,6 +35,31 @@ test("clock-out mode is configurable and defaults to ops_only", () => {
   assert.ok(CLOCK_OUT_MODES.some((m) => m.value === "hard_block"));
 });
 
+test("owner with page write can fill even when siRoles allowlist excludes their role", async () => {
+  const { canFill, canDeleteDraft, taskUnlocked } = await import("./model.ts");
+  const actor = {
+    userId: "abdul",
+    displayName: "Abdul",
+    isMasterOwner: false,
+    effectiveRoleIds: ["other-role"],
+    hasAllLocationAccess: true,
+    locationScopeIds: [],
+    permissions: { si_handover: { canView: true, canAdd: true, canEdit: true } },
+  };
+  const settings = defaultSettings({ siRoles: ["sic-role-only"] });
+  const row = {
+    id: "c1",
+    location_id: "s1",
+    status: "open",
+    outgoing_user_id: "abdul",
+    submitted_at: null,
+    deleted_at: null,
+  };
+  assert.equal(canFill(actor, settings, row), true);
+  assert.equal(canDeleteDraft(actor, settings, row), true);
+  assert.equal(taskUnlocked({ when: "shift_start_mid" }, Date.now(), Date.now(), "start").unlocked, true);
+});
+
 test("validateSettings rejects inverted escalation windows", () => {
   assert.throws(
     () =>
