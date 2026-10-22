@@ -172,7 +172,20 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   const dataset = await loadReviewStatusDataset(companyId, locations.map((location) => location.station_code), range.from, range.to);
   const graph = await loadPeopleReviewGraph(companyId).catch(() => null);
   const routes: Record<string, PeopleReviewRoute> = Object.fromEntries(locations.map(location => [location.id, graph ? resolvePeopleReviewRoute(graph, location.id) : { chain: [], error: "People routing could not be verified. Refresh and try again." }]));
-  const allRows = buildReviewStatusRows({ routes, dates: reviewStatusDates(range.from, range.to), locations, ...dataset });
+  const darkStore = operatingContext.mode === "amazon_now";
+  const allRows = buildReviewStatusRows({
+    routes,
+    dates: reviewStatusDates(range.from, range.to),
+    locations,
+    ...dataset,
+    darkStore
+  });
+  const primaryLabel = darkStore ? "Store manager" : "Cluster manager";
+  const secondaryLabel = darkStore ? "City manager" : "AOM";
+  const primaryEmpty = darkStore ? "No Store Manager on route" : "Not configured";
+  const secondaryEmpty = darkStore ? "No City Manager layer" : "No AOM layer";
+  const secondaryHint = darkStore ? "City Manager" : "Area Operations Manager";
+  const secondaryMissingHint = darkStore ? "Route skips City Manager" : "Route skips AOM";
   const filters: SearchParams = {
     from: range.from,
     to: range.to,
@@ -223,7 +236,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
         subtitle="One view of every station review, reviewer stage and pending dependency."
         action={canManageAccess ? <Link className="button secondary compact" href="/users?section=roles">Manage access</Link> : undefined}
       />
-      <PerformanceWorkspaceTabs active="status" canViewReviews={canViewReviews} canViewReviewStatus darkStore={operatingContext.mode === "amazon_now"} />
+      <PerformanceWorkspaceTabs active="status" canViewReviews={canViewReviews} canViewReviewStatus darkStore={darkStore} />
 
       <nav className="review-status-presets" aria-label="Review date presets">
         <Link className={range.from === latestDate && range.to === latestDate ? "active" : ""} href={hrefFor(todayFilters, { from: latestDate, to: latestDate, page: undefined })}>Previous day</Link>
@@ -237,8 +250,8 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
         <label><span>To</span><input name="to" type="date" defaultValue={range.to} max={todayDate} /></label>
         <label><span>Status</span><select name="status" defaultValue={filters.status}><option value="all">All statuses</option><option value="not_started">Not started</option><option value="in_progress">In progress</option><option value="completed">Completed</option></select></label>
         <label><span>Region</span><select name="region" defaultValue={filters.region}><option value="all">All regions</option>{regions.map((region) => <option key={region}>{region}</option>)}</select></label>
-        <label><span>Cluster manager</span><select name="cluster" defaultValue={filters.cluster}><option value="all">All clusters</option>{clusters.map((cluster) => <option key={cluster}>{cluster}</option>)}</select></label>
-        <label><span>AOM</span><select name="aom" defaultValue={filters.aom}><option value="all">All AOMs</option>{aoms.map((aom) => <option key={aom}>{aom}</option>)}</select></label>
+        <label><span>{primaryLabel}</span><select name="cluster" defaultValue={filters.cluster}><option value="all">{darkStore ? "All store managers" : "All clusters"}</option>{clusters.map((cluster) => <option key={cluster}>{cluster}</option>)}</select></label>
+        <label><span>{secondaryLabel}</span><select name="aom" defaultValue={filters.aom}><option value="all">{darkStore ? "All city managers" : "All AOMs"}</option>{aoms.map((aom) => <option key={aom}>{aom}</option>)}</select></label>
         <label><span>Station</span><select name="station" defaultValue={filters.station}><option value="all">All stations</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || "Station"}</option>)}</select></label>
         <label className="review-status-search"><span>Find</span><input name="q" defaultValue={filters.q} placeholder="Station or reviewer" /></label>
         <button className="button compact">Apply</button>
@@ -260,14 +273,14 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
           <div><h2>Station review register</h2><p>{rows.length} results · click any row for reviewers, RCA, actions and discussion.</p></div>
           <span>{formatDashboardDate(range.from)}{range.from !== range.to ? ` – ${formatDashboardDate(range.to)}` : ""}</span>
         </header>
-        <div className="review-status-columns" aria-hidden="true"><span>Date</span><span>Station</span><span>Cluster manager</span><span>AOM</span><span>Status</span><span>Progress</span><span>Current dependency</span><span></span></div>
+        <div className="review-status-columns" aria-hidden="true"><span>Date</span><span>Station</span><span>{primaryLabel}</span><span>{secondaryLabel}</span><span>Status</span><span>Progress</span><span>Current dependency</span><span></span></div>
         <div className="review-status-rows">
           {pageRows.length ? pageRows.map((row) => <details className={`review-status-row ${row.status}`} key={row.key}>
             <summary>
               <span data-label="Date"><strong>{formatDashboardDate(row.date)}</strong><small>Performance day</small></span>
               <span data-label="Station"><strong>{row.stationCode}</strong><small>{row.stationName}</small></span>
-              <span data-label="Cluster"><strong>{row.clusterManager || "Not configured"}</strong><small>{row.region || "Region not set"}</small></span>
-              <span data-label="AOM"><strong>{row.aom || "No AOM layer"}</strong><small>{row.aom ? "Area Operations Manager" : "Route skips AOM"}</small></span>
+              <span data-label={primaryLabel}><strong>{row.clusterManager || primaryEmpty}</strong><small>{row.region || (darkStore ? "City / region from People" : "Region not set")}</small></span>
+              <span data-label={secondaryLabel}><strong>{row.aom || secondaryEmpty}</strong><small>{row.aom ? secondaryHint : secondaryMissingHint}</small></span>
               <span data-label="Status"><b className={`review-status-pill ${row.status}`}>{statusLabel(row.status)}</b></span>
               <span data-label="Progress"><strong>{row.totalSteps ? `${row.completedSteps + row.skippedSteps}/${row.totalSteps}` : "—"}</strong><small>{row.skippedSteps ? `${row.skippedSteps} skipped` : `${row.completedSteps} reviewed`}</small></span>
               <span data-label="Dependency"><strong>{row.currentDependency}</strong><small>{row.lastActivityAt ? formatDashboardDateTime(row.lastActivityAt) : "No activity"}</small></span>

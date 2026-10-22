@@ -57,8 +57,34 @@ export function darkStoreReviewRole(p: Pick<ReviewPerson, "code" | "role">) {
   return false;
 }
 
+/** Ordered DS review tiers — parallel people at the same tier may share one upward route. */
+export function darkStoreReviewTier(p: Pick<ReviewPerson, "code" | "role">): "si" | "sm" | "city" | "rm" | "nh" | null {
+  const text = roleText(p as ReviewPerson);
+  if (/\b(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)\b/.test(text)) return "si";
+  if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(text)) return "sm";
+  if (/\bSM\b/.test(text) && !/\b(STM|STATION MANAGER)\b/.test(text)) return "sm";
+  if (/\b(CITY MANAGER|CTM)\b/.test(text)) return "city";
+  if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(text)) return "rm";
+  if (nationalHeadRole(p as ReviewPerson)) return "nh";
+  return null;
+}
+
 const isOperationalChain = (chain: ReviewPerson[], darkStore: boolean) =>
   chain.some((person) => darkStore ? darkStoreReviewRole(person) : lastMileOperationalRole(person));
+
+/**
+ * True when `chain` is the same route as `selected`, or a Dark Store peer root
+ * (e.g. a second Shift Incharge) that shares the identical managers above.
+ */
+function operationalChainConverges(chain: ReviewPerson[], selected: ReviewPerson[], darkStore: boolean) {
+  if (chain.every((person, index) => person.id === selected[selected.length - chain.length + index]?.id)) {
+    return true;
+  }
+  if (!darkStore || chain.length !== selected.length || chain.length < 2) return false;
+  const rootTier = darkStoreReviewTier(chain[0]);
+  if (!rootTier || rootTier !== darkStoreReviewTier(selected[0])) return false;
+  return chain.slice(1).every((person, index) => person.id === selected[index + 1]?.id);
+}
 
 export function resolvePeopleReviewRoute(graph: PeopleReviewGraph, stationId: string): PeopleReviewRoute {
   const byId = new Map(graph.people.map(p => [p.id, p]));
@@ -143,10 +169,15 @@ export function resolvePeopleReviewRoute(graph: PeopleReviewGraph, stationId: st
       ? 'No Shift Incharge, Store Manager, City Manager, Regional Manager or National Head is mapped for this store in People.'
       : 'No eligible review manager is mapped in People.');
   }
-  operationalChains.sort((a, b) => b.length - a.length);
+  // Prefer the longest route; among equal roots pick a stable name/id so peer SIs do not flip daily.
+  operationalChains.sort((a, b) =>
+    b.length - a.length
+    || a[0].name.localeCompare(b[0].name)
+    || a[0].id.localeCompare(b[0].id)
+  );
   const selected = operationalChains[0];
-  // Every other operational root must converge on the same route; never choose alphabetically.
-  if (operationalChains.some(chain => chain.some((p, i) => p.id !== selected[selected.length - chain.length + i]?.id))) {
+  // Every other operational root must converge on the same route (suffix or same-tier peer root).
+  if (operationalChains.some((chain) => !operationalChainConverges(chain, selected, darkStore))) {
     return fail('People has conflicting reporting routes for this station. Resolve the primary manager mapping.');
   }
   const stages = selected;

@@ -774,6 +774,7 @@ async function renderStoreHealthReviewDesk({
   const deskCodes = deskLocations.map((location) => location.station_code);
   const requestedReviewCode = stationCode(searchParams?.review ?? null);
   const metricSelect = "batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at";
+  const historyFrom = dateShift(selectedDate, -6);
   const dayFacts = !supabaseAdmin || !deskCodes.length
     ? { data: [] as MetricFact[], error: null }
     : await supabaseAdmin.from("report_metric_facts")
@@ -796,6 +797,17 @@ async function renderStoreHealthReviewDesk({
     ?? deskLocations.find((location) => activeReviewCodes.has(stationCode(location.station_code)))
     ?? deskLocations[0]
     ?? null;
+  const historyFacts = !supabaseAdmin || !selectedReviewLocation
+    ? { data: [] as MetricFact[], error: null }
+    : await supabaseAdmin.from("report_metric_facts")
+      .select(metricSelect)
+      .eq("company_id", companyId)
+      .eq("station_code", selectedReviewLocation.station_code)
+      .eq("source_type", dailySource)
+      .gte("report_date", historyFrom)
+      .lte("report_date", selectedDate)
+      .order("created_at", { ascending: false })
+      .limit(200);
   const selectedReviewRow = selectedReviewLocation
     ? selectStationDailyRow(
       (dayFacts.data ?? []) as MetricFact[],
@@ -808,6 +820,21 @@ async function renderStoreHealthReviewDesk({
   const { metrics, hero } = selectedReviewRow
     ? buildStoreHealthReviewMetrics(selectedReviewRow.values_json)
     : { metrics: [], hero: { scorePct: null, band: null, pointsEarned: null, pointsAvailable: null, city: null } };
+  const storeHealthHistory = selectedReviewLocation
+    ? Array.from({ length: 7 }, (_, index) => dateShift(selectedDate, index - 6)).map((historyDate) => {
+      const row = selectStationDailyRow(
+        (historyFacts.data ?? []) as MetricFact[],
+        historyDate,
+        selectedReviewLocation.station_code,
+        stationCode,
+        STORE_HEALTH_DAILY_SOURCE
+      );
+      const built = row
+        ? buildStoreHealthReviewMetrics(row.values_json)
+        : { metrics: [], hero: { scorePct: null, band: null, pointsEarned: null, pointsAvailable: null, city: null } };
+      return { date: historyDate, metrics: built.metrics, hero: built.hero };
+    })
+    : [];
   const selectedReview = selectedReviewLocation
     ? reviewWorkspace.reviews.find((review) =>
       review.station_id === selectedReviewLocation.id || stationCode(review.station_code) === stationCode(selectedReviewLocation.station_code)
@@ -872,6 +899,7 @@ async function renderStoreHealthReviewDesk({
           canFilterClusters={canFilterClusters}
           readOnlyPreview={Boolean(authorization.readOnly)}
           metrics={metrics}
+          history={storeHealthHistory}
           hero={hero}
           notice={searchParams?.notice || null}
           previousReviews={reviewWorkspace.previousReviews}

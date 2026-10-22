@@ -72,6 +72,27 @@ test('Dark Store route is Shift Incharge → Store → City → Regional → NH 
  assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['si','sm','city','rm','nh']);
 });
 
+test('Dark Store picks one Shift Incharge when peers share the same managers above',()=>{
+ const g=darkStoreGraph();
+ g.people[0].name='Asha SI';
+ g.people.push(person('si2','SIC',{role:'Shift Incharge',name:'Zara SI',locationId:'store',scopeIds:['store']}));
+ g.relationships.push({subjectId:'si2',managerId:'sm'});
+ const route=resolvePeopleReviewRoute(g,'store');
+ assert.equal(route.error,null);
+ // Stable pick: alphabetical by name among equal-length peer roots.
+ assert.deepEqual(route.chain.map(p=>p.personId),['si','sm','city','rm','nh']);
+});
+
+test('Dark Store still fails when peer Shift Incharges report to different managers',()=>{
+ const g=darkStoreGraph();
+ g.people.push(
+  person('si2','SIC',{role:'Shift Incharge',locationId:'store',scopeIds:['store']}),
+  person('sm2','SM',{role:'Store Manager',scopeIds:['store']})
+ );
+ g.relationships.push({subjectId:'si2',managerId:'sm2'},{subjectId:'sm2',managerId:'city'});
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/conflicting/);
+});
+
 test('Dark Store keeps NH on the route even when marked full oversight',()=>{
  const g=darkStoreGraph();
  g.people[4].oversight=true;

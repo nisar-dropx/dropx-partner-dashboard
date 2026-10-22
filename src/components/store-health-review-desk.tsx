@@ -28,6 +28,7 @@ import {
   type StoreHealthHero,
   type StoreHealthReviewMetric
 } from "@/lib/ops-pulse/store-health-scorecard";
+import { StoreHealthScorecardPanel, type StoreHealthHistoryDay } from "@/components/store-health-scorecard-panel";
 import "@/app/ops-pulse/performance/review-desk.css";
 import "@/app/ops-pulse/performance/store-health-review.css";
 
@@ -63,6 +64,7 @@ type Props = {
   canFilterClusters?: boolean;
   readOnlyPreview?: boolean;
   metrics: StoreHealthReviewMetric[];
+  history: StoreHealthHistoryDay[];
   hero: StoreHealthHero;
   notice: string | null;
   previousReviews: PerformanceReviewCarryover[];
@@ -86,39 +88,10 @@ function formatActual(metric: StoreHealthReviewMetric) {
   return String(metric.actual);
 }
 
-function severityRank(severity: StoreHealthReviewMetric["severity"]) {
-  return severity === "red" ? 0 : severity === "amber" ? 1 : severity === "green" ? 2 : 3;
-}
-
-/** Same single-grid scorecard pattern as Last Mile ReviewScorecard — no category rows that stretch one tile full width. */
-function StoreHealthScorecard({ metrics }: { metrics: StoreHealthReviewMetric[] }) {
-  const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
-  const ordered = [...metrics].sort((left, right) =>
-    severityRank(left.severity) - severityRank(right.severity)
-    || left.short.localeCompare(right.short)
-  );
-  return <ReviewDetails className="performance-inline-detail review-scorecard" open>
-    <summary><span>Performance scorecard</span><b>{misses.length} misses · {metrics.length} metrics</b></summary>
-    <div className="review-scorecard-toolbar">
-      <span>All Store Health metrics · misses first · Green full · Amber half · Red zero</span>
-      <ReviewDetailsClose label="Close performance scorecard"/>
-    </div>
-    <p className="review-history-hint">Selected day’s imported Store Health Scorecard (D-2).</p>
-    {!metrics.length ? <p className="review-scorecard-empty">No Store Health scorecard imported for this store and date.</p> : <div className="performance-review-metrics">{ordered.map((metric) => {
-      const definition = storeHealthMetricDefinitions.find((entry) => entry.key === metric.key);
-      return <article className={metric.severity} key={metric.key} title={`${metric.label}${definition?.category ? ` · ${definition.category}` : ""}`}>
-        <span>{metric.short}</span>
-        <strong>{formatActual(metric)}</strong>
-        <small>{metric.severity === "neutral" ? "Not scored" : `Target ${definition?.targetText ?? "—"}`}</small>
-      </article>;
-    })}</div>}
-  </ReviewDetails>;
-}
-
 export function StoreHealthReviewDesk(props: Props) {
   const {
     canAdd, canCompleteStep, canEdit, canComment, programManager, reviewerEditReopened, isOriginalReviewer,
-    updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews,
+    updates, reviewChain, date, error, items, locations, metrics, history, notice, previousReviews, review, reviews,
     selectedLocation, sourceBatchId, sourceType, sourceWeek, steps, hero
   } = props;
   const selectedCode = selectedLocation.station_code;
@@ -280,7 +253,7 @@ export function StoreHealthReviewDesk(props: Props) {
         </div>
       ) : null}
 
-      <StoreHealthScorecard metrics={metrics}/>
+      <StoreHealthScorecardPanel metrics={metrics} history={history} date={date}/>
 
       {rcaRows.length ? (
         <PerformanceRcaActions

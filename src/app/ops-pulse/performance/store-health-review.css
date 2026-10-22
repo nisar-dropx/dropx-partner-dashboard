@@ -124,8 +124,147 @@
   color: #64748b;
 }
 
+.store-health-review-desk .review-scorecard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
 .store-health-review-desk .review-scorecard-toolbar span {
   font-size: 11px;
+}
+
+.store-health-score-modes {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.store-health-score-modes button {
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 9px;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.store-health-score-modes button.active {
+  background: #172033;
+  color: #fff;
+}
+
+.store-health-score-modes button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.store-health-compare-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 12px 10px;
+}
+
+.store-health-compare-summary article {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.store-health-compare-summary span,
+.store-health-compare-summary small {
+  display: block;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.store-health-compare-summary strong {
+  display: block;
+  margin: 3px 0;
+  color: #172033;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-health-review-desk .performance-review-metrics article {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.store-health-review-desk .performance-review-metrics article.red {
+  background: linear-gradient(180deg, #fff5f5 0%, #fef2f2 100%);
+  border-color: #fecaca;
+}
+
+.store-health-review-desk .performance-review-metrics article.amber {
+  background: linear-gradient(180deg, #fffbeb 0%, #fff7ed 100%);
+  border-color: #fde68a;
+}
+
+.store-health-review-desk .performance-review-metrics article.green {
+  background: linear-gradient(180deg, #f0fdf4 0%, #ecfdf5 100%);
+  border-color: #bbf7d0;
+}
+
+.store-health-metric-cat {
+  margin-top: auto;
+  color: #94a3b8;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.store-health-metrics-compare article {
+  min-height: 92px;
+}
+
+.store-health-metric-trend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.store-health-metric-trend em {
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-health-metric-trend em.up { color: #15803d; }
+.store-health-metric-trend em.down { color: #b91c1c; }
+.store-health-metric-trend em.flat { color: #94a3b8; }
+
+.store-health-spark {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.store-health-spark path { stroke: #64748b; }
+.store-health-spark.green path { stroke: #16a34a; }
+.store-health-spark.amber path { stroke: #d97706; }
+.store-health-spark.red path { stroke: #dc2626; }
+.store-health-spark.empty {
+  width: 56px;
+  height: 18px;
+  border-radius: 4px;
+  background: #e2e8f0;
 }
 
 @media (max-width: 1100px) {

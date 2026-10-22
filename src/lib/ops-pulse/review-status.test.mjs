@@ -33,6 +33,32 @@ test("matrix keeps not-started days and historical saved reviewers", () => {
   assert.equal(rows[1].currentDependency, "Start review");
 });
 
+test("Dark Store register columns use Store Manager and City Manager from the People route", () => {
+  const rows = buildReviewStatusRows({
+    darkStore: true,
+    dates: ["2026-10-21"],
+    locations: [location],
+    reviews: [],
+    steps: [],
+    items: [],
+    updates: [],
+    followups: [],
+    routes: {
+      "station-1": {
+        error: null,
+        chain: [
+          { reviewerName: "Asha", reviewerRole: "Shift Incharge", reviewerUserId: "u1", personId: "p1", assignmentId: "a1", designationId: "SIC", routingSource: "people" },
+          { reviewerName: "Bala", reviewerRole: "Store Manager", reviewerUserId: "u2", personId: "p2", assignmentId: "a2", designationId: "SM", routingSource: "people" },
+          { reviewerName: "Chitra", reviewerRole: "City Manager", reviewerUserId: "u3", personId: "p3", assignmentId: "a3", designationId: "CTM", routingSource: "people" }
+        ]
+      }
+    }
+  });
+  assert.equal(rows[0].clusterManager, "Bala");
+  assert.equal(rows[0].aom, "Chitra");
+  assert.equal(rows[0].currentDependency, "Start review");
+});
+
 test("closed reviews show resolved progress including an evidenced skip", () => {
   const review = { id: "review-2", source_date: "2026-09-04", station_id: "station-1", station_code: "TEST", source_type: "hawkeye", status: "closed", current_step_order: 2, review_summary: null, started_at: "2026-09-05T04:00:00Z", closed_at: "2026-09-05T05:00:00Z", updated_at: "2026-09-05T05:00:00Z" };
   const base = { review_id: "review-2", feedback: null, proxy_reviewer_name: null, proxy_reason: null, proxy_started_at: null };
