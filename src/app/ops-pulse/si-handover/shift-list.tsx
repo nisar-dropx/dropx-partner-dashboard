@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { statusLabels, type WorkspaceView } from "@/lib/ops-pulse/si-handover/model";
+import {
+  statusLabels,
+  type ChecklistStatus,
+  type WorkspaceView,
+} from "@/lib/ops-pulse/si-handover/model";
 import {
   filterProgressRows,
   paginateRows,
@@ -20,6 +24,23 @@ type Props = {
   empty?: string;
   pageSize?: number;
 };
+
+function statusClass(status: ChecklistStatus) {
+  switch (status) {
+    case "open":
+      return styles.statusOpen;
+    case "submitted":
+      return styles.statusSubmitted;
+    case "accepted":
+      return styles.statusAccepted;
+    case "rejected":
+      return styles.statusRejected;
+    case "cancelled":
+      return styles.statusCancelled;
+    default:
+      return "";
+  }
+}
 
 export function ShiftList(props: Props) {
   const [store, setStore] = useState("");
@@ -70,14 +91,14 @@ export function ShiftList(props: Props) {
       <div className={styles.shiftListHead}>
         <h2 className={styles.sectionTitle}>{props.title}</h2>
         <span className={styles.chip}>
-          {filtered.length} shift{filtered.length === 1 ? "" : "s"}
+          {filtered.length} of {props.rows.length}
         </span>
       </div>
       <div className={styles.filterBar}>
         <label className={styles.field}>
           Store
           <select value={store} onChange={(e) => setStore(e.target.value)}>
-            <option value="">All</option>
+            <option value="">All stores</option>
             {stores.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.code}
@@ -86,9 +107,9 @@ export function ShiftList(props: Props) {
           </select>
         </label>
         <label className={styles.field}>
-          Shift Incharge
+          Person
           <select value={si} onChange={(e) => setSi(e.target.value)}>
-            <option value="">All</option>
+            <option value="">Everyone</option>
             {sis.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -126,12 +147,12 @@ export function ShiftList(props: Props) {
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
           >
-            <option value="date_desc">Date · newest</option>
-            <option value="date_asc">Date · oldest</option>
+            <option value="date_desc">Newest first</option>
+            <option value="date_asc">Oldest first</option>
             <option value="pct_desc">Completion · high</option>
             <option value="pct_asc">Completion · low</option>
             <option value="store">Store</option>
-            <option value="si">Shift Incharge</option>
+            <option value="si">Person</option>
             <option value="status">Status</option>
           </select>
         </label>
@@ -139,7 +160,7 @@ export function ShiftList(props: Props) {
           Search
           <input
             value={q}
-            placeholder="Store, SI, date…"
+            placeholder="Store or name…"
             onChange={(e) => setQ(e.target.value)}
           />
         </label>
@@ -158,7 +179,11 @@ export function ShiftList(props: Props) {
             >
               <div className={styles.cardTop}>
                 <strong>
-                  {r.store_code} · {r.shift_date} {r.shift_slot}
+                  {r.store_code}
+                  <span className={styles.cardWhen}>
+                    {" "}
+                    · {r.shift_date} {r.shift_slot}
+                  </span>
                 </strong>
                 <span
                   className={
@@ -172,11 +197,22 @@ export function ShiftList(props: Props) {
                   {r.pct}%
                 </span>
               </div>
-              <small>
-                {statusLabels[r.status]} · {r.outgoing_name}
-                {r.total ? ` · ${r.answered}/${r.total} tasks` : ""}
-                {r.escalate !== "none" ? ` · escalate ${r.escalate}` : ""}
-              </small>
+              <div className={styles.cardMeta}>
+                <span className={`${styles.statusPill} ${statusClass(r.status)}`}>
+                  {statusLabels[r.status]}
+                </span>
+                <small>{r.outgoing_name}</small>
+                {r.total ? (
+                  <small>
+                    {r.answered}/{r.total} tasks
+                  </small>
+                ) : null}
+                {r.escalate !== "none" ? (
+                  <span className={`${styles.statusPill} ${styles.statusSubmitted}`}>
+                    escalate {r.escalate}
+                  </span>
+                ) : null}
+              </div>
               <div className={styles.cardProgress}>
                 <div
                   className={styles.cardProgressFill}

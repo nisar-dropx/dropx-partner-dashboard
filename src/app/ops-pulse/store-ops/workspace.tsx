@@ -332,40 +332,43 @@ export function StoreOpsWorkspace(props: Props) {
 
       {!focused ? (
         <section className={styles.panel}>
-          <div className={styles.startGrid}>
-            <label className={styles.field}>
-              Store
-              <select
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
+          <div className={styles.startDock}>
+            <div className={styles.startGrid}>
+              <label className={styles.field}>
+                Store to work
+                <select
+                  value={locationId}
+                  onChange={(e) => setLocationId(e.target.value)}
+                >
+                  {!props.stores.length ? (
+                    <option value="">No stores in scope</option>
+                  ) : null}
+                  {props.stores.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.station_code} · {s.station_name || s.station_code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className={styles.btnAccent}
+                disabled={pending || !locationId || !filler}
+                onClick={() =>
+                  run(() => startDay({ locationId, workDate: today }))
+                }
               >
-                {!props.stores.length ? (
-                  <option value="">No stores in scope</option>
-                ) : null}
-                {props.stores.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.station_code} · {s.station_name || s.station_code}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className={styles.btnAccent}
-              disabled={pending || !locationId || !filler}
-              onClick={() =>
-                run(() => startDay({ locationId, workDate: today }))
-              }
-            >
-              Start today
-            </button>
+                Start today
+              </button>
+            </div>
+            <p className={styles.meta}>
+              <span className={styles.chipOk}>{today} IST · one checklist per store</span>
+              <span className={styles.chip}>
+                {props.stores.length} store{props.stores.length === 1 ? "" : "s"} in
+                scope
+              </span>
+            </p>
           </div>
-          <p className={styles.meta}>
-            <span className={styles.chipOk}>{today} IST</span>
-            <span className={styles.chip}>
-              {props.stores.length} store{props.stores.length === 1 ? "" : "s"}
-            </span>
-          </p>
 
           <h2 className={styles.sectionTitle}>Open today</h2>
           <div className={styles.list}>

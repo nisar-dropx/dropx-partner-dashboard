@@ -70,16 +70,13 @@ export function ActivitiesReportClient(props: Props) {
   };
 
   return (
-    <div className={styles.page}>
+    <div className={styles.pageWide}>
       <header className={styles.hero}>
         <p className={styles.eyebrow}>Dark Store · Activities & Handover</p>
         <h1>Activities report</h1>
         <p>
-          Completion and follow-up across Shift Incharge handovers and Store
-          Manager daily checklists.{" "}
-          <Link href="/si-handover?view=start">Shift</Link>
-          {" · "}
-          <Link href="/store-ops?view=start">Store</Link>
+          See who is on track, who still needs to submit, and where handovers are
+          stuck — across Shift operations and Store operations.
         </p>
       </header>
 
@@ -112,31 +109,36 @@ export function ActivitiesReportClient(props: Props) {
       </nav>
 
       <section className={styles.panel}>
-        <div className={styles.filterBar}>
-          <label className={styles.field}>
-            From
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-            />
-          </label>
-          <label className={styles.field}>
-            To
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            className={styles.btnAccent}
-            disabled={pending}
-            onClick={applyRange}
-          >
-            Apply dates
-          </button>
+        <div className={styles.reportToolbar}>
+          <div className={styles.filterBar}>
+            <label className={styles.field}>
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </label>
+            <label className={styles.field}>
+              To
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className={styles.btnAccent}
+              disabled={pending}
+              onClick={applyRange}
+            >
+              Apply range
+            </button>
+          </div>
+          <span className={styles.chipOk}>
+            {props.tab === "shift" ? "Shift handovers" : "Store day checklists"}
+          </span>
         </div>
       </section>
 
@@ -246,6 +248,7 @@ function ShiftReportBody({
   return (
     <>
       <section className={styles.panel}>
+        <h2 className={styles.sectionTitle}>Overview</h2>
         <div className={styles.kpiGrid}>
           <div className={styles.kpi}>
             <strong>{s.shifts}</strong>
@@ -257,11 +260,11 @@ function ShiftReportBody({
           </div>
           <div className={styles.kpi}>
             <strong>{s.submitRate}%</strong>
-            <span>Submitted</span>
+            <span>Submit rate</span>
           </div>
           <div className={styles.kpi}>
             <strong>{s.acceptRate}%</strong>
-            <span>Accepted of submitted</span>
+            <span>Accept rate</span>
           </div>
           <div className={styles.kpi}>
             <strong>{s.open}</strong>
@@ -274,20 +277,21 @@ function ShiftReportBody({
         </div>
       </section>
 
+      <div className={styles.reportSplit}>
       <section className={styles.panel}>
-        <h2 className={styles.sectionTitle}>By Shift Incharge</h2>
+        <h2 className={styles.sectionTitle}>By person</h2>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Shift Incharge</th>
+                <th>Person</th>
                 <th>Shifts</th>
                 <th>Avg %</th>
                 <th>Open</th>
-                <th>Submitted</th>
-                <th>Accepted</th>
-                <th>Rejected</th>
-                <th>Overdue</th>
+                <th>In</th>
+                <th>OK</th>
+                <th>No</th>
+                <th>Late</th>
               </tr>
             </thead>
             <tbody>
@@ -311,7 +315,19 @@ function ShiftReportBody({
                       </button>
                     </td>
                     <td>{b.shifts}</td>
-                    <td>{b.avgPct}%</td>
+                    <td>
+                      <span
+                        className={
+                          b.avgPct >= 80
+                            ? styles.pctOk
+                            : b.avgPct >= 40
+                              ? styles.pctMid
+                              : styles.pctLow
+                        }
+                      >
+                        {b.avgPct}%
+                      </span>
+                    </td>
                     <td>{b.open}</td>
                     <td>{b.submitted}</td>
                     <td>{b.accepted}</td>
@@ -361,7 +377,19 @@ function ShiftReportBody({
                       </button>
                     </td>
                     <td>{b.shifts}</td>
-                    <td>{b.avgPct}%</td>
+                    <td>
+                      <span
+                        className={
+                          b.avgPct >= 80
+                            ? styles.pctOk
+                            : b.avgPct >= 40
+                              ? styles.pctMid
+                              : styles.pctLow
+                        }
+                      >
+                        {b.avgPct}%
+                      </span>
+                    </td>
                     <td>{b.open}</td>
                     <td>{b.submitted}</td>
                     <td>{b.accepted}</td>
@@ -373,6 +401,7 @@ function ShiftReportBody({
           </table>
         </div>
       </section>
+      </div>
 
       <section className={styles.panel}>
         <div className={styles.shiftListHead}>
@@ -508,8 +537,31 @@ function ShiftReportBody({
                     </td>
                     <td>{r.outgoing_name}</td>
                     <td>
-                      {siStatusLabels[r.status]}
-                      {r.escalate !== "none" ? ` · escalate ${r.escalate}` : ""}
+                      <span
+                        className={`${styles.statusPill} ${
+                          r.status === "open"
+                            ? styles.statusOpen
+                            : r.status === "submitted"
+                              ? styles.statusSubmitted
+                              : r.status === "accepted"
+                                ? styles.statusAccepted
+                                : r.status === "rejected"
+                                  ? styles.statusRejected
+                                  : styles.statusCancelled
+                        }`}
+                      >
+                        {siStatusLabels[r.status]}
+                      </span>
+                      {r.escalate !== "none" ? (
+                        <>
+                          {" "}
+                          <span
+                            className={`${styles.statusPill} ${styles.statusSubmitted}`}
+                          >
+                            escalate {r.escalate}
+                          </span>
+                        </>
+                      ) : null}
                     </td>
                     <td>
                       <span
@@ -530,6 +582,7 @@ function ShiftReportBody({
                     <td>
                       <Link
                         prefetch={false}
+                        className={styles.btnTiny}
                         href={`/si-handover?view=during&id=${r.id}`}
                       >
                         Open
@@ -600,6 +653,7 @@ function StoreReportBody({
   return (
     <>
       <section className={styles.panel}>
+        <h2 className={styles.sectionTitle}>Overview</h2>
         <div className={styles.kpiGrid}>
           <div className={styles.kpi}>
             <strong>{s.days}</strong>
@@ -611,7 +665,7 @@ function StoreReportBody({
           </div>
           <div className={styles.kpi}>
             <strong>{s.submitRate}%</strong>
-            <span>Submitted</span>
+            <span>Submit rate</span>
           </div>
           <div className={styles.kpi}>
             <strong>{s.open}</strong>
@@ -620,8 +674,9 @@ function StoreReportBody({
         </div>
       </section>
 
+      <div className={styles.reportSplit}>
       <section className={styles.panel}>
-        <h2 className={styles.sectionTitle}>By Store Manager</h2>
+        <h2 className={styles.sectionTitle}>By person</h2>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
@@ -654,7 +709,19 @@ function StoreReportBody({
                       </button>
                     </td>
                     <td>{b.days}</td>
-                    <td>{b.avgPct}%</td>
+                    <td>
+                      <span
+                        className={
+                          b.avgPct >= 80
+                            ? styles.pctOk
+                            : b.avgPct >= 40
+                              ? styles.pctMid
+                              : styles.pctLow
+                        }
+                      >
+                        {b.avgPct}%
+                      </span>
+                    </td>
                     <td>{b.open}</td>
                     <td>{b.submitted}</td>
                   </tr>
@@ -699,7 +766,19 @@ function StoreReportBody({
                       </button>
                     </td>
                     <td>{b.days}</td>
-                    <td>{b.avgPct}%</td>
+                    <td>
+                      <span
+                        className={
+                          b.avgPct >= 80
+                            ? styles.pctOk
+                            : b.avgPct >= 40
+                              ? styles.pctMid
+                              : styles.pctLow
+                        }
+                      >
+                        {b.avgPct}%
+                      </span>
+                    </td>
                     <td>{b.open}</td>
                     <td>{b.submitted}</td>
                   </tr>
@@ -709,6 +788,7 @@ function StoreReportBody({
           </table>
         </div>
       </section>
+      </div>
 
       <section className={styles.panel}>
         <div className={styles.shiftListHead}>
@@ -821,7 +901,19 @@ function StoreReportBody({
                       {r.store_code} · {r.work_date}
                     </td>
                     <td>{r.owner_name}</td>
-                    <td>{storeStatusLabels[r.status]}</td>
+                    <td>
+                      <span
+                        className={`${styles.statusPill} ${
+                          r.status === "open"
+                            ? styles.statusOpen
+                            : r.status === "submitted"
+                              ? styles.statusSubmitted
+                              : styles.statusCancelled
+                        }`}
+                      >
+                        {storeStatusLabels[r.status]}
+                      </span>
+                    </td>
                     <td>
                       <span
                         className={
@@ -841,6 +933,7 @@ function StoreReportBody({
                     <td>
                       <Link
                         prefetch={false}
+                        className={styles.btnTiny}
                         href={`/store-ops?view=close&id=${r.id}`}
                       >
                         Open

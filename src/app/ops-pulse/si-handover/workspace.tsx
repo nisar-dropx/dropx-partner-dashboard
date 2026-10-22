@@ -447,8 +447,8 @@ export function SiHandoverWorkspace(props: Props) {
         <p className={styles.eyebrow}>Dark Store · Shift operations</p>
         <h1>{titles[props.view]}</h1>
         <p>
-          Compact shift checklist — live camera proofs where required, screenshots for
-          dashboards. Clock-out: <strong>{modeLabel}</strong>
+          Work through the shift stages below. Proofs use the live camera where
+          required. Clock-out mode: <strong>{modeLabel}</strong>
           {props.canMaster ? (
             <>
               {" "}
@@ -490,59 +490,61 @@ export function SiHandoverWorkspace(props: Props) {
 
       {props.view !== "accept" && !focused ? (
         <section className={styles.panel}>
-          <div className={styles.startGrid}>
-            <label className={styles.field}>
-              Store
-              <select
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
+          <div className={styles.startDock}>
+            <div className={styles.startGrid}>
+              <label className={styles.field}>
+                Store to work
+                <select
+                  value={locationId}
+                  onChange={(e) => setLocationId(e.target.value)}
+                >
+                  {!props.stores.length ? (
+                    <option value="">No stores in scope</option>
+                  ) : null}
+                  {props.stores.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.station_code} · {s.station_name || s.station_code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className={styles.btnAccent}
+                disabled={pending || !locationId || !canCoverShift}
+                onClick={() =>
+                  run(() =>
+                    startShift({
+                      locationId,
+                      shiftDate: cur.shiftDate,
+                      shiftSlot: cur.shiftSlot,
+                    }),
+                  )
+                }
               >
-                {!props.stores.length ? (
-                  <option value="">No stores in scope</option>
-                ) : null}
-                {props.stores.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.station_code} · {s.station_name || s.station_code}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className={styles.btnAccent}
-              disabled={pending || !locationId || !canCoverShift}
-              onClick={() =>
-                run(() =>
-                  startShift({
-                    locationId,
-                    shiftDate: cur.shiftDate,
-                    shiftSlot: cur.shiftSlot,
-                  }),
-                )
-              }
-            >
-              Start {cur.shiftSlot}
-            </button>
-          </div>
-          {canCoverShift && manager ? (
-            <p className={styles.banner}>
-              Cover mode: as Store Manager / Store Incharge you can run Shift
-              operations at any store in your city scope when an SI is away —
-              including accepting the next handover.
+                Start {cur.shiftSlot} shift
+              </button>
+            </div>
+            <p className={styles.meta}>
+              <span className={styles.chipOk}>
+                Current window · {cur.shiftDate} {cur.shiftSlot} IST
+              </span>
+              <span className={styles.chip}>
+                {props.stores.length} store{props.stores.length === 1 ? "" : "s"} in
+                scope
+              </span>
             </p>
-          ) : null}
-          <p className={styles.meta}>
-            <span className={styles.chipOk}>
-              {cur.shiftDate} {cur.shiftSlot} IST
-            </span>
-            <span className={styles.chip}>
-              {props.stores.length} store{props.stores.length === 1 ? "" : "s"}
-            </span>
-          </p>
+            {canCoverShift && manager ? (
+              <p className={styles.banner}>
+                You can cover an absent SI at any store in your city — start here,
+                then accept the next handover when ready.
+              </p>
+            ) : null}
+          </div>
 
           {mineRows.length ? (
             <ShiftList
-              title="Your open shifts"
+              title="Your shifts"
               rows={mineRows}
               view={props.view}
               highlightMine
@@ -550,13 +552,14 @@ export function SiHandoverWorkspace(props: Props) {
             />
           ) : (
             <div className={styles.empty}>
-              No open shift yet — pick a store and start the current window.
+              No open shift of yours yet — choose a store above and start this
+              window.
             </div>
           )}
 
           {otherRows.length ? (
             <ShiftList
-              title="Other stores"
+              title="Team activity"
               rows={otherRows}
               view={props.view}
               pageSize={12}
