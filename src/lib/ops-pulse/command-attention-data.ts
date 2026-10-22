@@ -54,6 +54,11 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       const s=storeAuditAttention(r.data??[],today,now);
       return{value:`${s.count} to action`,count:s.count,dueAt:s.focus?.scheduled_for,detail:`${s.overdue} overdue · ${s.upcoming} next 7 days · store audit programme`,href:s.focus?`/ops-pulse/store-audits?audit=${encodeURIComponent(s.focus.id)}`:'/ops-pulse/store-audits',action:'Open store audits',tone:s.overdue?'urgent':s.count||s.upcoming?'action':'clear'};
     }),
+    check(mode!=='amazon_now'&&has('ops_rostering')&&ids.length>0,'people','Shift readiness','/ops-pulse?view=manpower',async()=>{
+      const data=await loadOpsStationManpower(company,selected,today),s=summarizeStorePeople(data.people,now);
+      const affected=[...new Set(data.people.filter(p=>{const x=summarizeStorePeople([p],now);return x.notReported||x.missingOut||x.unplanned;}).map(p=>p.locationId))];
+      return{value:`${affected.length} locations to check`,count:s.notReported+s.missingOut+s.unplanned,href:`/ops-pulse?view=manpower&date=${today}${affected[0]?`&location=${affected[0]}`:''}`,detail:`${s.notReported} not reported · ${s.missingOut} punch-outs · ${s.unplanned} shift times missing`,action:'Check today’s attendance',tone:affected.length?'action':'clear'};
+    }),
     check(mode==='amazon_now'&&has('si_handover')&&ids.length>0,'si-handover','SI shift handover','/si-handover?view=accept',async()=>{
       if(!supabaseAdmin)throw Error('Unavailable');
       const master=await supabaseAdmin.from('ops_si_handover_master').select('settings').eq('company_id',company).maybeSingle();
@@ -76,11 +81,6 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
         action:'Review handovers',
         tone:cluster?'urgent':rows.length?'action':'clear'
       };
-    }),
-    check(mode!=='amazon_now'&&has('ops_rostering')&&ids.length>0,'people','Shift readiness','/ops-pulse?view=manpower',async()=>{
-      const data=await loadOpsStationManpower(company,selected,today),s=summarizeStorePeople(data.people,now);
-      const affected=[...new Set(data.people.filter(p=>{const x=summarizeStorePeople([p],now);return x.notReported||x.missingOut||x.unplanned;}).map(p=>p.locationId))];
-      return{value:`${affected.length} locations to check`,count:s.notReported+s.missingOut+s.unplanned,href:`/ops-pulse?view=manpower&date=${today}${affected[0]?`&location=${affected[0]}`:''}`,detail:`${s.notReported} not reported · ${s.missingOut} punch-outs · ${s.unplanned} shift times missing`,action:'Check today’s attendance',tone:affected.length?'action':'clear'};
     }),
     check(mode!=='amazon_now'&&mappingCanView(a)&&codes.length>0,'vehicles','Vehicle DA exceptions','/fleet/da-mapping',async()=>{
       const allowed=await mappingStationScope(a),scoped=allowed.stations.filter(s=>codes.includes(s.code));
