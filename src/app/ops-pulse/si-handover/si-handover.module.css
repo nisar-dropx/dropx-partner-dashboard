@@ -3,11 +3,23 @@
 .hero h1 { margin: 0; font-size: 1.55rem; letter-spacing: -0.02em; }
 .hero p { margin: 0.35rem 0 0; color: var(--muted, #5b6472); max-width: 42rem; }
 .eyebrow { margin: 0; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted, #5b6472); }
-.tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.tab, .tabActive {
-  border: 1px solid #d5dbe3; background: #fff; color: #1f2937; border-radius: 8px;
-  padding: 0.45rem 0.8rem; font-size: 0.9rem; text-decoration: none;
+.tabBar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.35rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
 }
+.tab, .tabActive {
+  border: 1px solid transparent; background: transparent; color: #1f2937; border-radius: 8px;
+  padding: 0.5rem 0.85rem; font-size: 0.9rem; text-decoration: none; white-space: nowrap;
+  flex: 1 1 auto; text-align: center;
+}
+.tab:hover { background: #fff; border-color: #d5dbe3; }
 .tabActive { border-color: #1f2937; background: #111827; color: #fff; }
 .panel {
   border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; padding: 1rem;

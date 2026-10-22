@@ -406,26 +406,26 @@ export function SiHandoverWorkspace(props: Props) {
             .
           </p>
         </div>
-        <nav className={styles.tabs}>
-          {(
-            [
-              ["start", "Start shift"],
-              ["during", "During shift"],
-              ["handover", "Handover"],
-              ["accept", "Acceptance"],
-            ] as const
-          ).map(([v, label]) => (
-            <Link
-              key={v}
-              prefetch={false}
-              className={props.view === v ? styles.tabActive : styles.tab}
-              href={`/si-handover?view=${v}${focused ? `&id=${focused.id}` : ""}`}
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
       </header>
+      <nav className={styles.tabBar} aria-label="Shift stages">
+        {(
+          [
+            ["start", "Start shift"],
+            ["during", "During shift"],
+            ["handover", "Handover"],
+            ["accept", "Acceptance"],
+          ] as const
+        ).map(([v, label]) => (
+          <Link
+            key={v}
+            prefetch={false}
+            className={props.view === v ? styles.tabActive : styles.tab}
+            href={`/si-handover?view=${v}${focused ? `&id=${focused.id}` : ""}`}
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
 
       {message ? <p className={styles.error}>{message}</p> : null}
 
