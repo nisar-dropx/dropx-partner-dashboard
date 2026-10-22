@@ -189,6 +189,7 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     shiftAttendanceNavItem,
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
+    {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
     {
       code: "si_handover",
       label: "Activities & Handover",
@@ -211,7 +212,6 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
         },
       ],
     },
-    {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
     {
       code: "performance",
       label: "Performance",
