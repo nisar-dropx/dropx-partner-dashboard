@@ -24,6 +24,8 @@ import { reviewLink } from "@/lib/ops-pulse/review-periods";
 import { discussionFeedUpdates, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
 import {
   storeHealthBandTone,
+  storeHealthCategoryOrder,
+  storeHealthMetricCategory,
   storeHealthMetricDefinitions,
   type StoreHealthHero,
   type StoreHealthReviewMetric
@@ -131,7 +133,11 @@ export function StoreHealthReviewDesk(props: Props) {
     const definition = storeHealthMetricDefinitions.find((entry) => entry.key === metric.key);
     const actual = metric.evidence?.trim() || formatActual(metric);
     const target = definition?.targetText ? ` · Target ${definition.targetText}` : "";
-    return { ...metric, evidence: `${actual}${target}` };
+    return {
+      ...metric,
+      evidence: `${actual}${target}`,
+      category: metric.category || definition?.category || storeHealthMetricCategory(metric.key)
+    };
   });
   const itemsByMetricForRca = new Map<string, PerformanceReviewItem>();
   for (const metric of rcaRows) {
@@ -268,7 +274,9 @@ export function StoreHealthReviewDesk(props: Props) {
           reviewVersion={review?.updated_at ?? ""}
           stationCode={selectedCode}
           reviewStarted={Boolean(review)}
-          hint="Amber and red Store Health metrics need RCA and a next action before the review can move on."
+          variant="store-health"
+          categoryOrder={storeHealthCategoryOrder}
+          hint="Amber and red metrics are grouped like the Store Health PDF. Add RCA and a next action for each miss."
           startControl={!review && canAdd && !props.readOnlyPreview ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review & add RCA</button></ReviewActionForm> : undefined}
           editHint={!canEdit ? canCompleteStep ? "Performance RCA is editable by the first-stage reviewer or authorised oversight." : "View only at this stage. The assigned reviewer or authorised oversight can update these entries." : undefined}
         />

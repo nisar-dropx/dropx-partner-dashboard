@@ -338,6 +338,23 @@ export function storeHealthMetricLabel(key: string) {
   return LABEL_BY_KEY.get(key) ?? key;
 }
 
+/** PDF category order for Store Health scorecard grouping. */
+export const storeHealthCategoryOrder = [
+  ...new Set(storeHealthMetricDefinitions.map((metric) => metric.category))
+];
+
+export function storeHealthCategoryLabel(category: string) {
+  return category
+    .toLowerCase()
+    .split(" ")
+    .map((part) => (part === "&" ? "&" : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
+}
+
+export function storeHealthMetricCategory(key: string) {
+  return storeHealthMetricDefinitions.find((metric) => metric.key === key)?.category ?? "Other";
+}
+
 export type StoreHealthReviewMetric = {
   actual: number | null;
   direction: "higher" | "lower";
@@ -347,6 +364,7 @@ export type StoreHealthReviewMetric = {
   short: string;
   target: number | null;
   evidence?: string;
+  category?: string;
 };
 
 export type StoreHealthHero = {
@@ -375,7 +393,8 @@ export function buildStoreHealthReviewMetrics(valuesJson: unknown): {
       severity,
       short: definition.short,
       target: null,
-      evidence: value?.actual_text || (severity === "neutral" ? "No data" : undefined)
+      evidence: value?.actual_text || (severity === "neutral" ? "No data" : undefined),
+      category: definition.category
     };
   });
   return {

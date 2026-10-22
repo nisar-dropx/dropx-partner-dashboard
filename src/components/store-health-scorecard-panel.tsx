@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { formatDashboardDate } from "@/lib/date-format";
 import {
+  storeHealthCategoryLabel,
+  storeHealthCategoryOrder,
+  storeHealthMetricCategory,
   storeHealthMetricDefinitions,
   type StoreHealthHero,
   type StoreHealthReviewMetric
@@ -24,8 +27,9 @@ function formatActual(metric: StoreHealthReviewMetric) {
   return String(metric.actual);
 }
 
-function severityRank(severity: StoreHealthReviewMetric["severity"]) {
-  return severity === "red" ? 0 : severity === "amber" ? 1 : severity === "green" ? 2 : 3;
+function definitionOrder(key: string) {
+  const index = storeHealthMetricDefinitions.findIndex((entry) => entry.key === key);
+  return index < 0 ? 999 : index;
 }
 
 function Sparkline({ values, tone }: { values: Array<number | null>; tone: string }) {
@@ -67,6 +71,32 @@ function compareDelta(current: number | null, prior: Array<number | null>, direc
   };
 }
 
+function groupMetrics(metrics: StoreHealthReviewMetric[]) {
+  const byCategory = new Map<string, StoreHealthReviewMetric[]>();
+  for (const metric of metrics) {
+    const category = metric.category || storeHealthMetricCategory(metric.key);
+    const list = byCategory.get(category) ?? [];
+    list.push(metric);
+    byCategory.set(category, list);
+  }
+  const orderedCategories = [
+    ...storeHealthCategoryOrder.filter((category) => byCategory.has(category)),
+    ...[...byCategory.keys()].filter((category) => !storeHealthCategoryOrder.includes(category))
+  ];
+  return orderedCategories.map((category) => {
+    const rows = (byCategory.get(category) ?? []).sort((left, right) => definitionOrder(left.key) - definitionOrder(right.key));
+    return {
+      category,
+      label: storeHealthCategoryLabel(category),
+      rows,
+      red: rows.filter((row) => row.severity === "red").length,
+      amber: rows.filter((row) => row.severity === "amber").length,
+      green: rows.filter((row) => row.severity === "green").length,
+      neutral: rows.filter((row) => row.severity === "neutral").length
+    };
+  });
+}
+
 export function StoreHealthScorecardPanel({
   metrics,
   history,
@@ -78,13 +108,6 @@ export function StoreHealthScorecardPanel({
 }) {
   const [mode, setMode] = useState<ViewMode>("day");
   const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
-  const ordered = useMemo(
-    () => [...metrics].sort((left, right) =>
-      severityRank(left.severity) - severityRank(right.severity)
-      || left.short.localeCompare(right.short)
-    ),
-    [metrics]
-  );
   const historyNewestFirst = useMemo(
     () => [...history].sort((left, right) => right.date.localeCompare(left.date)),
     [history]
@@ -106,24 +129,23 @@ export function StoreHealthScorecardPanel({
     };
   }, [historyNewestFirst, date]);
 
-  const compareMetrics = useMemo(() => {
-    if (metrics.length) return ordered;
-    // Selected day missing an import — still render catalog rows from the newest history day that has data.
+  const displayMetrics = useMemo(() => {
+    if (mode === "day") return metrics;
+    if (metrics.length) return metrics;
     const fallback = historyNewestFirst.find((day) => day.metrics.length)?.metrics ?? [];
-    return [...fallback].sort((left, right) =>
-      severityRank(left.severity) - severityRank(right.severity)
-      || left.short.localeCompare(right.short)
-    );
-  }, [metrics.length, ordered, historyNewestFirst]);
+    return fallback;
+  }, [mode, metrics, historyNewestFirst]);
+
+  const groups = useMemo(() => groupMetrics(displayMetrics), [displayMetrics]);
 
   return (
     <ReviewDetails className="performance-inline-detail review-scorecard store-health-scorecard-panel" open>
       <summary>
         <span>Performance scorecard</span>
-        <b>{misses.length} misses · {metrics.length} metrics</b>
+        <b>{misses.length} misses · {metrics.length} metrics · {groups.length} groups</b>
       </summary>
       <div className="review-scorecard-toolbar">
-        <span>Store Health · Green full · Amber half · Red zero</span>
+        <span>Grouped as in the Store Health PDF · Green full · Amber half · Red zero</span>
         <div className="store-health-score-modes" role="group" aria-label="Scorecard view">
           <button type="button" className={mode === "day" ? "active" : ""} onClick={() => setMode("day")}>Selected day</button>
           <button type="button" className={mode === "compare7" ? "active" : ""} onClick={() => setMode("compare7")} disabled={!daysWithData}>
@@ -155,36 +177,52 @@ export function StoreHealthScorecardPanel({
       ) : null}
       {mode === "day" && !metrics.length ? (
         <p className="review-scorecard-empty">No Store Health scorecard imported for this store and date.</p>
-      ) : mode === "compare7" && !compareMetrics.length ? (
+      ) : mode === "compare7" && !displayMetrics.length ? (
         <p className="review-scorecard-empty">No Store Health imports in the last 7 days for this store yet.</p>
       ) : (
-        <div className={`performance-review-metrics${mode === "compare7" ? " store-health-metrics-compare" : ""}`}>
-          {(mode === "compare7" ? compareMetrics : ordered).map((metric) => {
-            const definition = storeHealthMetricDefinitions.find((entry) => entry.key === metric.key);
-            const series = historyOldestFirst.map((day) => day.metrics.find((entry) => entry.key === metric.key)?.actual ?? null);
-            const selectedActual = historyNewestFirst.find((day) => day.date === date)?.metrics.find((entry) => entry.key === metric.key)?.actual
-              ?? (metrics.length ? metric.actual : null);
-            const prior = series.slice(0, -1);
-            const delta = mode === "compare7" ? compareDelta(selectedActual, prior, metric.direction) : null;
-            const displayMetric = mode === "compare7" && !metrics.length
-              ? { ...metric, actual: selectedActual, evidence: selectedActual == null ? "No data" : metric.evidence, severity: selectedActual == null ? "neutral" as const : metric.severity }
-              : metric;
-            return (
-              <article className={displayMetric.severity} key={metric.key} title={`${metric.label}${definition?.category ? ` · ${definition.category}` : ""}`}>
-                <span>{metric.short}</span>
-                <strong>{formatActual(displayMetric)}</strong>
-                <small>{displayMetric.severity === "neutral" ? "Not scored" : `Target ${definition?.targetText ?? "—"}`}</small>
-                {mode === "compare7" ? (
-                  <div className="store-health-metric-trend">
-                    <Sparkline values={series} tone={displayMetric.severity}/>
-                    {delta ? <em className={delta.tone} title={delta.label}>{delta.text}</em> : <em className="flat">—</em>}
-                  </div>
-                ) : definition?.category ? (
-                  <i className="store-health-metric-cat">{definition.category.split(" ")[0]}</i>
-                ) : null}
-              </article>
-            );
-          })}
+        <div className={`store-health-metric-groups${mode === "compare7" ? " store-health-metrics-compare" : ""}`}>
+          {groups.map((group) => (
+            <section className="store-health-metric-group" key={group.category} aria-label={group.label}>
+              <header className="store-health-metric-group-head">
+                <div>
+                  <h4>{group.label}</h4>
+                  <p>{group.rows.length} metric{group.rows.length === 1 ? "" : "s"}</p>
+                </div>
+                <div className="store-health-metric-group-counts" aria-label={`${group.label} status counts`}>
+                  {group.red ? <em className="red">{group.red} red</em> : null}
+                  {group.amber ? <em className="amber">{group.amber} amber</em> : null}
+                  {group.green ? <em className="green">{group.green} green</em> : null}
+                  {group.neutral ? <em className="neutral">{group.neutral} n/a</em> : null}
+                </div>
+              </header>
+              <div className="performance-review-metrics">
+                {group.rows.map((metric) => {
+                  const definition = storeHealthMetricDefinitions.find((entry) => entry.key === metric.key);
+                  const series = historyOldestFirst.map((day) => day.metrics.find((entry) => entry.key === metric.key)?.actual ?? null);
+                  const selectedActual = historyNewestFirst.find((day) => day.date === date)?.metrics.find((entry) => entry.key === metric.key)?.actual
+                    ?? (metrics.length ? metric.actual : null);
+                  const prior = series.slice(0, -1);
+                  const delta = mode === "compare7" ? compareDelta(selectedActual, prior, metric.direction) : null;
+                  const displayMetric = mode === "compare7" && !metrics.length
+                    ? { ...metric, actual: selectedActual, evidence: selectedActual == null ? "No data" : metric.evidence, severity: selectedActual == null ? "neutral" as const : metric.severity }
+                    : metric;
+                  return (
+                    <article className={displayMetric.severity} key={metric.key} title={metric.label}>
+                      <span>{metric.short}</span>
+                      <strong>{formatActual(displayMetric)}</strong>
+                      <small>{displayMetric.severity === "neutral" ? "Not scored" : `Target ${definition?.targetText ?? "—"}`}</small>
+                      {mode === "compare7" ? (
+                        <div className="store-health-metric-trend">
+                          <Sparkline values={series} tone={displayMetric.severity}/>
+                          {delta ? <em className={delta.tone} title={delta.label}>{delta.text}</em> : <em className="flat">—</em>}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
     </ReviewDetails>
