@@ -15,6 +15,7 @@ export type AnswerType =
   | "yes_no_na"
   | "number"
   | "number_x4"
+  | "line_items"
   | "text";
 
 /**
@@ -124,7 +125,13 @@ export function isPdfMime(mime: string) {
 export type NoRequires = "reason" | "informed" | "both";
 export type MandatoryRule = "yes" | "hyderabad" | "if_disposal";
 
-export type NumberField = { key: string; label: string };
+export type NumberField = {
+  key: string;
+  label: string;
+  /** Optional select choices (used by line_items, e.g. YMS vehicle type). */
+  options?: readonly string[];
+  placeholder?: string;
+};
 
 export type Task = {
   id: string;
@@ -181,7 +188,7 @@ export const CLOCK_OUT_MODES: {
 ];
 
 /** Bump when default catalogue proof/answer rules change; master template refreshes. */
-export const SI_TEMPLATE_FORMAT = 3;
+export const SI_TEMPLATE_FORMAT = 5;
 
 export type Settings = {
   managerRoles: string[];
@@ -211,10 +218,41 @@ export type Outcome = "" | "yes" | "no" | "na";
 export type TaskAnswer = {
   outcome: Outcome;
   numbers: Record<string, string>;
+  /** Repeatable rows for answerType line_items (e.g. YMS vehicles). */
+  lines: Array<Record<string, string>>;
   text: string;
   informed: string;
   answeredAt?: string;
 };
+
+/** Amazon Now stores see many inbound vehicles per shift. */
+export const LINE_ITEMS_MAX = 50;
+
+/** Cold-chain vehicle / load types used on Amazon Now YMS docks. */
+export const YMS_VEHICLE_TYPES = [
+  "Ambient",
+  "Tropical",
+  "Chiller",
+  "Freezer",
+  "Multi-temp",
+] as const;
+
+export function emptyLine(fields: NumberField[]): Record<string, string> {
+  return Object.fromEntries(fields.map((f) => [f.key, ""]));
+}
+
+export function lineHasAny(line: Record<string, string> | undefined) {
+  if (!line) return false;
+  return Object.values(line).some((v) => String(v ?? "").trim() !== "");
+}
+
+export function lineIsComplete(
+  line: Record<string, string> | undefined,
+  fields: NumberField[],
+) {
+  if (!line || !fields.length) return false;
+  return fields.every((f) => String(line[f.key] ?? "").trim() !== "");
+}
 
 export type Rejection = {
   taskIds: string[];
@@ -363,9 +401,31 @@ export const tasks = (t: Template) => t.sections.flatMap((s) => s.tasks);
 export const emptyAnswer = (): TaskAnswer => ({
   outcome: "",
   numbers: {},
+  lines: [],
   text: "",
   informed: "",
 });
+
+export function normalizeAnswer(value: Partial<TaskAnswer> | null | undefined): TaskAnswer {
+  const lines = Array.isArray(value?.lines)
+    ? value!.lines
+        .filter((row): row is Record<string, string> => Boolean(row) && typeof row === "object")
+        .map((row) =>
+          Object.fromEntries(
+            Object.entries(row).map(([k, v]) => [k, String(v ?? "")]),
+          ),
+        )
+        .slice(0, LINE_ITEMS_MAX)
+    : [];
+  return {
+    outcome: (value?.outcome as Outcome) || "",
+    numbers: value?.numbers && typeof value.numbers === "object" ? value.numbers : {},
+    lines,
+    text: String(value?.text ?? ""),
+    informed: String(value?.informed ?? ""),
+    answeredAt: value?.answeredAt,
+  };
+}
 
 export function isManager(a: Actor, s: Settings) {
   return (
@@ -641,6 +701,11 @@ export function requiredProofCount(task: Task, answer: TaskAnswer) {
   if (task.proof.kind === "optional") return 0;
   if (answer.outcome === "na") return 0;
   if (!answer.outcome && task.answerType === "text") return task.proof.min;
+  if (task.answerType === "line_items") {
+    const lines = (answer.lines || []).filter(lineHasAny);
+    if (!lines.length && !answer.outcome) return 0;
+    return task.proof.min;
+  }
   if (!answer.outcome) return 0;
   return task.proof.min;
 }
@@ -664,7 +729,21 @@ export function validateAnswersForSubmit(
         throw Error(`Complete: ${task.label}`);
       continue;
     }
-    if (task.answerType === "number" || task.answerType === "number_x4") {
+    if (task.answerType === "line_items") {
+      const lines = (a.lines || []).filter(lineHasAny);
+      if (!mandatory && lines.length === 0) continue;
+      if (mandatory && lines.length === 0)
+        throw Error(`Add at least one vehicle: ${task.label}`);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        for (const f of task.numberFields) {
+          if (!String(line[f.key] ?? "").trim())
+            throw Error(
+              `Enter ${f.label} for vehicle ${i + 1}: ${task.label}`,
+            );
+        }
+      }
+    } else if (task.answerType === "number" || task.answerType === "number_x4") {
       for (const f of task.numberFields) {
         const v = a.numbers[f.key];
         if (mandatory && (v === undefined || v === null || String(v).trim() === ""))
@@ -775,6 +854,14 @@ export function progress(
     const filled =
       task.answerType === "text"
         ? Boolean(a?.text?.trim())
+        : task.answerType === "line_items"
+          ? (() => {
+              const lines = (a?.lines || []).filter(lineHasAny);
+              return (
+                lines.length > 0 &&
+                lines.every((line) => lineIsComplete(line, task.numberFields))
+              );
+            })()
         : task.answerType === "number" || task.answerType === "number_x4"
           ? task.numberFields.every((f) => String(a?.numbers?.[f.key] ?? "").trim())
           : Boolean(a?.outcome);

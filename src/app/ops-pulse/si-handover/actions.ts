@@ -6,9 +6,9 @@ import {
   canDeleteDraft,
   canFill,
   currentShift,
-  emptyAnswer,
   isSi,
   nextShift,
+  normalizeAnswer,
   parseShiftSlot,
   tasks,
   validateAnswersForSubmit,
@@ -190,9 +190,7 @@ export async function saveAnswers(input: {
     const answers = { ...c.checklist.answers };
     for (const [id, value] of Object.entries(input.answers || {})) {
       answers[id] = {
-        ...emptyAnswer(),
-        ...value,
-        numbers: value.numbers || {},
+        ...normalizeAnswer(value),
         answeredAt: new Date().toISOString(),
       };
     }
@@ -242,9 +240,7 @@ export async function submitHandover(input: {
     const answers = { ...c.checklist.answers };
     for (const [id, value] of Object.entries(input.answers || {})) {
       answers[id] = {
-        ...emptyAnswer(),
-        ...value,
-        numbers: value.numbers || {},
+        ...normalizeAnswer(value),
         answeredAt: new Date().toISOString(),
       };
     }

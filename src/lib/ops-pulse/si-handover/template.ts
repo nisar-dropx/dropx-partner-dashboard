@@ -1,12 +1,17 @@
 /** Spec v1 task catalogue — Shift Incharge checklist for Amazon Now dark stores. */
-import type { Template } from "./model";
+import { YMS_VEHICLE_TYPES, type Template } from "./model";
 
 type TaskSeed = {
   id: string;
   label: string;
   when: import("./model").TaskWhen;
   answerType: import("./model").AnswerType;
-  numberFields?: { key: string; label: string }[];
+  numberFields?: {
+    key: string;
+    label: string;
+    options?: readonly string[];
+    placeholder?: string;
+  }[];
   proof: import("./model").ProofRule;
   noRequires?: import("./model").NoRequires;
   mandatory: import("./model").MandatoryRule;
@@ -429,17 +434,35 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           id: "E3",
           label: "YMS: every vehicle checked in & out",
           when: "each_vehicle",
-          answerType: "number",
+          answerType: "line_items",
           numberFields: [
-            { key: "vehicles_arrived", label: "Vehicles arrived" },
-            { key: "checked_in", label: "Checked in" },
-            { key: "checked_out", label: "Checked out" },
+            {
+              key: "vehicle_no",
+              label: "Vehicle no",
+              placeholder: "Reg. / YMS id",
+            },
+            {
+              key: "vehicle_type",
+              label: "Type",
+              options: YMS_VEHICLE_TYPES,
+            },
+            {
+              key: "checked_in",
+              label: "Checked in",
+              placeholder: "HH:MM or Yes",
+            },
+            {
+              key: "checked_out",
+              label: "Checked out",
+              placeholder: "HH:MM or Yes",
+            },
           ],
           proof: shot(),
           noRequires: "reason",
           mandatory: "hyderabad",
           linksTo: "YMS",
-          guidance: "Mandatory for Hyderabad stores.",
+          guidance:
+            "Mandatory for Hyderabad stores. One line per vehicle (Ambient / Tropical / Chiller / Freezer / Multi-temp). Use + Add vehicle for each arrival; enter vehicle no. + reason if any miss check-in or check-out.",
         },
         {
           id: "E4",
@@ -514,7 +537,12 @@ export function defaultSiTemplate(): Template {
         guidance: t.guidance ?? "",
         when: t.when,
         answerType: t.answerType,
-        numberFields: t.numberFields ?? [],
+        numberFields: (t.numberFields ?? []).map((f) => ({
+          key: f.key,
+          label: f.label,
+          ...(f.options?.length ? { options: [...f.options] } : {}),
+          ...(f.placeholder ? { placeholder: f.placeholder } : {}),
+        })),
         proof: t.proof,
         noRequires: t.noRequires ?? "reason",
         mandatory: t.mandatory,

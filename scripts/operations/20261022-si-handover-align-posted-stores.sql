@@ -3,6 +3,7 @@
 -- Explicit moves:
 --   DF1094 Goshika Vamshi Vardhan → TTA5
 --   H1041  J Shashank             → TTB3 (HR already moved; Ops still had TTG9)
+--   P1003  Mohamed Arsath         → TCC3
 -- Ongoing sync: apply migration 20261022220000_sync_ops_scope_from_people_posting.sql
 -- so future People location changes update OpsPulse automatically.
 -- Apply on the shared Supabase project after reviewing the notices.
@@ -48,7 +49,8 @@ begin
   for fix in
     select * from (values
       ('DF1094', 'TTA5', '%GOSHIKA%VAMSHI%', '%VAMSHI%VARDHAN%'),
-      ('H1041',  'TTB3', '%JSHASHANK%',      '%J%SHASHANK%')
+      ('H1041',  'TTB3', '%JSHASHANK%',      '%J%SHASHANK%'),
+      ('P1003',  'TCC3', '%MOHAMEDARSATH%',  '%MOHAMED%ARSATH%')
     ) as t(emp_code, station_code, name_pat_a, name_pat_b)
   loop
     select s.id into target_station_id

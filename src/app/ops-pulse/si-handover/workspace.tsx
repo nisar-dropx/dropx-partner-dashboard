@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import {
   CLOCK_OUT_MODES,
+  LINE_ITEMS_MAX,
   canAccept,
   canDeleteDraft,
   canFill,
   currentShift,
   emptyAnswer,
+  emptyLine,
   escalationLevel,
   progress,
   statusLabels,
@@ -137,7 +139,124 @@ function TaskCard({
       ) : (
         <div className={styles.taskBody}>
           <div className={styles.taskMain}>
-            {task.numberFields.length ? (
+            {task.answerType === "line_items" ? (
+              <div className={styles.lineItems}>
+                {(() => {
+                  const lines = answer.lines?.length
+                    ? answer.lines
+                    : [emptyLine(task.numberFields)];
+                  const setLines = (next: Array<Record<string, string>>) =>
+                    setAnswer({
+                      ...answer,
+                      outcome: next.some((row) =>
+                        Object.values(row).some((v) => String(v ?? "").trim()),
+                      )
+                        ? answer.outcome || "yes"
+                        : "",
+                      lines: next,
+                    });
+                  const filled = lines.filter((row) =>
+                    Object.values(row).some((v) => String(v ?? "").trim()),
+                  ).length;
+                  return (
+                    <>
+                      <div className={styles.lineMeta}>
+                        <span>
+                          {filled} vehicle{filled === 1 ? "" : "s"} entered
+                          {filled
+                            ? ` · ${lines.filter((r) => String(r.checked_in || "").trim()).length} in · ${lines.filter((r) => String(r.checked_out || "").trim()).length} out`
+                            : ""}
+                        </span>
+                        {!disabled && lines.length < LINE_ITEMS_MAX ? (
+                          <button
+                            type="button"
+                            className={styles.lineAdd}
+                            onClick={() =>
+                              setLines([...lines, emptyLine(task.numberFields)])
+                            }
+                          >
+                            + Add vehicle
+                          </button>
+                        ) : null}
+                      </div>
+                      {lines.map((line, index) => (
+                        <div key={index} className={styles.lineRow}>
+                          <span className={styles.lineIndex}>#{index + 1}</span>
+                          <div className={styles.fields}>
+                            {task.numberFields.map((f) => (
+                              <label key={f.key} className={styles.field}>
+                                {f.label}
+                                {f.options?.length ? (
+                                  <select
+                                    disabled={disabled}
+                                    value={line[f.key] || ""}
+                                    onChange={(e) => {
+                                      const next = [...lines];
+                                      next[index] = {
+                                        ...emptyLine(task.numberFields),
+                                        ...next[index],
+                                        [f.key]: e.target.value,
+                                      };
+                                      setLines(next);
+                                    }}
+                                  >
+                                    <option value="">Select</option>
+                                    {f.options.map((opt) => (
+                                      <option key={opt} value={opt}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    disabled={disabled}
+                                    value={line[f.key] || ""}
+                                    placeholder={f.placeholder || f.label}
+                                    onChange={(e) => {
+                                      const next = [...lines];
+                                      next[index] = {
+                                        ...emptyLine(task.numberFields),
+                                        ...next[index],
+                                        [f.key]: e.target.value,
+                                      };
+                                      setLines(next);
+                                    }}
+                                  />
+                                )}
+                              </label>
+                            ))}
+                          </div>
+                          {!disabled && lines.length > 1 ? (
+                            <button
+                              type="button"
+                              className={styles.lineRemove}
+                              onClick={() => {
+                                const next = [...lines];
+                                next.splice(index, 1);
+                                setLines(next);
+                              }}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                      {!disabled && lines.length < LINE_ITEMS_MAX ? (
+                        <button
+                          type="button"
+                          className={styles.lineAddWide}
+                          onClick={() =>
+                            setLines([...lines, emptyLine(task.numberFields)])
+                          }
+                        >
+                          + Add another vehicle
+                        </button>
+                      ) : null}
+                    </>
+                  );
+                })()}
+              </div>
+            ) : task.numberFields.length ? (
               <div className={styles.fields}>
                 {task.numberFields.map((f) => (
                   <label key={f.key} className={styles.field}>

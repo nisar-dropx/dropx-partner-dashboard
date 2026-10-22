@@ -281,6 +281,71 @@
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 0.3rem;
 }
+.lineItems {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+}
+.lineMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: #475569;
+}
+.lineRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.45rem;
+  align-items: end;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.lineIndex {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  font-weight: 750;
+  color: #64748b;
+  padding-bottom: 0.35rem;
+}
+.lineRow .field select {
+  min-width: 7.5rem;
+}
+.lineAdd,
+.lineAddWide,
+.lineRemove {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: #0f172a;
+}
+.lineAddWide {
+  width: 100%;
+  border-radius: 8px;
+  border-style: dashed;
+  border-color: #94a3b8;
+  background: #fff;
+  padding: 0.4rem 0.65rem;
+  color: #0f766e;
+}
+.lineRemove {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+.lineAdd:hover,
+.lineAddWide:hover,
+.lineRemove:hover {
+  background: #f1f5f9;
+}
 
 .outcomeRow {
   display: flex;
