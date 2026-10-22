@@ -41,7 +41,14 @@ const checks = [
   [accessPages.includes('["performance_review"], "performance_review_status"'), "review status starts from existing review grants and remains independently configurable"],
   [permissionMatrix.includes("OpsPermissionMatrix") && navigation.includes('permissionCodes: ["performance_review_cluster_filter"]') && navigation.includes('code: "performance_review_status"'), "review status permission stays grouped under Performance"],
   [statusPage.includes("buildReviewStatusRows") && statusPage.includes('status === "not_started"'), "review register includes station-days where nobody started a review"],
-  [statusPage.includes("Cluster manager") && statusPage.includes("<span>AOM</span>") && statusPage.includes("All statuses"), "compact register filters by hierarchy and workflow status"],
+  [
+    statusPage.includes('primaryLabel = darkStore ? "Store manager" : "Cluster manager"')
+      && statusPage.includes('secondaryLabel = darkStore ? "City manager" : "AOM"')
+      && statusPage.includes("{primaryLabel}")
+      && statusPage.includes("{secondaryLabel}")
+      && statusPage.includes("All statuses"),
+    "compact register filters by hierarchy and workflow status"
+  ],
   [statusPage.includes("<StepStatus row={row}") && statusPage.includes("Open RCA / actions") && statusPage.includes("Latest discussion"), "expanded rows expose reviewer history, RCA, actions and discussion"],
   [statusStyles.includes("content-visibility: auto") && statusStyles.includes("@media (max-width: 720px)"), "long date ranges stay efficient and responsive"],
 ];
