@@ -21,7 +21,7 @@ export type ReportImportMaster = {
 export const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function reportSchedule(report: ReportImportMaster) {
-  const offset = report.day_offset === -1 ? "D-1" : report.day_offset === 0 ? "D0" : `D${report.day_offset > 0 ? "+" : ""}${report.day_offset}`;
+  const offset = report.day_offset === -2 ? "D-2" : report.day_offset === -1 ? "D-1" : report.day_offset === 0 ? "D0" : `D${report.day_offset > 0 ? "+" : ""}${report.day_offset}`;
   const [hourText, minute = "00"] = (report.upload_time ?? "").split(":");
   const hour = Number(hourText);
   const time = report.upload_time && Number.isFinite(hour)

@@ -1,0 +1,82 @@
+.store-health-review-desk .store-health-hero {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 18px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #d6d3d1;
+  background: #fafaf9;
+}
+
+.store-health-review-desk .store-health-hero.green { border-color: #86efac; background: #f0fdf4; }
+.store-health-review-desk .store-health-hero.amber { border-color: #fcd34d; background: #fffbeb; }
+.store-health-review-desk .store-health-hero.red { border-color: #fca5a5; background: #fef2f2; }
+
+.store-health-review-desk .store-health-hero span {
+  display: block;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #78716c;
+}
+
+.store-health-review-desk .store-health-hero strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.store-health-review-desk .store-health-hero small {
+  display: block;
+  margin-top: 4px;
+  color: #57534e;
+}
+
+.store-health-review-desk .store-health-band.green { color: #15803d; }
+.store-health-review-desk .store-health-band.amber { color: #b45309; }
+.store-health-review-desk .store-health-band.red { color: #b91c1c; }
+
+.store-health-review-desk .store-health-insights {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.store-health-review-desk .store-health-insights p {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f5f5f4;
+  color: #44403c;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.store-health-review-desk .store-health-insights strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #78716c;
+}
+
+.store-health-review-desk .store-health-category {
+  margin: 16px 0;
+}
+
+.store-health-review-desk .store-health-category h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #78716c;
+}
+
+@media (max-width: 720px) {
+  .store-health-review-desk .store-health-hero {
+    grid-template-columns: 1fr;
+  }
+}

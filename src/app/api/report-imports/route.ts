@@ -14,6 +14,11 @@ import {
 } from "@/lib/flipkart-production-import";
 import { getServiceAuthorization, ServiceAuthError } from "@/lib/service-auth";
 import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pulse/cod";
+import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
+import {
+  parseStoreHealthScorecardPdf,
+  storeHealthValuesJson
+} from "@/lib/ops-pulse/store-health-scorecard";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
@@ -139,7 +144,8 @@ const sourceLabels: Record<SourceType, string> = {
   flipkart_production: "Flipkart production",
   iocl_fuel: "IOC fuel",
   edsp_sls_scorecard: "EDSP SLS scorecard",
-  daily_edsp_metrics: "Daily EDSP metrics"
+  daily_edsp_metrics: "Daily EDSP metrics",
+  qc_store_health_daily: "Store Health scorecard"
 };
 const HASH_LOOKUP_CHUNK_SIZE = 25;
 
@@ -2361,6 +2367,76 @@ export async function POST(request: Request) {
         status: "Completed"
       }).eq("id", batch.data.id).eq("company_id", companyId);
       return Response.json({ duplicateRows, imported: validMetrics.length, message, skipped: duplicateRows + unknownStations.size, totalRows });
+    }
+
+    if (masterData.parser_type === "qc_store_health_pdf") {
+      const parsed = await importStep("Read Store Health scorecard PDF", () => parseStoreHealthScorecardPdf(fileBuffer));
+      const locationResult = await importStep("Validate dark store stations", () => loadCodLocations(companyId, [], true));
+      if (locationResult.error) throw new Error(locationResult.error);
+      const allowedStationCodes = new Set(
+        locationResult.locations
+          .filter((location) => operatingModeForLocation(location) === "amazon_now")
+          .map((location) => normalizeStation(location.station_code))
+      );
+      const unknownStations = new Set<string>();
+      const week = amazonWeekInfo(parsed.performanceDate);
+      const allMetricRows = parsed.stores.flatMap((store) => {
+        if (!allowedStationCodes.has(store.stationCode)) {
+          unknownStations.add(store.stationCode);
+          return [];
+        }
+        const valuesJson = storeHealthValuesJson(store, parsed.performanceDate);
+        const hash = crypto.createHash("sha256").update(JSON.stringify({
+          sourceType,
+          reportDate: parsed.performanceDate,
+          stationCode: store.stationCode,
+          values: valuesJson,
+          parserVersion: 1
+        })).digest("hex");
+        return [{
+          batch_id: batch.data.id,
+          company_id: companyId,
+          page_number: store.pageNumber,
+          raw_text: store.rawText,
+          report_date: parsed.performanceDate,
+          report_week: week.amazon_week_no,
+          report_year: week.amazon_week_year,
+          row_hash: hash,
+          row_label: store.city,
+          row_number: 1,
+          source_type: sourceType,
+          station_code: store.stationCode,
+          values_json: valuesJson
+        }];
+      });
+      if (!allMetricRows.length) {
+        throw new Error(`No Store Health rows matched active dark stores.${unknownStations.size ? ` Unmatched: ${[...unknownStations].join(", ")}.` : ""}`);
+      }
+      const hashes = allMetricRows.map((row) => row.row_hash);
+      const existing = new Set<string>();
+      for (let index = 0; index < hashes.length; index += HASH_LOOKUP_CHUNK_SIZE) {
+        const result = await db.from("report_metric_facts").select("row_hash")
+          .eq("company_id", companyId).eq("source_type", sourceType).in("row_hash", hashes.slice(index, index + HASH_LOOKUP_CHUNK_SIZE));
+        if (result.error) throw result.error;
+        (result.data ?? []).forEach((row) => existing.add(row.row_hash));
+      }
+      const validMetrics = allMetricRows.filter((row) => !existing.has(row.row_hash));
+      await importStep("Save Store Health metrics", () => insertInChunks("report_metric_facts", validMetrics, 250));
+      const duplicateRows = allMetricRows.length - validMetrics.length;
+      const warning = unknownStations.size ? ` ${[...unknownStations].join(", ")} ignored because they are not active dark stores.` : "";
+      const message = `${validMetrics.length} Store Health store row${validMetrics.length === 1 ? "" : "s"} imported for ${parsed.performanceDate}. ${duplicateRows} duplicate${duplicateRows === 1 ? "" : "s"} ignored.${warning}`;
+      await db.from("report_import_batches").update({
+        completed_at: new Date().toISOString(),
+        imported_row_count: validMetrics.length,
+        message,
+        report_from: parsed.performanceDate,
+        report_to: parsed.performanceDate,
+        row_count: parsed.stores.length,
+        skipped_row_count: duplicateRows + unknownStations.size,
+        station_code: [...new Set(allMetricRows.map((row) => row.station_code))].sort().join(", "),
+        status: "Completed"
+      }).eq("id", batch.data.id).eq("company_id", companyId);
+      return Response.json({ duplicateRows, imported: validMetrics.length, message, skipped: duplicateRows + unknownStations.size, totalRows: parsed.stores.length });
     }
 
     if (masterData.parser_type === "pdf_scorecard" || masterData.parser_type === "pdf_daily_metrics") {

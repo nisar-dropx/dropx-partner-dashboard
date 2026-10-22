@@ -57,12 +57,15 @@ function storeSummary(a:AuthorizationContext,locations:CodLocationRow[],month:st
   const due=stores.reduce((n,s)=>n+(s.people?.due??0),0),reported=stores.reduce((n,s)=>n+(s.people?.dueReported??0),0);
   const entered=stores.filter(s=>s.units?.units!=null).length,units=stores.reduce((n,s)=>n+(s.units?.units??0),0);
   const attendanceHref=`/ops-pulse?view=manpower&date=${today}${needsAttendance[0]?`&location=${needsAttendance[0].id}`:''}`;
+  const performanceDate=(()=>{const d=new Date(`${today}T00:00:00+05:30`);d.setDate(d.getDate()-2);return d.toISOString().slice(0,10);})();
+  const reviewHref=`/performance?view=reviews&date=${performanceDate}`;
   const extraItems:AttentionItem[]=[];
   if(data.canPeople){
     extraItems.push({key:'people',title:'Store attendance',value:data.peopleError?'Unavailable':`${needsAttendance.length} stores to check`,count:needsAttendance.length,detail:'Started shifts without in-punch or ended shifts without out-punch',href:attendanceHref,action:'Open attendance',tone:data.peopleError?'unknown':needsAttendance.length?'action':'clear'});
     if(needsRoster.length)extraItems.push({key:'shift-times',title:'Shift assignments',value:`${needsRoster.length} stores need review`,count:needsRoster.length,detail:'Shift times missing · not counted as absent',href:`/rostering?station=${encodeURIComponent(needsRoster[0].code)}`,action:'Open rostering',tone:'action'});
   }
   if(data.canUnits)extraItems.push({key:'units',title:'Store unit reporting',value:data.unitError?'Unavailable':`${needsUnits.length} stores to update`,count:needsUnits.length,detail:`${month} · cumulative units expected through ${date(data.expectedThrough)}`,href:unitHref,action:'Open unit reports',tone:data.unitError?'unknown':needsUnits.length?'action':'clear'});
+  if(hasPermission(a,'performance_review','access'))extraItems.push({key:'reviews',title:'Store Health Review Desk',value:'Open reviews',count:0,detail:`D-2 ${performanceDate} · upload the Store Health Scorecard, then start store reviews`,href:reviewHref,action:'Open Review Desk',tone:'action'});
   return {extraItems,attendanceHref,unitHref,due,reported,entered,units};
 }
 
@@ -79,10 +82,12 @@ export function DarkStoreHome({authorization:a,locations,searchParams={}}:Props)
   const today=todayKolkata(),month=searchParams.month&&validMonth(searchParams.month)&&searchParams.month<=today.slice(0,7)?searchParams.month:today.slice(0,7);
   const selected=locations.filter(l=>(!searchParams.station||l.station_code===searchParams.station)&&(!searchParams.city||l.city===searchParams.city));
   const scopeLabel=searchParams.station?selected[0]?.station_code||'Store not found':searchParams.city||'All your dark stores';
+  const performanceDate=(()=>{const d=new Date(`${today}T00:00:00+05:30`);d.setDate(d.getDate()-2);return d.toISOString().slice(0,10);})();
   const links=[
     ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${selected.length===1?`&location=${encodeURIComponent(selected[0].id)}`:''}`],
     ['ops_rostering','Rostering',`/rostering${selected.length===1?`?station=${encodeURIComponent(selected[0].station_code)}`:''}`],
     ['store_audits','Store Audits','/store-audits'],
+    ['performance_review','Review Desk',`/performance?view=reviews&date=${performanceDate}${selected.length===1?`&review=${encodeURIComponent(selected[0].station_code)}`:''}`],
     ['payment_approvals','Payment Approvals','/payments/approvals'],
     ['cpu_overview','CPU',`/cpu?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`],
     ['ops_report_bot','Report Bot','/report-bot']

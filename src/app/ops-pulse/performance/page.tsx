@@ -6,25 +6,28 @@ import { AmazonWeekNavigator } from "@/components/amazon-week-navigator";
 import { PerformanceSortControl } from "@/components/performance-sort-control";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
 import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performance-review-desk";
+import { StoreHealthReviewDesk } from "@/components/store-health-review-desk";
 import "./review-desk.css";
-import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
-import { loadCodLocations } from "@/lib/ops-pulse/cod";
+import { loadCodLocations, type CodLocationRow } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarget } from "@/lib/performance-targets";
 import { loadStationReviewTargets, emptyStationReviewTargets } from "@/lib/ops-pulse/station-review-targets-data";
 import { hawkeyeMetricDefinitions, hawkeyeTargetKey, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
-import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceReviewBacklog, loadPerformanceConnections, resolvePerformanceReviewChain, loadPerformanceFollowups, loadPerformanceNoonEmd, loadReviewStationLeads } from "@/lib/ops-pulse/performance-review";
+import { loadPerformanceReviewWorkspace, loadPerformanceReviewBacklog, loadPerformanceConnections, resolvePerformanceReviewChain, loadPerformanceFollowups, loadPerformanceNoonEmd, loadReviewStationLeads, loadPerformanceOperationalSnapshots } from "@/lib/ops-pulse/performance-review";
 import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { filterLocationsByReviewCluster, legacyConnectionsFromReview, reviewClusterFilterOptions } from "@/lib/ops-pulse/review-policy";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
-import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
+import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, dailyPerformanceSourceForMode, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
+import { STORE_HEALTH_DAILY_SOURCE, buildStoreHealthReviewMetrics } from "@/lib/ops-pulse/store-health-scorecard";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadCapacityRules } from "@/lib/ops-pulse/capacity";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -174,9 +177,39 @@ function trendPath(values: number[], width = 240, height = 62) {
 }
 
 export default async function PerformancePage({ searchParams }: { searchParams?: SearchParams }) {
-  const view = searchParams?.view === "sls" ? "sls" : searchParams?.view === "reviews" ? "reviews" : "daily";
-  const authorization = await requirePagePermission(view === "reviews" ? "performance_review" : "performance", "access");
+  const requestedView = searchParams?.view === "sls" ? "sls" : searchParams?.view === "reviews" ? "reviews" : "daily";
+  // Dark Store reviewers often have Review Desk without the LM "performance" page. Fall back
+  // only after we know the operating mode — never send a Last Mile user to Review Desk by accident.
+  let authorization: AuthorizationContext;
+  let reviewAccessFallback = false;
+  try {
+    authorization = await requirePagePermission(requestedView === "reviews" ? "performance_review" : "performance", "access");
+  } catch (denied) {
+    if (requestedView === "reviews") throw denied;
+    try {
+      authorization = await requirePagePermission("performance_review", "access");
+      reviewAccessFallback = true;
+    } catch {
+      throw denied;
+    }
+  }
   const companyId = requireCompanyId(authorization);
+  const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+  const context = resolveOperatingContext(locationsResult.locations);
+  if (reviewAccessFallback && context.mode !== "amazon_now") {
+    await requirePagePermission("performance", "access");
+  }
+  if (context.mode === "amazon_now") {
+    if (requestedView !== "reviews") {
+      const params = new URLSearchParams({ view: "reviews" });
+      if (searchParams?.date) params.set("date", searchParams.date);
+      if (searchParams?.review) params.set("review", searchParams.review);
+      if (searchParams?.cluster) params.set("cluster", searchParams.cluster);
+      redirect(`/performance?${params.toString()}`);
+    }
+    return renderStoreHealthReviewDesk({ authorization, companyId, searchParams, locations: context.modeLocations });
+  }
+  const view = requestedView;
   const targetResult = await loadPerformanceTargets(companyId);
   const allDailyTargets = resolvePerformanceTargets(targetResult.rows, "daily");
   const dailyMetricDefinitions = allDailyTargets.filter((target) => target.sourceIndex != null).map((target) => ({ ...target, index: target.sourceIndex as number }));
@@ -186,8 +219,6 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const dsrMetric = dailyMetricDefinitions.find((metric) => metric.metricKey === "dsr");
   const dsrIndex = dsrMetric?.index ?? 20;
   const slsMetricDefinitions = resolvePerformanceTargets(targetResult.rows, "sls");
-  const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
-  const context = resolveOperatingContext(locationsResult.locations);
   // Review Desk / Station Performance must use every authorised station for the
   // active operating model. Do not inherit the Command Center single-station
   // Scope cookie (dropx-ops-locations), or managers with full access only see
@@ -708,6 +739,153 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             </section>
           </>
         )}
+      </div>
+    </AppShell>
+  );
+}
+
+async function renderStoreHealthReviewDesk({
+  authorization,
+  companyId,
+  searchParams,
+  locations
+}: {
+  authorization: AuthorizationContext;
+  companyId: string;
+  searchParams?: SearchParams;
+  locations: CodLocationRow[];
+}) {
+  const dailySource = dailyPerformanceSourceForMode("amazon_now");
+  // Store Health is D-2: performance date T is published on T+1; reviews start on T+2.
+  const defaultDailyDate = dateShift(today(), -2);
+  const selectedDate = validDate(searchParams?.date, defaultDailyDate);
+  const selectedDailyWeek = amazonWeekNumber(selectedDate);
+  const canFilterClusters = hasPermission(authorization, "performance_review_cluster_filter", "access");
+  const clusterHierarchy = canFilterClusters
+    ? await loadPeopleOperationalHierarchy(companyId, locations.map((location) => location.id))
+    : { byLocation: new Map(), error: null };
+  const clusterOptions = reviewClusterFilterOptions(clusterHierarchy.byLocation);
+  const requestedCluster = canFilterClusters ? String(searchParams?.cluster ?? "").trim() : "";
+  const selectedCluster = requestedCluster && clusterOptions.some((option) => option.value === requestedCluster) ? requestedCluster : "";
+  const clusterFilteredLocations = filterLocationsByReviewCluster(locations, clusterHierarchy.byLocation, selectedCluster);
+  const deskLocations = selectedCluster
+    ? (clusterFilteredLocations.length ? clusterFilteredLocations : locations)
+    : locations;
+  const deskCodes = deskLocations.map((location) => location.station_code);
+  const requestedReviewCode = stationCode(searchParams?.review ?? null);
+  const metricSelect = "batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at";
+  const dayFacts = !supabaseAdmin || !deskCodes.length
+    ? { data: [] as MetricFact[], error: null }
+    : await supabaseAdmin.from("report_metric_facts")
+      .select(metricSelect)
+      .eq("company_id", companyId)
+      .in("station_code", deskCodes)
+      .eq("source_type", dailySource)
+      .eq("report_date", selectedDate)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+  const reviewWorkspace = deskLocations.length
+    ? await loadPerformanceReviewWorkspace(companyId, selectedDate, deskCodes)
+    : { settings: null, reviews: [], previousReviews: [], steps: [], items: [], updates: [], error: "No permitted store is available." };
+  const activeReviewCodes = new Set(
+    reviewWorkspace.reviews
+      .filter((review) => review.status === "open" || review.status === "in_review")
+      .map((review) => stationCode(review.station_code))
+  );
+  const selectedReviewLocation = deskLocations.find((location) => stationCode(location.station_code) === requestedReviewCode)
+    ?? deskLocations.find((location) => activeReviewCodes.has(stationCode(location.station_code)))
+    ?? deskLocations[0]
+    ?? null;
+  const selectedReviewRow = selectedReviewLocation
+    ? selectStationDailyRow(
+      (dayFacts.data ?? []) as MetricFact[],
+      selectedDate,
+      selectedReviewLocation.station_code,
+      stationCode,
+      STORE_HEALTH_DAILY_SOURCE
+    )
+    : null;
+  const { metrics, hero } = selectedReviewRow
+    ? buildStoreHealthReviewMetrics(selectedReviewRow.values_json)
+    : { metrics: [], hero: { scorePct: null, band: null, pointsEarned: null, pointsAvailable: null, city: null } };
+  const selectedReview = selectedReviewLocation
+    ? reviewWorkspace.reviews.find((review) =>
+      review.station_id === selectedReviewLocation.id || stationCode(review.station_code) === stationCode(selectedReviewLocation.station_code)
+    ) ?? null
+    : null;
+  const selectedStationClusterConflict = selectedReviewLocation
+    ? Boolean(clusterHierarchy.byLocation.get(selectedReviewLocation.id)?.hasClusterManagerConflict)
+    : false;
+  let peopleRouteError: string | null = null;
+  const [reviewChain, backlog, followups, stationLeads] = selectedReviewLocation
+    ? await Promise.all([
+      resolvePerformanceReviewChain(companyId, selectedReviewLocation.id).catch((error: Error) => { peopleRouteError = error.message; return []; }),
+      loadPerformanceReviewBacklog(companyId, selectedDate, deskCodes, reviewPendingPage(searchParams?.pendingPage)),
+      loadPerformanceFollowups(companyId, selectedReviewLocation.id, selectedDate),
+      loadReviewStationLeads(companyId, selectedReviewLocation.id)
+    ])
+    : [[], { rows: [], count: 0, page: 1, pageSize: 15, error: null }, { rows: [], count: 0, error: null }, "Store TL"];
+  const reviewAccess = selectedReviewLocation
+    ? await getReviewAccess(
+      authorization,
+      selectedReviewLocation.id,
+      selectedReview,
+      selectedReview
+        ? reviewWorkspace.steps.filter((step) => step.review_id === selectedReview.id)
+        : reviewChain.map((step, index) => ({ step_order: index + 1, reviewer_user_id: step.reviewerUserId, reviewer_role: step.reviewerRole, routing_source: step.routingSource, status: "pending" })),
+      { inScope: true, scorecardImported: Boolean(selectedReviewRow) }
+    )
+    : null;
+  const canViewReviews = hasPermission(authorization, "performance_review", "access");
+  const canViewReviewStatus = hasPermission(authorization, "performance_review_status", "access");
+
+  return (
+    <AppShell active="Review Desk" pageCode="performance_review">
+      <div className="ops-command-center performance-workspace">
+        <PageHead eyebrow="Dark Store · Performance" title="Store Health Review Desk" subtitle="D-2 Store Health Scorecard — performance date T is published on T+1; review from T+2." />
+        <PerformanceWorkspaceTabs active="reviews" canViewReviews={canViewReviews} canViewReviewStatus={canViewReviewStatus} darkStore />
+        {dayFacts.error ? <section className="panel message-panel error"><div className="panel-body">{dayFacts.error.message}</div></section> : null}
+        {selectedReviewLocation ? <StoreHealthReviewDesk
+          canAdd={Boolean(reviewAccess?.canStart)}
+          canCompleteStep={Boolean(reviewAccess?.canComplete)}
+          canEdit={Boolean(reviewAccess?.canEditRca)}
+          canComment={Boolean(reviewAccess?.canComment)}
+          canBypass={Boolean(reviewAccess?.canBypass)}
+          canProxy={Boolean(reviewAccess?.canProxy)}
+          canAccessBypass={Boolean(reviewAccess?.canAccessBypass)}
+          canAccessProxy={Boolean(reviewAccess?.canAccessProxy)}
+          canUndoBypass={Boolean(reviewAccess?.canUndoBypass)}
+          canManageActions={Boolean(reviewAccess?.canManageActions)}
+          reviewerEditReopened={Boolean(reviewAccess?.reviewerEditReopened)}
+          isOriginalReviewer={Boolean(reviewAccess?.isOriginalReviewer)}
+          followups={followups}
+          stationLeads={stationLeads}
+          backlog={backlog}
+          pendingExpanded={Boolean(searchParams?.pendingPage)}
+          programManager={Boolean(reviewAccess?.actor.programManager)}
+          updates={reviewWorkspace.updates}
+          reviewChain={reviewChain}
+          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this store. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict ? "Two People assignments are tied for Cluster Manager at this store. Contact HR to resolve the org chart." : null)}
+          date={selectedDate}
+          error={searchParams?.error || reviewWorkspace.error || (!selectedReviewRow ? "No Store Health Scorecard is imported for this store and date yet. Upload it in Report Imports before starting a review or adding RCA." : null)}
+          items={reviewWorkspace.items}
+          locations={deskLocations}
+          reviewClusters={canFilterClusters ? clusterOptions : []}
+          selectedCluster={selectedCluster}
+          canFilterClusters={canFilterClusters}
+          readOnlyPreview={Boolean(authorization.readOnly)}
+          metrics={metrics}
+          hero={hero}
+          notice={searchParams?.notice || null}
+          previousReviews={reviewWorkspace.previousReviews}
+          review={selectedReview}
+          reviews={reviewWorkspace.reviews}
+          selectedLocation={selectedReviewLocation}
+          sourceBatchId={selectedReviewRow?.batch_id ?? null}
+          sourceType={selectedReviewRow?.source_type ?? STORE_HEALTH_DAILY_SOURCE}
+          sourceWeek={selectedDailyWeek}
+          steps={reviewWorkspace.steps}
+        /> : <section className="panel message-panel error"><div className="panel-body">No permitted dark store is available for review.</div></section>}
       </div>
     </AppShell>
   );

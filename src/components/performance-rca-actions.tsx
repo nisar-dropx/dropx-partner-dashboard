@@ -76,7 +76,7 @@ export function PerformanceRcaActions({
               <span className={`metric-dot ${metric.severity}`} />
               <strong>{metric.label}</strong>
               {metric.reasonOnly ? <small>{cod ? metric.actual == null ? "Recorded COD pendency" : `${codRemarkMoney(metric.actual)} aged 2+ days` : metric.actual == null ? "Recorded delay" : `${metric.actual} min late`}</small> : <small>
-                Actual {valueText(metric.actual)}
+                Actual {metric.evidence?.trim() || valueText(metric.actual)}
                 {metric.target == null ? "" : ` · Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}
               </small>}
               <b>{metric.reasonOnly ? item?.root_cause?.trim() ? "Reason saved" : "Reason required" : item?.status?.replaceAll("_", " ") || "Needs RCA"}<span className="review-rca-edit-label">{!reviewStarted ? "View miss ›" : metric.reasonOnly ? canSaveReason && activeDisciplineKeys.includes(metric.key) ? item?.root_cause?.trim() ? "Edit reason ›" : "Add reason ›" : "View reason ›" : canSaveMetric ? "Edit RCA & plan ›" : "View RCA ›"}</span></b>

@@ -6,12 +6,16 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
 import { getReviewAccess, isScorecardImported } from "@/lib/ops-pulse/review-access";
+import { dailyPerformanceSourceForMode } from "@/lib/ops-pulse/performance-source-policy";
+import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
+import { STORE_HEALTH_DAILY_SOURCE } from "@/lib/ops-pulse/store-health-scorecard";
 import { reviewBypassReason, visibleReviewStep, noonEmdValue, stationTimingClocks } from "@/lib/ops-pulse/review-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { disciplineReason, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
 import { loadDisciplineRca } from "@/lib/ops-pulse/review-discipline-rca-data";
 import { codRemark, isCodRemarkKey, missingCodRemark } from "@/lib/ops-pulse/review-cod-rca";
 import { loadCodRca } from "@/lib/ops-pulse/review-cod-rca-data";
+import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 
 export type ReviewActionResult = { error?: string; notice?: string };
 const text = (data: FormData, key: string) => String(data.get(key) ?? "").trim();
@@ -41,11 +45,21 @@ function rpcError(error: { message: string; code?: string } | null) {
 }
 async function stationForAction(authorization: AuthorizationContext, stationCode: string) {
   if (!supabaseAdmin) throw new Error("Review service is unavailable.");
-  const result = await supabaseAdmin.from("stations").select("id,station_code")
+  const result = await supabaseAdmin.from("stations")
+    .select("id,station_code,station_name,providers(code,name),location_models(code,name)")
     .eq("company_id", requireCompanyId(authorization)).eq("station_code", stationCode).eq("is_active", true).maybeSingle();
   if (result.error || !result.data || !(authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(result.data.id))) throw new Error("This station is outside your location access.");
-  return result.data;
+  return result.data as Pick<CodLocationRow, "id" | "station_code" | "station_name" | "providers" | "location_models">;
 }
+
+function dailySourceForStation(station: Pick<CodLocationRow, "station_code" | "providers" | "location_models">) {
+  return dailyPerformanceSourceForMode(operatingModeForLocation(station as CodLocationRow));
+}
+
+function isStoreHealthReview(sourceType: string | null | undefined) {
+  return sourceType === STORE_HEALTH_DAILY_SOURCE;
+}
+
 async function context(authorization: AuthorizationContext, data: FormData) {
   if (!supabaseAdmin) throw new Error("Review service is unavailable.");
   const companyId = requireCompanyId(authorization);
@@ -53,15 +67,15 @@ async function context(authorization: AuthorizationContext, data: FormData) {
   const date = dateValue(text(data, "source_date"));
   await syncPeopleReviewRoutes(companyId, { reviewId: text(data, "review_id"), stationCodes: [station.station_code], from: date, to: date });
   const result = await supabaseAdmin.from("ops_performance_reviews")
-    .select("id,station_id,station_code,source_date,current_step_order,status,updated_at,reviewer_edit_reopened,routing_error")
+    .select("id,station_id,station_code,source_date,source_type,current_step_order,status,updated_at,reviewer_edit_reopened,routing_error")
     .eq("company_id", companyId).eq("id", text(data, "review_id")).eq("station_id", station.id).eq("source_date", date).maybeSingle();
   if (result.error || !result.data) throw new Error("This review is unavailable. Refresh and try again.");
   const steps = await supabaseAdmin.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id,routing_source,route_superseded_at")
     .eq("company_id", companyId).eq("review_id", result.data.id).order("step_order");
   if (steps.error) throw new Error("Unable to check the current review stage.");
-  const scorecardImported = await isScorecardImported(companyId, station.station_code, date);
+  const scorecardImported = await isScorecardImported(companyId, station.station_code, date, dailySourceForStation(station));
   const access = await getReviewAccess(authorization, station.id, result.data, steps.data ?? [], { inScope: true, scorecardImported });
-  return { companyId, station: { ...station, station_name: null }, review: result.data, access, steps: steps.data ?? [] };
+  return { companyId, station: { ...station, station_name: station.station_name ?? null }, review: result.data, access, steps: steps.data ?? [] };
 }
 function author(authorization: AuthorizationContext, role: string) {
   return { author_name: authorization.fullName || "Reviewer", author_role: role };
@@ -75,13 +89,19 @@ export async function startPerformanceReview(data: FormData): Promise<ReviewActi
     const sourceDate = dateValue(text(data, "source_date"));
     const chain = await resolvePerformanceReviewChain(companyId, station.id);
     if (!chain.length) throw new Error("The station review manager is not assigned in People. Contact your administrator.");
-    const scorecardImported = await isScorecardImported(companyId, station.station_code, sourceDate);
+    const expectedSource = dailySourceForStation(station);
+    // Always bind the review to the mode’s daily source — ignore spoofed form source_type.
+    const scorecardImported = await isScorecardImported(companyId, station.station_code, sourceDate, expectedSource);
     const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,routing_source:step.routingSource,status:"pending" })), { inScope: true, scorecardImported });
-    if (!access.scorecardImported) throw new Error("Import the Performance Scorecard for this station and date before starting a review.");
+    if (!access.scorecardImported) {
+      throw new Error(expectedSource === STORE_HEALTH_DAILY_SOURCE
+        ? "Import the Store Health Scorecard for this store and date before starting a review."
+        : "Import the Performance Scorecard for this station and date before starting a review.");
+    }
     if (!access.canStart) throw new Error("Only the first review manager or authorised oversight team can start this review.");
     const result = await supabaseAdmin!.rpc("ops_start_people_review", {
       p_company: companyId,p_actor:authorization.userId,p_station:station.id,p_chain:chain,
-      p_data:{source_date:sourceDate,source_type:text(data,"source_type") || "operational_data",source_batch_id:text(data,"source_batch_id"),report_week:text(data,"report_week") || null}
+      p_data:{source_date:sourceDate,source_type:expectedSource,source_batch_id:text(data,"source_batch_id"),report_week:text(data,"report_week") || null}
     });
     rpcError(result.error);
     return finish("Review started.");
@@ -207,7 +227,7 @@ export async function savePerformanceReviewComment(data:FormData):Promise<Review
     const note=limited(data,"feedback",4000,!complete);
     const step=steps.find((entry)=>entry.step_order===review.current_step_order && entry.status==="pending");
     if (complete && text(data,"step_id")!==step?.id) throw new Error("The review has moved to another stage. Refresh to continue.");
-    if (complete) {
+    if (complete && !isStoreHealthReview(review.source_type)) {
       const [delays, saved] = await Promise.all([
         loadDisciplineRca(companyId, station, review.source_date),
         supabaseAdmin!.from("ops_performance_review_items").select("metric_key,root_cause")
@@ -272,7 +292,7 @@ export async function bypassPerformanceReviewLevel(data: FormData): Promise<Revi
     if (!step) throw new Error("This review level is no longer pending. Refresh to continue.");
     const reason = reviewBypassReason(text(data, "reason"));
     // Skipping the final outstanding stage must not silently bypass completion requirements.
-    if (!steps.some(entry => entry.id !== step.id && entry.status === "pending")) {
+    if (!isStoreHealthReview(review.source_type) && !steps.some(entry => entry.id !== step.id && entry.status === "pending")) {
       await requireCodRemark(companyId, station.station_code, review.id);
       await requireVehicleDetails(companyId, station.id, review.source_date);
       await requireNoonEmd(companyId, station.id, review.source_date);

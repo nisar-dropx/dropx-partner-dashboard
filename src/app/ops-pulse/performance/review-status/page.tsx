@@ -10,6 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
+import { dailyPerformanceSourceForMode } from "@/lib/performance-source-policy";
 import { getReviewAccess, isScorecardImported } from "@/lib/ops-pulse/review-access";
 import {
   buildReviewStatusRows,
@@ -165,7 +166,9 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   const latestDate = dateShift(todayDate, -1);
   const range = reviewStatusDateRange({ from: searchParams?.from, to: searchParams?.to ?? latestDate, latestDate: todayDate });
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
-  const locations = resolveOperatingContext(locationsResult.locations).modeLocations;
+  const operatingContext = resolveOperatingContext(locationsResult.locations);
+  const locations = operatingContext.modeLocations;
+  const dailySource = dailyPerformanceSourceForMode(operatingContext.mode);
   const dataset = await loadReviewStatusDataset(companyId, locations.map((location) => location.station_code), range.from, range.to);
   const graph = await loadPeopleReviewGraph(companyId).catch(() => null);
   const routes: Record<string, PeopleReviewRoute> = Object.fromEntries(locations.map(location => [location.id, graph ? resolvePeopleReviewRoute(graph, location.id) : { chain: [], error: "People routing could not be verified. Refresh and try again." }]));
@@ -207,7 +210,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   // below skips rendering the block entirely); anyone who CAN see the review still sees
   // the buttons even without oversight rights, disabled with an explanation.
   const rowAccess = canViewReviews ? new Map(await Promise.all(pageRows.map(async (row) => {
-    const scorecardImported = row.review ? await isScorecardImported(companyId, row.stationCode, row.date) : false;
+    const scorecardImported = row.review ? await isScorecardImported(companyId, row.stationCode, row.date, dailySource) : false;
     const access = await getReviewAccess(authorization, row.stationId, row.review, row.steps, { inScope: true, scorecardImported });
     return [row.key, access] as const;
   }))) : new Map<string, Awaited<ReturnType<typeof getReviewAccess>>>();
@@ -220,7 +223,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
         subtitle="One view of every station review, reviewer stage and pending dependency."
         action={canManageAccess ? <Link className="button secondary compact" href="/users?section=roles">Manage access</Link> : undefined}
       />
-      <PerformanceWorkspaceTabs active="status" canViewReviews={canViewReviews} canViewReviewStatus />
+      <PerformanceWorkspaceTabs active="status" canViewReviews={canViewReviews} canViewReviewStatus darkStore={operatingContext.mode === "amazon_now"} />
 
       <nav className="review-status-presets" aria-label="Review date presets">
         <Link className={range.from === latestDate && range.to === latestDate ? "active" : ""} href={hrefFor(todayFilters, { from: latestDate, to: latestDate, page: undefined })}>Previous day</Link>

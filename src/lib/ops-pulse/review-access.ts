@@ -6,15 +6,22 @@ import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from "@/lib/ops-pulse/performance-sou
 import { reviewCapabilities, reviewRole, reviewRoutingIssue, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
 import { loadReviewOversightRoles, matchesOversightTier } from "@/lib/ops-pulse/review-oversight-roles";
 
-/** Has the Performance Scorecard (Hawkeye daily) been imported for this station/date? Reviews and RCA are blocked until it has. */
-export async function isScorecardImported(companyId: string, stationCode: string, sourceDate: string) {
+/** Has the daily performance scorecard been imported for this station/date? Reviews and RCA are blocked until it has. */
+export async function isScorecardImported(
+  companyId: string,
+  stationCode: string,
+  sourceDate: string,
+  sourceType: string = ACTIVE_DAILY_PERFORMANCE_SOURCE
+) {
   if (!supabaseAdmin || !stationCode || !sourceDate) return false;
+  const normalized = String(stationCode).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!normalized) return false;
   const result = await supabaseAdmin.from("report_metric_facts")
     .select("id", { head: true, count: "exact" })
     .eq("company_id", companyId)
-    .eq("station_code", stationCode)
+    .eq("station_code", normalized)
     .eq("report_date", sourceDate)
-    .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
+    .eq("source_type", sourceType)
     .limit(1);
   if (result.error) return false;
   return Boolean(result.count);

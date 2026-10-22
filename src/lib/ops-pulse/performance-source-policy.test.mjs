@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ACTIVE_DAILY_PERFORMANCE_SOURCE,
+  STORE_HEALTH_DAILY_SOURCE,
+  dailyPerformanceSourceForMode,
   selectActiveDailyBatchRows,
   selectStationDailyRow,
 } from "./performance-source-policy.ts";
@@ -16,6 +18,11 @@ const fact = (source_type, batch_id, created_at, report_date = "2026-09-02", sta
 
 test("uses Hawkeye as the active temporary daily performance source", () => {
   assert.equal(ACTIVE_DAILY_PERFORMANCE_SOURCE, "amazon_hawkeye_daily");
+});
+
+test("uses Store Health as the daily source for dark store mode", () => {
+  assert.equal(dailyPerformanceSourceForMode("amazon_now"), STORE_HEALTH_DAILY_SOURCE);
+  assert.equal(dailyPerformanceSourceForMode("amazon_edsp"), ACTIVE_DAILY_PERFORMANCE_SOURCE);
 });
 
 test("does not fall back to automated Daily EDSP facts", () => {
