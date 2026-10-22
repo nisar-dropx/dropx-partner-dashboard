@@ -388,7 +388,7 @@ export function ReportImportUploader({
         {compact ? <div className="compact-upload-actions">{manualButton}{autoButton}</div> : null}
       </div>
       {compact && isShipmentImport ? <p className="shipment-upload-note">Manual upload: station is read from the file. Auto upload: every Amazon station is fetched one by one for the date above — no station picker.</p> : null}
-      {compact && canAuto && !isShipmentImport ? <p className="shipment-upload-note">Auto upload pulls the file from the portal — no file picker needed. Use Upload file when the portal is blocked or Auto fails.</p> : null}
+      {compact && canAuto && !isShipmentImport ? <p className="shipment-upload-note">{sourceType === "amazon_hawkeye_daily" || sourceType === "qc_store_health_daily" ? "Auto upload checks Gmail for new report files (same as the 15-minute worker). Use Upload file for a one-off PDF/xlsx." : "Auto upload pulls the file from the portal — no file picker needed. Use Upload file when the portal is blocked or Auto fails."}</p> : null}
       {autoProgress ? (
         <div className="auto-run-progress" role="status" aria-live="polite">
           <div className="auto-run-progress-head">

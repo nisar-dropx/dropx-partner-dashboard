@@ -219,11 +219,16 @@ export async function POST(request: Request) {
       return Response.json(result);
     }
 
-    if (sourceType === "amazon_hawkeye_daily") {
-      // Not date-scoped like the others — the worker polls Gmail for every
-      // new "Hawkeye Daily Report" message (not just today's) and uploads
-      // whatever it finds, same as its 15-min cron. Clicking Auto upload
-      // just runs that same check immediately instead of waiting.
+    if (sourceType === "amazon_hawkeye_daily" || sourceType === "qc_store_health_daily") {
+      // Not date-scoped — the worker polls Gmail for new messages and uploads
+      // whatever it finds, same as its 15-min cron. Clicking Auto upload just
+      // runs that check immediately. Store Health accepts multiple PDFs per mail;
+      // the PDF parser itself sets the performance (D-2) date.
+      const tickPath =
+        sourceType === "qc_store_health_daily"
+          ? "/api/admin/reports/store-health-scorecard/tick"
+          : "/api/admin/reports/hawkeye-daily/tick";
+      const label = sourceType === "qc_store_health_daily" ? "Store Health" : "Hawkeye";
       const tick = await reportAutoPost<{
         ok: boolean;
         checked: number;
@@ -237,10 +242,10 @@ export async function POST(request: Request) {
           upload?: { ok: boolean; reason?: string };
         }>;
         reason?: string;
-      }>("/api/admin/reports/hawkeye-daily/tick", {});
+      }>(tickPath, {});
       if (!tick.ok) {
         return Response.json(
-          { ok: false, sourceType, error: tick.reason || "Hawkeye Gmail check failed." },
+          { ok: false, sourceType, error: tick.reason || `${label} Gmail check failed.` },
           { status: 502 }
         );
       }
@@ -249,7 +254,7 @@ export async function POST(request: Request) {
       const message =
         tick.results.length === 0
           ? `Checked ${tick.checked} recent email${tick.checked === 1 ? "" : "s"} — nothing new to upload.`
-          : `${succeeded.length} of ${tick.results.length} new Hawkeye report${tick.results.length === 1 ? "" : "s"} imported.${
+          : `${succeeded.length} of ${tick.results.length} new ${label} file${tick.results.length === 1 ? "" : "s"} imported.${
               failed.length ? ` ${failed.length} failed: ${failed.map((r) => r.reason).filter(Boolean).join("; ").slice(0, 300)}` : ""
             }`;
       const result: AutoRunResult = {
