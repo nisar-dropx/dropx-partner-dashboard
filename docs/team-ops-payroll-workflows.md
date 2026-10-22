@@ -323,11 +323,10 @@ for every gate, so a wider list never gives anyone extra approval rights.
 
 ## Pending work
 
-- **NL/SLP lifecycle — production walkthrough only.** Migrations and code gates are in place (Settings
-  digest UI, dry-run preview, edge-case tests). Ops still needs: keep digest disabled for the dry-run
-  day, verify recipients, then set `delivery_ready` and enable; run one live NL and one SLP Final case
-  into a payroll/payout draft. Checklist + email samples:
-  [`docs/nl-slp-ops-enablement.md`](./nl-slp-ops-enablement.md).
+- **NL/SLP lifecycle — production walkthrough completed 2026-10-22.** Digest dry-run verified, live NL
+  + SLP Final propose→approve→due completed, Initial-only refused, cap override / two-month / pre-publish
+  lock spot-checked, then `delivery_ready` + digest enabled. Record:
+  [`docs/nl-slp-ops-enablement.md`](./nl-slp-ops-enablement.md) §4.
 - **Automatic ID mapping by email** (workforce register and LSC ↔ DropX IDs). This is blocked: LSC
   provider IDs (`2000…`, from `cps_shipment_daily`) have no email anywhere in the database, and the Amazon
   transporter IDs linked by email in `workforce_amazon_portal_links` are a different ID system. It needs a

@@ -119,8 +119,8 @@ Use low-value real cases on a single station. Do not enable digest until both ru
 | Digest empty day / no double send | **Done** | Builder returns `[]`; `portal_digest_runs` + disabled seed; unit tests |
 | Command Center totals match scoped stations | **Done** | `nl_loss_recovery_command_summary(p_stations)`; empty for other station in test |
 | Digest UI + dry-run preview | **Done** (this enablement) | Settings form + `/api/ops-pulse/loss-recovery-digest-preview` |
-| Live NL + SLP Final walkthrough in production | **Ops pending** | Section 3 above — run on shared Supabase after deploy |
-| Mark `delivery_ready` + enable digest | **Ops pending** | After recipient verification |
+| Live NL + SLP Final walkthrough in production | **Done** (2026-10-22) | AOM Sujan propose → SLPM Varun approve; NL `630199769121` ₹0.56; SLP Final `…368262515886` ₹132 two-month + cap override; both due in 2026-10 workforce window; scripts under `scripts/operations/20261022-nl-slp-*` |
+| Mark `delivery_ready` + enable digest | **Done** (2026-10-22) | Control `enabled` / `delivery_ready=true` for all companies; IST 09:00; dry-run recipients `@dropxlogistics.com` only |
 
 ---
 
