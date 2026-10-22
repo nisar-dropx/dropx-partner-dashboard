@@ -1051,8 +1051,15 @@ returns table(
     when c.report = 'slp' and c.final_seen_at is null then 'Awaiting SLP Final'
     else null
   end blocker,
-  '/team-ops/losses/'||case c.report when 'slp' then 'slp' when 'station' then 'nl' else 'nl' end
-    ||'?month='||c.month||'&station='||c.station_code||'&case='||c.case_key
+  '/team-ops/losses/'
+    || case
+         when c.report = 'slp' and c.final_seen_at is null then 'slp-initial'
+         when c.report = 'slp' then 'slp-final'
+         else 'nl'
+       end
+    || '?month=' || c.month
+    || '&station=' || c.station_code
+    || '&case=' || replace(replace(replace(c.case_key, '%', '%25'), '|', '%7C'), ':', '%3A')
  from nl_loss_month_cases c
  left join nl_loss_recoveries r
    on r.company_id=c.company_id and r.month=c.month and r.case_key=c.case_key and not r.is_deleted

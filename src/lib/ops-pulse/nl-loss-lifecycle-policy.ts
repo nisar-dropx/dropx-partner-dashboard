@@ -93,11 +93,19 @@ export function lossesDeepLink(input: {
   station?: string | null;
   caseKey?: string | null;
   lifecycle?: string | null;
+  /** When report is slp: false → slp-initial, true/omit → slp-final. */
+  slpFinal?: boolean | null;
 }) {
-  const report = input.report === "slp" ? "slp" : "nl";
+  // Losses tabs are nl | slp-initial | slp-final — never a bare /slp path.
+  const section =
+    input.report === "slp"
+      ? input.slpFinal === false
+        ? "slp-initial"
+        : "slp-final"
+      : "nl";
   const q = new URLSearchParams({ month: input.month });
   if (input.station) q.set("station", input.station);
   if (input.caseKey) q.set("case", input.caseKey);
   if (input.lifecycle) q.set("lifecycle", input.lifecycle);
-  return `/team-ops/losses/${report}?${q}`;
+  return `/team-ops/losses/${section}?${q}`;
 }

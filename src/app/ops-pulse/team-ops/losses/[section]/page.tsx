@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { OpsLossReport, type LossTab } from "@/components/ops-loss-report";
 import { requirePagePermission } from "@/lib/authorization";
 import { loadLossReport, type LossReportKind } from "@/lib/ops-pulse/loss-reports";
@@ -18,6 +18,7 @@ import { loadRecoveryLedger } from "@/lib/ops-pulse/nl-recovery-ledger";
 import { StationClaimsDesk } from "@/components/station-claims-desk";
 import { canRaiseClaims, loadStationClaims } from "@/lib/ops-pulse/station-claims";
 import { hasPermission } from "@/lib/authorization";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import styles from "@/components/nl-loss.module.css";
 export const dynamic = "force-dynamic";
 
@@ -122,6 +123,31 @@ export default async function LossesSectionPage({
         </section>
       );
     }
+  }
+  // Digest / lifecycle helpers once emitted /team-ops/losses/slp — map to real tabs.
+  if (params.section === "slp") {
+    const auth = await requirePagePermission("ops_losses", "access");
+    const q = new URLSearchParams();
+    for (const [key, value] of Object.entries(searchParams ?? {})) {
+      if (value == null || value === "") continue;
+      q.set(key, Array.isArray(value) ? String(value[0]) : String(value));
+    }
+    const caseKey = q.get("case") || "";
+    const month = q.get("month") || "";
+    let target: "slp-initial" | "slp-final" = "slp-final";
+    if (auth.companyId && caseKey && month && supabaseAdmin) {
+      const row = await supabaseAdmin
+        .from("nl_loss_month_cases")
+        .select("final_seen_at")
+        .eq("company_id", auth.companyId)
+        .eq("month", month)
+        .eq("case_key", caseKey)
+        .eq("report", "slp")
+        .maybeSingle();
+      if (row.data && row.data.final_seen_at == null) target = "slp-initial";
+    }
+    const qs = q.toString();
+    redirect(qs ? `/team-ops/losses/${target}?${qs}` : `/team-ops/losses/${target}`);
   }
   const section = sections[params.section];
   if (!section) notFound();

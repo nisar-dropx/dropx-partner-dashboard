@@ -29,7 +29,17 @@ test("deep links stay on existing Losses routes", () => {
       station: "BLR1",
       lifecycle: "cluster_validation_pending",
     }),
-    "/team-ops/losses/slp?month=2026-10&station=BLR1&lifecycle=cluster_validation_pending",
+    "/team-ops/losses/slp-final?month=2026-10&station=BLR1&lifecycle=cluster_validation_pending",
+  );
+  assert.equal(
+    lossesDeepLink({
+      report: "slp",
+      month: "2026-09",
+      station: "KDJE",
+      caseKey: "slp:x|y",
+      slpFinal: false,
+    }),
+    "/team-ops/losses/slp-initial?month=2026-09&station=KDJE&case=slp%3Ax%7Cy",
   );
   assert.equal(lifecycleLabel("slp_final_confirmation_pending"), "Awaiting SLP confirmation");
 });

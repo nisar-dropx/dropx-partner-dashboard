@@ -63,7 +63,7 @@ Hello Cluster Manager,
 2 open actions.
 
 BLR1 | TID123456789 | ₹1,250.50 | Cluster validation | age 3d | due — | — | https://ops.dropxlogistics.com/team-ops/losses/nl?month=2026-09&case=TID123456789
-BLR1 | slp:AMZ987 | ₹800.00 | SLP final confirmation | age 1d | due 2026-10 | Awaiting SLP | https://ops.dropxlogistics.com/team-ops/losses/nl?month=2026-09&case=slp%3AAMZ987
+BLR1 | slp:AMZ987 | ₹800.00 | SLP final confirmation | age 1d | due 2026-10 | Awaiting SLP | https://ops.dropxlogistics.com/team-ops/losses/slp-final?month=2026-09&case=slp%3AAMZ987
 
 Open Losses: https://ops.dropxlogistics.com/team-ops/losses/nl
 ```

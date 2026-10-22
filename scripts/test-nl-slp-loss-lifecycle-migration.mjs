@@ -58,6 +58,7 @@ for (const file of [
   "20261016161000_loss_recovery_installments.sql",
   "20261022120000_nl_slp_loss_lifecycle.sql",
   "20261022121000_loss_recovery_action_digest.sql",
+  "20261022200000_loss_recovery_digest_deep_links.sql",
 ]) {
   const sql = readFileSync(`supabase/migrations/${file}`, "utf8");
   await db.exec(sql);
