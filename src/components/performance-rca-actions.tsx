@@ -35,6 +35,8 @@ type Props = {
   reviewStarted?: boolean;
   startControl?: ReactNode;
   editHint?: string;
+  /** Override the default Opening / UTR / COD hint (e.g. Dark Store scorecard RCA). */
+  hint?: string;
 };
 
 function valueText(value: number | null) {
@@ -53,7 +55,8 @@ export function PerformanceRcaActions({
   stationCode,
   reviewStarted = true,
   startControl,
-  editHint
+  editHint,
+  hint = "Performance misses: RCA and action plan. Opening / UTR delays and COD pending 2+ days: one short reason only."
 }: Props) {
   if (!rows.length) return null;
   const orderedRows = [...rows.filter(row=>!row.reasonOnly), ...rows.filter(row=>row.reasonOnly && !isCodRemarkKey(row.key)), ...rows.filter(row=>isCodRemarkKey(row.key))];
@@ -63,7 +66,7 @@ export function PerformanceRcaActions({
 
   return (
     <div className="performance-review-actions" id="review-rca">
-      <div className="review-rca-heading"><div><h3>RCA & reporting reasons</h3><p className="review-rca-hint">Performance misses: RCA and action plan. Opening / UTR delays and COD pending 2+ days: one short reason only.</p></div>{startControl}</div>
+      <div className="review-rca-heading"><div><h3>RCA & reporting reasons</h3><p className="review-rca-hint">{hint}</p></div>{startControl}</div>
       {!reviewStarted ? <p className="review-rca-locked">The review has not started. The misses are listed below; start the review to save RCA and delay reasons.</p> : editHint ? <p className="review-rca-locked">{editHint}</p> : null}
       {orderedRows.map((metric,index) => {
         const item = itemsByMetric.get(metric.key);

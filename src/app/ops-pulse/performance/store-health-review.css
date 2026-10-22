@@ -1,19 +1,113 @@
-/* Store Health accents on top of shared review-desk.css (same layout as Last Mile). */
+/* Store Health accents on shared review-desk.css — keep Last Mile layout, fix DS scorecard UX. */
 
 .store-health-review-desk .store-health-band.green { color: #15803d; }
 .store-health-review-desk .store-health-band.amber { color: #b45309; }
 .store-health-review-desk .store-health-band.red { color: #b91c1c; }
 
+/* Five status cells + Start review — keep on one row like Last Mile’s status strip. */
+.store-health-review-desk .performance-review-statusbar {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+}
+
+/* Even cards — auto-fit was stretching single-metric rows (e.g. People) full width. */
+.store-health-review-desk .performance-review-metrics {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+
+.store-health-review-desk .performance-review-metrics article {
+  padding: 8px 9px;
+  border-radius: 8px;
+  min-height: 72px;
+}
+
+.store-health-review-desk .performance-review-metrics span {
+  font-size: 10px;
+  font-weight: 750;
+  white-space: normal;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.store-health-review-desk .performance-review-metrics strong {
+  font-size: 15px;
+  margin: 4px 0 2px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-health-review-desk .performance-review-metrics small {
+  font-size: 10px;
+  font-weight: 650;
+  white-space: normal;
+  line-height: 1.3;
+  color: #64748b;
+}
+
+.store-health-review-desk .performance-review-facts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.store-health-review-desk .performance-review-facts > article.store-health-fact-green {
+  background: #f0fdf4;
+}
+
+.store-health-review-desk .performance-review-facts > article.store-health-fact-amber {
+  background: #fffbeb;
+}
+
+.store-health-review-desk .performance-review-facts > article.store-health-fact-red {
+  background: #fef2f2;
+}
+
 .store-health-review-desk .store-health-insights {
+  margin: 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.store-health-review-desk .store-health-insights > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 10px 13px;
+  font-size: 12px;
+  font-weight: 750;
+  color: #172033;
+}
+
+.store-health-review-desk .store-health-insights > summary small {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.store-health-review-desk .store-health-insights > summary::-webkit-details-marker { display: none; }
+.store-health-review-desk .store-health-insights > summary::after {
+  content: "+";
+  margin-left: auto;
+  color: #94a3b8;
+  font-weight: 700;
+}
+.store-health-review-desk .store-health-insights[open] > summary::after { content: "−"; }
+
+.store-health-review-desk .store-health-insights .store-health-insight-body {
   display: grid;
   gap: 8px;
-  margin: 12px 0 0;
+  padding: 0 13px 12px;
 }
 
 .store-health-review-desk .store-health-insights p {
   margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   color: #334155;
@@ -23,36 +117,35 @@
 
 .store-health-review-desk .store-health-insights strong {
   display: block;
-  margin-bottom: 4px;
-  font-size: 11px;
+  margin-bottom: 3px;
+  font-size: 10px;
   letter-spacing: .04em;
   text-transform: uppercase;
   color: #64748b;
 }
 
-.store-health-review-desk .store-health-category {
-  margin: 14px 0 0;
+.store-health-review-desk .review-scorecard-toolbar span {
+  font-size: 11px;
 }
 
-.store-health-review-desk .store-health-category h3 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: #64748b;
+@media (max-width: 1100px) {
+  .store-health-review-desk .performance-review-statusbar {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  }
 }
 
-.store-health-review-desk .performance-review-facts > article.store-health-fact-green {
-  border-color: #86efac;
-  background: #f0fdf4;
+@media (max-width: 900px) {
+  .store-health-review-desk .performance-review-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-.store-health-review-desk .performance-review-facts > article.store-health-fact-amber {
-  border-color: #fcd34d;
-  background: #fffbeb;
-}
+@media (max-width: 720px) {
+  .store-health-review-desk .performance-review-statusbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.store-health-review-desk .performance-review-facts > article.store-health-fact-red {
-  border-color: #fca5a5;
-  background: #fef2f2;
+  .store-health-review-desk .performance-review-metrics {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  }
 }

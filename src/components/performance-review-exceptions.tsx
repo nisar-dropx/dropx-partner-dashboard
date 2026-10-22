@@ -39,6 +39,7 @@ export function PerformanceReviewExceptions({
   routeLabel,
   reviewerEditReopened,
   firstReviewerName,
+  darkStore = false,
 }: {
   review: ExceptionsReview | null;
   steps: ExceptionsStep[];
@@ -50,6 +51,8 @@ export function PerformanceReviewExceptions({
   canStart: boolean;
   hasRoute: boolean;
   routeLabel?: string;
+  /** Dark Store uses Shift Incharge → Store → City → Regional → NH, not LM CM/AOM. */
+  darkStore?: boolean;
   /** Oversight has re-opened edit access for the original CM/AOM reviewer. */
   reviewerEditReopened?: boolean;
   /** Display name of the original (first-stage) reviewer, for the reopen button's label. */
@@ -67,7 +70,9 @@ export function PerformanceReviewExceptions({
   const noAccessReason = "You don't have oversight rights for this action — contact your Program Manager or an authorised oversight reviewer.";
 
   const inactiveReason = !hasRoute
-    ? "A review manager needs to be assigned in People. Contact HR so this station gets a Cluster Manager → National Head route."
+    ? darkStore
+      ? "A review manager needs to be assigned in People. Contact HR so this store gets a Shift Incharge → Store Manager → City Manager → Regional Manager → National Head route."
+      : "A review manager needs to be assigned in People. Contact HR so this station gets a Cluster Manager → National Head route."
     : !review
       ? canStart
         ? "Start review first for this station and date, then use Proxy or Skip."
@@ -82,7 +87,7 @@ export function PerformanceReviewExceptions({
 
   const proxyEnabled = Boolean(review && pending.length && current && canProxy);
   const skipEnabled = Boolean(review && pending.length && canBypass);
-  // Same audience as Skip (PGM / NH / Owner / Tech) — never Proxy-only editors.
+  // Same audience as Skip (PGM / NH / Owner / FSD / Tech) — never Proxy-only editors.
   const undoEnabled = Boolean(review && skipped.length && canAccessBypass && canUndoBypass);
 
   const proxyHint =

@@ -2,7 +2,7 @@ import 'server-only';
 import { unstable_noStore as noStore } from 'next/cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { resolvePeopleReviewRoute, type PeopleReviewGraph, type PeopleReviewRoute } from './people-review-route';
+import { isDarkStoreStationRow, resolvePeopleReviewRoute, type PeopleReviewGraph, type PeopleReviewRoute } from './people-review-route';
 
 // Paginate every source: a partial People graph must never silently choose a different approver.
 export async function allRoutingRows(query: any) {
@@ -30,7 +30,7 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
     allRoutingRows(db.from('profiles').select('id').eq('company_id', companyId).eq('is_active', true).order('id')),
     allRoutingRows(db.from('company_product_memberships').select('id,user_id,has_all_location_access,location_scope_ids').eq('company_id', companyId).eq('product_code', 'operations').eq('is_active', true).order('id')),
     allRoutingRows(db.from('ops_performance_review_oversight_roles').select('id,match_text').eq('company_id', companyId).eq('is_active', true).eq('tier', 'full').order('id')),
-    allRoutingRows(db.from('stations').select('id,parent_station_id').eq('company_id', companyId).not('parent_station_id', 'is', null).order('id'))
+    allRoutingRows(db.from('stations').select('id,parent_station_id,station_code,station_name,providers(code,name),location_models(code,name)').eq('company_id', companyId).order('id'))
   ]);
   const engagementById = new Map(engagements.map(r => [r.id, r]));
   const personById = new Map(people.map(r => [r.id, r]));
@@ -54,7 +54,8 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
         scopeIds: [...new Set(access.flatMap(m => (m.location_scope_ids ?? []) as string[]))], allLocations: access.some(m => m.has_all_location_access) }];
     }),
     relationships: relationships.map(r => ({ subjectId: r.subject_assignment_id, managerId: r.manager_assignment_id })),
-    parentStationById: new Map(stations.map(r => [String(r.id), String(r.parent_station_id)]))
+    parentStationById: new Map(stations.filter((r) => r.parent_station_id).map((r) => [String(r.id), String(r.parent_station_id)])),
+    darkStoreStationIds: new Set(stations.filter((r) => isDarkStoreStationRow(r)).map((r) => String(r.id)))
   };
 }
 export async function loadPeopleReviewRoute(companyId: string, stationId: string) {

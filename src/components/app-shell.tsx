@@ -98,7 +98,10 @@ export async function AppShell({ children, active, pageCode }: { children: React
   }
 
   const activeItem = shellNavItems.find((item) => item.label === active || item.children?.some((child) => child.label === active));
-  const currentPageCode = pageCode ?? activeItem?.code;
+  // Prefer the matched child page code — parent groups (e.g. Performance) may use a
+  // code the viewer does not hold, while the child (Review Desk) is what they opened.
+  const activeChild = activeItem?.children?.find((child) => child.label === active);
+  const currentPageCode = pageCode ?? activeChild?.code ?? activeItem?.code;
   if (currentPageCode && !hasPermission(authorization, currentPageCode, "access")) {
     redirect(`/unauthorized?page=${encodeURIComponent(currentPageCode)}&reason=access`);
   }

@@ -154,6 +154,15 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Drop PDF scraps that are not readable store/network notes. */
+export function usableStoreHealthInsight(value: string | null | undefined): string | undefined {
+  const text = normalizeSpace(String(value ?? ""));
+  if (text.length < 24) return undefined;
+  if (/^\{[^}]+\}\.?$/.test(text)) return undefined;
+  if (/^from\s+\d+/i.test(text) && text.length < 48) return undefined;
+  return text;
+}
+
 function extractInsight(text: string, heading: RegExp): string | undefined {
   const match = text.match(heading);
   if (!match || match.index == null) return undefined;
@@ -161,7 +170,7 @@ function extractInsight(text: string, heading: RegExp): string | undefined {
   const rest = text.slice(start);
   const next = rest.search(/\b(This store|Metric|TOTAL|Where the points|SPEED & PRODUCTIVITY|All stores)\b/i);
   const body = (next >= 0 ? rest.slice(0, next) : rest).trim();
-  return body ? normalizeSpace(body) : undefined;
+  return usableStoreHealthInsight(body ? normalizeSpace(body) : undefined);
 }
 
 function parseMetricLine(line: string, definition: StoreHealthMetricDefinition): StoreHealthMetricValue | null {
@@ -377,8 +386,8 @@ export function buildStoreHealthReviewMetrics(valuesJson: unknown): {
       pointsEarned: fact.pointsEarned,
       pointsAvailable: fact.pointsAvailable,
       city: fact.city,
-      networkInsight: fact.insights.network,
-      storeInsight: fact.insights.store
+      networkInsight: usableStoreHealthInsight(fact.insights.network),
+      storeInsight: usableStoreHealthInsight(fact.insights.store)
     }
   };
 }

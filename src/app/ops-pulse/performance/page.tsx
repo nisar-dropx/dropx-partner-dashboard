@@ -573,7 +573,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             connections={reviewConnections}
             updates={reviewWorkspace.updates}
             reviewChain={reviewChain}
-            routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict ? "Two People assignments are tied for Cluster Manager at this station. Contact HR to resolve the org chart — the Cluster/AOM filter may not reflect the intended manager until then." : null)}
+            routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict && !reviewChain.length ? "Two People assignments are tied for Cluster Manager at this station. Contact HR to resolve the org chart — the Cluster/AOM filter may not reflect the intended manager until then." : null)}
             date={selectedDate}
             error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Performance Scorecard is imported for this station and date yet. Import it before starting a review or adding RCA — Opening and UTR delay reasons are still available below." : null)}
             items={reviewWorkspace.items}
@@ -813,9 +813,6 @@ async function renderStoreHealthReviewDesk({
       review.station_id === selectedReviewLocation.id || stationCode(review.station_code) === stationCode(selectedReviewLocation.station_code)
     ) ?? null
     : null;
-  const selectedStationClusterConflict = selectedReviewLocation
-    ? Boolean(clusterHierarchy.byLocation.get(selectedReviewLocation.id)?.hasClusterManagerConflict)
-    : false;
   let peopleRouteError: string | null = null;
   const [reviewChain, backlog, followups, stationLeads] = selectedReviewLocation
     ? await Promise.all([
@@ -842,7 +839,7 @@ async function renderStoreHealthReviewDesk({
   return (
     <AppShell active="Review Desk" pageCode="performance_review">
       <div className="ops-command-center performance-workspace">
-        <PageHead eyebrow="Dark Store · Performance" title="Store Health Review Desk" subtitle="D-2 Store Health Scorecard — performance date T is published on T+1; review from T+2." />
+        <PageHead eyebrow="Performance" title="Review Desk" subtitle="D-2 Store Health Scorecard — performance date T is published on T+1; review from T+2." />
         <PerformanceWorkspaceTabs active="reviews" canViewReviews={canViewReviews} canViewReviewStatus={canViewReviewStatus} darkStore />
         {dayFacts.error ? <section className="panel message-panel error"><div className="panel-body">{dayFacts.error.message}</div></section> : null}
         {selectedReviewLocation ? <StoreHealthReviewDesk
@@ -865,7 +862,7 @@ async function renderStoreHealthReviewDesk({
           programManager={Boolean(reviewAccess?.actor.programManager)}
           updates={reviewWorkspace.updates}
           reviewChain={reviewChain}
-          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this store. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict ? "Two People assignments are tied for Cluster Manager at this store. Contact HR to resolve the org chart." : null)}
+          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "Map Shift Incharge → Store Manager → City Manager → Regional Manager → National Head in People for this store so reviews, Proxy and Skip can run." : null)}
           date={selectedDate}
           error={searchParams?.error || reviewWorkspace.error || (!selectedReviewRow ? "No Store Health Scorecard is imported for this store and date yet. Upload it in Report Imports before starting a review or adding RCA." : null)}
           items={reviewWorkspace.items}

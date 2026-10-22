@@ -2,6 +2,12 @@
 export function reviewRole(value: string | null | undefined) {
   const role = ` ${String(value ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ")} `;
   if (/\b(PGM|PROGRAM MANAGER|PROGRAM HEAD)\b/.test(role)) return "program";
+  // Dark Store seats (checked before LM station-floor tokens so Store Manager ≠ Station Manager).
+  if (/\b(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)\b/.test(role)) return "shift";
+  if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(role)) return "store";
+  if (/\bSM\b/.test(role) && !/\b(STM|STATION MANAGER)\b/.test(role)) return "store";
+  if (/\b(CITY MANAGER|CTM)\b/.test(role)) return "city";
+  if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(role)) return "regional";
   // CM / CLM are used interchangeably in People designations for cluster managers.
   if (/\b(CLM|CM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(role)) return "cluster";
   if (/\b(AOM|AM|AREA OPERATIONS? MANAGER|AREA MANAGER)\b/.test(role)) return "aom";
@@ -16,6 +22,17 @@ export function managerReviewChain<T extends { role: string; personId: string; d
   return chain.filter((person) => {
     const role = reviewRole(`${person.designationCode ?? ""} ${person.role}`);
     if (!["cluster", "aom", "national"].includes(role) || seen.has(person.personId)) return false;
+    seen.add(person.personId);
+    return true;
+  });
+}
+
+/** Dark Store review stages: Shift Incharge → Store → City → Regional → NH. */
+export function darkStoreManagerReviewChain<T extends { role: string; personId: string; designationCode?: string | null }>(chain: T[]) {
+  const seen = new Set<string>();
+  return chain.filter((person) => {
+    const role = reviewRole(`${person.designationCode ?? ""} ${person.role}`);
+    if (!["shift", "store", "city", "regional", "national"].includes(role) || seen.has(person.personId)) return false;
     seen.add(person.personId);
     return true;
   });

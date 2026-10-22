@@ -65,7 +65,7 @@ function storeSummary(a:AuthorizationContext,locations:CodLocationRow[],month:st
     if(needsRoster.length)extraItems.push({key:'shift-times',title:'Shift assignments',value:`${needsRoster.length} stores need review`,count:needsRoster.length,detail:'Shift times missing · not counted as absent',href:`/rostering?station=${encodeURIComponent(needsRoster[0].code)}`,action:'Open rostering',tone:'action'});
   }
   if(data.canUnits)extraItems.push({key:'units',title:'Store unit reporting',value:data.unitError?'Unavailable':`${needsUnits.length} stores to update`,count:needsUnits.length,detail:`${month} · cumulative units expected through ${date(data.expectedThrough)}`,href:unitHref,action:'Open unit reports',tone:data.unitError?'unknown':needsUnits.length?'action':'clear'});
-  if(hasPermission(a,'performance_review','access'))extraItems.push({key:'reviews',title:'Store Health Review Desk',value:'Open reviews',count:0,detail:`D-2 ${performanceDate} · upload the Store Health Scorecard, then start store reviews`,href:reviewHref,action:'Open Review Desk',tone:'action'});
+  if(hasPermission(a,'performance_review','access'))extraItems.push({key:'reviews',title:'Review Desk',value:'Open reviews',count:0,detail:`D-2 ${performanceDate} · Store Health Scorecard · start store reviews`,href:reviewHref,action:'Open Review Desk',tone:'action'});
   return {extraItems,attendanceHref,unitHref,due,reported,entered,units};
 }
 

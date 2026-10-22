@@ -287,7 +287,7 @@ export async function bypassPerformanceReviewLevel(data: FormData): Promise<Revi
   const authorization = await requirePagePermission("performance_review", "access");
   try {
     const { companyId, station, review, access, steps } = await context(authorization, data);
-    if (!access.canBypass) throw new Error("Only Program Manager, National Head, Owner or Tech can skip a review level within their station access.");
+    if (!access.canBypass) throw new Error("Only Program Manager, National Head, Owner, FSD or Tech can skip a review level within their station access.");
     const step = steps.find(entry => entry.id === text(data, "step_id") && entry.status === "pending" && visibleReviewStep(entry));
     if (!step) throw new Error("This review level is no longer pending. Refresh to continue.");
     const reason = reviewBypassReason(text(data, "reason"));
@@ -334,7 +334,7 @@ export async function reopenPerformanceReviewForOriginalReviewer(data: FormData)
   const authorization = await requirePagePermission("performance_review", "access");
   try {
     const { companyId, review, access } = await context(authorization, data);
-    if (!access.canAccessBypass) throw new Error("Only Program Manager, National Head, Owner, Tech, or Cluster/AOM filter access can reopen edit access.");
+    if (!access.canAccessBypass) throw new Error("Only Program Manager, National Head, Owner, FSD, Tech, or Cluster/AOM filter access can reopen edit access.");
     const result = await supabaseAdmin!.rpc("ops_reopen_reviewer_edit_access", {
       p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_reopened: true,
       p_expected_version: text(data, "review_version") || review.updated_at,
@@ -348,7 +348,7 @@ export async function closeReopenedPerformanceReviewAccess(data: FormData): Prom
   const authorization = await requirePagePermission("performance_review", "access");
   try {
     const { companyId, review, access } = await context(authorization, data);
-    if (!access.canAccessBypass) throw new Error("Only Program Manager, National Head, Owner, Tech, or Cluster/AOM filter access can close reopened edit access.");
+    if (!access.canAccessBypass) throw new Error("Only Program Manager, National Head, Owner, FSD, Tech, or Cluster/AOM filter access can close reopened edit access.");
     const result = await supabaseAdmin!.rpc("ops_reopen_reviewer_edit_access", {
       p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_reopened: false,
       p_expected_version: text(data, "review_version") || review.updated_at,

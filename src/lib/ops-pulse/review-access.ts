@@ -53,13 +53,19 @@ export const loadReviewActor = cache(async (companyId: string, userId: string, r
   const oversightRoles = (await loadReviewOversightRoles(companyId)).rows;
   // Portal role code isn't a People designation, but it still needs to match the configured
   // oversight list the same way FSD/TECH portal logins matched the old hardcoded check.
-  const matchLabels = [...roleLabels, `${roleCode ?? ""} ${roleName ?? ""}`];
+  const portalLabel = `${roleCode ?? ""} ${roleName ?? ""}`;
+  const matchLabels = [...roleLabels, portalLabel];
+  const hinted = matchLabels.map((label) => reviewRole(label));
+  const roleCodeUpper = String(roleCode ?? "").trim().toUpperCase();
+  // NH / FSD / TECH keep Proxy + Skip even when Master oversight rows are missing or stale.
+  const nationalByRole = hinted.includes("national") || roleCodeUpper === "NH";
+  const techByRole = hinted.includes("tech") || ["TECH", "OPERATIONS_TECH", "FSD"].includes(roleCodeUpper);
   return {
     // Master-configured "full" oversight tier — replaces the old Program Manager-only check.
-    programManager: matchesOversightTier(oversightRoles, matchLabels, "full"),
+    programManager: matchesOversightTier(oversightRoles, matchLabels, "full") || hinted.includes("program"),
     // Master-configured "override" tier (also true for anyone in the "full" tier).
-    nationalHead: matchesOversightTier(oversightRoles, matchLabels, "override"),
-    tech: matchesOversightTier(oversightRoles, matchLabels, "override") || ["TECH", "OPERATIONS_TECH"].includes(roleCode ?? ""),
+    nationalHead: matchesOversightTier(oversightRoles, matchLabels, "override") || nationalByRole,
+    tech: matchesOversightTier(oversightRoles, matchLabels, "override") || techByRole,
     stationUser: roleLabels.some((label) => reviewRole(label) === "station"),
     label: displayLabel || roleName || "Reviewer"
   };
@@ -105,13 +111,22 @@ export async function getReviewAccess(
     reviewerEditReopened: Boolean(review?.reviewer_edit_reopened)
   });
   const routingIssue = review?.routing_error || reviewRoutingIssue(steps);
+  // Owner / NH / FSD / Tech / Program Manager may still Proxy or Skip when People mapping
+  // is noisy — those tools are the recovery path, not blocked by the same mapping alert.
+  const canOverride = Boolean(
+    isCompanyOwner(authorization)
+    || actor.programManager
+    || actor.nationalHead
+    || actor.tech
+    || hasClusterFilterAccess
+  );
   return {
     actor,
     routingIssue,
     ...capabilities,
     canComplete: capabilities.canComplete && !routingIssue,
-    canProxy: capabilities.canProxy && !routingIssue,
-    canBypass: capabilities.canBypass && !routingIssue,
+    canProxy: capabilities.canProxy && (!routingIssue || canOverride),
+    canBypass: capabilities.canBypass && (!routingIssue || canOverride),
     // Exposed so the UI can show "you are the original reviewer" hints (e.g. the reopened-edit-access banner).
     isOriginalReviewer: Boolean(pendingSteps[0]?.reviewer_user_id && pendingSteps[0].reviewer_user_id === authorization.userId)
   };
