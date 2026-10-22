@@ -10,10 +10,13 @@ import {
   proofKindHint,
   proofPrefersCapture,
   type Evidence,
+  type ProofRule,
   type SiChecklist,
   type Task,
 } from "@/lib/ops-pulse/si-handover/model";
 import styles from "./si-handover.module.css";
+
+type ProofTask = Pick<Task, "id" | "proof"> | { id: string; proof: ProofRule };
 
 const stamp = (v: string | null | undefined) =>
   v
@@ -46,18 +49,20 @@ async function readGps(): Promise<{
 
 function MediaPreview({
   proof,
+  apiBase,
   fullscreen,
   onClose,
   onFullscreen,
   onExitFullscreen,
 }: {
   proof: Evidence;
+  apiBase: string;
   fullscreen: boolean;
   onClose: () => void;
   onFullscreen: () => void;
   onExitFullscreen: () => void;
 }) {
-  const src = `/api/ops-pulse/si-handover/evidence/${proof.id}`;
+  const src = `${apiBase}/evidence/${proof.id}`;
   const mime = proof.content_type || "";
   return (
     <div
@@ -118,13 +123,15 @@ export function ProofPanel({
   editable,
   onChange,
   onError,
+  apiBase = "/api/ops-pulse/si-handover",
 }: {
-  checklist: SiChecklist;
-  task: Task;
+  checklist: Pick<SiChecklist, "id">;
+  task: ProofTask;
   proofs: Evidence[];
   editable: boolean;
   onChange: (next: Evidence[]) => void;
   onError: (msg: string) => void;
+  apiBase?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<Evidence | null>(null);
@@ -160,7 +167,7 @@ export function ProofPanel({
       let next = [...proofs];
       for (const file of list) {
         const capturedAt = new Date().toISOString();
-        const prep = await fetch("/api/ops-pulse/si-handover/upload", {
+        const prep = await fetch(`${apiBase}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -182,7 +189,7 @@ export function ProofPanel({
           .from("ops-pulse-documents")
           .uploadToSignedUrl(prepared.path, prepared.token, file);
         if (up.error) throw Error(up.error.message);
-        const done = await fetch("/api/ops-pulse/si-handover/upload", {
+        const done = await fetch(`${apiBase}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -227,7 +234,7 @@ export function ProofPanel({
             >
               {isImageMime(p.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={`/api/ops-pulse/si-handover/evidence/${p.id}`} alt="" />
+                <img src={`${apiBase}/evidence/${p.id}`} alt="" />
               ) : isVideoMime(p.content_type) ? (
                 <span className={styles.proofBadge}>Video</span>
               ) : isPdfMime(p.content_type) ? (
@@ -243,7 +250,7 @@ export function ProofPanel({
                 className={styles.linkDanger}
                 disabled={busy}
                 onClick={async () => {
-                  const r = await fetch("/api/ops-pulse/si-handover/upload", {
+                  const r = await fetch(`${apiBase}/upload`, {
                     method: "POST",
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify({
@@ -328,6 +335,7 @@ export function ProofPanel({
       {preview ? (
         <MediaPreview
           proof={preview}
+          apiBase={apiBase}
           fullscreen={fullscreen}
           onClose={() => {
             setPreview(null);

@@ -70,6 +70,8 @@ export const accessPages = [
   { code: "store_audit_master", name: "Store Audit Master", sort_order: 94 },
   { code: "si_handover", name: "Activities and Handover", sort_order: 93 },
   { code: "si_handover_master", name: "Activities and Handover Master", sort_order: 94 },
+  { code: "store_ops", name: "Store Operations", sort_order: 93 },
+  { code: "store_ops_master", name: "Store Operations Master", sort_order: 94 },
   { code: "station_audits", name: "Station Audits", sort_order: 94 },
   { code: "ops_loss_master", name: "Loss Recovery Master", sort_order: 94 },
   { code: "station_audit_master", name: "Audit Master", sort_order: 94 },
@@ -607,6 +609,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["station_audit_master"], "store_audit_master");
     await seedTargetPermissionsFromSources(supabase, companyId, ["store_audits"], "si_handover");
     await seedTargetPermissionsFromSources(supabase, companyId, ["store_audit_master"], "si_handover_master");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["si_handover"], "store_ops");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["si_handover_master"], "store_ops_master");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_master"], "station_audit_master");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");

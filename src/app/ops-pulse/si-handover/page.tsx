@@ -25,8 +25,9 @@ export default async function Page({
 }: {
   searchParams?: { view?: string; id?: string; from?: string; to?: string };
 }) {
-  await requirePagePermission("si_handover", "access");
+  const auth = await requirePagePermission("si_handover", "access");
   const c = await context();
+  const showStore = hasPermission(auth, "store_ops", "access");
   const view = parseView(searchParams?.view);
   const cur = currentShift(new Date(), c.master.settings.shiftSlots);
   const lookbackStart = (() => {
@@ -56,18 +57,7 @@ export default async function Page({
   }
   const evidence = focused ? await proofs(c.companyId, focused.id) : [];
   return (
-    <AppShell
-      active={
-        view === "accept"
-          ? "Accept handover"
-          : view === "handover"
-            ? "Handover"
-            : view === "during"
-              ? "During shift"
-              : "Activities & Handover"
-      }
-      pageCode="si_handover"
-    >
+    <AppShell active="Shift operations" pageCode="si_handover">
       <SiHandoverWorkspace
         key={`${focused?.id || "list"}:${view}`}
         view={view}
@@ -79,6 +69,7 @@ export default async function Page({
         settings={c.master.settings}
         error={error}
         canMaster={hasPermission(c.auth, "si_handover_master", "access")}
+        showStoreOps={showStore}
       />
     </AppShell>
   );

@@ -36,6 +36,7 @@ import {
   startShift,
   submitHandover,
 } from "./actions";
+import { ActivitiesHub } from "./activities-hub";
 import { ProofPanel } from "./si-handover-proof";
 import { ShiftList } from "./shift-list";
 import styles from "./si-handover.module.css";
@@ -57,6 +58,7 @@ type Props = {
   settings: Settings;
   error: string;
   canMaster: boolean;
+  showStoreOps?: boolean;
 };
 
 function TaskCard({
@@ -440,17 +442,11 @@ export function SiHandoverWorkspace(props: Props) {
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <p className={styles.eyebrow}>Dark Store · Activities & Handover</p>
+        <p className={styles.eyebrow}>Dark Store · Shift operations</p>
         <h1>{titles[props.view]}</h1>
         <p>
           Compact shift checklist — live camera proofs where required, screenshots for
           dashboards. Clock-out: <strong>{modeLabel}</strong>
-          {manager ? (
-            <>
-              {" "}
-              · <Link href="/si-handover/report">Manager report</Link>
-            </>
-          ) : null}
           {props.canMaster ? (
             <>
               {" "}
@@ -460,6 +456,12 @@ export function SiHandoverWorkspace(props: Props) {
           .
         </p>
       </header>
+
+      <ActivitiesHub
+        active="shift"
+        showStore={Boolean(props.showStoreOps)}
+        showReport={manager}
+      />
 
       <nav className={styles.tabBar} aria-label="Activity stages">
         {(

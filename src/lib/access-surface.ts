@@ -47,6 +47,8 @@ export const opsAccessPageCodes = [
   "store_audit_master",
   "si_handover",
   "si_handover_master",
+  "store_ops",
+  "store_ops_master",
   "edd_dashboard",
   "station_edd",
   "cps",

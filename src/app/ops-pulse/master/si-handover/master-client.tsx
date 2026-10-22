@@ -40,7 +40,7 @@ export function SiHandoverMasterClient({
       <header className={styles.hero}>
         <div>
           <p className={styles.eyebrow}>Ops Masters</p>
-          <h1>Activities & Handover Master</h1>
+          <h1>Shift operations Master</h1>
           <p>
             Configure who can fill/accept, which store models are in scope, and
             how clock-out is enforced until handover is accepted.{" "}

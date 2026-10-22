@@ -82,6 +82,7 @@ const groupedParentPermissions: Record<string, string[]> = {
     "station_audits",
     "station_audit_master", "store_audits", "store_audit_master",
     "si_handover", "si_handover_master",
+    "store_ops", "store_ops_master",
     "edd_dashboard",
     "station_edd",
     "cps",

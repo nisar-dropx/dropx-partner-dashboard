@@ -194,8 +194,21 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
       label: "Activities & Handover",
       icon: "▶",
       children: [
-        { code: "si_handover", label: "Workspace", href: "/si-handover?view=start" },
-        { code: "si_handover", label: "Manager report", href: "/si-handover/report" },
+        {
+          code: "si_handover",
+          label: "Shift operations",
+          href: "/si-handover?view=start",
+        },
+        {
+          code: "store_ops",
+          label: "Store operations",
+          href: "/store-ops?view=start",
+        },
+        {
+          // Visible when either Shift or Store ops is granted (see AppShell child filter).
+          label: "Activities report",
+          href: "/si-handover/report",
+        },
       ],
     },
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
@@ -215,7 +228,8 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
     {code:'master_data',label:'Ops Masters',icon:'*',children:[
       {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
       {code:'store_audit_master',label:'Audit Master',href:'/master/store-audits'},
-      {code:'si_handover_master',label:'Activities & Handover Master',href:'/master/si-handover'},
+      {code:'si_handover_master',label:'Shift operations Master',href:'/master/si-handover'},
+      {code:'store_ops_master',label:'Store operations Master',href:'/master/store-ops'},
       {code:'master_locations',label:'Location Master',href:'/master/location'},
       {code:'master_providers',label:'Client / Provider Master',href:'/master/providers'},
       {code:'master_models',label:'Operation Models',href:'/master/models'}
