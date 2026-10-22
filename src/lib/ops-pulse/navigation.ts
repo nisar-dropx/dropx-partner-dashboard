@@ -191,8 +191,15 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
     {code:'si_handover',label:'SI Shift',href:'/si-handover?view=start',icon:'▶'},
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
-    {code:'performance_review',label:'Review Desk',href:'/performance?view=reviews',icon:'R'},
-    {code:'performance_review_status',label:'Review Status',href:'/performance/review-status',icon:'R'},
+    {
+      code: "performance",
+      label: "Performance",
+      icon: "P",
+      children: [
+        { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
+        { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" }
+      ]
+    },
     {code:'ops_report_bot',label:'Report Bot',href:'/report-bot',icon:'W'},
     businessDocuments,payments,
     {code:'cpu_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,

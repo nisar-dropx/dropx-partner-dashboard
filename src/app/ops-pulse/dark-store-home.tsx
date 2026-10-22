@@ -88,7 +88,7 @@ export function DarkStoreHome({authorization:a,locations,searchParams={}}:Props)
     ['ops_rostering','Rostering',`/rostering${selected.length===1?`?station=${encodeURIComponent(selected[0].station_code)}`:''}`],
     ['si_handover','SI Shift','/si-handover?view=start'],
     ['store_audits','Store Audits','/store-audits'],
-    ['performance_review','Review Desk',`/performance?view=reviews&date=${performanceDate}${selected.length===1?`&review=${encodeURIComponent(selected[0].station_code)}`:''}`],
+    ['performance_review','Performance',`/performance?view=reviews&date=${performanceDate}${selected.length===1?`&review=${encodeURIComponent(selected[0].station_code)}`:''}`],
     ['payment_approvals','Payment Approvals','/payments/approvals'],
     ['cpu_overview','CPU',`/cpu?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`],
     ['ops_report_bot','Report Bot','/report-bot']

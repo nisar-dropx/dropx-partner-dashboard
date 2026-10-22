@@ -842,7 +842,7 @@ async function renderStoreHealthReviewDesk({
   return (
     <AppShell active="Review Desk" pageCode="performance_review">
       <div className="ops-command-center performance-workspace">
-        <PageHead eyebrow="Dark Store · Performance" title="Store Health Review Desk" subtitle="D-2 · scorecard date T · review from T+2" />
+        <PageHead eyebrow="Dark Store · Performance" title="Store Health Review Desk" subtitle="D-2 Store Health Scorecard — performance date T is published on T+1; review from T+2." />
         <PerformanceWorkspaceTabs active="reviews" canViewReviews={canViewReviews} canViewReviewStatus={canViewReviewStatus} darkStore />
         {dayFacts.error ? <section className="panel message-panel error"><div className="panel-body">{dayFacts.error.message}</div></section> : null}
         {selectedReviewLocation ? <StoreHealthReviewDesk
