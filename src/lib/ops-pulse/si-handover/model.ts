@@ -188,7 +188,7 @@ export const CLOCK_OUT_MODES: {
 ];
 
 /** Bump when default catalogue proof/answer rules change; master template refreshes. */
-export const SI_TEMPLATE_FORMAT = 5;
+export const SI_TEMPLATE_FORMAT = 6;
 
 export type Settings = {
   managerRoles: string[];
@@ -712,16 +712,25 @@ export function requiredProofCount(task: Task, answer: TaskAnswer) {
     if (!lines.length && !answer.outcome) return 0;
     return task.proof.min;
   }
+  if (task.answerType === "number" || task.answerType === "number_x4") {
+    const numbersReady = task.numberFields.every((f) =>
+      String(answer.numbers?.[f.key] ?? "").trim(),
+    );
+    if (!numbersReady && !answer.outcome) return 0;
+    return task.proof.min;
+  }
   if (!answer.outcome) return 0;
   return task.proof.min;
 }
 
-export function validateAnswersForSubmit(
+/** Collect submit blockers without throwing — used for mobile UX before submit. */
+export function collectSubmitGaps(
   row: SiChecklist,
   answers: Record<string, TaskAnswer>,
   proofs: Evidence[],
   ctx: { city?: string | null; settings: Settings },
-) {
+): string[] {
+  const gaps: string[] = [];
   const done = disposalDone(answers);
   for (const task of tasks(row.template)) {
     const mandatory = isTaskMandatory(task, {
@@ -731,47 +740,47 @@ export function validateAnswersForSubmit(
     });
     const a = answers[task.id] || emptyAnswer();
     if (task.answerType === "text") {
-      if (mandatory && !a.text.trim())
-        throw Error(`Complete: ${task.label}`);
+      if (mandatory && !a.text.trim()) gaps.push(`Complete: ${task.label}`);
       continue;
     }
     if (task.answerType === "line_items") {
       const lines = (a.lines || []).filter(lineHasAny);
       if (!mandatory && lines.length === 0) continue;
-      if (mandatory && lines.length === 0)
-        throw Error(`Add at least one vehicle: ${task.label}`);
+      if (mandatory && lines.length === 0) {
+        gaps.push(`Add at least one vehicle: ${task.label}`);
+        continue;
+      }
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
         for (const f of task.numberFields) {
           if (!String(line[f.key] ?? "").trim())
-            throw Error(
-              `Enter ${f.label} for vehicle ${i + 1}: ${task.label}`,
-            );
+            gaps.push(`Enter ${f.label} for vehicle ${i + 1}: ${task.label}`);
         }
       }
     } else if (task.answerType === "number" || task.answerType === "number_x4") {
       for (const f of task.numberFields) {
         const v = a.numbers[f.key];
         if (mandatory && (v === undefined || v === null || String(v).trim() === ""))
-          throw Error(`Enter ${f.label}: ${task.label}`);
+          gaps.push(`Enter ${f.label}: ${task.label}`);
       }
     } else if (!a.outcome) {
-      if (mandatory) throw Error(`Answer: ${task.label}`);
+      if (mandatory) gaps.push(`Answer required: ${task.label}`);
       continue;
     }
-    if (task.answerType === "yes_no" && !["yes", "no"].includes(a.outcome))
-      throw Error(`Choose Yes or No: ${task.label}`);
+    if (task.answerType === "yes_no" && a.outcome && !["yes", "no"].includes(a.outcome))
+      gaps.push(`Choose Yes or No: ${task.label}`);
     if (
       task.answerType === "yes_no_na" &&
+      a.outcome &&
       !["yes", "no", "na"].includes(a.outcome)
     )
-      throw Error(`Choose Yes, No or N/A: ${task.label}`);
+      gaps.push(`Choose Yes, No or N/A: ${task.label}`);
     if (task.answerType === "yes_no" || task.answerType === "yes_no_na") {
       for (const f of task.numberFields) {
         if (a.outcome === "yes" || a.outcome === "no") {
           const v = a.numbers[f.key];
           if (v === undefined || String(v).trim() === "")
-            throw Error(`Enter ${f.label}: ${task.label}`);
+            gaps.push(`Enter ${f.label}: ${task.label}`);
         }
       }
     }
@@ -780,26 +789,37 @@ export function validateAnswersForSubmit(
         (task.noRequires === "reason" || task.noRequires === "both") &&
         !a.text.trim()
       )
-        throw Error(`Reason required when No: ${task.label}`);
+        gaps.push(`Reason required when No: ${task.label}`);
       if (
         (task.noRequires === "informed" || task.noRequires === "both") &&
         !a.informed.trim()
       )
-        throw Error(`Who was informed?: ${task.label}`);
+        gaps.push(`Who was informed?: ${task.label}`);
     }
     if (a.outcome === "na" && !a.text.trim())
-      throw Error(`Explain N/A: ${task.label}`);
+      gaps.push(`Explain N/A: ${task.label}`);
     const count = proofs.filter(
       (p) => p.ready && p.checklist_id === row.id && p.task_id === task.id,
     ).length;
     const need = requiredProofCount(task, a);
     if (count < need || count > task.proof.max)
-      throw Error(
-        `Proof for ${task.label}: need ${need}–${task.proof.max} file(s) with timestamp.`,
+      gaps.push(
+        `Proof for ${task.label}: need ${need}–${task.proof.max} file(s).`,
       );
   }
   const f2 = answers.F2 || emptyAnswer();
-  if (!f2.text.trim()) throw Error("List open issues for the incoming SI (F2).");
+  if (!f2.text.trim()) gaps.push("List open issues for the incoming SI (F2).");
+  return gaps;
+}
+
+export function validateAnswersForSubmit(
+  row: SiChecklist,
+  answers: Record<string, TaskAnswer>,
+  proofs: Evidence[],
+  ctx: { city?: string | null; settings: Settings },
+) {
+  const gaps = collectSubmitGaps(row, answers, proofs, ctx);
+  if (gaps[0]) throw Error(gaps[0]);
 }
 
 export function validateSettings(s: Settings) {

@@ -9,12 +9,15 @@ import {
   canAccept,
   canDeleteDraft,
   canFill,
+  collectSubmitGaps,
   currentShift,
+  disposalDone,
   emptyAnswer,
   emptyLine,
   escalationLevel,
   isManager,
   isSi,
+  isTaskMandatory,
   progress,
   statusLabels,
   taskUnlocked,
@@ -73,6 +76,8 @@ function TaskCard({
   shiftStartMs,
   view,
   onError,
+  storeLabel,
+  showRequired,
 }: {
   task: Task;
   answer: TaskAnswer;
@@ -84,6 +89,8 @@ function TaskCard({
   shiftStartMs: number;
   view: WorkspaceView;
   onError: (m: string) => void;
+  storeLabel?: string | null;
+  showRequired?: boolean;
 }) {
   const lock = taskUnlocked(task, shiftStartMs, Date.now(), view);
   const disabled = !editable || !lock.unlocked;
@@ -102,6 +109,12 @@ function TaskCard({
         <div className={styles.taskTitle}>
           <strong>
             {task.id}. {task.label}
+            {showRequired ? (
+              <>
+                {" "}
+                <span className={styles.requiredTag}>Required</span>
+              </>
+            ) : null}
           </strong>
           <span>
             {task.when.replaceAll("_", " ")}
@@ -306,6 +319,7 @@ function TaskCard({
             editable={!disabled}
             onChange={setProofs}
             onError={onError}
+            storeLabel={storeLabel}
           />
         </div>
       )}
@@ -317,6 +331,7 @@ function TaskCard({
           editable={!disabled}
           onChange={setProofs}
           onError={onError}
+          storeLabel={storeLabel}
         />
       ) : null}
     </article>
@@ -379,6 +394,25 @@ export function SiHandoverWorkspace(props: Props) {
       { city: store?.city, settings: props.settings },
     );
   }, [answers, focused, props.settings, store?.city]);
+  const storeLabel = store
+    ? `${store.station_code}${store.station_name ? ` · ${store.station_name}` : ""}`
+    : focused?.store_code || null;
+  const disposalDoneNow = disposalDone(answers);
+  const submitGaps = useMemo(() => {
+    if (!focused || props.view !== "handover" || !editable) return [];
+    return collectSubmitGaps(focused, answers, proofs, {
+      city: store?.city,
+      settings: props.settings,
+    });
+  }, [
+    answers,
+    editable,
+    focused,
+    proofs,
+    props.settings,
+    props.view,
+    store?.city,
+  ]);
   const esc =
     focused?.status === "submitted"
       ? escalationLevel(focused.submitted_at, props.settings)
@@ -664,6 +698,12 @@ export function SiHandoverWorkspace(props: Props) {
                     shiftStartMs={shiftStartMs}
                     view={props.view}
                     onError={setMessage}
+                    storeLabel={storeLabel}
+                    showRequired={isTaskMandatory(task, {
+                      city: store?.city,
+                      disposalDone: disposalDoneNow,
+                      settings: props.settings,
+                    })}
                   />
                 ))}
               </div>
@@ -674,6 +714,23 @@ export function SiHandoverWorkspace(props: Props) {
               </div>
             ) : null}
           </div>
+
+          {editable && props.view === "handover" && submitGaps.length ? (
+            <div className={styles.submitGaps} role="status">
+              <strong>
+                {submitGaps.length} item{submitGaps.length === 1 ? "" : "s"} still
+                needed before submit
+              </strong>
+              <ul>
+                {submitGaps.slice(0, 8).map((g) => (
+                  <li key={g}>{g}</li>
+                ))}
+                {submitGaps.length > 8 ? (
+                  <li>+{submitGaps.length - 8} more…</li>
+                ) : null}
+              </ul>
+            </div>
+          ) : null}
 
           {(editable || acceptable || deletable) && (
             <div className={styles.stickyBar}>
@@ -702,15 +759,25 @@ export function SiHandoverWorkspace(props: Props) {
                       type="button"
                       className={styles.btnAccent}
                       disabled={pending}
-                      onClick={() =>
+                      onClick={() => {
+                        if (submitGaps.length) {
+                          setMessage(
+                            `Still needed: ${submitGaps.slice(0, 3).join(" · ")}${
+                              submitGaps.length > 3
+                                ? ` (+${submitGaps.length - 3} more)`
+                                : ""
+                            }`,
+                          );
+                          return;
+                        }
                         run(() =>
                           submitHandover({
                             checklistId: focused.id,
                             version,
                             answers,
                           }),
-                        )
-                      }
+                        );
+                      }}
                     >
                       Submit handover
                     </button>

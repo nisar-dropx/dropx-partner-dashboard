@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
+import {
+  prepareProofFile,
+  readProofGps,
+} from "@/lib/ops-pulse/proof-media";
 import {
   isImageMime,
   isPdfMime,
@@ -26,26 +31,6 @@ const stamp = (v: string | null | undefined) =>
         timeStyle: "short",
       }) + " IST"
     : "—";
-
-async function readGps(): Promise<{
-  latitude: number | null;
-  longitude: number | null;
-}> {
-  if (typeof navigator === "undefined" || !navigator.geolocation)
-    return { latitude: null, longitude: null };
-  try {
-    const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-        timeout: 8000,
-        maximumAge: 60000,
-      }),
-    );
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-  } catch {
-    return { latitude: null, longitude: null };
-  }
-}
 
 function MediaPreview({
   proof,
@@ -116,6 +101,145 @@ function MediaPreview({
   );
 }
 
+function LiveCameraSheet({
+  onCapture,
+  onClose,
+  busy,
+}: {
+  onCapture: (file: File) => void | Promise<void>;
+  onClose: () => void;
+  busy: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function start() {
+      setError("");
+      setReady(false);
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Live camera is not supported here. Use Take photo or Attach.");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play();
+          setReady(true);
+        }
+      } catch (reason) {
+        if (!cancelled) {
+          const msg =
+            reason instanceof Error
+              ? reason.name === "NotAllowedError"
+                ? "Camera permission denied. Allow camera, or use Take photo / Attach."
+                : reason.message
+              : "Unable to open live camera.";
+          setError(msg);
+        }
+      }
+    }
+    start().catch(() => undefined);
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, []);
+
+  const snap = async () => {
+    const video = videoRef.current;
+    if (!video || !ready || capturing || busy) return;
+    setCapturing(true);
+    try {
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Unable to capture frame.");
+      ctx.drawImage(video, 0, 0, w, h);
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("Capture failed."))),
+          "image/jpeg",
+          0.92,
+        ),
+      );
+      const file = new File([blob], `live-${Date.now()}.jpg`, {
+        type: "image/jpeg",
+        lastModified: Date.now(),
+      });
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      await onCapture(file);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Capture failed.");
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  if (!mounted) return null;
+  return createPortal(
+    <div className={styles.liveCam} role="dialog" aria-modal="true" aria-label="Live camera">
+      <div className={styles.liveCamBody}>
+        <header className={styles.liveCamHead}>
+          <strong>Live camera</strong>
+          <button type="button" className={styles.btnTiny} onClick={onClose} disabled={capturing || busy}>
+            Close
+          </button>
+        </header>
+        {error ? <p className={styles.error}>{error}</p> : null}
+        <div className={styles.liveCamStage}>
+          <video ref={videoRef} playsInline muted autoPlay className={styles.liveCamVideo} />
+          {!ready && !error ? <span className={styles.liveCamWait}>Opening camera…</span> : null}
+        </div>
+        <div className={styles.liveCamActions}>
+          <button
+            type="button"
+            className={styles.btnAccent}
+            disabled={!ready || capturing || busy || Boolean(error)}
+            onClick={() => void snap()}
+          >
+            {capturing || busy ? "Saving…" : "Capture photo"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function ProofPanel({
   checklist,
   task,
@@ -124,6 +248,7 @@ export function ProofPanel({
   onChange,
   onError,
   apiBase = "/api/ops-pulse/si-handover",
+  storeLabel = null,
 }: {
   checklist: Pick<SiChecklist, "id">;
   task: ProofTask;
@@ -132,17 +257,36 @@ export function ProofPanel({
   onChange: (next: Evidence[]) => void;
   onError: (msg: string) => void;
   apiBase?: string;
+  storeLabel?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
   const [preview, setPreview] = useState<Evidence | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const filesRef = useRef<HTMLInputElement>(null);
+  const [liveOpen, setLiveOpen] = useState(false);
   const uid = useId();
   const mine = proofs.filter((p) => p.task_id === task.id);
   const room = Math.max(0, task.proof.max - mine.length);
   const preferCapture = proofPrefersCapture(task.proof.kind);
-  const accept = proofAcceptAttribute(task.proof.kind);
+  const allowLiveStill =
+    task.proof.kind === "live" ||
+    task.proof.kind === "photo" ||
+    task.proof.kind === "optional" ||
+    task.proof.kind === "document";
+  const acceptNative =
+    task.proof.kind === "video"
+      ? "video/*"
+      : preferCapture
+        ? "image/*"
+        : proofAcceptAttribute(task.proof.kind);
+  const acceptAttach =
+    task.proof.kind === "screenshot"
+      ? "image/*"
+      : task.proof.kind === "document"
+        ? "image/*,application/pdf"
+        : task.proof.kind === "video"
+          ? "video/mp4,video/webm,video/quicktime"
+          : proofAcceptAttribute(task.proof.kind);
 
   useEffect(() => {
     if (!preview) return;
@@ -162,11 +306,28 @@ export function ProofPanel({
     const list = Array.from(files).slice(0, room);
     if (!list.length) return;
     setBusy(true);
+    setStatus("Preparing…");
     try {
-      const gps = await readGps();
+      setStatus("Getting location…");
+      const gps = await readProofGps(4500);
       let next = [...proofs];
-      for (const file of list) {
+      let index = 0;
+      for (const raw of list) {
+        index += 1;
+        setStatus(
+          list.length > 1
+            ? `Processing ${index}/${list.length}…`
+            : "Compressing & stamping…",
+        );
         const capturedAt = new Date().toISOString();
+        const file = await prepareProofFile(raw, {
+          capturedAt,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          accuracyM: gps.accuracyM,
+          storeLabel,
+        });
+        setStatus(list.length > 1 ? `Uploading ${index}/${list.length}…` : "Uploading…");
         const prep = await fetch(`${apiBase}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -204,8 +365,10 @@ export function ProofPanel({
         next = [...next, body.proof as Evidence];
         onChange(next);
       }
+      setStatus("");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Upload failed.");
+      setStatus("");
     } finally {
       setBusy(false);
     }
@@ -220,6 +383,7 @@ export function ProofPanel({
           {task.proof.min ? ` · min ${task.proof.min}` : ""}
         </span>
       </div>
+      {status ? <small className={styles.proofStatus}>{status}</small> : null}
       <div className={styles.proofGrid}>
         {mine.map((p) => (
           <div key={p.id} className={styles.proofThumb}>
@@ -274,38 +438,48 @@ export function ProofPanel({
         {editable && room > 0 ? (
           <>
             {preferCapture ? (
-              <button
-                type="button"
-                className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
-                disabled={busy}
-                onClick={() => cameraRef.current?.click()}
-              >
-                {busy ? "…" : "Camera"}
-              </button>
+              <>
+                <label
+                  className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
+                  htmlFor={`${uid}-cam`}
+                >
+                  {busy ? "…" : task.proof.kind === "video" ? "Record" : "Take"}
+                  <input
+                    id={`${uid}-cam`}
+                    type="file"
+                    accept={acceptNative}
+                    capture="environment"
+                    hidden
+                    disabled={busy}
+                    onChange={async (e) => {
+                      const files = e.target.files;
+                      e.target.value = "";
+                      if (files?.length) await uploadFiles(files);
+                    }}
+                  />
+                </label>
+                {allowLiveStill ? (
+                  <button
+                    type="button"
+                    className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
+                    disabled={busy}
+                    onClick={() => setLiveOpen(true)}
+                  >
+                    Live
+                  </button>
+                ) : null}
+              </>
             ) : null}
-            <button
-              type="button"
+            <label
               className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
-              disabled={busy}
-              onClick={() => filesRef.current?.click()}
+              htmlFor={`${uid}-files`}
             >
-              {busy
-                ? "…"
-                : preferCapture
-                  ? room > 1
-                    ? "Files"
-                    : "File"
-                  : room > 1
-                    ? "Add files"
-                    : "Add"}
-            </button>
-            {preferCapture ? (
+              {busy ? "…" : preferCapture ? "Attach" : room > 1 ? "Add" : "Add"}
               <input
-                id={`${uid}-cam`}
-                ref={cameraRef}
+                id={`${uid}-files`}
                 type="file"
-                accept={accept}
-                capture="environment"
+                accept={acceptAttach}
+                multiple={room > 1 && !preferCapture}
                 hidden
                 disabled={busy}
                 onChange={async (e) => {
@@ -314,24 +488,19 @@ export function ProofPanel({
                   if (files?.length) await uploadFiles(files);
                 }}
               />
-            ) : null}
-            <input
-              id={`${uid}-files`}
-              ref={filesRef}
-              type="file"
-              accept={accept}
-              multiple={room > 1}
-              hidden
-              disabled={busy}
-              onChange={async (e) => {
-                const files = e.target.files;
-                e.target.value = "";
-                if (files?.length) await uploadFiles(files);
-              }}
-            />
+            </label>
           </>
         ) : null}
       </div>
+      {liveOpen ? (
+        <LiveCameraSheet
+          busy={busy}
+          onClose={() => setLiveOpen(false)}
+          onCapture={async (file) => {
+            await uploadFiles([file]);
+          }}
+        />
+      ) : null}
       {preview ? (
         <MediaPreview
           proof={preview}

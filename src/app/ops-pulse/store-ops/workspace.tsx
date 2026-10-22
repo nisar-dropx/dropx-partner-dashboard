@@ -9,9 +9,12 @@ import {
 import { ProofPanel } from "@/app/ops-pulse/si-handover/si-handover-proof";
 import {
   canFill,
+  collectSubmitGaps,
+  disposalDone,
   emptyAnswer,
   isFiller,
   isManager,
+  isTaskMandatory,
   progress,
   statusLabels,
   tasks,
@@ -65,6 +68,8 @@ function TaskCard({
   editable,
   alreadyDone,
   onError,
+  storeLabel,
+  showRequired,
 }: {
   task: Task;
   answer: TaskAnswer;
@@ -75,6 +80,8 @@ function TaskCard({
   editable: boolean;
   alreadyDone: boolean;
   onError: (m: string) => void;
+  storeLabel?: string | null;
+  showRequired?: boolean;
 }) {
   const disabled = !editable || alreadyDone;
   const outcomes =
@@ -92,6 +99,12 @@ function TaskCard({
         <div className={styles.taskTitle}>
           <strong>
             {task.id}. {task.label}
+            {showRequired && !alreadyDone ? (
+              <>
+                {" "}
+                <span className={styles.requiredTag}>Required</span>
+              </>
+            ) : null}
           </strong>
           <span>
             {task.frequency.replaceAll("_", " ")}
@@ -182,6 +195,7 @@ function TaskCard({
             onChange={setProofs}
             onError={onError}
             apiBase="/api/ops-pulse/store-ops"
+            storeLabel={storeLabel}
           />
         </div>
       )}
@@ -194,6 +208,7 @@ function TaskCard({
           onChange={setProofs}
           onError={onError}
           apiBase="/api/ops-pulse/store-ops"
+          storeLabel={storeLabel}
         />
       ) : null}
     </article>
@@ -249,6 +264,29 @@ export function StoreOpsWorkspace(props: Props) {
   const editable = focused
     ? canFill(props.actor, props.settings, focused)
     : false;
+  const storeLabel = store
+    ? `${store.station_code}${store.station_name ? ` · ${store.station_name}` : ""}`
+    : focused?.store_code || null;
+  const disposalDoneNow = disposalDone(answers);
+  const submitGaps = useMemo(() => {
+    if (!focused || props.view !== "close" || !editable) return [];
+    return collectSubmitGaps(focused, answers, proofs, {
+      city: store?.city,
+      settings: props.settings,
+      weeklyDoneIds: weekly,
+      monthlyDoneIds: monthly,
+    });
+  }, [
+    answers,
+    editable,
+    focused,
+    monthly,
+    proofs,
+    props.settings,
+    props.view,
+    store?.city,
+    weekly,
+  ]);
   const filler = isFiller(props.actor, props.settings);
   const manager = isManager(props.actor, props.settings);
   const today = todayIst();
@@ -498,11 +536,36 @@ export function StoreOpsWorkspace(props: Props) {
                     editable={editable}
                     alreadyDone={alreadyDone}
                     onError={setMessage}
+                    storeLabel={storeLabel}
+                    showRequired={isTaskMandatory(task, {
+                      city: store?.city,
+                      disposalDone: disposalDoneNow,
+                      settings: props.settings,
+                      weeklyDone: weekly.has(task.id),
+                      monthlyDone: monthly.has(task.id),
+                    })}
                   />
                 );
               })}
             </div>
           ))}
+
+          {editable && props.view === "close" && submitGaps.length ? (
+            <div className={styles.submitGaps} role="status">
+              <strong>
+                {submitGaps.length} item{submitGaps.length === 1 ? "" : "s"} still
+                needed before submit
+              </strong>
+              <ul>
+                {submitGaps.slice(0, 8).map((g) => (
+                  <li key={g}>{g}</li>
+                ))}
+                {submitGaps.length > 8 ? (
+                  <li>+{submitGaps.length - 8} more…</li>
+                ) : null}
+              </ul>
+            </div>
+          ) : null}
 
           <div className={styles.actions}>
             {editable ? (
@@ -530,15 +593,25 @@ export function StoreOpsWorkspace(props: Props) {
                     type="button"
                     className={styles.btnAccent}
                     disabled={pending}
-                    onClick={() =>
+                    onClick={() => {
+                      if (submitGaps.length) {
+                        setMessage(
+                          `Still needed: ${submitGaps.slice(0, 3).join(" · ")}${
+                            submitGaps.length > 3
+                              ? ` (+${submitGaps.length - 3} more)`
+                              : ""
+                          }`,
+                        );
+                        return;
+                      }
                       run(() =>
                         submitDay({
                           checklistId: focused.id,
                           version,
                           answers,
                         }),
-                      )
-                    }
+                      );
+                    }}
                   >
                     Submit day
                   </button>

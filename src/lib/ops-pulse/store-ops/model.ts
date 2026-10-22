@@ -337,7 +337,8 @@ export function requiredProofCount(task: Task, answer: TaskAnswer) {
   );
 }
 
-export function validateForSubmit(
+/** Collect submit blockers without throwing — used for mobile UX before submit. */
+export function collectSubmitGaps(
   row: StoreOpsChecklist,
   answers: Record<string, TaskAnswer>,
   proofs: Evidence[],
@@ -347,7 +348,8 @@ export function validateForSubmit(
     weeklyDoneIds: Set<string>;
     monthlyDoneIds: Set<string>;
   },
-) {
+): string[] {
+  const gaps: string[] = [];
   const done = disposalDone(answers);
   for (const task of tasks(row.template)) {
     const mandatory = isTaskMandatory(task, {
@@ -365,33 +367,33 @@ export function validateForSubmit(
     }
     const a = answers[task.id] || emptyAnswer();
     if (task.answerType === "text") {
-      if (mandatory && !a.text.trim())
-        throw Error(`Complete: ${task.label}`);
+      if (mandatory && !a.text.trim()) gaps.push(`Complete: ${task.label}`);
       continue;
     }
     if (task.answerType === "number" || task.answerType === "number_x4") {
       for (const f of task.numberFields) {
         const v = a.numbers[f.key];
         if (mandatory && (v === undefined || String(v).trim() === ""))
-          throw Error(`Enter ${f.label}: ${task.label}`);
+          gaps.push(`Enter ${f.label}: ${task.label}`);
       }
     } else if (!a.outcome) {
-      if (mandatory) throw Error(`Answer: ${task.label}`);
+      if (mandatory) gaps.push(`Answer required: ${task.label}`);
       continue;
     }
-    if (task.answerType === "yes_no" && !["yes", "no"].includes(a.outcome))
-      throw Error(`Choose Yes or No: ${task.label}`);
+    if (task.answerType === "yes_no" && a.outcome && !["yes", "no"].includes(a.outcome))
+      gaps.push(`Choose Yes or No: ${task.label}`);
     if (
       task.answerType === "yes_no_na" &&
+      a.outcome &&
       !["yes", "no", "na"].includes(a.outcome)
     )
-      throw Error(`Choose Yes, No or N/A: ${task.label}`);
+      gaps.push(`Choose Yes, No or N/A: ${task.label}`);
     if (task.answerType === "yes_no" || task.answerType === "yes_no_na") {
       for (const f of task.numberFields) {
         if (a.outcome === "yes" || a.outcome === "no") {
           const v = a.numbers[f.key];
           if (v === undefined || String(v).trim() === "")
-            throw Error(`Enter ${f.label}: ${task.label}`);
+            gaps.push(`Enter ${f.label}: ${task.label}`);
         }
       }
     }
@@ -400,22 +402,38 @@ export function validateForSubmit(
         (task.noRequires === "reason" || task.noRequires === "both") &&
         !a.text.trim()
       )
-        throw Error(`Reason required when No: ${task.label}`);
+        gaps.push(`Reason required when No: ${task.label}`);
     }
     if (a.outcome === "na" && !a.text.trim())
-      throw Error(`Explain N/A: ${task.label}`);
+      gaps.push(`Explain N/A: ${task.label}`);
     const count = proofs.filter(
       (p) => p.ready && p.checklist_id === row.id && p.task_id === task.id,
     ).length;
     const need = requiredProofCount(task, a);
     if (count < need || count > task.proof.max)
-      throw Error(
+      gaps.push(
         `Proof for ${task.label}: need ${need}–${task.proof.max} file(s).`,
       );
   }
   const m19 = answers.M19 || emptyAnswer();
   if (!m19.text.trim())
-    throw Error("Day summary to City Manager is required (M19).");
+    gaps.push("Day summary to City Manager is required (M19).");
+  return gaps;
+}
+
+export function validateForSubmit(
+  row: StoreOpsChecklist,
+  answers: Record<string, TaskAnswer>,
+  proofs: Evidence[],
+  ctx: {
+    city?: string | null;
+    settings: Settings;
+    weeklyDoneIds: Set<string>;
+    monthlyDoneIds: Set<string>;
+  },
+) {
+  const gaps = collectSubmitGaps(row, answers, proofs, ctx);
+  if (gaps[0]) throw Error(gaps[0]);
 }
 
 export function progress(

@@ -361,16 +361,22 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
         {
           id: "D9",
           label:
-            "Audit tasks closed in HHD: BOH, IRDR, SBC, transshipment",
+            "Audit tasks closed in HHD — record open counts separately for BOH, SBC, BVC (and IRDR / TS if any)",
           when: "shift_end",
           answerType: "number",
           numberFields: [
-            { key: "tasks_open_end", label: "Tasks open at shift end" },
+            { key: "boh_open", label: "BOH open" },
+            { key: "sbc_open", label: "SBC open" },
+            { key: "bvc_open", label: "BVC open" },
+            { key: "irdr_open", label: "IRDR open" },
+            { key: "ts_open", label: "Transshipment open" },
           ],
           proof: shot(),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Count compliance, IRDR & ERMR",
+          guidance:
+            "Enter 0 when a queue has no open tasks. Do not combine BOH / SBC / BVC into one number.",
         },
         {
           id: "D10",

@@ -701,6 +701,97 @@
   line-height: 1.1;
 }
 .proofAddBusy { opacity: 0.6; pointer-events: none; }
+.proofStatus {
+  color: #0f766e;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.proofAdd input { display: none; }
+.requiredTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.submitGaps {
+  margin: 0;
+  padding: 0.5rem 0.55rem;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.submitGaps strong { display: block; margin-bottom: 0.2rem; }
+.submitGaps ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.liveCam {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(15, 23, 42, 0.72);
+  display: grid;
+  place-items: end center;
+  padding: 0.75rem;
+}
+.liveCamBody {
+  width: min(100%, 420px);
+  max-height: min(92vh, 720px);
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  border-radius: 14px 14px 10px 10px;
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+.liveCamHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.liveCamHead strong { font-size: 0.9rem; }
+.liveCamStage {
+  position: relative;
+  min-height: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #020617;
+}
+.liveCamVideo {
+  width: 100%;
+  height: min(52vh, 420px);
+  object-fit: cover;
+  display: block;
+  background: #020617;
+}
+.liveCamWait {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.liveCamActions {
+  display: flex;
+  justify-content: center;
+}
+.liveCamActions .btnAccent {
+  min-width: 10rem;
+  min-height: 2.4rem;
+}
 .linkDanger {
   border: 0;
   background: transparent;
