@@ -51,7 +51,7 @@ export function PerformanceReviewExceptions({
   canStart: boolean;
   hasRoute: boolean;
   routeLabel?: string;
-  /** Dark Store uses Shift Incharge → Store → City → Regional → NH, not LM CM/AOM. */
+  /** Dark Store reviews are City Manager → Regional Manager (not LM CM/AOM). */
   darkStore?: boolean;
   /** Oversight has re-opened edit access for the original CM/AOM reviewer. */
   reviewerEditReopened?: boolean;
@@ -71,12 +71,16 @@ export function PerformanceReviewExceptions({
 
   const inactiveReason = !hasRoute
     ? darkStore
-      ? "A review manager needs to be assigned in People. Contact HR so this store gets a Shift Incharge → Store Manager → City Manager → Regional Manager → National Head route."
+      ? "Map City Manager → Regional Manager in People for this store. After Start review, National Head / FSD / Owner can use Conduct proxy review and Skip a level."
       : "A review manager needs to be assigned in People. Contact HR so this station gets a Cluster Manager → National Head route."
     : !review
       ? canStart
-        ? "Start review first for this station and date, then use Proxy or Skip."
-        : "The review has not started for this station and date. Ask the assigned review manager to start it."
+        ? darkStore
+          ? "Start review first for this store and date, then Conduct proxy or Skip a level."
+          : "Start review first for this station and date, then use Proxy or Skip."
+        : darkStore
+          ? "The review has not started for this store and date. Ask the City Manager to start it, or use Start review if you have oversight."
+          : "The review has not started for this station and date. Ask the assigned review manager to start it."
       : review.status === "closed" && !skipped.length
         ? "Review completed. There are no pending levels to skip or cover."
         : !pending.length && !skipped.length

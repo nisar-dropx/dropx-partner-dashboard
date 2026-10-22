@@ -27,12 +27,12 @@ export function managerReviewChain<T extends { role: string; personId: string; d
   });
 }
 
-/** Dark Store review stages: Shift Incharge → Store → City → Regional → NH. */
+/** Dark Store review stages: City Manager → Regional Manager. */
 export function darkStoreManagerReviewChain<T extends { role: string; personId: string; designationCode?: string | null }>(chain: T[]) {
   const seen = new Set<string>();
   return chain.filter((person) => {
     const role = reviewRole(`${person.designationCode ?? ""} ${person.role}`);
-    if (!["shift", "store", "city", "regional", "national"].includes(role) || seen.has(person.personId)) return false;
+    if (!["city", "regional"].includes(role) || seen.has(person.personId)) return false;
     seen.add(person.personId);
     return true;
   });
@@ -66,7 +66,9 @@ export function reviewCapabilities(input: {
   const visible = input.inScope && input.canView;
   const editor = visible && input.canEdit;
   const oversight = input.owner || input.programManager || Boolean(input.hasClusterFilterAccess);
-  const canOverride = oversight || input.nationalHead || input.tech;
+  const canOverride = oversight || Boolean(input.nationalHead) || Boolean(input.tech);
+  // NH / FSD / Owner / Tech may Start, Proxy and Skip even when their portal role is view-only.
+  const canAct = Boolean(visible && (input.canEdit || canOverride));
   const current = Boolean(input.currentReviewerId && input.currentReviewerId === input.userId);
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
   // Oversight can explicitly hand edit access back to the original CM/AOM reviewer after
@@ -77,22 +79,22 @@ export function reviewCapabilities(input: {
   return {
     scorecardImported: input.scorecardImported,
     reviewerEditReopened: Boolean(input.reviewerEditReopened),
-    canStart: Boolean(visible && input.scorecardImported && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
+    canStart: Boolean(visible && input.scorecardImported && (input.canAdd || input.canEdit || canOverride) && (canOverride || first || input.higherReviewer)),
     // Station team always; first-stage manager (or their proxy) can enter timings when TL access is missing.
     canEditConnections: editor && (oversight || reopenedForOriginalReviewer || input.stationUser || (!input.closed && current && (first || input.currentIsFirst === true))),
-    canEditRca: editor && (oversight || reopenedForOriginalReviewer || (!input.closed && current && (first || input.currentIsFirst === true))),
-    canComment: editor && (oversight || (!input.closed && current)),
-    canManageActions: editor && (oversight || reopenedForOriginalReviewer || first || (!input.closed && current)),
+    canEditRca: canAct && (oversight || canOverride || reopenedForOriginalReviewer || (!input.closed && current && (first || input.currentIsFirst === true))),
+    canComment: canAct && (oversight || canOverride || (!input.closed && current)),
+    canManageActions: canAct && (oversight || canOverride || reopenedForOriginalReviewer || first || (!input.closed && current)),
     // Oversight uses an explicit, reason-required bypass, never an unassigned approval.
-    canComplete: editor && !input.closed && Boolean(input.currentRole) && current,
-    // Visibility is separate from availability: every editor sees Proxy; Skip stays oversight-only.
+    canComplete: canAct && !input.closed && Boolean(input.currentRole) && current,
+    // Visibility is separate from availability: every actor sees Proxy; Skip stays oversight-only.
     // That keeps KOZA/TLPB tools discoverable even when the viewer is not on that station's route.
-    canAccessBypass: Boolean(editor && canOverride),
-    canAccessProxy: Boolean(editor),
-    canBypass: Boolean(editor && !input.closed && canOverride),
+    canAccessBypass: Boolean(visible && canOverride),
+    canAccessProxy: Boolean(visible && (input.canEdit || canOverride)),
+    canBypass: Boolean(visible && canOverride && !input.closed),
     // Oversight can undo an accidental skip even after the review closed from skipping the last level.
-    canUndoBypass: Boolean(editor && canOverride),
-    canProxy: Boolean(editor && !input.closed && input.currentRole && !current && (canOverride || (!input.hasProxy && input.higherReviewer))),
+    canUndoBypass: Boolean(visible && canOverride),
+    canProxy: Boolean(canAct && !input.closed && input.currentRole && !current && (canOverride || (!input.hasProxy && input.higherReviewer))),
   };
 }
 

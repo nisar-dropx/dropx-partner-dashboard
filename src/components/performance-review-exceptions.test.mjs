@@ -34,6 +34,13 @@ test('missing manager explains the issue without suggesting start',()=>{
   const html=render({...base,review:null,steps:[],hasRoute:false});
   assert.match(html,/Contact HR/);assert.ok(!html.includes('href="#start-station-review"'));
 });
+test('Dark Store missing City→RM route explains Proxy after Start, not SI→SM→NH',()=>{
+  const html=render({...base,review:null,steps:[],hasRoute:false,darkStore:true});
+  assert.match(html,/City Manager → Regional Manager/);
+  assert.match(html,/Conduct proxy review/);
+  assert.ok(!html.includes('Shift Incharge'));
+  assert.ok(!html.includes('href="#start-station-review"'));
+});
 test('own assigned level explains why proxy is not needed while skip is available',()=>{
   const html=render({...base,canProxy:false});
   assert.equal((html.match(/disabled=""/g)||[]).length,1);assert.match(html,/This is your assigned review level/);

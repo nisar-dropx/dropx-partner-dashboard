@@ -30,7 +30,7 @@ const nationalHeadRole = (p: ReviewPerson) => /\b(NH|NATIONAL HEAD)\b/.test(role
 const lastMileFloorRole = (p: ReviewPerson) =>
   /\b(LOCATION|TL|ATL|STM|SSA|TEAM LEAD|TEAM LEADER|STATION MANAGER|STATION SUPPORT ASSOCIATE)\b/.test(roleText(p));
 
-/** Dark Store floor seats — pickers / SSA / TL only. Store Manager and Shift Incharge review. */
+/** Dark Store floor seats — pickers / SSA / TL only (not City / Regional review seats). */
 const darkStoreFloorRole = (p: ReviewPerson) =>
   /\b(LOCATION|TL|ATL|SSA|TEAM LEAD|TEAM LEADER|STATION SUPPORT ASSOCIATE|PICKER)\b/.test(roleText(p))
   && !darkStoreReviewRole(p);
@@ -42,43 +42,31 @@ const lastMileOperationalRole = (p: ReviewPerson) =>
   || nationalHeadRole(p);
 
 /**
- * Dark Store review seats only: Shift Incharge → Store Manager → City Manager →
- * Regional Manager → National Head.
+ * Dark Store review seats: City Manager → Regional Manager only.
+ * Shift Incharge / Store Manager run the store; NH / FSD / Owner cover via Proxy / Skip.
  */
 export function darkStoreReviewRole(p: Pick<ReviewPerson, "code" | "role">) {
   const text = roleText(p as ReviewPerson);
-  if (/\b(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)\b/.test(text)) return true;
-  if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(text)) return true;
-  // SM = Store Manager; never treat STM / Station Manager as a DS review seat.
-  if (/\bSM\b/.test(text) && !/\b(STM|STATION MANAGER)\b/.test(text)) return true;
-  if (/\b(CITY MANAGER|CTM)\b/.test(text)) return true;
+  if (/\b(CITY MANAGER|CITY HEAD|CTM)\b/.test(text)) return true;
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(text)) return true;
-  if (nationalHeadRole(p as ReviewPerson)) return true;
   return false;
 }
 
-/** Ordered DS review tiers — parallel people at the same tier may share one upward route. */
-export function darkStoreReviewTier(p: Pick<ReviewPerson, "code" | "role">): "si" | "sm" | "city" | "rm" | "nh" | null {
+/** Ordered DS review tiers — parallel City Managers may share one Regional Manager. */
+export function darkStoreReviewTier(p: Pick<ReviewPerson, "code" | "role">): "city" | "rm" | null {
   const text = roleText(p as ReviewPerson);
-  if (/\b(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)\b/.test(text)) return "si";
-  if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(text)) return "sm";
-  if (/\bSM\b/.test(text) && !/\b(STM|STATION MANAGER)\b/.test(text)) return "sm";
-  if (/\b(CITY MANAGER|CTM)\b/.test(text)) return "city";
+  if (/\b(CITY MANAGER|CITY HEAD|CTM)\b/.test(text)) return "city";
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(text)) return "rm";
-  if (nationalHeadRole(p as ReviewPerson)) return "nh";
   return null;
 }
 
 const isOperationalChain = (chain: ReviewPerson[], darkStore: boolean) =>
   chain.some((person) => darkStore ? darkStoreReviewRole(person) : lastMileOperationalRole(person));
 
-/** City → RM → NH (or RM → NH / NH alone) — peers below this may differ (multiple SIs / SMs). */
+/** City → RM (or RM alone) — store-floor people below this are not review stages. */
 function darkStoreUpwardKey(chain: ReviewPerson[]) {
-  const idx = chain.findIndex((person) => {
-    const tier = darkStoreReviewTier(person);
-    return tier === "city" || tier === "rm" || tier === "nh";
-  });
-  return idx >= 0 ? chain.slice(idx) : chain.slice(-1);
+  const idx = chain.findIndex((person) => darkStoreReviewTier(person) != null);
+  return idx >= 0 ? chain.slice(idx) : [];
 }
 
 function samePeopleSuffix(left: ReviewPerson[], right: ReviewPerson[]) {
@@ -103,9 +91,10 @@ function operationalChainConverges(chain: ReviewPerson[], selected: ReviewPerson
       return true;
     }
   }
-  // Different SI / Store Manager below the same City → RM → NH is one store route, not a conflict.
+  // Floor / other lines that share the same City → RM are one store route, not a conflict.
   const selectedUp = darkStoreUpwardKey(selected);
   const chainUp = darkStoreUpwardKey(chain);
+  if (!selectedUp.length || !chainUp.length) return false;
   return samePeopleSuffix(chainUp, selectedUp) || samePeopleSuffix(selectedUp, chainUp);
 }
 
@@ -160,7 +149,7 @@ export function resolvePeopleReviewRoute(
   const fail = (error: string): PeopleReviewRoute => ({ chain: [], error });
   if (!roots.length) {
     return fail(darkStore
-      ? 'No Shift Incharge, Store Manager, City Manager, Regional Manager or National Head is mapped to this store in People.'
+      ? 'No City Manager or Regional Manager is mapped to this store in People.'
       : 'No reporting manager is mapped to this station in People.');
   }
   const chains: ReviewPerson[][] = [];
@@ -188,11 +177,10 @@ export function resolvePeopleReviewRoute(
   }
   if (!chains.length) {
     return fail(darkStore
-      ? 'No Shift Incharge, Store Manager, City Manager, Regional Manager or National Head is mapped in People.'
+      ? 'No City Manager or Regional Manager is mapped in People.'
       : 'No eligible review manager is mapped in People.');
   }
-  // Dark Store: compare only SI / Store / City / RM / NH seats so finance or LM
-  // people posted at the store cannot invent a second conflicting route.
+  // Dark Store: compare only City → RM seats so store-floor / finance / LM people cannot invent a conflict.
   const operationalChains = darkStore
     ? chains.map((chain) => chain.filter(darkStoreReviewRole)).filter((chain) => chain.length)
     : chains.some((chain) => isOperationalChain(chain, false))
@@ -200,7 +188,7 @@ export function resolvePeopleReviewRoute(
       : chains;
   if (!operationalChains.length) {
     return fail(darkStore
-      ? 'No Shift Incharge, Store Manager, City Manager, Regional Manager or National Head is mapped for this store in People.'
+      ? 'No City Manager or Regional Manager is mapped for this store in People.'
       : 'No eligible review manager is mapped in People.');
   }
   // Prefer the longest route; among equal roots pick a stable name/id so peer SIs do not flip daily.
@@ -217,7 +205,7 @@ export function resolvePeopleReviewRoute(
   const stages = selected;
   if (!stages.length) {
     return fail(darkStore
-      ? 'No Shift Incharge, Store Manager, City Manager, Regional Manager or National Head is mapped for this store in People.'
+      ? 'No City Manager or Regional Manager is mapped for this store in People.'
       : 'No eligible review manager is mapped in People.');
   }
   const chain: PeopleReviewStage[] = [];

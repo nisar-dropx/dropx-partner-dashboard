@@ -67,42 +67,27 @@ const darkStoreGraph=()=>({
  ]
 });
 
-test('Dark Store route is Shift Incharge → Store → City → Regional → NH only',()=>{
+test('Dark Store route is City Manager → Regional Manager only',()=>{
  const g=darkStoreGraph();
- assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['si','sm','city','rm','nh']);
+ assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','rm']);
 });
 
-test('Dark Store picks one Shift Incharge when peers share the same managers above',()=>{
+test('Dark Store allows peer City Managers that share the same Regional Manager',()=>{
  const g=darkStoreGraph();
- g.people[0].name='Asha SI';
- g.people.push(person('si2','SIC',{role:'Shift Incharge',name:'Zara SI',locationId:'store',scopeIds:['store']}));
- g.relationships.push({subjectId:'si2',managerId:'sm'});
+ g.people.push(person('city2','CTM',{role:'City Manager',name:'Other City',locationId:'store',scopeIds:['store']}));
+ g.relationships.push({subjectId:'city2',managerId:'rm'});
  const route=resolvePeopleReviewRoute(g,'store');
  assert.equal(route.error,null);
- // Stable pick: alphabetical by name among equal-length peer roots.
- assert.deepEqual(route.chain.map(p=>p.personId),['si','sm','city','rm','nh']);
+ assert.deepEqual(route.chain.map(p=>p.personId),['city','rm']);
 });
 
-test('Dark Store allows peer SI/SM lines that share the same City → RM → NH',()=>{
+test('Dark Store still fails when Regional Managers diverge',()=>{
  const g=darkStoreGraph();
  g.people.push(
-  person('si2','SIC',{role:'Shift Incharge',name:'Zara SI',locationId:'store',scopeIds:['store']}),
-  person('sm2','SM',{role:'Store Manager',name:'Other SM',scopeIds:['store']})
+  person('city2','CTM',{role:'City Manager',locationId:'store',scopeIds:['store']}),
+  person('rm2','RM',{role:'Regional Manager',name:'Other RM',scopeIds:['store']})
  );
- g.relationships.push({subjectId:'si2',managerId:'sm2'},{subjectId:'sm2',managerId:'city'});
- const route=resolvePeopleReviewRoute(g,'store');
- assert.equal(route.error,null);
- assert.deepEqual(route.chain.map(p=>p.personId).slice(2),['city','rm','nh']);
-});
-
-test('Dark Store still fails when City Managers diverge',()=>{
- const g=darkStoreGraph();
- g.people.push(
-  person('si2','SIC',{role:'Shift Incharge',locationId:'store',scopeIds:['store']}),
-  person('sm2','SM',{role:'Store Manager',scopeIds:['store']}),
-  person('city2','CTM',{role:'City Manager',name:'Other City',scopeIds:['store']})
- );
- g.relationships.push({subjectId:'si2',managerId:'sm2'},{subjectId:'sm2',managerId:'city2'},{subjectId:'city2',managerId:'rm'});
+ g.relationships.push({subjectId:'city2',managerId:'rm2'},{subjectId:'rm2',managerId:'nh'});
  assert.match(resolvePeopleReviewRoute(g,'store').error,/conflicting/);
  assert.match(resolvePeopleReviewRoute(g,'store').error,/Compare:/);
 });
@@ -110,24 +95,16 @@ test('Dark Store still fails when City Managers diverge',()=>{
 test('Dark Store mode can be forced when station model detection is missing',()=>{
  const g=darkStoreGraph();
  delete g.darkStoreStationIds;
- // Without DS mode, LM floor rules would drop Store Manager seats in some graphs; force keeps the DS route.
  const route=resolvePeopleReviewRoute(g,'store',{darkStore:true});
  assert.equal(route.error,null);
- assert.deepEqual(route.chain.map(p=>p.personId),['si','sm','city','rm','nh']);
+ assert.deepEqual(route.chain.map(p=>p.personId),['city','rm']);
 });
 
-test('Dark Store keeps NH on the route even when marked full oversight',()=>{
+test('Dark Store ignores SI, Store Manager, finance and NH as review stages',()=>{
  const g=darkStoreGraph();
- g.people[4].oversight=true;
- assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['si','sm','city','rm','nh']);
-});
-
-test('Dark Store ignores finance / LM seats posted at the store',()=>{
- const g=darkStoreGraph();
- g.people.push(person('cm','CLM',{role:'Cluster Manager',locationId:'store',scopeIds:['store']}));
- g.relationships.push({subjectId:'cm',managerId:'rm'});
- assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['si','sm','city','rm','nh']);
- assert.ok(!resolvePeopleReviewRoute(g,'store').chain.some(step=>step.personId==='finance'||step.personId==='cm'));
+ const ids=resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId);
+ assert.deepEqual(ids,['city','rm']);
+ assert.ok(!ids.includes('si') && !ids.includes('sm') && !ids.includes('finance') && !ids.includes('nh'));
 });
 
 test('finance is never a review stage for Last Mile or Dark Store',()=>{
@@ -145,4 +122,13 @@ test('National Head stays on Last Mile route even when marked full oversight (sh
  g.relationships[3].managerId='nh';
  g.relationships.push({subjectId:'nh',managerId:'owner'});
  assert.deepEqual(resolvePeopleReviewRoute(g,'station').chain.map(p=>p.personId),['cluster','area','inayath','nh']);
+});
+
+test('Dark Store resolves from a scoped City Manager when nobody is posted at the store',()=>{
+ const g=darkStoreGraph();
+ g.people=g.people.map(p=>p.locationId==='store' && p.personId!=='city' ? {...p,locationId:null} : p);
+ g.people.find(p=>p.personId==='city').locationId=null;
+ const route=resolvePeopleReviewRoute(g,'store',{darkStore:true});
+ assert.equal(route.error,null);
+ assert.deepEqual(route.chain.map(p=>p.personId),['city','rm']);
 });

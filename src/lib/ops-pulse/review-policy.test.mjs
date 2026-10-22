@@ -54,8 +54,18 @@ test('Program Manager edits/comments at all stages including closed, not another
     assert.equal(access.canEditRca,true);assert.equal(access.canComment,true);assert.equal(access.canEditConnections,true);assert.equal(access.canComplete,false);
   }
 });
-test('location scope and page permissions remain enforced even for oversight',()=>{
-  for(const override of [{inScope:false},{canView:false},{canEdit:false,canAdd:false}])assert.ok(Object.entries(reviewCapabilities({...base,owner:true,programManager:true,...override})).filter(([key])=>key.startsWith("can")).every(([,value])=>!value));
+test('location scope and view permission remain enforced even for oversight',()=>{
+  for(const override of [{inScope:false},{canView:false}])assert.ok(Object.entries(reviewCapabilities({...base,owner:true,programManager:true,...override})).filter(([key])=>key.startsWith("can")).every(([,value])=>!value));
+});
+test('NH / Owner / FSD keep Proxy and Skip when portal role is view-only',()=>{
+  for(const role of [{owner:true},{nationalHead:true},{tech:true},{programManager:true}]){
+    const access=reviewCapabilities({...base,...role,canEdit:false,canAdd:false});
+    assert.equal(access.canAccessProxy,true);
+    assert.equal(access.canAccessBypass,true);
+    assert.equal(access.canProxy,true);
+    assert.equal(access.canBypass,true);
+    assert.equal(access.canStart,true);
+  }
 });
 test('role classification includes TL, location mail accounts and People PGM',()=>{
   assert.equal(reviewRole('OPERATIONS_LOCATION'), 'station');assert.equal(reviewRole('TL Team Lead'),'station');assert.equal(reviewRole('PGM Program Manager'),'program');assert.equal(reviewRole('PROGRAM_HEAD'),'program');
