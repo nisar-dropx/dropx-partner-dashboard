@@ -1,15 +1,44 @@
 {
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "crons": [
-    {"path":"/api/cron/attendance-reconciliation","schedule":"*/15 * * * *"},
-    {"path":"/api/cron/workforce-payout-publication-refresh","schedule":"* * * * *"},
-    {"path":"/api/cron/portal-notifications","schedule":"*/5 * * * *"},
-    { "path": "/api/cron/edd-review-history", "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/edd-review-history?checkpoint=eod", "schedule": "25 18 * * *" },
-    { "path": "/api/cron/edd-stock-refresh", "schedule": "* * * * *" },
-    { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
-    { "path": "/api/cron/edd-ledger-retention", "schedule": "30 21 * * *" },
-    { "path": "/api/cron/report-import-retention", "schedule": "0 22 * * *" },
+    {
+      "path": "/api/cron/attendance-reconciliation",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/workforce-payout-publication-refresh",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/portal-notifications",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/edd-review-history",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/edd-review-history?checkpoint=eod",
+      "schedule": "25 18 * * *"
+    },
+    {
+      "path": "/api/cron/edd-stock-refresh",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/edd-verification",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/edd-ledger-retention",
+      "schedule": "30 21 * * *"
+    },
+    {
+      "path": "/api/cron/report-import-retention",
+      "schedule": "0 22 * * *"
+    },
     {
       "path": "/api/cron/business-document-expiry",
       "schedule": "30 5 * * *"
@@ -64,286 +93,6 @@
     },
     {
       "path": "/api/cron/attendance-catchup-audit",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=0",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=16",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=32",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=48",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=64",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=80",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=96",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=112",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=128",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=144",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=160",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=176",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=192",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=208",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=224",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=240",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=256",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=272",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=288",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=304",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=320",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=336",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=352",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=368",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=384",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=400",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=416",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=432",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=448",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=464",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=480",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=496",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=512",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=528",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=544",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=560",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=576",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=592",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=608",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=624",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=640",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=656",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=672",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=688",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=704",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=720",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=736",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=752",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=768",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=784",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=800",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=816",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=832",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=848",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=864",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=880",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=896",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=912",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=928",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=944",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=960",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=976",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=992",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1008",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1024",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1040",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1056",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1072",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1088",
-      "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/attendance-reconciliation?mode=catchup&from=2026-09-01&to=2026-10-11&raw_activity_only=true&limit=16&cursor=1104",
       "schedule": "0 0 1 1 *"
     }
   ]

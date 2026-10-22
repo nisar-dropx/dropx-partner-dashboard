@@ -30,6 +30,10 @@ By default this only validates and prints the local execution plan. It cannot
 write production unless --execute is supplied. The execution mode uses Vercel's
 authenticated cron runner; CRON_SECRET is never read or printed locally.
 
+Optimized catch-up cursor routes are temporary vercel.json registrations. They are
+not kept deployed after the historical repair finishes. Re-add contiguous
+mode=catchup cursor crons (schedule 0 0 1 1 *) before --execute.
+
 Options:
   --execute                 Trigger the deployed production cron jobs.
   --from YYYY-MM-DD         First IST attendance date (default: 2026-09-01).
@@ -246,10 +250,12 @@ async function loadLocalInventory(options) {
     .filter((cursor) => cursor !== null)
     .sort((left, right) => left - right);
   if (!paths.has(AUDIT_ROUTE)) throw new Error(`Local vercel.json is missing ${AUDIT_ROUTE}.`);
-  if (!cursors.length || cursors[0] !== 0) throw new Error("Local vercel.json is missing the optimized cursor 0 cron.");
-  for (let index = 1; index < cursors.length; index += 1) {
-    if (cursors[index] !== cursors[index - 1] + options.limit) {
-      throw new Error(`Local optimized cron cursors are not contiguous at ${cursors[index - 1]} -> ${cursors[index]}.`);
+  if (cursors.length) {
+    if (cursors[0] !== 0) throw new Error("Local vercel.json is missing the optimized cursor 0 cron.");
+    for (let index = 1; index < cursors.length; index += 1) {
+      if (cursors[index] !== cursors[index - 1] + options.limit) {
+        throw new Error(`Local optimized cron cursors are not contiguous at ${cursors[index - 1]} -> ${cursors[index]}.`);
+      }
     }
   }
   return { cursors, paths };
@@ -581,17 +587,30 @@ async function main() {
     execute: options.execute,
     expectedSnapshotToken: options.expectedSnapshotToken,
     expectedTotalMappings: options.expectedTotalMappings,
-    firstCursor: local.cursors[0],
+    firstCursor: local.cursors[0] ?? null,
     from: options.from,
-    lastCursor: local.cursors.at(-1),
+    lastCursor: local.cursors.at(-1) ?? null,
     limit: options.limit,
     registeredCursorCount: local.cursors.length,
     startCursor: options.startCursor,
     to: options.to
   }));
   if (!options.execute) {
+    if (!local.cursors.length) {
+      console.log(
+        "Dry run only. No optimized catch-up cursor crons are registered in vercel.json; "
+        + "re-add contiguous mode=catchup cursor routes before --execute."
+      );
+      return;
+    }
     console.log("Dry run only. Re-run with --execute after the optimized deployment is live and verified.");
     return;
+  }
+  if (!local.cursors.length) {
+    throw new Error(
+      "vercel.json has no optimized catch-up cursor crons. Re-add contiguous "
+      + "mode=catchup routes (schedule 0 0 1 1 *) before --execute."
+    );
   }
 
   const inventory = await loadRemoteInventory(options);
