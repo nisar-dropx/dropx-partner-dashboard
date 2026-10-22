@@ -10,7 +10,8 @@
  *   the day worked, until the credit lapses - week-off comp-off covers dates
  *   up to the end of the calendar month it was earned in, and can be applied
  *   for until the attendance month close day of the next month; holiday
- *   comp-off after the configured number of days.
+ *   comp-off earned on/before the 25th stays usable through the 2nd of the
+ *   next month, and holidays after the 25th use the configured day count.
  * - Every other leave type: today onwards (unchanged).
  */
 export type LeaveDateWindow = { earliest: string; latest: string | null };
@@ -55,8 +56,10 @@ export function isMonthlyCapLeaveCode(code: string) {
 /**
  * Validity end for one comp-off credit, per the leave type's lapse settings.
  * Ledger sources: 'comp_off_earned_week_off' for a worked week off, and
- * 'comp_off_earned' for a worked holiday. A credit that never lapses is
- * usable until `noLapseLatest`.
+ * 'comp_off_earned' for a worked holiday. Matches HRMS
+ * hr_lapse_comp_off_by_source: mid-month holidays stay open through the 2nd of
+ * the next month; late-month holidays use the configured day count. A credit
+ * that never lapses is usable until `noLapseLatest`.
  */
 export function compOffValidUntil(
   referenceDate: string,
@@ -65,7 +68,11 @@ export function compOffValidUntil(
   noLapseLatest: string
 ) {
   if (/week_off/.test(source)) return settings.weekOffLapsesMonthly ? lastOfMonth(referenceDate) : noLapseLatest;
-  return settings.holidayLapseDays != null ? addDays(referenceDate, settings.holidayLapseDays) : noLapseLatest;
+  if (parts(referenceDate).day > 25) {
+    return settings.holidayLapseDays != null ? addDays(referenceDate, settings.holidayLapseDays) : noLapseLatest;
+  }
+  const { year, month } = parts(referenceDate);
+  return iso(year, month + 1, 2);
 }
 
 /**

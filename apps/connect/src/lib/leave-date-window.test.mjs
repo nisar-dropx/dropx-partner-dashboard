@@ -46,12 +46,17 @@ test('earned leave available follows the date window, not a stale ledger remaini
   assert.equal(earnedLeaveAvailable(null, { earliest: '2026-10-03', latest: '2026-10-16' }), 0);
 });
 
-test('holiday comp-off (source comp_off_earned) lapses after its configured days', () => {
-  assert.equal(compOffValidUntil('2026-09-10', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: 30 }, '2026-10-31'), '2026-10-10');
+test('holiday comp-off on/before the 25th stays usable through the 2nd of next month', () => {
+  assert.equal(compOffValidUntil('2026-10-02', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: 14 }, '2026-11-30'), '2026-11-02');
+  assert.equal(compOffValidUntil('2026-10-20', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: 14 }, '2026-11-30'), '2026-11-02');
+  assert.equal(compOffValidUntil('2026-10-25', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: 14 }, '2026-11-30'), '2026-11-02');
 });
 
-test('a comp-off credit that never lapses is usable until the no-lapse limit', () => {
-  assert.equal(compOffValidUntil('2026-09-10', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: null }, '2026-10-31'), '2026-10-31');
+test('holiday comp-off after the 25th uses the configured day count', () => {
+  assert.equal(compOffValidUntil('2026-10-26', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: 14 }, '2026-11-30'), '2026-11-09');
+});
+
+test('a week-off credit that never lapses is usable until the no-lapse limit', () => {
   assert.equal(compOffValidUntil('2026-09-13', 'comp_off_earned_week_off', { weekOffLapsesMonthly: false, holidayLapseDays: null }, '2026-10-31'), '2026-10-31');
 });
 
