@@ -11,7 +11,7 @@ declare
   now_model_ids uuid[];
   now_station_ids uuid[];
   n int;
-  page_id uuid;
+  handover_page_id uuid;
   rec record;
   store_ids uuid[];
   role_text text;
@@ -80,13 +80,16 @@ begin
   on conflict (company_id, code) do update
   set name = excluded.name, sort_order = excluded.sort_order, is_active = true, updated_at = now();
 
-  select id into page_id
+  select id into handover_page_id
   from public.app_pages
   where company_id = company and code = 'si_handover' and is_active
   limit 1;
+  if handover_page_id is null then
+    raise exception 'si_handover app_pages row missing for company %', company;
+  end if;
 
   insert into public.role_page_permissions (company_id, role_id, page_id, can_view, can_add, can_edit)
-  select r.company_id, r.id, page_id, true, true, true
+  select r.company_id, r.id, handover_page_id, true, true, true
   from public.user_roles r
   where r.company_id = company
     and r.is_active
@@ -99,7 +102,7 @@ begin
   set can_view = true, can_add = true, can_edit = true, updated_at = now();
 
   insert into public.role_page_permissions (company_id, role_id, page_id, can_view, can_add, can_edit)
-  select r.company_id, r.id, page_id, true, false, true
+  select r.company_id, r.id, handover_page_id, true, false, true
   from public.user_roles r
   where r.company_id = company
     and r.is_active
@@ -180,7 +183,7 @@ begin
           from public.role_page_permissions rpp
           where rpp.company_id = company
             and rpp.role_id = m.role_id
-            and rpp.page_id = page_id
+            and rpp.page_id = handover_page_id
             and rpp.can_view
         )
       )
