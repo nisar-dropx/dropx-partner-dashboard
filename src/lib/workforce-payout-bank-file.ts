@@ -399,7 +399,12 @@ function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
   let dataRowCount = 0;
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex] ?? [];
-    if (row.some((value) => cleanCell(value))) dataRowCount += 1;
+    // Count the same response rows that the parser will inspect. Bank exports
+    // can contain notes or other footer cells outside the response columns;
+    // those are not payment rows and must not create a phantom Skipped count.
+    if (WORKFORCE_FEDONE_RESPONSE_HEADERS.some((header) => cleanCell(row[columnFor(header)] ?? ""))) {
+      dataRowCount += 1;
+    }
     const rawReference = row[columnFor("Customer Ref. No.")] ?? "";
     const referenceNo = normalizeWorkforceBankReference(rawReference);
     if (referenceNo) allReferenceCandidates.push({ referenceNo, rowNumber: rowIndex + 1 });

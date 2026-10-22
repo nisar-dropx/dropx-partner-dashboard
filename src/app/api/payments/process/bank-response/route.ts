@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { centralBankRpcRow, resolveCentralBankRowOwner, type CentralBankLedger } from "@/lib/central-bank-response";
+import {
+  summarizeCentralBankResponseRows,
+  type CentralBankResponseIssue
+} from "@/lib/central-bank-response-summary";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { canProcessPayment } from "@/lib/payment-processing-policy";
@@ -29,6 +33,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const MAX_RESPONSE_ROWS_PER_FILE = 5000;
 const MAX_RESPONSE_ROWS_PER_REQUEST = 20_000;
+const DATABASE_ROW_OUTCOMES = new Set(["paid", "cancelled", "failed", "replayed", "rejected", "unknown"]);
 
 type PaymentRequestOwner = {
   approval_status: string | null;
@@ -92,11 +97,7 @@ type PaymentRequestEvent = {
   status?: unknown;
 };
 
-type BankResponseRowError = {
-  message: string;
-  referenceNo: string;
-  rowNumber: number;
-};
+type BankResponseRowError = CentralBankResponseIssue;
 
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
@@ -143,7 +144,8 @@ function addRowError(
   errors: Map<number, BankResponseRowError>,
   rowNumber: number,
   referenceNo: unknown,
-  message: unknown
+  message: unknown,
+  category: BankResponseRowError["category"] = "exceptions"
 ) {
   const cleanedMessage = (String(message ?? "").trim()
     || "This bank response row could not be finalized safely.")
@@ -153,12 +155,14 @@ function addRowError(
   const normalizedMessage = cleanedMessage || "This bank response row could not be finalized safely.";
   const existing = errors.get(rowNumber);
   if (existing) {
+    if (existing.category === "skipped" && category === "exceptions") existing.category = "exceptions";
     if (!existing.message.includes(normalizedMessage)) {
       existing.message = `${existing.message} ${normalizedMessage}`;
     }
     return;
   }
   errors.set(rowNumber, {
+    category,
     message: normalizedMessage,
     referenceNo: normalizedReference(referenceNo),
     rowNumber
@@ -178,6 +182,7 @@ function readDatabaseRowErrors(value: unknown) {
     const rowNumber = Number(issue.row_number ?? issue.rowNumber);
     if (!Number.isSafeInteger(rowNumber) || rowNumber <= 0) continue;
     errors.push({
+      category: "exceptions",
       message: String(issue.message ?? "").trim()
         || "This bank response row could not be finalized safely.",
       referenceNo: normalizedReference(issue.reference_no ?? issue.referenceNo),
@@ -185,6 +190,38 @@ function readDatabaseRowErrors(value: unknown) {
     });
   }
   return errors;
+}
+
+function readDatabaseResultRows(value: unknown, expectedRows: WorkforceFedOneResponseRow[]) {
+  if (!Array.isArray(value)) {
+    throw new Error("The bank finalizer returned an invalid row result.");
+  }
+  const expectedRowNumbers = new Set(expectedRows.map((row) => row.rowNumber));
+  const seen = new Set<number>();
+  const rows: Record<string, unknown>[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error("The bank finalizer returned an invalid row result.");
+    }
+    const row = raw as Record<string, unknown>;
+    const rowNumber = Number(row.row_number ?? row.rowNumber);
+    const outcome = String(row.outcome ?? "").trim().toLowerCase();
+    if (
+      !Number.isSafeInteger(rowNumber)
+      || rowNumber <= 0
+      || !expectedRowNumbers.has(rowNumber)
+      || seen.has(rowNumber)
+      || !DATABASE_ROW_OUTCOMES.has(outcome)
+    ) {
+      throw new Error("The bank finalizer returned an invalid or duplicate row result.");
+    }
+    seen.add(rowNumber);
+    rows.push(row);
+  }
+  if (seen.size !== expectedRowNumbers.size) {
+    throw new Error("The bank finalizer returned an incomplete row result.");
+  }
+  return rows;
 }
 
 function addToMap<Row>(map: Map<string, Row[]>, key: unknown, row: Row) {
@@ -296,13 +333,7 @@ async function resolveLegacyPaymentReferences(
   for (const candidate of candidates) {
     const resolution = byRow.get(candidate.rowNumber);
     if (!resolution) {
-      addRowError(
-        rowErrors,
-        candidate.rowNumber,
-        candidate.dropxId,
-        "This reference did not match an eligible payment instruction."
-      );
-      continue;
+      throw new Error("The bare DropX payment reference resolver returned an incomplete result.");
     }
     const state = String(resolution.resolution_state ?? "").trim().toLowerCase();
     if (state === "unrelated") continue;
@@ -311,9 +342,13 @@ async function resolveLegacyPaymentReferences(
         rowErrors,
         candidate.rowNumber,
         candidate.dropxId,
-        "This reference did not match an eligible payment instruction."
+        resolution.message ?? "This known reference has mismatched or ambiguous payment data.",
+        "exceptions"
       );
       continue;
+    }
+    if (state !== "resolved") {
+      throw new Error("The bare DropX payment reference resolver returned an invalid result state.");
     }
     const referenceNo = normalizedReference(resolution.reference_no);
     const audience = String(resolution.audience ?? "").trim().toLowerCase();
@@ -459,7 +494,8 @@ async function processFile(input: {
         rowErrors,
         candidate.rowNumber,
         rawReference,
-        "This reference did not match an eligible payment instruction."
+        "This reference did not match an eligible payment instruction.",
+        "skipped"
       );
       continue;
     }
@@ -468,7 +504,8 @@ async function processFile(input: {
         rowErrors,
         candidate.rowNumber,
         rawReference,
-        "This reference did not match an eligible payment instruction."
+        "This reference did not match an eligible payment instruction.",
+        "skipped"
       );
       continue;
     }
@@ -489,7 +526,8 @@ async function processFile(input: {
         rowErrors,
         candidate.rowNumber,
         rawReference,
-        "This reference did not match an eligible payment instruction."
+        "This reference did not match an eligible payment instruction.",
+        "skipped"
       );
       continue;
     }
@@ -507,7 +545,8 @@ async function processFile(input: {
         rowErrors,
         skipped.rowNumber,
         skipped.referenceNo,
-        "This reference did not match an eligible payment instruction."
+        "This reference did not match an eligible payment instruction.",
+        "skipped"
       );
     }
   }
@@ -524,7 +563,8 @@ async function processFile(input: {
         rowErrors,
         row.rowNumber,
         row.referenceNo,
-        "Payment ownership changed while this row was being validated."
+        "Payment ownership changed while this row was being validated.",
+        "skipped"
       );
       continue;
     }
@@ -539,6 +579,7 @@ async function processFile(input: {
 
   const rowsForFinalization = Object.values(rowsByLedger).flat();
   if (!rowsForFinalization.length) {
+    const issues = sortedRowErrors(rowErrors);
     return {
       cancelledRows: 0,
       failedRows: 0,
@@ -549,7 +590,8 @@ async function processFile(input: {
       paidRows: 0,
       processedRows: 0,
       errorRows: rowErrors.size,
-      rowErrors: sortedRowErrors(rowErrors),
+      resultGroups: summarizeCentralBankResponseRows({ databaseRows: [], issues, replayedFile: false }),
+      rowErrors: issues,
       skipped: prepared.dataRowCount
     };
   }
@@ -570,8 +612,23 @@ async function processFile(input: {
   });
   if (finalized.error) throw new Error(finalized.error.message);
   const databaseResult = resultRecord(finalized.data);
+  const databaseRows = readDatabaseResultRows(databaseResult.rows, rowsForFinalization);
+  const databaseOutcomeByRow = new Map<number, string>();
+  for (const raw of databaseRows) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const row = raw as Record<string, unknown>;
+    const rowNumber = Number(row.row_number ?? row.rowNumber);
+    if (!Number.isSafeInteger(rowNumber) || rowNumber <= 0) continue;
+    databaseOutcomeByRow.set(rowNumber, String(row.outcome ?? "").trim().toLowerCase());
+  }
   for (const issue of readDatabaseRowErrors(databaseResult.row_errors)) {
-    addRowError(rowErrors, issue.rowNumber, issue.referenceNo, issue.message);
+    addRowError(
+      rowErrors,
+      issue.rowNumber,
+      issue.referenceNo,
+      issue.message,
+      databaseOutcomeByRow.get(issue.rowNumber) === "unknown" ? "skipped" : "exceptions"
+    );
   }
   const paymentRequestEvents = Array.isArray(databaseResult.payment_request_events)
     ? databaseResult.payment_request_events as PaymentRequestEvent[]
@@ -586,7 +643,11 @@ async function processFile(input: {
 
   const failedRows = resultCount(databaseResult, "failed");
   const totalCancelled = resultCount(databaseResult, "cancelled");
-  const databaseErrorRows = new Set(readDatabaseRowErrors(databaseResult.row_errors).map((issue) => issue.rowNumber));
+  const replayedFile = databaseResult.replayed === true;
+  const issues = sortedRowErrors(rowErrors);
+  const databaseErrorRows = new Set(databaseRows
+    .filter((row) => ["rejected", "unknown"].includes(String(row.outcome ?? "").trim().toLowerCase()))
+    .map((row) => Number(row.row_number ?? row.rowNumber)));
   const successfullyMatchedRows = rowsForFinalization.filter((row) => !databaseErrorRows.has(row.rowNumber));
   const successfulRowsByLedger = (ledger: CentralBankLedger) => rowsByLedger[ledger]
     .filter((row) => !databaseErrorRows.has(row.rowNumber)).length;
@@ -606,10 +667,16 @@ async function processFile(input: {
     processedRows: successfullyMatchedRows.length,
     errorRows: rowErrors.size,
     failedRows,
-    replayedFile: databaseResult.replayed === true,
+    replayedFile,
     rejectedRows: resultCount(databaseResult, "rejected"),
     replayedRows: resultCount(databaseResult, "replayed_items"),
-    rowErrors: sortedRowErrors(rowErrors),
+    resultGroups: summarizeCentralBankResponseRows({
+      databaseRows,
+      issues,
+      replayedFile,
+      replayedRowNumbers: databaseResult.replayed_row_numbers
+    }),
+    rowErrors: issues,
     unknownRows: resultCount(databaseResult, "unknown"),
     skipped: Math.max(0, prepared.dataRowCount - successfullyMatchedRows.length)
   };

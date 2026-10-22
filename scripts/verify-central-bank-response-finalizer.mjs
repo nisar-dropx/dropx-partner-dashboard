@@ -15,9 +15,17 @@ const debitAccountPolicyMigration = readFileSync(new URL(
   "../supabase/migrations/20261022250000_central_bank_response_ignore_debit_account_mismatch.sql",
   import.meta.url
 ), "utf8");
+const replayRowNumbersMigration = readFileSync(new URL(
+  "../supabase/migrations/20261022260000_central_bank_partial_replay_row_numbers.sql",
+  import.meta.url
+), "utf8");
 const executableMigration = migration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executablePartialMigration = partialMigration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableDebitAccountPolicyMigration = debitAccountPolicyMigration.replace(
+  /notify\s+pgrst\s*,\s*'reload schema'\s*;/gi,
+  ""
+);
+const executableReplayRowNumbersMigration = replayRowNumbersMigration.replace(
   /notify\s+pgrst\s*,\s*'reload schema'\s*;/gi,
   ""
 );
@@ -41,6 +49,9 @@ assert.match(migration, /to service_role/i);
 assert.match(debitAccountPolicyMigration, /Response debit account is audit evidence only/i);
 assert.match(debitAccountPolicyMigration, /finalize_central_bank_response_partially/i);
 assert.match(debitAccountPolicyMigration, /finalize_central_bank_response\(/i);
+assert.match(replayRowNumbersMigration, /replayed_row_numbers/i);
+assert.match(replayRowNumbersMigration, /successful replayed rows separately/i);
+assert.match(replayRowNumbersMigration, /invalid replayed row result/i);
 
 const db = new PGlite();
 await db.exec(`
@@ -347,6 +358,8 @@ await db.exec(executableMigration);
 await db.exec(executablePartialMigration);
 await db.exec(executableDebitAccountPolicyMigration);
 await db.exec(executableDebitAccountPolicyMigration);
+await db.exec(executableReplayRowNumbersMigration);
+await db.exec(executableReplayRowNumbersMigration);
 
 const effectiveDefinitions = await db.query(`
   select pg_get_functiondef(signature::regprocedure) definition
@@ -371,6 +384,8 @@ assert.doesNotMatch(
   effectiveDefinitionText,
   /public\.workforce_payout_bank_account_canonical\(v_payroll_line\.debit_account_number\)/i
 );
+assert.match(effectiveDefinitionText, /replayed_row_numbers/i);
+assert.match(effectiveDefinitionText, /successful replayed rows separately/i);
 
 const rows = {
   workforce: [{
@@ -666,6 +681,11 @@ assert.equal(mixedReplay.processed_rows, 1);
 assert.equal(mixedReplay.error_rows, 1);
 assert.equal(mixedReplay.paid, 1);
 assert.equal(mixedReplay.replayed, false, "the remaining row error keeps the file result partial");
+assert.deepEqual(
+  mixedReplay.replayed_row_numbers,
+  [10],
+  "the successful replayed row remains distinguishable inside a partial file result"
+);
 assert.equal(mixedReplay.row_errors[0].row_number, 11);
 assert.match(mixedReplay.row_errors[0].message, /value date/i);
 assert.equal((await db.query(`
