@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveBalance, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
 import { notifyConnectLeaveSubmitted } from "../../../../src/lib/connect-leave-notifications";
-import { compOffApplyUntil, compOffValidUntil, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
+import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -229,6 +229,12 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
         : Promise.resolve({ entitlement: null, used: null, remaining: null }),
       leaveWindowFor(account, type, leaveType, indiaToday())
     ]);
+    const remaining = tracksBalance ? balance.remaining : null;
+    // Earned comp-off: do not advertise ledger remaining when every credit has
+    // already passed its apply-by date (picker is closed).
+    const available = leaveType.balance_mode === "earned_balance"
+      ? earnedLeaveAvailable(remaining, dateWindow)
+      : remaining;
     return {
       id: leaveType.leave_type_id,
       name: leaveType.name,
@@ -237,7 +243,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
       color: leaveType.color,
       used: tracksBalance ? balance.used : 0,
       pending,
-      available: tracksBalance ? balance.remaining : null,
+      available,
       isPaid: leaveType.is_paid,
       balanceMode: leaveType.balance_mode,
       dateWindow

@@ -108,6 +108,18 @@ export function leaveDateWindow(input: {
   return { earliest: today, latest: null };
 }
 
+/**
+ * Ledger remaining can still count an earned credit after its apply-by date.
+ * The date picker only opens when `dateWindow` is non-null, so the dropdown
+ * "N available" must use the same gate — otherwise DropX One shows "1 available"
+ * with every date disabled (Holiday Comp Off after its lapse days).
+ */
+export function earnedLeaveAvailable(remaining: number | null | undefined, dateWindow: LeaveDateWindow | null) {
+  if (dateWindow == null) return 0;
+  const value = Number(remaining);
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
 /** null when allowed, otherwise the reason. */
 export function leaveDatesOutsideWindow(window: LeaveDateWindow | null, fromDate: string, toDate: string, leaveName: string) {
   if (!window) return `No ${leaveName} is available to use right now.`;

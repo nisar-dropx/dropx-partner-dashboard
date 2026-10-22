@@ -1280,6 +1280,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
         {canEditProfile ? <button className="dx-profile-edit-button" disabled={editLoading} onClick={() => void beginProfileEdit()} type="button"><Pencil />{editLoading ? "Loading..." : "Edit profile"}</button> : null}
       </div>
+      {!readOnly && !account.activationOnly ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
+        setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
+        onPhoto?.(url);
+      }} /> : null}
       {sections.map((section, sectionIndex) => <section className={sectionIndex === 0 ? "primary" : ""} key={section.name}>
         {sectionIndex ? <h2>{section.name}</h2> : null}
         <div>{Object.entries(section.values).map(([label, value]) => <ReadTile

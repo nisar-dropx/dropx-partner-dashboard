@@ -504,20 +504,24 @@ test("profile-edit identity checks bind name matching to the immutable server pr
   assert.doesNotMatch(verificationRoute, /mobile_number_format|normalizeStoredConnectMobile/);
 });
 
-test("completed profiles cannot mutate the profile photo outside the OTP edit boundary", () => {
+test("active and registration profiles can update the profile photo beside OTP edit", () => {
   const photoRoute = fs.readFileSync(
     new URL("../../app/api/connect/profile-photo/route.ts", import.meta.url),
     "utf8"
   );
-  assert.match(photoRoute, /function assertRegistrationPhotoUpdate/);
-  assert.match(photoRoute, /\["pending", "returned"\]\.includes\(status\)/);
-  assert.equal((photoRoute.match(/assertRegistrationPhotoUpdate\(account\)/g) ?? []).length, 2);
+  assert.doesNotMatch(photoRoute, /function assertRegistrationPhotoUpdate/);
+  assert.doesNotMatch(photoRoute, /assertRegistrationPhotoUpdate\(account\)/);
+  assert.doesNotMatch(
+    photoRoute,
+    /Profile photo changes are not available after registration/
+  );
 
   const profileApp = fs.readFileSync(
     new URL("../components/connect-profile-app.tsx", import.meta.url),
     "utf8"
   );
-  assert.equal((profileApp.match(/<VerifiedProfilePhotoUpdate/g) ?? []).length, 1);
+  assert.equal((profileApp.match(/<VerifiedProfilePhotoUpdate/g) ?? []).length, 2);
+  assert.match(profileApp, /!readOnly && !account\.activationOnly \? <VerifiedProfilePhotoUpdate/);
   assert.match(profileApp, /!readOnly && !account\.activationOnly && !editing \? <VerifiedProfilePhotoUpdate/);
 });
 

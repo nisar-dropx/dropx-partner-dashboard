@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compOffApplyUntil, compOffValidUntil, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
+import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
 
 test('CL/SL: whole current month and next month (mid-month)', () => {
   assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-09-01', latest: '2026-10-31' });
@@ -36,6 +36,14 @@ test('comp-off: lapsed credits give no window', () => {
   const window = leaveDateWindow({ code: 'WOFFCOMP', balanceMode: 'earned_balance', today: '2026-10-05', credits: [{ referenceDate: '2026-09-13', validUntil: '2026-09-30' }] });
   assert.equal(window, null);
   assert.equal(leaveDatesOutsideWindow(window, '2026-10-06', '2026-10-06', 'Week-off Comp Off'), 'No Week-off Comp Off is available to use right now.');
+});
+
+test('earned leave available follows the date window, not a stale ledger remaining', () => {
+  // KANALA ANIL KUMAR: Holiday Comp Off earned 2026-10-02, 14-day lapse → apply-by 2026-10-16.
+  // On 2026-10-22 the ledger can still say remaining 1 while the picker is closed.
+  assert.equal(earnedLeaveAvailable(1, null), 0);
+  assert.equal(earnedLeaveAvailable(1, { earliest: '2026-10-03', latest: '2026-10-16' }), 1);
+  assert.equal(earnedLeaveAvailable(null, { earliest: '2026-10-03', latest: '2026-10-16' }), 0);
 });
 
 test('holiday comp-off (source comp_off_earned) lapses after its configured days', () => {
