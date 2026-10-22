@@ -440,6 +440,11 @@ function hasSiPageWrite(a: Actor) {
   );
 }
 
+/** Start / accept / cover fill — requires can_add (SI + SM cover). Oversight is can_edit only. */
+function hasSiFillPermission(a: Actor) {
+  return Boolean(a.permissions.si_handover?.canAdd);
+}
+
 function hasSiPageAccess(a: Actor) {
   return Boolean(
     a.permissions.si_handover?.canView ||
@@ -448,10 +453,13 @@ function hasSiPageAccess(a: Actor) {
   );
 }
 
-/** Shift Incharge: page write grant, optionally narrowed by master siRoles allowlist. */
+/**
+ * Who may start / accept Shift operations (and cover when SI is absent).
+ * Master siRoles usually includes Shift Incharge + Store Manager / Store Incharge.
+ */
 export function isSi(a: Actor, s: Settings) {
   if (a.isMasterOwner) return true;
-  if (!hasSiPageWrite(a)) return false;
+  if (!hasSiFillPermission(a)) return false;
   if (!s.siRoles.length) return true;
   return a.effectiveRoleIds.some((id) => s.siRoles.includes(id));
 }
@@ -474,15 +482,14 @@ export function canRead(a: Actor, s: Settings, row: SiChecklist) {
 }
 
 export function canFill(a: Actor, s: Settings, row: SiChecklist) {
-  // Outgoing owner with page write can always edit their own open/rejected draft.
-  // Master siRoles only gates who may start / accept — never locks an owner's inputs.
+  // Outgoing owner can edit their open/rejected draft. Master owner may assist.
   return (
     !a.readOnly &&
     !row.deleted_at &&
     inScope(a, row.location_id) &&
     ["open", "rejected"].includes(row.status) &&
     a.userId === row.outgoing_user_id &&
-    hasSiPageWrite(a)
+    (a.isMasterOwner || hasSiFillPermission(a))
   );
 }
 
@@ -505,9 +512,8 @@ export function canAccept(a: Actor, s: Settings, row: SiChecklist) {
     canRead(a, s, row) &&
     row.status === "submitted" &&
     a.userId !== row.outgoing_user_id &&
-    hasSiPageWrite(a) &&
-    // Optional allowlist: when configured, acceptor must be in siRoles (or master owner).
-    (a.isMasterOwner || !s.siRoles.length || isSi(a, s))
+    // Incoming SI or covering SM / Store Incharge (can_add + siRoles).
+    isSi(a, s)
   );
 }
 

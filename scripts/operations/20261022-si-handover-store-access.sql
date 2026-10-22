@@ -104,6 +104,25 @@ begin
   on conflict (company_id, role_id, page_id) do update
   set can_view = true, can_add = true, can_edit = true, updated_at = now();
 
+  -- SM / Store Incharge: full write so they can cover absent SI shifts.
+  insert into public.role_page_permissions (company_id, role_id, page_id, can_view, can_add, can_edit)
+  select r.company_id, r.id, handover_page_id, true, true, true
+  from public.user_roles r
+  where r.company_id = company
+    and r.is_active
+    and (
+      r.code in ('OPERATIONS_SM', 'OPERATIONS_SRSM', 'OPERATIONS_STM', 'SM', 'SRSM')
+      or upper(regexp_replace(concat_ws(' ', r.code, r.name), '[^A-Za-z0-9]+', ' ', 'g'))
+        ~ '(^| )(STORE MANAGER|SENIOR STORE MANAGER|SRSM|STORE INCHARGE|STORE IN CHARGE)( |$)'
+    )
+    and not (
+      r.code in ('OPERATIONS_SIC', 'SIC', 'SI', 'SHIFT_INCHARGE')
+      or upper(regexp_replace(concat_ws(' ', r.code, r.name), '[^A-Za-z0-9]+', ' ', 'g'))
+        ~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)( |$)'
+    )
+  on conflict (company_id, role_id, page_id) do update
+  set can_view = true, can_add = true, can_edit = true, updated_at = now();
+
   insert into public.role_page_permissions (company_id, role_id, page_id, can_view, can_add, can_edit)
   select r.company_id, r.id, handover_page_id, true, false, true
   from public.user_roles r
@@ -111,7 +130,6 @@ begin
     and r.is_active
     and (
       r.code in (
-        'OPERATIONS_SM', 'OPERATIONS_SRSM', 'OPERATIONS_STM',
         'OPERATIONS_CTM', 'OPERATIONS_CM', 'OPERATIONS_CLM', 'OPERATIONS_CLUSTER_HEAD',
         'OPERATIONS_AOM',
         'OPERATIONS_RM', 'OPERATIONS_REGIONAL_HEAD',
@@ -121,12 +139,15 @@ begin
         'PROGRAM_HEAD', 'CLUSTER_HEAD', 'REGIONAL_HEAD', 'NATIONAL_HEAD'
       )
       or upper(regexp_replace(concat_ws(' ', r.code, r.name), '[^A-Za-z0-9]+', ' ', 'g'))
-        ~ '(^| )(STORE MANAGER|SENIOR STORE MANAGER|SRSM|CITY MANAGER|CTM|CLUSTER MANAGER|CLUSTER HEAD|AREA OPERATIONS MANAGER|AREA MANAGER|AOM|REGIONAL MANAGER|REGIONAL HEAD|NATIONAL HEAD|PROGRAM MANAGER|PROGRAM HEAD)( |$)'
+        ~ '(^| )(CITY MANAGER|CTM|CLUSTER MANAGER|CLUSTER HEAD|AREA OPERATIONS MANAGER|AREA MANAGER|AOM|REGIONAL MANAGER|REGIONAL HEAD|NATIONAL HEAD|PROGRAM MANAGER|PROGRAM HEAD)( |$)'
     )
     and not (
-      r.code in ('OPERATIONS_SIC', 'SIC', 'SI', 'SHIFT_INCHARGE')
+      r.code in (
+        'OPERATIONS_SIC', 'SIC', 'SI', 'SHIFT_INCHARGE',
+        'OPERATIONS_SM', 'OPERATIONS_SRSM', 'OPERATIONS_STM', 'SM', 'SRSM'
+      )
       or upper(regexp_replace(concat_ws(' ', r.code, r.name), '[^A-Za-z0-9]+', ' ', 'g'))
-        ~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)( |$)'
+        ~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC|STORE MANAGER|SENIOR STORE MANAGER|SRSM|STORE INCHARGE|STORE IN CHARGE)( |$)'
     )
   on conflict (company_id, role_id, page_id) do update
   set
@@ -135,7 +156,7 @@ begin
     can_add = public.role_page_permissions.can_add,
     updated_at = now();
 
-  -- 3) Location scope: SI/SM get posted NOW store; City get NOW stores they touch;
+  -- 3) Location scope: SI posted store; SM/Store Incharge same-city NOW; City+ oversight;
   --    RM / NH / Program get all NOW stores.
   for rec in
     select
@@ -244,8 +265,46 @@ begin
       if store_ids is null or cardinality(store_ids) = 0 then
         store_ids := now_station_ids;
       end if;
-    elsif role_text ~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC|STORE MANAGER|SENIOR STORE MANAGER|SRSM)( |$)' then
-      -- SI / Store Manager: People posting NOW store(s) only (do not keep stale scopes).
+    elsif role_text ~ '(^| )(STORE MANAGER|SENIOR STORE MANAGER|SRSM|STORE INCHARGE|STORE IN CHARGE)( |$)'
+         and role_text !~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)( |$)' then
+      -- SM / Store Incharge cover: all NOW stores in the same city as their posting.
+      replace_now := true;
+      select coalesce(array_agg(distinct peer.id), '{}'::uuid[])
+      into store_ids
+      from public.hr_user_person_links l
+      join public.hr_engagements e
+        on e.person_id = l.person_id and e.company_id = company and e.status = 'active'
+       and e.start_date <= today and (e.end_date is null or e.end_date >= today)
+      join public.hr_work_assignments a
+        on a.engagement_id = e.id and a.company_id = company and a.is_primary
+       and a.effective_from <= today and (a.effective_to is null or a.effective_to >= today)
+       and a.location_id = any(now_station_ids)
+      join public.stations posted on posted.id = a.location_id
+      join public.stations peer
+        on peer.company_id = company
+       and peer.id = any(now_station_ids)
+       and nullif(btrim(lower(coalesce(peer.city, ''))), '') is not null
+       and lower(btrim(peer.city)) = lower(btrim(posted.city))
+      where l.company_id = company
+        and l.user_id = rec.user_id
+        and l.status = 'active';
+      if store_ids is null or cardinality(store_ids) = 0 then
+        select coalesce(array_agg(distinct a.location_id), '{}'::uuid[])
+        into store_ids
+        from public.hr_user_person_links l
+        join public.hr_engagements e
+          on e.person_id = l.person_id and e.company_id = company and e.status = 'active'
+         and e.start_date <= today and (e.end_date is null or e.end_date >= today)
+        join public.hr_work_assignments a
+          on a.engagement_id = e.id and a.company_id = company and a.is_primary
+         and a.effective_from <= today and (a.effective_to is null or a.effective_to >= today)
+         and a.location_id = any(now_station_ids)
+        where l.company_id = company
+          and l.user_id = rec.user_id
+          and l.status = 'active';
+      end if;
+    elsif role_text ~ '(^| )(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)( |$)' then
+      -- Pure SI: People posting NOW store(s) only.
       replace_now := true;
       select coalesce(array_agg(distinct a.location_id), '{}'::uuid[])
       into store_ids

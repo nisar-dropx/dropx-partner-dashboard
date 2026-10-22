@@ -114,9 +114,11 @@ export function SiHandoverMasterClient({
         </section>
 
         <section className={styles.masterCard}>
-          <h2>Shift Incharge roles</h2>
+          <h2>Shift fill / cover roles</h2>
           <p className={styles.meta}>
-            Empty = anyone with Activities & Handover add/edit can fill and accept.
+            Who may start, fill, submit and accept Shift operations — including Store
+            Managers / Store Incharges covering when an SI is absent. Empty = anyone
+            with Shift operations add permission.
           </p>
           <div className={styles.roleList}>
             {roles.map((r) => (

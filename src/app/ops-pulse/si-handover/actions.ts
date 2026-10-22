@@ -47,19 +47,11 @@ export async function startShift(input: {
 }) {
   try {
     const c = await context(true);
-    const canStart =
-      c.actor.isMasterOwner ||
-      Boolean(
-        c.actor.permissions.si_handover?.canAdd ||
-          c.actor.permissions.si_handover?.canEdit,
+    // Start = Shift Incharge or covering SM / Store Incharge (can_add + siRoles).
+    if (!isSi(c.actor, c.master.settings))
+      throw Error(
+        "Only Shift Incharge or a covering Store Manager / Store Incharge can start a shift checklist.",
       );
-    if (
-      !canStart ||
-      (c.master.settings.siRoles.length &&
-        !isSi(c.actor, c.master.settings) &&
-        !c.actor.isMasterOwner)
-    )
-      throw Error("You do not have permission to start a shift checklist.");
     const locations = await stores(c.auth, c.master.settings);
     const store = locations.find((l) => l.id === input.locationId);
     if (!store) throw Error("Store not in your Dark Store scope.");

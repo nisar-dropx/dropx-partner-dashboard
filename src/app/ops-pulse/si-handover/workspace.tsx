@@ -14,6 +14,7 @@ import {
   emptyLine,
   escalationLevel,
   isManager,
+  isSi,
   progress,
   statusLabels,
   taskUnlocked,
@@ -355,6 +356,8 @@ export function SiHandoverWorkspace(props: Props) {
   const acceptable = Boolean(
     focused && canAccept(props.actor, props.settings, focused),
   );
+  const canCoverShift = isSi(props.actor, props.settings);
+  const manager = isManager(props.actor, props.settings);
   const viewTasks = useMemo(
     () => (focused ? tasksForView(props.view, focused.template) : []),
     [focused, props.view],
@@ -399,7 +402,6 @@ export function SiHandoverWorkspace(props: Props) {
       ["open", "rejected", "submitted"].includes(r.status),
   );
   const acceptRows = progressRows.filter((r) => r.status === "submitted");
-  const manager = isManager(props.actor, props.settings);
 
   const run = (
     work: () => Promise<{
@@ -508,7 +510,7 @@ export function SiHandoverWorkspace(props: Props) {
             <button
               type="button"
               className={styles.btnAccent}
-              disabled={pending || !locationId}
+              disabled={pending || !locationId || !canCoverShift}
               onClick={() =>
                 run(() =>
                   startShift({
@@ -522,6 +524,13 @@ export function SiHandoverWorkspace(props: Props) {
               Start {cur.shiftSlot}
             </button>
           </div>
+          {canCoverShift && manager ? (
+            <p className={styles.banner}>
+              Cover mode: as Store Manager / Store Incharge you can run Shift
+              operations at any store in your city scope when an SI is away —
+              including accepting the next handover.
+            </p>
+          ) : null}
           <p className={styles.meta}>
             <span className={styles.chipOk}>
               {cur.shiftDate} {cur.shiftSlot} IST
