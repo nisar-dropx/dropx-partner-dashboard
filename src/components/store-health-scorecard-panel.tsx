@@ -18,8 +18,6 @@ export type StoreHealthHistoryDay = {
   hero: StoreHealthHero;
 };
 
-type ViewMode = "day" | "compare7";
-
 type DayPoint = {
   date: string;
   value: number | null;
@@ -56,7 +54,7 @@ function MiniBarTrend({
 }) {
   const numeric = points.map((point) => point.value).filter((value): value is number => value != null);
   const max = numeric.length ? Math.max(...numeric.map((value) => Math.abs(value)), 1e-9) : 1;
-  const height = compact ? 22 : 28;
+  const height = compact ? 18 : 28;
   if (!points.length) {
     return <span className="store-health-bars empty" aria-hidden="true"/>;
   }
@@ -213,7 +211,6 @@ export function StoreHealthScorecardPanel({
   history: StoreHealthHistoryDay[];
   date: string;
 }) {
-  const [mode, setMode] = useState<ViewMode>("day");
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
   const historyNewestFirst = useMemo(
@@ -225,26 +222,22 @@ export function StoreHealthScorecardPanel({
     [historyNewestFirst]
   );
   const daysWithData = historyNewestFirst.filter((day) => day.metrics.some((metric) => metric.severity !== "neutral" || metric.actual != null)).length;
-  const compareHero = useMemo(() => {
+  const scoreSummary = useMemo(() => {
     const scoredDays = historyNewestFirst.filter((day) => day.hero.scorePct != null);
-    if (!scoredDays.length) return null;
-    const average = scoredDays.reduce((sum, day) => sum + (day.hero.scorePct as number), 0) / scoredDays.length;
     const selectedDay = historyNewestFirst.find((day) => day.date === date) ?? null;
+    const selectedScore = selectedDay?.hero.scorePct ?? null;
+    if (!scoredDays.length && selectedScore == null) return null;
+    const average = scoredDays.length
+      ? scoredDays.reduce((sum, day) => sum + (day.hero.scorePct as number), 0) / scoredDays.length
+      : null;
     return {
       average,
-      selectedScore: selectedDay?.hero.scorePct ?? null,
+      selectedScore,
       days: scoredDays.length
     };
   }, [historyNewestFirst, date]);
 
-  const displayMetrics = useMemo(() => {
-    if (mode === "day") return metrics;
-    if (metrics.length) return metrics;
-    const fallback = historyNewestFirst.find((day) => day.metrics.length)?.metrics ?? [];
-    return fallback;
-  }, [mode, metrics, historyNewestFirst]);
-
-  const groups = useMemo(() => groupMetrics(displayMetrics), [displayMetrics]);
+  const groups = useMemo(() => groupMetrics(metrics), [metrics]);
 
   const seriesByKey = useMemo(() => {
     const map = new Map<string, DayPoint[]>();
@@ -266,9 +259,7 @@ export function StoreHealthScorecardPanel({
   }, [historyOldestFirst]);
 
   const activeMetric = activeKey
-    ? displayMetrics.find((metric) => metric.key === activeKey)
-      ?? metrics.find((metric) => metric.key === activeKey)
-      ?? null
+    ? metrics.find((metric) => metric.key === activeKey) ?? null
     : null;
   const activeDefinition = activeMetric
     ? storeHealthMetricDefinitions.find((entry) => entry.key === activeMetric.key)
@@ -288,75 +279,58 @@ export function StoreHealthScorecardPanel({
         <b>{misses.length} misses · {metrics.length} metrics · {groups.length} groups</b>
       </summary>
       <div className="review-scorecard-toolbar">
-        <span>PDF groups · tap a card for full detail · bars = last 7 days</span>
-        <div className="store-health-score-modes" role="group" aria-label="Scorecard view">
-          <button type="button" className={mode === "day" ? "active" : ""} onClick={() => setMode("day")}>Selected day</button>
-          <button type="button" className={mode === "compare7" ? "active" : ""} onClick={() => setMode("compare7")} disabled={!daysWithData}>
-            Last 7 days
-          </button>
-        </div>
+        <span>PDF order · tap a card for detail · bars = last 7 days</span>
         <ReviewDetailsClose label="Close performance scorecard"/>
       </div>
-      <p className="review-history-hint">
-        {mode === "day"
-          ? `Imported Store Health for ${formatDashboardDateMedium(date)} (D-2). Each card shows the 7-day bar trend.`
-          : daysWithData
-            ? `Comparing ${daysWithData} imported day${daysWithData === 1 ? "" : "s"} ending ${formatDashboardDateMedium(date)}. Bars read oldest → newest.`
-            : "No Store Health imports in the last 7 days for this store yet."}
-      </p>
-      {mode === "compare7" && compareHero ? (
-        <div className="store-health-compare-summary" aria-label="Seven day score summary">
-          <article>
-            <span>7-day avg score</span>
-            <strong>{compareHero.average.toFixed(1)}%</strong>
-            <small>{compareHero.days} scored day{compareHero.days === 1 ? "" : "s"}</small>
-          </article>
-          <article>
-            <span>Selected day score</span>
-            <strong>{compareHero.selectedScore == null ? "—" : `${compareHero.selectedScore}%`}</strong>
-            <small>{formatDashboardDateMedium(date)}</small>
-          </article>
-        </div>
-      ) : null}
-      {mode === "day" && !metrics.length ? (
+      {!metrics.length ? (
         <p className="review-scorecard-empty">No Store Health scorecard imported for this store and date.</p>
-      ) : mode === "compare7" && !displayMetrics.length ? (
-        <p className="review-scorecard-empty">No Store Health imports in the last 7 days for this store yet.</p>
       ) : (
-        <div className={`store-health-metric-groups${mode === "compare7" ? " store-health-metrics-compare" : ""}`}>
-          {groups.map((group) => (
-            <section className="store-health-metric-group" key={group.category} aria-label={group.label}>
-              <header className="store-health-metric-group-head">
-                <h4>{group.label}<small>{group.rows.length}</small></h4>
-                <div className="store-health-metric-group-counts" aria-label={`${group.label} status counts`}>
-                  {group.red ? <em className="red">{group.red}</em> : null}
-                  {group.amber ? <em className="amber">{group.amber}</em> : null}
-                  {group.green ? <em className="green">{group.green}</em> : null}
-                  {group.neutral ? <em className="neutral">{group.neutral}</em> : null}
+        <>
+          <div className="store-health-score-meta" aria-label="Scorecard summary">
+            <p>
+              <strong>{formatDashboardDateMedium(date)}</strong>
+              <span>D-2 import</span>
+              {scoreSummary?.selectedScore != null ? <em>{scoreSummary.selectedScore}%</em> : null}
+              {scoreSummary?.average != null ? (
+                <span className="store-health-score-meta-avg">
+                  7d avg {scoreSummary.average.toFixed(1)}%
+                  <small>· {scoreSummary.days} day{scoreSummary.days === 1 ? "" : "s"}</small>
+                </span>
+              ) : daysWithData ? (
+                <span className="store-health-score-meta-avg">{daysWithData} day{daysWithData === 1 ? "" : "s"} imported</span>
+              ) : null}
+            </p>
+          </div>
+          <div className="store-health-metric-board">
+            {groups.map((group) => (
+              <div key={group.category} className="store-health-board-section" aria-label={group.label}>
+                <div className="store-health-board-label">
+                  <strong>{group.label}</strong>
+                  <span>{group.rows.length}</span>
+                  <div className="store-health-metric-group-counts" aria-label={`${group.label} status counts`}>
+                    {group.red ? <em className="red">{group.red}</em> : null}
+                    {group.amber ? <em className="amber">{group.amber}</em> : null}
+                    {group.green ? <em className="green">{group.green}</em> : null}
+                    {group.neutral ? <em className="neutral">{group.neutral}</em> : null}
+                  </div>
                 </div>
-              </header>
-              <div className="performance-review-metrics">
                 {group.rows.map((metric) => {
                   const definition = storeHealthMetricDefinitions.find((entry) => entry.key === metric.key);
                   const points = seriesByKey.get(metric.key) ?? [];
-                  const selectedActual = points.find((point) => point.date === date)?.value
-                    ?? (metrics.length ? metric.actual : null);
+                  const selectedActual = points.find((point) => point.date === date)?.value ?? metric.actual;
                   const prior = points.filter((point) => point.date !== date).map((point) => point.value);
                   const delta = compareDelta(selectedActual, prior, metric.direction);
-                  const displayMetric = mode === "compare7" && !metrics.length
-                    ? { ...metric, actual: selectedActual, evidence: selectedActual == null ? "No data" : metric.evidence, severity: selectedActual == null ? "neutral" as const : metric.severity }
-                    : metric;
                   return (
                     <button
                       type="button"
-                      className={`store-health-metric-card ${displayMetric.severity}`}
+                      className={`store-health-metric-card ${metric.severity}`}
                       key={metric.key}
                       title={`${metric.label} · open details`}
                       onClick={() => setActiveKey(metric.key)}
                     >
                       <span>{metric.short}</span>
-                      <strong>{formatActual(displayMetric)}</strong>
-                      <small>{displayMetric.severity === "neutral" ? "Not scored" : `Target ${definition?.targetText ?? "—"}`}</small>
+                      <strong>{formatActual(metric)}</strong>
+                      <small>{metric.severity === "neutral" ? "Not scored" : `Target ${definition?.targetText ?? "—"}`}</small>
                       <div className="store-health-metric-trend">
                         <MiniBarTrend points={points} selectedDate={date} compact/>
                         {delta ? <em className={delta.tone} title={delta.label}>{delta.text}</em> : <em className="flat">—</em>}
@@ -365,9 +339,9 @@ export function StoreHealthScorecardPanel({
                   );
                 })}
               </div>
-            </section>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
       {activeMetric ? (
         <MetricDetailModal
