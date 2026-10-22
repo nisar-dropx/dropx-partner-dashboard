@@ -131,6 +131,20 @@ type Props = {
   today: string;
 };
 
+type BankResponseResultDetail = {
+  ledger: string;
+  message: string;
+  outcome: string;
+  referenceNo: string;
+  rowNumber: number;
+};
+
+type BankResponseResultGroups = {
+  exceptions: BankResponseResultDetail[];
+  reconciled: BankResponseResultDetail[];
+  skipped: BankResponseResultDetail[];
+};
+
 type BankResponseImportResult = {
   cancelledRows?: number;
   error?: string;
@@ -150,6 +164,7 @@ type BankResponseImportResult = {
   rejectedRows?: number;
   replayedFile?: boolean;
   replayedRows?: number;
+  resultGroups?: BankResponseResultGroups;
   rowErrors?: Array<{
     message: string;
     referenceNo: string;
@@ -158,6 +173,109 @@ type BankResponseImportResult = {
   skipped?: number;
   unknownRows?: number;
 };
+
+const bankResponseGroupPresentation = {
+  reconciled: {
+    background: "#f0fdf4",
+    border: "#86efac",
+    color: "#166534",
+    description: "Successfully finalized as Paid, Cancelled/Returned, or Failed.",
+    label: "Reconciled"
+  },
+  exceptions: {
+    background: "#fff1f2",
+    border: "#fda4af",
+    color: "#b91c1c",
+    description: "Known payment references with mismatched or invalid response data.",
+    label: "Exceptions"
+  },
+  skipped: {
+    background: "#fffbeb",
+    border: "#fcd34d",
+    color: "#a16207",
+    description: "References that were not eligible or found, or payments already finalized.",
+    label: "Skipped"
+  }
+} as const;
+
+const BANK_RESPONSE_DETAIL_PAGE_SIZE = 100;
+
+function bankResponseLedgerLabel(value: string) {
+  if (value === "payment_requests") return "Payment request";
+  if (value === "workforce") return "Workforce";
+  if (value === "helpers") return "Helper";
+  if (value === "people_payroll" || value === "payroll") return "People payroll";
+  return "";
+}
+
+function BankResponseResultGroup({
+  details,
+  group
+}: {
+  details: BankResponseResultDetail[];
+  group: keyof BankResponseResultGroups;
+}) {
+  const presentation = bankResponseGroupPresentation[group];
+  const [expanded, setExpanded] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(BANK_RESPONSE_DETAIL_PAGE_SIZE);
+  const visibleDetails = expanded ? details.slice(0, visibleCount) : [];
+  return (
+    <details
+      onToggle={(event) => {
+        const open = event.currentTarget.open;
+        setExpanded(open);
+        if (!open) setVisibleCount(BANK_RESPONSE_DETAIL_PAGE_SIZE);
+      }}
+      style={{
+        background: presentation.background,
+        border: `1px solid ${presentation.border}`,
+        borderRadius: 9,
+        color: presentation.color,
+        padding: "8px 10px"
+      }}
+    >
+      <summary style={{ cursor: "pointer", fontWeight: 700 }}>
+        {presentation.label} ({details.length})
+      </summary>
+      {expanded ? (
+        <div style={{ color: "#334155", marginTop: 8 }}>
+          <p className="subtle" style={{ margin: 0 }}>{presentation.description}</p>
+          {details.length ? (
+            <>
+              <ul style={{ margin: "8px 0 0", maxHeight: 260, overflowY: "auto", paddingLeft: 20 }}>
+                {visibleDetails.map((detail, detailIndex) => {
+                  const ledger = bankResponseLedgerLabel(detail.ledger);
+                  return (
+                    <li key={`${group}-${detail.rowNumber}-${detail.referenceNo}-${detailIndex}`} style={{ marginBottom: 6 }}>
+                      <strong>
+                        Row {detail.rowNumber}{detail.referenceNo ? ` · ${detail.referenceNo}` : ""}
+                        {ledger ? ` · ${ledger}` : ""} · {detail.outcome}
+                      </strong>
+                      <div>{detail.message}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+              {visibleCount < details.length ? (
+                <button
+                  className="button secondary compact"
+                  onClick={() => setVisibleCount((current) => Math.min(current + BANK_RESPONSE_DETAIL_PAGE_SIZE, details.length))}
+                  style={{ marginTop: 8 }}
+                  type="button"
+                >
+                  Show next {Math.min(BANK_RESPONSE_DETAIL_PAGE_SIZE, details.length - visibleCount)} rows
+                </button>
+              ) : null}
+              <p aria-live="polite" className="subtle" style={{ margin: "8px 0 0" }}>
+                Showing {Math.min(visibleCount, details.length)} of {details.length} rows.
+              </p>
+            </>
+          ) : <p className="subtle" style={{ margin: "8px 0 0" }}>No rows in this category.</p>}
+        </div>
+      ) : null}
+    </details>
+  );
+}
 
 type ProcessActionState = {
   ok: boolean;
@@ -212,6 +330,16 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
   const [processRemarks, setProcessRemarks] = useState("");
   const [rejectConfirmationOpen, setRejectConfirmationOpen] = useState(false);
   const [rejectValidationError, setRejectValidationError] = useState("");
+  const finalizeResultAnnouncement = useMemo(() => {
+    if (!finalizeResults.length) return "";
+    const totals = finalizeResults.reduce((summary, result) => ({
+      exceptions: summary.exceptions + (result.resultGroups?.exceptions.length ?? 0),
+      fileErrors: summary.fileErrors + (result.ok ? 0 : 1),
+      reconciled: summary.reconciled + (result.resultGroups?.reconciled.length ?? 0),
+      skipped: summary.skipped + (result.resultGroups?.skipped.length ?? 0)
+    }), { exceptions: 0, fileErrors: 0, reconciled: 0, skipped: 0 });
+    return `${finalizeResults.length} ${finalizeResults.length === 1 ? "file" : "files"} processed. ${totals.reconciled} reconciled, ${totals.exceptions} exceptions, ${totals.skipped} skipped${totals.fileErrors ? `, ${totals.fileErrors} file ${totals.fileErrors === 1 ? "error" : "errors"}` : ""}.`;
+  }, [finalizeResults]);
 
   useEffect(() => {
     if (!processResult.ok || !processResult.resultKey || processResult.resultKey === hiddenProcessResultKey) return;
@@ -520,42 +648,42 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
                 />
               </label>
               <p className="subtle" style={{ margin: 0 }}>
-                Select up to 20 Federal Bank enquiry files. Valid rows are finalized across Payment Requests, Workforce, Helpers and People Payroll; unmatched or invalid rows are skipped and listed in red.
+                Select up to 20 Federal Bank enquiry files. Each file is summarized as Reconciled, Exceptions and Skipped; expand a group only when you need its row details.
               </p>
               {finalizeError ? <div className="form-error" role="alert">{finalizeError}</div> : null}
+              <div aria-live="polite" className="sr-only" role="status">{finalizeResultAnnouncement}</div>
               {finalizeResults.length ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   {finalizeResults.map((result, index) => (
                     <div
                       key={`${result.fileName}-${index}`}
                       style={{
-                        background: result.ok ? "#f0fdf4" : "#fff1f2",
-                        border: `1px solid ${result.ok ? "#bbf7d0" : "#fecdd3"}`,
+                        background: result.ok ? "#ffffff" : "#fff1f2",
+                        border: `1px solid ${result.ok ? "#dbe3ef" : "#fecdd3"}`,
                         borderRadius: 10,
                         padding: 10
                       }}
                     >
                       <strong>{result.fileName}</strong>
                       {result.ok ? (
-                        <p className="subtle" style={{ margin: "4px 0 0" }}>
-                          {result.replayedFile ? "Already imported · original result: " : ""}{result.matched ?? 0} matched · {result.paidRows ?? 0} paid · {result.cancelledRows ?? 0} cancelled · {result.failedRows ?? 0} payroll failed · {result.replayedRows ?? 0} already recorded · {result.rejectedRows ?? 0} rejected · {result.unknownRows ?? 0} unknown · {result.skipped ?? 0} skipped
-                          {result.ledgerRows ? ` · Requests ${result.ledgerRows.paymentRequests}, Workforce ${result.ledgerRows.workforce}, Helpers ${result.ledgerRows.helpers}, Payroll ${result.ledgerRows.payroll}` : ""}
-                        </p>
+                        <>
+                          {result.replayedFile ? (
+                            <p className="subtle" style={{ color: "#a16207", margin: "4px 0 0" }}>
+                              Already imported. These rows were previously finalized and are counted under Skipped.
+                            </p>
+                          ) : null}
+                          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                            <BankResponseResultGroup details={result.resultGroups?.reconciled ?? []} group="reconciled" />
+                            <BankResponseResultGroup details={result.resultGroups?.exceptions ?? []} group="exceptions" />
+                            <BankResponseResultGroup details={result.resultGroups?.skipped ?? []} group="skipped" />
+                          </div>
+                        </>
                       ) : (
-                        <p style={{ color: "#b91c1c", margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{result.error || "Import failed."}</p>
-                      )}
-                      {result.rowErrors?.length ? (
                         <div role="alert" style={{ color: "#b91c1c", marginTop: 6 }}>
-                          <strong>{result.rowErrors.length} skipped row{result.rowErrors.length === 1 ? "" : "s"}:</strong>
-                          <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
-                            {result.rowErrors.map((rowError, rowErrorIndex) => (
-                              <li key={`${rowError.rowNumber}-${rowError.referenceNo}-${rowErrorIndex}`}>
-                                Row {rowError.rowNumber}{rowError.referenceNo ? ` · ${rowError.referenceNo}` : ""} — {rowError.message}
-                              </li>
-                            ))}
-                          </ul>
+                          <strong>File error</strong>
+                          <p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{result.error || "Import failed."}</p>
                         </div>
-                      ) : null}
+                      )}
                     </div>
                   ))}
                 </div>

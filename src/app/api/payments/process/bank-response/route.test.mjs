@@ -84,27 +84,42 @@ test("one partial central RPC is issued per accepted file with all four ledger s
   assert.match(route, /paymentRequestEvents\.map\(\(event\) => sendPaymentRequestSideEffects/);
   assert.match(route, /paidRows: resultCount\(databaseResult, "paid"\)/);
   assert.match(route, /failedRows/);
-  assert.match(route, /replayedFile: databaseResult\.replayed === true/);
-  assert.match(panel, /Already imported · original result:/);
+  assert.match(route, /const replayedFile = databaseResult\.replayed === true/);
+  assert.match(panel, /Already imported\. These rows were previously finalized and are counted under Skipped\./);
   assert.match(route, /rejectedRows: resultCount\(databaseResult, "rejected"\)/);
   assert.match(route, /resultCount\(databaseResult, "replayed_items"\)/);
   assert.match(route, /unknownRows: resultCount\(databaseResult, "unknown"\)/);
   assert.match(route, /totalCancelled = resultCount\(databaseResult, "cancelled"\)/);
 });
 
-test("mixed files finalize valid rows while returning row-specific failures for red UI display", () => {
+test("mixed files return compact categorized summaries with expandable row details", () => {
   assert.match(route, /parsePreparedFedOneResponseRowsPartially\(prepared, permittedReferences, rowAliases\)/);
   assert.match(route, /rpc\("finalize_central_bank_response_partially"/);
   assert.match(route, /databaseResult\.row_errors/);
   assert.match(route, /rowErrors:/);
+  assert.match(route, /resultGroups: summarizeCentralBankResponseRows/);
+  assert.match(route, /replayedRowNumbers: databaseResult\.replayed_row_numbers/);
+  assert.match(route, /readDatabaseResultRows\(databaseResult\.rows, rowsForFinalization\)/);
+  assert.match(route, /DATABASE_ROW_OUTCOMES/);
   assert.match(route, /successfullyMatchedRows/);
   assert.match(route, /skipped: Math\.max\(0, prepared\.dataRowCount - successfullyMatchedRows\.length\)/);
-  assert.match(panel, /rowErrors\?: Array/);
-  assert.match(panel, /result\.rowErrors\.map/);
-  assert.match(panel, /Row \{rowError\.rowNumber\}/);
-  assert.match(panel, /rowError\.referenceNo/);
-  assert.match(panel, /rowError\.message/);
-  assert.match(panel, /color: "#b91c1c"/);
+  assert.match(panel, /<details/);
+  assert.match(panel, /<summary/);
+  assert.match(panel, /label: "Reconciled"/);
+  assert.match(panel, /label: "Exceptions"/);
+  assert.match(panel, /label: "Skipped"/);
+  assert.match(panel, /BANK_RESPONSE_DETAIL_PAGE_SIZE = 100/);
+  assert.match(panel, /expanded \? details\.slice\(0, visibleCount\) : \[\]/);
+  assert.match(panel, /Show next \{Math\.min\(BANK_RESPONSE_DETAIL_PAGE_SIZE/);
+  assert.match(panel, /aria-live="polite" className="sr-only" role="status"/);
+  assert.match(panel, /<strong>File error<\/strong>/);
+  assert.doesNotMatch(panel, /result\.rowErrors\.map/);
+});
+
+test("known bare-ID evidence mismatches are exceptions while unrelated references are skipped", () => {
+  assert.match(route, /state === "unrelated"/);
+  assert.match(route, /state === "error"[\s\S]*?resolution\.message[\s\S]*?"exceptions"/);
+  assert.match(route, /resolver returned an incomplete result/);
 });
 
 test("central finalization treats the response debit account as audit evidence, not an instruction match", () => {
