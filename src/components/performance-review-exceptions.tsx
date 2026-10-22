@@ -51,7 +51,7 @@ export function PerformanceReviewExceptions({
   canStart: boolean;
   hasRoute: boolean;
   routeLabel?: string;
-  /** Dark Store reviews are City Manager → Regional Manager (not LM CM/AOM). */
+  /** Dark Store reviews are City → Regional → National Head (not LM CM/AOM). */
   darkStore?: boolean;
   /** Oversight has re-opened edit access for the original CM/AOM reviewer. */
   reviewerEditReopened?: boolean;
@@ -71,7 +71,7 @@ export function PerformanceReviewExceptions({
 
   const inactiveReason = !hasRoute
     ? darkStore
-      ? "Map City Manager → Regional Manager in People for this store. After Start review, National Head / FSD / Owner can use Conduct proxy review and Skip a level."
+      ? "Map City Manager → Regional Manager → National Head in People for this store. After Start review, authorised oversight can still use Conduct proxy review and Skip a level."
       : "A review manager needs to be assigned in People. Contact HR so this station gets a Cluster Manager → National Head route."
     : !review
       ? canStart

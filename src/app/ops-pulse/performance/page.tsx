@@ -889,7 +889,7 @@ async function renderStoreHealthReviewDesk({
           programManager={Boolean(reviewAccess?.actor.programManager)}
           updates={reviewWorkspace.updates}
           reviewChain={reviewChain}
-          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "Map City Manager → Regional Manager in People for this store so reviews can start. National Head / FSD / Owner use Proxy and Skip after Start review." : null)}
+          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "Map City Manager → Regional Manager → National Head in People for this store so reviews can start. FSD / Owner use Proxy and Skip after Start review." : null)}
           date={selectedDate}
           error={searchParams?.error || reviewWorkspace.error || (!selectedReviewRow ? "No Store Health Scorecard is imported for this store and date yet. Upload it in Report Imports before starting a review or adding RCA." : null)}
           items={reviewWorkspace.items}

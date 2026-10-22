@@ -42,30 +42,35 @@ const lastMileOperationalRole = (p: ReviewPerson) =>
   || nationalHeadRole(p);
 
 /**
- * Dark Store review seats: City Manager → Regional Manager only.
- * Shift Incharge / Store Manager run the store; NH / FSD / Owner cover via Proxy / Skip.
+ * Dark Store review seats: City Manager → Regional Manager → National Head.
+ * Shift Incharge / Store Manager run the store; FSD / Owner still cover via Proxy / Skip.
  */
 export function darkStoreReviewRole(p: Pick<ReviewPerson, "code" | "role">) {
   const text = roleText(p as ReviewPerson);
   if (/\b(CITY MANAGER|CITY HEAD|CTM)\b/.test(text)) return true;
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(text)) return true;
+  if (/\b(NH|NATIONAL HEAD)\b/.test(text)) return true;
   return false;
 }
 
-/** Ordered DS review tiers — parallel City Managers may share one Regional Manager. */
-export function darkStoreReviewTier(p: Pick<ReviewPerson, "code" | "role">): "city" | "rm" | null {
+/** Ordered DS review tiers — parallel City Managers may share one Regional → NH line. */
+export function darkStoreReviewTier(p: Pick<ReviewPerson, "code" | "role">): "city" | "rm" | "nh" | null {
   const text = roleText(p as ReviewPerson);
   if (/\b(CITY MANAGER|CITY HEAD|CTM)\b/.test(text)) return "city";
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(text)) return "rm";
+  if (/\b(NH|NATIONAL HEAD)\b/.test(text)) return "nh";
   return null;
 }
 
 const isOperationalChain = (chain: ReviewPerson[], darkStore: boolean) =>
   chain.some((person) => darkStore ? darkStoreReviewRole(person) : lastMileOperationalRole(person));
 
-/** City → RM (or RM alone) — store-floor people below this are not review stages. */
+/** City → RM → NH (from first City/RM) — NH-only suffixes must not glue divergent City lines together. */
 function darkStoreUpwardKey(chain: ReviewPerson[]) {
-  const idx = chain.findIndex((person) => darkStoreReviewTier(person) != null);
+  const idx = chain.findIndex((person) => {
+    const tier = darkStoreReviewTier(person);
+    return tier === "city" || tier === "rm";
+  });
   return idx >= 0 ? chain.slice(idx) : [];
 }
 
@@ -180,9 +185,15 @@ export function resolvePeopleReviewRoute(
       ? 'No City Manager or Regional Manager is mapped in People.'
       : 'No eligible review manager is mapped in People.');
   }
-  // Dark Store: compare only City → RM seats so store-floor / finance / LM people cannot invent a conflict.
+  // Dark Store: compare City → RM → NH so store-floor / finance cannot invent a conflict.
+  // Require at least City or Regional — National Head alone is oversight, not a store route.
   const operationalChains = darkStore
-    ? chains.map((chain) => chain.filter(darkStoreReviewRole)).filter((chain) => chain.length)
+    ? chains
+      .map((chain) => chain.filter(darkStoreReviewRole))
+      .filter((chain) => chain.some((person) => {
+        const tier = darkStoreReviewTier(person);
+        return tier === "city" || tier === "rm";
+      }))
     : chains.some((chain) => isOperationalChain(chain, false))
       ? chains.filter((chain) => isOperationalChain(chain, false))
       : chains;

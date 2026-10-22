@@ -34,9 +34,9 @@ test('missing manager explains the issue without suggesting start',()=>{
   const html=render({...base,review:null,steps:[],hasRoute:false});
   assert.match(html,/Contact HR/);assert.ok(!html.includes('href="#start-station-review"'));
 });
-test('Dark Store missing City→RM route explains Proxy after Start, not SI→SM→NH',()=>{
+test('Dark Store missing City→RM→NH route explains Proxy after Start, not SI→SM',()=>{
   const html=render({...base,review:null,steps:[],hasRoute:false,darkStore:true});
-  assert.match(html,/City Manager → Regional Manager/);
+  assert.match(html,/City Manager → Regional Manager → National Head/);
   assert.match(html,/Conduct proxy review/);
   assert.ok(!html.includes('Shift Incharge'));
   assert.ok(!html.includes('href="#start-station-review"'));

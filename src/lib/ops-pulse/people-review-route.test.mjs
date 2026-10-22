@@ -67,18 +67,18 @@ const darkStoreGraph=()=>({
  ]
 });
 
-test('Dark Store route is City Manager → Regional Manager only',()=>{
+test('Dark Store route is City Manager → Regional Manager → National Head',()=>{
  const g=darkStoreGraph();
- assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','rm']);
+ assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','rm','nh']);
 });
 
-test('Dark Store allows peer City Managers that share the same Regional Manager',()=>{
+test('Dark Store allows peer City Managers that share the same Regional Manager → NH',()=>{
  const g=darkStoreGraph();
  g.people.push(person('city2','CTM',{role:'City Manager',name:'Other City',locationId:'store',scopeIds:['store']}));
  g.relationships.push({subjectId:'city2',managerId:'rm'});
  const route=resolvePeopleReviewRoute(g,'store');
  assert.equal(route.error,null);
- assert.deepEqual(route.chain.map(p=>p.personId),['city','rm']);
+ assert.deepEqual(route.chain.map(p=>p.personId),['city','rm','nh']);
 });
 
 test('Dark Store still fails when Regional Managers diverge',()=>{
@@ -97,14 +97,14 @@ test('Dark Store mode can be forced when station model detection is missing',()=
  delete g.darkStoreStationIds;
  const route=resolvePeopleReviewRoute(g,'store',{darkStore:true});
  assert.equal(route.error,null);
- assert.deepEqual(route.chain.map(p=>p.personId),['city','rm']);
+ assert.deepEqual(route.chain.map(p=>p.personId),['city','rm','nh']);
 });
 
-test('Dark Store ignores SI, Store Manager, finance and NH as review stages',()=>{
+test('Dark Store ignores SI, Store Manager and finance as review stages',()=>{
  const g=darkStoreGraph();
  const ids=resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId);
- assert.deepEqual(ids,['city','rm']);
- assert.ok(!ids.includes('si') && !ids.includes('sm') && !ids.includes('finance') && !ids.includes('nh'));
+ assert.deepEqual(ids,['city','rm','nh']);
+ assert.ok(!ids.includes('si') && !ids.includes('sm') && !ids.includes('finance'));
 });
 
 test('finance is never a review stage for Last Mile or Dark Store',()=>{
@@ -130,5 +130,11 @@ test('Dark Store resolves from a scoped City Manager when nobody is posted at th
  g.people.find(p=>p.personId==='city').locationId=null;
  const route=resolvePeopleReviewRoute(g,'store',{darkStore:true});
  assert.equal(route.error,null);
- assert.deepEqual(route.chain.map(p=>p.personId),['city','rm']);
+ assert.deepEqual(route.chain.map(p=>p.personId),['city','rm','nh']);
+});
+
+test('Dark Store keeps National Head even when Master marks them full oversight',()=>{
+ const g=darkStoreGraph();
+ g.people.find(p=>p.personId==='nh').oversight=true;
+ assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','rm','nh']);
 });
