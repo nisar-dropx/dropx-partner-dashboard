@@ -41,6 +41,16 @@ function actorFromAuth(auth: AuthorizationContext): Actor {
   };
 }
 
+async function nowModelIds(companyId: string) {
+  const models = await db()
+    .from("location_models")
+    .select("id")
+    .eq("company_id", companyId)
+    .ilike("code", "NOW");
+  if (models.error) throw Error(models.error.message);
+  return (models.data || []).map((m) => m.id as string);
+}
+
 export async function ensureMaster(companyId: string): Promise<Master> {
   const existing = await db()
     .from("ops_si_handover_master")
@@ -56,13 +66,17 @@ export async function ensureMaster(companyId: string): Promise<Master> {
     ).length;
     const refreshCatalogue =
       emptyCatalogue || settings.templateFormat < SI_TEMPLATE_FORMAT;
+    const missingModels = !settings.modelIds.length;
     const template = refreshCatalogue
       ? defaultSiTemplate()
       : master.template;
-    if (refreshCatalogue) {
+    if (refreshCatalogue || missingModels) {
       const nextSettings = {
         ...settings,
-        templateFormat: SI_TEMPLATE_FORMAT,
+        templateFormat: Math.max(settings.templateFormat, SI_TEMPLATE_FORMAT),
+        modelIds: missingModels
+          ? await nowModelIds(companyId)
+          : settings.modelIds,
       };
       const patched = await db()
         .from("ops_si_handover_master")
@@ -84,17 +98,17 @@ export async function ensureMaster(companyId: string): Promise<Master> {
           template,
         };
       }
+      return {
+        ...master,
+        settings: nextSettings,
+        template,
+      };
     }
     return { ...master, settings, template };
   }
   const template = defaultSiTemplate();
   const settings = defaultSettings();
-  const models = await db()
-    .from("location_models")
-    .select("id")
-    .eq("company_id", companyId)
-    .ilike("code", "NOW");
-  settings.modelIds = (models.data || []).map((m) => m.id);
+  settings.modelIds = await nowModelIds(companyId);
   const inserted = await db()
     .from("ops_si_handover_master")
     .insert({
