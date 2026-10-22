@@ -578,8 +578,13 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   return { rows: empty, error: null };
 }
 
-export async function resolvePerformanceReviewChain(companyId: string, stationId: string, _authorization?: AuthorizationContext): Promise<PerformanceReviewChainStep[]> {
-  const route = await loadPeopleReviewRoute(companyId, stationId);
+export async function resolvePerformanceReviewChain(
+  companyId: string,
+  stationId: string,
+  _authorization?: AuthorizationContext,
+  options?: { darkStore?: boolean }
+): Promise<PerformanceReviewChainStep[]> {
+  const route = await loadPeopleReviewRoute(companyId, stationId, options);
   if (route.error) throw new Error(route.error);
   return route.chain;
 }

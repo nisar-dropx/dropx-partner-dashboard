@@ -87,7 +87,8 @@ export async function startPerformanceReview(data: FormData): Promise<ReviewActi
     const companyId = requireCompanyId(authorization);
     const station = await stationForAction(authorization, text(data, "station_code").toUpperCase());
     const sourceDate = dateValue(text(data, "source_date"));
-    const chain = await resolvePerformanceReviewChain(companyId, station.id);
+    const darkStore = operatingModeForLocation(station as CodLocationRow) === "amazon_now";
+    const chain = await resolvePerformanceReviewChain(companyId, station.id, authorization, { darkStore });
     if (!chain.length) throw new Error("The station review manager is not assigned in People. Contact your administrator.");
     const expectedSource = dailySourceForStation(station);
     // Always bind the review to the mode’s daily source — ignore spoofed form source_type.

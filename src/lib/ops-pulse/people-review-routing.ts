@@ -58,8 +58,12 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
     darkStoreStationIds: new Set(stations.filter((r) => isDarkStoreStationRow(r)).map((r) => String(r.id)))
   };
 }
-export async function loadPeopleReviewRoute(companyId: string, stationId: string) {
-  return resolvePeopleReviewRoute(await loadPeopleReviewGraph(companyId), stationId);
+export async function loadPeopleReviewRoute(
+  companyId: string,
+  stationId: string,
+  options?: { darkStore?: boolean }
+) {
+  return resolvePeopleReviewRoute(await loadPeopleReviewGraph(companyId), stationId, options);
 }
 export async function syncPeopleReviewRoutes(companyId: string, options: { reviewId?: string; reviewIds?: string[]; stationCodes?: string[]; from?: string; to?: string } = {}, db: SupabaseClient = supabaseAdmin!) {
   noStore();

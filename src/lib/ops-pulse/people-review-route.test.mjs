@@ -83,14 +83,37 @@ test('Dark Store picks one Shift Incharge when peers share the same managers abo
  assert.deepEqual(route.chain.map(p=>p.personId),['si','sm','city','rm','nh']);
 });
 
-test('Dark Store still fails when peer Shift Incharges report to different managers',()=>{
+test('Dark Store allows peer SI/SM lines that share the same City → RM → NH',()=>{
+ const g=darkStoreGraph();
+ g.people.push(
+  person('si2','SIC',{role:'Shift Incharge',name:'Zara SI',locationId:'store',scopeIds:['store']}),
+  person('sm2','SM',{role:'Store Manager',name:'Other SM',scopeIds:['store']})
+ );
+ g.relationships.push({subjectId:'si2',managerId:'sm2'},{subjectId:'sm2',managerId:'city'});
+ const route=resolvePeopleReviewRoute(g,'store');
+ assert.equal(route.error,null);
+ assert.deepEqual(route.chain.map(p=>p.personId).slice(2),['city','rm','nh']);
+});
+
+test('Dark Store still fails when City Managers diverge',()=>{
  const g=darkStoreGraph();
  g.people.push(
   person('si2','SIC',{role:'Shift Incharge',locationId:'store',scopeIds:['store']}),
-  person('sm2','SM',{role:'Store Manager',scopeIds:['store']})
+  person('sm2','SM',{role:'Store Manager',scopeIds:['store']}),
+  person('city2','CTM',{role:'City Manager',name:'Other City',scopeIds:['store']})
  );
- g.relationships.push({subjectId:'si2',managerId:'sm2'},{subjectId:'sm2',managerId:'city'});
+ g.relationships.push({subjectId:'si2',managerId:'sm2'},{subjectId:'sm2',managerId:'city2'},{subjectId:'city2',managerId:'rm'});
  assert.match(resolvePeopleReviewRoute(g,'store').error,/conflicting/);
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/Compare:/);
+});
+
+test('Dark Store mode can be forced when station model detection is missing',()=>{
+ const g=darkStoreGraph();
+ delete g.darkStoreStationIds;
+ // Without DS mode, LM floor rules would drop Store Manager seats in some graphs; force keeps the DS route.
+ const route=resolvePeopleReviewRoute(g,'store',{darkStore:true});
+ assert.equal(route.error,null);
+ assert.deepEqual(route.chain.map(p=>p.personId),['si','sm','city','rm','nh']);
 });
 
 test('Dark Store keeps NH on the route even when marked full oversight',()=>{

@@ -72,28 +72,62 @@ export function darkStoreReviewTier(p: Pick<ReviewPerson, "code" | "role">): "si
 const isOperationalChain = (chain: ReviewPerson[], darkStore: boolean) =>
   chain.some((person) => darkStore ? darkStoreReviewRole(person) : lastMileOperationalRole(person));
 
+/** City → RM → NH (or RM → NH / NH alone) — peers below this may differ (multiple SIs / SMs). */
+function darkStoreUpwardKey(chain: ReviewPerson[]) {
+  const idx = chain.findIndex((person) => {
+    const tier = darkStoreReviewTier(person);
+    return tier === "city" || tier === "rm" || tier === "nh";
+  });
+  return idx >= 0 ? chain.slice(idx) : chain.slice(-1);
+}
+
+function samePeopleSuffix(left: ReviewPerson[], right: ReviewPerson[]) {
+  if (left.length > right.length) return false;
+  return left.every((person, index) => person.id === right[right.length - left.length + index]?.id);
+}
+
 /**
- * True when `chain` is the same route as `selected`, or a Dark Store peer root
- * (e.g. a second Shift Incharge) that shares the identical managers above.
+ * True when `chain` is the same route as `selected`, a Dark Store peer root
+ * that shares managers above, or another DS line that shares the same City→RM→NH.
  */
 function operationalChainConverges(chain: ReviewPerson[], selected: ReviewPerson[], darkStore: boolean) {
   if (chain.every((person, index) => person.id === selected[selected.length - chain.length + index]?.id)) {
     return true;
   }
-  if (!darkStore || chain.length !== selected.length || chain.length < 2) return false;
-  const rootTier = darkStoreReviewTier(chain[0]);
-  if (!rootTier || rootTier !== darkStoreReviewTier(selected[0])) return false;
-  return chain.slice(1).every((person, index) => person.id === selected[index + 1]?.id);
+  if (!darkStore) return false;
+  // Same-tier peer (two Shift Incharges) with identical managers above.
+  if (chain.length === selected.length && chain.length >= 2) {
+    const rootTier = darkStoreReviewTier(chain[0]);
+    if (rootTier && rootTier === darkStoreReviewTier(selected[0])
+      && chain.slice(1).every((person, index) => person.id === selected[index + 1]?.id)) {
+      return true;
+    }
+  }
+  // Different SI / Store Manager below the same City → RM → NH is one store route, not a conflict.
+  const selectedUp = darkStoreUpwardKey(selected);
+  const chainUp = darkStoreUpwardKey(chain);
+  return samePeopleSuffix(chainUp, selectedUp) || samePeopleSuffix(selectedUp, chainUp);
 }
 
-export function resolvePeopleReviewRoute(graph: PeopleReviewGraph, stationId: string): PeopleReviewRoute {
+function conflictingRouteDetail(chains: ReviewPerson[][], selected: ReviewPerson[], darkStore: boolean) {
+  const diverging = chains.find((chain) => !operationalChainConverges(chain, selected, darkStore));
+  if (!diverging?.length) return "";
+  const label = (chain: ReviewPerson[]) => chain.map((person) => `${person.role} (${person.name})`).join(" → ");
+  return ` Compare: ${label(selected.slice(0, 3))}${selected.length > 3 ? "…" : ""} vs ${label(diverging.slice(0, 3))}${diverging.length > 3 ? "…" : ""}.`;
+}
+
+export function resolvePeopleReviewRoute(
+  graph: PeopleReviewGraph,
+  stationId: string,
+  options?: { darkStore?: boolean }
+): PeopleReviewRoute {
   const byId = new Map(graph.people.map(p => [p.id, p]));
   const managers = new Map<string, Set<string>>();
   for (const edge of graph.relationships) {
     const ids = managers.get(edge.subjectId) ?? new Set<string>();
     ids.add(edge.managerId); managers.set(edge.subjectId, ids);
   }
-  const darkStore = Boolean(graph.darkStoreStationIds?.has(stationId));
+  const darkStore = Boolean(options?.darkStore || graph.darkStoreStationIds?.has(stationId));
   const floorRole = darkStore ? darkStoreFloorRole : lastMileFloorRole;
   const eligible = (p: ReviewPerson) => {
     if (financeRole(p) || floorRole(p)) return false;
@@ -111,7 +145,7 @@ export function resolvePeopleReviewRoute(graph: PeopleReviewGraph, stationId: st
   // station, e.g. XAPL under GNTI) is reviewed by its mother station's route.
   const parentId = graph.parentStationById?.get(stationId);
   if (!roots.length && parentId && parentId !== stationId) {
-    const parentRoute = resolvePeopleReviewRoute({ ...graph, parentStationById: undefined }, parentId);
+    const parentRoute = resolvePeopleReviewRoute({ ...graph, parentStationById: undefined }, parentId, options);
     if (!parentRoute.error) {
       const outside = parentRoute.chain.find(stage => {
         const person = byId.get(stage.assignmentId);
@@ -176,9 +210,9 @@ export function resolvePeopleReviewRoute(graph: PeopleReviewGraph, stationId: st
     || a[0].id.localeCompare(b[0].id)
   );
   const selected = operationalChains[0];
-  // Every other operational root must converge on the same route (suffix or same-tier peer root).
+  // Every other operational root must converge on the same route (suffix, peer root, or shared City→RM→NH).
   if (operationalChains.some((chain) => !operationalChainConverges(chain, selected, darkStore))) {
-    return fail('People has conflicting reporting routes for this station. Resolve the primary manager mapping.');
+    return fail(`People has conflicting reporting routes for this station. Resolve the primary manager mapping.${conflictingRouteDetail(operationalChains, selected, darkStore)}`);
   }
   const stages = selected;
   if (!stages.length) {
@@ -206,7 +240,12 @@ export function isDarkStoreStationRow(row: {
   const first = <T,>(value: T | T[] | null | undefined): T | null => Array.isArray(value) ? value[0] ?? null : value ?? null;
   const provider = first(row.providers);
   const model = first(row.location_models);
-  const modelName = String(model?.name ?? model?.code ?? "").toUpperCase();
-  const providerName = String(provider?.name ?? provider?.code ?? "").toUpperCase();
-  return modelName === "NOW" || `${providerName} ${modelName}`.includes("AMAZON NOW");
+  const modelName = String(model?.name ?? model?.code ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+  const providerName = String(provider?.name ?? provider?.code ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+  const blended = `${providerName} ${modelName}`;
+  return modelName === "NOW"
+    || modelName === "AMAZON NOW"
+    || modelName.includes("AMAZON NOW")
+    || blended.includes("AMAZON NOW")
+    || (providerName.includes("AMAZON") && modelName === "NOW");
 }

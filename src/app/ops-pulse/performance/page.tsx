@@ -843,7 +843,7 @@ async function renderStoreHealthReviewDesk({
   let peopleRouteError: string | null = null;
   const [reviewChain, backlog, followups, stationLeads] = selectedReviewLocation
     ? await Promise.all([
-      resolvePerformanceReviewChain(companyId, selectedReviewLocation.id).catch((error: Error) => { peopleRouteError = error.message; return []; }),
+      resolvePerformanceReviewChain(companyId, selectedReviewLocation.id, authorization, { darkStore: true }).catch((error: Error) => { peopleRouteError = error.message; return []; }),
       loadPerformanceReviewBacklog(companyId, selectedDate, deskCodes, reviewPendingPage(searchParams?.pendingPage)),
       loadPerformanceFollowups(companyId, selectedReviewLocation.id, selectedDate),
       loadReviewStationLeads(companyId, selectedReviewLocation.id)
