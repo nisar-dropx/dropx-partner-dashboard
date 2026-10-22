@@ -3,8 +3,11 @@ import fontkit from "@pdf-lib/fontkit";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  auditTypeLabels,
   questions,
   score,
+  scoreBand,
+  scoreSnapshot,
   statusLabels,
   type StoreAudit,
   type Proof,
@@ -18,21 +21,57 @@ export const auditDate = (v: string | null) =>
       }) + " IST"
     : "—";
 export function reportLines(a: StoreAudit) {
+  const snap = a.score_snapshot || scoreSnapshot(a);
+  const pct = a.score ?? score(a);
+  const band = a.score_band ?? scoreBand(pct);
   return [
     a.store_name,
     a.number,
-    `Status: ${statusLabels[a.status]} | Checklist version: ${a.template_version}`,
-    `Auditor: ${a.assigned_name}`,
+    `Type: ${auditTypeLabels[a.audit_type || "mock"]} | Status: ${statusLabels[a.status]} | Checklist version: ${a.template_version}`,
+    `Auditor: ${a.assigned_name}${a.present_sm_name ? ` | SM/SI present: ${a.present_sm_name}` : ""}`,
+    a.audit_type === "amazon"
+      ? `Amazon score: ${a.amazon_score ?? "—"}% | Amazon auditor: ${a.amazon_auditor || "—"}`
+      : "",
     `Scheduled: ${auditDate(a.scheduled_for)} | Completed: ${auditDate(a.completed_at)}`,
-    `Checklist compliance: ${score(a) === null ? "Not scored" : `${score(a)}%`} (applicable answered checks, equal weight)`,
+    `DropX score: ${pct === null ? "Not scored" : `${pct}%`} (${band || "n/a"}) — ${snap.formula}`,
+    ...snap.sections
+      .filter((s) => s.percentage != null)
+      .map(
+        (s) =>
+          `Section ${s.name}: ${s.percentage}% (${s.compliant}/${s.answered} compliant)`,
+      ),
+    snap.gaps.length
+      ? `Top gaps: ${snap.gaps
+          .slice(0, 8)
+          .map((g) => `${g.id}×${g.instances}`)
+          .join(", ")}`
+      : "No scored gaps",
     `Summary: ${a.summary || "Not recorded"}`,
     ...a.template.sections.flatMap((s) => [
       s.name,
       ...s.questions.flatMap((q) => {
         const answer = a.answers[q.id];
         const f = a.findings.find((f) => f.questionId === q.id);
+        const response =
+          answer?.response ||
+          (answer?.outcome === "pass"
+            ? q.compliantAnswer || "yes"
+            : answer?.outcome === "gap"
+              ? q.compliantAnswer === "no"
+                ? "yes"
+                : "no"
+              : answer?.outcome) ||
+          "Not answered";
         return [
-          `${q.label} — ${answer?.outcome || "Not answered"}`,
+          `${q.id}. ${q.label} — ${response}${answer?.outcome ? ` (${answer.outcome})` : ""}`,
+          answer?.instances
+            ? `Instances: ${answer.instances}`
+            : "",
+          answer?.extras && Object.keys(answer.extras).length
+            ? `Extra: ${Object.entries(answer.extras)
+                .map(([k, v]) => `${k}=${v}`)
+                .join("; ")}`
+            : "",
           answer?.observation ? `Observation: ${answer.observation}` : "",
           answer?.outcome === "gap"
             ? `Action: ${answer.action} | Owner: ${answer.owner} | Due: ${auditDate(answer.dueAt)}`
@@ -44,7 +83,7 @@ export function reportLines(a: StoreAudit) {
         ].filter(Boolean);
       }),
     ]),
-  ];
+  ].filter(Boolean);
 }
 export async function storeAuditPdf(a: StoreAudit, proof: Proof[]) {
   const doc = await PDFDocument.create();

@@ -10,6 +10,7 @@ import { allAuditRows } from "../station-audit-query";
 import {
   canRead,
   isManager,
+  isResponder,
   inScope,
   type Master,
   type StoreAudit,
@@ -97,10 +98,17 @@ export async function workspace(
 ) {
   const locations = await stores(auth, master);
   const manager = isManager(auth, master.settings);
+  const storeLead = manager || isResponder(auth, master.settings);
+  const assigneeRoles = [
+    ...new Set([
+      ...master.settings.managerRoles,
+      ...master.settings.responderRoles,
+    ]),
+  ];
   let q = db()
     .from("ops_store_audits")
     .select(
-      "id,number,location_id,store_name,assigned_to,assigned_name,scheduled_for,status,completed_at,findings,answers,version,email_error",
+      "id,number,location_id,store_name,assigned_to,assigned_name,scheduled_for,status,completed_at,findings,answers,version,email_error,audit_type,score,score_band,amazon_score,amazon_auditor,present_sm_name,template",
     )
     .eq("company_id", master.company_id)
     .is("deleted_at", null)
@@ -112,17 +120,18 @@ export async function workspace(
     q = q.in("location_id", auth.locationScopeIds);
   }
   if (!manager)
-    q = q
-      .not("completed_at", "is", null)
-      .in("status", ["awaiting_response", "under_review", "closed"]);
+    // Store leads see completed findings plus their own open self / Amazon logs.
+    q = q.or(
+      `and(assigned_to.eq.${auth.userId},audit_type.in.(self,amazon),status.in.(scheduled,in_progress)),and(status.in.(awaiting_response,under_review,closed),completed_at.not.is.null)`,
+    );
   const [r, assignees] = await Promise.all([
     allAuditRows((a, b) =>
       q.order("scheduled_for", { ascending: false }).order("id").range(a, b),
     ),
-    manager
+    storeLead && assigneeRoles.length
       ? loadAuditAssignees(
           master.company_id,
-          master.settings.managerRoles,
+          assigneeRoles,
           locations.map((l) => l.id),
           "store_audits",
         )

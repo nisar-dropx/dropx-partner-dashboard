@@ -1,267 +1,32 @@
 {
-  "name": "Amazon Now \u00b7 Apollo store audit",
-  "description": "Based on Apollo Audit Readiness Checklist, supplied 15 Oct 2026. Questions and evidence rules are editable. Surprise audit: stores see results only after completion.",
+  "name": "Amazon Now · Apollo store audit",
+  "description": "Mirrors Amazon CM_DS_Visit_Audit (received 22 Oct 2026): 79 scored questions in 9 sections + 4 counts. Compliant answer = the answer that passes (some questions are worded negatively). Self, mock and Amazon-log audits share this bank. Surprise mock: stores see results only after completion.",
   "sections": [
-    {
-      "id": "priority",
-      "name": "Fix first",
-      "guidance": "Priority checks: repeated failures in the source checklist.",
-      "questions": [
-        {
-          "id": "priority_01",
-          "label": "Expiry removal: zero physical vs. system mismatch; remove every expired unit in system before disposal",
-          "guidance": "Show the physical expiry check and matching system removal record.",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Remove expired units in the system, reconcile the physical quantity and dispose under SOP.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_02",
-          "label": "Cleaning & sanitation record displayed & updated to date",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Update and display the cleaning and sanitation record.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_03",
-          "label": "Liquid items stowed vertically",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Restow liquid items vertically and inspect for leakage.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_04",
-          "label": "Cleaning schedule available at site",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Display the current cleaning schedule and assign responsibility.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_05",
-          "label": "No dust in food bins",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Clean affected bins and verify the cleaning frequency.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_06",
-          "label": "Deckling plates not damaged",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Replace or repair damaged deckling plates.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_07",
-          "label": "No over-stuffing / over-hanging (check 5 bays)",
-          "guidance": "Inspect five bays; record their identifiers and each exception.",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Restow affected bays within their safe capacity.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_08",
-          "label": "UTR roster pasted & visible to staff",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Display the current UTR roster.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_09",
-          "label": "Partner escalation matrix documented & displayed",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Update and display the escalation matrix.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_10",
-          "label": "Long ASINs kept in bat bins",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Move long ASINs into the designated bat bins.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_11",
-          "label": "No food spillage beneath racks / bins",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Remove spillage and clean beneath the affected racks and bins.",
-          "hours": 24,
-          "severity": "high"
-        },
-        {
-          "id": "priority_12",
-          "label": "PGT tasks performed regularly",
-          "guidance": "Check recent task records and execution.",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Complete overdue PGT tasks and record the recurring owner.",
-          "hours": 24,
-          "severity": "high"
-        }
-      ]
-    },
     {
       "id": "hygiene",
       "name": "Hygiene & Upkeep",
-      "guidance": "",
+      "guidance": "Washrooms, dust, cleaning records and site upkeep.",
       "questions": [
         {
-          "id": "hygiene_01",
-          "label": "No liquid ASIN leakage",
-          "guidance": "",
+          "id": "H1",
+          "label": "Are washrooms clean (UTR + Rider)?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -270,18 +35,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Isolate leaking stock and clean the affected storage area.",
-          "hours": 48,
+          "action": "Correct the finding for: Are washrooms clean (UTR + Rider)?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
           "severity": "normal"
         },
         {
-          "id": "hygiene_02",
-          "label": "Washrooms clean (UTR + rider)",
-          "guidance": "",
+          "id": "H2",
+          "label": "Is dust found in food bins?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -290,25 +67,133 @@
             "min": 1,
             "max": 5
           },
-          "action": "Clean both washrooms and update the cleaning record.",
-          "hours": 48,
-          "severity": "normal"
+          "action": "Correct the finding for: Is dust found in food bins?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "H3",
+          "label": "Is cleaning and sanitation record displayed at designated area?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 7 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is cleaning and sanitation record displayed at designated area?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "H4",
+          "label": "Are deckling plates damaged?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 5 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are deckling plates damaged?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "H5",
+          "label": "Is liquid ASIN leakage observed?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is liquid ASIN leakage observed?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "high"
         }
       ]
     },
     {
       "id": "food",
       "name": "Food Safety",
-      "guidance": "Record actual readings and affected areas where relevant. Thresholds below are transcribed from the supplied checklist.",
+      "guidance": "Temperature, pest control, segregation and chilled packing. Record readings where asked.",
       "questions": [
         {
-          "id": "food_01",
-          "label": "Veg / non-veg & food / non-food on separate shelves",
-          "guidance": "",
+          "id": "F1",
+          "label": "Are bin dividers present? (Audit 2 aisles in each Ambient, Tropical, Chiller & Frozen)",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -317,18 +202,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Segregate the affected stock onto separate shelves.",
+          "action": "Correct the finding for: Are bin dividers present? (Audit 2 aisles in each Ambient, Tropical, Chiller & Frozen). Owner default: Store Manager or Store In-charge.",
           "hours": 24,
           "severity": "high"
         },
         {
-          "id": "food_02",
-          "label": "No leakage on any building wall",
-          "guidance": "",
+          "id": "F2",
+          "label": "Are frozen / meat & seafood (chilled) products picked in chilled bags with minimum 2 gel pads?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -337,18 +234,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Raise a repair action and protect stock from the affected wall.",
+          "action": "Correct the finding for: Are frozen / meat & seafood (chilled) products picked in chilled bags with minimum 2 gel pads?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
           "severity": "high"
         },
         {
-          "id": "food_03",
-          "label": "Product temperature validated on addback from CRET001",
-          "guidance": "Record the product temperature and supporting return/addback record.",
+          "id": "F3",
+          "label": "Are veg / non-veg, food / non-food products segregated in different shelves?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 5 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -357,16 +266,168 @@
             "min": 1,
             "max": 5
           },
-          "action": "Validate product temperature and follow the approved addback process.",
+          "action": "Correct the finding for: Are veg / non-veg, food / non-food products segregated in different shelves?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "F4",
+          "label": "Is product temperature validated by store team while doing addback from CRET001?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is product temperature validated by store team while doing addback from CRET001?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
           "severity": "high"
         },
         {
-          "id": "food_04",
-          "label": "Bin dividers present (2 aisles each: Ambient, Tropical, Chiller, Frozen)",
-          "guidance": "Check two aisles in each listed zone.",
+          "id": "F5",
+          "label": "Are there any expiry products in bins?",
+          "guidance": "Proof: Photo of each expired item + bin ID. Also record: Bin IDs if expiry found; no. of instances (if non-compliant). Failed in 1 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "bin_ids",
+              "label": "Bin IDs",
+              "type": "text",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are there any expiry products in bins?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "F6",
+          "label": "Are there any rotten / worms / fungal infected items in bins?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are there any rotten / worms / fungal infected items in bins?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "F7",
+          "label": "Is site performing expiry / reversal removals timely?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is site performing expiry / reversal removals timely?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "F8",
+          "label": "Is Tropical temperature maintained at 18 to 22 C (+/-4 C)?",
+          "guidance": "Proof: Photo of meter (always). Also record: Reading (C); no. of instances (if non-compliant).",
           "required": true,
           "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "reading_c",
+              "label": "Reading (°C)",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
             "when": "always",
             "min": 1,
@@ -377,16 +438,72 @@
             "min": 1,
             "max": 5
           },
-          "action": "Install missing dividers in the identified aisles.",
+          "action": "Correct the finding for: Is Tropical temperature maintained at 18 to 22 C (+/-4 C)?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "F9",
+          "label": "Is Chiller temperature maintained at 0 to 5 C (+/-4 C)?",
+          "guidance": "Proof: Photo of meter (always). Also record: Reading (C); no. of instances (if non-compliant). Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "reading_c",
+              "label": "Reading (°C)",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is Chiller temperature maintained at 0 to 5 C (+/-4 C)?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
           "severity": "high"
         },
         {
-          "id": "food_05",
-          "label": "Chiller temperature 0 to 5 C (+/- 4 C)",
-          "guidance": "Record the measured temperature and a photo of the reading.",
+          "id": "F10",
+          "label": "Is Frozen temperature maintained at -22 to -18 C (+/-4 C)?",
+          "guidance": "Proof: Photo of meter (always). Also record: Reading (C); no. of instances (if non-compliant). Failed in 2 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "reading_c",
+              "label": "Reading (°C)",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
             "when": "always",
             "min": 1,
@@ -397,18 +514,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Escalate temperature deviation, protect stock and verify the corrected reading.",
+          "action": "Correct the finding for: Is Frozen temperature maintained at -22 to -18 C (+/-4 C)?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
-          "severity": "high"
+          "severity": "normal"
         },
         {
-          "id": "food_06",
-          "label": "Rodent traps at designated locations",
-          "guidance": "",
+          "id": "F11",
+          "label": "Are any gaps observed allowing rodent entry?",
+          "guidance": "Proof: Photo if non-compliant.",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -417,18 +546,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Restore designated trap placement and escalate pest activity.",
+          "action": "Correct the finding for: Are any gaps observed allowing rodent entry?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
-          "severity": "high"
+          "severity": "normal"
         },
         {
-          "id": "food_07",
-          "label": "Frozen temperature -22 to -18 C (+/- 4 C)",
-          "guidance": "Record the measured temperature and a photo of the reading.",
+          "id": "F12",
+          "label": "Is continuous temperature monitoring / recording system capturing correct temperature?",
+          "guidance": "Proof: Photo if non-compliant.",
           "required": true,
           "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -437,18 +578,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Escalate temperature deviation, protect stock and verify the corrected reading.",
+          "action": "Correct the finding for: Is continuous temperature monitoring / recording system capturing correct temperature?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
-          "severity": "high"
+          "severity": "normal"
         },
         {
-          "id": "food_08",
-          "label": "Frozen / meat / seafood in chilled bags with min. 2 gel pads",
-          "guidance": "",
+          "id": "F13",
+          "label": "Are any food items kept directly on floor?",
+          "guidance": "Proof: Photo if non-compliant.",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -457,163 +610,163 @@
             "min": 1,
             "max": 5
           },
-          "action": "Repack affected items in chilled bags with at least two gel pads.",
+          "action": "Correct the finding for: Are any food items kept directly on floor?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
-          "severity": "high"
+          "severity": "normal"
+        },
+        {
+          "id": "F14",
+          "label": "Are rodent traps present at designated locations?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are rodent traps present at designated locations?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "F15",
+          "label": "Is floor including cold room clean across the store?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is floor including cold room clean across the store?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "F16",
+          "label": "Is there any food spillage present beneath the racks / bins?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is there any food spillage present beneath the racks / bins?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "F17",
+          "label": "Is there any leakage in building on any walls?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 5 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is there any leakage in building on any walls?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
         }
       ]
     },
     {
       "id": "quality",
       "name": "Quality",
-      "guidance": "",
+      "guidance": "Stowage quality, counts, produce condition and quality OPLs. Sample as noted on each check.",
       "questions": [
         {
-          "id": "quality_01",
-          "label": "Unshaped / small items (non six-side) in drawer bins",
-          "guidance": "",
+          "id": "Q1",
+          "label": "Are QRC / quality OPLs pasted at store?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 1 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Move applicable items into drawer bins.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_02",
-          "label": "Big & soft items in single layer",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Restow big and soft items in a single layer.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_03",
-          "label": "Punnets (fruit / veg) max 2 layers, lid up",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Restow punnets lid-up, no more than two layers.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_04",
-          "label": "Simple Bin Count, Simple Record Count & Cycle Count closed by shift end",
-          "guidance": "Check the shift-end count records.",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Complete and close outstanding counts with the shift owner.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_05",
-          "label": "MAP / cover items stowed vertically",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Restow MAP/cover items vertically.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_06",
-          "label": "Corrugated box items stowed horizontally",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Restow corrugated box items horizontally.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_07",
-          "label": "No heavy items on top of light / fragile IDs",
-          "guidance": "",
-          "required": true,
-          "allowNA": true,
-          "evidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "responseEvidence": {
-            "when": "always",
-            "min": 1,
-            "max": 5
-          },
-          "action": "Remove heavy items from light or fragile stock.",
-          "hours": 48,
-          "severity": "normal"
-        },
-        {
-          "id": "quality_08",
-          "label": "Quality Manager aware of roles & responsibilities",
-          "guidance": "Record the discussion and knowledge gaps.",
-          "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -624,18 +777,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Brief the Quality Manager and verify understanding.",
-          "hours": 48,
+          "action": "Correct the finding for: Are QRC / quality OPLs pasted at store?. Owner default: Shift Incharge.",
+          "hours": 24,
           "severity": "normal"
         },
         {
-          "id": "quality_09",
-          "label": "No rotten / over / under-ripe products in bins",
-          "guidance": "",
+          "id": "Q2",
+          "label": "Is Quality Manager aware of the roles and responsibilities?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 1 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -644,18 +809,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Remove unsuitable produce and inspect neighbouring bins.",
-          "hours": 48,
+          "action": "Correct the finding for: Is Quality Manager aware of the roles and responsibilities?. Owner default: Shift Incharge.",
+          "hours": 24,
           "severity": "normal"
         },
         {
-          "id": "quality_10",
-          "label": "QRC / quality OPLs pasted at store",
-          "guidance": "",
+          "id": "Q3",
+          "label": "Is there any over-stuffing / over-hanging? (Audit 5 bays)",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -664,23 +841,387 @@
             "min": 1,
             "max": 5
           },
-          "action": "Display the current QRC / quality OPLs.",
-          "hours": 48,
+          "action": "Correct the finding for: Is there any over-stuffing / over-hanging? (Audit 5 bays). Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "Q4",
+          "label": "Are non six-side (unshaped) / small items kept in drawer bins?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are non six-side (unshaped) / small items kept in drawer bins?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "Q5",
+          "label": "Are liquid items stowed vertically?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 7 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are liquid items stowed vertically?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "Q6",
+          "label": "Are MAP / cover based items stowed vertically?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are MAP / cover based items stowed vertically?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "Q7",
+          "label": "Are big and soft items stowed in single layer?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 5 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are big and soft items stowed in single layer?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "Q8",
+          "label": "Are corrugated box items stowed horizontally?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are corrugated box items stowed horizontally?. Owner default: Shift Incharge.",
+          "hours": 24,
           "severity": "normal"
+        },
+        {
+          "id": "Q9",
+          "label": "Are punnet (fruit / veg container) packed items stowed in only 2 layers with lid upwards?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are punnet (fruit / veg container) packed items stowed in only 2 layers with lid upwards?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "Q10",
+          "label": "Are heavy items stacked on top of light / fragile IDs?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 1 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are heavy items stacked on top of light / fragile IDs?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "Q11",
+          "label": "Are long ASINs kept in bat bins?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are long ASINs kept in bat bins?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "Q12",
+          "label": "Are there any rotten / over / under ripe products in bins?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are there any rotten / over / under ripe products in bins?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "Q13",
+          "label": "Is site performing PGT tasks regularly?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is site performing PGT tasks regularly?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "Q14",
+          "label": "Are Simple Bin Count, Simple Record Count & Cycle Count completed by end of the shift?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 5 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are Simple Bin Count, Simple Record Count & Cycle Count completed by end of the shift?. Owner default: Shift Incharge.",
+          "hours": 24,
+          "severity": "critical"
         }
       ]
     },
     {
       "id": "picker",
       "name": "Picker Knowledge",
-      "guidance": "Quiz two pickers on the floor. Record who was checked and any coaching needed.",
+      "guidance": "Shadow pickers on the floor. Record who was checked and any coaching needed.",
       "questions": [
         {
-          "id": "picker_01",
-          "label": "Hazmat kept in separate bags",
-          "guidance": "",
+          "id": "P1",
+          "label": "Is the damage process understood and followed?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -691,16 +1232,28 @@
             "min": 1,
             "max": 5
           },
-          "action": "Coach both pickers and demonstrate separate hazmat packing.",
+          "action": "Correct the finding for: Is the damage process understood and followed?. Owner default: Shift Incharge (retrain pickers).",
           "hours": 48,
           "severity": "normal"
         },
         {
-          "id": "picker_02",
-          "label": "Correct bag size per order (basis units)",
-          "guidance": "",
+          "id": "P2",
+          "label": "Is the six side check process (title check) followed correctly?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -711,16 +1264,28 @@
             "min": 1,
             "max": 5
           },
-          "action": "Coach pickers on bag selection based on order units.",
+          "action": "Correct the finding for: Is the six side check process (title check) followed correctly?. Owner default: Shift Incharge (retrain pickers).",
           "hours": 48,
           "severity": "normal"
         },
         {
-          "id": "picker_03",
-          "label": "Veg / non-veg kept in separate bags",
-          "guidance": "",
+          "id": "P3",
+          "label": "Is the missing process understood and followed?",
+          "guidance": "Proof: Photo if non-compliant.",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -731,16 +1296,28 @@
             "min": 1,
             "max": 5
           },
-          "action": "Coach pickers and demonstrate separate packing.",
+          "action": "Correct the finding for: Is the missing process understood and followed?. Owner default: Shift Incharge (retrain pickers).",
           "hours": 48,
           "severity": "normal"
         },
         {
-          "id": "picker_04",
-          "label": "Damage process understood & followed",
-          "guidance": "",
+          "id": "P4",
+          "label": "Is the pick & pack in LM bags process (placement of item) followed correctly?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 1 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -751,16 +1328,28 @@
             "min": 1,
             "max": 5
           },
-          "action": "Brief the damage process and verify understanding.",
+          "action": "Correct the finding for: Is the pick & pack in LM bags process (placement of item) followed correctly?. Owner default: Shift Incharge (retrain pickers).",
           "hours": 48,
           "severity": "normal"
         },
         {
-          "id": "picker_05",
-          "label": "Six-side (title) check followed",
-          "guidance": "",
+          "id": "P5",
+          "label": "Is hazmat and food handed over in separate bags during outbound?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -771,23 +1360,99 @@
             "min": 1,
             "max": 5
           },
-          "action": "Demonstrate the six-side check and verify execution.",
+          "action": "Correct the finding for: Is hazmat and food handed over in separate bags during outbound?. Owner default: Shift Incharge (retrain pickers).",
           "hours": 48,
-          "severity": "normal"
+          "severity": "high"
+        },
+        {
+          "id": "P6",
+          "label": "Are veg / non-veg kept separately in bags?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are veg / non-veg kept separately in bags?. Owner default: Shift Incharge (retrain pickers).",
+          "hours": 48,
+          "severity": "high"
+        },
+        {
+          "id": "P7",
+          "label": "Are associates following appropriate bag size basis units per order?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Shift Incharge (retrain pickers)",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are associates following appropriate bag size basis units per order?. Owner default: Shift Incharge (retrain pickers).",
+          "hours": 48,
+          "severity": "high"
         }
       ]
     },
     {
       "id": "people",
       "name": "People Presence & Knowledge",
-      "guidance": "",
+      "guidance": "Staffing plan and role awareness for key store roles.",
       "questions": [
         {
-          "id": "people_01",
-          "label": "Process Expert aware of responsibilities",
-          "guidance": "Record the discussion and knowledge gaps.",
+          "id": "K1",
+          "label": "Is adequate staffing planned at store?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
             "when": "gap",
             "min": 1,
@@ -798,18 +1463,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Brief the Process Expert and verify understanding.",
-          "hours": 48,
-          "severity": "normal"
+          "action": "Correct the finding for: Is adequate staffing planned at store?. Owner default: Store Manager or Store In-charge.",
+          "hours": 168,
+          "severity": "high"
         },
         {
-          "id": "people_02",
-          "label": "Adequate staffing planned at store",
-          "guidance": "Review the roster against the staffing plan.",
+          "id": "K2",
+          "label": "Does Store Manager / Shift Incharge have proper system / HWMS understanding with respect to scans & process workflow?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -818,23 +1495,175 @@
             "min": 1,
             "max": 5
           },
-          "action": "Correct the staffing plan and assign shift coverage.",
-          "hours": 48,
+          "action": "Correct the finding for: Does Store Manager / Shift Incharge have proper system / HWMS understanding with respect to scans & process workflow?. Owner default: Store Manager or Store In-charge.",
+          "hours": 168,
           "severity": "normal"
+        },
+        {
+          "id": "K3",
+          "label": "Are UTR rosters available and pasted for easy visibility of staff?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are UTR rosters available and pasted for easy visibility of staff?. Owner default: Store Manager or Store In-charge.",
+          "hours": 168,
+          "severity": "critical"
+        },
+        {
+          "id": "K4",
+          "label": "Is Store Manager / SI aware of IRT and guidelines to be followed while reconciling transshipments?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is Store Manager / SI aware of IRT and guidelines to be followed while reconciling transshipments?. Owner default: Store Manager or Store In-charge.",
+          "hours": 168,
+          "severity": "normal"
+        },
+        {
+          "id": "K5",
+          "label": "Is Store Manager / SI raising tickets with right details for hub / in-transit shortages / damages?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is Store Manager / SI raising tickets with right details for hub / in-transit shortages / damages?. Owner default: Store Manager or Store In-charge.",
+          "hours": 168,
+          "severity": "normal"
+        },
+        {
+          "id": "K6",
+          "label": "Is Process Expert aware of their responsibilities?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 4 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is Process Expert aware of their responsibilities?. Owner default: Store Manager or Store In-charge.",
+          "hours": 168,
+          "severity": "high"
         }
       ]
     },
     {
       "id": "compliance",
       "name": "Compliance & Documents",
-      "guidance": "Keep one valid copy of each in a station file. Capture the document and validity where applicable.",
+      "guidance": "Licences, contracts and displayed compliance documents. Capture validity where asked.",
       "questions": [
         {
-          "id": "compliance_01",
-          "label": "Pest control contract available & valid",
-          "guidance": "",
+          "id": "C1",
+          "label": "Is FSSAI license available and valid? (displayed at entrance; number matches FSSAI portal; within validity; category covers warehousing / storage)",
+          "guidance": "Proof: Photo of licence (always). Also record: Licence no. & expiry date; no. of instances (if non-compliant).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "licence_no",
+              "label": "Licence number",
+              "type": "text",
+              "when": "always"
+            },
+            {
+              "id": "expiry_date",
+              "label": "Expiry date",
+              "type": "text",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
           "evidence": {
             "when": "always",
             "min": 1,
@@ -845,18 +1674,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Obtain or renew the pest control contract and retain a valid copy.",
-          "hours": 48,
+          "action": "Correct the finding for: Is FSSAI license available and valid? (displayed at entrance; number matches FSSAI portal; within validity; category covers warehousing / storage). Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
           "severity": "normal"
         },
         {
-          "id": "compliance_02",
-          "label": "Emergency contacts displayed",
-          "guidance": "",
+          "id": "C2",
+          "label": "Is Shops & Establishment Registration Act certificate available?",
+          "guidance": "Proof: Photo if non-compliant.",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -865,16 +1706,34 @@
             "min": 1,
             "max": 5
           },
-          "action": "Display current emergency contact details.",
-          "hours": 48,
+          "action": "Correct the finding for: Is Shops & Establishment Registration Act certificate available?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
           "severity": "normal"
         },
         {
-          "id": "compliance_03",
-          "label": "Contract Labour (R&A) Act certificate available",
-          "guidance": "",
+          "id": "C3",
+          "label": "Is Trade license available and valid?",
+          "guidance": "Proof: Photo of licence (always). Also record: Expiry date; no. of instances (if non-compliant). Failed in 1 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "expiry_date",
+              "label": "Expiry date",
+              "type": "text",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
           "evidence": {
             "when": "always",
             "min": 1,
@@ -885,18 +1744,30 @@
             "min": 1,
             "max": 5
           },
-          "action": "Obtain and file the applicable certificate.",
-          "hours": 48,
+          "action": "Correct the finding for: Is Trade license available and valid?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
           "severity": "normal"
         },
         {
-          "id": "compliance_04",
-          "label": "GST APOB available",
-          "guidance": "",
+          "id": "C4",
+          "label": "Is GST APOB available?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -905,16 +1776,66 @@
             "min": 1,
             "max": 5
           },
-          "action": "Obtain and file the GST APOB.",
-          "hours": 48,
+          "action": "Correct the finding for: Is GST APOB available?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
           "severity": "normal"
         },
         {
-          "id": "compliance_05",
-          "label": "Trade license available & valid",
-          "guidance": "",
+          "id": "C5",
+          "label": "Is Contract Labour Regulation Act certificate available?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is Contract Labour Regulation Act certificate available?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "high"
+        },
+        {
+          "id": "C6",
+          "label": "Is Pest control contract available and valid?",
+          "guidance": "Proof: Photo of contract (always). Also record: Expiry date; no. of instances (if non-compliant). Failed in 5 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            },
+            {
+              "id": "expiry_date",
+              "label": "Expiry date",
+              "type": "text",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
           "evidence": {
             "when": "always",
             "min": 1,
@@ -925,8 +1846,328 @@
             "min": 1,
             "max": 5
           },
-          "action": "Obtain or renew the trade licence and retain a valid copy.",
-          "hours": 48,
+          "action": "Correct the finding for: Is Pest control contract available and valid?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "critical"
+        },
+        {
+          "id": "C7",
+          "label": "Is partner escalation matrix documented and displayed?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is partner escalation matrix documented and displayed?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "critical"
+        },
+        {
+          "id": "C8",
+          "label": "Are emergency contacts displayed?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are emergency contacts displayed?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "high"
+        },
+        {
+          "id": "C9",
+          "label": "Are TDR records containing temperature details maintained and TDR guidelines followed while accepting temp-controlled vehicles?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are TDR records containing temperature details maintained and TDR guidelines followed while accepting temp-controlled vehicles?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "normal"
+        },
+        {
+          "id": "C10",
+          "label": "Is cleaning schedule and housekeeping inspection records available at site?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 6 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is cleaning schedule and housekeeping inspection records available at site?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "critical"
+        },
+        {
+          "id": "C11",
+          "label": "Is store following expiry disposal guidelines by moving expired items into biodegradable bags by cutting and damaging the packaging?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is store following expiry disposal guidelines by moving expired items into biodegradable bags by cutting and damaging the packaging?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "normal"
+        },
+        {
+          "id": "C12",
+          "label": "Are all expired items moved to disposal vehicle under CCTV surveillance?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are all expired items moved to disposal vehicle under CCTV surveillance?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "normal"
+        },
+        {
+          "id": "C13",
+          "label": "Is security guard recording the video of expiry handover for record keeping for last 15 days?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is security guard recording the video of expiry handover for record keeping for last 15 days?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "normal"
+        },
+        {
+          "id": "C14",
+          "label": "Is challan copy filled and shared with driver of disposal vehicle with signature of both Shift Incharge & driver? (check last 5 days challan & CCTV)",
+          "guidance": "Proof: Photo of last challan (always).",
+          "required": true,
+          "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is challan copy filled and shared with driver of disposal vehicle with signature of both Shift Incharge & driver? (check last 5 days challan & CCTV). Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "normal"
+        },
+        {
+          "id": "C15",
+          "label": "Is annual medical examination carried out for all food handlers?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is annual medical examination carried out for all food handlers?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
+          "severity": "normal"
+        },
+        {
+          "id": "C16",
+          "label": "Is FoSTaC training completed by SM and displayed?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge; licences: City Manager",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is FoSTaC training completed by SM and displayed?. Owner default: Store Manager or Store In-charge; licences: City Manager.",
+          "hours": 720,
           "severity": "normal"
         }
       ]
@@ -934,16 +2175,28 @@
     {
       "id": "integrity",
       "name": "Integrity Checks",
-      "guidance": "",
+      "guidance": "Physical vs system integrity and CCTV checks.",
       "questions": [
         {
-          "id": "integrity_01",
-          "label": "No physical vs. virtual mismatch on recommended-ASIN audit",
-          "guidance": "Record ASINs checked and the physical/system quantities.",
+          "id": "I1",
+          "label": "Is physical-virtual non-compliance observed during expiry removal?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 7 of 8 Amazon audits (source history).",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
-            "when": "always",
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -952,18 +2205,165 @@
             "min": 1,
             "max": 5
           },
-          "action": "Investigate each difference and reconcile the physical and system quantities.",
+          "action": "Correct the finding for: Is physical-virtual non-compliance observed during expiry removal?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "critical"
+        },
+        {
+          "id": "I2",
+          "label": "Is physical-virtual non-compliance observed during audit of recommended ASINs?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 2 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is physical-virtual non-compliance observed during audit of recommended ASINs?. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "I3",
+          "label": "Is non-compliance observed during disposal of expiry products?",
+          "guidance": "Proof: Photo if non-compliant. Failed in 3 of 8 Amazon audits (source history).",
+          "required": true,
+          "allowNA": true,
+          "kind": "yes_no_na",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is non-compliance observed during disposal of expiry products?. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
           "severity": "high"
         },
         {
-          "id": "integrity_02",
-          "label": "Expiry products disposed as per SOP",
-          "guidance": "Check the disposal record and system removal evidence.",
+          "id": "I4",
+          "label": "Any process deviation observed leading to wrong item pick during outbound? (review CCTV)",
+          "guidance": "Proof: CCTV time & camera in remarks.",
           "required": true,
-          "allowNA": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
           "evidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "responseEvidence": {
             "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Any process deviation observed leading to wrong item pick during outbound? (review CCTV). Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "I5",
+          "label": "Any process deviation observed to avoid inventory-not-found cases during outbound picking? (review CCTV)",
+          "guidance": "Proof: CCTV time & camera in remarks.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Any process deviation observed to avoid inventory-not-found cases during outbound picking? (review CCTV). Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "lm",
+      "name": "LM Controllable",
+      "guidance": "Last-mile controllable process checks on the floor.",
+      "questions": [
+        {
+          "id": "L1",
+          "label": "Is delivery blue bag used by riders for delivering orders?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
             "min": 1,
             "max": 5
           },
@@ -972,9 +2372,407 @@
             "min": 1,
             "max": 5
           },
-          "action": "Correct the disposal process and retain the required records.",
+          "action": "Correct the finding for: Is delivery blue bag used by riders for delivering orders?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "L2",
+          "label": "Is thermal bag carried by riders for temp-controlled products?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is thermal bag carried by riders for temp-controlled products?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "L3",
+          "label": "Is site premises (inside & outside) maintained by riders?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is site premises (inside & outside) maintained by riders?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "L4",
+          "label": "Is decorum maintained by riders inside & outside store?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is decorum maintained by riders inside & outside store?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "L5",
+          "label": "Is any incident reported by store on consumption of prohibited substance by riders?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "no",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is any incident reported by store on consumption of prohibited substance by riders?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "L6",
+          "label": "Is washroom maintained by riders?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is washroom maintained by riders?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "L7",
+          "label": "Are riders parking their vehicles appropriately?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are riders parking their vehicles appropriately?. Owner default: Rider in-charge / RM.",
+          "hours": 48,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "lm_utr",
+      "name": "LM - UTR Controllable",
+      "guidance": "UTR controllable checks.",
+      "questions": [
+        {
+          "id": "U1",
+          "label": "Is drinking water available for riders?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Is drinking water available for riders?. Owner default: Rider in-charge / RM.",
+          "hours": 168,
+          "severity": "normal"
+        },
+        {
+          "id": "U2",
+          "label": "Are adequate fans / charging points available for riders?",
+          "guidance": "Proof: Photo if non-compliant.",
+          "required": true,
+          "allowNA": false,
+          "kind": "yes_no",
+          "scored": true,
+          "compliantAnswer": "yes",
+          "extraFields": [
+            {
+              "id": "instances",
+              "label": "No. of instances",
+              "type": "number",
+              "when": "gap"
+            }
+          ],
+          "defaultOwner": "Rider in-charge / RM",
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the finding for: Are adequate fans / charging points available for riders?. Owner default: Rider in-charge / RM.",
+          "hours": 168,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "counts",
+      "name": "Counts",
+      "guidance": "Headcount and volume snapshot for the visit. Not scored.",
+      "questions": [
+        {
+          "id": "N1",
+          "label": "Count of large thermal bags",
+          "guidance": "Also record: Number.",
+          "required": true,
+          "allowNA": false,
+          "kind": "count",
+          "scored": false,
+          "compliantAnswer": null,
+          "extraFields": [
+            {
+              "id": "count",
+              "label": "Count",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "action": "Correct the finding for: Count of large thermal bags. Owner default: Store Manager or Store In-charge.",
           "hours": 24,
-          "severity": "high"
+          "severity": "normal"
+        },
+        {
+          "id": "N2",
+          "label": "Count of gel pads",
+          "guidance": "Also record: Number.",
+          "required": true,
+          "allowNA": false,
+          "kind": "count",
+          "scored": false,
+          "compliantAnswer": null,
+          "extraFields": [
+            {
+              "id": "count",
+              "label": "Count",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "action": "Correct the finding for: Count of gel pads. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "N3",
+          "label": "Count of small thermal bags",
+          "guidance": "Also record: Number.",
+          "required": true,
+          "allowNA": false,
+          "kind": "count",
+          "scored": false,
+          "compliantAnswer": null,
+          "extraFields": [
+            {
+              "id": "count",
+              "label": "Count",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "action": "Correct the finding for: Count of small thermal bags. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
+        },
+        {
+          "id": "N4",
+          "label": "Count of devices at the store",
+          "guidance": "Also record: Number.",
+          "required": true,
+          "allowNA": false,
+          "kind": "count",
+          "scored": false,
+          "compliantAnswer": null,
+          "extraFields": [
+            {
+              "id": "count",
+              "label": "Count",
+              "type": "number",
+              "when": "always"
+            }
+          ],
+          "defaultOwner": "Store Manager or Store In-charge",
+          "evidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "optional",
+            "min": 0,
+            "max": 5
+          },
+          "action": "Correct the finding for: Count of devices at the store. Owner default: Store Manager or Store In-charge.",
+          "hours": 24,
+          "severity": "normal"
         }
       ]
     }

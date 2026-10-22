@@ -419,6 +419,59 @@
   color: #2f425d;
   margin-top: 5px;
 }
+.sectionScores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  background: #f6f9fb;
+  border-radius: 9px;
+  border: 1px solid #e4ebf2;
+}
+.sectionScores span {
+  font-size: 11px;
+  color: #7a8aa0;
+}
+.sectionScores b {
+  display: block;
+  font-size: 12px;
+  color: #2f425d;
+  margin-top: 4px;
+}
+.band {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  vertical-align: middle;
+}
+.band[data-band="Good"] {
+  color: #1f7855;
+  background: #e8f6ee;
+}
+.band[data-band="Watch"] {
+  color: #9b5b13;
+  background: #fff3df;
+}
+.band[data-band="Risk"] {
+  color: #ab3340;
+  background: #fdecee;
+}
+.reportGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.reportGrid .card {
+  margin-bottom: 0;
+}
+.reportGrid .tableWrap {
+  margin-top: 12px;
+  max-height: 280px;
+}
 .choiceList {
   border: 1px solid #dbe5ed;
   border-radius: 8px;

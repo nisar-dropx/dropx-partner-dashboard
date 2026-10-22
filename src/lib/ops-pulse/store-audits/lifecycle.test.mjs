@@ -44,19 +44,31 @@ const manager = {
   permissions: { store_audits: { canView: true, canAdd: true, canEdit: true } },
 };
 const store = { ...manager, userId: "store-user", effectiveRoleIds: ["store"] };
+const q = {
+  ...seed.sections[0].questions[0],
+  id: "test_q",
+  allowNA: true,
+  kind: "yes_no_na",
+  scored: true,
+  compliantAnswer: "yes",
+  evidence: { when: "always", min: 1, max: 5 },
+  responseEvidence: { when: "always", min: 1, max: 5 },
+  extraFields: [
+    { id: "instances", label: "No. of instances", type: "number", when: "gap" },
+  ],
+  defaultOwner: "Store TL",
+};
 const template = {
   ...seed,
-  sections: [
-    { ...seed.sections[0], questions: [seed.sections[0].questions[0]] },
-  ],
+  sections: [{ ...seed.sections[0], questions: [q] }],
 };
-const q = template.sections[0].questions[0];
 const audit = () => ({
   id: "audit",
   company_id: "company",
   location_id: "A",
   assigned_to: "auditor",
   status: "scheduled",
+  audit_type: "mock",
   started_at: null,
   completed_at: null,
   deleted_at: null,
@@ -66,6 +78,14 @@ const audit = () => ({
   findings: [],
   events: [],
   summary: "",
+  score: null,
+  score_band: null,
+  score_snapshot: null,
+  amazon_score: null,
+  amazon_auditor: null,
+  present_sm_name: null,
+  started_lat: null,
+  started_lng: null,
 });
 const proof = (phase = "audit") => ({
   id: "proof",
@@ -76,25 +96,64 @@ const proof = (phase = "audit") => ({
 });
 const answer = (outcome = "gap") => ({
   outcome,
+  response:
+    outcome === "pass" ? "yes" : outcome === "gap" ? "no" : outcome === "na" ? "na" : "",
   observation: "Expired stock in bin A",
   action: "Remove expired units from system",
   owner: "Store TL",
   dueAt: "2099-10-16T10:00:00+05:30",
+  instances: outcome === "gap" ? 2 : null,
+  extras: {},
 });
-test("source has all 46 checks in eight editable sections with evidence and action defaults", () => {
+test("source has all 83 Apollo checks (79 scored + 4 counts) with polarity and evidence rules", () => {
   model.validateTemplate(seed);
-  assert.equal(model.questions(seed).length, 46);
-  assert.equal(seed.sections.length, 8);
+  assert.equal(model.questions(seed).length, 83);
+  assert.equal(seed.sections.length, 10);
+  const scored = model.questions(seed).filter((q) => model.isScored(q));
+  assert.equal(scored.length, 79);
+  assert.equal(
+    scored.filter((q) => q.compliantAnswer === "no").length >= 15,
+    true,
+  );
   for (const q of model.questions(seed)) {
-    assert(q.evidence.min >= 1);
-    assert(q.responseEvidence.min >= 1);
     assert(q.hours > 0);
     assert(q.action);
+    if (model.isCount(q)) {
+      assert.equal(q.evidence.when, "optional");
+      assert.equal(q.scored, false);
+    } else {
+      assert(["always", "gap", "optional"].includes(q.evidence.when));
+      assert.equal(q.responseEvidence.min >= 1, true);
+      assert(["yes", "no"].includes(q.compliantAnswer));
+    }
   }
+  assert.equal(model.outcomeFromResponse(scored[0], scored[0].compliantAnswer), "pass");
+  const inverted = scored.find((q) => q.compliantAnswer === "no");
+  assert.equal(model.outcomeFromResponse(inverted, "no"), "pass");
+  assert.equal(model.outcomeFromResponse(inverted, "yes"), "gap");
 });
 test("store cannot discover scheduled/in-progress/cancelled/deleted/out-of-scope audits", () => {
   for (const status of ["scheduled", "in_progress", "cancelled"])
     assert.equal(model.canRead(store, settings, { ...audit(), status }), false);
+  // Surprise mock: even the assigned store user cannot read before completion.
+  assert.equal(
+    model.canRead(store, settings, {
+      ...audit(),
+      assigned_to: store.userId,
+      audit_type: "mock",
+      status: "scheduled",
+    }),
+    false,
+  );
+  assert.equal(
+    model.canRead(store, settings, {
+      ...audit(),
+      assigned_to: store.userId,
+      audit_type: "self",
+      status: "scheduled",
+    }),
+    true,
+  );
   assert.equal(
     model.canRead(store, settings, {
       ...audit(),
@@ -223,6 +282,22 @@ test("configurable counts enforce minimum and maximum separately for inspection 
   model.validateResponse(q, "Corrected", 1);
   assert.throws(() => model.validateResponse(q, "", 1), /Describe/);
 });
+test("Amazon autofilled passes skip always-photo and always-extra validation", () => {
+  const row = structuredClone(audit());
+  row.audit_type = "amazon";
+  row.template.sections[0].questions[0] = {
+    ...q,
+    evidence: { when: "always", min: 1, max: 5 },
+    extraFields: [
+      { id: "reading_c", label: "Reading (°C)", type: "number", when: "always" },
+      { id: "instances", label: "No. of instances", type: "number", when: "gap" },
+    ],
+  };
+  const filled = model.fillAmazonPasses(row.template, {});
+  model.validateAnswers(row, filled, []);
+  assert.equal(filled[q.id].autofilled, true);
+  assert.equal(model.score({ template: row.template, answers: filled }), 100);
+});
 test("editing/removing master questions never changes the saved audit snapshot", () => {
   const a = structuredClone(audit());
   const t = structuredClone(template);
@@ -244,7 +319,7 @@ test("end-to-end server actions: start, draft, blocked completion, release, resp
   const actions = compile("src/app/ops-pulse/store-audits/actions.ts", {
     "node:crypto": { randomUUID: () => "id" },
     "next/cache": { revalidatePath() {} },
-    "@/lib/authorization": {},
+    "@/lib/authorization": { hasPermission: () => true },
     "@/lib/ops-pulse/store-audits/server": {
       context: async () => c(),
       readAudit: async () => {
@@ -277,7 +352,16 @@ test("end-to-end server actions: start, draft, blocked completion, release, resp
       },
     },
   });
-  assert.equal((await actions.startStoreAudit("audit", 1)).ok, true);
+  assert.equal(
+    (
+      await actions.startStoreAudit("audit", 1, {
+        lat: 12.97,
+        lng: 77.59,
+        presentSmName: "Store SM",
+      })
+    ).ok,
+    true,
+  );
   assert.equal(sent, 0);
   assert.equal(model.canRead(store, settings, row), false);
   assert.equal(
@@ -301,6 +385,7 @@ test("end-to-end server actions: start, draft, blocked completion, release, resp
         row.answers,
         "Gap found",
         true,
+        { presentSmName: "Store SM" },
       )
     ).ok,
     false,
@@ -315,6 +400,7 @@ test("end-to-end server actions: start, draft, blocked completion, release, resp
         row.answers,
         "Gap found",
         true,
+        { presentSmName: "Store SM" },
       )
     ).ok,
     true,

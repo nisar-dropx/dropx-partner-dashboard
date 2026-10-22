@@ -18,8 +18,13 @@ import {
   canRespond,
   validateResponse,
   findingStatus,
+  fillAmazonPasses,
+  scoreSnapshot,
+  isManager,
+  isResponder,
   type Answer,
   type Finding,
+  type AuditType,
 } from "@/lib/ops-pulse/store-audits/model";
 import {
   loadAuditAssignees,
@@ -35,27 +40,83 @@ const failure = (e: unknown) => ({
   ok: false as const,
   message: e instanceof Error ? e.message : "Unable to save store audit.",
 });
+const auditTypes: AuditType[] = ["self", "mock", "amazon"];
+function cleanAnswer(a: Answer): Answer {
+  const extras: Record<string, string> = {};
+  for (const [k, v] of Object.entries(a.extras || {})) {
+    if (typeof v === "string" && v.length <= 10000) extras[k] = v;
+  }
+  let instances =
+    a.instances == null || a.instances === undefined
+      ? null
+      : Number(a.instances);
+  if (
+    a.outcome === "gap" &&
+    (!Number.isFinite(instances) || (instances as number) < 1)
+  )
+    instances = 1;
+  return {
+    outcome: a.outcome,
+    response: a.response || "",
+    observation: a.observation,
+    action: a.action,
+    owner: a.owner,
+    dueAt: a.dueAt,
+    instances: Number.isFinite(instances) ? instances : null,
+    extras,
+    autofilled: Boolean(a.autofilled),
+  };
+}
 export async function scheduleStoreAudit(data: {
   locationId: string;
   auditorId: string;
   scheduledFor: string;
+  auditType?: AuditType;
+  amazonScore?: number | null;
+  amazonAuditor?: string | null;
   id?: string;
   version?: number;
 }) {
   try {
     const c = await context();
-    requireManager(c, data.id ? "edit" : "add");
+    const auditType: AuditType = auditTypes.includes(data.auditType as AuditType)
+      ? (data.auditType as AuditType)
+      : "mock";
+    const manager = isManager(c.auth, c.master.settings);
+    const responder = isResponder(c.auth, c.master.settings);
+    if (c.auth.readOnly) throw Error("Preview is read-only.");
+    if (auditType === "self") {
+      if (
+        !manager &&
+        !(
+          responder &&
+          hasPermission(c.auth, "store_audits", data.id ? "edit" : "add")
+        )
+      )
+        throw Error("Self-audits are for Store Manager / Store In-charge roles.");
+    } else {
+      requireManager(c, data.id ? "edit" : "add");
+    }
     const list = await stores(c.auth, c.master);
     const store = list.find((s) => s.id === data.locationId);
     if (!store) throw Error("Select an authorized store.");
     if (
       !Number.isFinite(Date.parse(data.scheduledFor)) ||
-      Date.parse(data.scheduledFor) < Date.now()
+      Date.parse(data.scheduledFor) < Date.now() - 60_000
     )
       throw Error("Choose a future audit date and time.");
+    const roleIds =
+      auditType === "self"
+        ? [
+            ...new Set([
+              ...c.master.settings.managerRoles,
+              ...c.master.settings.responderRoles,
+            ]),
+          ]
+        : c.master.settings.managerRoles;
     const users = await loadAuditAssignees(
       c.companyId,
-      c.master.settings.managerRoles,
+      roleIds,
       [store.id],
       "store_audits",
     );
@@ -64,21 +125,39 @@ export async function scheduleStoreAudit(data: {
     );
     if (!auditor)
       throw Error("Choose an eligible auditor with access to this store.");
+    if (auditType === "self" && !manager && auditor.id !== c.auth.userId)
+      throw Error("Self-audits must be assigned to you.");
+    const amazonScore =
+      auditType === "amazon" && data.amazonScore != null
+        ? Number(data.amazonScore)
+        : null;
+    if (
+      auditType === "amazon" &&
+      amazonScore != null &&
+      (!Number.isFinite(amazonScore) || amazonScore < 0 || amazonScore > 100)
+    )
+      throw Error("Amazon score must be between 0 and 100.");
+    const amazonAuditor =
+      auditType === "amazon" ? (data.amazonAuditor || "").trim() || null : null;
+    const patch = {
+      location_id: store.id,
+      store_name: `${store.station_code} · ${store.station_name || store.city || ""}`,
+      assigned_to: auditor.id,
+      assigned_name: auditor.name,
+      scheduled_for: data.scheduledFor,
+      audit_type: auditType,
+      amazon_score: amazonScore,
+      amazon_auditor: amazonAuditor,
+    };
     if (data.id) {
       const old = await readAudit(data.id, c);
       if (old.audit.status !== "scheduled")
         throw Error("Only a scheduled audit can be reassigned or rescheduled.");
       await updateAudit(
         old,
-        {
-          location_id: store.id,
-          store_name: `${store.station_code} · ${store.station_name || store.city || ""}`,
-          assigned_to: auditor.id,
-          assigned_name: auditor.name,
-          scheduled_for: data.scheduledFor,
-        },
+        patch,
         "rescheduled",
-        `Rescheduled and assigned to ${auditor.name}`,
+        `Rescheduled (${auditType}) and assigned to ${auditor.name}`,
         data.version!,
       );
     } else {
@@ -89,11 +168,7 @@ export async function scheduleStoreAudit(data: {
           id,
           company_id: c.companyId,
           number: `STORE-${store.station_code}-${id.slice(0, 8).toUpperCase()}`,
-          location_id: store.id,
-          store_name: `${store.station_code} · ${store.station_name || store.city || ""}`,
-          assigned_to: auditor.id,
-          assigned_name: auditor.name,
-          scheduled_for: data.scheduledFor,
+          ...patch,
           template: c.master.template,
           template_version: c.master.version,
           events: [
@@ -101,7 +176,7 @@ export async function scheduleStoreAudit(data: {
               at: new Date().toISOString(),
               actor: c.auth.fullName || c.auth.email,
               kind: "scheduled",
-              note: `Assigned to ${auditor.name}. Store not notified.`,
+              note: `${auditType} audit assigned to ${auditor.name}. Store not notified.`,
             },
           ],
         });
@@ -110,23 +185,54 @@ export async function scheduleStoreAudit(data: {
     refresh();
     return {
       ok: true as const,
-      message: "Audit scheduled privately. The store is not notified.",
+      message:
+        auditType === "amazon"
+          ? "Amazon audit log scheduled. Enter failed questions from the Scout alert."
+          : "Audit scheduled privately. The store is not notified.",
     };
   } catch (e) {
     return failure(e);
   }
 }
-export async function startStoreAudit(id: string, version: number) {
+export async function startStoreAudit(
+  id: string,
+  version: number,
+  gps?: { lat: number | null; lng: number | null; presentSmName?: string },
+) {
   try {
     const c = await readAudit(id);
-    requireManager(c);
+    const selfOk =
+      c.audit.audit_type === "self" &&
+      (isManager(c.auth, c.master.settings) ||
+        isResponder(c.auth, c.master.settings));
+    if (
+      c.auth.readOnly ||
+      (!isManager(c.auth, c.master.settings) && !selfOk) ||
+      !hasPermission(c.auth, "store_audits", "edit")
+    )
+      throw Error("Only the assigned auditor can start this scheduled audit.");
     if (c.audit.assigned_to !== c.auth.userId || c.audit.status !== "scheduled")
       throw Error("Only the assigned auditor can start this scheduled audit.");
+    if (
+      (c.audit.audit_type === "self" || c.audit.audit_type === "mock") &&
+      (gps?.lat == null || gps?.lng == null)
+    )
+      throw Error(
+        "Share your GPS location at the store before starting a self or mock audit.",
+      );
     await updateAudit(
       c,
-      { status: "in_progress", started_at: new Date().toISOString() },
+      {
+        status: "in_progress",
+        started_at: new Date().toISOString(),
+        started_lat: gps?.lat ?? null,
+        started_lng: gps?.lng ?? null,
+        present_sm_name: gps?.presentSmName?.trim() || c.audit.present_sm_name,
+      },
       "started",
-      "Inspection started",
+      gps?.lat != null
+        ? `Inspection started at GPS ${gps.lat.toFixed(5)}, ${gps.lng!.toFixed(5)}`
+        : "Inspection started",
       version,
     );
     refresh();
@@ -141,6 +247,11 @@ export async function saveStoreInspection(
   answers: Record<string, Answer>,
   summary: string,
   submit = false,
+  meta?: {
+    presentSmName?: string;
+    amazonScore?: number | null;
+    amazonAuditor?: string | null;
+  },
 ) {
   try {
     const c = await readAudit(id);
@@ -150,9 +261,9 @@ export async function saveStoreInspection(
       );
     if (JSON.stringify(answers).length > 500000 || summary.length > 10000)
       throw Error("Inspection text is too large.");
-    const cleaned: Record<string, Answer> = {};
+    let cleaned: Record<string, Answer> = {};
     for (const q of questions(c.audit.template)) {
-      const a = answers[q.id];
+      const a = answers[q.id] ?? c.audit.answers?.[q.id];
       if (a) {
         if (
           !["", "pass", "gap", "na"].includes(a.outcome) ||
@@ -161,50 +272,86 @@ export async function saveStoreInspection(
           )
         )
           throw Error("Invalid inspection response.");
-        cleaned[q.id] = {
-          outcome: a.outcome,
-          observation: a.observation,
-          action: a.action,
-          owner: a.owner,
-          dueAt: a.dueAt,
-        };
+        cleaned[q.id] = cleanAnswer({
+          ...a,
+          // Client edits clear Amazon autofill unless still the sentinel pass.
+          autofilled: Boolean(answers[q.id] ? a.autofilled : a.autofilled),
+        });
       }
     }
-    // Guard against a blank client state overwriting a draft that already has answers.
     if (!submit) {
       const existingAnswered = Object.values(c.audit.answers || {}).filter(
         (a) => a?.outcome,
       ).length;
-      const nextAnswered = Object.values(cleaned).filter((a) => a.outcome).length;
-      if (existingAnswered > 0 && nextAnswered === 0)
+      const clientAnswered = Object.values(answers || {}).filter(
+        (a) => a?.outcome,
+      ).length;
+      if (existingAnswered > 0 && clientAnswered === 0)
         throw Error(
           "This draft already has answers on the server. Refresh the page, then save again — an empty form was not written over them.",
         );
     }
+    if (submit && c.audit.audit_type === "amazon")
+      cleaned = fillAmazonPasses(c.audit.template, cleaned);
     if (submit) {
       validateAnswers(c.audit, cleaned, await proofs(c, id));
       if (!summary.trim())
         throw Error("Add a short overall summary before completing the audit.");
+      if (c.audit.audit_type === "mock" && !(meta?.presentSmName || "").trim())
+        throw Error(
+          "Record the Store Manager or Store In-charge present for a mock audit.",
+        );
     }
     const findings: Finding[] = questions(c.audit.template)
       .filter((q) => cleaned[q.id]?.outcome === "gap")
       .map((q) => ({ questionId: q.id, state: "open", note: "" }));
+    const snap = submit ? scoreSnapshot({ template: c.audit.template, answers: cleaned }) : null;
+    const amazonScore =
+      c.audit.audit_type === "amazon"
+        ? meta?.amazonScore != null
+          ? Number(meta.amazonScore)
+          : c.audit.amazon_score
+        : null;
+    const amazonAuditor =
+      c.audit.audit_type === "amazon"
+        ? meta?.amazonAuditor?.trim() || c.audit.amazon_auditor || null
+        : null;
+    if (
+      submit &&
+      c.audit.audit_type === "amazon" &&
+      (amazonScore == null ||
+        !Number.isFinite(amazonScore) ||
+        amazonScore < 0 ||
+        amazonScore > 100)
+    )
+      throw Error("Enter the Amazon score % from the Scout alert (0–100).");
+    if (submit && c.audit.audit_type === "amazon" && !amazonAuditor)
+      throw Error("Enter the Amazon auditor name from the Scout alert.");
     const saved = await updateAudit(
       c,
       {
         answers: cleaned,
         summary,
+        present_sm_name:
+          c.audit.audit_type === "mock"
+            ? meta?.presentSmName?.trim() || c.audit.present_sm_name || null
+            : c.audit.present_sm_name,
+        amazon_score: amazonScore,
+        amazon_auditor: amazonAuditor,
         ...(submit
           ? {
               findings,
               status: findings.length ? "awaiting_response" : "closed",
               completed_at: new Date().toISOString(),
+              score: snap?.percentage ?? null,
+              score_band: snap?.band ?? null,
+              score_snapshot: snap,
             }
           : {}),
       },
       submit ? "completed" : "draft_saved",
       submit
-        ? `${findings.length} gaps identified. Results released to the store.`
+        ? `${findings.length} gaps · score ${snap?.percentage ?? "—"}% (${snap?.band || "n/a"}). Results released to the store.`
         : "Inspection draft saved",
       version,
     );

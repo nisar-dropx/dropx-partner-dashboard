@@ -13,14 +13,29 @@ import { supabase } from "@/lib/supabase";
 import {
   questions,
   emptyAnswer,
-  requiredEvidence,
-  score,
+  applyResponse,
+  auditTypeLabels,
+  isCount,
+  isScored,
+  scoreSnapshot,
+  scoreBand,
   statusLabels,
+  type AuditType,
   type StoreAudit,
   type Proof,
   type Answer,
   type Question,
+  type ExtraField,
 } from "@/lib/ops-pulse/store-audits/model";
+import {
+  auditScore,
+  auditBand,
+  readiness,
+  topFailedQuestions,
+  openActions,
+  mockVsAmazon,
+  repeatFailures,
+} from "@/lib/ops-pulse/store-audits/reports";
 import type { AuditAssignee } from "@/lib/ops-pulse/station-audit-people";
 import { EvidencePreview } from "@/components/evidence-preview";
 import {
@@ -41,10 +56,33 @@ const date = (v: string | null) =>
         timeStyle: "short",
       }) + " IST"
     : "—";
-const localTime = (v: string) =>
-  v
-    ? new Date(new Date(v).getTime() + 330 * 60000).toISOString().slice(0, 16)
-    : "";
+const localTime = (v: string) => {
+  if (!v) return "";
+  const d = new Date(v);
+  if (!Number.isFinite(d.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value || "";
+  const hour = g("hour") === "24" ? "00" : g("hour");
+  return `${g("year")}-${g("month")}-${g("day")}T${hour}:${g("minute")}`;
+};
+const extraFieldInputType = (f: ExtraField) =>
+  f.id === "expiry_date" ? "date" : f.type === "number" ? "number" : "text";
+const responseLabel = (a: Answer) => {
+  if (a.response === "yes") return "Yes";
+  if (a.response === "no") return "No";
+  if (a.response === "na" || a.outcome === "na") return "N/A";
+  if (a.outcome === "pass") return "Compliant";
+  if (a.outcome === "gap") return "Non-compliant";
+  return "—";
+};
 type Props = {
   locations: {
     id: string;
@@ -226,14 +264,33 @@ export function StoreAuditWorkspace(p: Props) {
     [when, setWhen] = useState(
       p.focused ? localTime(p.focused.scheduled_for) : "",
     ),
-    [rescheduling, setRescheduling] = useState(false);
+    [rescheduling, setRescheduling] = useState(false),
+    [scheduleAuditType, setScheduleAuditType] = useState<AuditType>(
+      p.focused?.audit_type || "mock",
+    ),
+    [scheduleAmazonScore, setScheduleAmazonScore] = useState(
+      p.focused?.amazon_score != null ? String(p.focused.amazon_score) : "",
+    ),
+    [scheduleAmazonAuditor, setScheduleAmazonAuditor] = useState(
+      p.focused?.amazon_auditor || "",
+    ),
+    [auditTypeFilter, setAuditTypeFilter] = useState("");
   const [audit, setAudit] = useState(p.focused),
     [answers, setAnswers] = useState(p.focused?.answers || {}),
     [summary, setSummary] = useState(p.focused?.summary || ""),
     [proof, setProof] = useState(p.evidence),
     [section, setSection] = useState(p.focused?.template.sections[0]?.id || ""),
     [dirty, setDirty] = useState(false),
-    [notes, setNotes] = useState<Record<string, string>>({});
+    [notes, setNotes] = useState<Record<string, string>>({}),
+    [presentSmName, setPresentSmName] = useState(
+      p.focused?.present_sm_name || "",
+    ),
+    [completeAmazonScore, setCompleteAmazonScore] = useState(
+      p.focused?.amazon_score != null ? String(p.focused.amazon_score) : "",
+    ),
+    [completeAmazonAuditor, setCompleteAmazonAuditor] = useState(
+      p.focused?.amazon_auditor || "",
+    );
   const dirtyRef = useRef(dirty);
   const focusedIdRef = useRef<string | null>(p.focused?.id ?? null);
   dirtyRef.current = dirty;
@@ -266,12 +323,34 @@ export function StoreAuditWorkspace(p: Props) {
     setSummary(p.focused.summary || "");
     setProof(p.evidence);
     setDirty(false);
+    setPresentSmName(p.focused.present_sm_name || "");
+    setCompleteAmazonScore(
+      p.focused.amazon_score != null ? String(p.focused.amazon_score) : "",
+    );
+    setCompleteAmazonAuditor(p.focused.amazon_auditor || "");
     setSection((current) =>
       p.focused!.template.sections.some((s) => s.id === current)
         ? current
         : p.focused!.template.sections[0]?.id || "",
     );
   }, [p.focused?.id, p.focused?.version, p.evidence]);
+  useEffect(() => {
+    if (!schedule || rescheduling) return;
+    if (
+      scheduleAuditType === "self" &&
+      p.assignees.some(
+        (a) => a.id === p.userId && a.stationIds.includes(scheduleLocation),
+      )
+    )
+      setAuditor(p.userId);
+  }, [
+    schedule,
+    rescheduling,
+    scheduleAuditType,
+    scheduleLocation,
+    p.assignees,
+    p.userId,
+  ]);
   useEffect(() => {
     if (!dirty) return;
     const before = (e: BeforeUnloadEvent) => {
@@ -322,7 +401,7 @@ export function StoreAuditWorkspace(p: Props) {
         ...(patch.outcome === "gap"
           ? {
               action: old.action || q.action,
-              owner: old.owner || audit?.store_name || "",
+              owner: old.owner || q.defaultOwner || audit?.store_name || "",
               dueAt:
                 old.dueAt ||
                 new Date(Date.now() + q.hours * 3600000).toISOString(),
@@ -332,8 +411,113 @@ export function StoreAuditWorkspace(p: Props) {
     });
     setDirty(true);
   };
+  const setResponse = (q: Question, response: NonNullable<Answer["response"]>) => {
+    const old = answers[q.id] || emptyAnswer();
+    const next = applyResponse(q, response, old);
+    setAnswers({
+      ...answers,
+      [q.id]: {
+        ...next,
+        observation: old.observation,
+        extras: { ...(old.extras || {}), ...(next.extras || {}) },
+      },
+    });
+    setDirty(true);
+  };
+  const setCount = (q: Question, count: string) => {
+    const old = answers[q.id] || emptyAnswer();
+    const ok =
+      count.trim() !== "" &&
+      Number.isFinite(Number(count)) &&
+      Number(count) >= 0;
+    setAnswers({
+      ...answers,
+      [q.id]: {
+        ...old,
+        extras: { ...(old.extras || {}), count },
+        outcome: ok ? "pass" : "",
+      },
+    });
+    setDirty(true);
+  };
+  const setExtra = (q: Question, fieldId: string, value: string) => {
+    const old = answers[q.id] || emptyAnswer();
+    setAnswers({
+      ...answers,
+      [q.id]: {
+        ...old,
+        extras: { ...(old.extras || {}), [fieldId]: value },
+      },
+    });
+    setDirty(true);
+  };
+  const fieldVisible = (f: ExtraField, outcome: Answer["outcome"]) =>
+    f.when === "always" || (f.when === "gap" && outcome === "gap");
+  const inspectionMeta = () => ({
+    presentSmName: presentSmName.trim() || undefined,
+    amazonScore:
+      completeAmazonScore.trim() === ""
+        ? null
+        : Number(completeAmazonScore),
+    amazonAuditor: completeAmazonAuditor.trim() || undefined,
+  });
+  const startInspection = async () => {
+    if (!audit) return;
+    const needsGps =
+      audit.audit_type === "self" || audit.audit_type === "mock";
+    let presentSm: string | undefined;
+    if (audit.audit_type === "mock") {
+      const name =
+        presentSmName.trim() ||
+        prompt(
+          "Store Manager or Store In-charge present on site:",
+          audit.present_sm_name || "",
+        )?.trim();
+      if (!name) {
+        setMessage(
+          "Record the Store Manager or Store In-charge present before starting.",
+        );
+        return;
+      }
+      presentSm = name;
+      setPresentSmName(name);
+    }
+    let lat: number | null = null;
+    let lng: number | null = null;
+    if (needsGps) {
+      if (!navigator.geolocation) {
+        setMessage(
+          "Share your GPS location at the store before starting a self or mock audit.",
+        );
+        return;
+      }
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 20000,
+          }),
+        );
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+      } catch {
+        setMessage(
+          "Share your GPS location at the store before starting a self or mock audit.",
+        );
+        return;
+      }
+    }
+    await run(() =>
+      startStoreAudit(audit.id, audit.version, {
+        lat,
+        lng,
+        presentSmName: presentSm,
+      }),
+    );
+  };
   const visible = p.audits.filter(
     (a) =>
+      (!auditTypeFilter || a.audit_type === auditTypeFilter) &&
       (!location || a.location_id === location) &&
       (status === "all" || status === "overdue"
         ? status !== "overdue" ||
@@ -349,12 +533,48 @@ export function StoreAuditWorkspace(p: Props) {
   );
   const blocked = busy || transition;
   if (audit) {
-    const current = audit.template.sections.find((s) => s.id === section)!;
+    const sections = audit.template?.sections || [];
+    if (!sections.length) {
+      return (
+        <div className={styles.page}>
+          <header className={styles.header}>
+            <div>
+              <Link href="/store-audits">← Store audits</Link>
+              <h1>{audit.store_name}</h1>
+              <p>{audit.number}</p>
+            </div>
+          </header>
+          <div className={styles.card}>
+            <h2>Checklist unavailable</h2>
+            <p className={styles.muted}>
+              This audit snapshot has no sections. Open Store Audit Master or
+              schedule a new audit from the current checklist.
+            </p>
+            <Link className={styles.button} href="/store-audits">
+              Back to register
+            </Link>
+          </div>
+        </div>
+      );
+    }
+    const current =
+      sections.find((s) => s.id === section) || sections[0];
     const completed = Boolean(audit.completed_at);
     const inspection = p.canInspect && !completed;
     const answered = questions(audit.template).filter(
       (q) => answers[q.id]?.outcome,
     ).length;
+    const snap =
+      audit.score_snapshot ||
+      (completed
+        ? scoreSnapshot({ template: audit.template, answers: audit.answers })
+        : null);
+    const livePct = completed
+      ? (audit.score ?? snap?.percentage)
+      : scoreSnapshot({ template: audit.template, answers }).percentage;
+    const liveBand =
+      audit.score_band ??
+      scoreBand(typeof livePct === "number" ? livePct : null);
     return (
       <div className={styles.page}>
         <header className={styles.header}>
@@ -384,6 +604,9 @@ export function StoreAuditWorkspace(p: Props) {
         <div className={styles.card}>
           <div className={styles.facts}>
             <span>
+              Audit type<b>{auditTypeLabels[audit.audit_type || "mock"]}</b>
+            </span>
+            <span>
               Auditor<b>{audit.assigned_name}</b>
             </span>
             <span>
@@ -395,12 +618,53 @@ export function StoreAuditWorkspace(p: Props) {
             <span>
               Completed<b>{date(audit.completed_at)}</b>
             </span>
-            {completed && (
+            {(completed || inspection) && livePct != null && (
               <span>
-                Checklist compliance<b>{score(audit) ?? "—"}%</b>
+                DropX score
+                <b>
+                  {livePct}%
+                  {liveBand ? (
+                    <>
+                      {" "}
+                      <span
+                        className={styles.band}
+                        data-band={liveBand}
+                      >
+                        {liveBand}
+                      </span>
+                    </>
+                  ) : null}
+                </b>
+              </span>
+            )}
+            {audit.audit_type === "amazon" &&
+              (audit.amazon_score != null || completeAmazonScore) && (
+                <span>
+                  Amazon score
+                  <b>
+                    {audit.amazon_score ?? completeAmazonScore}%
+                    {audit.amazon_auditor || completeAmazonAuditor
+                      ? ` · ${audit.amazon_auditor || completeAmazonAuditor}`
+                      : ""}
+                  </b>
+                </span>
+              )}
+            {audit.present_sm_name && (
+              <span>
+                SM / SI present<b>{audit.present_sm_name}</b>
               </span>
             )}
           </div>
+          {completed && snap?.sections?.length ? (
+            <div className={styles.sectionScores}>
+              {snap.sections.map((s) => (
+                <span key={s.id}>
+                  {s.name}
+                  <b>{s.percentage != null ? `${s.percentage}%` : "—"}</b>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className={styles.inline}>
             {audit.status === "scheduled" &&
               p.canEdit &&
@@ -408,17 +672,26 @@ export function StoreAuditWorkspace(p: Props) {
                 <button
                   className={styles.primary}
                   disabled={blocked}
-                  onClick={() =>
-                    run(() => startStoreAudit(audit.id, audit.version))
-                  }
+                  onClick={() => startInspection()}
                 >
                   Start inspection
                 </button>
               )}
-            {audit.status === "scheduled" && p.canEdit && (
+            {audit.status === "scheduled" &&
+              p.canEdit &&
+              (p.manager ||
+                (audit.audit_type === "self" &&
+                  audit.assigned_to === p.userId)) && (
               <button
                 onClick={() => {
                   setRescheduling(true);
+                  setScheduleAuditType(audit.audit_type || "mock");
+                  setScheduleAmazonScore(
+                    audit.amazon_score != null
+                      ? String(audit.amazon_score)
+                      : "",
+                  );
+                  setScheduleAmazonAuditor(audit.amazon_auditor || "");
                   setSchedule(true);
                 }}
               >
@@ -493,12 +766,27 @@ export function StoreAuditWorkspace(p: Props) {
           <div className={styles.card}>
             <h2>Ready for the visit</h2>
             <p>
+              {auditTypeLabels[audit.audit_type || "mock"]} ·{" "}
               {questions(audit.template).length} checks in{" "}
               {audit.template.sections.length} sections. The assigned auditor
               can start the inspection when ready.
             </p>
+            {audit.audit_type === "mock" &&
+              p.canEdit &&
+              audit.assigned_to === p.userId && (
+                <label>
+                  SM / SI present (optional before start)
+                  <input
+                    value={presentSmName}
+                    onChange={(e) => setPresentSmName(e.target.value)}
+                    placeholder="Store Manager or Store In-charge"
+                  />
+                </label>
+              )}
             <p className={styles.muted}>
               The checklist and evidence settings are saved with this audit.
+              {(audit.audit_type === "self" || audit.audit_type === "mock") &&
+                " GPS location is required when you start."}
             </p>
           </div>
         ) : (
@@ -573,30 +861,77 @@ export function StoreAuditWorkspace(p: Props) {
                           {q.guidance && (
                             <p className={styles.muted}>{q.guidance}</p>
                           )}
-                          <div className={styles.outcomes}>
-                            {(
-                              [
-                                "pass",
-                                "gap",
-                                ...(q.allowNA ? ["na"] : []),
-                              ] as Answer["outcome"][]
-                            ).map((value) => (
-                              <button
-                                type="button"
-                                key={value}
-                                disabled={!inspection || blocked}
-                                aria-pressed={a.outcome === value}
-                                data-outcome={value}
-                                onClick={() => setAnswer(q, { outcome: value })}
-                              >
-                                {value === "pass"
-                                  ? "Meets standard"
-                                  : value === "gap"
-                                    ? "Gap found"
-                                    : "Not applicable"}
-                              </button>
-                            ))}
-                          </div>
+                          {isScored(q) && q.compliantAnswer && (
+                            <p className={styles.muted}>
+                              Compliant answer:{" "}
+                              {q.compliantAnswer === "yes" ? "Yes" : "No"}
+                            </p>
+                          )}
+                          {isCount(q) ? (
+                            inspection ? (
+                              <label>
+                                Count *
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  value={a.extras?.count ?? ""}
+                                  onChange={(e) => setCount(q, e.target.value)}
+                                />
+                              </label>
+                            ) : (
+                              a.extras?.count && (
+                                <p>
+                                  Count: <b>{a.extras.count}</b>
+                                </p>
+                              )
+                            )
+                          ) : inspection ? (
+                            <div className={styles.outcomes}>
+                              {(
+                                [
+                                  "yes",
+                                  "no",
+                                  ...(q.allowNA || q.kind === "yes_no_na"
+                                    ? (["na"] as const)
+                                    : []),
+                                ] as const
+                              ).map((value) => {
+                                const pressed =
+                                  a.response === value ||
+                                  (!a.response &&
+                                    value === "na" &&
+                                    a.outcome === "na");
+                                const outcomeForStyle =
+                                  value === "na"
+                                    ? "na"
+                                    : applyResponse(q, value, emptyAnswer())
+                                        .outcome || "pass";
+                                return (
+                                  <button
+                                    type="button"
+                                    key={value}
+                                    disabled={blocked}
+                                    aria-pressed={pressed}
+                                    data-outcome={outcomeForStyle}
+                                    onClick={() => setResponse(q, value)}
+                                  >
+                                    {value === "yes"
+                                      ? "Yes"
+                                      : value === "no"
+                                        ? "No"
+                                        : "N/A"}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            a.outcome && (
+                              <p>
+                                Response: <b>{responseLabel(a)}</b>
+                              </p>
+                            )
+                          )}
                           {inspection ? (
                             <label>
                               Observation
@@ -614,6 +949,62 @@ export function StoreAuditWorkspace(p: Props) {
                           ) : (
                             a.observation && <p>{a.observation}</p>
                           )}
+                          {a.outcome === "gap" && isScored(q) && (
+                            inspection ? (
+                              <label>
+                                Number of instances *
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={a.instances ?? ""}
+                                  onChange={(e) =>
+                                    setAnswer(q, {
+                                      instances: e.target.value
+                                        ? Number(e.target.value)
+                                        : null,
+                                    })
+                                  }
+                                />
+                              </label>
+                            ) : (
+                              a.instances != null && (
+                                <p className={styles.muted}>
+                                  Instances: {a.instances}
+                                </p>
+                              )
+                            )
+                          )}
+                          {(q.extraFields || [])
+                            .filter(
+                              (f) =>
+                                f.id !== "count" &&
+                                f.id !== "instances" &&
+                                fieldVisible(f, a.outcome),
+                            )
+                            .map((f) =>
+                              inspection ? (
+                                <label key={f.id}>
+                                  {f.label}
+                                  {a.outcome === "gap" || f.when === "always"
+                                    ? " *"
+                                    : ""}
+                                  <input
+                                    type={extraFieldInputType(f)}
+                                    value={a.extras?.[f.id] ?? ""}
+                                    onChange={(e) =>
+                                      setExtra(q, f.id, e.target.value)
+                                    }
+                                  />
+                                </label>
+                              ) : (
+                                a.extras?.[f.id] && (
+                                  <p key={f.id} className={styles.muted}>
+                                    {f.label}: {a.extras[f.id]}
+                                  </p>
+                                )
+                              ),
+                            )}
                           {a.outcome === "gap" && (
                             <div className={styles.finding}>
                               <h4>Corrective action</h4>
@@ -827,6 +1218,54 @@ export function StoreAuditWorkspace(p: Props) {
                   ) : (
                     <p>{audit.summary}</p>
                   )}
+                  {inspection && audit.audit_type === "mock" && (
+                    <label>
+                      Store Manager / Store In-charge present *
+                      <input
+                        value={presentSmName}
+                        onChange={(e) => {
+                          setPresentSmName(e.target.value);
+                          setDirty(true);
+                        }}
+                        placeholder="Name of SM or SI on site"
+                      />
+                    </label>
+                  )}
+                  {inspection && audit.audit_type === "amazon" && (
+                    <>
+                      <div className={styles.formGrid}>
+                        <label>
+                          Amazon score % (Scout alert) *
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.1}
+                            value={completeAmazonScore}
+                            onChange={(e) => {
+                              setCompleteAmazonScore(e.target.value);
+                              setDirty(true);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          Amazon auditor
+                          <input
+                            value={completeAmazonAuditor}
+                            onChange={(e) => {
+                              setCompleteAmazonAuditor(e.target.value);
+                              setDirty(true);
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <p className={styles.muted}>
+                        Enter only failed questions from the Scout alert.
+                        Unanswered scored questions auto-pass when you complete
+                        and release.
+                      </p>
+                    </>
+                  )}
                   {inspection && (
                     <div className={styles.inline}>
                       <button
@@ -839,6 +1278,8 @@ export function StoreAuditWorkspace(p: Props) {
                                 audit.version,
                                 answers,
                                 summary,
+                                false,
+                                inspectionMeta(),
                               ),
                             { answers, summary },
                           )
@@ -850,6 +1291,33 @@ export function StoreAuditWorkspace(p: Props) {
                         disabled={blocked}
                         className={styles.primary}
                         onClick={() => {
+                          if (
+                            audit.audit_type === "mock" &&
+                            !presentSmName.trim()
+                          ) {
+                            setMessage(
+                              "Record the Store Manager or Store In-charge present for a mock audit.",
+                            );
+                            return;
+                          }
+                          if (audit.audit_type === "amazon") {
+                            const pct = Number(completeAmazonScore);
+                            if (
+                              !completeAmazonScore.trim() ||
+                              !Number.isFinite(pct) ||
+                              pct < 0 ||
+                              pct > 100
+                            ) {
+                              setMessage(
+                                "Enter the Amazon score % from the Scout alert (0–100).",
+                              );
+                              return;
+                            }
+                            if (!completeAmazonAuditor.trim()) {
+                              setMessage("Enter the Amazon auditor name.");
+                              return;
+                            }
+                          }
                           if (
                             confirm(
                               "Complete this audit and release its report and findings to the store?",
@@ -863,6 +1331,7 @@ export function StoreAuditWorkspace(p: Props) {
                                   answers,
                                   summary,
                                   true,
+                                  inspectionMeta(),
                                 ),
                               { answers, summary },
                             );
@@ -914,6 +1383,15 @@ export function StoreAuditWorkspace(p: Props) {
               scheduledFor: when
                 ? new Date(when + ":00+05:30").toISOString()
                 : "",
+              auditType: scheduleAuditType,
+              amazonScore:
+                scheduleAuditType === "amazon" && scheduleAmazonScore.trim()
+                  ? Number(scheduleAmazonScore)
+                  : null,
+              amazonAuditor:
+                scheduleAuditType === "amazon"
+                  ? scheduleAmazonAuditor.trim() || null
+                  : null,
               ...(rescheduling && audit
                 ? { id: audit.id, version: audit.version }
                 : {}),
@@ -967,10 +1445,62 @@ export function StoreAuditWorkspace(p: Props) {
               onChange={(e) => setWhen(e.target.value)}
             />
           </label>
+          <label>
+            Audit type
+            <select
+              value={scheduleAuditType}
+              onChange={(e) => {
+                const next = e.target.value as AuditType;
+                setScheduleAuditType(next);
+                if (
+                  next === "self" &&
+                  p.assignees.some(
+                    (a) =>
+                      a.id === p.userId &&
+                      a.stationIds.includes(scheduleLocation),
+                  )
+                )
+                  setAuditor(p.userId);
+              }}
+            >
+              {(
+                (p.manager
+                  ? (["self", "mock", "amazon"] as AuditType[])
+                  : (["self"] as AuditType[]))
+              ).map((t) => (
+                <option key={t} value={t}>
+                  {auditTypeLabels[t]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {scheduleAuditType === "amazon" && (
+            <>
+              <label>
+                Amazon score % (optional now)
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={scheduleAmazonScore}
+                  onChange={(e) => setScheduleAmazonScore(e.target.value)}
+                />
+              </label>
+              <label>
+                Amazon auditor
+                <input
+                  value={scheduleAmazonAuditor}
+                  onChange={(e) => setScheduleAmazonAuditor(e.target.value)}
+                />
+              </label>
+            </>
+          )}
         </div>
         <p className={styles.muted}>
-          The store will not see the schedule or receive advance email. Only the
-          assigned auditor can complete the inspection.
+          {scheduleAuditType === "amazon"
+            ? "Log an Amazon Scout audit. Enter failed checklist items during the inspection."
+            : "The store will not see the schedule or receive advance email. Only the assigned auditor can complete the inspection."}
         </p>
         <div className={styles.inline}>
           <button className={styles.primary} disabled={blocked}>
@@ -1006,6 +1536,20 @@ export function StoreAuditWorkspace(p: Props) {
               className={styles.primary}
               onClick={() => {
                 setRescheduling(false);
+                setScheduleAuditType(p.manager ? "mock" : "self");
+                setScheduleAmazonScore("");
+                setScheduleAmazonAuditor("");
+                if (
+                  !p.manager &&
+                  p.assignees.some(
+                    (a) =>
+                      a.id === p.userId &&
+                      a.stationIds.includes(
+                        scheduleLocation || p.locations[0]?.id || "",
+                      ),
+                  )
+                )
+                  setAuditor(p.userId);
                 setSchedule(!schedule);
               }}
             >
@@ -1080,6 +1624,22 @@ export function StoreAuditWorkspace(p: Props) {
               ))}
             </select>
           </label>
+          {p.manager && (
+            <label>
+              Audit type
+              <select
+                value={auditTypeFilter}
+                onChange={(e) => setAuditTypeFilter(e.target.value)}
+              >
+                <option value="">All types</option>
+                {(Object.keys(auditTypeLabels) as AuditType[]).map((t) => (
+                  <option key={t} value={t}>
+                    {auditTypeLabels[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Status
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -1114,12 +1674,22 @@ export function StoreAuditWorkspace(p: Props) {
           >
             Calendar
           </button>
+          {p.manager && (
+            <button
+              aria-pressed={view === "reports"}
+              onClick={() => setView("reports")}
+            >
+              Reports
+            </button>
+          )}
         </div>
         <span className={styles.muted}>
           {visible.length} audits · All times IST
         </span>
       </div>
-      {!visible.length ? (
+      {view === "reports" && p.manager ? (
+        reportsView()
+      ) : !visible.length ? (
         <div className={styles.empty}>
           <h2>
             {p.manager
@@ -1156,7 +1726,10 @@ export function StoreAuditWorkspace(p: Props) {
                         {localTime(a.scheduled_for).slice(11)} ·{" "}
                         {a.assigned_name}
                       </span>
-                      <small>{statusLabels[a.status]}</small>
+                      <small>
+                        {auditTypeLabels[a.audit_type || "mock"]} ·{" "}
+                        {statusLabels[a.status]}
+                      </small>
                     </Link>
                   ))}
               </section>
@@ -1168,6 +1741,8 @@ export function StoreAuditWorkspace(p: Props) {
             <thead>
               <tr>
                 <th>Store / audit</th>
+                <th>Type</th>
+                <th>Score</th>
                 <th>Scheduled</th>
                 <th>Auditor</th>
                 <th>Status</th>
@@ -1176,11 +1751,32 @@ export function StoreAuditWorkspace(p: Props) {
               </tr>
             </thead>
             <tbody>
-              {visible.map((a) => (
+              {visible.map((a) => {
+                const pct = auditScore(a);
+                const band = auditBand(a);
+                return (
                 <tr key={a.id}>
                   <td>
                     <b>{a.store_name}</b>
                     <small>{a.number}</small>
+                  </td>
+                  <td>{auditTypeLabels[a.audit_type || "mock"]}</td>
+                  <td>
+                    {a.completed_at && pct != null ? (
+                      <>
+                        {pct}%
+                        {band ? (
+                          <>
+                            {" "}
+                            <span className={styles.band} data-band={band}>
+                              {band}
+                            </span>
+                          </>
+                        ) : null}
+                      </>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td>{date(a.scheduled_for)}</td>
                   <td>{a.assigned_name}</td>
@@ -1204,11 +1800,175 @@ export function StoreAuditWorkspace(p: Props) {
                     </Link>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
       )}
     </div>
   );
+  function reportsView() {
+    const rows = p.audits;
+    const ready = readiness(rows);
+    const failed = topFailedQuestions(rows, 30);
+    const actions = openActions(rows);
+    const compare = mockVsAmazon(rows);
+    const repeats = repeatFailures(rows);
+    return (
+      <div className={styles.reportGrid}>
+        <section className={styles.card}>
+          <h2>Self-audit readiness</h2>
+          <p className={styles.muted}>
+            Stores with no completed self-audit in the last 7 days are flagged.
+          </p>
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Last self</th>
+                  <th>Last mock</th>
+                  <th>Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ready.slice(0, 20).map((r) => (
+                  <tr key={r.locationId}>
+                    <td>{r.store}</td>
+                    <td>
+                      {r.daysSinceSelf == null ? "—" : `${r.daysSinceSelf}d ago`}
+                    </td>
+                    <td>
+                      {r.daysSinceMock == null ? "—" : `${r.daysSinceMock}d ago`}
+                    </td>
+                    <td>
+                      {r.flagNoSelf7d ? (
+                        <span className={styles.band} data-band="Risk">
+                          No self 7d
+                        </span>
+                      ) : (
+                        "OK"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className={styles.card}>
+          <h2>Top failed questions (30d)</h2>
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Question</th>
+                  <th>Stores</th>
+                  <th>Fails</th>
+                  <th>Instances</th>
+                </tr>
+              </thead>
+              <tbody>
+                {failed.slice(0, 15).map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.label}</td>
+                    <td>{r.storesFailed}</td>
+                    <td>{r.fails}</td>
+                    <td>{r.instances}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className={styles.card}>
+          <h2>Open corrective actions</h2>
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Action</th>
+                  <th>Owner</th>
+                  <th>Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actions.slice(0, 20).map((r) => (
+                  <tr key={`${r.auditId}-${r.questionId}`}>
+                    <td>{r.store}</td>
+                    <td>{r.label}</td>
+                    <td>{r.owner}</td>
+                    <td>
+                      {date(r.dueAt || null)}
+                      {r.overdue ? " · overdue" : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className={styles.card}>
+          <h2>Mock vs Amazon (lenient &gt;10 pts)</h2>
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Mock</th>
+                  <th>Amazon</th>
+                  <th>Gap</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compare.slice(0, 15).map((r) => (
+                  <tr key={r.locationId}>
+                    <td>
+                      {r.store}
+                      {r.lenient ? (
+                        <>
+                          {" "}
+                          <span className={styles.band} data-band="Watch">
+                            Lenient
+                          </span>
+                        </>
+                      ) : null}
+                    </td>
+                    <td>{r.mockScore ?? "—"}</td>
+                    <td>{r.amazonScore ?? "—"}</td>
+                    <td>{r.gap ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className={styles.card}>
+          <h2>Repeat failures (last 3 audits)</h2>
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Question</th>
+                  <th>Times failed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repeats.slice(0, 15).map((r) => (
+                  <tr key={`${r.locationId}-${r.questionId}`}>
+                    <td>{r.store}</td>
+                    <td>{r.label}</td>
+                    <td>{r.fails}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    );
+  }
 }

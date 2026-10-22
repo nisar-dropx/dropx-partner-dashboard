@@ -16,6 +16,13 @@ const newQuestion = (): Question => ({
   guidance: "",
   required: true,
   allowNA: true,
+  kind: "yes_no_na",
+  scored: true,
+  compliantAnswer: "yes",
+  extraFields: [
+    { id: "instances", label: "No. of instances", type: "number", when: "gap" },
+  ],
+  defaultOwner: "Store Manager or Store In-charge",
   evidence: { when: "gap", min: 1, max: 5 },
   responseEvidence: { when: "always", min: 1, max: 5 },
   action: "",

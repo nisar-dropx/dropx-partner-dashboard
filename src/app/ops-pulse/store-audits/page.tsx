@@ -10,6 +10,7 @@ import {
   canInspect,
   canRespond,
   isManager,
+  isResponder,
 } from "@/lib/ops-pulse/store-audits/model";
 import { loadStationAuditMaster } from "@/lib/ops-pulse/station-audits";
 import { canDeleteStationAudit } from "@/lib/ops-pulse/station-audit-people";
@@ -53,6 +54,8 @@ export default async function Page({
   const evidence = focused ? await proofs(c, focused.id) : [];
   const legacy = await loadStationAuditMaster(c.companyId);
   const manager = isManager(c.auth, c.master.settings);
+  const storeLead =
+    manager || isResponder(c.auth, c.master.settings);
   return (
     <AppShell active="Store Audits" pageCode="store_audits">
       <StoreAuditWorkspace
@@ -65,12 +68,12 @@ export default async function Page({
         to={to}
         userId={c.auth.userId}
         canSchedule={
-          manager &&
+          storeLead &&
           !c.auth.readOnly &&
           hasPermission(c.auth, "store_audits", "add")
         }
         canEdit={
-          manager &&
+          storeLead &&
           !c.auth.readOnly &&
           hasPermission(c.auth, "store_audits", "edit")
         }
