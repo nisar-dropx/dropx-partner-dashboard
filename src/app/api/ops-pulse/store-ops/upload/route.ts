@@ -131,13 +131,18 @@ export async function POST(request: Request) {
         .eq("uploaded_by", c.auth.userId)
         .eq("ready", false)
         .select(
-          "id,captured_at,file_name,content_type,size,path,task_id,created_at,latitude,longitude",
+          "id,checklist_id,captured_at,file_name,content_type,size,path,task_id,created_at,latitude,longitude",
         )
         .maybeSingle();
       if (r.error) throw Error(r.error.message);
       if (!r.data) throw Error("Upload could not be confirmed.");
       return Response.json({
-        proof: { ...r.data, ready: true, uploaded_by: c.auth.userId },
+        proof: {
+          ...r.data,
+          checklist_id: r.data.checklist_id || c.checklist.id,
+          ready: true,
+          uploaded_by: c.auth.userId,
+        },
       });
     }
 

@@ -49,12 +49,36 @@ function MediaPreview({
 }) {
   const src = `${apiBase}/evidence/${proof.id}`;
   const mime = proof.content_type || "";
-  return (
+  const [mounted, setMounted] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (fullscreen) onExitFullscreen();
+        else onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen, onClose, onExitFullscreen]);
+
+  if (!mounted) return null;
+  return createPortal(
     <div
       className={fullscreen ? styles.mediaFs : styles.mediaModal}
       role="dialog"
       aria-modal="true"
-      aria-label={proof.file_name}
+      aria-label={proof.file_name || "Proof preview"}
       onClick={onClose}
     >
       <div
@@ -62,8 +86,8 @@ function MediaPreview({
         onClick={(e) => e.stopPropagation()}
       >
         <header className={styles.mediaHead}>
-          <div>
-            <strong>{proof.file_name}</strong>
+          <div className={styles.mediaHeadText}>
+            <strong>{proof.file_name || "Proof"}</strong>
             <small>{stamp(proof.captured_at)}</small>
           </div>
           <div className={styles.mediaActions}>
@@ -77,27 +101,55 @@ function MediaPreview({
               </button>
             )}
             <a className={styles.btnTiny} href={src} target="_blank" rel="noreferrer">
-              Open file
+              Open
             </a>
-            <button type="button" className={styles.btnTiny} onClick={onClose}>
-              Close
+            <button
+              type="button"
+              className={styles.mediaClose}
+              onClick={onClose}
+              aria-label="Close preview"
+            >
+              ✕
             </button>
           </div>
         </header>
         <div className={styles.mediaStage}>
-          {isImageMime(mime) ? (
+          {loadError ? (
+            <div className={styles.mediaFallback}>
+              <p>Preview could not load.</p>
+              <a className={styles.btnAccent} href={src} target="_blank" rel="noreferrer">
+                Open file
+              </a>
+            </div>
+          ) : isImageMime(mime) ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={src} alt={proof.file_name} />
+            <img
+              src={src}
+              alt={proof.file_name || "Proof"}
+              onError={() => setLoadError(true)}
+            />
           ) : isVideoMime(mime) ? (
-            <video src={src} controls playsInline autoPlay={fullscreen} />
+            <video
+              src={src}
+              controls
+              playsInline
+              autoPlay
+              onError={() => setLoadError(true)}
+            />
           ) : isPdfMime(mime) ? (
-            <iframe title={proof.file_name} src={src} />
+            <iframe title={proof.file_name || "PDF"} src={src} />
           ) : (
-            <p className={styles.meta}>Preview not available for this file type.</p>
+            <div className={styles.mediaFallback}>
+              <p>Preview not available for this file type.</p>
+              <a className={styles.btnAccent} href={src} target="_blank" rel="noreferrer">
+                Open file
+              </a>
+            </div>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -392,19 +444,12 @@ export function ProofPanel({
           ? "video/mp4,video/webm,video/quicktime"
           : proofAcceptAttribute(task.proof.kind);
 
-  useEffect(() => {
-    if (!preview) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (fullscreen) setFullscreen(false);
-        else setPreview(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [preview, fullscreen]);
-
   if (task.proof.kind === "none") return null;
+
+  const openPreview = (proof: Evidence) => {
+    setFullscreen(false);
+    setPreview(proof);
+  };
 
   const uploadFiles = async (files: FileList | File[]) => {
     const list = Array.from(files).slice(0, room);
@@ -495,8 +540,15 @@ export function ProofPanel({
         }
         if (!done.ok) throw Error(body.error || "Confirm failed.");
         if (!body.proof?.id) throw Error("Upload confirmed but proof was missing.");
-        next = [...next, body.proof];
+        const proof = {
+          ...body.proof,
+          ready: true,
+          checklist_id: body.proof.checklist_id || checklist.id,
+        } as Evidence;
+        next = [...next, proof];
         onChange(next);
+        // Show the just-uploaded proof so the SI can confirm stamp / content.
+        openPreview(proof);
       }
       setStatus("");
     } catch (err) {
@@ -524,11 +576,9 @@ export function ProofPanel({
             <button
               type="button"
               className={styles.proofThumbBtn}
-              onClick={() => {
-                setFullscreen(false);
-                setPreview(p);
-              }}
-              title={p.file_name}
+              onClick={() => openPreview(p)}
+              title={`Preview ${p.file_name || "proof"}`}
+              aria-label={`Preview ${p.file_name || "proof"}`}
             >
               {isImageMime(p.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -540,6 +590,7 @@ export function ProofPanel({
               ) : (
                 <span className={styles.proofBadge}>File</span>
               )}
+              <span className={styles.proofThumbHint}>View</span>
             </button>
             <small>{stamp(p.captured_at)}</small>
             {editable ? (

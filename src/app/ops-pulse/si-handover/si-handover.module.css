@@ -651,14 +651,15 @@
 .proofThumb {
   display: grid;
   gap: 0.05rem;
-  width: 2.6rem;
+  width: 3.2rem;
   min-width: 0;
 }
 .proofThumbBtn {
-  width: 2.6rem;
-  height: 2.6rem;
+  position: relative;
+  width: 3.2rem;
+  height: 3.2rem;
   border: 1px solid var(--si-line);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
   padding: 0;
   background: #f8fafc;
@@ -670,6 +671,17 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.proofThumbHint {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 0.12rem 0;
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 .proofBadge {
   font-size: 0.55rem;
@@ -988,23 +1000,26 @@
 .mediaFs {
   position: fixed;
   inset: 0;
-  z-index: 80;
-  background: rgba(15, 23, 42, 0.55);
+  z-index: 140;
+  background: rgba(2, 6, 23, 0.72);
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px))
+    max(0.75rem, env(safe-area-inset-right, 0px))
+    max(0.75rem, env(safe-area-inset-bottom, 0px))
+    max(0.75rem, env(safe-area-inset-left, 0px));
 }
 .mediaFs { background: #0b1220; padding: 0; }
 .mediaModalBody,
 .mediaFsBody {
   width: min(920px, 100%);
-  max-height: min(88vh, 900px);
+  max-height: min(92dvh, 900px);
   background: #fff;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.35);
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
 }
 .mediaFsBody {
   width: 100%;
@@ -1019,14 +1034,48 @@
   justify-content: space-between;
   gap: 0.75rem;
   align-items: center;
-  padding: 0.55rem 0.7rem;
+  padding: 0.65rem 0.75rem;
   border-bottom: 1px solid var(--si-line);
 }
 .mediaFsBody .mediaHead { border-bottom-color: #1e293b; }
-.mediaHead strong { display: block; font-size: 0.8rem; }
+.mediaHeadText {
+  min-width: 0;
+}
+.mediaHead strong {
+  display: block;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mediaHead small { color: var(--si-muted); font-size: 0.68rem; }
 .mediaFsBody .mediaHead small { color: #94a3b8; }
-.mediaActions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.mediaActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+.mediaClose {
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.mediaFsBody .mediaClose {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(248, 250, 252, 0.28);
+  color: #f8fafc;
+}
 .mediaStage {
   min-height: 0;
   display: grid;
@@ -1038,7 +1087,7 @@
 .mediaStage video,
 .mediaStage iframe {
   max-width: 100%;
-  max-height: min(72vh, 780px);
+  max-height: min(72dvh, 780px);
   width: auto;
   height: auto;
   border: 0;
@@ -1048,10 +1097,36 @@
 .mediaFsBody .mediaStage img,
 .mediaFsBody .mediaStage video,
 .mediaFsBody .mediaStage iframe {
-  max-height: calc(100vh - 3.5rem);
+  max-height: calc(100dvh - 3.5rem);
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+.mediaFallback {
+  display: grid;
+  gap: 0.75rem;
+  place-items: center;
+  color: #e2e8f0;
+  text-align: center;
+  padding: 1.5rem;
+}
+.mediaFallback p { margin: 0; font-size: 0.85rem; }
+
+@media (max-width: 640px) {
+  .mediaModalBody {
+    width: 100%;
+    max-height: 94dvh;
+    border-radius: 14px 14px 10px 10px;
+  }
+  .mediaHead {
+    align-items: flex-start;
+  }
+  .mediaActions .btnTiny {
+    display: none;
+  }
+  .mediaActions .mediaClose {
+    display: grid;
+  }
 }
 
 .progressWrap { display: grid; gap: 0.2rem; }
