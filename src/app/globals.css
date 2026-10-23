@@ -860,6 +860,10 @@ a {
   line-height: 1.45;
 }
 
+.sidebar-footer > span {
+  display: block;
+}
+
 .main {
   min-width: 0;
   max-width: 100%;

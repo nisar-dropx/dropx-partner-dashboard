@@ -140,8 +140,8 @@ export async function AppShell({ children, active, pageCode }: { children: React
     </>
   );
   const sidebarIdentity = <>
-    <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong><br />
-    {authorization.designationName ?? authorization.roleName ?? "Portal user"}
+    <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong>
+    <span>{authorization.designationName ?? authorization.roleName ?? "Portal user"}</span>
   </>;
 
   return (

@@ -42,6 +42,7 @@
     "test:review-associate-pay": "node --test src/lib/ops-pulse/review-associate-pay.test.mjs",
     "test:store-audits": "node --test src/lib/ops-pulse/store-audits/*.test.mjs",
     "test:cod-status": "node --experimental-strip-types --test src/lib/ops-pulse/cod-remittance-variance.test.mjs src/lib/ops-pulse/cod-status.test.mjs src/lib/ops-pulse/cod-pickup.test.mjs src/lib/ops-pulse/cod-cms-followup.test.mjs src/lib/ops-pulse/cod-reconciliation.test.mjs src/lib/ops-pulse/cod-column-filters.test.mjs src/lib/ops-pulse/cod-refresh.test.mjs src/lib/ops-pulse/cod-lifecycle.test.mjs src/lib/ops-pulse/cod-status-server.test.mjs src/app/master/cod-master/lifecycle.test.mjs src/app/master/cod-master/actions.test.mjs src/app/api/ops-pulse/cod/status/route.test.mjs",
+    "test:mcp": "node --experimental-strip-types --test src/lib/mcp/*.test.mjs",
     "test:ops-design": "node --experimental-strip-types --test src/lib/ops-pulse/design-navigation.test.mjs src/components/ops-design-shell.test.mjs src/components/ops-compact-workspaces.test.mjs src/components/ops-permission-matrix.test.mjs src/components/ops-ai-chat.test.mjs",
     "verify:ops-app": "node scripts/verify-opspulse-app.mjs && node --test scripts/test-opspulse-service-worker.mjs src/components/ops-app-install.test.mjs"
   },

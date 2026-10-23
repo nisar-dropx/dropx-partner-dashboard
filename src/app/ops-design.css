@@ -77,8 +77,21 @@ body:has(.ops-modern) .ops-modern [aria-label="Business workspace"] button[aria-
 .ops-group-chevron { transition:transform .16s; margin-left:auto; }
 [aria-expanded="true"] > .ops-group-chevron { transform:rotate(180deg); }
 .ops-nav-empty { color:var(--muted); font-size:11.5px; padding:10px; }
-body:has(.ops-modern) .ops-modern .sidebar-footer { flex-shrink:0; margin:0; padding:13px 8px 0; border:0; border-top:1px solid var(--line); border-radius:0; background:none; font-size:10px; overflow-wrap:anywhere; }
-body:has(.ops-modern) .ops-modern .sidebar-footer strong { display:inline-block; font-size:11.5px; color:var(--ink); margin-bottom:3px; }
+body:has(.ops-modern) .ops-modern .sidebar-footer {
+  flex-shrink:0; display:grid; gap:7px; margin:0; padding:8px 6px 0;
+  border:0; border-top:1px solid var(--line); border-radius:0; background:none;
+  font-size:10px; overflow-wrap:anywhere;
+}
+/* People-dense identity card: name + role only, not the whole footer stack. */
+body:has(.ops-modern) .ops-modern .ops-sidebar-profile {
+  padding:7px 9px; border:1px solid #e8ebf0; border-radius:8px; background:#f8fafc;
+  color:var(--muted); font-size:10.5px; line-height:1.35;
+}
+body:has(.ops-modern) .ops-modern .ops-sidebar-profile strong {
+  display:block; font-size:11.5px; font-weight:750; color:var(--ink); margin:0 0 1px; line-height:1.25;
+}
+body:has(.ops-modern) .ops-modern .ops-sidebar-profile span { display:block; color:var(--muted); }
+body:has(.ops-modern) .ops-modern .sidebar-footer > strong { display:inline-block; font-size:11.5px; color:var(--ink); margin-bottom:3px; }
 body:has(.ops-modern) .ops-modern > .main { min-width:0; }
 body:has(.ops-modern) .ops-modern .topbar {
   height:56px; min-height:56px; padding:0 clamp(18px,2.7vw,38px); gap:14px; justify-content:space-between;
@@ -195,8 +208,12 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 .ops-modern .user-menu-profile :is(strong,span,small) { white-space:normal; overflow-wrap:anywhere; }
 .ops-modern .user-menu-action { min-height:44px; font-family:inherit; font-size:13px; font-weight:600; line-height:1.5; }
 .ops-modern .user-menu-action > span { display:flex; align-items:center; gap:9px; }
-.ops-modern .ops-sidebar-signout { margin-top:10px; }
-.ops-modern .ops-sidebar-signout button { border:1px solid var(--line); border-radius:8px; background:#fff; }
+.ops-modern .ops-sidebar-signout { margin:0; }
+.ops-modern .ops-sidebar-signout button {
+  width:100%; min-height:32px; padding:6px 9px; border:1px solid var(--line); border-radius:8px;
+  background:#fff; font-size:11.5px; font-weight:650; gap:7px;
+}
+.ops-modern .ops-sidebar-signout button svg { width:14px; height:14px; }
 .ops-modern .ops-scope-options input:focus-visible + span { outline:2px solid var(--ops-focus); outline-offset:2px; }
 .ops-modern .ops-scope-options span { font-size:12px; }
 .ops-modern .owner-preview-banner { flex-wrap:wrap; }
@@ -337,7 +354,11 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 .ops-download-page header a { font-size:12px; color:#475467; }
 .ops-download-page h1 { font-size:32px; letter-spacing:-.035em; line-height:1.15; }
 .ops-download-intro { color:#667085; font-size:14px; line-height:1.6; margin-bottom:30px; }
-.ops-modern .ops-sidebar-install { display:flex; align-items:center; gap:8px; min-height:40px; margin-top:10px; color:#475467; text-decoration:none; font-size:12px; }
+.ops-modern .ops-sidebar-install {
+  display:flex; align-items:center; gap:6px; min-height:28px; margin:0; padding:0 2px;
+  color:#667085; text-decoration:none; font-size:10.5px; font-weight:600;
+}
+.ops-modern .ops-sidebar-install svg { width:13px; height:13px; flex-shrink:0; }
 @media(max-width:480px) {
   .ops-install-actions { grid-template-columns:1fr; }
   .ops-install-help { min-height:44px; }
