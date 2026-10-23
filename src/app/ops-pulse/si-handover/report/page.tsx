@@ -91,13 +91,9 @@ export default async function Page({
     }
 
     const cur = currentShift(new Date(), c.master.settings.shiftSlots);
-    const defaultFrom = (() => {
-      const d = new Date(`${cur.shiftDate}T12:00:00+05:30`);
-      d.setDate(d.getDate() - 13);
-      return d.toISOString().slice(0, 10);
-    })();
-    const from = searchParams?.from || defaultFrom;
-    const to = searchParams?.to || cur.shiftDate;
+    const today = cur.shiftDate;
+    const from = searchParams?.from || today;
+    const to = searchParams?.to || today;
     const prior = priorEqualWindow(from, to);
     const [{ locations, rows }, priorList] = await Promise.all([
       listSi(c.auth, c.master, {
@@ -153,12 +149,7 @@ export default async function Page({
   }
 
   const today = todayIst();
-  const defaultFrom = (() => {
-    const d = new Date(`${today}T12:00:00+05:30`);
-    d.setDate(d.getDate() - 13);
-    return d.toISOString().slice(0, 10);
-  })();
-  const from = searchParams?.from || defaultFrom;
+  const from = searchParams?.from || today;
   const to = searchParams?.to || today;
   const prior = priorEqualWindow(from, to);
   const [{ locations, rows }, priorList] = await Promise.all([

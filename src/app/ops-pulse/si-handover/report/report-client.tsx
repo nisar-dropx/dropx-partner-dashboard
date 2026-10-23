@@ -1,7 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type CSSProperties,
+} from "react";
 import { statusLabels as siStatusLabels } from "@/lib/ops-pulse/si-handover/model";
 import {
   filterProgressRows as filterSi,
@@ -57,10 +63,10 @@ function formatIstRange(from: string, to: string) {
 }
 
 const RANGE_PRESETS = [
+  { id: "today", label: "Today", days: 0 },
   { id: "7d", label: "Last 7 days", days: 6 },
   { id: "14d", label: "Last 14 days", days: 13 },
   { id: "30d", label: "Last 30 days", days: 29 },
-  { id: "today", label: "Today", days: 0 },
 ] as const;
 
 export function ActivitiesReportClient(props: Props) {
@@ -130,14 +136,14 @@ export function ActivitiesReportClient(props: Props) {
     ? props.shift?.rows.length || 0
     : props.store?.rows.length || 0;
   return (
-    <div className={`${styles.pageWide} ${rui.shell}`}>
+    <div className={`${styles.pageWide} ${rui.shell}${pending ? ` ${rui.pending}` : ""}`}>
       <header className={rui.hero}>
         <p className={rui.eyebrow}>Dark Store · Activities & Handover</p>
         <h1>{isShift ? "Shift operations report" : "Store operations report"}</h1>
-        <p>
+        <p className={rui.heroLead}>
           {isShift
-            ? "What’s stuck, who’s quiet, what’s improving — then open any checklist as a report."
-            : "What’s stuck, who’s quiet, what’s improving — then open any day checklist as a report."}
+            ? "See what’s stuck, who’s quiet, and what’s improving — then open any checklist as a full report."
+            : "See what’s stuck, who’s quiet, and what’s improving — then open any day checklist as a full report."}
         </p>
         <div className={rui.heroMeta}>
           <span className={rui.metaPill}>
@@ -158,62 +164,52 @@ export function ActivitiesReportClient(props: Props) {
         showStoreReport={props.showStore}
       />
 
-      <section className={styles.panel}>
-        <div className={styles.reportToolbar}>
-          <div className={styles.dateRange}>
-            <div className={styles.dateRangeHead}>
-              <strong>Date range</strong>
-              <span className={styles.dateRangeLabel}>
-                {formatIstRange(from, to)} · IST
-              </span>
-            </div>
-            <div className={styles.datePresets} role="group" aria-label="Quick ranges">
-              {RANGE_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={
-                    activePreset?.id === p.id
-                      ? styles.datePresetOn
-                      : styles.datePreset
-                  }
-                  disabled={pending}
-                  onClick={() => applyPreset(p.days)}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <div className={styles.filterBar}>
-              <label className={styles.field}>
-                From
-                <input
-                  type="date"
-                  value={from}
-                  max={to || undefined}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
-              </label>
-              <label className={styles.field}>
-                To
-                <input
-                  type="date"
-                  value={to}
-                  min={from || undefined}
-                  onChange={(e) => setTo(e.target.value)}
-                />
-              </label>
-              <button
-                type="button"
-                className={styles.btnAccent}
-                disabled={pending || (!from && !to)}
-                onClick={applyRange}
-              >
-                {pending ? "Loading…" : "Apply"}
-              </button>
-            </div>
-          </div>
-          <span className={styles.chipOk}>
+      <section className={rui.rangeCard}>
+        <div className={rui.rangeHead}>
+          <strong>Date range</strong>
+          <span>{formatIstRange(from, to)} · IST</span>
+        </div>
+        <div className={rui.presets} role="group" aria-label="Quick ranges">
+          {RANGE_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={activePreset?.id === p.id ? rui.presetOn : rui.preset}
+              disabled={pending}
+              onClick={() => applyPreset(p.days)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className={rui.rangeRow}>
+          <label className={rui.field}>
+            From
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </label>
+          <label className={rui.field}>
+            To
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className={rui.applyBtn}
+            disabled={pending || (!from && !to)}
+            onClick={applyRange}
+          >
+            {pending ? "Loading…" : "Apply"}
+          </button>
+          <span className={rui.kindChip}>
             {props.tab === "shift" ? "Shift handovers" : "Store day checklists"}
           </span>
         </div>
@@ -289,6 +285,61 @@ function barClass(pct: number) {
   if (pct >= 80) return rui.bar;
   if (pct >= 50) return rui.barMid;
   return rui.barLow;
+}
+
+function pctTone(pct: number) {
+  if (pct >= 80) return rui.pctOk;
+  if (pct >= 40) return rui.pctMid;
+  return rui.pctLow;
+}
+
+function PulseTile({
+  label,
+  value,
+  hint,
+  tone,
+  ringPct,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone: "ok" | "warn" | "bad" | "neutral";
+  ringPct?: number | null;
+}) {
+  const cls =
+    tone === "ok"
+      ? rui.pulseOk
+      : tone === "warn"
+        ? rui.pulseWarn
+        : tone === "bad"
+          ? rui.pulseBad
+          : rui.pulse;
+  const ringColor =
+    tone === "bad" ? "#ef4444" : tone === "warn" ? "#f59e0b" : "#14b8a6";
+  const showRing = ringPct != null && Number.isFinite(ringPct);
+  return (
+    <div className={cls}>
+      <div className={rui.pulseCopy}>
+        <p className={rui.pulseLabel}>{label}</p>
+        <p className={rui.pulseValue}>{value}</p>
+        <p className={rui.pulseHint}>{hint}</p>
+      </div>
+      {showRing ? (
+        <div
+          className={rui.ring}
+          style={
+            {
+              "--ring-pct": Math.max(0, Math.min(100, ringPct)),
+              "--ring-color": ringColor,
+            } as CSSProperties
+          }
+          aria-hidden
+        >
+          <span>{Math.round(ringPct)}%</span>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function heatClass(stale: number, open: number, active: boolean) {
@@ -494,34 +545,35 @@ function ShiftReportBody({
           />
         ) : (
           <div className={rui.pulseGrid} aria-label="Shift pulse">
-            <div className={rui.pulseOk}>
-              <p className={rui.pulseLabel}>Avg completion</p>
-              <p className={rui.pulseValue}>{s.avgPct}%</p>
-              <p className={rui.pulseHint}>
-                {s.shifts} shifts · submit {s.submitRate}%
-              </p>
-            </div>
-            <div className={s.open ? rui.pulseWarn : rui.pulse}>
-              <p className={rui.pulseLabel}>Still open</p>
-              <p className={rui.pulseValue}>{s.open}</p>
-              <p className={rui.pulseHint}>
-                Accept {s.acceptRate}% · overdue {s.overdueAccept}
-              </p>
-            </div>
-            <div className={s.staleOpen ? rui.pulseBad : rui.pulseOk}>
-              <p className={rui.pulseLabel}>Broken / stale</p>
-              <p className={rui.pulseValue}>{s.staleOpen}</p>
-              <p className={rui.pulseHint}>Quiet past escalate window</p>
-            </div>
-            <div className={rui.pulseOk}>
-              <p className={rui.pulseLabel}>Trend vs prior</p>
-              <p className={rui.pulseValue}>{trendNet || "—"}</p>
-              <p className={rui.pulseHint}>
-                {trendNet
+            <PulseTile
+              label="Avg completion"
+              value={`${s.avgPct}%`}
+              hint={`${s.shifts} shifts · submit ${s.submitRate}%`}
+              tone={s.avgPct >= 80 ? "ok" : s.avgPct >= 40 ? "warn" : "bad"}
+              ringPct={s.avgPct}
+            />
+            <PulseTile
+              label="Still open"
+              value={String(s.open)}
+              hint={`Accept ${s.acceptRate}% · overdue ${s.overdueAccept}`}
+              tone={s.open ? "warn" : "ok"}
+            />
+            <PulseTile
+              label="Broken / stale"
+              value={String(s.staleOpen)}
+              hint="Quiet past escalate window"
+              tone={s.staleOpen ? "bad" : "ok"}
+            />
+            <PulseTile
+              label="Trend vs prior"
+              value={trendNet || "—"}
+              hint={
+                trendNet
                   ? "Same-length previous window"
-                  : "No prior window to compare"}
-              </p>
-            </div>
+                  : "No prior window to compare"
+              }
+              tone="ok"
+            />
           </div>
         )}
       </section>
@@ -764,16 +816,19 @@ function ShiftReportBody({
         )}
       </section>
 
-      <section className={styles.panel}>
-        <div className={styles.shiftListHead}>
-          <h2 className={styles.sectionTitle}>Shift detail</h2>
-          <span className={styles.chip}>
+      <section className={rui.card}>
+        <div className={rui.cardHead}>
+          <div>
+            <h2>Shift detail</h2>
+            <p>Filter, sort, then open any checklist as a report</p>
+          </div>
+          <span className={rui.countChip}>
             {filtered.length} shown · slots{" "}
             {s.bySlot.map((b) => `${b.label}:${b.shifts}`).join(" · ") || "—"}
           </span>
         </div>
-        <div className={styles.filterBar}>
-          <label className={styles.field}>
+        <div className={rui.filterBar}>
+          <label className={rui.field}>
             Store
             <select
               value={store}
@@ -790,7 +845,7 @@ function ShiftReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Shift Incharge
             <select
               value={person}
@@ -807,7 +862,7 @@ function ShiftReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Status
             <select
               value={status}
@@ -826,7 +881,7 @@ function ShiftReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Slot
             <select
               value={slot}
@@ -843,7 +898,7 @@ function ShiftReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Sort
             <select
               value={sort}
@@ -861,7 +916,7 @@ function ShiftReportBody({
               <option value="status">Status</option>
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Search
             <input
               value={q}
@@ -874,8 +929,8 @@ function ShiftReportBody({
           </label>
         </div>
 
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        <div className={rui.tableWrap}>
+          <table className={rui.table}>
             <thead>
               <tr>
                 <th>Shift</th>
@@ -894,56 +949,56 @@ function ShiftReportBody({
                 paged.rows.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      {r.store_code} · {r.shift_date} {r.shift_slot}
+                      <div className={rui.rowTitle}>
+                        <strong>
+                          {r.store_code} · {r.shift_slot}
+                        </strong>
+                        <small>{r.shift_date}</small>
+                      </div>
                     </td>
                     <td>{r.outgoing_name}</td>
                     <td>
                       <span
-                        className={`${styles.statusPill} ${
+                        className={
                           r.status === "open"
-                            ? styles.statusOpen
+                            ? rui.statusOpen
                             : r.status === "submitted"
-                              ? styles.statusSubmitted
+                              ? rui.statusSubmitted
                               : r.status === "accepted"
-                                ? styles.statusAccepted
+                                ? rui.statusAccepted
                                 : r.status === "rejected"
-                                  ? styles.statusRejected
-                                  : styles.statusCancelled
-                        }`}
+                                  ? rui.statusRejected
+                                  : rui.statusCancelled
+                        }
                       >
                         {siStatusLabels[r.status]}
                       </span>
                       {r.escalate !== "none" ? (
-                        <>
-                          {" "}
-                          <span
-                            className={`${styles.statusPill} ${styles.statusSubmitted}`}
-                          >
-                            escalate {r.escalate}
-                          </span>
-                        </>
+                        <span className={rui.escalatePill}>
+                          escalate {r.escalate}
+                        </span>
                       ) : null}
                     </td>
                     <td>
-                      <span
-                        className={
-                          r.pct >= 80
-                            ? styles.pctOk
-                            : r.pct >= 40
-                              ? styles.pctMid
-                              : styles.pctLow
-                        }
-                      >
-                        {r.pct}%
-                      </span>{" "}
-                      <small>
-                        ({r.answered}/{r.total})
-                      </small>
+                      <div className={rui.completionCell}>
+                        <div className={rui.completionTop}>
+                          <strong className={pctTone(r.pct)}>{r.pct}%</strong>
+                          <span>
+                            {r.answered}/{r.total}
+                          </span>
+                        </div>
+                        <span className={barClass(r.pct)} aria-hidden>
+                          <i
+                            className={rui.barFill}
+                            style={{ width: `${Math.max(0, Math.min(100, r.pct))}%` }}
+                          />
+                        </span>
+                      </div>
                     </td>
                     <td>
                       <button
                         type="button"
-                        className={rui.openBtn}
+                        className={rui.openBtnPrimary}
                         onClick={() => onOpenReport(r.id)}
                       >
                         Open report
@@ -1054,32 +1109,35 @@ function StoreReportBody({
           />
         ) : (
           <div className={rui.pulseGrid} aria-label="Store pulse">
-            <div className={rui.pulseOk}>
-              <p className={rui.pulseLabel}>Avg completion</p>
-              <p className={rui.pulseValue}>{s.avgPct}%</p>
-              <p className={rui.pulseHint}>
-                {s.days} days · submit {s.submitRate}%
-              </p>
-            </div>
-            <div className={s.open ? rui.pulseWarn : rui.pulse}>
-              <p className={rui.pulseLabel}>Still open</p>
-              <p className={rui.pulseValue}>{s.open}</p>
-              <p className={rui.pulseHint}>Needs finish or close</p>
-            </div>
-            <div className={s.staleOpen ? rui.pulseBad : rui.pulseOk}>
-              <p className={rui.pulseLabel}>Broken / stale</p>
-              <p className={rui.pulseValue}>{s.staleOpen}</p>
-              <p className={rui.pulseHint}>Quiet past escalate window</p>
-            </div>
-            <div className={rui.pulseOk}>
-              <p className={rui.pulseLabel}>Trend vs prior</p>
-              <p className={rui.pulseValue}>{trendNet || "—"}</p>
-              <p className={rui.pulseHint}>
-                {trendNet
+            <PulseTile
+              label="Avg completion"
+              value={`${s.avgPct}%`}
+              hint={`${s.days} days · submit ${s.submitRate}%`}
+              tone={s.avgPct >= 80 ? "ok" : s.avgPct >= 40 ? "warn" : "bad"}
+              ringPct={s.avgPct}
+            />
+            <PulseTile
+              label="Still open"
+              value={String(s.open)}
+              hint="Needs finish or close"
+              tone={s.open ? "warn" : "ok"}
+            />
+            <PulseTile
+              label="Broken / stale"
+              value={String(s.staleOpen)}
+              hint="Quiet past escalate window"
+              tone={s.staleOpen ? "bad" : "ok"}
+            />
+            <PulseTile
+              label="Trend vs prior"
+              value={trendNet || "—"}
+              hint={
+                trendNet
                   ? "Same-length previous window"
-                  : "No prior window to compare"}
-              </p>
-            </div>
+                  : "No prior window to compare"
+              }
+              tone="ok"
+            />
           </div>
         )}
       </section>
@@ -1303,13 +1361,16 @@ function StoreReportBody({
         )}
       </section>
 
-      <section className={styles.panel}>
-        <div className={styles.shiftListHead}>
-          <h2 className={styles.sectionTitle}>Day detail</h2>
-          <span className={styles.chip}>{filtered.length} shown</span>
+      <section className={rui.card}>
+        <div className={rui.cardHead}>
+          <div>
+            <h2>Day detail</h2>
+            <p>Filter, sort, then open any day checklist as a report</p>
+          </div>
+          <span className={rui.countChip}>{filtered.length} shown</span>
         </div>
-        <div className={styles.filterBar}>
-          <label className={styles.field}>
+        <div className={rui.filterBar}>
+          <label className={rui.field}>
             Store
             <select
               value={store}
@@ -1326,7 +1387,7 @@ function StoreReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Owner
             <select
               value={person}
@@ -1343,7 +1404,7 @@ function StoreReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Status
             <select
               value={status}
@@ -1360,7 +1421,7 @@ function StoreReportBody({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Sort
             <select
               value={sort}
@@ -1378,7 +1439,7 @@ function StoreReportBody({
               <option value="status">Status</option>
             </select>
           </label>
-          <label className={styles.field}>
+          <label className={rui.field}>
             Search
             <input
               value={q}
@@ -1391,8 +1452,8 @@ function StoreReportBody({
           </label>
         </div>
 
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        <div className={rui.tableWrap}>
+          <table className={rui.table}>
             <thead>
               <tr>
                 <th>Day</th>
@@ -1411,42 +1472,45 @@ function StoreReportBody({
                 paged.rows.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      {r.store_code} · {r.work_date}
+                      <div className={rui.rowTitle}>
+                        <strong>{r.store_code}</strong>
+                        <small>{r.work_date}</small>
+                      </div>
                     </td>
                     <td>{r.owner_name}</td>
                     <td>
                       <span
-                        className={`${styles.statusPill} ${
+                        className={
                           r.status === "open"
-                            ? styles.statusOpen
+                            ? rui.statusOpen
                             : r.status === "submitted"
-                              ? styles.statusSubmitted
-                              : styles.statusCancelled
-                        }`}
+                              ? rui.statusSubmitted
+                              : rui.statusCancelled
+                        }
                       >
                         {storeStatusLabels[r.status]}
                       </span>
                     </td>
                     <td>
-                      <span
-                        className={
-                          r.pct >= 80
-                            ? styles.pctOk
-                            : r.pct >= 40
-                              ? styles.pctMid
-                              : styles.pctLow
-                        }
-                      >
-                        {r.pct}%
-                      </span>{" "}
-                      <small>
-                        ({r.answered}/{r.total})
-                      </small>
+                      <div className={rui.completionCell}>
+                        <div className={rui.completionTop}>
+                          <strong className={pctTone(r.pct)}>{r.pct}%</strong>
+                          <span>
+                            {r.answered}/{r.total}
+                          </span>
+                        </div>
+                        <span className={barClass(r.pct)} aria-hidden>
+                          <i
+                            className={rui.barFill}
+                            style={{ width: `${Math.max(0, Math.min(100, r.pct))}%` }}
+                          />
+                        </span>
+                      </div>
                     </td>
                     <td>
                       <button
                         type="button"
-                        className={rui.openBtn}
+                        className={rui.openBtnPrimary}
                         onClick={() => onOpenReport(r.id)}
                       >
                         Open report
@@ -1475,10 +1539,10 @@ function Pager({
 }) {
   if (pages <= 1) return null;
   return (
-    <div className={styles.pager}>
+    <div className={rui.pager}>
       <button
         type="button"
-        className={styles.lineAdd}
+        className={rui.pagerBtn}
         disabled={page <= 1}
         onClick={() => setPage((p) => Math.max(1, p - 1))}
       >
@@ -1489,7 +1553,7 @@ function Pager({
       </span>
       <button
         type="button"
-        className={styles.lineAdd}
+        className={rui.pagerBtn}
         disabled={page >= pages}
         onClick={() => setPage((p) => Math.min(pages, p + 1))}
       >
