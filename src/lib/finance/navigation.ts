@@ -16,6 +16,7 @@ export const financeNavItems: NavItem[] = [
       { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
       { code: "payment_process", label: "Payment Process", href: "/payments/process" },
       { code: "workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
+      { code: "payable_balance", label: "Payable balance", href: "/payments/payable-balance" },
       { code: "payment_reports", label: "Reports", href: "/payments/report" }
     ]
   },

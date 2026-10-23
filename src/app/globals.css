@@ -23700,6 +23700,116 @@ td strong,
 .client-id-master { display: grid; gap: 14px; }
 .client-id-master .performance-summary-grid { margin: 0; }
 .client-id-bulk-panel .panel-head { align-items: center; }
+
+/* Payments · consolidated payable balance */
+.payable-balance-page {
+  display: grid;
+  gap: 16px;
+}
+
+.payable-balance-filter .panel-body {
+  padding: 14px 16px;
+}
+
+.payable-balance-filter form {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.payable-balance-filter label {
+  display: grid;
+  gap: 6px;
+  min-width: min(320px, 100%);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.payable-balance-filter .subtle {
+  flex: 1 1 360px;
+  margin: 0 0 7px;
+}
+
+.payable-balance-period-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.payable-balance-period-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.payable-balance-period-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.summary-grid.payable-balance-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.payable-balance-metrics .metric-card {
+  min-height: 118px;
+}
+
+.payable-balance-metrics .metric-card strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.payable-balance-metrics .payable-balance-due {
+  border-color: #fdba74;
+  background: #fffaf5;
+}
+
+.payable-balance-table-panel .panel-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.payable-balance-table-panel .panel-head .subtle {
+  margin: 0;
+}
+
+.payable-balance-table-panel table {
+  min-width: 720px;
+}
+
+.payable-balance-table-panel th:not(:first-child),
+.payable-balance-table-panel td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.payable-balance-table-panel .payable-balance-value {
+  color: #b42318;
+}
+
+.payable-balance-table-panel tfoot th {
+  border-top: 2px solid var(--line);
+  background: #fafbfc;
+}
+
+@media (max-width: 900px) {
+  .summary-grid.payable-balance-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .payable-balance-filter form,
+  .payable-balance-filter label,
+  .payable-balance-filter .button {
+    width: 100%;
+  }
+}
 .client-id-master-layout { display: grid; grid-template-columns: minmax(260px,.72fr) minmax(0,1.8fr); gap: 14px; align-items: start; }
 .client-id-station-list, .client-id-station-editor, .client-id-worker-panel { overflow: hidden; border-radius: 14px; }
 .client-id-station-links { display: grid; max-height: 650px; overflow: auto; padding: 8px; }
