@@ -726,6 +726,43 @@
 .upload input {
   display: none;
 }
+.proofFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.proofActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.proofAdd {
+  min-height: 36px;
+  padding: 7px 12px !important;
+  border: 1px solid #d5dce5 !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #276157 !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+.proofAdd:hover:not(:disabled) {
+  border-color: #85b6a9 !important;
+  background: #eaf3f0 !important;
+}
+.proofAdd:disabled {
+  opacity: 0.55;
+}
+.proofStatus {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 11px;
+}
 .facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -943,6 +980,8 @@
 :global(.ops-modern) .formGrid { gap:13px; }
 :global(.ops-modern) .page input[type="checkbox"] { accent-color:var(--brand-dark); }
 :global(.ops-modern) .page .upload { color:var(--ops-selected-ink); background:#fffaf7; border-color:#e6cfc1; }
+:global(.ops-modern) .proofAdd { color:var(--ops-selected-ink) !important; border-color:var(--line) !important; }
+:global(.ops-modern) .proofAdd:hover:not(:disabled) { background:var(--ops-selected-bg) !important; border-color:var(--ops-selected-border) !important; }
 :global(.ops-modern) .outcomes button[aria-pressed="true"][data-outcome="pass"] { background:#e7f6ed; border-color:#b7dbc5; color:#087443; }
 :global(.ops-modern) .outcomes button[aria-pressed="true"][data-outcome="gap"] { background:#fff4df; border-color:#efd39f; color:#9a5b00; }
 :global(.ops-modern) .outcomes button[aria-pressed="true"][data-outcome="na"] { background:#eef1f4; border-color:#d4dbe4; color:#475467; }

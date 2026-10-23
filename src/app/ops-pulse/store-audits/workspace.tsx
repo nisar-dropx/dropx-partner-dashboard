@@ -41,6 +41,11 @@ import {
 import type { AuditAssignee } from "@/lib/ops-pulse/station-audit-people";
 import { EvidencePreview } from "@/components/evidence-preview";
 import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
+import { OpsLiveCamera } from "@/components/ops-live-camera";
+import {
+  prepareProofFile,
+  readProofGps,
+} from "@/lib/ops-pulse/proof-media";
 import {
   scheduleStoreAudit,
   startStoreAudit,
@@ -119,6 +124,7 @@ function ProofFiles({
   editable,
   userId,
   onError,
+  storeLabel,
 }: {
   audit: StoreAudit;
   q: Question;
@@ -128,12 +134,18 @@ function ProofFiles({
   editable: boolean;
   userId: string;
   onError: (e: string) => void;
+  storeLabel?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [liveOpen, setLiveOpen] = useState(false);
+  const camInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const existing = proofs.filter(
     (p) => p.question_id === q.id && p.phase === phase,
   );
   const rule = phase === "audit" ? q.evidence : q.responseEvidence;
+  const room = Math.max(0, rule.max - existing.length);
   const call = async (data: Record<string, unknown>) => {
     const r = await fetch("/api/ops-pulse/store-audits/upload", {
       method: "POST",
@@ -148,6 +160,102 @@ function ProofFiles({
     const j = await r.json();
     if (!r.ok) throw Error(j.error || "Upload failed.");
     return j;
+  };
+  const inferMime = (file: File) => {
+    const extension = file.name.split(".").pop()?.toLowerCase() || "";
+    return (
+      file.type ||
+      (
+        {
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          png: "image/png",
+          webp: "image/webp",
+          heic: "image/heic",
+          heif: "image/heif",
+          pdf: "application/pdf",
+        } as Record<string, string>
+      )[extension] ||
+      "image/jpeg"
+    );
+  };
+  const uploadFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files).slice(0, room);
+    if (!list.length) {
+      onError("No file was selected. Try Take, Live, or Attach again.");
+      return;
+    }
+    if (list.length + existing.length > rule.max) {
+      onError(`Use up to ${rule.max} files for this question.`);
+      return;
+    }
+    setBusy(true);
+    setStatus("Getting location…");
+    onError("");
+    try {
+      if (!supabase) throw Error("Upload service unavailable.");
+      const gps = await readProofGps(4500);
+      let index = 0;
+      for (const raw of list) {
+        index += 1;
+        setStatus(
+          list.length > 1
+            ? `Processing ${index}/${list.length}…`
+            : "Compressing & stamping…",
+        );
+        const capturedAt = new Date().toISOString();
+        const prepared = await prepareProofFile(raw, {
+          capturedAt,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          accuracyM: gps.accuracyM,
+          storeLabel: storeLabel || null,
+        });
+        const mime = (prepared.type || inferMime(raw)).toLowerCase();
+        const file =
+          prepared.type === mime
+            ? prepared
+            : new File(
+                [prepared],
+                prepared.name || raw.name || `proof-${Date.now()}.jpg`,
+                {
+                  type: mime,
+                  lastModified: prepared.lastModified || Date.now(),
+                },
+              );
+        if (file.size < 1) throw Error("Captured file was empty. Try again.");
+        setStatus(
+          list.length > 1 ? `Uploading ${index}/${list.length}…` : "Uploading…",
+        );
+        const signed = await call({
+          phase: "prepare",
+          fileName: file.name,
+          size: file.size,
+          contentType: mime,
+        });
+        const uploaded = await supabase.storage
+          .from(signed.bucket)
+          .uploadToSignedUrl(signed.path, signed.token, file, {
+            contentType: mime,
+          });
+        if (uploaded.error) throw Error(uploaded.error.message);
+        const done = await call({ phase: "complete", id: signed.id });
+        setProofs((current) => [...current, done.proof as Proof]);
+      }
+      setStatus("");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Upload failed.");
+      setStatus("");
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pickFromInput = (input: HTMLInputElement | null) => {
+    if (!input?.files?.length) return;
+    const files = Array.from(input.files);
+    input.value = "";
+    void uploadFiles(files).catch(() => undefined);
   };
   const pillKind =
     rule.when === "optional" ? "optional" : rule.when === "gap" ? "gap" : "always";
@@ -202,62 +310,62 @@ function ProofFiles({
           </span>
         ))}
       </div>
-      {editable && rule.max > existing.length && (
-        <label className={styles.upload}>
-          {busy ? "Uploading…" : "＋ Attach photo or PDF"}
+      {status ? <small className={styles.proofStatus}>{status}</small> : null}
+      {editable && room > 0 ? (
+        <div className={styles.proofActions}>
           <input
+            ref={camInputRef}
+            className={styles.proofFileInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            disabled={busy}
+            onChange={() => pickFromInput(camInputRef.current)}
+          />
+          <button
+            type="button"
+            className={styles.proofAdd}
+            disabled={busy}
+            onClick={() => camInputRef.current?.click()}
+          >
+            {busy ? "…" : "Take"}
+          </button>
+          <button
+            type="button"
+            className={styles.proofAdd}
+            disabled={busy}
+            onClick={() => setLiveOpen(true)}
+          >
+            Live
+          </button>
+          <input
+            ref={fileInputRef}
+            className={styles.proofFileInput}
             type="file"
             accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
-            multiple
+            multiple={room > 1}
             disabled={busy}
-            onChange={async (e) => {
-              const files = Array.from(e.target.files || []);
-              e.target.value = "";
-              if (files.length + existing.length > rule.max) {
-                onError(`Use up to ${rule.max} files for this question.`);
-                return;
-              }
-              setBusy(true);
-              try {
-                for (const file of files) {
-                  if (!supabase) throw Error("Upload service unavailable.");
-                  const extension =
-                    file.name.split(".").pop()?.toLowerCase() || "";
-                  const mime =
-                    file.type ||
-                    {
-                      jpg: "image/jpeg",
-                      jpeg: "image/jpeg",
-                      png: "image/png",
-                      webp: "image/webp",
-                      heic: "image/heic",
-                      heif: "image/heif",
-                      pdf: "application/pdf",
-                    }[extension];
-                  const signed = await call({
-                    phase: "prepare",
-                    fileName: file.name,
-                    size: file.size,
-                    contentType: mime,
-                  });
-                  const uploaded = await supabase.storage
-                    .from(signed.bucket)
-                    .uploadToSignedUrl(signed.path, signed.token, file, {
-                      contentType: mime,
-                    });
-                  if (uploaded.error) throw Error(uploaded.error.message);
-                  const done = await call({ phase: "complete", id: signed.id });
-                  setProofs((current) => [...current, done.proof]);
-                }
-              } catch (e) {
-                onError(e instanceof Error ? e.message : "Upload failed.");
-              } finally {
-                setBusy(false);
-              }
-            }}
+            onChange={() => pickFromInput(fileInputRef.current)}
           />
-        </label>
-      )}
+          <button
+            type="button"
+            className={styles.proofAdd}
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {busy ? "…" : "Attach"}
+          </button>
+        </div>
+      ) : null}
+      {liveOpen ? (
+        <OpsLiveCamera
+          busy={busy}
+          onClose={() => setLiveOpen(false)}
+          onCapture={async (file) => {
+            await uploadFiles([file]);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1258,6 +1366,7 @@ export function StoreAuditWorkspace(p: Props) {
                                 editable={inspection}
                                 userId={p.userId}
                                 onError={setMessage}
+                                storeLabel={audit.store_name}
                               />
                             </div>
                           )}
@@ -1294,6 +1403,7 @@ export function StoreAuditWorkspace(p: Props) {
                                 editable={p.canRespond && f.state === "open"}
                                 userId={p.userId}
                                 onError={setMessage}
+                                storeLabel={audit.store_name}
                               />
                               {p.canRespond && f.state === "open" && (
                                 <>
