@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {loadPeopleOperationalHierarchy} from "./people-operational-hierarchy";
-import {registrationRow,registrationSnapshot,type RegistrationRow} from "./registration-pendency.ts";
+import {registrationRow,registrationSnapshot,uniqueRegistrationManagerEmail,type RegistrationRow} from "./registration-pendency.ts";
 
 type Data=Record<string,unknown>;
 async function all<T=Data>(db:SupabaseClient,company:string,table:string,columns:string,filters:Record<string,unknown>={}):Promise<T[]>{
@@ -58,10 +58,11 @@ export async function loadRegistrationPendency(db:SupabaseClient,company:string,
   const hierarchy=await loadPeopleOperationalHierarchy(company,[...stationById.keys()],{includeStationResponsibilities:true,asOf:date});
   if(hierarchy.error)throw Error(hierarchy.error);
   const emailForPerson=(personId:string)=>{
-    const candidates=links.filter(l=>l.person_id===personId).flatMap(l=>profiles.filter(p=>p.id===l.user_id))
-      .filter(p=>p.email&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(p.email)&&p.email.toLowerCase().endsWith(`@${domain.toLowerCase()}`));
-    const emails=[...new Set(candidates.map(p=>p.email!.toLowerCase()))];
-    return emails.length===1?{email:emails[0],name:activePeople.get(personId)?.display_name||candidates[0].full_name}:null;
+    const candidates=links.filter(l=>l.person_id===personId).flatMap(l=>profiles.filter(p=>p.id===l.user_id));
+    // A verified reporting manager may use a personal-domain HRMS login.
+    // Identity/company membership and reporting scope, not domain, authorize this report.
+    const email=uniqueRegistrationManagerEmail(candidates.map(p=>p.email));
+    return email?{email,name:activePeople.get(personId)?.display_name||candidates[0].full_name}:null;
   };
   const roleById=new Map(roles.map(r=>[r.id,r.code]));
   const managerForStation=(stationId:string)=>{

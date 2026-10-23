@@ -23,6 +23,9 @@ The database migration deliberately installs both controls disabled.
   is not a fallback recipient. Ambiguous/missing/inactive managers are held.
 - Each manager gets only their own profiles, grouped by station/store.
   Managers with zero pending profiles receive no message.
+- Managers use their unique active HRMS-linked account email, including personal
+  domains. The reporting relationship and active company identity authorize the
+  recipient. Other digest types retain their company-domain restriction.
 
 ## Delivery safeguards
 

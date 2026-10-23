@@ -85,6 +85,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
    let transport:ReturnType<typeof nodemailer.createTransport>|undefined;
    try {
     const manualCod=delivery.event_key==='cod_pending_current';
+    let registrationRecipientVerified=false;
     const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
     const threadEvents=delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:delivery.event_key.startsWith("id_mapping_")?["id_mapping_morning","id_mapping_afternoon"]:[delivery.event_key];
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
@@ -150,6 +151,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      const keys=saved.data.scope_summary?.profileKeys;
      // Profile-level (not just station-level) scope protects People reportees.
      if(!recipient||!Array.isArray(keys)||!keys.length||keys.some((key:string)=>!recipient.profileKeys.includes(key)))throw Error('Registration completed or manager routing changed; saved reminder held for the next fresh run.');
+     registrationRecipientVerified=true;
     }
     if(!digestEnabled(controlResult.data as DigestControl)||!smtpResult.data.is_enabled||!profileResult.data?.length) {
      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"Notification disabled or recipient no longer active.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
@@ -158,7 +160,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     const smtp=smtpResult.data,thread=threadResult.data,month=delivery.report_date.slice(0,7);
     if(!smtp.smtp_host||!smtp.smtp_from||!smtp.smtp_pass)throw new Error("Company SMTP is incomplete");
     const domain=String((controlResult.data as DigestControl).config.email_domain||"");
-    if(!domain||!delivery.recipient_email.endsWith("@"+domain)||/[\r\n<>]/.test(delivery.recipient_email))throw new Error("Recipient is outside configured company email domain");
+    if(!domain||(!registrationRecipientVerified&&!delivery.recipient_email.endsWith("@"+domain))||!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(delivery.recipient_email))throw new Error("Recipient is outside configured company email domain or is invalid");
     const threadEventKey=manualCod?'cod_pending_evening':delivery.event_key.startsWith('id_mapping_')?'id_mapping_morning':delivery.event_key;
     const key=digestThreadKey(delivery.company_id,portal,threadEventKey,delivery.recipient_email,month);
     const messageId="<portal-digest-"+key.slice(0,32)+"-"+delivery.report_date+(manualCod?"-manual-"+delivery.id.replace(/[^a-zA-Z0-9]/g,'').slice(0,12):"")+"@"+domain+">";

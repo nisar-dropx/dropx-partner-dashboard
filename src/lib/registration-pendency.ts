@@ -13,6 +13,12 @@ export type RegistrationRow = {
 };
 export type RegistrationRecipient = { email: string; name: string; profileKeys: string[] };
 export type RegistrationSnapshot = { date: string; checkedAt: string; rows: RegistrationRow[]; recipients: RegistrationRecipient[]; unrouted: RegistrationRow[] };
+
+/** Call only with emails from active company accounts linked to the mapped manager. */
+export function uniqueRegistrationManagerEmail(values: Array<string | null>): string | null {
+  const emails=[...new Set(values.filter((value): value is string=>Boolean(value)&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value!)).map(value=>value.toLowerCase()))];
+  return emails.length===1?emails[0]:null;
+}
 export type RegistrationInput = {
   profile: Record<string, unknown>; profileType: "employee" | "contractor" | "workforce";
   designation: {name: string; profile_field_rules?: unknown}; categoryRules: unknown;

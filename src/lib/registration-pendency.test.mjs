@@ -3,10 +3,16 @@ import test from "node:test";
 import {readFile} from "node:fs/promises";
 import * as XLSX from "xlsx";
 import {PGlite} from "@electric-sql/pglite";
-import {registrationRow,registrationSnapshot} from "./registration-pendency.ts";
+import {registrationRow,registrationSnapshot,uniqueRegistrationManagerEmail} from "./registration-pendency.ts";
 import {buildRegistrationMessages} from "./registration-pendency-digest.ts";
 const rules={dropx_one:{enabled:["gender","pincode","ifsc","pf_uan","esi_no","profile_photo","is_handicapped"],required:["gender","pincode","ifsc","pf_uan","esi_no","profile_photo","is_handicapped"]}};
 const base={profile:{id:"p1",full_name:"Test <Person>",employee_code:"D001",onboarding_status:"pending",profile_completion_status:"pending",is_active:true,pincode:"100001",ifsc:"IFSC_PRESENT",is_handicapped:false,statutory_applicability:["not_applicable"],created_at:"2026-10-01T00:00:00Z"},profileType:"employee",designation:{name:"Team Lead"},station:{id:"s1",station_code:"TEST1",station_name:"Test station"},categoryRules:rules,date:"2026-10-20"};
+test("verified managers may use a personal-domain company login; ambiguous or unsafe addresses are held",()=>{
+ assert.equal(uniqueRegistrationManagerEmail(["Manager@gmail.com","manager@gmail.com"]),"manager@gmail.com");
+ assert.equal(uniqueRegistrationManagerEmail(["manager@dropxlogistics.com"]),"manager@dropxlogistics.com");
+ assert.equal(uniqueRegistrationManagerEmail(["first@gmail.com","second@gmail.com"]),null);
+ assert.equal(uniqueRegistrationManagerEmail([null,"not-an-email","x@gmail.com\r\nBcc: other@gmail.com"]),null);
+});
 test("required completion follows current rule intersection, statutory applicability and employee aliases",()=>{
  const row=registrationRow(base);
  assert.deepEqual(row.missing,["Gender","Photo upload"]);
@@ -68,6 +74,8 @@ test("worker protects profile-level scope, schedule window and preview never sen
  const worker=await readFile(new URL("./portal-digest-delivery.ts",import.meta.url),"utf8");
  assert.match(worker,/Registration reminder window ended/);
  assert.match(worker,/recipient\.profileKeys\.includes\(key\)/);
+ assert.match(worker,/registrationRecipientVerified=true/);
+ assert.match(worker,/!registrationRecipientVerified&&!delivery\.recipient_email\.endsWith/);
  const preview=await readFile(new URL("../app/api/ops-pulse/registration-email-preview/route.ts",import.meta.url),"utf8");
  assert.match(preview,/isCompanyOwner\(auth\)/);assert.doesNotMatch(preview,/export async function POST|sendMail|sendEmail/);
 });
