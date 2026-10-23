@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -56,11 +58,19 @@ test("Android App notifications are data-only so background taps retain the payo
   assert.doesNotMatch(push, /message\.android\s*=\s*\{[\s\S]{0,160}notification:/);
 });
 
-test("App-only payout publication does not require Meta readiness or a mobile number", () => {
+test("App-only and silent payout publication do not require Meta readiness or a mobile number", () => {
   const publisher = read("../app/api/payments/workforce-payouts/send-review/route.ts");
-  assert.match(publisher, /const whatsappNotificationEnabled = Boolean\(config\.data\.is_enabled\)/);
+  assert.match(publisher, /typeof body\?\.sendWhatsAppNotification !== ["']boolean["']/);
+  assert.match(publisher, /const sendWhatsAppNotification = body\?\.sendWhatsAppNotification === true/);
+  assert.match(publisher, /notificationPreflight\([\s\S]*?sendWhatsAppNotification/);
+  assert.match(publisher, /const whatsappNotificationEnabled = sendWhatsAppNotification && Boolean\(config\.data\.is_enabled\)/);
   assert.match(publisher, /const appNotificationEnabled = Boolean\(config\.data\.app_notification_enabled\)/);
-  assert.match(publisher, /if\s*\(\s*!whatsappNotificationEnabled\s*&&\s*!appNotificationEnabled\s*\)/);
+  assert.doesNotMatch(publisher, /if\s*\(\s*!whatsappNotificationEnabled\s*&&\s*!appNotificationEnabled\s*\)/);
+  assert.match(
+    publisher,
+    /if\s*\(sendWhatsAppNotification\s*&&\s*!config\.data\.is_enabled\)[\s\S]*?WhatsApp/i,
+    "Checking WhatsApp must fail clearly when the saved WhatsApp payout channel is disabled."
+  );
 
   const whatsAppBlocks = bracedBlocksAfter(
     publisher,
@@ -79,6 +89,38 @@ test("App-only payout publication does not require Meta readiness or a mobile nu
   assert.match(publisher, /resolved_values: values/);
   assert.match(publisher, /app_notification_enabled: appNotificationEnabled/);
   assert.match(publisher, /whatsapp_notification_enabled: whatsappNotificationEnabled/);
+});
+
+test("payout publication RPCs honor the frozen per-request WhatsApp choice", () => {
+  const migrationDirectory = fileURLToPath(new URL("../../supabase/migrations/", import.meta.url));
+  const migrations = fs.readdirSync(migrationDirectory)
+    .filter((filename) => filename.startsWith("20261023") && filename.endsWith(".sql"))
+    .sort()
+    .reverse()
+    .map((filename) => ({ filename, sql: fs.readFileSync(path.join(migrationDirectory, filename), "utf8") }));
+  const migration = migrations.find(({ sql }) =>
+    /create or replace function public\.workforce_publish_payout_notifications/i.test(sql)
+    && /create or replace function public\.helper_publish_payout_notifications/i.test(sql)
+    && /whatsapp_notification_enabled/i.test(sql)
+  );
+
+  assert.ok(migration, "A migration must update both Workforce and Helper publication RPCs atomically.");
+  assert.match(
+    migration.sql,
+    /notification_config_snapshot[\s\S]*?whatsapp_notification_enabled[\s\S]*?config_whatsapp_enabled/i,
+    "The effective WhatsApp channel must be derived from the frozen publication choice."
+  );
+  assert.match(
+    migration.sql,
+    /config_whatsapp_enabled[\s\S]*?(?:and|&&)[\s\S]*?(?:requested|item|snapshot)[\s\S]*?whatsapp/i,
+    "Saved WhatsApp configuration and the explicit request choice must both be true before WhatsApp is queued."
+  );
+  assert.doesNotMatch(
+    migration.sql,
+    /if\s+not\s+config_whatsapp_enabled\s+and\s+not\s+config_app_enabled\s+then/i,
+    "Publishing without WhatsApp or App notification must remain valid."
+  );
+  assert.match(migration.sql, /if\s+config_whatsapp_enabled\s+then[\s\S]*?whatsapp_profile_id/i);
 });
 
 test("Workforce publication accepts configured zero payouts and verifies signed snapshots without a full worksheet reload", () => {

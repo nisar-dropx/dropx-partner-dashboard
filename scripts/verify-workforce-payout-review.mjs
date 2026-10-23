@@ -20,7 +20,7 @@ const disputeProcessingMigration = readFileSync(new URL("../supabase/migrations/
 const opsDisputePage = new URL("../src/app/ops-pulse/attendance/payout-review/page.tsx", import.meta.url);
 const opsDisputeActions = new URL("../src/app/ops-pulse/attendance/payout-review/actions.ts", import.meta.url);
 
-assert.match(tableSource, /Send Notification/);
+assert.match(tableSource, /Publish Payment/);
 assert.match(tableSource, /type="checkbox"/);
 assert.match(tableSource, /MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION/);
 assert.match(tableSource, /chunkPayoutRowsBySubject\(reviewSelectedRows, MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION\)/);
@@ -55,7 +55,7 @@ assert.match(
   /status === "sent" \|\| status === "superseded" \|\| status === "disabled"[\s\S]*\? "Payment published"/,
   "App-only publications must render as published instead of falling back to Under Review."
 );
-assert.doesNotMatch(tableSource, /Send Notification requires all-location access/);
+assert.doesNotMatch(tableSource, /Publish Payment requires all-location access/);
 assert.match(reviewActionSource, /rpc\("workforce_dispute_transition_v2"/);
 for (const action of ["propose_correction", "propose_rejection", "approve_final", "send_back", "claim_processing", "block_processing", "complete_processing"]) {
   assert.match(reviewActionSource, new RegExp(`"${action}"`));
@@ -91,7 +91,7 @@ assert.match(routeSource, /waitUntil\(Promise\.allSettled\(deliveryTasks\)/);
 assert.match(routeSource, /subjectTypes\.has\(["']helper["']\)/);
 assert.match(routeSource, /rpc\("workforce_publish_payout_notifications"/);
 assert.match(routeSource, /rpc\("helper_publish_payout_notifications"/);
-assert.match(tableSource, /`Send Notification\$\{reviewSelectedRows\.length/);
+assert.match(tableSource, /`Publish Payment\$\{reviewSelectedRows\.length/);
 assert.match(tableSource, /const canViewPaymentHistory = calendarMonthEnd === periodEnd/);
 assert.match(tableSource, /const canPublishPeriod = canEdit && canViewPaymentHistory/);
 assert.match(tableSource, /const showSelection = canPublish \|\| canDeductAdvances \|\| canManuallyEdit/);

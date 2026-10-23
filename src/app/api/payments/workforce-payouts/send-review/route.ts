@@ -266,6 +266,7 @@ async function notificationPreflight(
   companyId: string,
   snapshots: Array<{ workforceId: string; snapshot: PublicationSnapshot }>,
   reviewUntil: string,
+  sendWhatsAppNotification: boolean,
   recipientKind: "workforce" | "helper" = "workforce"
 ) {
   const config = await supabaseAdmin!
@@ -277,11 +278,11 @@ async function notificationPreflight(
   if (config.error || !config.data) {
     throw new Error("Save the Workforce & Helper payout notification setting before publishing payouts.");
   }
-  const whatsappNotificationEnabled = Boolean(config.data.is_enabled);
-  const appNotificationEnabled = Boolean(config.data.app_notification_enabled);
-  if (!whatsappNotificationEnabled && !appNotificationEnabled) {
-    throw new Error("Enable App or WhatsApp notifications before publishing payouts.");
+  if (sendWhatsAppNotification && !config.data.is_enabled) {
+    throw new Error("Enable WhatsApp payout notifications before publishing with WhatsApp.");
   }
+  const whatsappNotificationEnabled = sendWhatsAppNotification && Boolean(config.data.is_enabled);
+  const appNotificationEnabled = Boolean(config.data.app_notification_enabled);
 
   const people = recipientKind === "helper"
     ? await loadHelperNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId))
@@ -420,6 +421,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const periodStart = String(body?.periodStart ?? "");
     const periodEnd = String(body?.periodEnd ?? "");
+    if (typeof body?.sendWhatsAppNotification !== "boolean") {
+      return responseError("Choose whether to send a WhatsApp notification, then publish the payment again.", 400);
+    }
+    const sendWhatsAppNotification = body?.sendWhatsAppNotification === true;
     const items: unknown[] = Array.isArray(body?.items) ? body.items : [];
     if (!validDate(periodStart) || !validDate(periodEnd) || periodEnd < periodStart) {
       return responseError("Select a valid payout period.", 400);
@@ -461,14 +466,14 @@ export async function POST(request: Request) {
 
     if (subjectTypes.has("workforce") && normalized.length > MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION) {
       return responseError(
-        `Send Notification supports at most ${MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION} payout rows in one atomic batch. Narrow the filters and try again.`,
+        `Publish Payment supports at most ${MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION} payout rows in one atomic batch. Narrow the filters and try again.`,
         400
       );
     }
 
     if (subjectTypes.has("helper")) {
       if (!completeCalendarMonth(periodStart, periodEnd)) {
-        return responseError("Send Notification is available only for one complete calendar month.", 400);
+        return responseError("Publish Payment is available only for one complete calendar month.", 400);
       }
 
       const helperItems = normalized.map((item) => {
@@ -638,7 +643,13 @@ export async function POST(request: Request) {
         workforceId: helperId,
         snapshot: aggregateNotificationSnapshot(grouped)
       }));
-      const notification = await notificationPreflight(companyId, notificationSnapshots, reviewUntil, "helper");
+      const notification = await notificationPreflight(
+        companyId,
+        notificationSnapshots,
+        reviewUntil,
+        sendWhatsAppNotification,
+        "helper"
+      );
       const notificationPrimary = new Map<string, string>();
       for (const helperId of selectedHelpers) {
         notificationPrimary.set(helperId, helperItems
@@ -729,12 +740,12 @@ export async function POST(request: Request) {
         notifications: whatsappPublicationIds.length,
         publicationIds,
         whatsappNotifications: whatsappPublicationIds.length,
-        status: "Notification queued"
+        status: whatsappPublicationIds.length || appNotificationIds.length ? "Notification queued" : "Payment published"
       }, { headers: noStore });
     }
 
     if (!completeCalendarMonth(periodStart, periodEnd)) {
-      return responseError("Send Notification is available only for one complete calendar month.", 400);
+      return responseError("Publish Payment is available only for one complete calendar month.", 400);
     }
 
     const verified = normalized.map((item) => {
@@ -809,7 +820,7 @@ export async function POST(request: Request) {
         return {
           entries: null,
           dependencyHash: null,
-          error: refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.",
+          error: refreshed.error || "Payout inputs are updating. No payments were published; please try again in a moment.",
           updating: refreshed.updating
         };
       }
@@ -832,7 +843,7 @@ export async function POST(request: Request) {
     if (isProvisionalPayoutDependencyHash(expectedDependencyHash)) {
       const refreshed = await revalidatePublicationEntries();
       if (refreshed.error || !refreshed.dependencyHash || !refreshed.entries) {
-        return responseError(refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.", refreshed.updating ? 503 : 409);
+        return responseError(refreshed.error || "Payout inputs are updating. No payments were published; please try again in a moment.", refreshed.updating ? 503 : 409);
       }
       publicationEntries = refreshed.entries;
       expectedDependencyHash = refreshed.dependencyHash;
@@ -847,7 +858,12 @@ export async function POST(request: Request) {
       workforceId,
       snapshot: aggregateNotificationSnapshot(grouped)
     }));
-    const notification = await notificationPreflight(companyId, notificationSnapshots, reviewUntil);
+    const notification = await notificationPreflight(
+      companyId,
+      notificationSnapshots,
+      reviewUntil,
+      sendWhatsAppNotification
+    );
     const notificationPrimary = new Map<string, string>();
     for (const subjectId of selectedSubjects) {
       notificationPrimary.set(subjectId, verified
@@ -900,7 +916,7 @@ export async function POST(request: Request) {
       }
       if (dependencyRevalidations >= MAX_DEPENDENCY_REVALIDATION_ATTEMPTS) {
         return responseError(
-          "Payout inputs are being updated right now. No notifications were sent; please try again in a moment.",
+          "Payout inputs are being updated right now. No payments were published; please try again in a moment.",
           503
         );
       }
@@ -908,7 +924,7 @@ export async function POST(request: Request) {
       const refreshed = await revalidatePublicationEntries();
       if (refreshed.error || !refreshed.dependencyHash || !refreshed.entries) {
         return responseError(
-          refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.",
+          refreshed.error || "Payout inputs are updating. No payments were published; please try again in a moment.",
           refreshed.updating ? 503 : 409
         );
       }
@@ -942,7 +958,7 @@ export async function POST(request: Request) {
       notifications: whatsappPublicationIds.length,
       publicationIds,
       whatsappNotifications: whatsappPublicationIds.length,
-      status: "Notification queued"
+      status: whatsappPublicationIds.length || appNotificationIds.length ? "Notification queued" : "Payment published"
     }, { headers: noStore });
   } catch (error) {
     return responseError(error instanceof Error ? error.message : "Unable to publish Workforce payouts.", 500);

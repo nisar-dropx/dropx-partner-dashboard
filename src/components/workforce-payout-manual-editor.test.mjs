@@ -81,5 +81,5 @@ test("Workforce and Helper payout selection expose manual editing independently 
   assert.match(tableSource, /manualSelectedRows\.map/);
   assert.match(tableSource, /manualAttendancePeriod\(row, periodStart, periodEnd\)/);
   assert.match(tableSource, /if \(!reviewSelectedRows\.length \|\| reviewState\.busy\) return/);
-  assert.match(tableSource, /Send Notification[\s\S]*?reviewSelectedRows\.length/);
+  assert.match(tableSource, /Publish Payment[\s\S]*?reviewSelectedRows\.length/);
 });

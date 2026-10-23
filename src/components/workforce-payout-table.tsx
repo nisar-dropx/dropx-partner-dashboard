@@ -415,6 +415,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const [stickyScrollFrame, setStickyScrollFrame] = useState({ left: 0, width: 0, visible: false });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [reviewState, setReviewState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [sendWhatsAppNotification, setSendWhatsAppNotification] = useState(false);
   const [advanceState, setAdvanceState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const [mappingState, setMappingState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const [bankBusy, setBankBusy] = useState(false);
@@ -432,6 +434,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
+  const publishDialogRef = useRef<HTMLElement>(null);
+  const publishDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mappingDialogRef = useRef<HTMLElement>(null);
   const mappingDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mappingDialogOpen = mappingDialog !== null;
@@ -623,8 +627,40 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     setMappingState({ busy: false, error: "", notice: "" });
     setCancellationNotice("");
     setHoldNotice("");
+    setPublishDialogOpen(false);
+    setSendWhatsAppNotification(false);
     setMappingDialog(null);
   }, [periodStart, periodEnd]);
+
+  useEffect(() => {
+    if (!publishDialogOpen) return;
+    const dialog = publishDialogRef.current;
+    dialog?.querySelector<HTMLElement>("input, button:not([disabled])")?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !reviewState.busy) {
+        setPublishDialogOpen(false);
+        setSendWhatsAppNotification(false);
+        requestAnimationFrame(() => publishDialogTriggerRef.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled])"
+      )];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [publishDialogOpen, reviewState.busy]);
 
   useEffect(() => {
     if (!mappingDialogOpen) return;
@@ -746,31 +782,48 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     setReviewState((current) => ({ ...current, error: "", notice: "" }));
   }
 
-  async function sendNotification() {
-    if (!reviewSelectedRows.length || reviewState.busy) return;
+  function publicationSelectionError() {
+    if (!reviewSelectedRows.length) return "Select at least one payout to publish.";
     const missingLocations = missingPayoutNotificationLocations(rows, reviewSelectedRows, audience);
     if (missingLocations.length) {
       const details = missingLocations
         .map((entry) => `${entry.dropxId}${entry.name ? ` (${entry.name})` : ""}: ${entry.locations.join(", ")}`)
         .join("; ");
-      setReviewState({
-        busy: false,
-        error: `Select every publishable location row for each DropX ID. Missing locations: ${details}. Clear or change the filters, then select those rows too.`,
-        notice: ""
-      });
-      return;
+      return `Select every publishable location row for each DropX ID. Missing locations: ${details}. Clear or change the filters, then select those rows too.`;
     }
     if (audience === "workforce" && reviewSelectedRows.some((row) => !row.publicationDependencyHash)) {
-      setReviewState({ busy: false, error: "The payout worksheet version is unavailable. Refresh the page and select the payouts again.", notice: "" });
+      return "The payout worksheet version is unavailable. Refresh the page and select the payouts again.";
+    }
+    return "";
+  }
+
+  function openPublishDialog(button: HTMLButtonElement) {
+    if (reviewState.busy) return;
+    const error = publicationSelectionError();
+    if (error) {
+      setReviewState({ busy: false, error, notice: "" });
       return;
     }
-    const confirmed = window.confirm(
-      `Publish ${reviewSelectedRows.length} selected ${subjectLabelLower} payout${reviewSelectedRows.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}?\n\n`
-      + (audience === "workforce"
-        ? "This freezes each selected DropX ID's provider mapping, remapping and direct-pay allocation for the month, publishes the payment in DropX One, and queues the enabled App and WhatsApp notifications."
-        : "This freezes each selected Helper payout and direct-pay allocation for the month, publishes the payment in DropX One, and queues the enabled App and WhatsApp notifications.")
-    );
-    if (!confirmed) return;
+    publishDialogTriggerRef.current = button;
+    setReviewState({ busy: false, error: "", notice: "" });
+    setSendWhatsAppNotification(false);
+    setPublishDialogOpen(true);
+  }
+
+  function closePublishDialog() {
+    if (reviewState.busy) return;
+    setPublishDialogOpen(false);
+    setSendWhatsAppNotification(false);
+    requestAnimationFrame(() => publishDialogTriggerRef.current?.focus());
+  }
+
+  async function sendNotification() {
+    if (!reviewSelectedRows.length || reviewState.busy) return;
+    const error = publicationSelectionError();
+    if (error) {
+      setReviewState({ busy: false, error, notice: "" });
+      return;
+    }
     setReviewState({ busy: true, error: "", notice: "" });
     let completedChunks = 0;
     try {
@@ -783,6 +836,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           body: JSON.stringify({
             periodStart,
             periodEnd,
+            sendWhatsAppNotification,
             items: chunk.map((row) => ({
               subjectType: row.reviewSubjectType,
               subjectId: row.reviewSubjectId,
@@ -800,13 +854,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           })
         });
         const payload = await response.json();
-        if (!response.ok) throw new Error(payload?.error ?? `Unable to publish ${subjectLabelLower} payouts and queue notifications.`);
+        if (!response.ok) throw new Error(payload?.error ?? `Unable to publish ${subjectLabelLower} payouts.`);
         totals.submitted += Number(payload.submitted ?? chunk.length);
         totals.appNotifications += Number(payload.appNotifications ?? 0);
         totals.whatsappNotifications += Number(payload.whatsappNotifications ?? payload.notifications ?? 0);
         completedChunks += 1;
       }
       setSelected(new Set());
+      setPublishDialogOpen(false);
+      setSendWhatsAppNotification(false);
       const channelSummary = [
         totals.appNotifications ? `${totals.appNotifications} App notification${totals.appNotifications === 1 ? "" : "s"}` : "",
         totals.whatsappNotifications ? `${totals.whatsappNotifications} WhatsApp notification${totals.whatsappNotifications === 1 ? "" : "s"}` : ""
@@ -820,9 +876,11 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     } catch (error) {
       if (completedChunks) {
         setSelected(new Set());
+        setPublishDialogOpen(false);
+        setSendWhatsAppNotification(false);
         router.refresh();
       }
-      const message = error instanceof Error ? error.message : `Unable to publish ${subjectLabelLower} payouts and queue notifications.`;
+      const message = error instanceof Error ? error.message : `Unable to publish ${subjectLabelLower} payouts.`;
       setReviewState({ busy: false, error: completedChunks ? `${completedChunks} request batch${completedChunks === 1 ? " was" : "es were"} completed before the next batch failed. The worksheet is refreshing; select the remaining payouts and retry. ${message}` : message, notice: "" });
     }
   }
@@ -1032,7 +1090,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {holdNotice ? <div aria-live="polite" className="payout-inline-message success">{holdNotice}</div> : null}
     {mappingUnlocks.length ? <div className="payout-inline-message" role="status"><strong>{mappingUnlocks.length} mapping {mappingUnlocks.length === 1 ? "correction is" : "corrections are"} open for this month.</strong> The last stable payout remains in DropX One as revising until you relock and republish. <span>{mappingUnlocks.slice(0, 5).map((entry) => entry.dropxId || entry.name).join(", ")}{mappingUnlocks.length > 5 ? ` and ${mappingUnlocks.length - 5} more` : ""}.</span></div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
-    {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
+    {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Publish Payment requires every publishable location row, so the extra row may be required for publication.</div> : null}
     {canProcessPayments && selectedRows.length > 0 && selectedBankUnavailableCount > 0 ? <div aria-live="polite" className="payout-inline-message warn">
       <strong>{bankPayoutRows.length > 0 ? `${bankPayoutRows.length.toLocaleString("en-IN")} eligible payout${bankPayoutRows.length === 1 ? "" : "s"} can be downloaded.` : "No selected payout is currently eligible for a new bank file."}</strong>{" "}
       {selectedBankUnavailableCount.toLocaleString("en-IN")} selected row{selectedBankUnavailableCount === 1 ? " is" : "s are"} excluded by the status, balance, profile, PAN, hold or publication checks shown in the table. Eligible rows remain available and are not blocked by the excluded selection.
@@ -1051,14 +1109,14 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       <div className="payout-selection-summary">
         <strong>{selectedRows.length.toLocaleString("en-IN")} selected</strong>
         {canProcessPayments ? <span>{bankPayoutRows.length.toLocaleString("en-IN")} bank eligible</span> : null}
-        {skippedReviewSelectionCount ? <span>{reviewSelectedRows.length} of {selectedRows.length} selected eligible for notification</span> : null}
+        {skippedReviewSelectionCount ? <span>{reviewSelectedRows.length} of {selectedRows.length} selected eligible for publishing</span> : null}
       </div>
       <div className="payout-selection-actions">
         {(manualSelectedRows.length || advanceSelectedRows.length) ? <PayoutActionMenu label="Edit selected">
           {canManuallyEdit && manualSelectedRows.length ? <WorkforcePayoutManualEditor audience={audience} buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status, ...manualAttendancePeriod(row, periodStart, periodEnd) }))} toDate={periodEnd} /> : null}
-          {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
+          {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Publish Payment requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         </PayoutActionMenu> : null}
-        {canEdit ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={sendNotification} title={!canPublishNotifications ? "Send Notification is unavailable for this account." : !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for notification; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Queuing…" : `Send Notification${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={(event) => openPublishDialog(event.currentTarget)} title={!canPublishNotifications ? "Publish Payment is unavailable for this account." : !canPublishPeriod ? "Publish Payment is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for publishing; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Publishing…" : `Publish Payment${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" disabled={actionBusy} onClick={() => setSelected(new Set())} type="button">Clear selection</button>
       </div>
     </div> : showSelection ? <div className="payout-selection-hint">
@@ -1111,7 +1169,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
               && !individualHoldBlockedByProcessing;
             const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
             const selectionTitle = hasRowAdvanceSelectionConflict
-                ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
+                ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Publish Payment requires all publishable location rows."
                 : canProcessPayments && canCancelProcessingPayment(row)
                   ? "Available for bulk Payment Processing cancellation."
                 : canProcessPayments && audience === "workforce" && !activePaymentProfile
@@ -1254,6 +1312,37 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     >
       <div style={{ width: stickyScrollWidth }} />
     </div>
+    {publishDialogOpen ? <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePublishDialog(); }} role="presentation">
+      <section aria-describedby="publish-payment-dialog-description" aria-labelledby="publish-payment-dialog-title" aria-modal="true" className="modal-panel confirmation-dialog" ref={publishDialogRef} role="alertdialog">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">{subjectLabel} payout</p>
+            <h2 id="publish-payment-dialog-title">Publish Payment</h2>
+          </div>
+          <button aria-label="Close publish payment dialog" className="button secondary compact" disabled={reviewState.busy} onClick={closePublishDialog} type="button">Close</button>
+        </div>
+        <div className="confirmation-body">
+          <p id="publish-payment-dialog-description">Publish {reviewSelectedRows.length} selected {subjectLabelLower} payout{reviewSelectedRows.length === 1 ? "" : "s"} for {periodStart.slice(0, 7)}?</p>
+          <p className="subtle">{audience === "workforce"
+            ? "This freezes each selected DropX ID’s provider mapping, remapping and direct-pay allocation for the month, then publishes the payment in DropX One."
+            : "This freezes each selected Helper payout and direct-pay allocation for the month, then publishes the payment in DropX One."}</p>
+          <div className="confirmation-checkbox-list">
+            <label className="confirmation-checkbox">
+              <input checked={sendWhatsAppNotification} disabled={reviewState.busy} onChange={(event) => setSendWhatsAppNotification(event.target.checked)} type="checkbox" />
+              <span>Send WhatsApp Notification</span>
+            </label>
+          </div>
+          <p className="subtle">{sendWhatsAppNotification
+            ? "The configured WhatsApp payout notification will be queued after publication."
+            : "The payment will be published without a WhatsApp notification. The saved App notification behavior and notification history remain unchanged."}</p>
+          {reviewState.error ? <p className="payout-inline-message error" role="alert">{reviewState.error}</p> : null}
+        </div>
+        <div className="form-actions modal-actions confirmation-actions">
+          <button className="button secondary" disabled={reviewState.busy} onClick={closePublishDialog} type="button">Cancel</button>
+          <button className="button" disabled={reviewState.busy} onClick={sendNotification} type="button">{reviewState.busy ? "Publishing…" : "Publish Payment"}</button>
+        </div>
+      </section>
+    </div> : null}
     {mappingDialog ? <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMappingLockDialog(); }} role="presentation">
       <section aria-describedby="mapping-lock-dialog-description" aria-labelledby="mapping-lock-dialog-title" aria-modal="true" className="modal-panel confirmation-dialog" ref={mappingDialogRef} role="alertdialog">
         <div className="panel-head">
