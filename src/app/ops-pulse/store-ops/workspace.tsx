@@ -350,7 +350,7 @@ export function StoreOpsWorkspace(props: Props) {
       <ActivitiesHub
         active="store"
         showShift={Boolean(props.showShiftOps)}
-        showReport={manager}
+        showStoreReport={manager}
       />
 
       <nav className={styles.tabBar} aria-label="Store operations stages">

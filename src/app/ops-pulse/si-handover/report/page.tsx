@@ -61,23 +61,14 @@ export default async function Page({
     const c = await siContext();
     if (!isSiManager(c.actor, c.master.settings)) {
       return (
-        <AppShell active="Activities report" pageCode={pageCode}>
+        <AppShell active="Shift report" pageCode={pageCode}>
           <div className={styles.page}>
             <header className={styles.hero}>
               <p className={styles.eyebrow}>Dark Store · Activities & Handover</p>
-              <h1>Activities report</h1>
+              <h1>Shift operations report</h1>
               <p>
                 This report is for managers who oversee Shift Incharges.{" "}
                 <Link href="/si-handover?view=start">Open shift operations</Link>
-                {canStore ? (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <Link href="/si-handover/report?tab=store">
-                      Store operations report
-                    </Link>
-                  </>
-                ) : null}
               </p>
             </header>
           </div>
@@ -102,7 +93,7 @@ export default async function Page({
     const summary = summarizeSi(enriched);
 
     return (
-      <AppShell active="Activities report" pageCode={pageCode}>
+      <AppShell active="Shift report" pageCode={pageCode}>
         <ActivitiesReportClient
           tab="shift"
           from={from}
@@ -118,24 +109,15 @@ export default async function Page({
   const c = await storeContext();
   if (!isStoreManager(c.actor, c.master.settings) && !c.actor.isMasterOwner) {
     return (
-      <AppShell active="Activities report" pageCode={pageCode}>
+      <AppShell active="Store report" pageCode={pageCode}>
         <div className={styles.page}>
           <header className={styles.hero}>
             <p className={styles.eyebrow}>Dark Store · Activities & Handover</p>
-            <h1>Activities report</h1>
+            <h1>Store operations report</h1>
             <p>
               This report is for City Managers and above who oversee Store
               Managers.{" "}
               <Link href="/store-ops?view=start">Open store operations</Link>
-              {canSi ? (
-                <>
-                  {" "}
-                  ·{" "}
-                  <Link href="/si-handover/report?tab=shift">
-                    Shift operations report
-                  </Link>
-                </>
-              ) : null}
             </p>
           </header>
         </div>
@@ -160,7 +142,7 @@ export default async function Page({
   const summary = summarizeStore(enriched);
 
   return (
-    <AppShell active="Activities report" pageCode={pageCode}>
+    <AppShell active="Store report" pageCode={pageCode}>
       <ActivitiesReportClient
         tab="store"
         from={from}

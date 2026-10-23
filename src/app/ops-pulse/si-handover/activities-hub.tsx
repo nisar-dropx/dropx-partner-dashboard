@@ -1,18 +1,20 @@
 import Link from "next/link";
 import styles from "./si-handover.module.css";
 
-type HubTab = "shift" | "store" | "report";
+type HubTab = "shift" | "store" | "shift-report" | "store-report";
 
 export function ActivitiesHub({
   active,
   showShift = true,
   showStore = true,
-  showReport = true,
+  showShiftReport = false,
+  showStoreReport = false,
 }: {
   active: HubTab;
   showShift?: boolean;
   showStore?: boolean;
-  showReport?: boolean;
+  showShiftReport?: boolean;
+  showStoreReport?: boolean;
 }) {
   const tabs: { id: HubTab; label: string; href: string; show: boolean }[] = [
     {
@@ -28,10 +30,16 @@ export function ActivitiesHub({
       show: showStore,
     },
     {
-      id: "report",
-      label: "Report",
-      href: "/si-handover/report",
-      show: showReport,
+      id: "shift-report",
+      label: "Shift report",
+      href: "/si-handover/report?tab=shift",
+      show: showShiftReport,
+    },
+    {
+      id: "store-report",
+      label: "Store report",
+      href: "/si-handover/report?tab=store",
+      show: showStoreReport,
     },
   ];
   const visible = tabs.filter((t) => t.show);
@@ -43,13 +51,7 @@ export function ActivitiesHub({
           key={t.id}
           prefetch={false}
           className={active === t.id ? styles.hubActive : styles.hubTab}
-          href={
-            t.id === "report" && active === "report"
-              ? t.href
-              : t.id === "report"
-                ? "/si-handover/report"
-                : t.href
-          }
+          href={t.href}
         >
           {t.label}
         </Link>

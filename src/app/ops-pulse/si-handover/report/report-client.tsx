@@ -120,44 +120,26 @@ export function ActivitiesReportClient(props: Props) {
     return from === start && to === end;
   });
 
+  const isShift = props.tab === "shift";
   return (
     <div className={styles.pageWide}>
       <header className={styles.hero}>
         <p className={styles.eyebrow}>Dark Store · Activities & Handover</p>
-        <h1>Activities report</h1>
+        <h1>{isShift ? "Shift operations report" : "Store operations report"}</h1>
         <p>
-          See who is on track, who still needs to submit, and where handovers are
-          stuck — across Shift operations and Store operations.
+          {isShift
+            ? "See who is on track, who still needs to submit, and where shift handovers are stuck."
+            : "See who is on track, who still needs to submit, and where store day closes are stuck."}
         </p>
       </header>
 
       <ActivitiesHub
-        active="report"
+        active={isShift ? "shift-report" : "store-report"}
         showShift={props.showShift}
         showStore={props.showStore}
-        showReport
+        showShiftReport={props.showShift}
+        showStoreReport={props.showStore}
       />
-
-      <nav className={styles.tabBar} aria-label="Report scope">
-        {props.showShift ? (
-          <Link
-            prefetch={false}
-            className={props.tab === "shift" ? styles.tabActive : styles.tab}
-            href={`/si-handover/report?tab=shift&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`}
-          >
-            Shift operations
-          </Link>
-        ) : null}
-        {props.showStore ? (
-          <Link
-            prefetch={false}
-            className={props.tab === "store" ? styles.tabActive : styles.tab}
-            href={`/si-handover/report?tab=store&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`}
-          >
-            Store operations
-          </Link>
-        ) : null}
-      </nav>
 
       <section className={styles.panel}>
         <div className={styles.reportToolbar}>

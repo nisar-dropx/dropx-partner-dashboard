@@ -206,9 +206,14 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
           href: "/store-ops?view=start",
         },
         {
-          // Visible when either Shift or Store ops is granted (see AppShell child filter).
-          label: "Activities report",
-          href: "/si-handover/report",
+          code: "si_handover",
+          label: "Shift report",
+          href: "/si-handover/report?tab=shift",
+        },
+        {
+          code: "store_ops",
+          label: "Store report",
+          href: "/si-handover/report?tab=store",
         },
       ],
     },

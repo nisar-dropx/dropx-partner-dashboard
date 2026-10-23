@@ -109,13 +109,6 @@ export async function AppShell({ children, active, pageCode }: { children: React
     .map((item) => item.children?.length ? {
       ...item,
       children: item.children.filter((child) => {
-        // Activities report spans Shift + Store ops — show if either page is allowed.
-        if (child.href === "/si-handover/report" || child.href?.startsWith("/si-handover/report?")) {
-          return (
-            hasPermission(authorization, "si_handover", "access") ||
-            hasPermission(authorization, "store_ops", "access")
-          );
-        }
         return !child.code || hasPermission(authorization, child.code, "access");
       })
     } : item)
