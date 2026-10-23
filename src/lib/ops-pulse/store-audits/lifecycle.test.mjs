@@ -514,3 +514,63 @@ test("end-to-end server actions: start, draft, blocked completion, release, resp
   );
   assert.equal(sent, 1);
 });
+
+test("collectInspectionGaps mirrors validateAnswers and lists summary/meta gaps", () => {
+  const q0 = template.sections[0].questions[0];
+  const row = {
+    id: "audit-gaps",
+    audit_type: "self",
+    template: structuredClone(template),
+    answers: {},
+  };
+  const empty = model.collectInspectionGaps(row, {}, [], { summary: "" });
+  assert.ok(empty.some((g) => g.startsWith("Answer:")));
+  assert.ok(empty.some((g) => /summary/i.test(g)));
+
+  const answered = {
+    [q0.id]: {
+      ...model.emptyAnswer(),
+      response: "yes",
+      outcome: "pass",
+      observation: "",
+    },
+  };
+  const mid = model.collectInspectionGaps(row, answered, [], {
+    summary: "Looks solid overall.",
+  });
+  assert.ok(
+    !mid.some((g) => g.includes(q0.label) && g.startsWith("Answer:")),
+  );
+  assert.ok(!mid.some((g) => /summary/i.test(g)));
+
+  const amazonTpl = {
+    name: "Amazon",
+    description: "",
+    sections: [
+      {
+        id: "s1",
+        name: "S1",
+        guidance: "",
+        questions: [
+          {
+            ...q0,
+            id: "A1",
+            required: true,
+            scored: true,
+            kind: "yes_no",
+            evidence: { when: "gap", min: 1, max: 3 },
+          },
+        ],
+      },
+    ],
+  };
+  const amazonGaps = model.collectInspectionGaps(
+    { id: "a2", audit_type: "amazon", template: amazonTpl, answers: {} },
+    {},
+    [],
+    { summary: "Scout log", amazonScore: "", amazonAuditor: "" },
+  );
+  assert.ok(!amazonGaps.some((g) => g.startsWith("Answer:")));
+  assert.ok(amazonGaps.some((g) => /Amazon score/i.test(g)));
+  assert.ok(amazonGaps.some((g) => /Amazon auditor/i.test(g)));
+});

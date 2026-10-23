@@ -20,6 +20,8 @@ import {
   scoreSnapshot,
   scoreBand,
   statusLabels,
+  collectInspectionGaps,
+  requiredEvidence,
   type AuditType,
   type StoreAudit,
   type Proof,
@@ -147,15 +149,24 @@ function ProofFiles({
     if (!r.ok) throw Error(j.error || "Upload failed.");
     return j;
   };
+  const pillKind =
+    rule.when === "optional" ? "optional" : rule.when === "gap" ? "gap" : "always";
+  const pillText =
+    rule.when === "optional"
+      ? "Optional"
+      : rule.when === "gap"
+        ? `${rule.min} required for gaps`
+        : `${rule.min} required`;
   return (
     <div className={styles.proof}>
-      <small>
-        {phase === "audit" ? "Inspection evidence" : "Closure evidence"} ·{" "}
-        {rule.when === "optional"
-          ? "optional"
-          : `${rule.min} required${rule.when === "gap" ? " for gaps" : ""}`}{" "}
-        · up to {rule.max} files
-      </small>
+      <div className={styles.inline} style={{ gap: 8, marginBottom: 4 }}>
+        <span className={styles.blockLabel} style={{ margin: 0 }}>
+          {phase === "audit" ? "Inspection evidence" : "Closure evidence"}
+        </span>
+        <span className={styles.reqPill} data-kind={pillKind}>
+          {pillText} · max {rule.max}
+        </span>
+      </div>
       <div className={styles.fileList}>
         {existing.map((p) => (
           <span key={p.id}>
@@ -297,6 +308,8 @@ export function StoreAuditWorkspace(p: Props) {
     [startModalOpen, setStartModalOpen] = useState(false),
     [startOverlay, setStartOverlay] = useState(false),
     [startModalName, setStartModalName] = useState(""),
+    [completeConfirmOpen, setCompleteConfirmOpen] = useState(false),
+    [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false),
     [deleteStep, setDeleteStep] = useState<null | "warn" | "confirm">(null),
     [deleteReason, setDeleteReason] = useState("");
   const dirtyRef = useRef(dirty);
@@ -601,9 +614,25 @@ export function StoreAuditWorkspace(p: Props) {
       sections.find((s) => s.id === section) || sections[0];
     const completed = Boolean(audit.completed_at);
     const inspection = p.canInspect && !completed;
-    const answered = questions(audit.template).filter(
-      (q) => answers[q.id]?.outcome,
-    ).length;
+    const allQs = questions(audit.template);
+    const answered = allQs.filter((q) => answers[q.id]?.outcome).length;
+    const progressTotal = allQs.length;
+    const progressPct =
+      progressTotal > 0 ? Math.round((100 * answered) / progressTotal) : 0;
+    const inspectionGaps = inspection
+      ? collectInspectionGaps(audit, answers, proof, {
+          summary,
+          presentSmName,
+          amazonScore: completeAmazonScore,
+          amazonAuditor: completeAmazonAuditor,
+        })
+      : [];
+    const sectionDone = (s: (typeof sections)[number]) =>
+      s.questions.every((q) => {
+        if (answers[q.id]?.outcome) return true;
+        if (audit.audit_type === "amazon" && isScored(q)) return true;
+        return !q.required;
+      });
     const snap =
       audit.score_snapshot ||
       (completed
@@ -615,37 +644,72 @@ export function StoreAuditWorkspace(p: Props) {
     const liveBand =
       audit.score_band ??
       scoreBand(typeof livePct === "number" ? livePct : null);
+    const saveDraft = () =>
+      run(
+        () =>
+          saveStoreInspection(
+            audit.id,
+            audit.version,
+            answers,
+            summary,
+            false,
+            inspectionMeta(),
+          ),
+        { answers, summary },
+      );
+    const releaseAudit = () =>
+      run(
+        () =>
+          saveStoreInspection(
+            audit.id,
+            audit.version,
+            answers,
+            summary,
+            true,
+            inspectionMeta(),
+          ),
+        { answers, summary },
+      );
     return (
       <div className={styles.page}>
-        <header className={styles.header}>
-          <div>
-            <Link
-              href="/store-audits"
-              onClick={(e) => {
-                if (
-                  dirty &&
-                  !confirm("Leave without saving your inspection changes?")
-                )
-                  e.preventDefault();
-              }}
-            >
-              ← Store audits
-            </Link>
-            <h1>{audit.store_name}</h1>
-            <p>
-              {audit.number} · {audit.template.name} · Version{" "}
-              {audit.template_version}
-            </p>
+        <div className={styles.hero}>
+          <p className={styles.eyebrow}>Store audit</p>
+          <div className={styles.heroTop}>
+            <div>
+              <Link
+                href="/store-audits"
+                onClick={(e) => {
+                  if (dirty) {
+                    e.preventDefault();
+                    setLeaveConfirmOpen(true);
+                  }
+                }}
+              >
+                ← Store audits
+              </Link>
+              <h1>{audit.store_name}</h1>
+              <p className={styles.heroMeta}>
+                {audit.number} · {audit.template.name} · v
+                {audit.template_version}
+              </p>
+            </div>
+            <div className={styles.heroChips}>
+              <span className={styles.badge}>
+                {auditTypeLabels[audit.audit_type || "mock"]}
+              </span>
+              <span className={styles.badge} data-state={audit.status}>
+                {statusLabels[audit.status]}
+              </span>
+              {(completed || inspection) && livePct != null ? (
+                <span>
+                  <span className={styles.band} data-band={liveBand || undefined}>
+                    {livePct}%{liveBand ? ` · ${liveBand}` : ""}
+                  </span>
+                </span>
+              ) : null}
+            </div>
           </div>
-          <span className={styles.badge} data-state={audit.status}>
-            {statusLabels[audit.status]}
-          </span>
-        </header>
-        <div className={styles.card}>
-          <div className={styles.facts}>
-            <span>
-              Audit type<b>{auditTypeLabels[audit.audit_type || "mock"]}</b>
-            </span>
+          <div className={styles.heroFacts}>
             <span>
               Auditor<b>{audit.assigned_name}</b>
             </span>
@@ -658,25 +722,6 @@ export function StoreAuditWorkspace(p: Props) {
             <span>
               Completed<b>{date(audit.completed_at)}</b>
             </span>
-            {(completed || inspection) && livePct != null && (
-              <span>
-                DropX score
-                <b>
-                  {livePct}%
-                  {liveBand ? (
-                    <>
-                      {" "}
-                      <span
-                        className={styles.band}
-                        data-band={liveBand}
-                      >
-                        {liveBand}
-                      </span>
-                    </>
-                  ) : null}
-                </b>
-              </span>
-            )}
             {audit.audit_type === "amazon" &&
               (audit.amazon_score != null || completeAmazonScore) && (
                 <span>
@@ -689,9 +734,10 @@ export function StoreAuditWorkspace(p: Props) {
                   </b>
                 </span>
               )}
-            {audit.present_sm_name && (
+            {(audit.present_sm_name || presentSmName) && (
               <span>
-                SM / SI present<b>{audit.present_sm_name}</b>
+                SM / SI present
+                <b>{audit.present_sm_name || presentSmName}</b>
               </span>
             )}
           </div>
@@ -705,7 +751,7 @@ export function StoreAuditWorkspace(p: Props) {
               ))}
             </div>
           ) : null}
-          <div className={styles.inline}>
+          <div className={styles.inline} style={{ marginTop: 8 }}>
             {audit.status === "scheduled" &&
               p.canEdit &&
               audit.assigned_to === p.userId && (
@@ -768,13 +814,13 @@ export function StoreAuditWorkspace(p: Props) {
             )}
           </div>
           {!completed && (
-            <p className={styles.notice}>
-              Private audit · the store cannot see this schedule or inspection.
-              Results become visible after completion.
+            <p className={styles.notice} style={{ marginTop: 10, marginBottom: 0 }}>
+              Private audit · the store cannot see this until you complete &amp;
+              release.
             </p>
           )}
           {completed && (
-            <p className={styles.muted}>
+            <p className={styles.muted} style={{ marginBottom: 0 }}>
               Email:{" "}
               {audit.email_sent_at
                 ? `sent ${date(audit.email_sent_at)}`
@@ -788,8 +834,21 @@ export function StoreAuditWorkspace(p: Props) {
             </p>
           )}
         </div>
+        {audit.audit_type === "amazon" && !completed ? (
+          <p className={styles.callout} role="note">
+            Log Scout failures only. Unanswered scored questions auto-pass when
+            you complete and release.
+          </p>
+        ) : null}
         {message && (
-          <p className={styles.notice} role="status">
+          <p
+            className={
+              /saved|updated|sent/i.test(message)
+                ? styles.noticeOk
+                : styles.notice
+            }
+            role="status"
+          >
             {message}
           </p>
         )}
@@ -819,32 +878,41 @@ export function StoreAuditWorkspace(p: Props) {
           </div>
         ) : (
           <>
-            <div className={styles.toolbar}>
-              <span>
-                {completed
-                  ? `${audit.findings.filter((f) => f.state !== "closed").length} open findings`
-                  : `${answered} / ${questions(audit.template).length} answered${dirty ? " · Unsaved changes" : ""}`}
-              </span>
-              {inspection && (
-                <button
-                  disabled={blocked || !dirty}
-                  onClick={() =>
-                    run(
-                      () =>
-                        saveStoreInspection(
-                          audit.id,
-                          audit.version,
-                          answers,
-                          summary,
-                        ),
-                      { answers, summary },
-                    )
-                  }
+            {!completed ? (
+              <div className={styles.progressWrap}>
+                <div
+                  className={styles.progressTrack}
+                  role="progressbar"
+                  aria-valuenow={progressPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Checklist progress"
                 >
-                  Save draft
-                </button>
-              )}
-            </div>
+                  <div
+                    className={styles.progressFill}
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+                <div className={styles.progressLabel}>
+                  {answered} / {progressTotal} answered
+                  {dirty ? " · Unsaved changes" : ""}
+                  {inspectionGaps.length
+                    ? ` · ${inspectionGaps.length} item${inspectionGaps.length === 1 ? "" : "s"} left before release`
+                    : inspection
+                      ? " · Ready to complete"
+                      : ""}
+                </div>
+              </div>
+            ) : (
+              <div className={styles.toolbar}>
+                <span>
+                  {
+                    audit.findings.filter((f) => f.state !== "closed").length
+                  }{" "}
+                  open findings
+                </span>
+              </div>
+            )}
             <div className={styles.editor}>
               <nav className={styles.sectionNav} aria-label="Audit sections">
                 {audit.template.sections.map((s, i) => (
@@ -852,6 +920,7 @@ export function StoreAuditWorkspace(p: Props) {
                     type="button"
                     key={s.id}
                     aria-current={section === s.id ? "step" : undefined}
+                    data-complete={sectionDone(s) ? "true" : undefined}
                     onClick={() => setSection(s.id)}
                   >
                     {i + 1}. {s.name}
@@ -887,14 +956,26 @@ export function StoreAuditWorkspace(p: Props) {
                               ) : null}
                             </h3>
                             <div className={styles.qMeta}>
-                              {a.outcome === "gap" && (
+                              {(a.outcome === "gap" ||
+                                q.severity === "critical" ||
+                                q.severity === "high") && (
                                 <span
                                   className={styles.badge}
-                                  data-state="awaiting_response"
+                                  data-state={
+                                    a.outcome === "gap"
+                                      ? "awaiting_response"
+                                      : undefined
+                                  }
                                 >
                                   {q.severity}
                                 </span>
                               )}
+                              {a.outcome === "pass" ? (
+                                <span className={styles.chip}>Compliant</span>
+                              ) : null}
+                              {a.outcome === "na" ? (
+                                <span className={styles.chip}>N/A</span>
+                              ) : null}
                             </div>
                           </div>
                           {q.guidance ? (
@@ -923,7 +1004,11 @@ export function StoreAuditWorkspace(p: Props) {
                               )
                             )
                           ) : inspection ? (
-                            <div className={styles.outcomes}>
+                            <div
+                              className={styles.outcomes}
+                              role="group"
+                              aria-label={`Answer for ${q.id}`}
+                            >
                               {(
                                 [
                                   "yes",
@@ -1095,8 +1180,10 @@ export function StoreAuditWorkspace(p: Props) {
                                 ),
                               )}
                           {a.outcome === "gap" && (
-                            <div className={styles.finding}>
-                              <h4>Fix</h4>
+                            <div className={styles.subBlock}>
+                              <span className={styles.blockLabel}>
+                                Fix plan
+                              </span>
                               {inspection ? (
                                 <>
                                   <label className={styles.compactField}>
@@ -1154,18 +1241,28 @@ export function StoreAuditWorkspace(p: Props) {
                               )}
                             </div>
                           )}
-                          <ProofFiles
-                            audit={audit}
-                            q={q}
-                            phase="audit"
-                            proofs={proof}
-                            setProofs={setProof}
-                            editable={inspection}
-                            userId={p.userId}
-                            onError={setMessage}
-                          />
+                          {(inspection ||
+                            requiredEvidence(q.evidence, a.outcome || "pass") >
+                              0 ||
+                            proof.some(
+                              (pr) =>
+                                pr.question_id === q.id && pr.phase === "audit",
+                            )) && (
+                            <div className={styles.subBlock}>
+                              <ProofFiles
+                                audit={audit}
+                                q={q}
+                                phase="audit"
+                                proofs={proof}
+                                setProofs={setProof}
+                                editable={inspection}
+                                userId={p.userId}
+                                onError={setMessage}
+                              />
+                            </div>
+                          )}
                           {f && (
-                            <div className={styles.finding}>
+                            <div className={styles.storeResponse}>
                               <h4>
                                 Store response ·{" "}
                                 {f.state === "open"
@@ -1316,119 +1413,86 @@ export function StoreAuditWorkspace(p: Props) {
                         }}
                         placeholder="Name of SM or SI on site"
                       />
+                      <small className={styles.muted}>
+                        Captured at start — edit here if the person on site
+                        changed.
+                      </small>
                     </label>
                   )}
                   {inspection && audit.audit_type === "amazon" && (
-                    <>
-                      <div className={styles.formGrid}>
-                        <label>
-                          Amazon score % (Scout alert) *
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={0.1}
-                            value={completeAmazonScore}
-                            onChange={(e) => {
-                              setCompleteAmazonScore(e.target.value);
-                              setDirty(true);
-                            }}
-                          />
-                        </label>
-                        <label>
-                          Amazon auditor
-                          <input
-                            value={completeAmazonAuditor}
-                            onChange={(e) => {
-                              setCompleteAmazonAuditor(e.target.value);
-                              setDirty(true);
-                            }}
-                          />
-                        </label>
-                      </div>
-                      <p className={styles.muted}>
-                        Enter only failed questions from the Scout alert.
-                        Unanswered scored questions auto-pass when you complete
-                        and release.
-                      </p>
-                    </>
+                    <div className={styles.formGrid}>
+                      <label>
+                        Amazon score % (Scout alert) *
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.1}
+                          value={completeAmazonScore}
+                          onChange={(e) => {
+                            setCompleteAmazonScore(e.target.value);
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Amazon auditor *
+                        <input
+                          value={completeAmazonAuditor}
+                          onChange={(e) => {
+                            setCompleteAmazonAuditor(e.target.value);
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                    </div>
                   )}
-                  {inspection && (
-                    <div className={styles.inline}>
+                </div>
+                {inspection ? (
+                  <>
+                    {inspectionGaps.length ? (
+                      <div className={styles.gapPanel} role="status">
+                        <strong>
+                          Finish these before complete &amp; release
+                        </strong>
+                        <ul>
+                          {inspectionGaps.slice(0, 8).map((g, i) => (
+                            <li key={`${i}-${g}`}>{g}</li>
+                          ))}
+                          {inspectionGaps.length > 8 ? (
+                            <li key="more">
+                              +{inspectionGaps.length - 8} more…
+                            </li>
+                          ) : null}
+                        </ul>
+                      </div>
+                    ) : null}
+                    <div className={styles.stickyBar}>
+                      <span className={styles.stickyMeta}>
+                        {answered}/{progressTotal}
+                        {dirty ? " · Unsaved" : ""}
+                        {inspectionGaps.length
+                          ? ` · ${inspectionGaps.length} left`
+                          : " · Ready"}
+                      </span>
                       <button
+                        type="button"
                         disabled={blocked || !dirty}
-                        onClick={() =>
-                          run(
-                            () =>
-                              saveStoreInspection(
-                                audit.id,
-                                audit.version,
-                                answers,
-                                summary,
-                                false,
-                                inspectionMeta(),
-                              ),
-                            { answers, summary },
-                          )
-                        }
+                        onClick={() => saveDraft()}
                       >
                         Save draft
                       </button>
                       <button
-                        disabled={blocked}
+                        type="button"
+                        disabled={blocked || inspectionGaps.length > 0}
                         className={styles.primary}
-                        onClick={() => {
-                          if (
-                            audit.audit_type === "mock" &&
-                            !presentSmName.trim()
-                          ) {
-                            setMessage(
-                              "Record the Store Manager or Store In-charge present for a mock audit.",
-                            );
-                            return;
-                          }
-                          if (audit.audit_type === "amazon") {
-                            const pct = Number(completeAmazonScore);
-                            if (
-                              !completeAmazonScore.trim() ||
-                              !Number.isFinite(pct) ||
-                              pct < 0 ||
-                              pct > 100
-                            ) {
-                              setMessage(
-                                "Enter the Amazon score % from the Scout alert (0–100).",
-                              );
-                              return;
-                            }
-                            if (!completeAmazonAuditor.trim()) {
-                              setMessage("Enter the Amazon auditor name.");
-                              return;
-                            }
-                          }
-                          if (
-                            confirm(
-                              "Complete this audit and release its report and findings to the store?",
-                            )
-                          )
-                            run(
-                              () =>
-                                saveStoreInspection(
-                                  audit.id,
-                                  audit.version,
-                                  answers,
-                                  summary,
-                                  true,
-                                  inspectionMeta(),
-                                ),
-                              { answers, summary },
-                            );
-                        }}
+                        onClick={() => setCompleteConfirmOpen(true)}
                       >
-                        Complete & release to store
+                        Complete &amp; release
                       </button>
                     </div>
-                  )}
-                </div>
+                  </>
+                ) : null}
               </div>
             </div>
           </>
@@ -1507,6 +1571,43 @@ export function StoreAuditWorkspace(p: Props) {
             />
           </label>
         </OpsConfirmDialog>
+        <OpsConfirmDialog
+          open={completeConfirmOpen}
+          title="Complete & release to store?"
+          description={
+            <p>
+              The report and open findings become visible to the store. You
+              cannot edit inspection answers after release.
+            </p>
+          }
+          confirmLabel="Complete & release"
+          cancelLabel="Keep editing"
+          busy={blocked}
+          onCancel={() => setCompleteConfirmOpen(false)}
+          onConfirm={() => {
+            setCompleteConfirmOpen(false);
+            void releaseAudit();
+          }}
+        />
+        <OpsConfirmDialog
+          open={leaveConfirmOpen}
+          title="Leave without saving?"
+          description={
+            <p>
+              You have unsaved inspection changes. Leave anyway, or stay and
+              save draft first.
+            </p>
+          }
+          confirmLabel="Leave"
+          cancelLabel="Stay"
+          danger
+          onCancel={() => setLeaveConfirmOpen(false)}
+          onConfirm={() => {
+            setLeaveConfirmOpen(false);
+            setDirty(false);
+            router.push("/store-audits");
+          }}
+        />
         <OpsConfirmDialog
           open={deleteStep === "warn"}
           title={

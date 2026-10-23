@@ -304,10 +304,201 @@
   border-color: #82b6a5;
   color: #155f4b;
 }
+.hero {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background:
+    radial-gradient(120% 80% at 0% 0%, #ccfbf1 0%, transparent 55%),
+    linear-gradient(180deg, #f8fffc 0%, #fff 72%);
+}
+.heroTop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.hero h1 {
+  margin: 0;
+  font-size: 1.28rem;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: #14243b;
+}
+.heroMeta {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.heroChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.heroFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 4px;
+}
+.heroFacts span {
+  font-size: 11px;
+  color: #7a8aa0;
+}
+.heroFacts b {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #2f425d;
+}
+.callout {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #f0d9a8;
+  background: #fff8eb;
+  color: #7a4e0b;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.progressWrap {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 12px;
+}
+.progressTrack {
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #0d9488, #14b8a6);
+  transition: width 0.2s ease;
+}
+.progressLabel {
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 650;
+}
+.noticeOk {
+  background: #e8f6ee;
+  border: 1px solid #b7dbc5;
+  border-radius: 9px;
+  padding: 12px 16px;
+  color: #087443;
+}
+.gapPanel {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #f0d9a8;
+  background: #fffaf3;
+}
+.gapPanel strong {
+  display: block;
+  font-size: 12px;
+  color: #9a5b00;
+  margin-bottom: 6px;
+}
+.gapPanel ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #7a4e0b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.gapPanel li + li {
+  margin-top: 2px;
+}
+.stickyBar {
+  position: sticky;
+  bottom: 0.45rem;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  margin-top: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+.stickyMeta {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+}
+.sectionNav button[data-complete="true"] span::before {
+  content: "✓ ";
+  color: #0f766e;
+  font-weight: 700;
+}
+.blockLabel {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.subBlock {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e9eef4;
+  background: #f8fafc;
+}
+.storeResponse {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 9px;
+  border: 1px solid #ddd6fe;
+  background: #faf8ff;
+}
+.storeResponse h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #5b21b6;
+}
+.reqPill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #0f766e;
+  white-space: nowrap;
+}
+.reqPill[data-kind="gap"] {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+.reqPill[data-kind="optional"] {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
 .question {
   border: 1px solid #e5ebf1;
-  border-radius: 8px;
-  margin: 8px 0;
+  border-radius: 10px;
+  margin: 10px 0;
   overflow: hidden;
   background: #fff;
 }
@@ -318,20 +509,12 @@
 .question[data-outcome="pass"] {
   border-color: #cfe5da;
 }
-.question summary {
-  padding: 10px 12px;
-  background: #f8fafc;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  cursor: pointer;
-}
-.question summary small {
-  font-weight: 400;
-  color: #7d8b9d;
+.question[data-outcome="na"] {
+  border-color: #d4dbe4;
+  background: #fafbfc;
 }
 .questionBody {
-  padding: 10px 12px 12px;
+  padding: 12px 14px 14px;
 }
 .questionBody .toolbar {
   padding-top: 0;
@@ -417,12 +600,13 @@
 .outcomes {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 6px 0 8px;
+  gap: 8px;
+  margin: 8px 0 10px;
 }
 .outcomes button {
-  padding: 7px 12px !important;
-  min-width: 58px;
+  padding: 9px 16px !important;
+  min-width: 72px;
+  font-size: 13px !important;
 }
 .startOverlay {
   position: fixed;
@@ -653,6 +837,7 @@
 @media (max-width: 900px) {
   .page {
     padding: 16px;
+    padding-bottom: 5.5rem;
   }
   .header {
     align-items: flex-start;
@@ -663,8 +848,25 @@
   }
   .sectionNav {
     position: static;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sectionNav button {
+    flex: 0 0 auto;
+    min-width: 140px;
+  }
+  .stickyBar {
+    bottom: 0;
+    border-radius: 10px 10px 0 0;
+    margin-left: -16px;
+    margin-right: -16px;
+    width: calc(100% + 32px);
+    box-sizing: border-box;
   }
   .formGrid {
     grid-template-columns: 1fr;
@@ -732,6 +934,12 @@
 :global(.ops-modern) .sectionNav button { padding:10px 12px; }
 :global(.ops-modern) .sectionNav span { color:var(--muted); }
 :global(.ops-modern) .questionBody { padding:15px; }
+:global(.ops-modern) .hero { border-color:var(--line); box-shadow:var(--ops-shadow); }
+:global(.ops-modern) .stickyBar { border-color:var(--line); }
+:global(.ops-modern) .callout { border-color:#efd39f; background:#fff8eb; }
+:global(.ops-modern) .gapPanel { border-color:#efd39f; }
+:global(.ops-modern) .storeResponse { border-color:#ddd6fe; }
+:global(.ops-modern) .noticeOk { background:#e8f6ee; border-color:#b7dbc5; color:#087443; }
 :global(.ops-modern) .formGrid { gap:13px; }
 :global(.ops-modern) .page input[type="checkbox"] { accent-color:var(--brand-dark); }
 :global(.ops-modern) .page .upload { color:var(--ops-selected-ink); background:#fffaf7; border-color:#e6cfc1; }

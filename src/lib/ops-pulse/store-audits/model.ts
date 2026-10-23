@@ -405,6 +405,72 @@ export function validateTemplate(t: Template) {
 function fieldNeeded(f: ExtraField, outcome: Answer["outcome"]) {
   return f.when === "always" || (f.when === "gap" && outcome === "gap");
 }
+function answerGapsForQuestion(
+  row: StoreAudit,
+  q: Question,
+  a: Answer | undefined,
+  proofs: Proof[],
+  now: number,
+): string[] {
+  const gaps: string[] = [];
+  if (!a?.outcome) {
+    if (q.required) gaps.push(`Answer: ${q.label}`);
+    return gaps;
+  }
+  if (
+    !["pass", "gap", "na"].includes(a.outcome) ||
+    (a.outcome === "na" && !q.allowNA && !isCount(q))
+  )
+    gaps.push(`Choose an allowed outcome: ${q.label}`);
+  if (a.outcome === "na" && !a.observation?.trim())
+    gaps.push(`Explain why this is not applicable: ${q.label}`);
+  if (isCount(q)) {
+    const count = a.extras?.count?.trim();
+    if (!count || !Number.isFinite(Number(count)) || Number(count) < 0)
+      gaps.push(`Enter the count: ${q.label}`);
+  }
+  // Amazon autofilled passes skip floor-walk photo / always-extra checks.
+  if (a.autofilled && a.outcome === "pass") return gaps;
+  if (
+    a.outcome === "gap" &&
+    (!a.observation?.trim() ||
+      !a.action?.trim() ||
+      !a.owner?.trim() ||
+      !Number.isFinite(Date.parse(a.dueAt)) ||
+      Date.parse(a.dueAt) <= now)
+  )
+    gaps.push(
+      `Add the observation, action, owner and a future deadline: ${q.label}`,
+    );
+  if (
+    a.outcome === "gap" &&
+    isScored(q) &&
+    (!Number.isFinite(Number(a.instances)) || Number(a.instances) < 1)
+  )
+    gaps.push(`Record the number of instances: ${q.label}`);
+  for (const f of q.extraFields || []) {
+    if (f.id === "instances" || f.id === "count") continue;
+    if (!fieldNeeded(f, a.outcome)) continue;
+    const v = a.extras?.[f.id]?.trim();
+    if (!v) gaps.push(`Add ${f.label}: ${q.label}`);
+    else if (f.type === "number" && !Number.isFinite(Number(v)))
+      gaps.push(`Enter a number for ${f.label}: ${q.label}`);
+  }
+  const count = proofs.filter(
+    (p) =>
+      p.ready &&
+      p.audit_id === row.id &&
+      p.question_id === q.id &&
+      p.phase === "audit",
+  ).length;
+  const need = requiredEvidence(q.evidence, a.outcome);
+  if (count < need || count > q.evidence.max)
+    gaps.push(
+      `Check evidence for ${q.label}: ${need}–${q.evidence.max} files required.`,
+    );
+  return gaps;
+}
+
 export function validateAnswers(
   row: StoreAudit,
   answers: Record<string, Answer>,
@@ -412,65 +478,56 @@ export function validateAnswers(
   now = Date.now(),
 ) {
   for (const q of questions(row.template)) {
-    const a = answers[q.id];
-    if (!a?.outcome) {
-      if (q.required) throw Error(`Answer: ${q.label}`);
-      continue;
-    }
-    if (
-      !["pass", "gap", "na"].includes(a.outcome) ||
-      (a.outcome === "na" && !q.allowNA && !isCount(q))
-    )
-      throw Error(`Choose an allowed outcome: ${q.label}`);
-    if (a.outcome === "na" && !a.observation?.trim())
-      throw Error(`Explain why this is not applicable: ${q.label}`);
-    if (isCount(q)) {
-      const count = a.extras?.count?.trim();
-      if (!count || !Number.isFinite(Number(count)) || Number(count) < 0)
-        throw Error(`Enter the count: ${q.label}`);
-    }
-    // Amazon autofilled passes skip floor-walk photo / always-extra checks.
-    if (a.autofilled && a.outcome === "pass") continue;
-    if (
-      a.outcome === "gap" &&
-      (!a.observation?.trim() ||
-        !a.action?.trim() ||
-        !a.owner?.trim() ||
-        !Number.isFinite(Date.parse(a.dueAt)) ||
-        Date.parse(a.dueAt) <= now)
-    )
-      throw Error(
-        `Add the observation, action, owner and a future deadline: ${q.label}`,
-      );
-    if (
-      a.outcome === "gap" &&
-      isScored(q) &&
-      (!Number.isFinite(Number(a.instances)) || Number(a.instances) < 1)
-    )
-      throw Error(`Record the number of instances: ${q.label}`);
-    for (const f of q.extraFields || []) {
-      if (f.id === "instances" || f.id === "count") continue;
-      if (!fieldNeeded(f, a.outcome)) continue;
-      const v = a.extras?.[f.id]?.trim();
-      if (!v) throw Error(`Add ${f.label}: ${q.label}`);
-      if (f.type === "number" && !Number.isFinite(Number(v)))
-        throw Error(`Enter a number for ${f.label}: ${q.label}`);
-    }
-    const count = proofs.filter(
-      (p) =>
-        p.ready &&
-        p.audit_id === row.id &&
-        p.question_id === q.id &&
-        p.phase === "audit",
-    ).length;
-    if (
-      count < requiredEvidence(q.evidence, a.outcome) ||
-      count > q.evidence.max
-    )
-      throw Error(
-        `Check evidence for ${q.label}: ${requiredEvidence(q.evidence, a.outcome)}–${q.evidence.max} files required.`,
-      );
+    const gaps = answerGapsForQuestion(row, q, answers[q.id], proofs, now);
+    if (gaps[0]) throw Error(gaps[0]);
   }
+}
+
+/**
+ * UI-only readiness list for Complete & release. Mirrors validateAnswers (+
+ * summary / mock SM / Amazon meta). Amazon unanswered scored questions are
+ * treated as autofilled passes, matching server submit.
+ */
+export function collectInspectionGaps(
+  row: StoreAudit,
+  answers: Record<string, Answer>,
+  proofs: Proof[],
+  opts?: {
+    summary?: string;
+    presentSmName?: string;
+    amazonScore?: string;
+    amazonAuditor?: string;
+    now?: number;
+  },
+): string[] {
+  const now = opts?.now ?? Date.now();
+  const cleaned =
+    row.audit_type === "amazon"
+      ? fillAmazonPasses(row.template, answers)
+      : answers;
+  const gaps: string[] = [];
+  for (const q of questions(row.template)) {
+    gaps.push(...answerGapsForQuestion(row, q, cleaned[q.id], proofs, now));
+  }
+  if (!(opts?.summary ?? "").trim())
+    gaps.push("Add a short overall summary before completing the audit.");
+  if (row.audit_type === "mock" && !(opts?.presentSmName ?? "").trim())
+    gaps.push(
+      "Record the Store Manager or Store In-charge present for a mock audit.",
+    );
+  if (row.audit_type === "amazon") {
+    const pct = Number(opts?.amazonScore);
+    if (
+      !(opts?.amazonScore ?? "").trim() ||
+      !Number.isFinite(pct) ||
+      pct < 0 ||
+      pct > 100
+    )
+      gaps.push("Enter the Amazon score % from the Scout alert (0–100).");
+    if (!(opts?.amazonAuditor ?? "").trim())
+      gaps.push("Enter the Amazon auditor name.");
+  }
+  return gaps;
 }
 export function validateResponse(q: Question, note: string, count: number) {
   if (!note.trim())
