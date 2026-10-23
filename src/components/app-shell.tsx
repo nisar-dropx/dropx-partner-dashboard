@@ -1,4 +1,4 @@
-import { Download, LogOut } from "lucide-react";
+import { Download } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 import { OpsMenuClose } from "@/components/ops-menu-close";
 import { OpsPulseBrand } from "@/components/ops-pulse-brand";
@@ -139,10 +139,14 @@ export async function AppShell({ children, active, pageCode }: { children: React
       <UserMenu {...userMenuProps} />
     </>
   );
-  const sidebarIdentity = <>
-    <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong>
-    <span>{authorization.designationName ?? authorization.roleName ?? "Portal user"}</span>
-  </>;
+  const displayName = authorization.fullName ?? authorization.email ?? "DropX user";
+  const displayRole = authorization.designationName ?? authorization.roleName ?? "Portal user";
+  const avatarInitials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "DX";
 
   return (
     <PaymentNotificationProvider key={`${authorization.userId}:${authorization.isPreview}`} initialData={paymentNotifications} refreshOnMount={isOpsHost}>
@@ -171,14 +175,27 @@ export async function AppShell({ children, active, pageCode }: { children: React
           {isOpsHost&&<OpsWorkspaceSwitcher modes={opsContext.availableModes} mode={opsContext.mode}/>}
           <SidebarNav opsDesign={isOpsHost} active={active} items={visibleNavItems} prefetch={!(isOpsHost && pageCode === "ops_pulse")} />
 
-          <div className="sidebar-footer">
-            {isOpsHost ? <div className="ops-sidebar-profile">{sidebarIdentity}</div> : sidebarIdentity}
-            {isOpsHost && <a className="ops-sidebar-install" href="/downloads/app"><Download size={16} aria-hidden="true" /> Get the OpsPulse app</a>}
-            {isOpsHost && <form action={signOut} className="ops-sidebar-signout">
-              <SubmitButton className="user-menu-action" pendingText="Signing out">
-                <LogOut size={16} aria-hidden="true" /> Sign out
-              </SubmitButton>
-            </form>}
+          <div className={isOpsHost ? "sidebar-user ops-sidebar-user" : "sidebar-footer"}>
+            {isOpsHost ? (
+              <>
+                <div className="avatar" aria-hidden="true">{avatarInitials}</div>
+                <div>
+                  <strong>{displayName}</strong>
+                  <small>{displayRole}</small>
+                </div>
+                <form action={signOut}>
+                  <SubmitButton className="link-button" pendingText="Signing out…">Sign out</SubmitButton>
+                </form>
+                <a className="ops-sidebar-install" href="/downloads/app">
+                  <Download size={14} aria-hidden="true" /> Get the OpsPulse app
+                </a>
+              </>
+            ) : (
+              <>
+                <strong>{displayName}</strong>
+                <span>{displayRole}</span>
+              </>
+            )}
           </div>
         </aside>
       )}

@@ -1,25 +1,27 @@
-/* OpsPulse only. Self-hosted Inter 4.1, SIL OFL (public/fonts/inter/LICENSE.txt). */
+/* OpsPulse only. Same Inter 4.1 as People & Culture (SIL OFL — public/fonts/inter/LICENSE.txt). */
 @font-face {
-  font-family: "Ops Inter";
+  font-family: Inter;
   src: url("/fonts/inter/InterVariable-4.1.woff2") format("woff2");
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
 }
 .ops-mobile-close { display:none; }
-/* People-aligned OpsPulse tokens (Zoho-dense ops console). Keep desktop top bar. */
+/* People & Culture parity: tokens, Inter, dense shell. Desktop top bar kept for Ops context switcher. */
 body:has(.ops-modern) {
   --bg:#f3f5f8; --canvas:#f3f5f8; --surface:#fff; --surface-soft:#f8fafc;
   --ink:#1f2937; --muted:#667085; --line:#e2e7ee; --border:var(--line); --text:var(--ink);
-  --brand:#f5a400; --brand-dark:#de5a16; --brand-red:#cf1f35;
+  --brand:#f5a400; --brand-dark:#de5a16; --brand-red:#cf1f35; --brand-pink:#c8406b;
   --ops-action:linear-gradient(110deg,#d4561d,#c32338);
   --ops-action-hover:linear-gradient(110deg,#bd4713,#ad1c31);
   --ops-selected-bg:#fff7f2; --ops-selected-border:#f0ded3; --ops-selected-ink:#a63d1d;
   --ops-focus:#c45325;
   --ops-shadow:0 1px 2px rgba(16,24,40,.045),0 8px 24px rgba(16,24,40,.025);
+  --shadow:var(--ops-shadow);
   --green:#087443; --green-soft:#e7f6ed; --amber:#b76a00; --red:#b42318;
-  background:var(--bg);
-  font-family:"Ops Inter",Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--canvas);
+  font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:12.25px; line-height:1.45;
   font-optical-sizing:auto; -webkit-font-smoothing:antialiased;
 }
 body:has(.ops-modern) .shell.ops-modern { grid-template-columns:214px minmax(0,1fr); color:var(--ink); font-size:12.25px; line-height:1.45; }
@@ -77,21 +79,38 @@ body:has(.ops-modern) .ops-modern [aria-label="Business workspace"] button[aria-
 .ops-group-chevron { transition:transform .16s; margin-left:auto; }
 [aria-expanded="true"] > .ops-group-chevron { transform:rotate(180deg); }
 .ops-nav-empty { color:var(--muted); font-size:11.5px; padding:10px; }
-body:has(.ops-modern) .ops-modern .sidebar-footer {
-  flex-shrink:0; display:grid; gap:7px; margin:0; padding:8px 6px 0;
-  border:0; border-top:1px solid var(--line); border-radius:0; background:none;
-  font-size:10px; overflow-wrap:anywhere;
+/* People `.sidebar-user` account block: avatar + name/role + text Sign out. */
+body:has(.ops-modern) .ops-modern .ops-sidebar-user {
+  flex:0 0 auto; margin-top:0; padding:13px 8px 0; border-top:1px solid var(--line);
+  display:grid; grid-template-columns:31px minmax(0,1fr); gap:8px; align-items:center;
+  background:none; border-radius:0; box-shadow:none;
 }
-/* People-dense identity card: name + role only, not the whole footer stack. */
-body:has(.ops-modern) .ops-modern .ops-sidebar-profile {
-  padding:7px 9px; border:1px solid #e8ebf0; border-radius:8px; background:#f8fafc;
-  color:var(--muted); font-size:10.5px; line-height:1.35;
+body:has(.ops-modern) .ops-modern .ops-sidebar-user .avatar {
+  width:31px; height:31px; border-radius:50%; display:grid; place-items:center;
+  color:#fff; background:linear-gradient(135deg,var(--brand-dark),var(--brand-red));
+  font-size:10px; font-weight:800; letter-spacing:.02em;
 }
-body:has(.ops-modern) .ops-modern .ops-sidebar-profile strong {
-  display:block; font-size:11.5px; font-weight:750; color:var(--ink); margin:0 0 1px; line-height:1.25;
+body:has(.ops-modern) .ops-modern .ops-sidebar-user strong {
+  display:block; font-size:11.5px; font-weight:750; color:var(--ink);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.25;
 }
-body:has(.ops-modern) .ops-modern .ops-sidebar-profile span { display:block; color:var(--muted); }
-body:has(.ops-modern) .ops-modern .sidebar-footer > strong { display:inline-block; font-size:11.5px; color:var(--ink); margin-bottom:3px; }
+body:has(.ops-modern) .ops-modern .ops-sidebar-user small {
+  display:block; color:var(--muted); font-size:10px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+body:has(.ops-modern) .ops-modern .ops-sidebar-user form { grid-column:2; min-width:0; margin:0; }
+body:has(.ops-modern) .ops-modern .ops-sidebar-user .link-button {
+  color:var(--muted); background:none; border:0; padding:0; margin:0;
+  text-align:left; font-size:11px; font-weight:650; white-space:nowrap; cursor:pointer;
+}
+body:has(.ops-modern) .ops-modern .ops-sidebar-user .link-button:hover { color:var(--brand-dark); }
+body:has(.ops-modern) .ops-modern .ops-sidebar-user .ops-sidebar-install {
+  grid-column:1 / -1; display:inline-flex; align-items:center; gap:6px;
+  min-height:auto; margin:2px 0 0; padding:0; color:#98a2b3; text-decoration:none;
+  font-size:10px; font-weight:600;
+}
+body:has(.ops-modern) .ops-modern .ops-sidebar-user .ops-sidebar-install:hover { color:var(--brand-dark); }
+body:has(.ops-modern) .ops-modern .ops-sidebar-user .ops-sidebar-install svg { width:12px; height:12px; flex-shrink:0; }
 body:has(.ops-modern) .ops-modern > .main { min-width:0; }
 body:has(.ops-modern) .ops-modern .topbar {
   height:56px; min-height:56px; padding:0 clamp(18px,2.7vw,38px); gap:14px; justify-content:space-between;
@@ -102,7 +121,7 @@ body:has(.ops-modern) .ops-modern .topbar {
 body:has(.ops-modern) .ops-modern .top-actions { gap:8px; }
 body:has(.ops-modern) .ops-modern .content {
   width:100%; max-width:none; padding:23px clamp(18px,2.7vw,38px) 42px; gap:14px; align-content:start;
-  background:radial-gradient(circle at 92% 0,rgba(245,164,0,.06),transparent 24%),var(--bg);
+  background:var(--canvas);
 }
 body:has(.ops-modern) .ops-modern .content:focus { outline:none; }
 .ops-skip-link { position:fixed; left:214px; top:-80px; z-index:1000; background:#172033; color:#fff; padding:10px 15px; border-radius:8px; }
@@ -174,7 +193,8 @@ body:has(.ops-modern) .ops-modern .content:focus { outline:none; }
 body:has(.ops-modern) :is(.modal-panel,.modal-card) { border-radius:14px; border:1px solid var(--line); box-shadow:0 24px 70px #18202733; font-family:inherit; }
 body:has(.ops-modern) .modal-header { padding:16px 20px; }
 body:has(.ops-modern) .modal-body { padding:18px 20px; }
-@media(max-width:1080px) {
+/* People uses 960px for compact shell; Ops keeps drawer semantics but matches that breakpoint. */
+@media(max-width:960px) {
   body:has(.ops-modern) .shell.ops-modern { display:block; }
   body:has(.ops-modern).mobile-nav-open { overflow:hidden; }
   body:has(.ops-modern) .ops-modern > .sidebar { position:fixed; inset:0 auto 0 0; width:min(310px,88vw); height:100dvh; z-index:70; padding:12px; transform:translateX(-106%); visibility:hidden; box-shadow:12px 0 30px #10182824; }
@@ -208,12 +228,6 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 .ops-modern .user-menu-profile :is(strong,span,small) { white-space:normal; overflow-wrap:anywhere; }
 .ops-modern .user-menu-action { min-height:44px; font-family:inherit; font-size:13px; font-weight:600; line-height:1.5; }
 .ops-modern .user-menu-action > span { display:flex; align-items:center; gap:9px; }
-.ops-modern .ops-sidebar-signout { margin:0; }
-.ops-modern .ops-sidebar-signout button {
-  width:100%; min-height:32px; padding:6px 9px; border:1px solid var(--line); border-radius:8px;
-  background:#fff; font-size:11.5px; font-weight:650; gap:7px;
-}
-.ops-modern .ops-sidebar-signout button svg { width:14px; height:14px; }
 .ops-modern .ops-scope-options input:focus-visible + span { outline:2px solid var(--ops-focus); outline-offset:2px; }
 .ops-modern .ops-scope-options span { font-size:12px; }
 .ops-modern .owner-preview-banner { flex-wrap:wrap; }
@@ -270,8 +284,8 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 }
 
 /* Install surfaces share OpsPulse typography without depending on an authenticated shell. */
-.ops-login-page, .ops-download-page { font-family:"Ops Inter",Inter,ui-sans-serif,system-ui,sans-serif; }
-.ops-install { width:min(520px,100%); color:#344054; font-family:"Ops Inter",Inter,ui-sans-serif,system-ui,sans-serif; }
+.ops-login-page, .ops-download-page { font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
+.ops-install { width:min(520px,100%); color:#344054; font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
 .ops-install-heading { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
 .ops-install-heading img { border-radius:9px; }
 .ops-install-heading div { display:grid; gap:3px; }
@@ -354,11 +368,6 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 .ops-download-page header a { font-size:12px; color:#475467; }
 .ops-download-page h1 { font-size:32px; letter-spacing:-.035em; line-height:1.15; }
 .ops-download-intro { color:#667085; font-size:14px; line-height:1.6; margin-bottom:30px; }
-.ops-modern .ops-sidebar-install {
-  display:flex; align-items:center; gap:6px; min-height:28px; margin:0; padding:0 2px;
-  color:#667085; text-decoration:none; font-size:10.5px; font-weight:600;
-}
-.ops-modern .ops-sidebar-install svg { width:13px; height:13px; flex-shrink:0; }
 @media(max-width:480px) {
   .ops-install-actions { grid-template-columns:1fr; }
   .ops-install-help { min-height:44px; }
@@ -368,16 +377,12 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
   .ops-download-page { padding:24px 16px; }
   .ops-download-page header { flex-wrap:wrap; margin-bottom:32px; }
   .ops-download-page h1 { font-size:28px; }
-  .ops-modern .ops-sidebar-install { min-height:44px; }
 }
 .ops-install.is-compact { width:min(480px,100%); }
-@media(max-width:1080px) and (max-height:560px) {
-  body:has(.ops-modern) .ops-modern .sidebar-footer { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding-top:6px; }
-  .ops-modern .ops-sidebar-profile { display:none; }
-  .ops-modern .ops-sidebar-install { margin:0; font-size:11px; }
-  .ops-modern .ops-sidebar-signout { margin:0; }
+@media(max-width:960px) and (max-height:560px) {
+  body:has(.ops-modern) .ops-modern .ops-sidebar-user .ops-sidebar-install { display:none; }
 }
-.ops-route-loading { min-height:70dvh; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; padding:24px; font-family:"Ops Inter",Inter,system-ui,sans-serif; color:#172033; }
+.ops-route-loading { min-height:70dvh; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; padding:24px; font-family:Inter,system-ui,sans-serif; color:#172033; }
 .ops-route-loading img { border-radius:14px; box-shadow:0 8px 24px #17203316; }
 .ops-route-loading strong { font-size:16px; letter-spacing:-.02em; }
 .ops-route-loading > span { font-size:13px; color:#667085; }
