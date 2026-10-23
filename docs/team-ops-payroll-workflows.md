@@ -366,3 +366,28 @@ supabase migration repair --status applied <version> --linked
 
 Already applied (do not re-apply): `20261019101000`, `20261020100000`, `20261020110000`,
 `20261016200000`, `20261016190000`.
+
+## Current loss mail preview and manual send (2026-10-24)
+
+Notification Settings → Loss recovery → Preview current report / send to me uses
+`loss-daily-data.ts`, `loss-daily-snapshot.ts` and `loss-daily-mail.ts`. It reads every
+recorded loss period in the signed-in user's permitted station scope, using current People
+CM owners (AOM fallback), stage-aware NL replies, SLP Initial / Final separation,
+station claims and the payroll ledger. Internal response/plan deadlines remain explicitly
+unconfigured; only published Amazon stage deadlines produce overdue flags.
+
+The Excel has Station Summary, Case Actions and Person Recoveries. Only approved plans
+enter recovery balances. Draft payroll is separate from recovered amounts, and current
+payroll eligibility is before salary caps. Source failures stop the send; stale source
+checks appear in the report. No recovery or payroll records are modified.
+
+The preview endpoint's POST sends only to the signed-in account (Notification Settings
+edit + Losses access, no impersonation), with an Excel attachment and an SMTP receipt.
+A unique `loss_recovery_manual_<user ID>` event/day prevents duplicate sends, including
+uncertain deliveries. Accepted messages reply within that user's monthly thread.
+It never enables a schedule or accepts arbitrary recipients. Manual receipts appear in
+the loss delivery history.
+
+The existing scheduled loss digest was disabled on 24 October at the user's request.
+Recipients and timing are awaiting their decision. Its legacy recipient builder is
+separate from this manual report and must be reviewed before enabling broad delivery.

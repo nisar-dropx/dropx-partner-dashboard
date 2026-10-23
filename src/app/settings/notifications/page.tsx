@@ -21,7 +21,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  db.from('portal_notification_controls').select('*').eq('company_id',company).eq('portal','ops').eq('event_key','performance_data_updated').single(),
  db.from('portal_digest_deliveries').select('id,recipient_email,report_date,status,error,completed_at').eq('company_id',company).eq('portal','ops').eq('event_key','performance_data_updated').order('report_date',{ascending:false}).order('started_at',{ascending:false}).limit(60),
  db.from('portal_notification_controls').select('*').eq('company_id',company).eq('portal','ops').eq('event_key','loss_recovery_action_digest').maybeSingle(),
- db.from('portal_digest_deliveries').select('id,recipient_email,report_date,status,error,completed_at').eq('company_id',company).eq('portal','ops').eq('event_key','loss_recovery_action_digest').order('report_date',{ascending:false}).limit(60)]);
+ db.from('portal_digest_deliveries').select('id,recipient_email,report_date,status,error,completed_at').eq('company_id',company).eq('portal','ops').like('event_key','loss_recovery_%').order('report_date',{ascending:false}).limit(60)]);
  if(control.error||history.error||dataUpdate.error||updateHistory.error)throw new Error('Notification settings are temporarily unavailable.');
  return <AppShell active="Notifications" pageCode="ops_notification_settings"><PageHead title="Notifications" eyebrow="Ops Pulse settings" subtitle="Performance updates and daily review status · portal-run, individually scoped emails."/>
  {searchParams?.error?<p role="alert">{searchParams.error}</p>:searchParams?.saved?<p role="status">Notification settings saved.</p>:null}
@@ -34,7 +34,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  {lossDigest.data?<section id="loss-recovery-digest" className="panel" style={{padding:24,marginTop:20}}>
   <h2>Loss recovery · Daily action digest</h2>
   <p>Scoped NL/SLP open actions (station / cluster / SLP). Empty days send nothing. Cron is already registered; keep <b>disabled</b> until recipients are verified. Enabling requires <code>delivery_ready=true</code> in the control config after the dry-run day.</p>
-  <p><a className="button secondary" href="/api/ops-pulse/loss-recovery-digest-preview" target="_blank" rel="noreferrer">Dry-run HTML preview</a></p>
+  <p><a className="button secondary" href="/api/ops-pulse/loss-recovery-digest-preview" target="_blank" rel="noreferrer">Preview current report / send to me</a></p>
   <form action={saveLossRecoveryDigestSettings} className="form-grid" style={{marginTop:16,gap:18,gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,280px),1fr))'}}>
    <fieldset disabled={!canEdit} style={{border:0,padding:0,minWidth:0,display:'contents'}}>
     <label>Delivery status<select className="field" name="state" defaultValue={lossDigest.data.state}><option value="disabled">Disabled</option><option value="paused">Paused</option><option value="enabled">Enabled</option></select></label>
