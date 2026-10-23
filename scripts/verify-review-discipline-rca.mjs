@@ -90,6 +90,14 @@ emdRecorded = false;
 assert.match((await actions.savePerformanceReviewComment(form())).error, /EMD at 12 p.m./);
 emdRecorded = true;
 assert.equal((await actions.savePerformanceReviewComment(form())).notice, "Your review is complete. The next manager can now review.");
+// Store Health (Dark Store) reviews skip Vehicle 1 / noon EMD gates in the app layer.
+review.source_type = "qc_store_health_daily";
+vehicleDetails = false;
+emdRecorded = false;
+assert.equal((await actions.savePerformanceReviewComment(form())).notice, "Your review is complete. The next manager can now review.");
+delete review.source_type;
+vehicleDetails = true;
+emdRecorded = true;
 assert.equal((await actions.savePerformanceReviewItem(form())).error, "RCA and actions are editable by the first review manager during their stage, or Program Manager.", "later manager does not gain metric RCA rights");
 allowRca = true;
 assert.match((await actions.savePerformanceReviewItem(form())).error, /delay reason form/);

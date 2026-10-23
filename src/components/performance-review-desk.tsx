@@ -31,6 +31,7 @@ import { discussionFeedUpdates, visibleReviewStep } from "@/lib/ops-pulse/review
 import type { ReactNode } from "react";
 import { buildDisciplineRca, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
 import { buildCodRca, COD_REMARK_KEY, isCodRemarkKey, missingCodRemark } from "@/lib/ops-pulse/review-cod-rca";
+import { STORE_HEALTH_DAILY_SOURCE } from "@/lib/ops-pulse/store-health-scorecard";
 const isReasonOnlyKey = (key: string) => isDisciplineRcaKey(key) || isCodRemarkKey(key);
 const MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES = 5;
 
@@ -184,6 +185,8 @@ export function PerformanceReviewDesk(props: Props) {
   const codRemarkMissing = missingCodRemark(codRows, currentItems);
   const vehicleDetailsRecorded = connections.some((connection) => Boolean(connection.arrival_at && connection.unloading_at));
   const emdRecorded = props.noonEmd.row?.emd_noon_pct != null;
+  // Store Health (Dark Store) reviews do not gate completion on Vehicle 1 / noon EMD.
+  const requiresVehicleAndEmd = sourceType !== STORE_HEALTH_DAILY_SOURCE;
   const missingReasons = missingDisciplineReasons(disciplineRows, currentItems);
   const metricMisses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
   const misses = [...metricMisses, ...disciplineRows, ...codRows];
@@ -274,8 +277,8 @@ export function PerformanceReviewDesk(props: Props) {
       <div><span>Source</span><strong>{sourceType === "amazon_hawkeye_daily" ? "Hawkeye D-1" : sourceType === "daily_edsp_metrics" ? "Daily EDSP" : "Operational data"}</strong></div>
       <div><span>Review</span><strong>{review ? review.status.replace("_", " ") : "Not started"}</strong></div>
       <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.proxy_reviewer_name||activeStep.reviewer_name}${activeStep.proxy_reviewer_name?" (proxy)":""}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
-      <div><span>Vehicle 1</span><strong>{vehicleDetailsRecorded ? "Timings recorded" : "Details required"}</strong></div>
-      <div><span>EMD at 12 p.m.</span><strong>{emdRecorded ? "Recorded" : "Details required"}</strong></div>
+      <div><span>Vehicle 1</span><strong>{vehicleDetailsRecorded ? "Timings recorded" : requiresVehicleAndEmd ? "Details required" : "Optional"}</strong></div>
+      <div><span>EMD at 12 p.m.</span><strong>{emdRecorded ? "Recorded" : requiresVehicleAndEmd ? "Details required" : "Optional"}</strong></div>
       {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button id="start-station-review" className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
@@ -380,7 +383,7 @@ export function PerformanceReviewDesk(props: Props) {
     <PerformanceFollowups key={`${selectedCode}-${date}`} review={review} date={date} rows={props.followups.rows} count={props.followups.count} error={props.followups.error} canAdd={canEdit} canUpdate={props.canManageActions}/>
     {review ? <section className="review-discussion" id="review-discussion">
       <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `${activeStep.proxy_reviewer_name||activeStep.reviewer_name} reviews with ${selectedSteps.findIndex(step=>step.id===activeStep.id)>0?selectedSteps[selectedSteps.findIndex(step=>step.id===activeStep.id)-1].reviewer_name:props.stationLeads}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
-      {review.status !== "closed" && (!vehicleDetailsRecorded || !emdRecorded) ? <p className="review-delay-required review-vehicle-required-note"><a href="#review-station-updates">Vehicle 1 arrival, unloading, and EMD at 12 p.m. are required</a> before completing this review.</p> : null}
+      {review.status !== "closed" && requiresVehicleAndEmd && (!vehicleDetailsRecorded || !emdRecorded) ? <p className="review-delay-required review-vehicle-required-note"><a href="#review-station-updates">Vehicle 1 arrival, unloading, and EMD at 12 p.m. are required</a> before completing this review.</p> : null}
       {review.status !== "closed" && missingReasons.length ? <p className="review-delay-required"><a href="#review-rca">{missingReasons.length} delay reason{missingReasons.length === 1 ? "" : "s"} required in RCA</a> before completing this review.</p> : null}
       {review.status !== "closed" && codRemarkMissing ? <p className="review-delay-required"><a href="#review-cod-remark">COD pending 2+ days · reason / remark required</a> before completing this review.</p> : null}
       {review.status !== "closed" && props.codSnapshot.error ? <p className="review-delay-required">COD ageing could not be verified. Refresh the COD report before completing this review.</p> : null}

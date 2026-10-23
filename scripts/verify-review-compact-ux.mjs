@@ -44,6 +44,9 @@ const requiredVehicleMigration=read('supabase/migrations/20260928200000_require_
 assert.ok(requiredVehicleMigration.includes('ops_assert_review_vehicle_details')&&requiredVehicleMigration.includes('ops_guard_review_vehicle_completion')&&requiredVehicleMigration.includes('ops_guard_review_vehicle_close'),'database completion and final-close paths require a saved Vehicle 1');
 const requiredEmdMigration=read('supabase/migrations/20260928210000_require_review_emd_input.sql');
 assert.ok(requiredEmdMigration.includes('ops_assert_review_station_inputs')&&requiredEmdMigration.includes('emd_noon_pct is not null'),'database completion also requires EMD at 12 p.m.');
+const storeHealthSkipMigration=read('supabase/migrations/20261023100000_store_health_skip_vehicle_emd_gates.sql');
+assert.ok(storeHealthSkipMigration.includes("qc_store_health_daily")&&storeHealthSkipMigration.includes('ops_guard_review_vehicle_completion')&&storeHealthSkipMigration.includes('ops_guard_review_vehicle_close'),'Store Health reviews skip Vehicle 1 / EMD completion gates');
+assert.ok(read('src/components/performance-review-desk.tsx').includes('requiresVehicleAndEmd')&&read('src/components/performance-review-desk.tsx').includes('STORE_HEALTH_DAILY_SOURCE'),'Review Desk treats Vehicle/EMD as optional for Store Health');
 assert.ok(read('src/components/performance-noon-emd.tsx').includes('metric="emd"'),'EMD has a direct history control alongside vehicle timings');
 assert.ok(read('src/components/performance-trends.tsx').includes('Download Vehicle + EMD Excel'),'station history offers a combined workbook');
 const stationReport=read('src/app/api/ops-pulse/performance/station-inputs-report/route.ts');
