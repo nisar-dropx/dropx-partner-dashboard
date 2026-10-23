@@ -282,7 +282,7 @@ test("payout UI separates one-row advance recovery from complete-location notifi
   assert.match(payoutTable, /if\s*\(hasAdvanceSelectionConflict\)[\s\S]*?Select one location row per Workforce member[\s\S]*?return;/);
   assert.match(payoutTable, /disabled=\{!advanceSelectedRows\.length\s*\|\|\s*hasAdvanceSelectionConflict/);
   assert.match(payoutTable, /title=\{hasAdvanceSelectionConflict\s*\?\s*["']Advance deduction requires one location row per Workforce member\./);
-  assert.match(payoutTable, /Send Notification requires every publishable location row/i);
+  assert.match(payoutTable, /Publish Payment requires every publishable location row/i);
   assert.doesNotMatch(payoutTable, /maxActionSelection|actionSelectionLimitReached|actionSelectionTarget/);
   assert.match(payoutTable, /setSelected\(new Set\(selectable\.map\(\(row\)\s*=>\s*row\.id\)\)\)/);
   assert.match(payoutTable, /selectedRows\.filter\(\(row\)\s*=>\s*canSendPayoutForReview\(row,\s*audience\)\)/);

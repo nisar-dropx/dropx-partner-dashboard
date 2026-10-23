@@ -28,6 +28,24 @@ test("notification submit names missing locations even when payout filters hide 
   assert.match(source, /Missing locations:[\s\S]*?Clear or change the filters/);
 });
 
+test("Publish Payment uses an explicit confirmation dialog with WhatsApp opt-in disabled by default", () => {
+  assert.match(source, /const \[publishDialogOpen, setPublishDialogOpen\] = useState\(false\)/);
+  assert.match(source, /const \[sendWhatsAppNotification, setSendWhatsAppNotification\] = useState\(false\)/);
+  assert.match(source, /setSendWhatsAppNotification\(false\)[\s\S]*?setPublishDialogOpen\(true\)/);
+  assert.match(source, /`Publish Payment\$\{reviewSelectedRows\.length/);
+  assert.match(source, /role="alertdialog"[\s\S]*?Publish Payment[\s\S]*?Send WhatsApp Notification/);
+  assert.match(source, /type="checkbox"/);
+  assert.match(source, /checked=\{sendWhatsAppNotification\}/);
+  assert.match(source, /onChange=\{\(event\) => setSendWhatsAppNotification\(event\.target\.checked\)\}/);
+  assert.match(source, /<button[^>]*>Cancel<\/button>[\s\S]*?<button[^>]*>\{reviewState\.busy \? "Publishing…" : "Publish Payment"\}<\/button>/);
+});
+
+test("publication sends the explicit WhatsApp choice without changing the payout payload", () => {
+  assert.match(source, /body:\s*JSON\.stringify\(\{[\s\S]*?periodStart,[\s\S]*?periodEnd,[\s\S]*?sendWhatsAppNotification,[\s\S]*?items:/);
+  assert.match(source, /calculationSnapshot:\s*audience === ["']workforce["'][\s\S]*?buildHelperPayoutPublicationSnapshot/);
+  assert.doesNotMatch(source, /async function sendNotification\(\)[\s\S]{0,2200}window\.confirm/);
+});
+
 test("every monthly viewer receives payment status while bank action details stay permission-gated", () => {
   assert.match(pageSource, /const canLoadPaymentSummaries = period\.mode === ["']monthly["'];/);
   assert.match(pageSource, /loadWorkforcePayoutBanks\(companyId, canProcessPayments\)/);
