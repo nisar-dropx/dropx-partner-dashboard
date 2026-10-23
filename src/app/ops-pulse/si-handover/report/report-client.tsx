@@ -35,6 +35,39 @@ type Props = {
   store?: { summary: StoreSummary; rows: StoreRow[]; stores: Store[] };
 };
 
+function istToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+function addDaysIst(isoDate: string, days: number) {
+  const d = new Date(`${isoDate}T12:00:00+05:30`);
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+function formatIstRange(from: string, to: string) {
+  const fmt = (iso: string) => {
+    const t = Date.parse(`${iso}T12:00:00+05:30`);
+    if (!Number.isFinite(t)) return iso;
+    return new Date(t).toLocaleDateString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+  if (!from && !to) return "All dates";
+  if (from === to) return fmt(from);
+  return `${fmt(from)} → ${fmt(to)}`;
+}
+
+const RANGE_PRESETS = [
+  { id: "7d", label: "Last 7 days", days: 6 },
+  { id: "14d", label: "Last 14 days", days: 13 },
+  { id: "30d", label: "Last 30 days", days: 29 },
+  { id: "today", label: "Today", days: 0 },
+] as const;
+
 export function ActivitiesReportClient(props: Props) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -59,15 +92,41 @@ export function ActivitiesReportClient(props: Props) {
     setQ("");
   }, [props.from, props.to, props.tab]);
 
-  const applyRange = () => {
+  const pushRange = (nextFrom: string, nextTo: string) => {
     start(() => {
       const params = new URLSearchParams();
       params.set("tab", props.tab);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
+      if (nextFrom) params.set("from", nextFrom);
+      if (nextTo) params.set("to", nextTo);
       router.push(`/si-handover/report?${params.toString()}`);
     });
   };
+
+  const applyRange = () => {
+    const startDate = from || to;
+    const endDate = to || from;
+    if (startDate && endDate && startDate > endDate) {
+      setFrom(endDate);
+      setTo(startDate);
+      pushRange(endDate, startDate);
+      return;
+    }
+    pushRange(from, to);
+  };
+
+  const applyPreset = (daysBack: number) => {
+    const end = istToday();
+    const start = addDaysIst(end, -daysBack);
+    setFrom(start);
+    setTo(end);
+    pushRange(start, end);
+  };
+
+  const activePreset = RANGE_PRESETS.find((p) => {
+    const end = istToday();
+    const start = addDaysIst(end, -p.days);
+    return from === start && to === end;
+  });
 
   return (
     <div className={styles.pageWide}>
@@ -110,31 +169,58 @@ export function ActivitiesReportClient(props: Props) {
 
       <section className={styles.panel}>
         <div className={styles.reportToolbar}>
-          <div className={styles.filterBar}>
-            <label className={styles.field}>
-              From
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-            </label>
-            <label className={styles.field}>
-              To
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </label>
-            <button
-              type="button"
-              className={styles.btnAccent}
-              disabled={pending}
-              onClick={applyRange}
-            >
-              Apply range
-            </button>
+          <div className={styles.dateRange}>
+            <div className={styles.dateRangeHead}>
+              <strong>Date range</strong>
+              <span className={styles.dateRangeLabel}>
+                {formatIstRange(from, to)} · IST
+              </span>
+            </div>
+            <div className={styles.datePresets} role="group" aria-label="Quick ranges">
+              {RANGE_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={
+                    activePreset?.id === p.id
+                      ? styles.datePresetOn
+                      : styles.datePreset
+                  }
+                  disabled={pending}
+                  onClick={() => applyPreset(p.days)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className={styles.filterBar}>
+              <label className={styles.field}>
+                From
+                <input
+                  type="date"
+                  value={from}
+                  max={to || undefined}
+                  onChange={(e) => setFrom(e.target.value)}
+                />
+              </label>
+              <label className={styles.field}>
+                To
+                <input
+                  type="date"
+                  value={to}
+                  min={from || undefined}
+                  onChange={(e) => setTo(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className={styles.btnAccent}
+                disabled={pending || (!from && !to)}
+                onClick={applyRange}
+              >
+                {pending ? "Loading…" : "Apply"}
+              </button>
+            </div>
           </div>
           <span className={styles.chipOk}>
             {props.tab === "shift" ? "Shift handovers" : "Store day checklists"}

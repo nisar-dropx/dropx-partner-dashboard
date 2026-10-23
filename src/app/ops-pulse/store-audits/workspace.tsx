@@ -887,12 +887,6 @@ export function StoreAuditWorkspace(p: Props) {
                               ) : null}
                             </h3>
                             <div className={styles.qMeta}>
-                              {isScored(q) && q.compliantAnswer ? (
-                                <span className={styles.chip}>
-                                  Pass ={" "}
-                                  {q.compliantAnswer === "yes" ? "Yes" : "No"}
-                                </span>
-                              ) : null}
                               {a.outcome === "gap" && (
                                 <span
                                   className={styles.badge}

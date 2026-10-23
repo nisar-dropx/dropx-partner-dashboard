@@ -411,13 +411,80 @@
 .reportToolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem 0.55rem;
-  align-items: end;
+  gap: 0.55rem 0.75rem;
+  align-items: start;
   justify-content: space-between;
 }
 .reportToolbar .filterBar {
   flex: 1 1 auto;
   margin: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.dateRange {
+  display: grid;
+  gap: 0.45rem;
+  flex: 1 1 18rem;
+  min-width: min(100%, 18rem);
+}
+.dateRangeHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+}
+.dateRangeHead strong {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.dateRangeLabel {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: #64748b;
+}
+.datePresets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.datePreset,
+.datePresetOn {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.28rem 0.65rem;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.datePresetOn {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+.datePreset:disabled,
+.datePresetOn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.dateRange .field {
+  min-width: 9.5rem;
+  flex: 0 1 10rem;
+}
+.dateRange .field input[type="date"] {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.dateRange .btnAccent {
+  min-height: 2.15rem;
+  align-self: end;
 }
 .reportSplit {
   display: grid;
