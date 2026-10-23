@@ -6,7 +6,7 @@ export async function RegistrationNotificationSettings({companyId,canEdit}:{comp
  const db=digestDatabase();
  const [controls,history]=await Promise.all([
   db.from("portal_notification_controls").select("event_key,state,config").eq("company_id",companyId).eq("portal","ops").in("event_key",[...registrationEvents]).order("event_key",{ascending:false}),
-  db.from("portal_digest_deliveries").select("id,recipient_email,report_date,event_key,status,error").eq("company_id",companyId).eq("portal","ops").in("event_key",[...registrationEvents]).order("created_at",{ascending:false}).limit(40)
+  db.from("portal_digest_deliveries").select("id,recipient_email,report_date,event_key,status,error").eq("company_id",companyId).eq("portal","ops").in("event_key",[...registrationEvents]).order("report_date",{ascending:false}).order("started_at",{ascending:false}).limit(40)
  ]);
  if(controls.error||history.error)return <section className="panel" style={{padding:24}}><h2>Registration pendency</h2><p>Registration notification settings could not be loaded. Refresh to retry.</p></section>;
  return <section id="registration-pendency" className="panel" style={{padding:24,marginTop:20}}>

@@ -79,3 +79,10 @@ test("worker protects profile-level scope, schedule window and preview never sen
  const preview=await readFile(new URL("../app/api/ops-pulse/registration-email-preview/route.ts",import.meta.url),"utf8");
  assert.match(preview,/isCompanyOwner\(auth\)/);assert.doesNotMatch(preview,/export async function POST|sendMail|sendEmail/);
 });
+test("registration settings history uses the actual delivery schema timestamps",async()=>{
+ const settings=await readFile(new URL("../components/registration-notification-settings.tsx",import.meta.url),"utf8");
+ assert.match(settings,/\.order\("report_date",\{ascending:false\}\)\.order\("started_at",\{ascending:false\}\)/);
+ // portal_digest_deliveries has report_date/started_at/completed_at, not created_at.
+ assert.doesNotMatch(settings,/\.order\("created_at"/);
+ assert.match(settings,/\.eq\("company_id",companyId\)\.eq\("portal","ops"\)\.in\("event_key",\[\.\.\.registrationEvents\]\)/);
+});

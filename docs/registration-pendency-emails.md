@@ -2,7 +2,8 @@
 
 Native OpsPulse cron, not a workstation automation. The existing five-minute
 `/api/cron/portal-notifications` worker builds two independent daily reports:
-09:30 and 16:00 Asia/Kolkata. First eligible report date: 21 October 2026.
+09:30 and 16:00 Asia/Kolkata. Each control's `first_report_date` determines
+the first eligible report date and is set at production activation.
 The database migration deliberately installs both controls disabled.
 
 ## Source and audience
