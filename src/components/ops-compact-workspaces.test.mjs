@@ -8,7 +8,7 @@ function mount(file,exportName,props,extra={}){
  const values=[];let cursor=0,tree;const pushes=[];
  const hooks={useId:()=> 'controls-id',useState:v=>{const i=cursor++;if(!(i in values))values[i]=v;return [values[i],x=>values[i]=typeof x==='function'?x(values[i]):x]},useEffect:()=>{},useMemo:fn=>fn(),useRef:v=>({current:v}),createContext:()=>({}),useContext:()=>()=>{}};
  const router={push:(url,options)=>pushes.push({url,options})};
- const mocks={'react':hooks,'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react':new Proxy({},{get:()=> 'svg'}),'next/link':'a','@/lib/ops-pulse/command-attention':{attentionOrder:x=>x},'next/navigation':{useRouter:()=>router,usePathname:()=>'/payments/approvals',useSearchParams:()=>new URLSearchParams('view=scope&status=pending&page=3')},...extra};
+ const mocks={'react':hooks,'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react':new Proxy({},{get:()=> 'svg'}),'next/link':'a','@/lib/ops-pulse/command-attention':{attentionOrder:x=>x},'@/lib/ops-pulse/date-format':{formatOpsDate:v=>v??'-',formatOpsDateTime:v=>v??'-'},'next/navigation':{useRouter:()=>router,usePathname:()=>'/payments/approvals',useSearchParams:()=>new URLSearchParams('view=scope&status=pending&page=3')},...extra};
  const m={exports:{}};const code=ts.transpileModule(readFileSync(new URL(file,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
  new Function('require','exports','module',code)(id=>id.endsWith('.css')?{__esModule:true,default:new Proxy({},{get:(_,key)=>key})}:mocks[id],m.exports,m);
  return {pushes,render(){cursor=0;tree=m.exports[exportName](props);return tree},get tree(){return tree}};
