@@ -30,6 +30,7 @@ const combinedMethodRow = {
   deductions: 523,
   deductionBreakdown: [{ code: "TDS", label: "TDS Deduction", amount: 523 }],
   netAmount: 51764,
+  paymentSummary: { paidAmount: 12000, processingAmount: 5000 },
   panAadhaarStatus: "NOT LINKED",
   status: "Ready for review"
 };
@@ -119,6 +120,16 @@ test("payout export uses human labels, exact partner IDs, and one deduction suff
   assert.equal(table.headers.some((header) => /Deduction Deduction/.test(header)), false);
   assert.equal(table.rows[0][table.headers.indexOf("Gross Payment (INR)")], 52287);
   assert.equal(table.rows[0][table.headers.indexOf("Net Pay (INR)")], 51764);
+  assert.deepEqual(
+    table.headers.slice(
+      table.headers.indexOf("Net Pay (INR)"),
+      table.headers.indexOf("PAN-Aadhaar Status") + 1
+    ),
+    ["Net Pay (INR)", "Paid (INR)", "Processing (INR)", "Balance Payable (INR)", "PAN-Aadhaar Status"]
+  );
+  assert.equal(table.rows[0][table.headers.indexOf("Paid (INR)")], 12000);
+  assert.equal(table.rows[0][table.headers.indexOf("Processing (INR)")], 5000);
+  assert.equal(table.rows[0][table.headers.indexOf("Balance Payable (INR)")], 34764);
 });
 
 test("unmapped provider report rows export blank DropX and payment details", () => {
@@ -143,7 +154,82 @@ test("unmapped provider report rows export blank DropX and payment details", () 
   assert.equal(row[table.headers.indexOf("Payment Method")], "");
   assert.equal(row[table.headers.indexOf("Gross Payment (INR)")], "");
   assert.equal(row[table.headers.indexOf("Net Pay (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Paid (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Processing (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Balance Payable (INR)")], "");
   assert.equal(row[table.headers.indexOf("Mapping Status")], "ID not mapped");
+});
+
+test("payment balance export uses Net Pay minus Paid minus Processing at paise precision", () => {
+  const table = buildWorkforcePayoutExportTable([{
+    ...combinedMethodRow,
+    netAmount: 1000.10,
+    paymentSummary: {
+      paidAmount: 100.05,
+      processingAmount: 200.02,
+      balancePayable: 700
+    }
+  }], "Workforce");
+  const row = table.rows[0];
+
+  assert.equal(row[table.headers.indexOf("Paid (INR)")], 100.05);
+  assert.equal(row[table.headers.indexOf("Processing (INR)")], 200.02);
+  assert.equal(row[table.headers.indexOf("Balance Payable (INR)")], 700.03);
+});
+
+test("payment lifecycle export stays blank when a mapped row has no ledger summary", () => {
+  const { paymentSummary: _paymentSummary, ...rowWithoutSummary } = combinedMethodRow;
+  const table = buildWorkforcePayoutExportTable([rowWithoutSummary], "Workforce");
+  const row = table.rows[0];
+
+  assert.equal(row[table.headers.indexOf("Paid (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Processing (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Balance Payable (INR)")], "");
+});
+
+test("payment lifecycle export stays blank when the payment balance is unavailable", () => {
+  const table = buildWorkforcePayoutExportTable([{
+    ...combinedMethodRow,
+    paymentSummary: {
+      paidAmount: 0,
+      processingAmount: 0,
+      eligible: false,
+      eligibilityCode: "publication_missing"
+    }
+  }], "Workforce");
+  const row = table.rows[0];
+
+  assert.equal(row[table.headers.indexOf("Paid (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Processing (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Balance Payable (INR)")], "");
+});
+
+test("Helper export keeps authoritative balances when bank eligibility is blocked", () => {
+  const table = buildWorkforcePayoutExportTable([{
+    ...combinedMethodRow,
+    netAmount: 1500,
+    paymentSummary: {
+      paidAmount: 500,
+      processingAmount: 200,
+      eligible: false,
+      eligibilityCode: "bank_details_missing"
+    }
+  }], "Helper");
+  const row = table.rows[0];
+
+  assert.equal(row[table.headers.indexOf("Paid (INR)")], 500);
+  assert.equal(row[table.headers.indexOf("Processing (INR)")], 200);
+  assert.equal(row[table.headers.indexOf("Balance Payable (INR)")], 800);
+});
+
+test("payment balance cannot become negative when paid and processing exceed Net Pay", () => {
+  const table = buildWorkforcePayoutExportTable([{
+    ...combinedMethodRow,
+    netAmount: 1000,
+    paymentSummary: { paidAmount: 800, processingAmount: 300 }
+  }], "Workforce");
+
+  assert.equal(table.rows[0][table.headers.indexOf("Balance Payable (INR)")], 0);
 });
 
 test("separately configured heads with the same display name remain identifiable", () => {
