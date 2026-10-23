@@ -10,7 +10,9 @@
     "build": "next build",
     "build:connect": "node --test apps/connect/src/lib/workforce-own-adjustments.test.mjs && next build apps/connect",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:mcp": "node --experimental-strip-types --test src/lib/mcp/*.test.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

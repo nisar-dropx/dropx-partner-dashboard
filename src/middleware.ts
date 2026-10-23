@@ -76,11 +76,20 @@ function isPublicOpsInstallAsset(path: string) {
     path.startsWith("/.well-known/");
 }
 
+function isMcpBearerPath(path: string) {
+  return path === "/mcp";
+}
+
+function isMcpConsentPath(path: string) {
+  return path === "/mcp/consent" || path.startsWith("/mcp/consent/");
+}
+
 function isPublicAppPath(path: string) {
   return path === "/login" ||
     path.startsWith("/api/") ||
     path.startsWith("/auth/") ||
     path.startsWith("/_next/") ||
+    isMcpBearerPath(path) ||
     isPublicOpsInstallAsset(path) ||
     isAssetPath(path);
 }
@@ -203,6 +212,7 @@ export async function middleware(request: NextRequest) {
   if (
     isFleetHost &&
     !isPublicAppPath(path) &&
+    !isMcpConsentPath(path) &&
     path !== "/" &&
     path !== "/fleet-control" &&
     path !== "/fleet/mapping-mail" &&
