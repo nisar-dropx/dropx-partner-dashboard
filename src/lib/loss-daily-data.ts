@@ -15,7 +15,9 @@ export async function loadLossDailySnapshot(auth: AuthorizationContext) {
   const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(now);
   const codes=[...new Set(stations.map(s=>s.source_code))];
   const reports=['nl','slp_initial','slp_final'];
-  const [cases,plans,requests,claims,ledger,hrDue,workforceDue,settings,outcomes,liveMonth,...runs]=await Promise.all([
+  // Supabase result shapes differ per query; keep the batch boundary explicit.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const queries: PromiseLike<{data:any;error:{message:string}|null}>[]=[
     readAllRows(db.from('nl_loss_month_cases').select('month,case_key,report,station_code,amount,source_status,source_present,data_source,final_seen_at,last_seen_at,source_updated_at,lifecycle_status,lifecycle_note,lifecycle_updated_at,details').eq('company_id',company).in('station_code',codes).order('month').order('case_key')),
     readAllRows(db.from('nl_loss_recoveries').select('month,case_key,approval_status,deduction_timing,deduction_month,source_amount,outcome_code,outcome_label,recovery_mode,remarks,updated_at,updated_by_name,allocations').eq('company_id',company).eq('is_deleted',false).order('month').order('case_key')),
     readAllRows(db.from('nl_dispute_requests').select('month,case_key,status,source_stage,updated_at,updated_by_name,desk_note').eq('company_id',company).order('month').order('case_key')),
@@ -27,7 +29,8 @@ export async function loadLossDailySnapshot(auth: AuthorizationContext) {
     db.from('nl_recovery_outcomes').select('code,allocation_required').eq('company_id',company),
     db.from('nl_loss_month_cases').select('month').eq('company_id',company).eq('report','nl').eq('data_source','live').eq('source_present',true).order('month',{ascending:false}).limit(1).maybeSingle(),
     ...reports.map(report=>db.from('loss_report_runs').select('checked_at,finished_at,status').eq('report',report).in('status',['completed','failed']).order('started_at',{ascending:false}).limit(1).maybeSingle()),
-  ]);
+  ];
+  const [cases,plans,requests,claims,ledger,hrDue,workforceDue,settings,outcomes,liveMonth,...runs]=await Promise.all(queries);
   const results=[cases,plans,requests,claims,ledger,hrDue,workforceDue,settings,outcomes,liveMonth,...runs];
   const names=['cases','recovery plans','dispute requests','station claims','payroll ledger','People payroll eligibility','Workforce payroll eligibility','source settings','outcomes','live month','NL refresh','SLP Initial refresh','SLP Final refresh'];
   const failed=results.findIndex(r=>r.error);
@@ -43,13 +46,13 @@ export async function loadLossDailySnapshot(auth: AuthorizationContext) {
     return {name,checkedAt:at};
   });
   sources.push({name:'Amazon deadlines',checkedAt:settings.data.live_window_checked_at||null});
-  const scopedKeys=new Set((cases.data||[]).map(lossCaseKey));
+  const scopedKeys=new Set(((cases.data||[]) as LossSourceCase[]).map(lossCaseKey));
   return buildLossDailySnapshot({date,checkedAt,stations,cases:cases.data as LossSourceCase[],
-    plans:(plans.data||[]).filter(p=>scopedKeys.has(lossCaseKey(p))) as LossPlan[],
-    requests:(requests.data||[]).filter(p=>scopedKeys.has(lossCaseKey(p))) as LossRequest[],
+    plans:((plans.data||[]) as LossPlan[]).filter(p=>scopedKeys.has(lossCaseKey(p))) as LossPlan[],
+    requests:((requests.data||[]) as LossRequest[]).filter(p=>scopedKeys.has(lossCaseKey(p))) as LossRequest[],
     claims:claims.data as LossClaim[],ledger:ledger.data as LedgerLine[],
     dueLines:[...(hrDue.data||[]),...(workforceDue.data||[])].filter(p=>scopedKeys.has(lossCaseKey(p))),
     window:(settings.data.live_window||{}) as LiveWindow,liveWindowMonth:liveMonth.data?.month||null,
     recoverableStatuses:settings.data.recoverable_statuses||[],
-    nonAllocatingOutcomes:(outcomes.data||[]).filter(o=>!o.allocation_required).map(o=>o.code),sources,warnings});
+    nonAllocatingOutcomes:((outcomes.data||[]) as {code:string;allocation_required:boolean}[]).filter(o=>!o.allocation_required).map(o=>o.code),sources,warnings});
 }
