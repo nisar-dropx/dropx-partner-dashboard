@@ -42,6 +42,7 @@ import {
 } from "./actions";
 import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
 import { ActivitiesHub } from "./activities-hub";
+import { PickerHeadcountAssist } from "./picker-headcount-assist";
 import { ProofPanel } from "./si-handover-proof";
 import { ShiftList } from "./shift-list";
 import styles from "./si-handover.module.css";
@@ -140,6 +141,14 @@ function TaskCard({
         ) : null}
       </div>
       {task.guidance ? <small className={styles.taskHint}>{task.guidance}</small> : null}
+      {task.id === "A1" ? (
+        <PickerHeadcountAssist
+          checklistId={checklist.id}
+          answer={answer}
+          setAnswer={setAnswer}
+          disabled={disabled}
+        />
+      ) : null}
       {task.answerType === "text" ? (
         <textarea
           disabled={disabled}

@@ -64,6 +64,8 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           noRequires: "both",
           mandatory: "yes",
           linksTo: "Picker HC",
+          guidance:
+            "FT/PT counts auto-fill from punches at this store for the shift. Edit if someone isn’t registered, hasn’t punched, or isn’t coded as a picker. Still attach the attendance-sheet photo.",
         },
         {
           id: "A2",

@@ -809,6 +809,32 @@
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
+.punchAssist {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+}
+.punchAssistRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.55rem;
+}
+.punchAssistMeta {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #0f766e;
+}
+.punchAssistNote {
+  color: #475569;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
 .submitGaps {
   margin: 0;
   padding: 0.5rem 0.55rem;
