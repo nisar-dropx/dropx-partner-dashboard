@@ -510,6 +510,7 @@ export function SiHandoverWorkspace(props: Props) {
         active="shift"
         showStore={Boolean(props.showStoreOps)}
         showShiftReport={manager}
+        showStoreReport={manager && Boolean(props.showStoreOps)}
       />
 
       <nav className={styles.tabBar} aria-label="Activity stages">

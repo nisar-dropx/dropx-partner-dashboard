@@ -350,6 +350,7 @@ export function StoreOpsWorkspace(props: Props) {
       <ActivitiesHub
         active="store"
         showShift={Boolean(props.showShiftOps)}
+        showShiftReport={manager && Boolean(props.showShiftOps)}
         showStoreReport={manager}
       />
 
