@@ -188,7 +188,7 @@ export const CLOCK_OUT_MODES: {
 ];
 
 /** Bump when default catalogue proof/answer rules change; master template refreshes. */
-export const SI_TEMPLATE_FORMAT = 6;
+export const SI_TEMPLATE_FORMAT = 7;
 
 export type Settings = {
   managerRoles: string[];

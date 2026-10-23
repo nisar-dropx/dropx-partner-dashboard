@@ -31,12 +31,6 @@ const shot = (min = 1, max = 3): import("./model").ProofRule => ({
   min,
   max,
 });
-/** Video clip only (camera preferred). */
-const video = (min = 1, max = 3): import("./model").ProofRule => ({
-  kind: "video",
-  min,
-  max,
-});
 /** Photos and/or PDF (stamped manifests). */
 const docs = (min = 1, max = 8): import("./model").ProofRule => ({
   kind: "document",
@@ -257,11 +251,11 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           when: "mid_shift",
           answerType: "yes_no",
           numberFields: [{ key: "issues_found", label: "Issues found" }],
-          proof: video(1, 3),
+          proof: live(3, 6),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Apollo audit",
-          guidance: "Short walk-through video of aisles / planogram (camera).",
+          guidance: "Live photos of 3 bays (planogram / category placement).",
         },
         {
           id: "D2",
@@ -361,22 +355,23 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
         {
           id: "D9",
           label:
-            "Audit tasks closed in HHD — record open counts separately for BOH, SBC, BVC (and IRDR / TS if any)",
+            "Audit tasks closed in HHD: SBC, BOH, BVC, IRDR, transshipment",
           when: "shift_end",
           answerType: "number",
           numberFields: [
-            { key: "boh_open", label: "BOH open" },
-            { key: "sbc_open", label: "SBC open" },
-            { key: "bvc_open", label: "BVC open" },
-            { key: "irdr_open", label: "IRDR open" },
-            { key: "ts_open", label: "Transshipment open" },
+            // Spec order: SBC | BOH | BVC | IRDR | Transshipment (Number × 5)
+            { key: "sbc_open", label: "SBC · tasks open" },
+            { key: "boh_open", label: "BOH · tasks open" },
+            { key: "bvc_open", label: "BVC · tasks open" },
+            { key: "irdr_open", label: "IRDR · tasks open" },
+            { key: "ts_open", label: "Transshipment · tasks open" },
           ],
           proof: shot(),
           noRequires: "reason",
           mandatory: "yes",
           linksTo: "Count compliance, IRDR & ERMR",
           guidance:
-            "Enter 0 when a queue has no open tasks. Do not combine BOH / SBC / BVC into one number.",
+            "Separate fields for each queue at shift end. Enter 0 when none are open — do not combine SBC / BOH / BVC. If tasks remain open, give the reason per task type.",
         },
         {
           id: "D10",
@@ -477,12 +472,14 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
           when: "when_disposal",
           answerType: "yes_no_na",
           numberFields: [{ key: "units_disposed", label: "Units disposed" }],
+          // Spec: live photos (min 3, no gallery) + photo/PDF of stamped manifest.
+          // document kind accepts camera photos + PDF; Take/Live preferred in UI for images.
           proof: docs(3, 8),
           noRequires: "reason",
           mandatory: "if_disposal",
           linksTo: "CLEAR audit",
           guidance:
-            "Use N/A when no disposal this shift. Upload ≥3 photos of goods destroyed / bagged waste, plus photo or PDF of the vendor-stamped manifest.",
+            "Use N/A when no disposal this shift. Upload ≥3 live photos of goods destroyed / bagged waste, plus photo or PDF of the vendor-stamped manifest. Do not dispatch if incomplete — inform Store Manager.",
         },
         {
           id: "E5",
@@ -530,9 +527,9 @@ const sections: { id: string; name: string; guidance: string; tasks: TaskSeed[] 
 
 export function defaultSiTemplate(): Template {
   return {
-    name: "Ops Pulse · Activities & Handover",
+    name: "Ops Pulse · Shift Incharge Task List & Handover",
     description:
-      "One checklist per store per shift (6 AM, 2 PM, 10 PM). Spec v1 — live camera proofs where required; screenshots for dashboards. Outgoing SI completes & submits; incoming SI accepts.",
+      "One checklist per store per shift (6 AM, 2 PM, 10 PM). Spec v1 — live camera capture with time & GPS stamp unless stated; screenshots for dashboards only. Outgoing SI completes & submits; incoming SI accepts before outgoing closes the shift.",
     sections: sections.map((s) => ({
       id: s.id,
       name: s.name,
