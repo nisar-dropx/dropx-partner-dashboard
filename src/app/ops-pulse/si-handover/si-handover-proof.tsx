@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import {
@@ -420,7 +420,8 @@ export function ProofPanel({
   const [preview, setPreview] = useState<Evidence | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
-  const uid = useId();
+  const camInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mine = proofs.filter((p) => p.task_id === task.id);
   const room = Math.max(0, task.proof.max - mine.length);
   const preferCapture = proofPrefersCapture(task.proof.kind);
@@ -451,9 +452,20 @@ export function ProofPanel({
     setPreview(proof);
   };
 
+  /** Copy FileList before clearing the input — FileList is live and becomes empty if value is reset first. */
+  const pickFromInput = (input: HTMLInputElement | null) => {
+    if (!input?.files?.length) return;
+    const files = Array.from(input.files);
+    input.value = "";
+    void uploadFiles(files).catch(() => undefined);
+  };
+
   const uploadFiles = async (files: FileList | File[]) => {
     const list = Array.from(files).slice(0, room);
-    if (!list.length) return;
+    if (!list.length) {
+      onError("No file was selected. Try Take, Live, or Attach again.");
+      return;
+    }
     setBusy(true);
     setStatus("Preparing…");
     onError("");
@@ -473,14 +485,31 @@ export function ProofPanel({
         if (!Number.isFinite(Date.parse(capturedAt))) {
           throw Error("Could not read capture time on this device.");
         }
-        const file = await prepareProofFile(raw, {
+        const preparedFile = await prepareProofFile(raw, {
           capturedAt,
           latitude: gps.latitude,
           longitude: gps.longitude,
           accuracyM: gps.accuracyM,
           storeLabel,
         });
-        const contentType = (file.type || raw.type || "image/jpeg").toLowerCase();
+        // Gallery picks sometimes omit MIME; infer from name before prepare rejects.
+        const inferred =
+          preparedFile.type ||
+          raw.type ||
+          (/\.png$/i.test(preparedFile.name || raw.name) ? "image/png" : "") ||
+          (/\.webp$/i.test(preparedFile.name || raw.name) ? "image/webp" : "") ||
+          (/\.pdf$/i.test(preparedFile.name || raw.name) ? "application/pdf" : "") ||
+          (/\.(mp4|m4v)$/i.test(preparedFile.name || raw.name) ? "video/mp4" : "") ||
+          (/\.mov$/i.test(preparedFile.name || raw.name) ? "video/quicktime" : "") ||
+          "image/jpeg";
+        const contentType = inferred.toLowerCase();
+        const file =
+          preparedFile.type === contentType
+            ? preparedFile
+            : new File([preparedFile], preparedFile.name || raw.name || `proof-${Date.now()}.jpg`, {
+                type: contentType,
+                lastModified: preparedFile.lastModified || Date.now(),
+              });
         const size = Math.max(0, Math.round(Number(file.size) || 0));
         if (size < 1) throw Error("Captured file was empty. Try again.");
         setStatus(list.length > 1 ? `Uploading ${index}/${list.length}…` : "Uploading…");
@@ -624,25 +653,23 @@ export function ProofPanel({
           <>
             {preferCapture ? (
               <>
-                <label
+                <input
+                  ref={camInputRef}
+                  className={styles.proofFileInput}
+                  type="file"
+                  accept={acceptNative}
+                  capture="environment"
+                  disabled={busy}
+                  onChange={() => pickFromInput(camInputRef.current)}
+                />
+                <button
+                  type="button"
                   className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
-                  htmlFor={`${uid}-cam`}
+                  disabled={busy}
+                  onClick={() => camInputRef.current?.click()}
                 >
                   {busy ? "…" : task.proof.kind === "video" ? "Record" : "Take"}
-                  <input
-                    id={`${uid}-cam`}
-                    className={styles.proofFileInput}
-                    type="file"
-                    accept={acceptNative}
-                    capture="environment"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const files = e.target.files;
-                      e.target.value = "";
-                      if (files?.length) void uploadFiles(files).catch(() => undefined);
-                    }}
-                  />
-                </label>
+                </button>
                 {allowLiveStill ? (
                   <button
                     type="button"
@@ -655,25 +682,23 @@ export function ProofPanel({
                 ) : null}
               </>
             ) : null}
-            <label
+            <input
+              ref={fileInputRef}
+              className={styles.proofFileInput}
+              type="file"
+              accept={acceptAttach}
+              multiple={room > 1 && !preferCapture}
+              disabled={busy}
+              onChange={() => pickFromInput(fileInputRef.current)}
+            />
+            <button
+              type="button"
               className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
-              htmlFor={`${uid}-files`}
+              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
             >
-              {busy ? "…" : preferCapture ? "Attach" : room > 1 ? "Add" : "Add"}
-              <input
-                id={`${uid}-files`}
-                className={styles.proofFileInput}
-                type="file"
-                accept={acceptAttach}
-                multiple={room > 1 && !preferCapture}
-                disabled={busy}
-                onChange={(e) => {
-                  const files = e.target.files;
-                  e.target.value = "";
-                  if (files?.length) void uploadFiles(files).catch(() => undefined);
-                }}
-              />
-            </label>
+              {busy ? "…" : preferCapture ? "Attach" : "Add"}
+            </button>
           </>
         ) : null}
       </div>
