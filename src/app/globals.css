@@ -15068,6 +15068,10 @@ body:has([aria-modal="true"]) .ops-ai {
   gap: 10px;
 }
 
+.designation-form-error {
+  margin: 0;
+}
+
 .designation-modal {
   width: min(1800px, calc(100vw - 24px)) !important;
   max-width: none;
