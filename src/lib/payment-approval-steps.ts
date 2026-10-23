@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, loadEffectivePositionAccess, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { paymentRoutingDay, resolvePaymentCover } from "@/lib/payment-delegation-policy";
 import { resolveInitialStage } from "@/lib/payment-stage-policy";
+import { loadPaymentReportingHierarchy } from "@/lib/payment-reporting-hierarchy";
 
 export type ApprovalStepCandidate = { role_id: string; scope: "station" | "cluster" | "company" };
 export type ApprovalStepRow = {
@@ -316,6 +317,45 @@ export type AdvanceResult = {
   approver: ApproverTarget;
   noApproverConfigured: boolean;
 };
+
+export type PaymentApprovalCoverage = {
+  fromStepOrder: number;
+  throughStepOrder: number;
+};
+
+/**
+ * A manager acting from the team view may satisfy consecutive configured
+ * stages only while each resolved approver is that manager or a descendant
+ * in the same active People position tree. The first approver outside that
+ * tree boundary remains mandatory. An unmapped required stage is never
+ * silently bypassed.
+ */
+export async function paymentApprovalCoverage(
+  companyId: string,
+  steps: ApprovalStepRow[],
+  currentStepOrder: number,
+  locationId: string | null | undefined,
+  actorUserId: string
+): Promise<PaymentApprovalCoverage> {
+  const hierarchy = await loadPaymentReportingHierarchy(companyId);
+  let throughStepOrder = currentStepOrder;
+  const laterSteps = steps
+    .filter((step) => step.step_order > currentStepOrder)
+    .sort((left, right) => left.step_order - right.step_order);
+
+  for (const step of laterSteps) {
+    const approver = await resolveStepApprover(companyId, step, locationId);
+    if (!approver) {
+      if (step.is_required) break;
+      throughStepOrder = step.step_order;
+      continue;
+    }
+    if (!hierarchy.isSameOrAbove(actorUserId, approver.userId)) break;
+    throughStepOrder = step.step_order;
+  }
+
+  return { fromStepOrder: currentStepOrder, throughStepOrder };
+}
 
 /**
  * Walks forward from the request's current step to the next step that either

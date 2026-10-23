@@ -4,7 +4,7 @@ import { approvePaymentRequest, rejectPaymentRequest, returnPaymentRequest } fro
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canOverseePayment } from "@/lib/payment-oversight-policy";
-import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
+import { getPaymentApprovalActionEligibility, getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { paymentRequestAttachments } from "@/lib/payment-request-attachments";
 import { isPaymentTrackingQuestion, parsePaymentTrackingIds, paymentShipmentCount } from "@/lib/payment-shipment-count";
 import { adhocApprovalContext } from "@/lib/payment-volume";
@@ -41,7 +41,9 @@ async function authorizedRequest(requestId: string, requireEdit = false) {
 
   const station = relation(result.data.stations);
   const request = { ...result.data, location_model_id: station?.location_model_id ?? null };
-  const eligible = await getPaymentApprovalEligibility(companyId, authorization, [request]);
+  const eligible = requireEdit
+    ? await getPaymentApprovalActionEligibility(companyId, authorization, [request])
+    : await getPaymentApprovalEligibility(companyId, authorization, [request]);
   if (!eligible.has(request.id) && (requireEdit || !canOverseePayment(authorization, request))) {
     return { error: NextResponse.json({ error: "This payment request is outside your approval scope." }, { status: 403 }) } as const;
   }

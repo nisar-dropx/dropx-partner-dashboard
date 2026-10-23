@@ -2,6 +2,7 @@ import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
 import { initialApprovalReadyIds } from "@/lib/payment-initial-approval-gate";
+import { loadPaymentReportingHierarchy } from "@/lib/payment-reporting-hierarchy";
 
 export type PaymentApprovalScopeRequest = {
   id: string;
@@ -37,19 +38,31 @@ async function authorizationModelIds(companyId: string, authorization: Authoriza
   return new Set((result.data ?? []).map((row) => row.location_model_id).filter((id): id is string => Boolean(id)));
 }
 
-export async function getPaymentApprovalEligibility(companyId: string, authorization: AuthorizationContext, requests: PaymentApprovalScopeRequest[]) {
+async function approvalEligibility(
+  companyId: string,
+  authorization: AuthorizationContext,
+  requests: PaymentApprovalScopeRequest[],
+  includeReportingManagers: boolean
+) {
   if (authorization.roleCode === "OWNER" || authorization.isMasterOwner) {
     return new Set(requests.map((request) => request.id));
   }
   const eligibleIds = new Set<string>();
   const modelIds = await authorizationModelIds(companyId, authorization);
+  const hierarchy = includeReportingManagers ? await loadPaymentReportingHierarchy(companyId) : null;
 
   for (const request of requests) {
     if (!canAccessPaymentLocation(authorization, request.location_id)) {
       continue;
     }
 
-    if (!matchesCurrentPaymentAssignee(authorization.userId, authorization.effectiveRoleIds, request)) continue;
+    const assigned = matchesCurrentPaymentAssignee(authorization.userId, authorization.effectiveRoleIds, request);
+    const reportingManager = Boolean(
+      includeReportingManagers &&
+      request.current_approver_user_id &&
+      hierarchy?.isStrictlyAbove(authorization.userId, request.current_approver_user_id)
+    );
+    if (!assigned && !reportingManager) continue;
     if (request.location_model_id && modelIds && !modelIds.has(request.location_model_id)) continue;
     eligibleIds.add(request.id);
   }
@@ -57,7 +70,19 @@ export async function getPaymentApprovalEligibility(companyId: string, authoriza
   return initialApprovalReadyIds(companyId, [...eligibleIds], supabaseAdmin);
 }
 
+/** Personal queue and reminder eligibility: only the named assignee or an
+ * unnamed configured role pool. Higher managers deliberately do not appear
+ * here; they take over from the team view without receiving assignee mail. */
+export async function getPaymentApprovalEligibility(companyId: string, authorization: AuthorizationContext, requests: PaymentApprovalScopeRequest[]) {
+  return approvalEligibility(companyId, authorization, requests, false);
+}
+
+/** Decision eligibility for the team/location view and server actions. */
+export async function getPaymentApprovalActionEligibility(companyId: string, authorization: AuthorizationContext, requests: PaymentApprovalScopeRequest[]) {
+  return approvalEligibility(companyId, authorization, requests, true);
+}
+
 export async function canActOnPaymentRequest(companyId: string, authorization: AuthorizationContext, request: PaymentApprovalScopeRequest) {
-  const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, [request]);
+  const eligibleIds = await getPaymentApprovalActionEligibility(companyId, authorization, [request]);
   return eligibleIds.has(request.id);
 }
