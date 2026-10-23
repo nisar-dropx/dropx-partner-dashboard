@@ -18,8 +18,13 @@ assert.equal(calls,1);assert.equal(deferred.deferred,2);
 const logs=[];let smtpCalls=0,smtpFails=true,logFails=false,lastMail,tableFailure;
 const tables={fleet_control_settings:[{company_id:'fixture',daily_status_email_enabled:true,daily_status_send_time:'20:00:00',daily_status_only_affected:false}],companies:[{id:'fixture',name:'Fixture'}],fleet_vehicles:[{vehicle_no:'FIXTURE',station_code:'TLPB',model:'Fixture van',ownership_type:'own',status:'active'}],fleet_status_report_recipients:[{name:'Fixture',email:'fixture@example.com',station_codes:[]}],fleet_status_report_logs:logs};
 for(const name of ['fleet_vehicles','fleet_status_report_recipients'])for(const row of tables[name])Object.assign(row,{company_id:'fixture',is_active:true});
+// This table is keyed by vehicle/day; it has no synthetic id column.
+const dayAvailabilityColumns = new Set(['company_id','vehicle_id','status','work_date','created_at','revoked_at']);
+function checkColumn(table, column) {
+ if (table === 'fleet_vehicle_day_availability') assert.ok(dayAvailabilityColumns.has(column), `Unknown ${table}.${column}`);
+}
 function query(table){let filters=[],op='read',payload,single=false,desc=false,max=Infinity,start=0;
- const q={select(){return q;},is(k,v){filters.push(r=>(r[k]??null)===v);return q;},range(a,b){start=a;max=b-a+1;return q;},eq(k,v){filters.push(r=>r[k]===v);return q;},in(k,vs){filters.push(r=>vs.includes(r[k]));return q;},order(k,o){desc=o?.ascending===false;return q;},limit(n){max=n;return q;},maybeSingle(){single=true;return q;},upsert(p){op='upsert';payload=p;return q;},update(p){op='update';payload=p;return q;},then(resolve,reject){return Promise.resolve().then(()=>{
+ const q={select(columns='*'){if(columns!=='*')for(const column of columns.split(','))checkColumn(table,column.trim());return q;},is(k,v){filters.push(r=>(r[k]??null)===v);return q;},range(a,b){start=a;max=b-a+1;return q;},eq(k,v){filters.push(r=>r[k]===v);return q;},in(k,vs){filters.push(r=>vs.includes(r[k]));return q;},order(k,o){checkColumn(table,k);desc=o?.ascending===false;return q;},limit(n){max=n;return q;},maybeSingle(){single=true;return q;},upsert(p){op='upsert';payload=p;return q;},update(p){op='update';payload=p;return q;},then(resolve,reject){return Promise.resolve().then(()=>{
   if(table===tableFailure)return{data:null,error:{message:'Fixture unavailable table'}};
   let rows=(tables[table]||[]).filter(r=>filters.every(f=>f(r)));
   if(op==='upsert'){const found=logs.some(r=>['company_id','report_date','recipient_email','region_key'].every(k=>r[k]===payload[k]));rows=found?[]:[{id:`log-${logs.length}`,...payload}];logs.push(...rows);}

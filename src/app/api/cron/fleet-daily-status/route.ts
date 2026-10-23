@@ -50,7 +50,7 @@ async function processCompany(company: { id: string; name: string | null }, date
   const [vehiclesResult, recipientsResult, availabilityResult, statusesResult] = await Promise.all([
     readAllRows(supabaseAdmin.from("fleet_vehicles").select("id,vehicle_no,station_code,model,ownership_type,status,status_updated_at,non_operational_since,expected_operational_date,status_comment,status_reason_key").eq("company_id", company.id).order("id")),
     supabaseAdmin.from("fleet_status_report_recipients").select("name,email,station_codes").eq("company_id", company.id).eq("is_active", true),
-    readAllRows(supabaseAdmin.from("fleet_vehicle_day_availability").select("id,vehicle_id,status,work_date,created_at").eq("company_id", company.id).eq("work_date", date).is("revoked_at", null).order("id")),
+    readAllRows(supabaseAdmin.from("fleet_vehicle_day_availability").select("vehicle_id,status,work_date,created_at").eq("company_id", company.id).eq("work_date", date).is("revoked_at", null).order("vehicle_id")),
     readAllRows(supabaseAdmin.from("fleet_vehicle_status_master").select("id,status_key,is_operational,is_terminal").eq("company_id", company.id).order("id"))
   ]);
   if (vehiclesResult.error || recipientsResult.error || activity.error) throw new Error(vehiclesResult.error?.message || recipientsResult.error?.message || activity.error || "Fleet data could not be loaded.");
