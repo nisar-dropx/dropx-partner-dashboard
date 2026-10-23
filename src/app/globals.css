@@ -20660,8 +20660,9 @@ td strong,
   .ops-login-story-copy h1 { max-width: 520px; margin: 10px 0 0; font-size: clamp(31px, 7.5vw, 48px); }
   .ops-login-story-copy p,
   .ops-login-proof { display: none; }
-  .ops-login-access { position: relative; z-index: 1; min-height: auto; margin-top: -34px; padding: 0 18px 30px; }
+  .ops-login-access { position: relative; z-index: 1; min-height: auto; margin-top: -34px; padding: 0 18px 30px; gap: 14px; }
   .ops-login-card { border-radius: 19px; }
+  .ops-login-access .ops-install { order: 2; }
 }
 
 @media (max-width: 520px) {

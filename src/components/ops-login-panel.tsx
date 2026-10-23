@@ -10,7 +10,10 @@ type OpsLoginPanelProps = {
   nextPath?: string;
 };
 
-export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelProps) {
+export function OpsLoginPanel({
+  initialMessage,
+  nextPath = "/",
+}: OpsLoginPanelProps) {
   return (
     <main className="ops-login-page">
       <section className="ops-login-story" aria-label="OpsPulse overview">
@@ -22,18 +25,35 @@ export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelP
         <div className="ops-login-story-copy">
           <span className="ops-login-kicker">ONE OPERATING VIEW</span>
           <h1>Run every station from one clear pulse.</h1>
-          <p>Performance, capacity, cash, fleet and action queues—secured to your assigned role and locations.</p>
+          <p>
+            Performance, capacity, cash, fleet and action queues—secured to your
+            assigned role and locations.
+          </p>
         </div>
         <div className="ops-login-proof">
-          <div><MonitorSmartphone size={20} /><span><strong>Built for every screen</strong><small>Phone, tablet and desktop</small></span></div>
-          <div><ShieldCheck size={20} /><span><strong>Scope-safe by design</strong><small>Only your permitted operations</small></span></div>
+          <div>
+            <MonitorSmartphone size={20} />
+            <span>
+              <strong>Phone-ready workspace</strong>
+              <small>Install from Chrome while the store app ships</small>
+            </span>
+          </div>
+          <div>
+            <ShieldCheck size={20} />
+            <span>
+              <strong>Scope-safe by design</strong>
+              <small>Only your permitted operations</small>
+            </span>
+          </div>
         </div>
       </section>
 
       <section className="ops-login-access" aria-label="Sign in to OpsPulse">
         <div className="ops-login-card">
           <div className="ops-login-card-heading">
-            <span className="ops-login-card-icon"><LockKeyhole size={22} /></span>
+            <span className="ops-login-card-icon">
+              <LockKeyhole size={22} />
+            </span>
             <div>
               <span className="ops-login-kicker">SECURE ACCESS</span>
               <h2>Sign in to OpsPulse</h2>
@@ -41,7 +61,11 @@ export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelP
             </div>
           </div>
 
-          {initialMessage ? <div className="ops-login-notice" role="status">{initialMessage}</div> : null}
+          {initialMessage ? (
+            <div className="ops-login-notice" role="status">
+              {initialMessage}
+            </div>
+          ) : null}
 
           <form action={signInWithGoogle}>
             <input name="next" type="hidden" value={nextPath} />
@@ -51,7 +75,9 @@ export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelP
             </button>
           </form>
 
-          <p className="ops-access-footnote">Access is available only to active users enabled for OpsPulse.</p>
+          <p className="ops-access-footnote">
+            Access is available only to active users enabled for OpsPulse.
+          </p>
         </div>
 
         <OpsAppInstall compact />

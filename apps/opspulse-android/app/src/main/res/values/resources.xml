@@ -1,6 +1,6 @@
 <resources>
     <string name="app_name">OpsPulse</string>
-    <string name="launch_url">https://ops.dropxlogistics.com/?source=android-app</string>
+    <string name="launch_url">https://ops.dropxlogistics.com/login?source=android-app</string>
     <string name="asset_statements">[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"web","site":"https://ops.dropxlogistics.com"}}]</string>
     <color name="splash_background">#F5F6FA</color>
     <color name="navigation_color">#FFFFFF</color>
