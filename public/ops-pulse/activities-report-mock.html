@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpsPulse · Activities report mock</title>
+  <style>
+    :root {
+      --ink: #0b1220;
+      --muted: #5b6b7c;
+      --line: #e6edf4;
+      --soft: #f4f7fa;
+      --ok: #0f766e;
+      --ok-soft: #ecfdf5;
+      --warn: #b45309;
+      --warn-soft: #fff7ed;
+      --bad: #b91c1c;
+      --bad-soft: #fef2f2;
+      --accent: #0f766e;
+      --accent-deep: #115e59;
+      --shadow: 0 1px 0 rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 420px at 10% -10%, #d1fae5 0%, transparent 55%),
+        radial-gradient(900px 380px at 100% 0%, #e0f2fe 0%, transparent 50%),
+        #eef2f6;
+      padding: 28px 16px 72px;
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 18px; }
+
+    .hero {
+      padding: 22px 22px 18px;
+      border-radius: 18px;
+      border: 1px solid rgba(15, 118, 110, 0.14);
+      background: linear-gradient(135deg, #f0fdfa 0%, #fff 42%, #f8fafc 100%);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .hero h1 {
+      margin: 6px 0 6px;
+      font-size: clamp(1.45rem, 2.4vw, 1.85rem);
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+    .hero p { margin: 0; color: var(--muted); max-width: 52rem; font-size: 0.9rem; }
+    .hero-meta {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 10px; border-radius: 999px;
+      font-size: 0.72rem; font-weight: 700;
+      border: 1px solid var(--line); background: #fff; color: var(--muted);
+    }
+    .pill strong { color: var(--ink); font-weight: 800; }
+
+    .pulse-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      .pulse-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .pulse-tile {
+      position: relative;
+      padding: 16px 16px 14px;
+      border-radius: 16px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .pulse-tile::before {
+      content: "";
+      position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+      background: var(--accent);
+    }
+    .pulse-tile.warn::before { background: #f59e0b; }
+    .pulse-tile.bad::before { background: #ef4444; }
+    .pulse-tile .label {
+      margin: 0;
+      font-size: 0.7rem;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .pulse-tile .value {
+      margin: 6px 0 2px;
+      font-size: 1.85rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .pulse-tile .hint { margin: 0; font-size: 0.75rem; color: var(--muted); }
+    .pulse-tile.bad .value { color: var(--bad); }
+    .pulse-tile.warn .value { color: var(--warn); }
+    .pulse-tile.ok .value { color: var(--ok); }
+
+    .section-head {
+      display: flex; align-items: end; justify-content: space-between;
+      gap: 12px; margin-bottom: 12px;
+    }
+    .section-head h2 {
+      margin: 0;
+      font-size: 1rem;
+      letter-spacing: -0.02em;
+    }
+    .section-head p {
+      margin: 2px 0 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 880px) { .grid2 { grid-template-columns: 1fr; } }
+
+    .card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .rank-list { display: grid; gap: 10px; }
+    .rank {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, var(--soft));
+    }
+    .rank.hot {
+      border-color: #fecaca;
+      background: linear-gradient(180deg, #fff, var(--bad-soft));
+    }
+    .rank.warm {
+      border-color: #fed7aa;
+      background: linear-gradient(180deg, #fff, var(--warn-soft));
+    }
+    .rank-index {
+      width: 28px; height: 28px;
+      border-radius: 9px;
+      display: grid; place-items: center;
+      font-size: 0.72rem; font-weight: 800;
+      background: #ecfeff; color: var(--accent-deep);
+    }
+    .rank.hot .rank-index { background: #fee2e2; color: var(--bad); }
+    .rank.warm .rank-index { background: #ffedd5; color: var(--warn); }
+    .rank-main { min-width: 0; }
+    .rank-main strong {
+      display: block;
+      font-size: 0.9rem;
+      letter-spacing: -0.01em;
+    }
+    .rank-main small {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+    .bar {
+      margin-top: 8px;
+      height: 7px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #14b8a6, #0f766e);
+    }
+    .bar.mid > i { background: linear-gradient(90deg, #fbbf24, #d97706); }
+    .bar.low > i { background: linear-gradient(90deg, #f87171, #dc2626); }
+    .rank-stats {
+      display: grid;
+      gap: 4px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .rank-stats .pct {
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .rank-stats .meta {
+      font-size: 0.68rem;
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .flag {
+      display: inline-flex;
+      align-items: center;
+      margin-top: 4px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 0.65rem;
+      font-weight: 800;
+      background: var(--bad-soft);
+      color: var(--bad);
+    }
+    .flag.warn { background: var(--warn-soft); color: var(--warn); }
+    .flag.ok { background: var(--ok-soft); color: var(--ok); }
+
+    .activity {
+      display: grid;
+      gap: 0;
+      position: relative;
+    }
+    .activity::before {
+      content: "";
+      position: absolute;
+      left: 19px; top: 18px; bottom: 18px;
+      width: 2px;
+      background: linear-gradient(180deg, #99f6e4, #cbd5e1);
+    }
+    .act {
+      display: grid;
+      grid-template-columns: 40px 1fr auto;
+      gap: 12px;
+      align-items: start;
+      padding: 14px 4px 14px 0;
+      position: relative;
+    }
+    .act + .act { border-top: 1px dashed #e2e8f0; }
+    .dot {
+      width: 38px; height: 38px;
+      border-radius: 12px;
+      display: grid; place-items: center;
+      font-size: 0.62rem;
+      font-weight: 850;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      z-index: 1;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px var(--line);
+    }
+    .dot.done { background: var(--ok-soft); color: var(--ok); }
+    .dot.miss { background: var(--warn-soft); color: var(--warn); }
+    .dot.open { background: #e0f2fe; color: #0369a1; }
+    .act-body strong {
+      display: block;
+      font-size: 0.92rem;
+      letter-spacing: -0.01em;
+    }
+    .act-body small {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .act-body .tags {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+    }
+    .tag {
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: var(--soft);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+    .tag.ok { background: var(--ok-soft); color: var(--ok); border-color: #a7f3d0; }
+    .tag.warn { background: var(--warn-soft); color: var(--warn); border-color: #fdba74; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px; min-height: 36px; padding: 8px 14px;
+      border-radius: 10px; border: 1px solid var(--line);
+      background: #fff; color: var(--ink);
+      font: inherit; font-weight: 750; font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .btn:hover { border-color: #99f6e4; background: #f0fdfa; }
+    .btn.primary {
+      background: linear-gradient(180deg, #0d9488, var(--accent-deep));
+      color: #fff; border-color: transparent;
+      box-shadow: 0 8px 18px rgba(15, 118, 110, 0.28);
+    }
+    .btn.primary:hover { filter: brightness(1.05); background: linear-gradient(180deg, #14b8a6, var(--accent)); }
+    .btn.ghost { background: transparent; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .cta {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 18px 20px;
+      border-radius: 16px;
+      border: 1px solid rgba(15, 118, 110, 0.2);
+      background:
+        linear-gradient(120deg, rgba(240, 253, 250, 0.95), rgba(255,255,255,0.92)),
+        #fff;
+      box-shadow: var(--shadow);
+    }
+    @media (max-width: 700px) {
+      .cta { grid-template-columns: 1fr; }
+    }
+    .cta h2 { margin: 0 0 4px; font-size: 1rem; }
+    .cta p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+
+    /* Modal */
+    .backdrop {
+      display: none; position: fixed; inset: 0; z-index: 40;
+      background: rgba(11, 18, 32, 0.55);
+      backdrop-filter: blur(4px);
+      padding: 16px;
+      align-items: center; justify-content: center;
+    }
+    .backdrop.open { display: flex; }
+    .backdrop.fs { padding: 0; }
+    .modal {
+      width: min(920px, 100%); max-height: 92dvh; overflow: auto;
+      background: #fff; border-radius: 18px;
+      box-shadow: 0 28px 70px rgba(0,0,0,.32);
+      display: grid; grid-template-rows: auto minmax(0,1fr);
+    }
+    .backdrop.fs .modal { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
+    .modal-head {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+      padding: 14px 16px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f0fdfa, #fff);
+      position: sticky; top: 0; z-index: 2;
+    }
+    .modal-head h3 { margin: 0; font-size: 1.05rem; letter-spacing: -0.02em; }
+    .modal-head p { margin: 3px 0 0; color: var(--muted); font-size: 0.78rem; }
+    .report { padding: 18px 20px 32px; font-size: 0.84rem; background: #f8fafc; }
+    .report-sheet {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px 18px 22px;
+    }
+    .report h4 {
+      margin: 18px 0 10px; font-size: 0.78rem; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--accent);
+      border-bottom: 1px solid var(--line); padding-bottom: 6px;
+    }
+    .report h4:first-of-type { margin-top: 8px; }
+    .q {
+      margin: 10px 0; padding: 12px 13px;
+      border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    }
+    .q .meta { color: var(--muted); font-size: 0.7rem; font-weight: 700; margin-bottom: 4px; }
+    .ans { font-weight: 800; color: var(--ok); margin-top: 4px; }
+    .ans.no { color: var(--bad); }
+    .photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .ph {
+      width: 128px; height: 96px; border-radius: 10px; background: #cbd5e1;
+      display: grid; place-items: center; color: #334155; font-size: 0.7rem; font-weight: 800;
+      border: 1px solid #94a3b8;
+    }
+    .ph.pdf { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+    .video-link { margin-top: 8px; font-size: 0.78rem; }
+    .video-link a { color: var(--accent); font-weight: 750; }
+    .note {
+      margin-top: 14px; padding: 12px 13px; border-radius: 10px;
+      background: var(--warn-soft); color: var(--warn); font-size: 0.76rem;
+      border: 1px solid #fdba74;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <p class="eyebrow">Mock · Shift &amp; Store report</p>
+      <h1>What’s stuck, who’s quiet, what’s improving</h1>
+      <p>
+        Insight-first layout for managers: pulse numbers, ranked stores and people,
+        then a live activity feed into the checklist report modal.
+      </p>
+      <div class="hero-meta">
+        <span class="pill">Range <strong>10–23 Oct · IST</strong></span>
+        <span class="pill">Network <strong>37 shifts</strong></span>
+        <span class="pill">Sample only · <code style="font-size:0.7rem">/ops-pulse/activities-report-mock.html</code></span>
+      </div>
+    </header>
+
+    <section class="pulse-grid" aria-label="Store pulse">
+      <article class="pulse-tile ok">
+        <p class="label">Avg completion</p>
+        <p class="value">76%</p>
+        <p class="hint">Across selected range</p>
+      </article>
+      <article class="pulse-tile warn">
+        <p class="label">Still open</p>
+        <p class="value">6</p>
+        <p class="hint">Needs finish or handoff</p>
+      </article>
+      <article class="pulse-tile bad">
+        <p class="label">Broken / stale</p>
+        <p class="value">3</p>
+        <p class="hint">Quiet past escalate window</p>
+      </article>
+      <article class="pulse-tile ok">
+        <p class="label">Trend vs prior</p>
+        <p class="value">↑6%</p>
+        <p class="hint">Same-length previous window</p>
+      </article>
+    </section>
+
+    <div class="grid2">
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <h2>By store</h2>
+            <p>Worst open / stale rise first · bar = avg completion</p>
+          </div>
+        </div>
+        <div class="rank-list">
+          <article class="rank hot">
+            <div class="rank-index">1</div>
+            <div class="rank-main">
+              <strong>HYD-NOW-04</strong>
+              <small>Last start 06:05 · quiet 3.2h</small>
+              <div class="bar low" aria-hidden="true"><i style="width:61%"></i></div>
+              <span class="flag">2 stale · 3 open</span>
+            </div>
+            <div class="rank-stats">
+              <div class="pct">61%</div>
+              <div class="meta">12 shifts</div>
+              <div class="meta">Trend ↓ 4%</div>
+            </div>
+          </article>
+          <article class="rank warm">
+            <div class="rank-index">2</div>
+            <div class="rank-main">
+              <strong>BLR-NOW-08</strong>
+              <small>Last start 22:10 · 1 overdue accept</small>
+              <div class="bar mid" aria-hidden="true"><i style="width:74%"></i></div>
+              <span class="flag warn">1 stale · 2 open</span>
+            </div>
+            <div class="rank-stats">
+              <div class="pct">74%</div>
+              <div class="meta">11 shifts</div>
+              <div class="meta">Trend · flat</div>
+            </div>
+          </article>
+          <article class="rank">
+            <div class="rank-index">3</div>
+            <div class="rank-main">
+              <strong>HYD-NOW-12</strong>
+              <small>Last start 14:02 · healthy cadence</small>
+              <div class="bar" aria-hidden="true"><i style="width:88%"></i></div>
+              <span class="flag ok">On track</span>
+            </div>
+            <div class="rank-stats">
+              <div class="pct">88%</div>
+              <div class="meta">14 shifts</div>
+              <div class="meta">Trend ↑ 6%</div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <h2>By person</h2>
+            <p>Done vs open · last completed time</p>
+          </div>
+        </div>
+        <div class="rank-list">
+          <article class="rank hot">
+            <div class="rank-index">1</div>
+            <div class="rank-main">
+              <strong>Ravi K.</strong>
+              <small>Last done yesterday · 2 still open</small>
+              <div class="bar low" aria-hidden="true"><i style="width:55%"></i></div>
+              <span class="flag">Needs nudge</span>
+            </div>
+            <div class="rank-stats">
+              <div class="pct">55%</div>
+              <div class="meta">Done 4 · Open 2</div>
+              <div class="meta">Trend ↓</div>
+            </div>
+          </article>
+          <article class="rank warm">
+            <div class="rank-index">2</div>
+            <div class="rank-main">
+              <strong>Anitha M.</strong>
+              <small>Last done 06:40 IST · 1 open</small>
+              <div class="bar" aria-hidden="true"><i style="width:80%"></i></div>
+              <span class="flag warn">1 open</span>
+            </div>
+            <div class="rank-stats">
+              <div class="pct">80%</div>
+              <div class="meta">Done 5 · Open 1</div>
+              <div class="meta">Trend ↑</div>
+            </div>
+          </article>
+          <article class="rank">
+            <div class="rank-index">3</div>
+            <div class="rank-main">
+              <strong>Priya S.</strong>
+              <small>Last done 14:40 IST · clear inbox</small>
+              <div class="bar" aria-hidden="true"><i style="width:92%"></i></div>
+              <span class="flag ok">Clear</span>
+            </div>
+            <div class="rank-stats">
+              <div class="pct">92%</div>
+              <div class="meta">Done 8 · Open 0</div>
+              <div class="meta">Trend ↑</div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>Person activity</h2>
+          <p>Latest completed / missed / open in this range · Open opens the report modal</p>
+        </div>
+      </div>
+      <div class="activity">
+        <article class="act">
+          <div class="dot done">OK</div>
+          <div class="act-body">
+            <strong>Priya S. · HYD-NOW-12 · 14:00</strong>
+            <small>Submitted 15:12 IST · 31/33 tasks</small>
+            <div class="tags">
+              <span class="tag ok">Completed</span>
+              <span class="tag">94%</span>
+              <span class="tag">Shift handover</span>
+            </div>
+          </div>
+          <button class="btn" type="button" onclick="openModal()">Open</button>
+        </article>
+        <article class="act">
+          <div class="dot miss">Miss</div>
+          <div class="act-body">
+            <strong>Ravi K. · HYD-NOW-04 · 06:00</strong>
+            <small>Still open · last update 07:05 IST · 12/33</small>
+            <div class="tags">
+              <span class="tag warn">Missed / stale</span>
+              <span class="tag">Quiet 3.2h</span>
+            </div>
+          </div>
+          <button class="btn" type="button" onclick="openModal()">Open</button>
+        </article>
+        <article class="act">
+          <div class="dot done">OK</div>
+          <div class="act-body">
+            <strong>Anitha M. · BLR-NOW-08 · 22:00</strong>
+            <small>Accepted 06:40 IST next day · 30/33</small>
+            <div class="tags">
+              <span class="tag ok">Completed</span>
+              <span class="tag">91%</span>
+            </div>
+          </div>
+          <button class="btn" type="button" onclick="openModal()">Open</button>
+        </article>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div>
+        <h2>Checklist report modal</h2>
+        <p>
+          Fullscreen preview with Q&amp;A, photos, PDF-as-image, and video links.
+          Download builds a PDF in the browser only — never stored.
+        </p>
+      </div>
+      <button class="btn primary" type="button" onclick="openModal()">Open sample report</button>
+    </section>
+  </div>
+
+  <div class="backdrop" id="backdrop" role="presentation" onclick="if(event.target===this)closeModal()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mh">
+      <header class="modal-head">
+        <div>
+          <h3 id="mh">HYD-NOW-12 · 23 Oct · 14:00</h3>
+          <p>SI Priya S. → Ravi K. · Submitted · 94% · Shift checklist</p>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" type="button">Edit checklist</button>
+          <button class="btn" type="button" onclick="toggleFs()">Fullscreen</button>
+          <button class="btn" type="button" onclick="alert('Mock only — real app downloads a client-built PDF blob.')">Download PDF</button>
+          <button class="btn" type="button" onclick="closeModal()">Close</button>
+        </div>
+      </header>
+      <div class="report">
+        <div class="report-sheet">
+          <p style="margin:0 0 4px;color:var(--muted);font-size:0.78rem;">Outgoing Priya S. · Incoming Ravi K.</p>
+          <h4>A · Shift start</h4>
+          <article class="q">
+            <div class="meta">A1 · mandatory</div>
+            <div>Shift opened; attendance marked</div>
+            <div class="ans">Yes · FT 4 · PT 2</div>
+            <div class="photos">
+              <div class="ph">PHOTO</div>
+              <div class="ph">PHOTO</div>
+            </div>
+          </article>
+          <article class="q">
+            <div class="meta">A3 · mandatory</div>
+            <div>Chiller / freezer temperatures logged</div>
+            <div class="ans">Yes</div>
+            <div class="photos"><div class="ph pdf">PDF → IMAGE</div></div>
+          </article>
+          <h4>D · Closing</h4>
+          <article class="q">
+            <div class="meta">D2</div>
+            <div>Walkthrough video of floor</div>
+            <div class="ans">Yes</div>
+            <div class="video-link"><a href="#">View video (link only in PDF)</a></div>
+          </article>
+          <article class="q">
+            <div class="meta">D5</div>
+            <div>Open issues handed over</div>
+            <div class="ans no">No · note: pending refill on aisle 3</div>
+          </article>
+          <p class="note">Mock layout only. Production modal loads live checklist + proofs; PDF is generated in the browser and never written to the database.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const backdrop = document.getElementById("backdrop");
+    function openModal() { backdrop.classList.add("open"); backdrop.classList.remove("fs"); }
+    function closeModal() { backdrop.classList.remove("open"); backdrop.classList.remove("fs"); }
+    function toggleFs() { backdrop.classList.toggle("fs"); }
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  </script>
+</body>
+</html>

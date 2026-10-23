@@ -32,6 +32,20 @@ import { ActivitiesReportClient } from "./report-client";
 
 export const dynamic = "force-dynamic";
 
+function priorEqualWindow(from: string, to: string) {
+  const fromD = new Date(`${from}T12:00:00+05:30`);
+  const toD = new Date(`${to}T12:00:00+05:30`);
+  const days =
+    Math.max(1, Math.round((toD.getTime() - fromD.getTime()) / 86400000) + 1);
+  const priorTo = new Date(fromD);
+  priorTo.setDate(priorTo.getDate() - 1);
+  const priorFrom = new Date(priorTo);
+  priorFrom.setDate(priorFrom.getDate() - (days - 1));
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return { from: fmt(priorFrom), to: fmt(priorTo) };
+}
+
 export default async function Page({
   searchParams,
 }: {
@@ -84,13 +98,26 @@ export default async function Page({
     })();
     const from = searchParams?.from || defaultFrom;
     const to = searchParams?.to || cur.shiftDate;
-    const { locations, rows } = await listSi(c.auth, c.master, {
-      from,
-      to,
-      status: ["open", "submitted", "rejected", "accepted", "cancelled"],
-    });
+    const prior = priorEqualWindow(from, to);
+    const [{ locations, rows }, priorList] = await Promise.all([
+      listSi(c.auth, c.master, {
+        from,
+        to,
+        status: ["open", "submitted", "rejected", "accepted", "cancelled"],
+      }),
+      listSi(c.auth, c.master, {
+        from: prior.from,
+        to: prior.to,
+        status: ["open", "submitted", "rejected", "accepted", "cancelled"],
+      }),
+    ]);
     const enriched = enrichSiRows(rows, locations, c.master.settings);
-    const summary = summarizeSi(enriched);
+    const priorEnriched = enrichSiRows(
+      priorList.rows,
+      locations,
+      c.master.settings,
+    );
+    const summary = summarizeSi(enriched, priorEnriched);
 
     return (
       <AppShell active="Shift report" pageCode={pageCode}>
@@ -133,13 +160,26 @@ export default async function Page({
   })();
   const from = searchParams?.from || defaultFrom;
   const to = searchParams?.to || today;
-  const { locations, rows } = await listStore(c.auth, c.master, {
-    from,
-    to,
-    status: ["open", "submitted", "cancelled"],
-  });
+  const prior = priorEqualWindow(from, to);
+  const [{ locations, rows }, priorList] = await Promise.all([
+    listStore(c.auth, c.master, {
+      from,
+      to,
+      status: ["open", "submitted", "cancelled"],
+    }),
+    listStore(c.auth, c.master, {
+      from: prior.from,
+      to: prior.to,
+      status: ["open", "submitted", "cancelled"],
+    }),
+  ]);
   const enriched = enrichStoreRows(rows, locations, c.master.settings);
-  const summary = summarizeStore(enriched);
+  const priorEnriched = enrichStoreRows(
+    priorList.rows,
+    locations,
+    c.master.settings,
+  );
+  const summary = summarizeStore(enriched, priorEnriched);
 
   return (
     <AppShell active="Store report" pageCode={pageCode}>

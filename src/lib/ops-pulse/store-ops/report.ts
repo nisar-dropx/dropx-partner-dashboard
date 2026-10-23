@@ -5,6 +5,23 @@ import {
   type Settings,
   type StoreOpsChecklist,
 } from "./model";
+import {
+  applyBucketTrends,
+  buildPersonActivity as buildPersonActivityCore,
+  formatQuietLabel,
+  formatTrendDelta,
+  type PersonActivity as PersonActivityCore,
+  type PersonActivityItem as PersonActivityItemCore,
+} from "../si-handover/report-insights";
+
+export {
+  applyBucketTrends,
+  formatQuietLabel,
+  formatTrendDelta,
+};
+
+/** Quiet open checklists past this window count as stale (store has no SI escalate setting). */
+export const STORE_OPS_STALE_OPEN_MINUTES = 30;
 
 export type StoreRef = {
   id: string;
@@ -20,10 +37,14 @@ export type ProgressRow = {
   status: ChecklistStatus;
   owner_user_id: string;
   owner_name: string;
+  started_at: string;
+  updated_at: string;
   submitted_at: string | null;
   answered: number;
   total: number;
   pct: number;
+  staleOpen: boolean;
+  quietMinutes: number;
 };
 
 export type Bucket = {
@@ -33,6 +54,19 @@ export type Bucket = {
   open: number;
   submitted: number;
   avgPct: number;
+  staleOpen: number;
+  firstStartedAt: string | null;
+  lastUpdatedAt: string | null;
+  trendDelta: number | null;
+};
+
+export type PersonActivityItem = PersonActivityItemCore & {
+  work_date: string;
+  status: ChecklistStatus;
+};
+
+export type PersonActivity = Omit<PersonActivityCore, "items"> & {
+  items: PersonActivityItem[];
 };
 
 export type ReportSummary = {
@@ -42,8 +76,10 @@ export type ReportSummary = {
   cancelled: number;
   avgPct: number;
   submitRate: number;
+  staleOpen: number;
   byStore: Bucket[];
   byOwner: Bucket[];
+  personActivity: PersonActivity[];
 };
 
 function avg(nums: number[]) {
@@ -51,12 +87,23 @@ function avg(nums: number[]) {
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
 
+function lastActivityAt(row: StoreOpsChecklist) {
+  let latest = row.updated_at || row.started_at;
+  for (const e of row.events || []) {
+    if (e?.at && Date.parse(e.at) > Date.parse(latest)) latest = e.at;
+  }
+  return latest;
+}
+
 export function enrichChecklistRows(
   rows: StoreOpsChecklist[],
   stores: StoreRef[],
   settings: Settings,
+  now = Date.now(),
+  staleMinutes = STORE_OPS_STALE_OPEN_MINUTES,
 ): ProgressRow[] {
   const cityById = new Map(stores.map((s) => [s.id, s.city || null]));
+  void settings;
   return rows.map((row) => {
     const p = progress(
       { template: row.template, answers: row.answers },
@@ -65,6 +112,12 @@ export function enrichChecklistRows(
         settings,
       },
     );
+    const updatedAt = lastActivityAt(row);
+    const quietMinutes = Math.max(
+      0,
+      Math.round((now - Date.parse(updatedAt)) / 60000),
+    );
+    const staleOpen = row.status === "open" && quietMinutes >= staleMinutes;
     return {
       id: row.id,
       location_id: row.location_id,
@@ -73,10 +126,14 @@ export function enrichChecklistRows(
       status: row.status,
       owner_user_id: row.owner_user_id,
       owner_name: row.owner_name || "—",
+      started_at: row.started_at,
+      updated_at: updatedAt,
       submitted_at: row.submitted_at,
       answered: p.answered,
       total: p.total,
       pct: p.pct,
+      staleOpen,
+      quietMinutes,
     };
   });
 }
@@ -94,19 +151,70 @@ function bucketize(
     map.set(key, cur);
   }
   return [...map.entries()]
-    .map(([key, { label, rows: list }]) => ({
-      key,
-      label,
-      days: list.length,
-      open: list.filter((r) => r.status === "open").length,
-      submitted: list.filter((r) => r.status === "submitted").length,
-      avgPct: avg(list.map((r) => r.pct)),
-    }))
+    .map(([key, { label, rows: list }]) => {
+      const starts = list
+        .map((r) => r.started_at)
+        .filter(Boolean)
+        .sort();
+      const updates = list
+        .map((r) => r.updated_at)
+        .filter(Boolean)
+        .sort();
+      return {
+        key,
+        label,
+        days: list.length,
+        open: list.filter((r) => r.status === "open").length,
+        submitted: list.filter((r) => r.status === "submitted").length,
+        avgPct: avg(list.map((r) => r.pct)),
+        staleOpen: list.filter((r) => r.staleOpen).length,
+        firstStartedAt: starts[0] || null,
+        lastUpdatedAt: updates[updates.length - 1] || null,
+        trendDelta: null as number | null,
+      };
+    })
     .sort((a, b) => b.days - a.days || a.label.localeCompare(b.label));
 }
 
-export function summarizeReport(rows: ProgressRow[]): ReportSummary {
+export function buildPersonActivity(rows: ProgressRow[]): PersonActivity[] {
+  return buildPersonActivityCore(
+    rows.map((r) => ({
+      id: r.id,
+      store_code: r.store_code,
+      work_date: r.work_date,
+      status: r.status,
+      personKey: r.owner_user_id || r.owner_name,
+      personLabel: r.owner_name,
+      started_at: r.started_at,
+      updated_at: r.updated_at,
+      submitted_at: r.submitted_at,
+      pct: r.pct,
+      staleOpen: r.staleOpen,
+    })),
+  ) as PersonActivity[];
+}
+
+export function summarizeReport(
+  rows: ProgressRow[],
+  priorRows: ProgressRow[] = [],
+): ReportSummary {
   const submitted = rows.filter((r) => r.status === "submitted");
+  const priorSummary =
+    priorRows.length > 0
+      ? {
+          byStore: bucketize(
+            priorRows,
+            (r) => r.location_id,
+            (r) => r.store_code,
+          ),
+          byOwner: bucketize(
+            priorRows,
+            (r) => r.owner_user_id || r.owner_name,
+            (r) => r.owner_name,
+          ),
+        }
+      : { byStore: [] as Bucket[], byOwner: [] as Bucket[] };
+
   return {
     days: rows.length,
     open: rows.filter((r) => r.status === "open").length,
@@ -116,16 +224,24 @@ export function summarizeReport(rows: ProgressRow[]): ReportSummary {
     submitRate: rows.length
       ? Math.round((100 * submitted.length) / rows.length)
       : 0,
-    byStore: bucketize(
-      rows,
-      (r) => r.location_id,
-      (r) => r.store_code,
+    staleOpen: rows.filter((r) => r.staleOpen).length,
+    byStore: applyBucketTrends(
+      bucketize(
+        rows,
+        (r) => r.location_id,
+        (r) => r.store_code,
+      ),
+      priorSummary.byStore,
     ),
-    byOwner: bucketize(
-      rows,
-      (r) => r.owner_user_id || r.owner_name,
-      (r) => r.owner_name,
+    byOwner: applyBucketTrends(
+      bucketize(
+        rows,
+        (r) => r.owner_user_id || r.owner_name,
+        (r) => r.owner_name,
+      ),
+      priorSummary.byOwner,
     ),
+    personActivity: buildPersonActivity(rows),
   };
 }
 
@@ -187,11 +303,7 @@ export function filterProgressRows(
 ) {
   const q = (filters.q || "").trim().toLowerCase();
   return rows.filter((r) => {
-    if (
-      filters.store &&
-      r.location_id !== filters.store &&
-      r.store_code !== filters.store
-    )
+    if (filters.store && r.location_id !== filters.store && r.store_code !== filters.store)
       return false;
     if (
       filters.owner &&
@@ -212,4 +324,18 @@ export function filterProgressRows(
   });
 }
 
-export { paginateRows } from "@/lib/ops-pulse/si-handover/report";
+export function paginateRows<T>(rows: T[], page: number, pageSize: number) {
+  const size = Math.min(100, Math.max(5, pageSize || 20));
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(1, page || 1), pages);
+  const start = (current - 1) * size;
+  return {
+    rows: rows.slice(start, start + size),
+    page: current,
+    pageSize: size,
+    total,
+    pages,
+  };
+}
+

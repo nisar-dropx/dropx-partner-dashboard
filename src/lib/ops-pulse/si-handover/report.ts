@@ -6,6 +6,20 @@ import {
   type Settings,
   type SiChecklist,
 } from "./model";
+import {
+  applyBucketTrends,
+  buildPersonActivity as buildPersonActivityCore,
+  formatQuietLabel,
+  formatTrendDelta,
+  type PersonActivity as PersonActivityCore,
+  type PersonActivityItem as PersonActivityItemCore,
+} from "./report-insights";
+
+export {
+  applyBucketTrends,
+  formatQuietLabel,
+  formatTrendDelta,
+};
 
 export type StoreRef = {
   id: string;
@@ -23,12 +37,17 @@ export type ProgressRow = {
   outgoing_user_id: string;
   outgoing_name: string;
   incoming_name: string | null;
+  started_at: string;
+  updated_at: string;
   submitted_at: string | null;
   accepted_at: string | null;
   answered: number;
   total: number;
   pct: number;
   escalate: "none" | "store" | "cluster";
+  /** Open checklist quiet longer than store escalate window. */
+  staleOpen: boolean;
+  quietMinutes: number;
 };
 
 export type Bucket = {
@@ -41,6 +60,23 @@ export type Bucket = {
   rejected: number;
   avgPct: number;
   overdue: number;
+  staleOpen: number;
+  /** Earliest start in range (ISO) or null. */
+  firstStartedAt: string | null;
+  /** Most recent activity (ISO) or null. */
+  lastUpdatedAt: string | null;
+  /** avgPct − prior-window avgPct for same key; null if no prior. */
+  trendDelta: number | null;
+};
+
+export type PersonActivityItem = PersonActivityItemCore & {
+  shift_date: string;
+  shift_slot: string;
+  status: ChecklistStatus;
+};
+
+export type PersonActivity = Omit<PersonActivityCore, "items"> & {
+  items: PersonActivityItem[];
 };
 
 export type ReportSummary = {
@@ -54,9 +90,11 @@ export type ReportSummary = {
   submitRate: number;
   acceptRate: number;
   overdueAccept: number;
+  staleOpen: number;
   byStore: Bucket[];
   bySi: Bucket[];
   bySlot: Bucket[];
+  personActivity: PersonActivity[];
 };
 
 function avg(nums: number[]) {
@@ -64,10 +102,19 @@ function avg(nums: number[]) {
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
 
+function lastActivityAt(row: SiChecklist) {
+  let latest = row.updated_at || row.started_at;
+  for (const e of row.events || []) {
+    if (e?.at && Date.parse(e.at) > Date.parse(latest)) latest = e.at;
+  }
+  return latest;
+}
+
 export function enrichChecklistRows(
   rows: SiChecklist[],
   stores: StoreRef[],
   settings: Settings,
+  now = Date.now(),
 ): ProgressRow[] {
   const cityById = new Map(stores.map((s) => [s.id, s.city || null]));
   return rows.map((row) => {
@@ -75,6 +122,14 @@ export function enrichChecklistRows(
       city: cityById.get(row.location_id),
       settings,
     });
+    const updatedAt = lastActivityAt(row);
+    const quietMinutes = Math.max(
+      0,
+      Math.round((now - Date.parse(updatedAt)) / 60000),
+    );
+    const staleOpen =
+      row.status === "open" &&
+      quietMinutes >= (settings.escalateStoreMinutes || 30);
     return {
       id: row.id,
       location_id: row.location_id,
@@ -85,6 +140,8 @@ export function enrichChecklistRows(
       outgoing_user_id: row.outgoing_user_id,
       outgoing_name: row.outgoing_name || "—",
       incoming_name: row.incoming_name,
+      started_at: row.started_at,
+      updated_at: updatedAt,
       submitted_at: row.submitted_at,
       accepted_at: row.accepted_at,
       answered: p.answered,
@@ -92,8 +149,10 @@ export function enrichChecklistRows(
       pct: p.pct,
       escalate:
         row.status === "submitted"
-          ? escalationLevel(row.submitted_at, settings)
+          ? escalationLevel(row.submitted_at, settings, now)
           : "none",
+      staleOpen,
+      quietMinutes,
     };
   });
 }
@@ -103,10 +162,7 @@ function bucketize(
   keyFn: (r: ProgressRow) => string,
   labelFn: (r: ProgressRow) => string,
 ): Bucket[] {
-  const map = new Map<
-    string,
-    { label: string; rows: ProgressRow[] }
-  >();
+  const map = new Map<string, { label: string; rows: ProgressRow[] }>();
   for (const row of rows) {
     const key = keyFn(row);
     const cur = map.get(key) || { label: labelFn(row), rows: [] };
@@ -114,25 +170,78 @@ function bucketize(
     map.set(key, cur);
   }
   return [...map.entries()]
-    .map(([key, { label, rows: list }]) => ({
-      key,
-      label,
-      shifts: list.length,
-      open: list.filter((r) => r.status === "open").length,
-      submitted: list.filter((r) => r.status === "submitted").length,
-      accepted: list.filter((r) => r.status === "accepted").length,
-      rejected: list.filter((r) => r.status === "rejected").length,
-      avgPct: avg(list.map((r) => r.pct)),
-      overdue: list.filter((r) => r.escalate !== "none").length,
-    }))
+    .map(([key, { label, rows: list }]) => {
+      const starts = list
+        .map((r) => r.started_at)
+        .filter(Boolean)
+        .sort();
+      const updates = list
+        .map((r) => r.updated_at)
+        .filter(Boolean)
+        .sort();
+      return {
+        key,
+        label,
+        shifts: list.length,
+        open: list.filter((r) => r.status === "open").length,
+        submitted: list.filter((r) => r.status === "submitted").length,
+        accepted: list.filter((r) => r.status === "accepted").length,
+        rejected: list.filter((r) => r.status === "rejected").length,
+        avgPct: avg(list.map((r) => r.pct)),
+        overdue: list.filter((r) => r.escalate !== "none").length,
+        staleOpen: list.filter((r) => r.staleOpen).length,
+        firstStartedAt: starts[0] || null,
+        lastUpdatedAt: updates[updates.length - 1] || null,
+        trendDelta: null as number | null,
+      };
+    })
     .sort((a, b) => b.shifts - a.shifts || a.label.localeCompare(b.label));
 }
 
-export function summarizeReport(rows: ProgressRow[]): ReportSummary {
+export function buildPersonActivity(rows: ProgressRow[]): PersonActivity[] {
+  return buildPersonActivityCore(
+    rows.map((r) => ({
+      id: r.id,
+      store_code: r.store_code,
+      shift_date: r.shift_date,
+      shift_slot: r.shift_slot,
+      status: r.status,
+      personKey: r.outgoing_user_id || r.outgoing_name,
+      personLabel: r.outgoing_name,
+      started_at: r.started_at,
+      updated_at: r.updated_at,
+      submitted_at: r.submitted_at,
+      accepted_at: r.accepted_at,
+      pct: r.pct,
+      staleOpen: r.staleOpen,
+    })),
+  ) as PersonActivity[];
+}
+
+export function summarizeReport(
+  rows: ProgressRow[],
+  priorRows: ProgressRow[] = [],
+): ReportSummary {
   const terminal = rows.filter((r) =>
     ["submitted", "accepted", "rejected"].includes(r.status),
   );
   const accepted = rows.filter((r) => r.status === "accepted");
+  const priorSummary =
+    priorRows.length > 0
+      ? {
+          byStore: bucketize(
+            priorRows,
+            (r) => r.location_id,
+            (r) => r.store_code,
+          ),
+          bySi: bucketize(
+            priorRows,
+            (r) => r.outgoing_user_id || r.outgoing_name,
+            (r) => r.outgoing_name,
+          ),
+        }
+      : { byStore: [] as Bucket[], bySi: [] as Bucket[] };
+
   return {
     shifts: rows.length,
     open: rows.filter((r) => r.status === "open").length,
@@ -148,21 +257,29 @@ export function summarizeReport(rows: ProgressRow[]): ReportSummary {
       ? Math.round((100 * accepted.length) / terminal.length)
       : 0,
     overdueAccept: rows.filter((r) => r.escalate !== "none").length,
-    byStore: bucketize(
-      rows,
-      (r) => r.location_id,
-      (r) => r.store_code,
+    staleOpen: rows.filter((r) => r.staleOpen).length,
+    byStore: applyBucketTrends(
+      bucketize(
+        rows,
+        (r) => r.location_id,
+        (r) => r.store_code,
+      ),
+      priorSummary.byStore,
     ),
-    bySi: bucketize(
-      rows,
-      (r) => r.outgoing_user_id || r.outgoing_name,
-      (r) => r.outgoing_name,
+    bySi: applyBucketTrends(
+      bucketize(
+        rows,
+        (r) => r.outgoing_user_id || r.outgoing_name,
+        (r) => r.outgoing_name,
+      ),
+      priorSummary.bySi,
     ),
     bySlot: bucketize(
       rows,
       (r) => r.shift_slot,
       (r) => r.shift_slot,
     ),
+    personActivity: buildPersonActivity(rows),
   };
 }
 
@@ -276,3 +393,5 @@ export function paginateRows<T>(rows: T[], page: number, pageSize: number) {
     pages,
   };
 }
+
+/** Format quiet time for insight chips. */
