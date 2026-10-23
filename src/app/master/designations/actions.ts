@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requirePagePermission } from "@/lib/authorization";
+import { requirePagePermission, requirePagePermissionOrThrow } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { normalizeDesignationPeopleModule, designationPeopleModuleLabel } from "@/lib/designation-business-categories";
 import { normalizeDesignationCategories } from "@/lib/designation-categories";
@@ -28,14 +28,14 @@ function required(value: FormDataEntryValue | null, field: string) {
   return text;
 }
 
-function designationRedirect(params: { error?: string; notice?: string }) {
+function designationRedirect(params: { error?: string; notice?: string }): never {
   cookies().set("dropx_designation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 20,
     path: "/master/designations",
     sameSite: "lax"
   });
-  redirect("/master/designations");
+  return redirect("/master/designations");
 }
 
 function isNextRedirectError(error: unknown) {
@@ -116,6 +116,17 @@ function onboardingCategories(formData: FormData) {
   return categories;
 }
 
+function registrationCategoryCode(formData: FormData, categories: string[]) {
+  const registrationCategory = required(
+    formData.get("registration_category_code"),
+    "Registration policy"
+  ).toLowerCase();
+  if (!categories.includes(registrationCategory)) {
+    throw new Error("Registration policy must be one of the selected engagement types.");
+  }
+  return registrationCategory;
+}
+
 async function validateOnboardingCategories(companyId: string, categories: string[]) {
   const { data, error } = await supabaseAdmin!
     .from("workforce_categories")
@@ -181,16 +192,24 @@ function profileFieldRules(formData: FormData, categories: string[]) {
   ]));
 }
 
-export async function createDesignation(formData: FormData) {
-  const authorization = await requirePagePermission("designations", "add");
-  const companyId = requireCompanyId(authorization);
+export type DesignationActionState = {
+  error: string;
+};
+
+export async function createDesignation(
+  _previousState: DesignationActionState,
+  formData: FormData
+): Promise<DesignationActionState> {
   try {
+    const authorization = await requirePagePermissionOrThrow("designations", "add");
+    const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
     const code = required(formData.get("code"), "Designation code").toUpperCase();
     const name = required(formData.get("name"), "Designation name");
     const classification = await designationClassification(companyId, formData);
     const categories = onboardingCategories(formData);
+    const registrationCategory = registrationCategoryCode(formData, categories);
     await validateOnboardingCategories(companyId, categories);
     const roleIds = onboardingRoleIds(formData);
     await validateOnboardingRoles(companyId, roleIds);
@@ -204,6 +223,7 @@ export async function createDesignation(formData: FormData) {
       model_ids: modelIds(formData),
       location_ids: [],
       onboarding_categories: categories,
+      registration_category_code: registrationCategory,
       profile_field_rules: profileFieldRules(formData, categories),
       app_page_access: appPageAccess(formData),
       onboarding_role_ids: roleIds,
@@ -218,14 +238,17 @@ export async function createDesignation(formData: FormData) {
     designationRedirect({ notice: "Designation added." });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    designationRedirect({ error: friendlyError(error, "Unable to add designation.") });
+    return { error: friendlyError(error, "Unable to add designation.") };
   }
 }
 
-export async function updateDesignation(formData: FormData) {
-  const authorization = await requirePagePermission("designations", "edit");
-  const companyId = requireCompanyId(authorization);
+export async function updateDesignation(
+  _previousState: DesignationActionState,
+  formData: FormData
+): Promise<DesignationActionState> {
   try {
+    const authorization = await requirePagePermissionOrThrow("designations", "edit");
+    const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
     const id = required(formData.get("id"), "Designation");
@@ -233,6 +256,7 @@ export async function updateDesignation(formData: FormData) {
     const name = required(formData.get("name"), "Designation name");
     const status = clean(formData.get("status")) === "inactive" ? false : true;
     const categories = onboardingCategories(formData);
+    const registrationCategory = registrationCategoryCode(formData, categories);
     await validateOnboardingCategories(companyId, categories);
     const roleIds = onboardingRoleIds(formData);
     await validateOnboardingRoles(companyId, roleIds);
@@ -247,6 +271,7 @@ export async function updateDesignation(formData: FormData) {
         model_ids: modelIds(formData),
         location_ids: [],
         onboarding_categories: categories,
+        registration_category_code: registrationCategory,
         profile_field_rules: profileFieldRules(formData, categories),
         app_page_access: appPageAccess(formData),
         onboarding_role_ids: roleIds,
@@ -264,7 +289,7 @@ export async function updateDesignation(formData: FormData) {
     designationRedirect({ notice: "Designation updated." });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    designationRedirect({ error: friendlyError(error, "Unable to update designation.") });
+    return { error: friendlyError(error, "Unable to update designation.") };
   }
 }
 

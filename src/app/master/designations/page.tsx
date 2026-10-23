@@ -49,6 +49,7 @@ type DesignationRow = {
   location_ids?: string[];
   model_ids?: string[] | null;
   onboarding_categories: string[];
+  registration_category_code?: string | null;
   app_page_access?: string[] | null;
   onboarding_role_ids?: string[] | null;
   portal_permissions?: unknown;
@@ -105,7 +106,7 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
   }
 
   const [designationsResult, providersResult, locationsResult, modelsResult, categoriesResult, businessCategoriesResult, rolesResult] = await Promise.all([
-    supabaseAdmin.from("designations").select("id, code, name, designation_category_id, profile_destination, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, provider_mapping_required, is_active").eq("company_id", companyId).order("code"),
+    supabaseAdmin.from("designations").select("id, code, name, designation_category_id, profile_destination, provider_ids, model_ids, location_ids, onboarding_categories, registration_category_code, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, provider_mapping_required, is_active").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("providers").select("id, code, name, is_active").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("stations").select("id, station_code, station_name, hide_from_location_list").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("location_models").select("id, provider_id, code, name, is_active, providers (code, name)").eq("company_id", companyId).eq("is_active", true).order("code"),
@@ -118,7 +119,7 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
   if (isMissingProviderMappingPolicyColumn(designationsResult.error)) {
     const policyFallbackResult = await supabaseAdmin
       .from("designations")
-      .select("id, code, name, designation_category_id, profile_destination, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, is_active")
+      .select("id, code, name, designation_category_id, profile_destination, provider_ids, model_ids, location_ids, onboarding_categories, registration_category_code, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, is_active")
       .eq("company_id", companyId)
       .order("code");
     designationRows = (policyFallbackResult.data ?? []).map((row) => ({
@@ -145,6 +146,7 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
       location_ids: Array.isArray((row as { location_ids?: unknown }).location_ids) ? (row as { location_ids: string[] }).location_ids : [],
       model_ids: Array.isArray((row as { model_ids?: unknown }).model_ids) ? (row as { model_ids: string[] }).model_ids : [],
       onboarding_categories: Array.isArray((row as { onboarding_categories?: unknown }).onboarding_categories) ? (row as { onboarding_categories: string[] }).onboarding_categories : ["employees"],
+      registration_category_code: null,
       designation_category_id: null,
       profile_destination: null,
       app_page_access: ["dashboard", "attendance", "leave"],

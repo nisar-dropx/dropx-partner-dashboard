@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFormState } from "react-dom";
 import { ChevronDown } from "lucide-react";
+import type { DesignationActionState } from "@/app/master/designations/actions";
 import {
   AppPageAccessSelect,
   appPageOptions,
@@ -52,6 +54,7 @@ type DesignationInitial = {
   provider_ids: string[];
   model_ids?: string[] | null;
   onboarding_categories?: string[] | null;
+  registration_category_code?: string | null;
   app_page_access?: string[] | null;
   onboarding_role_ids?: string[] | null;
   portal_permissions?: unknown;
@@ -469,7 +472,10 @@ export function DesignationForm({
   roles,
   submitLabel = "Add designation"
 }: {
-  action: (formData: FormData) => void;
+  action: (
+    previousState: DesignationActionState,
+    formData: FormData
+  ) => Promise<DesignationActionState>;
   businessCategories: DesignationBusinessCategory[];
   categories: WorkforceCategoryOption[];
   initial?: DesignationInitial | null;
@@ -478,10 +484,18 @@ export function DesignationForm({
   roles: OnboardingRoleOption[];
   submitLabel?: string;
 }) {
+  const [actionState, formAction] = useFormState(action, { error: "" });
+  const [code, setCode] = useState(initial?.code ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [status, setStatus] = useState(initial?.is_active === false ? "inactive" : "active");
   const [selectedModels, setSelectedModels] = useState<string[]>(initial?.model_ids ?? []);
   const [selectedCategories, setSelectedCategories] = useState<DesignationCategory[]>(
     normalizeDesignationCategories(initial?.onboarding_categories)
   );
+  const [registrationCategory, setRegistrationCategory] = useState(() => {
+    const configured = String(initial?.registration_category_code ?? "").trim().toLowerCase();
+    return selectedCategories.includes(configured) ? configured : selectedCategories[0] ?? "";
+  });
   const initialBusinessCategoryId = initial?.designation_category_id
     ?? (businessCategories.length === 1 ? businessCategories[0].id : "");
   const [selectedBusinessCategoryId, setSelectedBusinessCategoryId] = useState(initialBusinessCategoryId);
@@ -517,8 +531,13 @@ export function DesignationForm({
     });
   }, [selectedBusinessCategory]);
 
+  useEffect(() => {
+    if (selectedCategories.includes(registrationCategory)) return;
+    setRegistrationCategory(selectedCategories[0] ?? "");
+  }, [registrationCategory, selectedCategories]);
+
   return (
-    <form action={action} className="designation-form">
+    <form action={formAction} className="designation-form">
       {initial ? <input name="id" type="hidden" value={initial.id} /> : null}
       {selectedModels.map((modelId) => (
         <input key={modelId} name="model_ids" type="hidden" value={modelId} />
@@ -526,14 +545,20 @@ export function DesignationForm({
       {selectedCategories.map((category) => (
         <input key={category} name="onboarding_categories" type="hidden" value={category} />
       ))}
+      {actionState.error ? (
+        <div className="modal-inline-message error designation-form-error" role="alert">
+          <strong>Unable to save designation</strong>
+          <span>{actionState.error}</span>
+        </div>
+      ) : null}
       <div className="form-grid three">
         <label>
           Designation code
-          <input className="field" defaultValue={initial?.code ?? ""} name="code" placeholder="Enter designation code" required />
+          <input className="field" name="code" onChange={(event) => setCode(event.target.value)} placeholder="Enter designation code" required value={code} />
         </label>
         <label>
           Designation name
-          <input className="field" defaultValue={initial?.name ?? ""} name="name" placeholder="Enter designation name" required />
+          <input className="field" name="name" onChange={(event) => setName(event.target.value)} placeholder="Enter designation name" required value={name} />
         </label>
         {initial ? (
           <>
@@ -597,6 +622,25 @@ export function DesignationForm({
           <CategoryMultiSelect categories={categories} selected={selectedCategories} setSelected={setSelectedCategories} />
         </label>
         <label>
+          Registration policy
+          <select
+            className="field"
+            disabled={!selectedCategories.length}
+            name="registration_category_code"
+            onChange={(event) => setRegistrationCategory(event.target.value)}
+            required
+            value={registrationCategory}
+          >
+            {!selectedCategories.length ? <option value="">Select an engagement type first</option> : null}
+            {selectedCategories.map((category) => (
+              <option key={category} value={category}>
+                {categories.find((option) => option.code === category)?.name ?? category}
+              </option>
+            ))}
+          </select>
+          <small>Controls registration requirements and DropX One access.</small>
+        </label>
+        <label>
           Models
           <ModelMultiSelect models={models} selected={selectedModels} setSelected={setSelectedModels} />
         </label>
@@ -629,7 +673,7 @@ export function DesignationForm({
         {initial ? (
           <label>
             Status
-            <select className="field" defaultValue={initial.is_active ? "active" : "inactive"} name="status">
+            <select className="field" name="status" onChange={(event) => setStatus(event.target.value)} value={status}>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
