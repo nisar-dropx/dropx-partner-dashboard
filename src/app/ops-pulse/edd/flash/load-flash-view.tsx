@@ -6,6 +6,7 @@ import type { EddNetworkRunStatus, LoadFlashNetworkPayload, LoadFlashStation, Lo
 import type { LoadFlashCluster } from "@/lib/ops-pulse/load-flash-access";
 import type { LoadFlashReportKind } from "@/lib/ops-pulse/load-flash-report";
 import { attributeFlashParcels, collapseFlashParcels, flashDriverLabel, flashPercent as percent, flashStationBase as baseOf, flashTotalsFromParcels, flashTotalsFromStations, sumFlashHourly, summarizeFlashDrivers } from "@/lib/ops-pulse/load-flash-scope";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import { FlashDrivers, FlashParcels } from "./flash-drilldown";
 import s from "./flash.module.css";
 
@@ -26,14 +27,11 @@ type Tracking = { key: string; rows: LoadFlashTrackingRow[] };
 
 function formatWhen(value: string | null) {
   if (!value) return "Not fetched yet";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return formatOpsDateTime(value, value);
 }
 
-function formatDay(date: string, options: Intl.DateTimeFormatOptions) {
-  const parsed = new Date(`${date}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString("en-IN", { timeZone: "UTC", ...options });
+function formatDay(date: string, _options?: Intl.DateTimeFormatOptions) {
+  return formatOpsDate(date, date);
 }
 
 function count(value: number) {

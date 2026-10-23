@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 
 export type EddTrendPoint = { date: string; count: number };
 
@@ -14,15 +15,11 @@ const GRID_LINES = 4;
 const MIN_LABEL_GAP_PX = 56;
 
 function formatShortDate(ymd: string) {
-  const parsed = new Date(`${ymd}T12:00:00+05:30`);
-  if (Number.isNaN(parsed.getTime())) return ymd;
-  return parsed.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
+  return formatOpsDate(ymd, ymd);
 }
 
 function formatFullDate(ymd: string) {
-  const parsed = new Date(`${ymd}T12:00:00+05:30`);
-  if (Number.isNaN(parsed.getTime())) return ymd;
-  return parsed.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+  return formatOpsDate(ymd, ymd);
 }
 
 function bucketOf(date: string, todayYmd: string): "overdue" | "today" | "future" {

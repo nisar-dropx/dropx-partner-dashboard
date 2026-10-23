@@ -1,10 +1,10 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { reviewClock, type ReviewEddTimeline, type UtrDiscipline, type ReviewEddRefreshSource } from "@/lib/ops-pulse/review-operations";
-import { dashboardDateInputValue, formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
+import { dashboardDateInputValue } from "@/lib/date-format";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import { UtrAttendanceDrilldown, UtrRepeatSummary } from "@/components/review-attendance-history";
 import { ReviewEddCheckpoint } from "./review-edd-checkpoint";
 import { EDD_MOVEMENT_GROUPS } from "@/lib/ops-pulse/edd-movement";
@@ -63,7 +63,7 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
     </summary>
     <div className="review-operation-popover">
       <ReviewDetailsClose label="Close delivery movement history"/>
-      <header><div><b>Delivery movement · {formatDashboardDate(t.day)}</b><p>Half-hour checkpoints · all times IST</p></div><span className="review-operation-tag">Automatic</span></header>
+      <header><div><b>Delivery movement · {formatOpsDate(t.day)}</b><p>Half-hour checkpoints · all times IST</p></div><span className="review-operation-tag">Automatic</span></header>
       {error ? <p role="alert">{error}</p> : null}
       {refreshError ? <p role="status" className="review-operation-note">{refreshError}</p> : null}
       <p className="review-operation-note">Source refresh target: every 15 minutes · checkpoints: 06:00, 06:30, then every half hour. Temporary source failures retry automatically. Source times can differ between stations; these are observed snapshots, not simultaneous scans.</p>
@@ -98,7 +98,7 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
           {latest && (latest.counts.todayUnverified || latest.counts.missingDate) ? <p role="status" className="review-operation-note">Data quality: {count(latest.counts.todayUnverified)} parcels need history or station reconciliation; {count(latest.counts.missingDate)} have no EDD date. These are not shipment statuses. Station stock stays visible, but fresh pending and clearance cannot be certified complete yet.</p> : null}
           <p className="review-operation-note">{t.summary}. Missing checkpoints and old tracking-ID lists cannot be reconstructed from current statuses.</p>
           {latest?.counts.movement ? <div className="review-operation-table"><table><thead><tr><th>Actual source status</th><th>Tracking IDs</th></tr></thead><tbody>{latest.counts.movement.statuses.map(row => <tr key={row.status}><td>{row.status}</td><td>{count(row.count)}</td></tr>)}</tbody></table></div> : null}
-          {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST.</p> : null}
+          {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatOpsDateTime(t.latest.backlogAt)} · outcomes {formatOpsDateTime(t.latest.performanceAt)} IST.</p> : null}
         </ReviewDetails>
         <p className="review-operation-note"><a href="/edd/edds">Multi-station / multi-status Excel exports →</a></p>
       </> : <>
@@ -136,7 +136,7 @@ export function PerformanceUtrDisciplineCard({ data, date }: { data: { disciplin
     </summary>
     <div className="review-operation-popover">
       <ReviewDetailsClose label="Close UTR reporting details"/>
-      <header><div><b>UTR reporting · {formatDashboardDate(date)}</b><p>Station People staff · approved shifts and attendance</p></div><span className="review-operation-tag">{d.onTime}/{d.scheduled} on time</span></header>
+      <header><div><b>UTR reporting · {formatOpsDate(date)}</b><p>Station People staff · approved shifts and attendance</p></div><span className="review-operation-tag">{d.onTime}/{d.scheduled} on time</span></header>
       {error ? <p role="alert">{error}</p> : null}
       <div className="review-operation-summary"><span>Scheduled <b>{d.scheduled}</b></span><span>On time <b>{d.onTime}</b></span><span>Late <b>{d.late}</b></span><span>Not reported <b>{d.notReported}</b></span></div>
       <UtrAttendanceDrilldown discipline={d}/>

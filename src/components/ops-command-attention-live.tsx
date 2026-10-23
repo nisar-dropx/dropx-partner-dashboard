@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import Link from 'next/link';
 import { ArrowUpRight, ClipboardCheck, Users, Truck, Wallet, CalendarDays, FileCheck, Boxes, Banknote } from 'lucide-react';
 import { attentionOrder, type AttentionItem } from '@/lib/ops-pulse/command-attention';
+import { formatOpsDate } from '@/lib/ops-pulse/date-format';
 import styles from './ops-command-attention.module.css';
 
 const AttentionContext = createContext<(id:number,items:AttentionItem[])=>void>(()=>{});
@@ -29,7 +30,7 @@ export function CommandAttentionView({items,today,pending=0}:{items:AttentionIte
   const active=items.filter(i=>i.tone!=='clear'),clear=items.filter(i=>i.tone==='clear');
   const actions=items.filter(i=>i.tone==='urgent'||i.tone==='action').length;
   const card=(i:AttentionItem)=>{const Icon=icons[i.key as keyof typeof icons]||ClipboardCheck;return <Link className={styles.card} data-tone={i.tone} key={i.key} href={i.href} prefetch={false}><span className={styles.label}><Icon size={15}/>{i.title}<ArrowUpRight size={14}/></span><strong>{i.value}</strong><small>{i.detail}</small><span className={styles.action}>{i.action} →</span></Link>;};
-  return <section className={styles.watch} data-details={showDetails} data-all={showAll} aria-label="Operational attention"><header><div><p>OPERATIONS · {new Date(today+'T12:00:00+05:30').toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'})} IST</p><h2>{actions?`${actions} areas need attention`:'Operational checks'}</h2></div><button type="button" className={styles.detailToggle} aria-pressed={showDetails} onClick={()=>setShowDetails(value=>!value)}>{showDetails?'Hide details':'Show details'}</button></header>
+  return <section className={styles.watch} data-details={showDetails} data-all={showAll} aria-label="Operational attention"><header><div><p>OPERATIONS · {formatOpsDate(today)} IST</p><h2>{actions?`${actions} areas need attention`:'Operational checks'}</h2></div><button type="button" className={styles.detailToggle} aria-pressed={showDetails} onClick={()=>setShowDetails(value=>!value)}>{showDetails?'Hide details':'Show details'}</button></header>
     {active.length>0&&<div className={styles.grid}>{active.map(card)}</div>}
     {active.length>5&&<button type="button" className={styles.showAll} aria-expanded={showAll} onClick={()=>setShowAll(value=>!value)}>{showAll?'Show top 5':`View all ${active.length} areas`} <span aria-hidden="true">{showAll?'↑':'↓'}</span></button>}
     {clear.length>0&&<details className={styles.checked}><summary>{clear.length} other checks · no current action or not applicable</summary><div className={styles.grid}>{clear.map(card)}</div></details>}

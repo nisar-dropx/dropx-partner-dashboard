@@ -14,15 +14,11 @@ export function PageHead({
   return (
     <div className="page-head">
       <div>
-        {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
         <h1>{title}</h1>
-        {subtitle ? (
-          <p className="subtle" style={{ marginTop: 6 }}>
-            {subtitle}
-          </p>
-        ) : null}
+        {subtitle ? <p className="subtle">{subtitle}</p> : null}
       </div>
-      {action}
+      {action ? <div className="page-head-actions">{action}</div> : null}
     </div>
   );
 }

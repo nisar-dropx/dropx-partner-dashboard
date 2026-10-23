@@ -8,7 +8,7 @@ import { PerformanceReviewPicker } from "@/components/performance-review-picker"
 import { ReviewActionForm } from "@/components/review-action-form";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { savePerformanceReviewComment, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
-import { formatDashboardDate, formatDashboardDateMedium } from "@/lib/date-format";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type {
   PerformanceFollowup,
@@ -179,7 +179,7 @@ export function StoreHealthReviewDesk(props: Props) {
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
     <section className="ops-control-strip performance-review-control">
-      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDateMedium(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || hero.city || selectedLocation.city || "Store"}</small></div>
+      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatOpsDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || hero.city || selectedLocation.city || "Store"}</small></div>
       <PerformanceReviewPicker
         date={date}
         locations={locations.map((location) => ({
@@ -193,14 +193,14 @@ export function StoreHealthReviewDesk(props: Props) {
       />
     </section>
 
-    <ReviewDetails className="performance-review-overview"><summary><span><strong>Store reviews · {formatDashboardDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stores</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map((location) => {
+    <ReviewDetails className="performance-review-overview"><summary><span><strong>Store reviews · {formatOpsDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stores</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map((location) => {
       const entry = reviewByStation.get(stationKey(location.station_code));
       const current = entry ? steps.find((step) => step.review_id === entry.id && step.step_order === entry.current_step_order && step.status === "pending") : null;
-      return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatDashboardDate(date)} · {location.station_name || location.city}</small></span><em className={entry?.status || "not-started"}>{entry?.status.replace("_", " ") || "Not started"}</em><p>{entry?.review_summary || "Takeaway pending"}{entry ? <small>Started {new Date(entry.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small> : null}</p><span><b>{current?.proxy_reviewer_name || current?.reviewer_name || "—"}</b><Link href={reviewLink(date, location.station_code)}>View review →</Link></span></article>;
+      return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatOpsDate(date)} · {location.station_name || location.city}</small></span><em className={entry?.status || "not-started"}>{entry?.status.replace("_", " ") || "Not started"}</em><p>{entry?.review_summary || "Takeaway pending"}{entry ? <small>Started {new Date(entry.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small> : null}</p><span><b>{current?.proxy_reviewer_name || current?.reviewer_name || "—"}</b><Link href={reviewLink(date, location.station_code)}>View review →</Link></span></article>;
     })}</div><ReviewDetailsClose label="Close store reviews"/></ReviewDetails>
 
-    <ReviewDetails className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatDashboardDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
-      {props.backlog.error ? <p role="alert">{props.backlog.error}</p> : <div>{props.backlog.rows.map((entry) => <article key={entry.id}><span><strong>{entry.station_code}</strong><small>Performance {formatDashboardDate(entry.source_date)}</small></span><em className="in_review">Pending</em><p>{entry.pending_role}<small>{entry.pending_name || "Manager not linked"}</small></p><span><small>Started {new Date(entry.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small><Link href={reviewLink(entry.source_date, entry.station_code)}>Review {formatDashboardDate(entry.source_date)} →</Link></span></article>)}{!props.backlog.count ? <p className="review-empty">No earlier pending reviews.</p> : null}</div>}
+    <ReviewDetails className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatOpsDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
+      {props.backlog.error ? <p role="alert">{props.backlog.error}</p> : <div>{props.backlog.rows.map((entry) => <article key={entry.id}><span><strong>{entry.station_code}</strong><small>Performance {formatOpsDate(entry.source_date)}</small></span><em className="in_review">Pending</em><p>{entry.pending_role}<small>{entry.pending_name || "Manager not linked"}</small></p><span><small>Started {new Date(entry.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small><Link href={reviewLink(entry.source_date, entry.station_code)}>Review {formatOpsDate(entry.source_date)} →</Link></span></article>)}{!props.backlog.count ? <p className="review-empty">No earlier pending reviews.</p> : null}</div>}
       {props.backlog.count > props.backlog.pageSize ? <nav className="review-backlog-pages">{props.backlog.page > 1 ? <Link href={reviewLink(date, selectedCode, props.backlog.page - 1)}>← Previous</Link> : null}<span>Page {props.backlog.page} of {Math.ceil(props.backlog.count / props.backlog.pageSize)}</span>{props.backlog.page * props.backlog.pageSize < props.backlog.count ? <Link href={reviewLink(date, selectedCode, props.backlog.page + 1)}>Next →</Link> : null}</nav> : null}
       <ReviewDetailsClose label="Close earlier pending reviews"/>
     </ReviewDetails>
@@ -252,7 +252,7 @@ export function StoreHealthReviewDesk(props: Props) {
       {previousReview?.review_summary ? (
         <div className="performance-previous-takeaway">
           <span>
-            <strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong>
+            <strong>Previous review · {formatOpsDate(previousReview.source_date)}</strong>
             <small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small>
           </span>
           <p>{previousReview.review_summary}</p>

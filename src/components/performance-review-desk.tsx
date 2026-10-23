@@ -19,7 +19,7 @@ import { PerformanceOpeningCard } from "@/components/performance-opening-card";
 import { PerformanceEddClearanceCard, PerformanceUtrDisciplineCard } from "@/components/performance-review-operations";
 import { ReviewAttendanceProvider, ReviewAttendanceExceptionsCard } from "@/components/review-attendance-history";
 import type { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
-import { formatDashboardDate, formatDashboardDateMedium } from "@/lib/date-format";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep, PerformanceConnection, PerformanceReviewUpdate, PerformanceReviewChainStep } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceReviewComment, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
@@ -145,14 +145,14 @@ function BelowMinimumAllocationBreakdown({ rows, target, date }: { rows: Perform
   const belowTarget = rows.filter((person) => person.delivered > MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES && person.delivered < target).sort((left, right) => left.delivered - right.delivered || left.name.localeCompare(right.name));
   return <div className="performance-associate-popover performance-allocation-popover">
     <ReviewDetailsClose label="Close below-minimum allocation details"/>
-    <div className="performance-allocation-heading"><div><strong>Below minimum allocation</strong><small>{belowTarget.length} associate{belowTarget.length === 1 ? "" : "s"} below {target.toLocaleString("en-IN")} deliveries on {formatDashboardDate(date)} · ≤{MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES} deliveries excluded</small></div><b>Target {target.toLocaleString("en-IN")}</b></div>
-    {belowTarget.length ? <div className="performance-allocation-list"><div className="performance-allocation-table-head"><span>Associate</span><span>{formatDashboardDate(date)}</span><span>Status</span></div>{belowTarget.map((person) => {
+    <div className="performance-allocation-heading"><div><strong>Below minimum allocation</strong><small>{belowTarget.length} associate{belowTarget.length === 1 ? "" : "s"} below {target.toLocaleString("en-IN")} deliveries on {formatOpsDate(date)} · ≤{MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES} deliveries excluded</small></div><b>Target {target.toLocaleString("en-IN")}</b></div>
+    {belowTarget.length ? <div className="performance-allocation-list"><div className="performance-allocation-table-head"><span>Associate</span><span>{formatOpsDate(date)}</span><span>Status</span></div>{belowTarget.map((person) => {
       const mtdAverage = person.mtdActiveDays ? person.mtdDelivered / person.mtdActiveDays : null;
       return <ReviewDetails className="performance-allocation-associate" key={`${person.associateId}-${person.name}`}>
         <summary><span><strong>{person.name}</strong><small>{person.associateId}</small></span><b>{person.delivered.toLocaleString("en-IN")}</b><em>Below {target.toLocaleString("en-IN")}</em></summary>
         <div className="performance-allocation-associate-detail">
           <div className="performance-allocation-mtd-summary"><span>MTD average allocation</span><strong>{mtdAverage == null ? "—" : mtdAverage.toFixed(1)}</strong><small>{person.mtdDelivered.toLocaleString("en-IN")} deliveries / {person.mtdActiveDays} active days · Target {target.toLocaleString("en-IN")}</small></div>
-          <div className="performance-allocation-daily-table"><div><span>Date</span><span>Deliveries</span></div>{person.mtdDailyAllocations.length ? person.mtdDailyAllocations.map((day) => <div key={day.date}><span>{formatDashboardDate(day.date)}</span><b>{day.delivered.toLocaleString("en-IN")}</b></div>) : <p>No MTD delivery ledger is available for this associate.</p>}</div>
+          <div className="performance-allocation-daily-table"><div><span>Date</span><span>Deliveries</span></div>{person.mtdDailyAllocations.length ? person.mtdDailyAllocations.map((day) => <div key={day.date}><span>{formatOpsDate(day.date)}</span><b>{day.delivered.toLocaleString("en-IN")}</b></div>) : <p>No MTD delivery ledger is available for this associate.</p>}</div>
         </div>
       </ReviewDetails>;
     })}</div> : <p className="review-empty">No associates are below the configured minimum allocation.</p>}
@@ -245,7 +245,7 @@ export function PerformanceReviewDesk(props: Props) {
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
     <section className="ops-control-strip performance-review-control">
-      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDateMedium(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
+      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatOpsDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
       <PerformanceReviewPicker
         date={date}
         locations={locations.map((location) => ({
@@ -259,13 +259,13 @@ export function PerformanceReviewDesk(props: Props) {
       />
     </section>
 
-    <ReviewDetails className="performance-review-overview"><summary><span><strong>Station reviews · {formatDashboardDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stations</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map(location=>{
+    <ReviewDetails className="performance-review-overview"><summary><span><strong>Station reviews · {formatOpsDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stations</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map(location=>{
       const entry=reviewByStation.get(stationKey(location.station_code));
       const current=entry?steps.find(step=>step.review_id===entry.id&&step.step_order===entry.current_step_order&&step.status==="pending"):null;
-      return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatDashboardDate(date)} · {location.station_name||location.city}</small></span><em className={entry?.status||"not-started"}>{entry?.status.replace("_"," ")||"Not started"}</em><p>{entry?.review_summary||"Takeaway pending"}{entry?<small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small>:null}</p><span><b>{current?.proxy_reviewer_name||current?.reviewer_name||"—"}</b><Link href={reviewLink(date,location.station_code)}>View review →</Link></span></article>;
+      return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatOpsDate(date)} · {location.station_name||location.city}</small></span><em className={entry?.status||"not-started"}>{entry?.status.replace("_"," ")||"Not started"}</em><p>{entry?.review_summary||"Takeaway pending"}{entry?<small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small>:null}</p><span><b>{current?.proxy_reviewer_name||current?.reviewer_name||"—"}</b><Link href={reviewLink(date,location.station_code)}>View review →</Link></span></article>;
     })}</div><ReviewDetailsClose label="Close station reviews"/></ReviewDetails>
-    <ReviewDetails className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatDashboardDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
-      {props.backlog.error?<p role="alert">{props.backlog.error}</p>:<div>{props.backlog.rows.map(entry=><article key={entry.id}><span><strong>{entry.station_code}</strong><small>Performance {formatDashboardDate(entry.source_date)}</small></span><em className="in_review">Pending</em><p>{entry.pending_role}<small>{entry.pending_name||"Manager not linked"}</small></p><span><small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small><Link href={reviewLink(entry.source_date,entry.station_code)}>Review {formatDashboardDate(entry.source_date)} →</Link></span></article>)}{!props.backlog.count?<p className="review-empty">No earlier pending reviews.</p>:null}</div>}
+    <ReviewDetails className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatOpsDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
+      {props.backlog.error?<p role="alert">{props.backlog.error}</p>:<div>{props.backlog.rows.map(entry=><article key={entry.id}><span><strong>{entry.station_code}</strong><small>Performance {formatOpsDate(entry.source_date)}</small></span><em className="in_review">Pending</em><p>{entry.pending_role}<small>{entry.pending_name||"Manager not linked"}</small></p><span><small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small><Link href={reviewLink(entry.source_date,entry.station_code)}>Review {formatOpsDate(entry.source_date)} →</Link></span></article>)}{!props.backlog.count?<p className="review-empty">No earlier pending reviews.</p>:null}</div>}
       {props.backlog.count>props.backlog.pageSize?<nav className="review-backlog-pages">{props.backlog.page>1?<Link href={reviewLink(date,selectedCode,props.backlog.page-1)}>← Previous</Link>:null}<span>Page {props.backlog.page} of {Math.ceil(props.backlog.count/props.backlog.pageSize)}</span>{props.backlog.page*props.backlog.pageSize<props.backlog.count?<Link href={reviewLink(date,selectedCode,props.backlog.page+1)}>Next →</Link>:null}</nav>:null}
       <ReviewDetailsClose label="Close earlier pending reviews"/>
     </ReviewDetails>
@@ -308,7 +308,7 @@ export function PerformanceReviewDesk(props: Props) {
         {previousReview?.review_summary ? (
           <div className="performance-previous-takeaway">
             <span>
-              <strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong>
+              <strong>Previous review · {formatOpsDate(previousReview.source_date)}</strong>
               <small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small>
             </span>
             <p>{previousReview.review_summary}</p>

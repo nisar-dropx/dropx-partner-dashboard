@@ -8,6 +8,7 @@ import type {
   RemittanceRowNormalized,
   RemittanceSummaryNormalized
 } from "@/lib/ops-pulse/cash-recon-types";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import { submitCodDayClosure, validateCodRemittanceDeposit } from "./actions";
 
 const SHORT_BLOCK_RUPEES = 10;
@@ -58,15 +59,7 @@ function formatEpoch(ms: number | null) {
 
 function formatDateLabel(date: string) {
   if (!date) return "—";
-  const parsed = new Date(`${date}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return parsed.toLocaleDateString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  });
+  return formatOpsDate(date, date);
 }
 
 function toneForAmount(value: number) {

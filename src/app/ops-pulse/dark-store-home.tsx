@@ -7,7 +7,7 @@ import { hasPermission, type AuthorizationContext } from '@/lib/authorization';
 import { todayKolkata, type CodLocationRow } from '@/lib/ops-pulse/cod';
 import { validMonth } from '@/lib/finance/pricing';
 import { loadDsCommandData } from '@/lib/ops-pulse/ds-command-data';
-import { formatDashboardDate } from '@/lib/date-format';
+import { formatOpsDate } from '@/lib/ops-pulse/date-format';
 import styles from './dark-store-home.module.css';
 import { DarkStoreFilters, DarkStoreRefresh } from './dark-store-controls';
 import { loadCpu } from '@/lib/ops-pulse/dark-store';
@@ -17,7 +17,7 @@ import type { AttentionItem } from '@/lib/ops-pulse/command-attention';
 
 type Props={authorization:AuthorizationContext;locations:CodLocationRow[];searchParams?:{station?:string;month?:string;city?:string}};
 const count=(n:number)=>n.toLocaleString('en-IN',{maximumFractionDigits:0});
-const date=(v:string)=>formatDashboardDate(v);
+const date=(v:string)=>formatOpsDate(v);
 const money=(n:number|null)=>n===null?'—':`₹${n.toLocaleString('en-IN',{maximumFractionDigits:2})}`;
 
 async function StoreEconomics({authorization:a,locations,month}:Props&{month:string}){

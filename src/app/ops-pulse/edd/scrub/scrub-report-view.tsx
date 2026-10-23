@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Download, Loader2, RefreshCw, Search, X } from "lucide-react";
 import type { ScrubType, ScrubTypeActivity, StationScrubActivity } from "@/lib/ops-pulse/edd-worker";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 
 type Status = "none" | "missed" | "unavailable" | "done";
 type Filter = "all" | "notDone" | Status;
@@ -40,16 +41,16 @@ function statusOf(activity: ScrubTypeActivity, today: string): Status {
 }
 
 function formatDateTime(value: string) {
-  return new Date(value).toLocaleString("en-IN", { timeZone: TZ, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return formatOpsDateTime(value);
 }
 
-/** The exact invocation time from Amazon, e.g. "Tue, 13 Oct 2026, 06:42 pm". */
+/** The exact invocation time from Amazon, e.g. "13 Oct 2026, 06:42 pm". */
 function formatFullDateTime(value: string) {
-  return new Date(value).toLocaleString("en-IN", { timeZone: TZ, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return formatOpsDateTime(value);
 }
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString("en-IN", { timeZone: TZ, day: "numeric", month: "short", year: "numeric" });
+  return formatOpsDate(value);
 }
 
 function formatTime(value: string) {
@@ -58,7 +59,7 @@ function formatTime(value: string) {
 
 function formatDay(key: string, today: string) {
   const gap = daysBetween(key, today);
-  const label = new Date(`${key}T12:00:00Z`).toLocaleDateString("en-IN", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
+  const label = formatOpsDate(key, key);
   return gap === 0 ? `Today · ${label}` : gap === 1 ? `Yesterday · ${label}` : label;
 }
 

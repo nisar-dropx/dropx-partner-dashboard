@@ -9,15 +9,18 @@ import {
   type LedgerLine,
 } from "@/lib/ops-pulse/nl-recovery-ledger-view";
 import { recoveryCsv } from "@/lib/ops-pulse/nl-loss-policy";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(n) || 0);
-const monthShort = (m: string | null) =>
-  m ? new Date(`${m}-01T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }) : "—";
-const day = (d: string | null) =>
-  d ? new Date(`${d.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+const monthShort = (m: string | null) => {
+  if (!m) return "—";
+  const label = formatOpsDate(`${m}-01`);
+  return label === "-" ? m : label.replace(/^\d+\s+/, "");
+};
+const day = (d: string | null) => (d ? formatOpsDate(d.slice(0, 10)) : "");
 const caseLabel = (l: LedgerLine) => `${l.report.toUpperCase()} · ${monthShort(l.month)} · ${l.case_key.replace(/^slp:/, "")}`;
 const lineKey = (l: LedgerLine) => `${l.month}|${l.case_key}|${l.employee_ref}`;
 

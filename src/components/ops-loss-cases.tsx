@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import styles from "@/components/ops-loss-report.module.css";
 import type { LossRow } from "@/lib/ops-pulse/loss-reports";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 
 type Column = { key: keyof LossRow; label: string; kind?: "money" | "date" | "long" | "tid" };
 
@@ -24,7 +25,7 @@ const COLUMNS: Record<"nl" | "slp", Column[]> = {
 };
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
-const dateFmt = (v: string) => new Date(`${v}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+const dateFmt = (v: string) => formatOpsDate(v);
 
 function cellText(row: LossRow, col: Column): string {
   const v = row[col.key];

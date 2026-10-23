@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadShipmentCountAssociateDays } from "@/lib/ops-pulse/capacity-shipments";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
@@ -475,11 +475,11 @@ export function formatAmount(value: number | string | null | undefined) {
 }
 
 export function formatDate(value: string | null | undefined) {
-  return formatDashboardDate(value);
+  return formatOpsDate(value);
 }
 
 export function formatDateTime(value: string | null | undefined) {
-  return formatDashboardDateTime(value);
+  return formatOpsDateTime(value);
 }
 
 export function formatTime(value: string | null | undefined) {

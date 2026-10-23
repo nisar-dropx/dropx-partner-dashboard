@@ -45,7 +45,7 @@ export function OpsDesignNavigation({ items, active }: { items: NavItem[]; activ
   const visible = searchOpsNavigation(items, query);
   const link = (item: { code?: string; href?: string; label: string; hideBadge?: boolean }, child = false, icon?: LucideIcon) => {
     const Symbol = icon;
-    const content = <>{Symbol && <Symbol size={17} aria-hidden="true" />}<span>{item.label}</span><PaymentNavBadge code={item.hideBadge ? undefined : item.code} /></>;
+    const content = <>{Symbol && <Symbol size={16} aria-hidden="true" />}<span>{item.label}</span><PaymentNavBadge code={item.hideBadge ? undefined : item.code} /></>;
     // Only the selected route may use PendingLink's current-page handling.
     // Its pathname-only fallback would also select / on ?view=manpower.
     return item.href ? <PendingLink key={item.label} className={`ops-design-link ${child ? "ops-design-child" : ""} ${selected === item.href ? "is-current" : ""}`} href={item.href} prefetch={false} disableWhenCurrent={selected === item.href} aria-current={selected === item.href ? "page" : undefined}>{content}</PendingLink> : <span key={item.label} className="ops-design-link unavailable">{content}</span>;
@@ -69,7 +69,7 @@ export function OpsDesignNavigation({ items, active }: { items: NavItem[]; activ
             const groupId = `${id}-${item.code}`;
             return <div key={item.code} className="ops-design-group">
               <button type="button" className={`ops-design-link ops-design-group-trigger ${currentGroup === item.code ? "is-section" : ""}`} aria-expanded={open} aria-controls={groupId} onClick={() => setExpanded(previous => ({ ...previous, [item.code]: !open }))}>
-                <Symbol size={17} aria-hidden="true" /><span>{item.label}</span><PaymentNavBadge code={item.code} /><ChevronDown size={14} className="ops-group-chevron" aria-hidden="true" />
+                <Symbol size={16} aria-hidden="true" /><span>{item.label}</span><PaymentNavBadge code={item.code} /><ChevronDown size={14} className="ops-group-chevron" aria-hidden="true" />
               </button>
               <div className="ops-design-children" id={groupId} hidden={!open}>{item.children.map(child => link(child, true))}</div>
             </div>;

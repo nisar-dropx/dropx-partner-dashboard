@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { commandCostHref, type CommandCenterModel, type CommandPeriod } from '@/lib/ops-pulse/command-center';
 import type { LossRecoveryCommandSummary } from '@/lib/ops-pulse/loss-recovery-command';
+import { formatOpsDate } from '@/lib/ops-pulse/date-format';
 import styles from '@/app/ops-pulse/command-center.module.css';
 const number = (n: number | null | undefined) => n == null ? '—' : n.toLocaleString('en-IN', {maximumFractionDigits:0});
 const money = (n: number | null | undefined) => n == null ? '—' : `₹${n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-const date = (v:string) => new Date(v+'T00:00:00Z').toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'});
+const date = (v:string) => formatOpsDate(v);
 
 // The dashboard is a launch point, not a second CPS / Performance report.
 export function OpsCommandCenter({model:m,period,codes,canCost,canPerformance,canLosses,performanceDate,errors,lossRecovery,lossHrefs}: {

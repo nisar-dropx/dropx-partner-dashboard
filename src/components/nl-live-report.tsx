@@ -9,6 +9,7 @@ import {
   daysUntil,
 } from "@/lib/ops-pulse/nl-dispute-policy";
 import type { NlLiveView } from "@/lib/ops-pulse/nl-live";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -17,22 +18,8 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(n);
-const day = (date: string) =>
-  new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
-const time = (s: string | null) =>
-  s
-    ? new Date(s).toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        day: "numeric",
-        month: "short",
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    : "Not checked";
+const day = (date: string) => formatOpsDate(date);
+const time = (s: string | null) => (s ? formatOpsDateTime(s) : "Not checked");
 const left = (days: number) =>
   days < 0
     ? "Closed"

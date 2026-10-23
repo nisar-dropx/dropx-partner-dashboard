@@ -20,6 +20,7 @@ import {
   type ReportSummary as StoreSummary,
   type SortKey as StoreSortKey,
 } from "@/lib/ops-pulse/store-ops/report";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import { ActivitiesHub } from "../activities-hub";
 import styles from "../si-handover.module.css";
 
@@ -46,16 +47,7 @@ function addDaysIst(isoDate: string, days: number) {
 }
 
 function formatIstRange(from: string, to: string) {
-  const fmt = (iso: string) => {
-    const t = Date.parse(`${iso}T12:00:00+05:30`);
-    if (!Number.isFinite(t)) return iso;
-    return new Date(t).toLocaleDateString("en-IN", {
-      timeZone: "Asia/Kolkata",
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
+  const fmt = (iso: string) => formatOpsDate(iso, iso);
   if (!from && !to) return "All dates";
   if (from === to) return fmt(from);
   return `${fmt(from)} → ${fmt(to)}`;

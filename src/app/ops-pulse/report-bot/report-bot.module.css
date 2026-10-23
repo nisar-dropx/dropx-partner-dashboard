@@ -354,11 +354,19 @@ button.thumb { padding: 0; cursor: zoom-in; font: inherit; }
   .tile, .chevron, .switch input, .switch input::after { transition: none; }
 }
 
-:global(.ops-modern) .page{max-width:none;width:100%;margin:0;padding:0 0 16px;--accent:var(--brand-dark);--accent-soft:var(--ops-selected-bg)}
-:global(.ops-modern) .hero{margin-bottom:8px}
-:global(.ops-modern) .hero h1{font-size:clamp(20px,1.6vw,24px);letter-spacing:-.035em}
-:global(.ops-modern) .hero p{display:none}
-:global(.ops-modern) .eyebrow{display:none}
-:global(.ops-modern) .tiles{margin-bottom:8px}
-:global(.ops-modern) .button.primary{background:var(--ops-action);border-color:transparent}
+:global(.ops-modern) .page{max-width:none;width:100%;margin:0;padding:0 0 24px;--ink:#1f2937;--muted:#667085;--line:#e2e7ee;--accent:var(--brand-dark);--accent-soft:var(--ops-selected-bg);font-size:12.25px}
+:global(.ops-modern) .hero{margin-bottom:17px;align-items:flex-end}
+:global(.ops-modern) .hero h1{font-size:clamp(23px,2vw,29px);letter-spacing:-.035em;line-height:1.12}
+:global(.ops-modern) .hero p{display:block;margin-top:5px;font-size:12.5px;color:var(--muted);max-width:52ch}
+:global(.ops-modern) .eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:850;letter-spacing:.11em;text-transform:uppercase;color:var(--brand-dark);background:transparent;border:0;padding:0;margin-bottom:4px;border-radius:0}
+:global(.ops-modern) .tiles{margin-bottom:14px;gap:14px}
+:global(.ops-modern) .tile{border-radius:13px;box-shadow:var(--ops-shadow);padding:15px 16px}
+:global(.ops-modern) .tileLabel{font-size:11.5px;font-weight:700}
+:global(.ops-modern) .tileValue{font-size:15px}
+:global(.ops-modern) .setup,:global(.ops-modern) .panel{border-radius:13px;box-shadow:var(--ops-shadow);border-color:var(--line)}
+:global(.ops-modern) .button{min-height:33px;border-radius:9px;font-size:11.5px;font-weight:760}
+:global(.ops-modern) .button.primary{background:var(--ops-action);border-color:transparent;color:#fff;box-shadow:0 4px 10px rgba(195,35,56,.13)}
 :global(.ops-modern) .button.primary:hover{background:var(--ops-action-hover)}
+:global(.ops-modern) .tabs{padding:3px;border-radius:10px;border:1px solid var(--line);background:#fff}
+:global(.ops-modern) .tab{min-height:30px;font-size:12px;border-radius:7px}
+:global(.ops-modern) .tab.active{background:#fff4e8;border-color:#f0d2b0;box-shadow:inset 0 -2px 0 var(--brand)}

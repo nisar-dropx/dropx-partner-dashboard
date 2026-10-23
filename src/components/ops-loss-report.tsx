@@ -2,12 +2,13 @@ import Link from "next/link";
 import styles from "@/components/ops-loss-report.module.css";
 import { OpsLossCases } from "@/components/ops-loss-cases";
 import { ALL_SNAPSHOTS, type LossReportView } from "@/lib/ops-pulse/loss-reports";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 
 import { LossHeader, LossTabs, type LossTab } from "@/components/loss-header";
 export { LossTabs, type LossTab };
 
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
-const time = (value: string | null) => value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+const time = (value: string | null) => (value ? formatOpsDateTime(value) : "—");
 
 
 export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }: {
@@ -27,7 +28,7 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
   const selected = totals.find((t) => t.station_code === selectedStation);
   // Potential loss opens on the newest daily snapshot, so "all" has to be explicit in the URL.
   const potential = activeTab === "potential";
-  const day = (p: string) => potential ? new Date(`${p}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : p;
+  const day = (p: string) => (potential ? formatOpsDate(p) : p);
   const href = (opts: { station?: string | null; period?: string | null }) => {
     const q = new URLSearchParams();
     const p = (opts.period === undefined ? view.selectedPeriod : opts.period) ?? (potential ? ALL_SNAPSHOTS : null);

@@ -7,7 +7,7 @@ import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tab
 import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
+import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { dailyPerformanceSourceForMode } from "@/lib/performance-source-policy";
@@ -93,9 +93,9 @@ function StepStatus({ row }: { row: ReviewStatusRow }) {
         <b>{step.reviewer_name}</b>
         <small>
           {step.status === "completed"
-            ? `Reviewed${step.proxy_reviewer_name ? ` by ${step.proxy_reviewer_name} as proxy` : ""}${step.completed_at ? ` · ${formatDashboardDateTime(step.completed_at)}` : ""}`
+            ? `Reviewed${step.proxy_reviewer_name ? ` by ${step.proxy_reviewer_name} as proxy` : ""}${step.completed_at ? ` · ${formatOpsDateTime(step.completed_at)}` : ""}`
             : step.status === "skipped"
-              ? `Skipped${step.bypassed_by_name ? ` by ${step.bypassed_by_name}` : ""}${step.bypassed_at ? ` · ${formatDashboardDateTime(step.bypassed_at)}` : ""}`
+              ? `Skipped${step.bypassed_by_name ? ` by ${step.bypassed_by_name}` : ""}${step.bypassed_at ? ` · ${formatOpsDateTime(step.bypassed_at)}` : ""}`
               : step.proxy_reviewer_name ? `Proxy assigned to ${step.proxy_reviewer_name}` : "Pending"}
         </small>
         {step.feedback ? <p>{step.feedback}</p> : null}
@@ -115,8 +115,8 @@ function ReviewStatusDetail({ row, access }: { row: ReviewStatusRow; access: Row
   const routeLabel = row.steps.length ? row.steps.map(step => `${step.reviewer_name} · ${step.reviewer_role}`).join(" → ") : row.peopleRoute?.chain.map(step => `${step.reviewerName} · ${step.reviewerRole}`).join(" → ") || "";
   return <div className="review-status-detail">
     <div className="review-status-detail-head">
-      <div><span>Started</span><strong>{formatDashboardDateTime(row.review?.started_at, "Not started")}</strong></div>
-      <div><span>Last activity</span><strong>{formatDashboardDateTime(row.lastActivityAt, "—")}</strong></div>
+      <div><span>Started</span><strong>{formatOpsDateTime(row.review?.started_at, "Not started")}</strong></div>
+      <div><span>Last activity</span><strong>{formatOpsDateTime(row.lastActivityAt, "—")}</strong></div>
       <div><span>RCA recorded</span><strong>{row.items.filter((item) => item.root_cause || item.corrective_action).length}</strong></div>
       <div><span>Open actions</span><strong>{openItems.length + openFollowups.length}</strong></div>
       <div><span>Discussion updates</span><strong>{row.updates.length}</strong></div>
@@ -147,8 +147,8 @@ function ReviewStatusDetail({ row, access }: { row: ReviewStatusRow; access: Row
       <section>
         <span>Open RCA / actions</span>
         {openItems.length || openFollowups.length ? <ul>
-          {openItems.slice(0, 4).map((item) => <li key={`${item.metric_label}-${item.due_date}`}><b>{item.metric_label}</b>{item.corrective_action || item.root_cause || "Action details pending"}{item.action_owner ? ` · ${item.action_owner}` : ""}{item.due_date ? ` · ETA ${formatDashboardDate(item.due_date)}` : ""}</li>)}
-          {openFollowups.slice(0, 4).map((item) => <li key={`followup-${item.action_number}`}><b>Action {item.action_number}</b>{item.title} · {item.owner_label} · ETA {formatDashboardDate(item.due_date)}</li>)}
+          {openItems.slice(0, 4).map((item) => <li key={`${item.metric_label}-${item.due_date}`}><b>{item.metric_label}</b>{item.corrective_action || item.root_cause || "Action details pending"}{item.action_owner ? ` · ${item.action_owner}` : ""}{item.due_date ? ` · ETA ${formatOpsDate(item.due_date)}` : ""}</li>)}
+          {openFollowups.slice(0, 4).map((item) => <li key={`followup-${item.action_number}`}><b>Action {item.action_number}</b>{item.title} · {item.owner_label} · ETA {formatOpsDate(item.due_date)}</li>)}
         </ul> : <p>No open action has been recorded.</p>}
       </section>
       <section>
@@ -271,19 +271,19 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
       <section className="review-status-register">
         <header>
           <div><h2>Station review register</h2><p>{rows.length} results · click any row for reviewers, RCA, actions and discussion.</p></div>
-          <span>{formatDashboardDate(range.from)}{range.from !== range.to ? ` – ${formatDashboardDate(range.to)}` : ""}</span>
+          <span>{formatOpsDate(range.from)}{range.from !== range.to ? ` – ${formatOpsDate(range.to)}` : ""}</span>
         </header>
         <div className="review-status-columns" aria-hidden="true"><span>Date</span><span>Station</span><span>{primaryLabel}</span><span>{secondaryLabel}</span><span>Status</span><span>Progress</span><span>Current dependency</span><span></span></div>
         <div className="review-status-rows">
           {pageRows.length ? pageRows.map((row) => <details className={`review-status-row ${row.status}`} key={row.key}>
             <summary>
-              <span data-label="Date"><strong>{formatDashboardDate(row.date)}</strong><small>Performance day</small></span>
+              <span data-label="Date"><strong>{formatOpsDate(row.date)}</strong><small>Performance day</small></span>
               <span data-label="Station"><strong>{row.stationCode}</strong><small>{row.stationName}</small></span>
               <span data-label={primaryLabel}><strong>{row.clusterManager || primaryEmpty}</strong><small>{row.region || (darkStore ? "From People route" : "Region not set")}</small></span>
               <span data-label={secondaryLabel}><strong>{row.aom || secondaryEmpty}</strong><small>{row.aom ? secondaryHint : secondaryMissingHint}</small></span>
               <span data-label="Status"><b className={`review-status-pill ${row.status}`}>{statusLabel(row.status)}</b></span>
               <span data-label="Progress"><strong>{row.totalSteps ? `${row.completedSteps + row.skippedSteps}/${row.totalSteps}` : "—"}</strong><small>{row.skippedSteps ? `${row.skippedSteps} skipped` : `${row.completedSteps} reviewed`}</small></span>
-              <span data-label="Dependency"><strong>{row.currentDependency}</strong><small>{row.lastActivityAt ? formatDashboardDateTime(row.lastActivityAt) : "No activity"}</small></span>
+              <span data-label="Dependency"><strong>{row.currentDependency}</strong><small>{row.lastActivityAt ? formatOpsDateTime(row.lastActivityAt) : "No activity"}</small></span>
               <i aria-hidden="true">⌄</i>
             </summary>
             <ReviewStatusDetail row={row} access={rowAccess.get(row.key) ?? null} />

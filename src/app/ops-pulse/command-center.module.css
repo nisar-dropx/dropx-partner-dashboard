@@ -16,14 +16,30 @@
 @media(max-width:1100px){.hero{align-items:start;flex-direction:column}.visualGrid{grid-template-columns:1fr}.priorities{flex-wrap:wrap}.priorities>div{width:100%}.priorities button{border-left:0;padding-left:0}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.command{padding:8px 0 24px}.command h1{font-size:23px}.metrics{gap:10px}.metrics article{padding:17px 13px}.metrics strong{font-size:26px}.metrics article>svg{width:16px;right:11px;top:17px}.metrics article>span{font-size:11px}.metrics small{font-size:10px}.priorities{padding:18px;gap:18px}.priorities button{flex-basis:100%}.dateForm{width:100%;gap:8px}.dateForm label{flex:1;min-width:0}.dateForm input{width:100%;min-width:0}.tools a{font-size:11px;padding:9px}.panel>header{padding:17px 15px;align-items:start}.panel header>span{white-space:normal}.panel h2{font-size:16px}.tableFilters{padding:12px}.tableFilters input{width:100%;min-width:0}.tableFilters button{padding:9px 7px}.sources summary span{display:block;margin:7px 0 0}.volumeChart{height:190px}.barTrack{height:160px}}
 
-:global(.ops-modern) .command{width:100%;max-width:none;margin:0;padding:0 0 24px;--accent:var(--brand-dark)}
-:global(.ops-modern) .command h1{font-size:clamp(24px,2vw,29px);letter-spacing:-.035em}
-:global(.ops-modern) .dateForm button{background:var(--ops-action);font-weight:700}
-:global(.ops-modern) .metrics article{padding:17px;border-radius:12px;box-shadow:var(--ops-shadow)}
-:global(.ops-modern) .metrics strong{font-size:29px}
-:global(.ops-modern) .panel{border-radius:12px;box-shadow:var(--ops-shadow)}
-:global(.ops-modern) .panel>header{padding:15px 18px}
-:global(.ops-modern) .command :is(a,button,summary,input):focus-visible{outline-color:var(--ops-focus)}
+:global(.ops-modern) .command{width:100%;max-width:none;margin:0;padding:0 0 24px;--accent:var(--brand-dark);--muted:#667085;--line:#e2e7ee;color:#1f2937;font-size:12.25px}
+:global(.ops-modern) .command h1{font-size:clamp(23px,2vw,29px);letter-spacing:-.035em;line-height:1.12}
+:global(.ops-modern) .eyebrow{font-size:10px!important;font-weight:850;letter-spacing:.11em;color:var(--brand-dark);background:none;border:0;padding:0;margin-bottom:4px!important}
+:global(.ops-modern) .hero p:last-child{font-size:12.5px;color:var(--muted)}
+:global(.ops-modern) .dateForm label{font-size:11px;font-weight:750;color:#46524a}
+:global(.ops-modern) .dateForm input{min-height:36px;border-radius:7px;border-color:#d2d7d3;font-size:12.5px}
+:global(.ops-modern) .dateForm button{min-height:33px;padding:7px 12px;background:var(--ops-action);border-radius:9px;font-size:11.5px;font-weight:760;box-shadow:0 4px 10px rgba(195,35,56,.13)}
+:global(.ops-modern) .tools a{min-height:33px;border-radius:9px;font-size:11.5px;font-weight:680}
+:global(.ops-modern) .metrics{gap:14px}
+:global(.ops-modern) .metrics article{padding:15px 16px;border-radius:13px;box-shadow:var(--ops-shadow);border-color:var(--line)}
+:global(.ops-modern) .metrics article>span{font-size:11.5px;font-weight:700}
+:global(.ops-modern) .metrics strong{font-size:24px;letter-spacing:-.035em}
+:global(.ops-modern) .metrics small{font-size:10.5px}
+:global(.ops-modern) .panel{border-radius:13px;box-shadow:var(--ops-shadow);border-color:var(--line)}
+:global(.ops-modern) .panel>header{padding:13px 15px;border-bottom:1px solid #e8ebf0}
+:global(.ops-modern) .panel h2{font-size:15px;letter-spacing:-.01em}
+:global(.ops-modern) .panel header p{font-size:12px;margin-top:3px}
+:global(.ops-modern) .command th{font-size:9.25px;letter-spacing:.06em;padding:9px 12px;background:#f7f9fb}
+:global(.ops-modern) .command td{padding:10px 12px}
+:global(.ops-modern) .tableFilters{padding:10px 15px;background:#fafbfc}
+:global(.ops-modern) .tableFilters input{min-height:31px;border-radius:7px;font-size:12px;padding:6px 9px}
+:global(.ops-modern) .tableFilters button{min-height:29px;font-size:11px;border-radius:7px}
+:global(.ops-modern) .tableFilters button[aria-pressed=true]{background:#fff4e8;border-color:#f0d2b0;color:#1f2937}
+:global(.ops-modern) .command :is(a,button,summary,input):focus-visible{outline:2px solid #fff0e5;outline-offset:2px;border-color:var(--brand-dark)}
 
 /* Compact overview, with normal-size text and date controls that can reflow. */
 .hero{flex-wrap:wrap;align-items:center}.hero>div:first-child{min-width:0;flex:1 1 320px}.dateOptions{max-width:100%;flex:0 1 auto}.dateToggle{display:none}.dateForm{max-width:100%}.dateForm label{min-width:0}.dateForm input{max-width:100%;box-sizing:border-box}.tools{margin-bottom:16px}

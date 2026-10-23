@@ -2,13 +2,13 @@
 import { useMemo, useState, useTransition } from "react";
 import { actOnOffboardingTaskApproval } from "@/app/ops-pulse/attendance/offboarding/actions";
 import type { OffboardingApprovalGate, OffboardingCase, OffboardingChecklistWorkspace, OffboardingTask } from "@/lib/ops-pulse/offboarding-checklist-data";
+import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import styles from "./ops-offboarding-checklist.module.css";
 import { ListPager, usePaged } from "./list-pager";
 
 const DONE = new Set(["completed", "waived"]);
 const label = (v: string) => v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-const dateLabel = (value: string | null) =>
-  value ? new Date(`${value}T12:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "Not set";
+const dateLabel = (value: string | null) => (value ? formatOpsDate(value) : "Not set");
 const todayIst = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const daysTo = (date: string | null) => (date ? Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${todayIst()}T00:00:00Z`)) / 86400000) : null);
 const tone = (status: string) =>
