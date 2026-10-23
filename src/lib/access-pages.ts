@@ -100,6 +100,7 @@ export const accessPages = [
   { code: "payment_process", name: "Payment Process", sort_order: 108 },
   { code: "payment_reports", name: "Payment Report", sort_order: 109 },
   { code: "workforce_payouts", name: "Workforce Payouts", sort_order: 110 },
+  { code: "payable_balance", name: "Payable Balance (view only)", sort_order: 111 },
   { code: "workforce_payout_disputes", name: "Workforce Payout Disputes", sort_order: 111 },
   { code: "workforce_advances", name: "Workforce Advance Register", sort_order: 112 },
   { code: "payment_recoveries", name: "Payment Recovery", sort_order: 113 },
@@ -630,6 +631,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["imports"], "master_imports");
     await seedTargetPermissionsFromSources(supabase, companyId, ["attendance_reports"], "raw_punch_reports");
     await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "payment_recoveries", true);
+    await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "payable_balance", true);
     await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "workforce_payout_disputes");
     // Ops Pulse disputes follow whoever already manages Ops Workforce Payouts.
     await seedTargetPermissionsFromSources(supabase, companyId, ["ops_workforce_payouts"], "ops_workforce_payout_disputes");

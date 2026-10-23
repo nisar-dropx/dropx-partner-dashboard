@@ -23,6 +23,7 @@ export const financeAccessPageCodes = [
   "payment_approvals",
   "payment_process",
   "workforce_payouts",
+  "payable_balance",
   "payment_reports",
   "payment_methods",
   "master_payment_banks",
