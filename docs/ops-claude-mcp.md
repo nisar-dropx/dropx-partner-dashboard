@@ -5,21 +5,28 @@ Deployed only on the **dropx-ops-pulse** Vercel project (`dropx1` scope). Never 
 
 ## Part A — Office Wi‑Fi DNS (do this once at the registrar)
 
+**Status (2026-10-23):** public DNS still has `ops` → `cname.vercel-dns.com` (legacy). Until this is changed at the registrar, company Wi‑Fi will keep dropping Ops—especially during Vercel prod deploys when the alias/edge remaps and the shared CNAME chase fails.
+
 Vercel Domains for `ops.dropxlogistics.com` recommends replacing the legacy shared CNAME:
 
 | Record | Current (legacy) | Recommended |
 |---|---|---|
 | `ops` CNAME | `cname.vercel-dns.com` | `7a10f280f74abb8a.vercel-dns-016.com` |
 
-Office routers often resolve project-specific `*.vercel-dns-0xx.com` names (dashboard / people / connect) but fail to chase the legacy shared target. That shows up as Ops “reconnect / offline” on office Wi‑Fi while mobile hotspot still works.
+**Why office Wi‑Fi dies during a deploy (then comes back):**
+
+1. Dashboard / People / Connect already use project-specific `*.vercel-dns-0xx.com` targets that office DNS resolves.
+2. Ops still uses the shared legacy target `cname.vercel-dns.com`. Office routers often fail to chase that name (hotspot / phone DNS usually works).
+3. A prod deploy re-aliases `ops.dropxlogistics.com` on Vercel. During that window the edge path for the legacy CNAME is unstable, so Ops looks “offline / reconnect” on company Wi‑Fi until the new deployment settles—even though the app itself is fine.
+4. This is **DNS at the registrar**, not an Ops app bug and not fixed by redeploying again.
 
 **Fix for all colleagues (no laptop DNS changes):**
 
-1. At the DNS provider for `dropxlogistics.com`, set CNAME `ops` → `7a10f280f74abb8a.vercel-dns-016.com` (exactly as Vercel recommends; trailing dot optional depending on the provider).
+1. At the DNS provider for `dropxlogistics.com` (currently Google Domains nameservers), set CNAME `ops` → `7a10f280f74abb8a.vercel-dns-016.com` (exactly as Vercel recommends; trailing dot optional depending on the provider).
 2. Keep the domain bound to **`dropx-ops-pulse` only**. Do not also attach it to `ops-source` or the partner dashboard project.
-3. Wait for propagation, then on office Wi‑Fi run `nslookup ops.dropxlogistics.com` and confirm A records resolve.
+3. Wait for propagation (often 5–30 minutes; TTL on the old record is ~4 hours worst case), then on office Wi‑Fi run `nslookup ops.dropxlogistics.com` and confirm it answers via `7a10f280f74abb8a.vercel-dns-016.com` (not `cname.vercel-dns.com`).
 
-**Do not delete** `ops.dropxlogistics.com` from Vercel. Codex / MCP domain checks can surface the “DNS Change Recommended” banner; that is not a reason to remove the production domain.
+**Do not delete** `ops.dropxlogistics.com` from Vercel. The “DNS Change Recommended” banner means update the CNAME, not remove the domain.
 
 ## Part B — MCP connector
 
@@ -48,13 +55,38 @@ Unauthenticated `GET`/`POST` to `/mcp` returns **401** with
 
 ### Tools (read-only)
 
-- `ops_list_permitted_stations`
-- `ops_capacity_snapshot` (needs `capacity`)
-- `ops_station_delivery_summary`
-- `ops_cod_summary` (needs `cod`)
-- `ops_loss_case_summary` (needs `ops_losses`)
+`tools/list` is **permission-filtered**: Claude only sees tools for Ops pages the signed-in user can open. Every tool is station-scoped (company + location scope) and returns aggregates, not desk dumps.
+
+| Tool | Permission |
+|---|---|
+| `ops_list_permitted_stations` | `ops_pulse` |
+| `ops_command_center` | `ops_pulse` |
+| `ops_capacity_snapshot` | `capacity` |
+| `ops_station_delivery_summary` | `ops_pulse` |
+| `ops_cod_summary` | `cod` |
+| `ops_cod_ageing` | `cod_reports` |
+| `ops_cod_status` | `cod_reports` |
+| `ops_loss_case_summary` | `ops_losses` |
+| `ops_loss_recovery_summary` | `ops_losses` |
+| `ops_review_status` | `performance_review_status` |
+| `ops_performance_snapshot` | `performance` |
+| `ops_edd_network_summary` | `edd_dashboard` |
+| `ops_cps_snapshot` | `cps_overview` |
+| `ops_cpu_snapshot` | `cpu_overview` |
+| `ops_station_audit_summary` | `station_audits` |
+| `ops_store_audit_summary` | `store_audits` |
+| `ops_si_handover_summary` | `si_handover` |
+| `ops_store_ops_summary` | `store_ops` |
+| `ops_roster_summary` | `ops_rostering` |
+| `ops_attendance_headcount` | `ops_rostering` |
+| `ops_fleet_daily_report` | `fleet_reports` / `fleet` |
+| `ops_payment_inbox_summary` | payments / payouts pages |
+| `ops_unplanned_leaves_summary` | `ops_unplanned_leaves` |
+| `ops_report_catalog` | `ops_reports` |
 
 Write-like tool names and MCP write methods are rejected.
+
+**Never exposed:** bank files / IFSC / NEFT, COD slip attachments, audit proofs, biometric IDs, live GPS, associate pay lines, masters, users/settings editors.
 
 ### Database migration
 

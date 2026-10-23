@@ -22,6 +22,24 @@ test("tools/list returns read-only tools", async () => {
   });
   assert.equal(response.error, undefined);
   assert.ok(response.result.tools.some((tool) => tool.name === "ops_capacity_snapshot"));
+  assert.ok(response.result.tools.some((tool) => tool.name === "ops_command_center"));
+  assert.ok(response.result.tools.length >= 20);
+});
+
+test("tools/list can be filtered by auth hook", async () => {
+  const { listMcpToolsForAuth } = await import("./tools-policy.ts");
+  const response = await handleMcpJsonRpcCore(
+    { jsonrpc: "2.0", id: 6, method: "tools/list" },
+    {
+      listTools: () =>
+        listMcpToolsForAuth((code) => code === "ops_pulse" || code === "cod")
+    }
+  );
+  assert.equal(response.error, undefined);
+  const names = response.result.tools.map((tool) => tool.name);
+  assert.ok(names.includes("ops_cod_summary"));
+  assert.ok(names.includes("ops_list_permitted_stations"));
+  assert.equal(names.includes("ops_capacity_snapshot"), false);
 });
 
 test("write methods and write-like tools are rejected", async () => {

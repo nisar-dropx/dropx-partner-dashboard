@@ -1,4 +1,9 @@
-import { assertReadOnlyToolName, listMcpTools } from "./tools-policy.ts";
+import {
+  assertReadOnlyToolName,
+  listMcpTools,
+  toolToListEntry,
+  type McpToolDefinition
+} from "./tools-policy.ts";
 
 export type JsonRpcId = string | number | null;
 
@@ -31,12 +36,17 @@ export function jsonRpcResult(id: JsonRpcId, result: unknown): JsonRpcResponse {
   return { jsonrpc: "2.0", id, result };
 }
 
+export type McpJsonRpcHooks = {
+  callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  listTools?: () => McpToolDefinition[] | Promise<McpToolDefinition[]>;
+};
+
 /**
- * Protocol routing without DB. `callTool` is injected by the HTTP handler.
+ * Protocol routing without DB. Hooks inject auth-aware list/call.
  */
 export async function handleMcpJsonRpcCore(
   body: JsonRpcRequest,
-  callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
+  hooks: McpJsonRpcHooks = {}
 ): Promise<JsonRpcResponse> {
   const id = body.id ?? null;
   if (body.jsonrpc && body.jsonrpc !== "2.0") {
@@ -57,12 +67,9 @@ export async function handleMcpJsonRpcCore(
       return jsonRpcResult(id, {});
     }
     if (method === "tools/list") {
+      const tools = await (hooks.listTools ?? (() => listMcpTools()))();
       return jsonRpcResult(id, {
-        tools: listMcpTools().map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema
-        }))
+        tools: tools.map(toolToListEntry)
       });
     }
     if (method === "tools/call") {
@@ -74,10 +81,10 @@ export async function handleMcpJsonRpcCore(
           : {};
       if (!name) return jsonRpcError(id, -32602, "Invalid params: name required");
       assertReadOnlyToolName(name);
-      if (!callTool) {
+      if (!hooks.callTool) {
         return jsonRpcError(id, -32000, "Tool runner unavailable");
       }
-      const result = await callTool(name, args);
+      const result = await hooks.callTool(name, args);
       return jsonRpcResult(id, {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result,
