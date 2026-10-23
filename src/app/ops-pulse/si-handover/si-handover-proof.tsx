@@ -116,6 +116,19 @@ function LiveCameraSheet({
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const [facing, setFacing] = useState<"environment" | "user">("environment");
+  const [clock, setClock] = useState(() =>
+    new Date().toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    }),
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -127,20 +140,47 @@ function LiveCameraSheet({
   }, []);
 
   useEffect(() => {
+    const id = window.setInterval(() => {
+      setClock(
+        new Date().toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "2-digit",
+          month: "short",
+          hour: "numeric",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        }),
+      );
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !capturing && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, capturing, onClose]);
+
+  useEffect(() => {
     let cancelled = false;
     async function start() {
       setError("");
       setReady(false);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error("Live camera is not supported here. Use Take photo or Attach.");
+          throw new Error("Live camera is not supported here. Use Take or Attach.");
         }
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            facingMode: { ideal: facing },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
         });
         if (cancelled) {
@@ -152,15 +192,17 @@ function LiveCameraSheet({
         if (video) {
           video.srcObject = stream;
           await video.play();
-          setReady(true);
+          if (!cancelled) setReady(true);
         }
       } catch (reason) {
         if (!cancelled) {
           const msg =
             reason instanceof Error
               ? reason.name === "NotAllowedError"
-                ? "Camera permission denied. Allow camera, or use Take photo / Attach."
-                : reason.message
+                ? "Camera permission denied. Allow camera, or use Take / Attach."
+                : reason.name === "NotFoundError"
+                  ? "No camera found on this device."
+                  : reason.message
               : "Unable to open live camera.";
           setError(msg);
         }
@@ -172,12 +214,14 @@ function LiveCameraSheet({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, []);
+  }, [facing]);
 
   const snap = async () => {
     const video = videoRef.current;
     if (!video || !ready || capturing || busy) return;
     setCapturing(true);
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 160);
     try {
       const w = video.videoWidth || 1280;
       const h = video.videoHeight || 720;
@@ -186,6 +230,10 @@ function LiveCameraSheet({
       canvas.height = h;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Unable to capture frame.");
+      if (facing === "user") {
+        ctx.translate(w, 0);
+        ctx.scale(-1, 1);
+      }
       ctx.drawImage(video, 0, 0, w, h);
       const blob = await new Promise<Blob>((resolve, reject) =>
         canvas.toBlob(
@@ -198,9 +246,9 @@ function LiveCameraSheet({
         type: "image/jpeg",
         lastModified: Date.now(),
       });
+      await onCapture(file);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
-      await onCapture(file);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Capture failed.");
@@ -210,30 +258,86 @@ function LiveCameraSheet({
   };
 
   if (!mounted) return null;
+  const locked = capturing || busy;
   return createPortal(
     <div className={styles.liveCam} role="dialog" aria-modal="true" aria-label="Live camera">
       <div className={styles.liveCamBody}>
         <header className={styles.liveCamHead}>
-          <strong>Live camera</strong>
-          <button type="button" className={styles.btnTiny} onClick={onClose} disabled={capturing || busy}>
-            Close
+          <div className={styles.liveCamTitle}>
+            <strong>Live camera</strong>
+            <span>Photo stamped with time & GPS after capture</span>
+          </div>
+          <button
+            type="button"
+            className={styles.liveCamClose}
+            onClick={onClose}
+            disabled={locked}
+            aria-label="Close camera"
+          >
+            ✕
           </button>
         </header>
-        {error ? <p className={styles.error}>{error}</p> : null}
+
         <div className={styles.liveCamStage}>
-          <video ref={videoRef} playsInline muted autoPlay className={styles.liveCamVideo} />
-          {!ready && !error ? <span className={styles.liveCamWait}>Opening camera…</span> : null}
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            autoPlay
+            className={`${styles.liveCamVideo}${facing === "user" ? ` ${styles.liveCamMirror}` : ""}`}
+          />
+          {flash ? <span className={styles.liveCamFlash} aria-hidden /> : null}
+          {!ready && !error ? (
+            <span className={styles.liveCamWait}>Opening camera…</span>
+          ) : null}
+          {error ? (
+            <div className={styles.liveCamError}>
+              <strong>Camera unavailable</strong>
+              <p>{error}</p>
+              <button type="button" className={styles.liveCamSecondary} onClick={onClose}>
+                Use Take or Attach instead
+              </button>
+            </div>
+          ) : null}
+          {ready && !error ? (
+            <div className={styles.liveCamStamp}>
+              <span>{clock} IST</span>
+              <small>Will stamp on save</small>
+            </div>
+          ) : null}
         </div>
+
         <div className={styles.liveCamActions}>
           <button
             type="button"
-            className={styles.btnAccent}
-            disabled={!ready || capturing || busy || Boolean(error)}
-            onClick={() => void snap()}
+            className={styles.liveCamSecondary}
+            disabled={locked || Boolean(error)}
+            onClick={() =>
+              setFacing((prev) => (prev === "environment" ? "user" : "environment"))
+            }
           >
-            {capturing || busy ? "Saving…" : "Capture photo"}
+            Flip
+          </button>
+          <button
+            type="button"
+            className={styles.liveCamShutter}
+            disabled={!ready || locked || Boolean(error)}
+            onClick={() => void snap()}
+            aria-label={locked ? "Saving photo" : "Capture photo"}
+          >
+            <span className={styles.liveCamShutterRing} />
+            <span className={styles.liveCamShutterCore} />
+          </button>
+          <button
+            type="button"
+            className={styles.liveCamSecondary}
+            disabled={locked}
+            onClick={onClose}
+          >
+            Cancel
           </button>
         </div>
+        {locked ? <p className={styles.liveCamSaving}>Compressing & uploading…</p> : null}
       </div>
     </div>,
     document.body,
@@ -307,6 +411,7 @@ export function ProofPanel({
     if (!list.length) return;
     setBusy(true);
     setStatus("Preparing…");
+    onError("");
     try {
       setStatus("Getting location…");
       const gps = await readProofGps(4500);
@@ -320,6 +425,9 @@ export function ProofPanel({
             : "Compressing & stamping…",
         );
         const capturedAt = new Date().toISOString();
+        if (!Number.isFinite(Date.parse(capturedAt))) {
+          throw Error("Could not read capture time on this device.");
+        }
         const file = await prepareProofFile(raw, {
           capturedAt,
           latitude: gps.latitude,
@@ -327,6 +435,9 @@ export function ProofPanel({
           accuracyM: gps.accuracyM,
           storeLabel,
         });
+        const contentType = (file.type || raw.type || "image/jpeg").toLowerCase();
+        const size = Math.max(0, Math.round(Number(file.size) || 0));
+        if (size < 1) throw Error("Captured file was empty. Try again.");
         setStatus(list.length > 1 ? `Uploading ${index}/${list.length}…` : "Uploading…");
         const prep = await fetch(`${apiBase}/upload`, {
           method: "POST",
@@ -335,21 +446,37 @@ export function ProofPanel({
             phase: "prepare",
             checklistId: checklist.id,
             taskId: task.id,
-            fileName: file.name,
-            size: file.size,
-            contentType: file.type || "image/jpeg",
+            fileName: file.name || `proof-${Date.now()}.jpg`,
+            size,
+            contentType,
             capturedAt,
             latitude: gps.latitude,
             longitude: gps.longitude,
           }),
         });
-        const prepared = await prep.json();
+        let prepared: {
+          error?: string;
+          id?: string;
+          path?: string;
+          token?: string;
+        } = {};
+        try {
+          prepared = await prep.json();
+        } catch {
+          throw Error(prep.ok ? "Prepare failed." : `Prepare failed (${prep.status}).`);
+        }
         if (!prep.ok) throw Error(prepared.error || "Prepare failed.");
-        if (!supabase) throw Error("Upload client unavailable.");
+        if (!prepared.id || !prepared.path || !prepared.token) {
+          throw Error("Upload prepare response was incomplete.");
+        }
+        if (!supabase) throw Error("Upload client unavailable. Refresh and try again.");
         const up = await supabase.storage
           .from("ops-pulse-documents")
-          .uploadToSignedUrl(prepared.path, prepared.token, file);
-        if (up.error) throw Error(up.error.message);
+          .uploadToSignedUrl(prepared.path, prepared.token, file, {
+            contentType,
+            upsert: false,
+          });
+        if (up.error) throw Error(up.error.message || "Storage upload failed.");
         const done = await fetch(`${apiBase}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -360,15 +487,22 @@ export function ProofPanel({
             id: prepared.id,
           }),
         });
-        const body = await done.json();
+        let body: { error?: string; proof?: Evidence } = {};
+        try {
+          body = await done.json();
+        } catch {
+          throw Error(done.ok ? "Confirm failed." : `Confirm failed (${done.status}).`);
+        }
         if (!done.ok) throw Error(body.error || "Confirm failed.");
-        next = [...next, body.proof as Evidence];
+        if (!body.proof?.id) throw Error("Upload confirmed but proof was missing.");
+        next = [...next, body.proof];
         onChange(next);
       }
       setStatus("");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Upload failed.");
       setStatus("");
+      throw err;
     } finally {
       setBusy(false);
     }
@@ -446,15 +580,15 @@ export function ProofPanel({
                   {busy ? "…" : task.proof.kind === "video" ? "Record" : "Take"}
                   <input
                     id={`${uid}-cam`}
+                    className={styles.proofFileInput}
                     type="file"
                     accept={acceptNative}
                     capture="environment"
-                    hidden
                     disabled={busy}
-                    onChange={async (e) => {
+                    onChange={(e) => {
                       const files = e.target.files;
                       e.target.value = "";
-                      if (files?.length) await uploadFiles(files);
+                      if (files?.length) void uploadFiles(files).catch(() => undefined);
                     }}
                   />
                 </label>
@@ -477,15 +611,15 @@ export function ProofPanel({
               {busy ? "…" : preferCapture ? "Attach" : room > 1 ? "Add" : "Add"}
               <input
                 id={`${uid}-files`}
+                className={styles.proofFileInput}
                 type="file"
                 accept={acceptAttach}
                 multiple={room > 1 && !preferCapture}
-                hidden
                 disabled={busy}
-                onChange={async (e) => {
+                onChange={(e) => {
                   const files = e.target.files;
                   e.target.value = "";
-                  if (files?.length) await uploadFiles(files);
+                  if (files?.length) void uploadFiles(files).catch(() => undefined);
                 }}
               />
             </label>
@@ -497,7 +631,7 @@ export function ProofPanel({
           busy={busy}
           onClose={() => setLiveOpen(false)}
           onCapture={async (file) => {
-            await uploadFiles([file]);
+            await uploadFiles([file]); // throws on failure so sheet stays open
           }}
         />
       ) : null}

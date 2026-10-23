@@ -28,37 +28,36 @@ export async function POST(request: Request) {
     if (task.proof.kind === "none")
       throw Error("This task does not accept proof uploads.");
 
-    const capturedAt = String(input.capturedAt || "").trim();
-    if (!capturedAt || !Number.isFinite(Date.parse(capturedAt)))
-      throw Error("Every proof needs a capture timestamp.");
-
-    const lat =
-      input.latitude === null || input.latitude === undefined
-        ? null
-        : Number(input.latitude);
-    const lng =
-      input.longitude === null || input.longitude === undefined
-        ? null
-        : Number(input.longitude);
-    if (
-      (lat !== null && !Number.isFinite(lat)) ||
-      (lng !== null && !Number.isFinite(lng))
-    )
-      throw Error("GPS coordinates are invalid.");
-
     const prefix = `${c.companyId}/si-handover/${c.checklist.id}/${task.id}/${c.auth.userId}/`;
 
     if (input.phase === "prepare") {
+      const capturedAt = String(input.capturedAt || "").trim();
+      if (!capturedAt || !Number.isFinite(Date.parse(capturedAt)))
+        throw Error("Every proof needs a capture timestamp.");
+      const lat =
+        input.latitude === null || input.latitude === undefined
+          ? null
+          : Number(input.latitude);
+      const lng =
+        input.longitude === null || input.longitude === undefined
+          ? null
+          : Number(input.longitude);
+      if (
+        (lat !== null && !Number.isFinite(lat)) ||
+        (lng !== null && !Number.isFinite(lng))
+      )
+        throw Error("GPS coordinates are invalid.");
+
       const name = String(input.fileName || "")
         .replace(/[^a-zA-Z0-9._-]/g, "_")
         .slice(0, 120);
       const size = Number(input.size);
-      const mime = String(input.contentType || "").toLowerCase();
+      const mime = String(input.contentType || "image/jpeg").toLowerCase();
       const maxBytes = proofMaxBytes(task.proof.kind);
       if (
         !name ||
         !proofMimeAllowed(task.proof.kind, mime) ||
-        !Number.isInteger(size) ||
+        !Number.isFinite(size) ||
         size < 1 ||
         size > maxBytes
       ) {
@@ -67,10 +66,33 @@ export async function POST(request: Request) {
           `Unsupported file for this task, or over ${mb} MB. Use the format shown on the task.`,
         );
       }
+      // Count ready + in-flight rows so a failed confirm cannot soft-block the slot forever
+      // without also consuming capacity (and clean stale not-ready rows for this user/task).
+      const pending = await db()
+        .from("ops_si_checklist_evidence")
+        .select("id,path,ready,uploaded_by,created_at")
+        .eq("company_id", c.companyId)
+        .eq("checklist_id", c.checklist.id)
+        .eq("task_id", task.id);
+      if (pending.error) throw Error(pending.error.message);
+      // Drop this user's incomplete uploads so a failed confirm can be retried.
+      for (const row of pending.data || []) {
+        if (!row.ready && row.uploaded_by === c.auth.userId) {
+          if (row.path) await db().storage.from(bucket).remove([row.path]);
+          await db()
+            .from("ops_si_checklist_evidence")
+            .delete()
+            .eq("id", row.id)
+            .eq("company_id", c.companyId);
+        }
+      }
       const existing = await proofs(c.companyId, c.checklist.id);
-      const remaining =
-        task.proof.max - existing.filter((p) => p.task_id === task.id).length;
-      if (remaining <= 0)
+      const inFlight = (pending.data || []).filter(
+        (p) => !p.ready && p.uploaded_by !== c.auth.userId,
+      ).length;
+      const used =
+        existing.filter((p) => p.task_id === task.id).length + inFlight;
+      if (used >= task.proof.max)
         throw Error(`This task permits up to ${task.proof.max} files.`);
       const id = randomUUID();
       const path = `${prefix}${id}-${name}`;
@@ -80,7 +102,7 @@ export async function POST(request: Request) {
         checklist_id: c.checklist.id,
         task_id: task.id,
         file_name: name,
-        size,
+        size: Math.round(size),
         content_type: mime,
         path,
         captured_at: new Date(capturedAt).toISOString(),
