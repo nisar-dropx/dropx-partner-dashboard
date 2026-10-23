@@ -129,11 +129,11 @@ async function leaveWindowFor(
     return leaveDateWindow({ code: leaveType.code, balanceMode: leaveType.balance_mode, today });
   }
   const [settings, companySettings, credits] = await Promise.all([
-    db().from("hr_leave_types").select("comp_off_week_off_lapses_monthly,comp_off_holiday_lapse_days")
+    db().from("hr_leave_types").select("comp_off_week_off_lapses_monthly,comp_off_holiday_lapse_days,comp_off_apply_earliest_mode,comp_off_apply_days_before")
       .eq("company_id", account.companyId).eq("id", leaveType.leave_type_id).maybeSingle(),
     db().from("hr_company_settings").select("regularization_close_day")
       .eq("company_id", account.companyId).maybeSingle(),
-    db().from("hr_leave_balance_ledger").select("reference_date,source")
+    db().from("hr_leave_balance_ledger").select("reference_date,source,usable_from,apply_until")
       .eq("company_id", account.companyId).eq("worker_type", type).eq("worker_id", account.id)
       .eq("leave_type_id", leaveType.leave_type_id).eq("entry_type", "credit").eq("leave_year", 0)
       .not("reference_date", "is", null)
@@ -146,18 +146,26 @@ async function leaveWindowFor(
     weekOffLapsesMonthly: Boolean(settings.data?.comp_off_week_off_lapses_monthly),
     holidayLapseDays: settings.data?.comp_off_holiday_lapse_days ?? null
   };
+  const earliestModeRaw = String(settings.data?.comp_off_apply_earliest_mode ?? "day_after");
+  const applyEarliest = {
+    earliestMode: (earliestModeRaw === "month_start" || earliestModeRaw === "days_before" ? earliestModeRaw : "day_after") as "day_after" | "month_start" | "days_before",
+    daysBefore: settings.data?.comp_off_apply_days_before == null ? null : Number(settings.data.comp_off_apply_days_before)
+  };
   const noLapseLatest = lastOfMonth(today, 1);
   return leaveDateWindow({
     code: leaveType.code,
     balanceMode: leaveType.balance_mode,
     today,
+    applyEarliest,
     credits: (credits.data ?? []).map((credit) => {
       const source = String(credit.source ?? "");
       const validUntil = compOffValidUntil(String(credit.reference_date), source, lapse, noLapseLatest);
+      const ledgerApplyUntil = credit.apply_until ? String(credit.apply_until) : null;
       return {
         referenceDate: String(credit.reference_date),
-        validUntil,
-        applyUntil: compOffApplyUntil(source, validUntil, lapse, closeDay)
+        validUntil: ledgerApplyUntil && ledgerApplyUntil > validUntil ? ledgerApplyUntil : validUntil,
+        applyUntil: ledgerApplyUntil ?? compOffApplyUntil(source, validUntil, lapse, closeDay),
+        usableFrom: credit.usable_from ? String(credit.usable_from) : null
       };
     })
   });

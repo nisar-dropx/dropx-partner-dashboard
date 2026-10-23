@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compOffApplyUntil, compOffValidUntil, earnedLeaveAvailable, earnedLeaveLapsedDays, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
+import { compOffApplyUntil, compOffUsableFrom, compOffValidUntil, earnedLeaveAvailable, earnedLeaveLapsedDays, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
 
 test('CL/SL: whole current month and next month (mid-month)', () => {
   assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-09-01', latest: '2026-10-31' });
@@ -90,4 +90,51 @@ test('comp-off apply-until: no close day, or holiday credit, keeps validUntil', 
   assert.equal(compOffApplyUntil('comp_off_earned_week_off', '2026-09-30', lapse, null), '2026-09-30');
   assert.equal(compOffApplyUntil('comp_off_earned', '2026-09-24', lapse, 2), '2026-09-24');
   assert.equal(compOffApplyUntil('comp_off_earned_week_off', '2026-12-31', lapse, 2), '2027-01-02');
+});
+
+test('comp-off usable-from: day after worked (default)', () => {
+  assert.equal(compOffUsableFrom('2026-10-20', { earliestMode: 'day_after', daysBefore: null }), '2026-10-21');
+});
+
+test('comp-off usable-from: month start allows leave before the holiday in the same month', () => {
+  assert.equal(compOffUsableFrom('2026-10-20', { earliestMode: 'month_start', daysBefore: null }), '2026-10-01');
+  const window = leaveDateWindow({
+    code: 'HOLCOMP',
+    balanceMode: 'earned_balance',
+    today: '2026-10-22',
+    applyEarliest: { earliestMode: 'month_start', daysBefore: null },
+    credits: [{ referenceDate: '2026-10-20', validUntil: '2026-11-02', applyUntil: '2026-11-02' }]
+  });
+  assert.deepEqual(window, { earliest: '2026-10-01', latest: '2026-11-02' });
+  assert.equal(leaveDatesOutsideWindow(window, '2026-10-19', '2026-10-19', 'Holiday Comp Off'), null);
+});
+
+test('comp-off usable-from: days_before clamps to month start', () => {
+  assert.equal(compOffUsableFrom('2026-10-20', { earliestMode: 'days_before', daysBefore: 1 }), '2026-10-19');
+  assert.equal(compOffUsableFrom('2026-10-20', { earliestMode: 'days_before', daysBefore: 0 }), '2026-10-20');
+  assert.equal(compOffUsableFrom('2026-10-03', { earliestMode: 'days_before', daysBefore: 10 }), '2026-10-01');
+});
+
+test('comp-off usable-from: ledger override wins over leave-type mode', () => {
+  assert.equal(compOffUsableFrom('2026-10-20', { earliestMode: 'day_after', daysBefore: null }, '2026-10-15'), '2026-10-15');
+});
+
+test('restored credit with applyUntil override reopens the picker after natural lapse', () => {
+  const window = leaveDateWindow({
+    code: 'HOLCOMP',
+    balanceMode: 'earned_balance',
+    today: '2026-10-22',
+    credits: [{ referenceDate: '2026-10-02', validUntil: '2026-10-16', applyUntil: '2026-11-05', usableFrom: '2026-10-01' }]
+  });
+  assert.deepEqual(window, { earliest: '2026-10-01', latest: '2026-10-16' });
+});
+
+test('restored credit whose validUntil was also extended covers leave through the new apply-by', () => {
+  const window = leaveDateWindow({
+    code: 'HOLCOMP',
+    balanceMode: 'earned_balance',
+    today: '2026-10-22',
+    credits: [{ referenceDate: '2026-10-02', validUntil: '2026-11-05', applyUntil: '2026-11-05', usableFrom: '2026-10-01' }]
+  });
+  assert.deepEqual(window, { earliest: '2026-10-01', latest: '2026-11-05' });
 });
