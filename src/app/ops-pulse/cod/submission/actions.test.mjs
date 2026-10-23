@@ -14,7 +14,9 @@ function compile(file, deps) {
 }
 const cod = compile("src/lib/ops-pulse/cod.ts", {
   react: { cache: (fn) => fn },
-  "@/lib/date-format": {}, "@/lib/supabase-admin": { supabaseAdmin: null },
+  "@/lib/date-format": {},
+  "@/lib/ops-pulse/date-format": { formatOpsDate: (v) => v ?? "-", formatOpsDateTime: (v) => v ?? "-" },
+  "@/lib/supabase-admin": { supabaseAdmin: null },
   "@/lib/ops-pulse/capacity-shipments": {}, "@/lib/people-operational-hierarchy": {},
 });
 const attachment = { storage_bucket: "private-proof", storage_path: "company/slip.png" };
