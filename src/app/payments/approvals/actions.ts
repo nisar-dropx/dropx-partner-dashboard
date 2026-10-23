@@ -9,7 +9,7 @@ import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
 import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
-import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
+import { advanceApproval, loadApprovalSteps, paymentApprovalCoverage } from "@/lib/payment-approval-steps";
 import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
 
 /**
@@ -113,37 +113,43 @@ async function isFinalRoleOrAbove(companyId: string, actorRoleId: string | null,
   return false;
 }
 
-async function ensureUserHasNotAlreadyActed(
+async function priorUserAction(
   companyId: string,
   requestId: string,
   userId: string | null,
   approvalCycle: number
 ) {
-  if (!supabaseAdmin || !userId) return;
+  if (!supabaseAdmin || !userId) return null;
 
-  const baseQuery = supabaseAdmin
+  const baseQuery = await supabaseAdmin
     .from("payment_request_approvals")
-    .select("id", { count: "exact", head: true })
+    .select("action,approver_user_id,created_at")
     .eq("company_id", companyId)
-    .eq("approver_user_id", userId)
     .eq("approval_cycle", approvalCycle)
-    .or(`payment_request_id.eq.${requestId},request_id.eq.${requestId}`);
-  const { count, error } = await baseQuery;
-  if (error) {
+    .or(`payment_request_id.eq.${requestId},request_id.eq.${requestId}`)
+    .order("created_at", { ascending: true });
+  let history = baseQuery.data;
+  if (baseQuery.error) {
     const legacyQuery = await supabaseAdmin
       .from("payment_request_approvals")
-      .select("id", { count: "exact", head: true })
+      .select("action,approver_user_id,created_at")
       .eq("company_id", companyId)
-      .eq("approver_user_id", userId)
       .eq("approval_cycle", approvalCycle)
-      .eq("request_id", requestId);
-    if (!legacyQuery.error && (legacyQuery.count ?? 0) > 0) {
-      throw new Error("You have already acted on this payment request.");
-    }
-    return;
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: true });
+    if (legacyQuery.error) return null;
+    history = legacyQuery.data;
   }
+  const rows = history ?? [];
+  const lastResetAt = rows.filter((row) => String(row.action).toLowerCase() !== "approved").at(-1)?.created_at ?? null;
+  const latest = rows
+    .filter((row) => row.approver_user_id === userId && (!lastResetAt || row.created_at > lastResetAt))
+    .at(-1);
+  return String(latest?.action ?? "").toLowerCase() || null;
+}
 
-  if ((count ?? 0) > 0) {
+async function ensureUserHasNotAlreadyActed(companyId: string, requestId: string, userId: string | null, approvalCycle: number) {
+  if (await priorUserAction(companyId, requestId, userId, approvalCycle)) {
     throw new Error("You have already acted on this payment request.");
   }
 }
@@ -397,7 +403,10 @@ export async function approvePaymentRequest(formData: FormData) {
   const requestStation = Array.isArray(request.stations) ? request.stations[0] : request.stations;
   if (!(await canActOnPaymentRequest(companyId, authorization, { ...request, location_model_id: requestStation?.location_model_id ?? null }))) throw new Error("This request is not pending with you.");
   const approvalCycle = Number(request.approval_cycle) || 1;
-  await ensureUserHasNotAlreadyActed(companyId, request.id, authorization.userId, approvalCycle);
+  const previousUserAction = await priorUserAction(companyId, request.id, authorization.userId, approvalCycle);
+  if (previousUserAction && previousUserAction !== "approved") {
+    throw new Error("You have already acted on this payment request.");
+  }
 
   const { data: role } = await supabaseAdmin
     .from("user_roles")
@@ -416,6 +425,7 @@ export async function approvePaymentRequest(formData: FormData) {
 
   // Resolve before recording approval: a People outage must leave this action retryable.
   let preparedAdvance: Awaited<ReturnType<typeof advanceApproval>> | null = null;
+  let coveredThroughStepOrder = approvalStepOrder;
   if (steps.length && !ownerCanFinalize) {
     // Everyone who has approved this request since it was last sent back to
     // the station (including this approval), so a person who already approved
@@ -433,23 +443,40 @@ export async function approvePaymentRequest(formData: FormData) {
     const lastSentBack = (history.data ?? []).filter((row) => row.action !== "approved").at(-1)?.created_at ?? null;
     const priorApprovals = (history.data ?? []).filter((row) => row.action === "approved" && (!lastSentBack || row.created_at > lastSentBack));
     const approvedUserIds = new Set<string>([authorization.userId, ...priorApprovals.map((row) => row.approver_user_id).filter((id): id is string => Boolean(id))]);
-    preparedAdvance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds);
+    const coverage = await paymentApprovalCoverage(
+      companyId,
+      steps,
+      approvalStepOrder,
+      request.location_id,
+      authorization.userId
+    );
+    coveredThroughStepOrder = coverage.throughStepOrder;
+    preparedAdvance = await advanceApproval(companyId, steps, coveredThroughStepOrder, request.location_id, approvedUserIds);
   }
 
-  await insertPaymentApprovalLog({
-    payment_request_id: request.id,
-    approver_user_id: authorization.userId,
-    approver_role_id: authorization.roleId ?? request.current_approver_role_id,
-    approval_cycle: approvalCycle,
-    action: "approved",
-    comments
-  }, companyId);
+  if (!previousUserAction) {
+    await insertPaymentApprovalLog({
+      payment_request_id: request.id,
+      approver_user_id: authorization.userId,
+      approver_role_id: authorization.roleId ?? request.current_approver_role_id,
+      approval_cycle: approvalCycle,
+      action: "approved",
+      comments
+    }, companyId);
+  }
+
+  const coverageReason = coveredThroughStepOrder > approvalStepOrder
+    ? `Higher-manager approval covered configured steps ${approvalStepOrder}-${coveredThroughStepOrder} in the active People reporting chain`
+    : previousUserAction
+      ? `Existing approval reapplied to the current route at configured step ${approvalStepOrder}`
+      : null;
 
   if (steps.length) {
     if (ownerCanFinalize) {
       await updatePaymentRequest(request.id, companyId, {
         status: "approved",
         approval_status: "FINAL_APPROVED",
+        approval_routing_reason: coverageReason ?? "Final approval completed",
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
@@ -462,7 +489,8 @@ export async function approvePaymentRequest(formData: FormData) {
         await updatePaymentRequest(request.id, companyId, {
           status: "approved",
           approval_status: "FINAL_APPROVED",
-          current_step_order: approvalStepOrder,
+          current_step_order: coveredThroughStepOrder,
+          approval_routing_reason: coverageReason ?? "Final configured approval stage completed",
           current_approver_user_id: null,
           current_approver_role_id: null,
           current_approver_role_ids: [],
@@ -474,6 +502,9 @@ export async function approvePaymentRequest(formData: FormData) {
           status: `${roleCode}_APPROVED`,
           approval_status: "NO_APPROVER_CONFIGURED",
           current_step_order: advance.nextStepOrder,
+          approval_routing_reason: coverageReason
+            ? `${coverageReason}; the next required stage has no configured approver`
+            : "The next required stage has no configured approver",
           current_approver_user_id: null,
           current_approver_role_id: null,
           current_approver_role_ids: [],
@@ -489,7 +520,9 @@ export async function approvePaymentRequest(formData: FormData) {
           current_approver_user_id: target.userId,
           current_approver_role_id: target.roleId,
           current_approver_role_ids: [target.roleId],
-          approval_routing_reason: target.routingReason || "Advanced to the next configured approval stage",
+          approval_routing_reason: coverageReason
+            ? `${coverageReason}; advanced to the next configured approval stage`
+            : target.routingReason || "Advanced to the next configured approval stage",
           updated_at: new Date().toISOString(),
           updated_by: authorization.userId
         }, {
@@ -499,7 +532,9 @@ export async function approvePaymentRequest(formData: FormData) {
           current_approver_user_id: target.userId,
           current_approver_role_id: target.roleId,
           current_approver_role_ids: [target.roleId],
-          approval_routing_reason: target.routingReason || "Advanced to the next configured approval stage",
+          approval_routing_reason: coverageReason
+            ? `${coverageReason}; advanced to the next configured approval stage`
+            : target.routingReason || "Advanced to the next configured approval stage",
           updated_at: new Date().toISOString(),
           updated_by: authorization.userId
         });

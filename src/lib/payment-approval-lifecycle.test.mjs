@@ -43,7 +43,10 @@ function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=fals
   const routing=compile('./payment-approval-steps.ts',{
     '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/payment-stage-policy':stage,
     '@/lib/payment-delegation-policy':{...cover,paymentRoutingDay:()=> '2026-10-14'},
-    '@/lib/position-access':{findPositionApprover:async()=>null,loadEffectivePositionAccess:async()=>({roleIds:[],locationScopeIds:[],hasAllLocationAccess:false}),roleIdsWithPageEditAccess:async(_c,roles)=>new Set(roles)}
+    '@/lib/position-access':{findPositionApprover:async()=>null,loadEffectivePositionAccess:async()=>({roleIds:[],locationScopeIds:[],hasAllLocationAccess:false}),roleIdsWithPageEditAccess:async(_c,roles)=>new Set(roles)},
+    '@/lib/payment-reporting-hierarchy':{loadPaymentReportingHierarchy:async()=>({
+      isSameOrAbove:(manager,report)=>manager===report || (manager==='area' && report==='cluster') || (manager==='head' && ['cluster','area'].includes(report))
+    })}
   });
   return {routing,tables,db};
 }
@@ -52,6 +55,12 @@ test('regional station route hands over CM to AOM on leave and avoids a second A
   const {routing}=routingFixture({leave:true});
   const first=await routing.resolveInitialApprovalTarget('co',steps,'NLRE');assert.equal(first.approver.userId,'area');assert.match(first.approver.routingReason,/cluster → area/);
   const next=await routing.advanceApproval('co',steps,1,'NLRE',new Set(['area']));assert.equal(next.nextStepOrder,3);assert.equal(next.approver.userId,'head');
+});
+test('one higher-manager approval covers only consecutive lower stages in the same People tree',async()=>{
+  const {routing}=routingFixture();
+  assert.equal((await routing.paymentApprovalCoverage('co',steps,1,'NLRE','area')).throughStepOrder,2);
+  assert.equal((await routing.paymentApprovalCoverage('co',steps,1,'NLRE','head')).throughStepOrder,3);
+  assert.equal((await routing.paymentApprovalCoverage('co',steps,1,'NLRE','other')).throughStepOrder,1);
 });
 test('nested leave cover works, expired/cancelled leave returns to the primary holder',async()=>{
   const chain=routingFixture({leave:true,chain:true});assert.equal((await chain.routing.resolveStepApprover('co',steps[0],'NLRE')).userId,'head');
@@ -109,7 +118,7 @@ test('approval routing failure does not write an approval or advance the request
     '@/lib/payment-approval-scope':{canActOnPaymentRequest:async()=>true},
     '@/lib/payment-email-notifications':{},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/position-access':{},
     '@/lib/payment-stage-policy':stage,
-    '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,advanceApproval:async()=>{throw Error('People unavailable');}}
+    '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,paymentApprovalCoverage:async()=>({fromStepOrder:1,throughStepOrder:1}),advanceApproval:async()=>{throw Error('People unavailable');}}
   });
   const form=new FormData();form.set('request_id','request');
   await assert.rejects(()=>approvePaymentRequest(form),/People unavailable/);
@@ -139,10 +148,13 @@ test('approval-page tracking evidence access enforces company, location and perm
 
 test('the action queue includes fallback and leave cover but excludes another approver and another location',async()=>{
   const db=database({stations:[{company_id:'co',id:'NLRE',location_model_id:'EDSP'}]});
-  const {getPaymentApprovalEligibility}=compile('./payment-approval-scope.ts',{
+  const {getPaymentApprovalEligibility,getPaymentApprovalActionEligibility}=compile('./payment-approval-scope.ts',{
     '@/lib/supabase-admin':{supabaseAdmin:db},
     '@/lib/payment-stage-policy':stage,
-    '@/lib/payment-initial-approval-gate':{initialApprovalReadyIds:async(_c,ids)=>new Set(ids)}
+    '@/lib/payment-initial-approval-gate':{initialApprovalReadyIds:async(_c,ids)=>new Set(ids)},
+    '@/lib/payment-reporting-hierarchy':{loadPaymentReportingHierarchy:async()=>({
+      isStrictlyAbove:(manager,report)=>manager==='area' && report==='cluster'
+    })}
   });
   const auth={userId:'area',roleCode:'AOM',effectiveRoleIds:['aom'],hasAllLocationAccess:false,locationScopeIds:['NLRE']};
   const request=(id,current_approver_user_id,current_approver_role_id,location_id='NLRE')=>({id,location_id,location_model_id:'EDSP',requested_by:'station',current_approver_user_id,current_approver_role_id});
@@ -154,6 +166,7 @@ test('the action queue includes fallback and leave cover but excludes another ap
     request('outside-location','area','aom','JDBD')
   ];
   assert.deepEqual([...await getPaymentApprovalEligibility('co',auth,requests)],['normal','fallback']);
+  assert.deepEqual([...await getPaymentApprovalActionEligibility('co',auth,requests)],['normal','fallback','another-person-same-role','earlier-stage']);
   const {canOverseePayment}=await import('./payment-oversight-policy.ts');
   const trackingAuth={...auth,permissions:{payment_approvals:{canView:true,canEdit:true}}};
   assert.deepEqual(requests.filter(r=>canOverseePayment(trackingAuth,r)).map(r=>r.id),['normal','fallback','another-person-same-role','earlier-stage']);

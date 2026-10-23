@@ -10,7 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { canOverseePayment, paymentPendingAge } from "@/lib/payment-oversight-policy";
 import { readAllRows } from "@/lib/supabase-pagination";
-import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
+import { getPaymentApprovalActionEligibility, getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { paymentApprovalAmount } from "@/lib/payment-approval-amount";
 import {
   matchesPaymentApprovalFacets,
@@ -200,8 +200,10 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     profiles: firstRelation(request.profiles),
     location_model_id: firstRelation(request.stations)?.location_model_id ?? null
   }));
-  const eligibleIds = !filters.oversight && hasPermission(authorization, "payment_approvals", "access")
-    ? await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests)
+  const eligibleIds = hasPermission(authorization, "payment_approvals", "access")
+    ? filters.oversight
+      ? await getPaymentApprovalActionEligibility(companyId, authorization, unscopedRequests)
+      : await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests)
     : new Set<string>();
   const normalizedFilter = filters.status || "pending";
   const stageTones = APPROVAL_STAGES.find((stage) => stage.value === filters.stage)?.tones ?? null;
@@ -391,20 +393,20 @@ export default async function PaymentApprovalsPage({
       totalSteps: request.total_steps
     };
   };
-  const canActOnRow = (request: RequestRow) => !oversight && pagePermission.canEdit && eligibleIds.has(request.id) && isPendingPaymentApproval(request);
+  const canActOnRow = (request: RequestRow) => pagePermission.canEdit && eligibleIds.has(request.id) && isPendingPaymentApproval(request);
 
   return (
     <AppShell active="Payment Approvals" pageCode={pageCode}>
       <PageHead
         eyebrow="Payments"
         title="Approvals"
-        subtitle="Review requests assigned to you, including leave cover."
+        subtitle="Review your assigned requests or act for a lower approver in your People reporting tree."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
       <nav className="payment-approval-stage-legend payment-approval-views" aria-label="Approval views">
         <PendingLink className={`button compact ${oversight ? "secondary" : ""}`} aria-current={!oversight ? "page" : undefined} prefetch={false} href="/payments/approvals">Needs my action</PendingLink>
-        <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} aria-current={oversight ? "page" : undefined} prefetch={false} href="/payments/approvals?view=scope" title="Track requests in my permitted locations">Track locations</PendingLink>
+        <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} aria-current={oversight ? "page" : undefined} prefetch={false} href="/payments/approvals?view=scope" title="Review the reporting team within my permitted locations">Entire team</PendingLink>
       </nav>
       {error ? (
         <section className="panel message-panel error">
@@ -430,8 +432,8 @@ export default async function PaymentApprovalsPage({
         <section className="panel payment-workspace payment-approval-workspace">
           <div className="panel-head">
             <div>
-              <h2>{oversight ? "Requests in my locations" : "My approval queue"}</h2>
-              {oversight ? <p className="subtle">Read-only · see who each request is waiting with.</p> : null}
+              <h2>{oversight ? "Reporting-team requests" : "My approval queue"}</h2>
+              {oversight ? <p className="subtle">Track all requests in scope. Approve, return or reject only when the current approver is below you in the active People reporting tree.</p> : null}
               <p className="subtle">{matchingRequests.length} records · page {pageNumber} of {pageCount}</p>
             </div>
             {!oversight && canDownloadProcessData ? (
@@ -486,7 +488,7 @@ export default async function PaymentApprovalsPage({
                   <th>Current approver / stage</th>
                   <th>Pending since</th>
                   <th>Created</th>
-                  <th>{oversight ? "Details" : "Action"}</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
