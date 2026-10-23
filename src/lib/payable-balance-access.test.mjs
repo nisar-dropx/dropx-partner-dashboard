@@ -27,7 +27,7 @@ test("Payable balance is a read-only Payments destination on Dashboard, People a
     accessPages,
     /seedTargetPermissionsFromSources\(supabase, companyId, \["workforce_payouts"\], "payable_balance", true\)/
   );
-  assert.match(permissionMatrix, /"workforce_payouts", "payable_balance", "payment_recoveries"/);
+  assert.match(permissionMatrix, /"workforce_payouts", "payment_recoveries"[^\]]*"payable_balance"/);
   assert.equal((accessSurface.match(/"payable_balance"/g) ?? []).length, 2);
   assert.match(financeSurface, /"payable_balance"/);
 
