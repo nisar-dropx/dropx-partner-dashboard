@@ -27,12 +27,12 @@ export function managerReviewChain<T extends { role: string; personId: string; d
   });
 }
 
-/** Dark Store review stages: City Manager → Regional Manager → National Head. */
+/** Dark Store review stages: City Manager → Regional Manager (not National Head). */
 export function darkStoreManagerReviewChain<T extends { role: string; personId: string; designationCode?: string | null }>(chain: T[]) {
   const seen = new Set<string>();
   return chain.filter((person) => {
     const role = reviewRole(`${person.designationCode ?? ""} ${person.role}`);
-    if (!["city", "regional", "national"].includes(role) || seen.has(person.personId)) return false;
+    if (!["city", "regional"].includes(role) || seen.has(person.personId)) return false;
     seen.add(person.personId);
     return true;
   });

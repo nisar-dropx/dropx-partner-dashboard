@@ -48,15 +48,15 @@ test("Dark Store register columns use City Manager and Regional Manager from the
         error: null,
         chain: [
           { reviewerName: "Chitra", reviewerRole: "City Manager", reviewerUserId: "u3", personId: "p3", assignmentId: "a3", designationId: "CTM", routingSource: "people" },
-          { reviewerName: "Ramesh", reviewerRole: "Regional Manager", reviewerUserId: "u4", personId: "p4", assignmentId: "a4", designationId: "RM", routingSource: "people" },
-          { reviewerName: "Abdul", reviewerRole: "National Head", reviewerUserId: "u5", personId: "p5", assignmentId: "a5", designationId: "NH", routingSource: "people" }
+          { reviewerName: "Ramesh", reviewerRole: "Regional Manager", reviewerUserId: "u4", personId: "p4", assignmentId: "a4", designationId: "RM", routingSource: "people" }
         ]
       }
     }
   });
   assert.equal(rows[0].clusterManager, "Chitra");
   assert.equal(rows[0].aom, "Ramesh");
-  assert.equal(rows[0].nationalHead, "Abdul");
+  // DS route stops at RM; NH label may still come from People hierarchy metadata.
+  assert.equal(rows[0].nationalHead, "National");
   assert.equal(rows[0].currentDependency, "Start review");
 });
 
