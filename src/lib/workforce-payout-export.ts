@@ -1,3 +1,5 @@
+import { isWorkforcePayoutPaymentBalanceAvailable } from "./workforce-payout-payment-summary.ts";
+
 export type WorkforcePayoutExportComponent = {
   code: string;
   label: string;
@@ -44,6 +46,12 @@ export type WorkforcePayoutExportRow = {
   deductions: number;
   deductionBreakdown: Array<{ code: string; label: string; amount: number }>;
   netAmount: number;
+  paymentSummary?: {
+    paidAmount: number;
+    processingAmount: number;
+    eligible?: boolean | null;
+    eligibilityCode?: string | null;
+  };
   panAadhaarStatus: string;
   status: string;
 };
@@ -152,6 +160,32 @@ function csvCell(value: ExportValue) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
+function paymentBalanceValues(
+  row: WorkforcePayoutExportRow,
+  subjectLabel: "Workforce" | "Helper"
+): ExportValue[] {
+  if (!row.paymentDetailsAvailable || !row.paymentSummary) return ["", "", ""];
+  const eligibilityCode = String(row.paymentSummary.eligibilityCode ?? "").trim().toLowerCase();
+  const balanceAvailable = subjectLabel === "Helper"
+    || row.paymentSummary.eligible !== false
+    || eligibilityCode === "publication_refresh_pending"
+    || isWorkforcePayoutPaymentBalanceAvailable({
+      eligible: row.paymentSummary.eligible,
+      eligibilityCode: row.paymentSummary.eligibilityCode ?? null
+    });
+  if (!balanceAvailable) return ["", "", ""];
+  const netAmount = Number(row.netAmount);
+  const paidAmount = Number(row.paymentSummary.paidAmount);
+  const processingAmount = Number(row.paymentSummary.processingAmount);
+  if (![netAmount, paidAmount, processingAmount].every(Number.isFinite)) return ["", "", ""];
+  const balancePayable = Math.max(0, (
+    Math.round(netAmount * 100)
+    - Math.round(paidAmount * 100)
+    - Math.round(processingAmount * 100)
+  ) / 100);
+  return [paidAmount, processingAmount, balancePayable];
+}
+
 export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[], subjectLabel: "Workforce" | "Helper") {
   const details = componentColumns(rows);
   const additionalPayments = additionalColumns(rows);
@@ -184,6 +218,9 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     ...deductions.map((item) => deductionHeader(item.exportLabel)),
     "Gross Deductions (INR)",
     "Net Pay (INR)",
+    "Paid (INR)",
+    "Processing (INR)",
+    "Balance Payable (INR)",
     "PAN-Aadhaar Status",
     "Mapping Status",
     "Payment Status"
@@ -240,6 +277,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
       ...deductionValues,
       blankPayments ? "" : row.deductions,
       blankPayments ? "" : row.netAmount,
+      ...paymentBalanceValues(row, subjectLabel),
       blankPayments ? "" : row.panAadhaarStatus,
       row.mappingStatus,
       row.status
