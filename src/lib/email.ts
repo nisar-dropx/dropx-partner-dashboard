@@ -106,5 +106,5 @@ export async function sendEmail({ body, cc = [], companyId, subject, to, html, m
     references,
     attachments
   });
-  return { messageId: result.messageId, response: result.response };
+  return { messageId: result.messageId, response: result.response, accepted: result.accepted ?? [], rejected: result.rejected ?? [] };
 }
