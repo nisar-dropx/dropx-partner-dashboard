@@ -8,7 +8,15 @@ import {
   defaultAppPageAccess
 } from "@/components/app-page-access-select";
 import { SubmitButton } from "@/components/submit-button";
+import type { DesignationBusinessCategory } from "@/lib/designation-business-categories";
 import { normalizeDesignationCategories, type DesignationCategory } from "@/lib/designation-categories";
+import {
+  designationProfileDestinationAllowed,
+  designationProfileDestinationLabel,
+  designationProfileDestinationsForModule,
+  normalizeDesignationProfileDestination,
+  type DesignationProfileDestination
+} from "@/lib/designation-profile-destination";
 import {
   designationPortalOptions,
   normalizeDesignationPortalPermissions
@@ -39,6 +47,8 @@ type DesignationInitial = {
   id: string;
   code: string;
   name: string;
+  designation_category_id?: string | null;
+  profile_destination?: DesignationProfileDestination | null;
   provider_ids: string[];
   model_ids?: string[] | null;
   onboarding_categories?: string[] | null;
@@ -452,6 +462,7 @@ function ModelMultiSelect({
 
 export function DesignationForm({
   action,
+  businessCategories,
   categories,
   initial,
   models,
@@ -459,6 +470,7 @@ export function DesignationForm({
   submitLabel = "Add designation"
 }: {
   action: (formData: FormData) => void;
+  businessCategories: DesignationBusinessCategory[];
   categories: WorkforceCategoryOption[];
   initial?: DesignationInitial | null;
   providers?: ProviderOption[];
@@ -470,12 +482,40 @@ export function DesignationForm({
   const [selectedCategories, setSelectedCategories] = useState<DesignationCategory[]>(
     normalizeDesignationCategories(initial?.onboarding_categories)
   );
+  const initialBusinessCategoryId = initial?.designation_category_id
+    ?? (businessCategories.length === 1 ? businessCategories[0].id : "");
+  const [selectedBusinessCategoryId, setSelectedBusinessCategoryId] = useState(initialBusinessCategoryId);
+  const selectedBusinessCategory = useMemo(
+    () => businessCategories.find((category) => category.id === selectedBusinessCategoryId) ?? null,
+    [businessCategories, selectedBusinessCategoryId]
+  );
+  const destinationOptions = useMemo(
+    () => selectedBusinessCategory
+      ? designationProfileDestinationsForModule(selectedBusinessCategory.people_module)
+      : [],
+    [selectedBusinessCategory]
+  );
+  const [profileDestination, setProfileDestination] = useState<DesignationProfileDestination | "">(() => {
+    const destination = normalizeDesignationProfileDestination(initial?.profile_destination);
+    const initialCategory = businessCategories.find((category) => category.id === initialBusinessCategoryId) ?? null;
+    if (!initialCategory) return "";
+    if (destination && designationProfileDestinationAllowed(initialCategory.people_module, destination)) return destination;
+    return designationProfileDestinationsForModule(initialCategory.people_module)[0]?.value ?? "";
+  });
   const [isFieldOperations, setIsFieldOperations] = useState(Boolean(initial?.is_field_operations));
   const [providerMappingRequired, setProviderMappingRequired] = useState(
     Boolean(initial?.provider_mapping_required)
   );
   const selectedPages = (initial?.app_page_access ?? defaultAppPageAccess)
     .filter((page) => appPageOptions.some((option) => option.value === page));
+
+  useEffect(() => {
+    setProfileDestination((current) => {
+      if (!selectedBusinessCategory) return "";
+      if (current && designationProfileDestinationAllowed(selectedBusinessCategory.people_module, current)) return current;
+      return designationProfileDestinationsForModule(selectedBusinessCategory.people_module)[0]?.value ?? "";
+    });
+  }, [selectedBusinessCategory]);
 
   return (
     <form action={action} className="designation-form">
@@ -495,8 +535,65 @@ export function DesignationForm({
           Designation name
           <input className="field" defaultValue={initial?.name ?? ""} name="name" placeholder="Enter designation name" required />
         </label>
+        {initial ? (
+          <>
+            <label>
+              Designation category
+              <input
+                className="field"
+                disabled
+                readOnly
+                value={selectedBusinessCategory?.name ?? "Category unavailable"}
+              />
+              <small>Classification is fixed after creation because register routing depends on it.</small>
+            </label>
+            <label>
+              Profile destination
+              <input
+                className="field"
+                disabled
+                readOnly
+                value={designationProfileDestinationLabel(initial.profile_destination)}
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <label>
+              Designation category
+              <select
+                className="field"
+                name="designation_category_id"
+                onChange={(event) => setSelectedBusinessCategoryId(event.target.value)}
+                required
+                value={selectedBusinessCategoryId}
+              >
+                <option value="">Select designation category</option>
+                {businessCategories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Profile destination
+              <select
+                className="field"
+                disabled={!selectedBusinessCategory}
+                name="profile_destination"
+                onChange={(event) => setProfileDestination(event.target.value as DesignationProfileDestination)}
+                required
+                value={profileDestination}
+              >
+                <option value="">Select profile destination</option>
+                {destinationOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
         <label>
-          Category
+          Engagement types
           <CategoryMultiSelect categories={categories} selected={selectedCategories} setSelected={setSelectedCategories} />
         </label>
         <label>
