@@ -640,7 +640,7 @@ function ShiftReportBody({
                 key={b.key}
                 index={i + 1}
                 label={b.label}
-                detail={`Last start ${formatWhen(b.firstStartedAt)}${
+                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)}${
                   b.overdue ? ` · ${b.overdue} overdue accept` : ""
                 }`}
                 pct={b.avgPct}
@@ -678,7 +678,7 @@ function ShiftReportBody({
                 key={b.key}
                 index={i + 1}
                 label={b.label}
-                detail={`Last update ${formatWhen(b.lastUpdatedAt)} · accepted ${b.accepted}`}
+                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)} · accepted ${b.accepted}`}
                 pct={b.avgPct}
                 stale={b.staleOpen}
                 open={b.open}
@@ -1182,7 +1182,7 @@ function StoreReportBody({
                 key={b.key}
                 index={i + 1}
                 label={b.label}
-                detail={`Last start ${formatWhen(b.firstStartedAt)}`}
+                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)}`}
                 pct={b.avgPct}
                 stale={b.staleOpen}
                 open={b.open}
@@ -1218,7 +1218,7 @@ function StoreReportBody({
                 key={b.key}
                 index={i + 1}
                 label={b.label}
-                detail={`Last update ${formatWhen(b.lastUpdatedAt)} · submitted ${b.submitted}`}
+                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)} · submitted ${b.submitted}`}
                 pct={b.avgPct}
                 stale={b.staleOpen}
                 open={b.open}

@@ -310,6 +310,14 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
         </header>
 
         <div className={styles.reportModalBody}>
+          {pack?.checklist ? (
+            <div className={styles.reportModalSummary} aria-label="Report summary">
+              <span><strong>{c?.pct ?? 0}%</strong><small>completion</small></span>
+              <span><strong>{answeredTasks}/{c?.total ?? 0}</strong><small>answered</small></span>
+              <span><strong>{pack.proofs.length}</strong><small>evidence files</small></span>
+              <span><strong>{pack.sections.length}</strong><small>sections</small></span>
+            </div>
+          ) : null}
           {loading ? (
             <div className={styles.reportModalSkeleton} aria-busy="true">
               <div />
@@ -336,15 +344,16 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
                   {!section.tasks.length ? (
                     <p className={styles.muted}>No tasks in this section.</p>
                   ) : (
-                    section.tasks.map((task) => {
+                    section.tasks.map((task, taskIndex) => {
                       const proofs = pack.proofs.filter(
                         (p) => p.task_id === task.id,
                       );
                       return (
                         <div key={task.id} className={styles.reportPdfTask}>
                           <div className={styles.reportPdfTaskTop}>
+                            <span className={styles.reportTaskNumber}>{String(taskIndex + 1).padStart(2, "0")}</span>
                             <strong>{task.label || task.id}</strong>
-                            <span>{formatTaskAnswer(task)}</span>
+                            <span className={styles.reportAnswer}>{formatTaskAnswer(task)}</span>
                           </div>
                           {proofs.length ? (
                             <div className={styles.reportProofGrid}>

@@ -1682,6 +1682,9 @@
   padding: 0.85rem 1rem;
   border-bottom: 1px solid #e2e8f0;
   background: linear-gradient(180deg, #f0fdfa, #fff 80%);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 .reportModalTitle {
   margin: 0.1rem 0 0.15rem;
@@ -1703,9 +1706,24 @@
   overflow: auto;
   padding: 0.85rem 1rem 1.25rem;
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
   background: #f8fafc;
 }
+.reportModalSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .55rem;
+}
+.reportModalSummary span {
+  display: grid;
+  gap: .12rem;
+  padding: .7rem .8rem;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fff, #f0fdfa);
+}
+.reportModalSummary strong { font-size: 1.15rem; color: #0f766e; }
+.reportModalSummary small { color: #64748b; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
 .reportModalSkeleton {
   display: grid;
   gap: 0.55rem;
@@ -1725,7 +1743,8 @@
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 0.65rem 0.75rem;
+  padding: 0.9rem;
+  box-shadow: 0 5px 18px rgba(15, 23, 42, .04);
 }
 .reportPdfSection h3 {
   margin: 0 0 0.45rem;
@@ -1741,10 +1760,13 @@
 .reportPdfTask:first-of-type { border-top: 0; }
 .reportPdfTaskTop {
   display: grid;
-  gap: 0.15rem;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.55rem;
   font-size: 0.78rem;
 }
-.reportPdfTaskTop span { color: #475569; }
+.reportTaskNumber { color: #0f766e; font-variant-numeric: tabular-nums; font-weight: 800; }
+.reportAnswer { color: #334155; padding: .18rem .45rem; background: #f1f5f9; border-radius: 999px; text-align: right; }
 .reportProofGrid {
   display: flex;
   flex-wrap: wrap;
@@ -1780,5 +1802,15 @@
   border-radius: 8px;
   background: #f0fdfa;
   text-decoration: none;
+}
+@media (max-width: 620px) {
+  .reportModalBackdrop { padding: 0; }
+  .reportModal { max-height: 100vh; height: 100vh; border-radius: 0; }
+  .reportModalHead { padding: .75rem; }
+  .reportModalActions { width: 100%; }
+  .reportModalActions button, .reportModalActions a { flex: 1; text-align: center; }
+  .reportModalSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reportPdfTaskTop { grid-template-columns: 1.7rem minmax(0, 1fr); }
+  .reportAnswer { grid-column: 2; justify-self: start; }
 }
 .reportVideoLink:hover { text-decoration: underline; }
