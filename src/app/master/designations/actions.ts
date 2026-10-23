@@ -5,7 +5,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
+import { normalizeDesignationPeopleModule, designationPeopleModuleLabel } from "@/lib/designation-business-categories";
 import { normalizeDesignationCategories } from "@/lib/designation-categories";
+import {
+  designationProfileDestinationAllowed,
+  designationProfileDestinationLabel,
+  normalizeDesignationProfileDestination
+} from "@/lib/designation-profile-destination";
 import { designationPortalOptions } from "@/lib/designation-portal-access";
 import { dropxOnePageCodes, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
@@ -123,6 +129,31 @@ async function validateOnboardingCategories(companyId: string, categories: strin
   }
 }
 
+async function designationClassification(companyId: string, formData: FormData) {
+  const designationCategoryId = required(formData.get("designation_category_id"), "Designation category");
+  const profileDestination = normalizeDesignationProfileDestination(formData.get("profile_destination"));
+  if (!profileDestination) throw new Error("Profile destination is required.");
+
+  const { data, error } = await supabaseAdmin!
+    .from("designation_categories")
+    .select("id, people_module")
+    .eq("id", designationCategoryId)
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+
+  const peopleModule = normalizeDesignationPeopleModule(data?.people_module);
+  if (!data || !peopleModule) throw new Error("Select an active designation category for this company.");
+  if (!designationProfileDestinationAllowed(peopleModule, profileDestination)) {
+    throw new Error(
+      `${designationProfileDestinationLabel(profileDestination)} is not a valid profile destination for the ${designationPeopleModuleLabel(peopleModule)} designation category.`
+    );
+  }
+
+  return { designationCategoryId: data.id as string, profileDestination };
+}
+
 function appPageAccess(formData: FormData) {
   return Array.from(new Set([
     ...requiredDropxOnePageCodes,
@@ -158,6 +189,7 @@ export async function createDesignation(formData: FormData) {
 
     const code = required(formData.get("code"), "Designation code").toUpperCase();
     const name = required(formData.get("name"), "Designation name");
+    const classification = await designationClassification(companyId, formData);
     const categories = onboardingCategories(formData);
     await validateOnboardingCategories(companyId, categories);
     const roleIds = onboardingRoleIds(formData);
@@ -166,6 +198,8 @@ export async function createDesignation(formData: FormData) {
     const { error } = await supabaseAdmin.from("designations").insert(withCompany({
       code,
       name,
+      designation_category_id: classification.designationCategoryId,
+      profile_destination: classification.profileDestination,
       provider_ids: providerIds(formData),
       model_ids: modelIds(formData),
       location_ids: [],
