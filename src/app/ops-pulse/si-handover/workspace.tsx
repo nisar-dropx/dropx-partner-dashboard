@@ -40,6 +40,7 @@ import {
   startShift,
   submitHandover,
 } from "./actions";
+import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
 import { ActivitiesHub } from "./activities-hub";
 import { ProofPanel } from "./si-handover-proof";
 import { ShiftList } from "./shift-list";
@@ -353,6 +354,9 @@ export function SiHandoverWorkspace(props: Props) {
   const [version, setVersion] = useState(props.focused?.version || 1);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectTasks, setRejectTasks] = useState("");
+  const [deleteStep, setDeleteStep] = useState<null | "warn" | "confirm">(
+    null,
+  );
   const cur = currentShift(new Date(), props.settings.shiftSlots);
   const modeLabel =
     CLOCK_OUT_MODES.find((m) => m.value === props.settings.clockOutMode)
@@ -797,15 +801,7 @@ export function SiHandoverWorkspace(props: Props) {
                   type="button"
                   className={styles.btnDanger}
                   disabled={pending}
-                  onClick={() => {
-                    if (!confirm("Delete this unsubmitted draft?")) return;
-                    run(() =>
-                      deleteDraftChecklist({
-                        checklistId: focused.id,
-                        version,
-                      }),
-                    );
-                  }}
+                  onClick={() => setDeleteStep("warn")}
                 >
                   Delete
                 </button>
@@ -865,6 +861,49 @@ export function SiHandoverWorkspace(props: Props) {
           )}
         </section>
       ) : null}
+      <OpsConfirmDialog
+        open={Boolean(focused && deleteStep === "warn")}
+        title="Delete this draft checklist?"
+        description={
+          <p>
+            This removes the unsubmitted shift checklist for{" "}
+            <b>{focused?.store_name || "this store"}</b>. Saved answers and
+            photos on the draft will leave the register.
+          </p>
+        }
+        confirmLabel="Continue"
+        cancelLabel="Keep draft"
+        danger
+        onCancel={() => setDeleteStep(null)}
+        onConfirm={() => setDeleteStep("confirm")}
+      />
+      <OpsConfirmDialog
+        open={Boolean(focused && deleteStep === "confirm")}
+        title="Confirm deletion"
+        description={
+          <p>
+            Only the person who created this draft, a programme manager, or a
+            company owner can delete it. This cannot be undone from the list.
+          </p>
+        }
+        confirmLabel="Yes, delete draft"
+        cancelLabel="Back"
+        secondaryLabel="Cancel"
+        danger
+        busy={pending}
+        onCancel={() => setDeleteStep("warn")}
+        onSecondary={() => setDeleteStep(null)}
+        onConfirm={() => {
+          if (!focused || pending) return;
+          // Keep the confirm step open while pending; navigate away on success.
+          run(() =>
+            deleteDraftChecklist({
+              checklistId: focused.id,
+              version,
+            }),
+          );
+        }}
+      />
     </div>
   );
 }

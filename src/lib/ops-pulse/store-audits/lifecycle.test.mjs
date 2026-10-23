@@ -180,6 +180,27 @@ test("store cannot discover scheduled/in-progress/cancelled/deleted/out-of-scope
     false,
   );
 });
+test("draft audits can be deleted by assignee, managers, or owners — not random store users", () => {
+  const draft = { ...audit(), status: "in_progress" };
+  assert.equal(model.canDeleteDraftStoreAudit(manager, settings, draft), true);
+  assert.equal(
+    model.canDeleteDraftStoreAudit(
+      { ...store, userId: "auditor" },
+      settings,
+      draft,
+    ),
+    true,
+  );
+  assert.equal(model.canDeleteDraftStoreAudit(store, settings, draft), false);
+  assert.equal(
+    model.canDeleteDraftStoreAudit(manager, settings, {
+      ...draft,
+      status: "closed",
+      completed_at: "2026-10-15",
+    }),
+    false,
+  );
+});
 test("only assigned in-scope leadership can inspect; preview and view-only cannot write", () => {
   const a = { ...audit(), status: "in_progress" };
   assert(model.canInspect(manager, settings, a));

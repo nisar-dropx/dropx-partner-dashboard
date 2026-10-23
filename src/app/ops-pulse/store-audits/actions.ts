@@ -22,6 +22,7 @@ import {
   scoreSnapshot,
   isManager,
   isResponder,
+  canDeleteDraftStoreAudit,
   type Answer,
   type Finding,
   type AuditType,
@@ -473,21 +474,33 @@ export async function deleteStoreAudit(
 ) {
   try {
     const c = await readAudit(id);
-    const m = await loadStationAuditMaster(c.companyId);
-    if (!canDeleteStationAudit(c.auth, m.programmeSettings))
-      throw Error("Only the named audit deletion users can delete an audit.");
-    if (!reason.trim()) throw Error("Record a reason for deletion.");
+    const draft = canDeleteDraftStoreAudit(
+      c.auth,
+      c.master.settings,
+      c.audit,
+    );
+    if (!draft) {
+      const m = await loadStationAuditMaster(c.companyId);
+      if (!canDeleteStationAudit(c.auth, m.programmeSettings))
+        throw Error(
+          "Only the assigned auditor, leadership, or named deletion users can remove this audit.",
+        );
+    }
+    const note = reason.trim() || (draft ? "Draft audit removed" : "");
+    if (!note) throw Error("Record a reason for deletion.");
     await updateAudit(
       c,
       { deleted_at: new Date().toISOString() },
       "deleted",
-      reason,
+      note,
       version,
     );
     refresh();
     return {
       ok: true as const,
-      message: "Audit removed from the register. History retained.",
+      message: draft
+        ? "Draft audit deleted."
+        : "Audit removed from the register. History retained.",
     };
   } catch (e) {
     return failure(e);

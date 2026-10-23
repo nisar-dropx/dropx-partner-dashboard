@@ -38,6 +38,7 @@ import {
 } from "@/lib/ops-pulse/store-audits/reports";
 import type { AuditAssignee } from "@/lib/ops-pulse/station-audit-people";
 import { EvidencePreview } from "@/components/evidence-preview";
+import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
 import {
   scheduleStoreAudit,
   startStoreAudit,
@@ -103,6 +104,8 @@ type Props = {
   canInspect: boolean;
   canRespond: boolean;
   canDelete: boolean;
+  canDeleteDraft: boolean;
+  isMasterOwner: boolean;
   canMaster: boolean;
 };
 function ProofFiles({
@@ -290,9 +293,15 @@ export function StoreAuditWorkspace(p: Props) {
     ),
     [completeAmazonAuditor, setCompleteAmazonAuditor] = useState(
       p.focused?.amazon_auditor || "",
-    );
+    ),
+    [startModalOpen, setStartModalOpen] = useState(false),
+    [startOverlay, setStartOverlay] = useState(false),
+    [startModalName, setStartModalName] = useState(""),
+    [deleteStep, setDeleteStep] = useState<null | "warn" | "confirm">(null),
+    [deleteReason, setDeleteReason] = useState("");
   const dirtyRef = useRef(dirty);
   const focusedIdRef = useRef<string | null>(p.focused?.id ?? null);
+  const startingRef = useRef(false);
   dirtyRef.current = dirty;
   // Adopt server props when the focused audit or its saved version changes.
   // Never key this off `dirty` alone: Save draft used to set dirty=false and
@@ -461,59 +470,90 @@ export function StoreAuditWorkspace(p: Props) {
         : Number(completeAmazonScore),
     amazonAuditor: completeAmazonAuditor.trim() || undefined,
   });
-  const startInspection = async () => {
-    if (!audit) return;
+  const canRemoveAudit = (row: StoreAudit) => {
+    if (row.completed_at) return p.canDelete;
+    return (
+      !row.completed_at &&
+      ["scheduled", "in_progress"].includes(row.status) &&
+      (row.assigned_to === p.userId || p.manager || p.isMasterOwner) &&
+      (p.canEdit || p.canSchedule || p.canDelete)
+    );
+  };
+  const runStartInspection = async (smName?: string) => {
+    if (!audit || startingRef.current || busy) return;
     const needsGps =
       audit.audit_type === "self" || audit.audit_type === "mock";
-    let presentSm: string | undefined;
+    startingRef.current = true;
+    setStartOverlay(true);
+    setStartModalOpen(false);
+    setMessage("");
+    try {
+      let lat: number | null = null;
+      let lng: number | null = null;
+      if (needsGps) {
+        if (!navigator.geolocation) {
+          setMessage(
+            "Turn on location services, then try Start again — GPS is required at the store.",
+          );
+          if (audit.audit_type === "mock") setStartModalOpen(true);
+          return;
+        }
+        try {
+          const pos = await new Promise<GeolocationPosition>(
+            (resolve, reject) =>
+              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true,
+                timeout: 20000,
+              }),
+          );
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+        } catch {
+          setMessage(
+            "Could not read GPS. Stay on site, allow location access, and try again.",
+          );
+          if (audit.audit_type === "mock") setStartModalOpen(true);
+          return;
+        }
+      }
+      if (smName) setPresentSmName(smName);
+      await run(() =>
+        startStoreAudit(audit.id, audit.version, {
+          lat,
+          lng,
+          presentSmName: smName,
+        }),
+      );
+    } finally {
+      startingRef.current = false;
+      setStartOverlay(false);
+    }
+  };
+  const startInspection = () => {
+    if (!audit) return;
     if (audit.audit_type === "mock") {
-      const name =
-        presentSmName.trim() ||
-        prompt(
-          "Store Manager or Store In-charge present on site:",
-          audit.present_sm_name || "",
-        )?.trim();
-      if (!name) {
-        setMessage(
-          "Record the Store Manager or Store In-charge present before starting.",
-        );
-        return;
-      }
-      presentSm = name;
-      setPresentSmName(name);
+      setStartModalName(presentSmName.trim() || audit.present_sm_name || "");
+      setStartModalOpen(true);
+      return;
     }
-    let lat: number | null = null;
-    let lng: number | null = null;
-    if (needsGps) {
-      if (!navigator.geolocation) {
-        setMessage(
-          "Share your GPS location at the store before starting a self or mock audit.",
-        );
-        return;
-      }
-      try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 20000,
-          }),
-        );
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-      } catch {
-        setMessage(
-          "Share your GPS location at the store before starting a self or mock audit.",
-        );
-        return;
-      }
+    void runStartInspection();
+  };
+  const confirmDeleteAudit = async () => {
+    if (!audit || busy) return;
+    const draft = !audit.completed_at;
+    const reason = deleteReason.trim() || (draft ? "Draft audit removed" : "");
+    if (!reason) {
+      setMessage("Add a short reason before deleting.");
+      return;
     }
-    await run(() =>
-      startStoreAudit(audit.id, audit.version, {
-        lat,
-        lng,
-        presentSmName: presentSm,
-      }),
+    const ok = await run(() =>
+      deleteStoreAudit(audit.id, audit.version, reason),
     );
+    if (ok) {
+      setDeleteStep(null);
+      setDeleteReason("");
+      router.push("/store-audits");
+    }
   };
   const visible = p.audits.filter(
     (a) =>
@@ -714,24 +754,16 @@ export function StoreAuditWorkspace(p: Props) {
                 Send report again
               </button>
             )}
-            {p.canDelete && (
+            {(p.canDeleteDraft || p.canDelete || canRemoveAudit(audit)) && (
               <button
                 className={styles.danger}
                 disabled={blocked}
-                onClick={async () => {
-                  const reason = prompt(
-                    "Reason for deleting this audit (history will be retained):",
-                  );
-                  if (
-                    reason &&
-                    (await run(() =>
-                      deleteStoreAudit(audit.id, audit.version, reason),
-                    ))
-                  )
-                    router.push("/store-audits");
+                onClick={() => {
+                  setDeleteReason("");
+                  setDeleteStep("warn");
                 }}
               >
-                Delete audit
+                {audit.completed_at ? "Delete audit" : "Delete draft"}
               </button>
             )}
           </div>
@@ -774,19 +806,15 @@ export function StoreAuditWorkspace(p: Props) {
             {audit.audit_type === "mock" &&
               p.canEdit &&
               audit.assigned_to === p.userId && (
-                <label>
-                  SM / SI present (optional before start)
-                  <input
-                    value={presentSmName}
-                    onChange={(e) => setPresentSmName(e.target.value)}
-                    placeholder="Store Manager or Store In-charge"
-                  />
-                </label>
+                <p className={styles.muted}>
+                  You will confirm who from store leadership is on site when you
+                  start. GPS is captured at the store.
+                </p>
               )}
             <p className={styles.muted}>
               The checklist and evidence settings are saved with this audit.
               {(audit.audit_type === "self" || audit.audit_type === "mock") &&
-                " GPS location is required when you start."}
+                " Starting takes a moment while location is verified."}
             </p>
           </div>
         ) : (
@@ -841,35 +869,49 @@ export function StoreAuditWorkspace(p: Props) {
                   {current.questions.map((q, i) => {
                     const a = answers[q.id] || emptyAnswer(),
                       f = audit.findings.find((f) => f.questionId === q.id);
+                    const needsNote =
+                      a.outcome === "gap" || a.outcome === "na";
                     return (
-                      <article className={styles.question} key={q.id}>
+                      <article
+                        className={styles.question}
+                        key={q.id}
+                        data-outcome={a.outcome || "empty"}
+                      >
                         <div className={styles.questionBody}>
-                          <div className={styles.toolbar}>
+                          <div className={styles.qHead}>
                             <h3>
-                              {i + 1}. {q.label}
-                              {q.required ? " *" : ""}
+                              <span className={styles.qId}>{q.id}</span>
+                              {q.label}
+                              {q.required ? (
+                                <span className={styles.req}>*</span>
+                              ) : null}
                             </h3>
-                            {a.outcome === "gap" && (
-                              <span
-                                className={styles.badge}
-                                data-state="awaiting_response"
-                              >
-                                {q.severity}
-                              </span>
-                            )}
+                            <div className={styles.qMeta}>
+                              {isScored(q) && q.compliantAnswer ? (
+                                <span className={styles.chip}>
+                                  Pass ={" "}
+                                  {q.compliantAnswer === "yes" ? "Yes" : "No"}
+                                </span>
+                              ) : null}
+                              {a.outcome === "gap" && (
+                                <span
+                                  className={styles.badge}
+                                  data-state="awaiting_response"
+                                >
+                                  {q.severity}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          {q.guidance && (
-                            <p className={styles.muted}>{q.guidance}</p>
-                          )}
-                          {isScored(q) && q.compliantAnswer && (
-                            <p className={styles.muted}>
-                              Compliant answer:{" "}
-                              {q.compliantAnswer === "yes" ? "Yes" : "No"}
-                            </p>
-                          )}
+                          {q.guidance ? (
+                            <details className={styles.qHint}>
+                              <summary>Guidance</summary>
+                              <p>{q.guidance}</p>
+                            </details>
+                          ) : null}
                           {isCount(q) ? (
                             inspection ? (
-                              <label>
+                              <label className={styles.compactField}>
                                 Count *
                                 <input
                                   type="number"
@@ -881,7 +923,7 @@ export function StoreAuditWorkspace(p: Props) {
                               </label>
                             ) : (
                               a.extras?.count && (
-                                <p>
+                                <p className={styles.muted}>
                                   Count: <b>{a.extras.count}</b>
                                 </p>
                               )
@@ -927,101 +969,155 @@ export function StoreAuditWorkspace(p: Props) {
                             </div>
                           ) : (
                             a.outcome && (
-                              <p>
+                              <p className={styles.muted}>
                                 Response: <b>{responseLabel(a)}</b>
                               </p>
                             )
                           )}
-                          {inspection ? (
-                            <label>
-                              Observation
-                              {a.outcome === "gap" || a.outcome === "na"
-                                ? " *"
-                                : ""}
-                              <textarea
-                                value={a.observation}
-                                onChange={(e) =>
-                                  setAnswer(q, { observation: e.target.value })
-                                }
-                                placeholder="What did you see? Add readings, sample locations or details."
-                              />
-                            </label>
-                          ) : (
-                            a.observation && <p>{a.observation}</p>
-                          )}
-                          {a.outcome === "gap" && isScored(q) && (
-                            inspection ? (
-                              <label>
-                                Number of instances *
-                                <input
-                                  type="number"
-                                  min={1}
-                                  step={1}
-                                  value={a.instances ?? ""}
+                          {(needsNote ||
+                            (inspection && a.observation) ||
+                            (!inspection && a.observation)) &&
+                            (inspection ? (
+                              <label className={styles.compactField}>
+                                {needsNote
+                                  ? a.outcome === "na"
+                                    ? "Why N/A *"
+                                    : "Observation *"
+                                  : "Note (optional)"}
+                                <textarea
+                                  rows={needsNote ? 2 : 1}
+                                  value={a.observation}
                                   onChange={(e) =>
                                     setAnswer(q, {
-                                      instances: e.target.value
-                                        ? Number(e.target.value)
-                                        : null,
+                                      observation: e.target.value,
                                     })
+                                  }
+                                  placeholder={
+                                    needsNote
+                                      ? "What did you see?"
+                                      : "Optional note"
                                   }
                                 />
                               </label>
                             ) : (
-                              a.instances != null && (
-                                <p className={styles.muted}>
-                                  Instances: {a.instances}
-                                </p>
+                              a.observation && (
+                                <p className={styles.muted}>{a.observation}</p>
                               )
-                            )
-                          )}
-                          {(q.extraFields || [])
-                            .filter(
-                              (f) =>
-                                f.id !== "count" &&
-                                f.id !== "instances" &&
-                                fieldVisible(f, a.outcome),
-                            )
-                            .map((f) =>
-                              inspection ? (
-                                <label key={f.id}>
-                                  {f.label}
-                                  {a.outcome === "gap" || f.when === "always"
-                                    ? " *"
-                                    : ""}
+                            ))}
+                          {a.outcome === "gap" && isScored(q) && (
+                            inspection ? (
+                              <div className={styles.compactGrid}>
+                                <label className={styles.compactField}>
+                                  Instances *
                                   <input
-                                    type={extraFieldInputType(f)}
-                                    value={a.extras?.[f.id] ?? ""}
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={a.instances ?? ""}
                                     onChange={(e) =>
-                                      setExtra(q, f.id, e.target.value)
+                                      setAnswer(q, {
+                                        instances: e.target.value
+                                          ? Number(e.target.value)
+                                          : null,
+                                      })
                                     }
                                   />
                                 </label>
-                              ) : (
-                                a.extras?.[f.id] && (
-                                  <p key={f.id} className={styles.muted}>
-                                    {f.label}: {a.extras[f.id]}
+                                {(q.extraFields || [])
+                                  .filter(
+                                    (f) =>
+                                      f.id !== "count" &&
+                                      f.id !== "instances" &&
+                                      fieldVisible(f, a.outcome),
+                                  )
+                                  .map((f) => (
+                                    <label
+                                      key={f.id}
+                                      className={styles.compactField}
+                                    >
+                                      {f.label} *
+                                      <input
+                                        type={extraFieldInputType(f)}
+                                        value={a.extras?.[f.id] ?? ""}
+                                        onChange={(e) =>
+                                          setExtra(q, f.id, e.target.value)
+                                        }
+                                      />
+                                    </label>
+                                  ))}
+                              </div>
+                            ) : (
+                              <>
+                                {a.instances != null && (
+                                  <p className={styles.muted}>
+                                    Instances: {a.instances}
                                   </p>
-                                )
-                              ),
-                            )}
+                                )}
+                                {(q.extraFields || [])
+                                  .filter(
+                                    (f) =>
+                                      f.id !== "count" &&
+                                      f.id !== "instances" &&
+                                      a.extras?.[f.id],
+                                  )
+                                  .map((f) => (
+                                    <p key={f.id} className={styles.muted}>
+                                      {f.label}: {a.extras?.[f.id]}
+                                    </p>
+                                  ))}
+                              </>
+                            )
+                          )}
+                          {a.outcome !== "gap" &&
+                            (q.extraFields || [])
+                              .filter(
+                                (f) =>
+                                  f.id !== "count" &&
+                                  f.id !== "instances" &&
+                                  fieldVisible(f, a.outcome),
+                              )
+                              .map((f) =>
+                                inspection ? (
+                                  <label
+                                    key={f.id}
+                                    className={styles.compactField}
+                                  >
+                                    {f.label}
+                                    {f.when === "always" ? " *" : ""}
+                                    <input
+                                      type={extraFieldInputType(f)}
+                                      value={a.extras?.[f.id] ?? ""}
+                                      onChange={(e) =>
+                                        setExtra(q, f.id, e.target.value)
+                                      }
+                                    />
+                                  </label>
+                                ) : (
+                                  a.extras?.[f.id] && (
+                                    <p key={f.id} className={styles.muted}>
+                                      {f.label}: {a.extras[f.id]}
+                                    </p>
+                                  )
+                                ),
+                              )}
                           {a.outcome === "gap" && (
                             <div className={styles.finding}>
-                              <h4>Corrective action</h4>
+                              <h4>Fix</h4>
                               {inspection ? (
                                 <>
-                                  <label>
-                                    What needs to be done *
+                                  <label className={styles.compactField}>
+                                    Action *
                                     <textarea
+                                      rows={2}
                                       value={a.action}
                                       onChange={(e) =>
                                         setAnswer(q, { action: e.target.value })
                                       }
                                     />
                                   </label>
-                                  <div className={styles.formGrid}>
-                                    <label>
-                                      Responsible person / team *
+                                  <div className={styles.compactGrid}>
+                                    <label className={styles.compactField}>
+                                      Owner *
                                       <input
                                         value={a.owner}
                                         onChange={(e) =>
@@ -1031,8 +1127,8 @@ export function StoreAuditWorkspace(p: Props) {
                                         }
                                       />
                                     </label>
-                                    <label>
-                                      Due by (IST) *
+                                    <label className={styles.compactField}>
+                                      Due (IST) *
                                       <input
                                         type="datetime-local"
                                         value={localTime(a.dueAt)}
@@ -1048,10 +1144,7 @@ export function StoreAuditWorkspace(p: Props) {
                                       />
                                     </label>
                                   </div>
-                                  <small>
-                                    Master target: {q.hours} hours. Adjust for
-                                    the action required.
-                                  </small>
+                                  <small>Target {q.hours}h</small>
                                 </>
                               ) : (
                                 <>
@@ -1367,6 +1460,123 @@ export function StoreAuditWorkspace(p: Props) {
               </p>
             ))}
         </details>
+        {startOverlay ? (
+          <div className={styles.startOverlay} role="status" aria-live="polite">
+            <div className={styles.startOverlayCard}>
+              <div className={styles.spinner} aria-hidden />
+              <strong>Starting inspection…</strong>
+              <p>
+                {(audit.audit_type === "self" || audit.audit_type === "mock") &&
+                  "Getting your GPS at the store, then opening the checklist."}
+                {audit.audit_type === "amazon" &&
+                  "Opening the Amazon audit log."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+        <OpsConfirmDialog
+          open={startModalOpen}
+          title="Who is on site?"
+          description={
+            <>
+              <p>
+                Record the Store Manager or Store In-charge present for this
+                mock audit. Their name is saved on the report.
+              </p>
+              <p>Next we will capture GPS at the store — this can take a few seconds.</p>
+            </>
+          }
+          confirmLabel="Start with GPS"
+          cancelLabel="Not yet"
+          busy={startOverlay}
+          confirmDisabled={!startModalName.trim()}
+          onCancel={() => setStartModalOpen(false)}
+          onConfirm={() => {
+            const name = startModalName.trim();
+            if (!name) return;
+            void runStartInspection(name);
+          }}
+        >
+          <label>
+            Name of SM / SI on site
+            <input
+              autoFocus
+              value={startModalName}
+              onChange={(e) => setStartModalName(e.target.value)}
+              placeholder="e.g. Priya Sharma"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && startModalName.trim()) {
+                  e.preventDefault();
+                  void runStartInspection(startModalName.trim());
+                }
+              }}
+            />
+          </label>
+        </OpsConfirmDialog>
+        <OpsConfirmDialog
+          open={deleteStep === "warn"}
+          title={
+            audit.completed_at
+              ? "Delete this audit?"
+              : "Delete this draft audit?"
+          }
+          description={
+            audit.completed_at ? (
+              <p>
+                The audit will leave the register. History is retained for
+                named deletion users.
+              </p>
+            ) : (
+              <p>
+                This removes the scheduled or in-progress draft for{" "}
+                <b>{audit.store_name}</b>. Answers and photos on this draft will
+                no longer appear in the register.
+              </p>
+            )
+          }
+          confirmLabel="Continue"
+          cancelLabel="Keep audit"
+          danger
+          onCancel={() => setDeleteStep(null)}
+          onConfirm={() => setDeleteStep("confirm")}
+        />
+        <OpsConfirmDialog
+          open={deleteStep === "confirm"}
+          title="Confirm deletion"
+          description={
+            <p>
+              This cannot be undone from the register. Type a short reason, then
+              confirm.
+            </p>
+          }
+          confirmLabel="Yes, delete"
+          cancelLabel="Back"
+          secondaryLabel="Cancel"
+          danger
+          busy={blocked}
+          confirmDisabled={
+            Boolean(audit.completed_at) && !deleteReason.trim()
+          }
+          onCancel={() => setDeleteStep("warn")}
+          onSecondary={() => {
+            setDeleteStep(null);
+            setDeleteReason("");
+          }}
+          onConfirm={() => void confirmDeleteAudit()}
+        >
+          <label>
+            Reason{audit.completed_at ? " *" : " (optional)"}
+            <textarea
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder={
+                audit.completed_at
+                  ? "Why this audit is being removed"
+                  : "Optional note, e.g. created by mistake"
+              }
+            />
+          </label>
+        </OpsConfirmDialog>
       </div>
     );
   }

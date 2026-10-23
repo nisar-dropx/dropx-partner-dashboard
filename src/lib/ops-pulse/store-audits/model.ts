@@ -298,6 +298,31 @@ export function canInspect(a: Actor, s: Settings, row: StoreAudit) {
     !row.completed_at
   );
 }
+/** Soft-delete scheduled / in-progress drafts: assignee, managers, or company owners. */
+export function canDeleteDraftStoreAudit(
+  a: Actor,
+  s: Settings,
+  row: Pick<
+    StoreAudit,
+    "assigned_to" | "status" | "completed_at" | "deleted_at" | "location_id"
+  >,
+) {
+  return (
+    !a.readOnly &&
+    !row.deleted_at &&
+    !row.completed_at &&
+    ["scheduled", "in_progress"].includes(row.status) &&
+    inScope(a, row.location_id) &&
+    (a.userId === row.assigned_to ||
+      isManager(a, s) ||
+      a.isMasterOwner) &&
+    Boolean(
+      a.isMasterOwner ||
+        a.permissions.store_audits?.canEdit ||
+        a.permissions.store_audits?.canAdd,
+    )
+  );
+}
 export function requiredEvidence(rule: EvidenceRule, outcome: string) {
   return outcome === "na"
     ? 0

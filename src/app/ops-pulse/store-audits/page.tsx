@@ -7,6 +7,7 @@ import {
   proofs,
 } from "@/lib/ops-pulse/store-audits/server";
 import {
+  canDeleteDraftStoreAudit,
   canInspect,
   canRespond,
   isManager,
@@ -84,6 +85,11 @@ export default async function Page({
           focused && canRespond(c.auth, c.master.settings, focused),
         )}
         canDelete={canDeleteStationAudit(c.auth, legacy.programmeSettings)}
+        canDeleteDraft={Boolean(
+          focused &&
+            canDeleteDraftStoreAudit(c.auth, c.master.settings, focused),
+        )}
+        isMasterOwner={Boolean(c.auth.isMasterOwner)}
         canMaster={hasPermission(c.auth, "store_audit_master", "access")}
       />
     </AppShell>

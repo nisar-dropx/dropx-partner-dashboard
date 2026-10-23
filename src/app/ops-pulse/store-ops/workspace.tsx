@@ -8,6 +8,7 @@ import {
 } from "@/lib/ops-pulse/si-handover/model";
 import { ProofPanel } from "@/app/ops-pulse/si-handover/si-handover-proof";
 import {
+  canDeleteDraft,
   canFill,
   collectSubmitGaps,
   disposalDone,
@@ -28,6 +29,7 @@ import {
   type TaskAnswer,
   type WorkspaceView,
 } from "@/lib/ops-pulse/store-ops/model";
+import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
 import { ActivitiesHub } from "../si-handover/activities-hub";
 import {
   deleteDraft,
@@ -228,6 +230,9 @@ export function StoreOpsWorkspace(props: Props) {
   );
   const [proofs, setProofs] = useState(props.evidence);
   const [version, setVersion] = useState(props.focused?.version || 1);
+  const [deleteStep, setDeleteStep] = useState<null | "warn" | "confirm">(
+    null,
+  );
   const focused = props.focused;
   const store = props.stores.find((s) => s.id === focused?.location_id);
   const weekly = useMemo(
@@ -263,6 +268,9 @@ export function StoreOpsWorkspace(props: Props) {
   }, [answers, focused, monthly, props.settings, store?.city, weekly]);
   const editable = focused
     ? canFill(props.actor, props.settings, focused)
+    : false;
+  const deletable = focused
+    ? canDeleteDraft(props.actor, props.settings, focused)
     : false;
   const storeLabel = store
     ? `${store.station_code}${store.station_name ? ` · ${store.station_name}` : ""}`
@@ -623,32 +631,82 @@ export function StoreOpsWorkspace(props: Props) {
                     Go to submit →
                   </Link>
                 )}
-                <button
-                  type="button"
-                  className={styles.btnDanger}
-                  disabled={pending}
-                  onClick={() =>
-                    run(() =>
-                      deleteDraft({
-                        checklistId: focused.id,
-                        version,
-                      }),
-                    )
-                  }
-                >
-                  Delete
-                </button>
+                {deletable ? (
+                  <button
+                    type="button"
+                    className={styles.btnDanger}
+                    disabled={pending}
+                    onClick={() => setDeleteStep("warn")}
+                  >
+                    Delete
+                  </button>
+                ) : null}
               </>
             ) : (
-              <p className={styles.banner}>
-                {focused.status === "submitted"
-                  ? "Submitted — read only. No accept / reject step."
-                  : "This checklist is not editable for your role."}
-              </p>
+              <>
+                <p className={styles.banner}>
+                  {focused.status === "submitted"
+                    ? "Submitted — read only. No accept / reject step."
+                    : "This checklist is not editable for your role."}
+                </p>
+                {deletable ? (
+                  <button
+                    type="button"
+                    className={styles.btnDanger}
+                    disabled={pending}
+                    onClick={() => setDeleteStep("warn")}
+                  >
+                    Delete draft
+                  </button>
+                ) : null}
+              </>
             )}
           </div>
         </section>
       )}
+      <OpsConfirmDialog
+        open={Boolean(focused && deleteStep === "warn")}
+        title="Delete this draft checklist?"
+        description={
+          <p>
+            This removes the unsubmitted store-ops day for{" "}
+            <b>{focused?.store_code || "this store"}</b>. Saved answers and
+            photos on the draft will leave the register.
+          </p>
+        }
+        confirmLabel="Continue"
+        cancelLabel="Keep draft"
+        danger
+        onCancel={() => setDeleteStep(null)}
+        onConfirm={() => setDeleteStep("confirm")}
+      />
+      <OpsConfirmDialog
+        open={Boolean(focused && deleteStep === "confirm")}
+        title="Confirm deletion"
+        description={
+          <p>
+            Only the owner, a programme manager, or a company owner can delete
+            this draft. This cannot be undone from the list.
+          </p>
+        }
+        confirmLabel="Yes, delete draft"
+        cancelLabel="Back"
+        secondaryLabel="Cancel"
+        danger
+        busy={pending}
+        onCancel={() => setDeleteStep("warn")}
+        onSecondary={() => setDeleteStep(null)}
+        onConfirm={() => {
+          if (!focused || pending) return;
+          // Keep the confirm step open while pending; navigate away on success.
+          run(() =>
+            deleteDraft({
+              checklistId: focused.id,
+              version,
+            }),
+          );
+        }}
+      />
     </div>
   );
 }

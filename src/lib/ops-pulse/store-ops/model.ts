@@ -226,6 +226,17 @@ export function canFill(a: Actor, s: Settings, row: StoreOpsChecklist) {
   );
 }
 
+/** Soft-delete open drafts: owner, managers, or company owners. */
+export function canDeleteDraft(a: Actor, s: Settings, row: StoreOpsChecklist) {
+  if (a.readOnly || row.deleted_at || row.status !== "open") return false;
+  if (!inScope(a, row.location_id)) return false;
+  const owner = a.userId === row.owner_user_id;
+  const lead = isManager(a, s) || a.isMasterOwner;
+  if (!(owner || lead)) return false;
+  // Owners need fill permission; managers / master owners can always clear drafts in scope.
+  return lead || hasFillPermission(a);
+}
+
 /** Whether an answer is complete enough to count the task done (for progress / period skip). */
 export function answerLooksComplete(task: Task, a: TaskAnswer | undefined) {
   if (!a) return false;

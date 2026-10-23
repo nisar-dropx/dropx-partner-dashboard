@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  canDeleteDraft,
   canFill,
   isFiller,
   normalizeAnswer,
@@ -238,13 +239,10 @@ export async function saveStoreOpsMaster(input: {
 export async function deleteDraft(input: { checklistId: string; version: number }) {
   try {
     const c = await readChecklist(input.checklistId);
-    if (c.checklist.status !== "open")
-      throw Error("Only open drafts can be deleted.");
-    if (
-      c.checklist.owner_user_id !== c.actor.userId &&
-      !c.actor.isMasterOwner
-    )
-      throw Error("Only the owner can delete this draft.");
+    if (!canDeleteDraft(c.actor, c.master.settings, c.checklist))
+      throw Error(
+        "Only an open draft can be deleted, by its owner, a programme manager, or a company owner.",
+      );
     const r = await db()
       .from("ops_store_ops_checklists")
       .update({
