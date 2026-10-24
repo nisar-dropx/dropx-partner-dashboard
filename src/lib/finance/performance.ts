@@ -1,3 +1,4 @@
+import type {BillingPeriod} from './billing-periods';
 import {
   mgEstimate,
   isXptPricing,
@@ -126,6 +127,7 @@ export type DailyCost = {
   updated_at: string;
 };
 export type BusinessDay = {
+  coverageStation?: string;
   variablePooledAt?: string;
   mgGroupStations?: string[];
   mfnPickups?: string | null;
@@ -640,29 +642,59 @@ export function parentGroups(rows: BusinessRow[]) {
   });
 }
 
-/** Invoice MG is settled once across a base and its XPTs. Never combine unequal source windows. */
-export function settleAlignedMgGroups(input: BusinessRow[], through?: string): BusinessRow[] {
+/** Fixed XPT billing can precede its separate reporting code. Parent units stay on the parent. */
+export function applyBillingPeriods(input: BusinessRow[], periods: Record<string, BillingPeriod>, through?: string): BusinessRow[] {
+ const rows=input.map(r=>({...r,daily:r.daily.map(d=>({...d,issues:[...d.issues]}))}));
+ for(const row of rows){
+  const period=periods[row.station];if(!period)continue;
+  const parent=period.prior_reporting_station?rows.find(r=>r.station===period.prior_reporting_station&&r.provider===row.provider):null;
+  for(const day of row.daily){
+   if(day.date<period.fixed_payout_from)day.base=null;
+   if(day.date<period.reporting_from){
+    // A contradictory imported row needs correction, never silent suppression.
+    if(day.shipmentReported)throw Error(`${row.station}: shipment data predates the configured reporting start. Review Business masters.`);
+    const parentDay=parent?.daily.find(d=>d.date===day.date);
+    if(row.model==='xpt'&&day.date>=period.fixed_payout_from&&(!through||day.date<=through)&&parentDay?.shipmentReported&&parentDay.deliveries!==null&&parentDay.eligibleDeliveries!==null){
+     day.coverageStation=parent!.station;day.variablePooledAt=parent!.station;
+     day.variable='0.00';day.mfnRevenue='0.00';day.swaRevenue='0.00';
+     day.issues=day.issues.filter(i=>!i.startsWith('Shipment report pending'));
+    }
+   }
+   day.revenue=addAmounts([day.base,day.variable,day.mfnRevenue,day.swaRevenue??null]);
+   day.profit=day.revenue!==null&&day.cost!==null&&day.costComplete?subtractAmounts(day.revenue,day.cost):null;
+  }
+  row.revenue=addAmounts(row.daily.map(d=>d.revenue));
+ }
+ return rows;
+}
+
+/** Settle MG once. Children may join on a confirmed reporting date; gaps after that still block settlement. */
+export function settleAlignedMgGroups(input: BusinessRow[], through?: string, periods: Record<string, BillingPeriod> = {}): BusinessRow[] {
  const rows=input.map(r=>({...r,daily:r.daily.map(d=>({...d,issues:[...d.issues]}))}));
  const reported=(r:BusinessRow)=>r.daily.filter(d=>(!through||d.date<=through)&&d.shipmentReported&&d.eligibleDeliveries!==null&&d.deliveries!==null);
  for(const parent of rows.filter(r=>r.provider==='Amazon'&&r.model==='mg')){
   const children=rows.filter(r=>r.provider==='Amazon'&&r.model==='xpt'&&r.parentStation===parent.station);
   if(!children.length||parent.mgVolume===null||parent.variableRate===null)continue;
-  const days=reported(parent), signature=days.map(d=>d.date).join(',');
-  if(!days.length||children.some(c=>reported(c).map(d=>d.date).join(',')!==signature))continue;
+  const days=reported(parent);
+  if(!days.length||children.some(c=>{
+   const period=periods[c.station];
+   const start=period?.prior_reporting_station===parent.station?period.reporting_from:null;
+   return reported(c).map(d=>d.date).join(',')!==days.filter(d=>!start||d.date>=start).map(d=>d.date).join(',');
+  }))continue;
   const group=[parent,...children], calendar=BigInt(Number(monthEnd(days[0].date.slice(0,7)).slice(8)));
   const mg=decimal(parent.mgVolume),rate=decimal(parent.variableRate);let quantity=zero,previousExcess=zero,previousMoney='0.00';
   for(let i=0;i<days.length;i++){
-   const day=days[i],members=group.map(r=>r.daily.find(d=>d.date===day.date)!);
-   for(const d of members)quantity+=decimal(d.eligibleDeliveries!);
+   const day=days[i],members=group.map(r=>r.daily.find(d=>d.date===day.date)).filter((d):d is BusinessDay=>!!d);
+   for(const d of members)if(d.shipmentReported&&d.eligibleDeliveries!==null)quantity+=decimal(d.eligibleDeliveries);
    const numerator=quantity*calendar-mg*BigInt(i+1),positive=numerator>zero?numerator:zero;
    const cumulative=amount(positive*rate/(calendar*scale)),excess=positive/calendar;
    day.variable=subtractAmounts(cumulative,previousMoney);day.excessVolume=units(excess-previousExcess);
    day.mgCumulativeEligible=units(quantity);day.mgCumulativeThreshold=units(mg*BigInt(i+1)/calendar);day.mgCumulativeExcess=units(excess);day.mgReportedDays=i+1;day.mgGroupStations=group.map(r=>r.station);
    previousMoney=cumulative;previousExcess=excess;
    for(const d of members.slice(1)){d.variable='0.00';d.excessVolume='0';d.variablePooledAt=parent.station;}
-   for(const d of members){d.revenue=addAmounts([d.base,d.variable,d.mfnRevenue,d.swaRevenue??null]);d.profit=d.cost!==null&&d.costComplete?subtractAmounts(d.revenue!,d.cost):null;}
+   for(const d of members){d.revenue=addAmounts([d.base,d.variable,d.mfnRevenue,d.swaRevenue??null]);d.profit=d.revenue!==null&&d.cost!==null&&d.costComplete?subtractAmounts(d.revenue,d.cost):null;}
   }
-  for(const r of group)r.revenue=addAmounts(r.daily.map(d=>d.revenue));
+  for(const r of group){r.revenue=addAmounts(r.daily.map(d=>d.revenue));r.profit=r.revenue!==null&&r.cost!==null&&r.costComplete?subtractAmounts(r.revenue,r.cost):null;}
  }
  return rows;
 }

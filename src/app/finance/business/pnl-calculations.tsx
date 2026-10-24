@@ -107,7 +107,7 @@ export function RevenueCalculation({
               <span>
                 {first.station} · {first.provider}
                 <small>
-                  {first.date} – {days.at(-1)!.date} · {days.length} reported days
+                  {first.date} – {days.at(-1)!.date} · {days.length} covered days
                 </small>
               </span>
               <strong>{money(amount)}</strong>
@@ -148,7 +148,7 @@ export function RevenueCalculation({
                         <td>{d.date}</td>
                         <td>{money(d.base)}</td>
                         <td>
-                          {d.shipmentReported
+                          {d.coverageStation ? `Reported under ${d.coverageStation} · units counted on parent` : d.shipmentReported
                             ? "Available"
                             : "Pending · fixed revenue accrues"}
                         </td>

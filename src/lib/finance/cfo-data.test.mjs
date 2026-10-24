@@ -30,7 +30,7 @@ test('CFO reuses one complete cost snapshot for shipment P&L and HO evidence',as
  await loadCfo({...c,authorization:{...c.authorization,userId:'another'}},q);assert.equal(loads,3);
 });
 test('XPT contract replacement stays on its original station day and cannot borrow parent coverage',async()=>{
- const pricing=compile('./pricing.ts'),now=compile('./now.ts',{'./pricing':pricing}),cfo=compile('./cfo.ts',{'./now':now});
+ const pricing=compile('./pricing.ts'),now=compile('./now.ts',{'./pricing':pricing,'./billing-periods':compile('./billing-periods.ts')}),cfo=compile('./cfo.ts',{'./now':now});
  const report={daily:[],breakup:[],gaps:[]};
  const row=(station,cost)=>({station,date:'2026-10-01',cost,revenue:200,deliveries:10,da:0,utr:0,van:0,rent:0,other:cost,issues:[]});
  const contract={station_code:'X',effective_from:'2026-10-01',effective_to:null,settlement_heads:['Security'],amount:'310',frequency:'monthly',vendor:'V',reference:'C'};
@@ -47,7 +47,7 @@ test('XPT contract replacement stays on its original station day and cannot borr
 });
 
 test('regional HO stops on excluded shipment dates while accrued costs stay disclosed',async()=>{
- const pricing=compile('./pricing.ts'),now=compile('./now.ts',{'./pricing':pricing}),cfo=compile('./cfo.ts',{'./now':now});
+ const pricing=compile('./pricing.ts'),now=compile('./now.ts',{'./pricing':pricing,'./billing-periods':compile('./billing-periods.ts')}),cfo=compile('./cfo.ts',{'./now':now});
  const report={daily:[{station_code:'A',work_date:'2026-10-02',shipment_present:true}],breakup:[],gaps:[]};
  const {loadCfo}=compile('./cfo-data.ts',{...baseMocks,'./now':now,'./cfo':cfo,
   './pnl':{...cps,pnlFilters:q=>({from:q.from,to:q.to,region:'',cluster:'',location:''})},

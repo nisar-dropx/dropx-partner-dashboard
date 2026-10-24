@@ -448,3 +448,13 @@ test('XPT dates remain independent and malformed counts cannot establish shipmen
  const policy={limit:'2026-10-04',shipments:[{station_code:'A',work_date:'2026-10-01',deliveries:'0'},{station_code:'X',work_date:'2026-10-02',deliveries:3},...['',null,'invalid',-1].map(deliveries=>({station_code:'A',work_date:'2026-10-03',deliveries}))]};
  const keys=p.reportedShipmentDays(policy,'2026-10-01','2026-10-04',new Set(['A']));assert.deepEqual([...keys],['A/2026-10-01']);
 });
+
+test('configured XPT transition uses parent coverage before separate reporting, with post-transition gaps still visible',()=>{
+ const dates=['2026-09-01','2026-09-02','2026-09-03','2026-09-04'];
+ const period={station_code:'X',reporting_from:dates[2],fixed_payout_from:dates[0],prior_reporting_station:'A',source:'Contract confirmed'};
+ const shipments=[...dates.map(work_date=>({station_code:'A',work_date,deliveries:10})),{station_code:'X',work_date:dates[2],deliveries:5}];
+ const r=p.buildPnl([{station:'A',daily:dates.map(date=>({...day,date}))},{station:'X',daily:dates.map(date=>({...day,date,deliveries:date===dates[2]?'5':null,shipmentReported:date===dates[2],coverageStation:date<dates[2]?'A':undefined}))}],{...snapshot,daily:dates.flatMap(work_date=>[{...cday,work_date},{...cday,station_code:'X',work_date}])},[place,{...place,station_code:'X'}],dates[0],dates[3],{limit:dates[3],shipments,billingPeriods:{X:period}});
+ const coverage=r.coverage.find(c=>c.station==='X');assert.equal(coverage.reportedDays,3);assert.equal(coverage.parentCoveredDays,2);assert.deepEqual(coverage.missingDates,[dates[3]]);
+ assert.equal(r.total.deliveries,45);assert.equal(r.days.filter(d=>d.station==='X').length,3);assert.equal(r.total.cost,700);
+ const noParent=p.reportedShipmentDays({limit:dates[3],shipments:shipments.filter(s=>s.station_code==='X'),billingPeriods:{X:period}},dates[0],dates[3],new Set(['X']));assert.deepEqual([...noParent],['X/2026-09-03']);
+});

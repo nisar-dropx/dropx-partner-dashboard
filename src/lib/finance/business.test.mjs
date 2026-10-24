@@ -299,6 +299,7 @@ const db = {
   },
 };
 const data = compile("./data.ts", {
+  "./billing-periods": compile("./billing-periods.ts"),
   "server-only": {},
   "next/headers": { headers: () => new Headers({ host }) },
   "next/navigation": {
@@ -1270,4 +1271,27 @@ test("Base and XPT settle one MG pool when dates align; missing XPT dates never 
  const noParent=performance.settleAlignedMgGroups([child]);assert.equal(noParent[0].daily[0].variable,'1260.00');
  const todayPartial={...base,daily:[parentDay,{...parentDay,date:'2026-09-02'}]};
  const capped=performance.settleAlignedMgGroups([todayPartial,child],'2026-09-01');assert.equal(capped[0].daily[0].variable,'420.00');
+});
+
+test('configured XPT billing before separate reporting accrues fixed revenue, never duplicates parent shipments',()=>{
+ const {pc,snap}=dailyFixture('2026-09',3,{delivery_mg_volume:'3000',variable_slab:'21',mg_amount_including_mhe:'3000'});
+ snap.daily_shipments=[1,2,3].map(d=>({...snap.daily_shipments[0],work_date:`2026-09-0${d}`,deliveries:'80',returns:'0',mfn:'0'}));
+ const parentDays=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-03',false);
+ const childSource={...snap,daily_shipments:[{...snap.daily_shipments[2],station_code:'XPT',deliveries:'100'}]};
+ const childDays=performance.buildDailyRows(childSource,'XPT','Amazon',pc,'2026-09','2026-09-03',false,{xpt:true,parentRate:'21',parentMfnRate:'8'});
+ const base={provider:'Amazon',station:'KOZA',parentStation:null,model:'mg',mgVolume:'3000',variableRate:'21',daily:parentDays};
+ const child={...base,station:'XPT',parentStation:'KOZA',model:'xpt',daily:childDays};
+ const periods={XPT:{station_code:'XPT',reporting_from:'2026-09-03',fixed_payout_from:'2026-09-01',prior_reporting_station:'KOZA',source:'Confirmed contract'}};
+ const result=performance.settleAlignedMgGroups(performance.applyBillingPeriods([base,child],periods,'2026-09-03'),'2026-09-03',periods);
+ assert.equal(result[1].daily[0].coverageStation,'KOZA');assert.equal(result[1].daily[0].shipmentReported,false);assert.equal(result[1].daily[0].deliveries,null);
+ assert.equal(pricing.addAmounts(result[1].daily.map(d=>d.base)),'300.00');
+ assert.equal(pricing.addAmounts(result[0].daily.map(d=>d.variable)),'840.00'); // 240+100 less one 300-unit MG threshold.
+ assert.equal(result[0].daily[2].mgCumulativeEligible,'340');assert.equal(pricing.addAmounts(result[1].daily.map(d=>d.variable)),'0.00');
+ const later={XPT:{...periods.XPT,fixed_payout_from:'2026-09-02'}};
+ const shifted=performance.applyBillingPeriods([base,child],later);assert.equal(shifted[1].daily[0].base,null);
+ assert.equal(pricing.addAmounts(shifted[1].daily.map(d=>d.base)),'200.00');
+ const missing=performance.settleAlignedMgGroups([base,{...child,daily:childDays.filter(d=>d.date!=='2026-09-03')}],'2026-09-03',periods);
+ assert.equal(missing[0].daily[2].mgGroupStations,undefined);
+ const denied=performance.applyBillingPeriods([child],periods);assert.equal(denied[0].daily[0].coverageStation,undefined);
+ assert.throws(()=>performance.applyBillingPeriods([base,{...child,daily:parentDays}],periods),/predates/);
 });

@@ -1,3 +1,4 @@
+import type {BillingPeriod} from './billing-periods';
 import { monthEnd, todayIndia } from "./pricing";
 import {
   isoDate,
@@ -65,15 +66,26 @@ export function shipmentReportingLimit(to: string, today = todayIndia()) {
   return to < yesterday ? to : yesterday;
 }
 export type ShipmentCoveragePolicy = {
+  billingPeriods?: Record<string, BillingPeriod>;
   limit: string;
   shipments: { station_code: string; work_date: string; deliveries: string | number | null }[];
   availability?: Record<string, { to: string | null }>;
 };
 export function reportedShipmentDays(policy: ShipmentCoveragePolicy, from: string, to: string, codes: Set<string>) {
-  return new Set(policy.shipments.filter(d => codes.has(d.station_code) && d.work_date >= from &&
-    d.work_date <= to && d.work_date <= policy.limit && d.deliveries !== null &&
-    String(d.deliveries).trim() !== '' && Number.isFinite(Number(d.deliveries)) && Number(d.deliveries) >= 0)
-    .map(d => `${d.station_code}/${d.work_date}`));
+  const raw=new Set(policy.shipments.filter(d=>d.work_date>=from&&d.work_date<=to&&d.work_date<=policy.limit&&
+    d.deliveries!==null&&String(d.deliveries).trim()!==''&&Number.isFinite(Number(d.deliveries))&&Number(d.deliveries)>=0)
+    .map(d=>`${d.station_code}/${d.work_date}`));
+  const covered=new Set([...raw].filter(key=>codes.has(key.split('/')[0])));
+  for(const [code,period] of Object.entries(policy.billingPeriods??{})){
+    if(!codes.has(code))continue;
+    for(let d=Date.parse(from);d<=Date.parse(to)&&d<=Date.parse(policy.limit);d+=86400000){
+      const date=new Date(d).toISOString().slice(0,10),key=`${code}/${date}`;
+      if(date>=period.reporting_from)continue;
+      covered.delete(key);
+      if(date>=period.fixed_payout_from&&period.prior_reporting_station&&raw.has(`${period.prior_reporting_station}/${date}`))covered.add(key);
+    }
+  }
+  return covered;
 }
 export type PnlLocation = {
   station_code: string;
@@ -237,10 +249,8 @@ export function buildPnl(
       day.deliveries === null || String(day.deliveries).trim() === '' ||
       !Number.isFinite(Number(day.deliveries)) || Number(day.deliveries) < 0) continue;
     available.set(day.station_code, [available.get(day.station_code) || '', day.work_date].sort().at(-1)!);
-    if (day.work_date < from || day.work_date > to) continue;
-    reported.add(`${day.station_code}/${day.work_date}`);
-    cutoffs.set(day.station_code, [cutoffs.get(day.station_code) || '', day.work_date].sort().at(-1)!);
   }
+  if (policy) for (const key of reported) { const [station,date]=key.split('/');cutoffs.set(station,[cutoffs.get(station)||'',date].sort().at(-1)!); }
   if (!policy) for (const row of revenue)
     for (const day of row.daily)
       if (
@@ -267,6 +277,10 @@ export function buildPnl(
     for (let d = Date.parse(from); d <= Date.parse(to); d += 86400000) {
       const date = new Date(d).toISOString().slice(0, 10),
         key = `${location.station_code}/${date}`;
+      const period=policy?.billingPeriods?.[location.station_code];
+      const starts=period?(period.fixed_payout_from<period.reporting_from?period.fixed_payout_from:period.reporting_from):null;
+      if(starts&&date<starts)continue;
+      const inherited=!!(period&&date<period.reporting_from&&period.prior_reporting_station);
       const covered = inCoverage(location.station_code, date);
       if (!covered && (cutoffs.has(location.station_code) || date !== from))
         continue;
@@ -289,7 +303,7 @@ export function buildPnl(
         issues.add(`${cost.cost_gaps} cost inputs need review`);
       if (cost?.unmapped)
         issues.add(`${cost.unmapped} provider IDs need mapping`);
-      const delivery = revenue.some((r) => r.shipmentReported)
+      const delivery = covered&&inherited ? 0 : revenue.some((r) => r.shipmentReported)
         ? sumKnown(revenue.map((r) => n(r.deliveries)))
         : cost?.shipment_present
           ? cost.deliveries
@@ -326,7 +340,11 @@ export function buildPnl(
       const dates: string[] = [];
       for (let d = Date.parse(from); d <= Date.parse(to); d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
       const excluded = dates.filter(d => !inCoverage(l.station_code, d));
-      const missing = excluded.filter(d => d <= (policy?.limit ?? to));
+      const period=policy?.billingPeriods?.[l.station_code];
+      const starts=period?[period.fixed_payout_from,period.reporting_from].sort()[0]:null;
+      const beforeOpening=excluded.filter(d=>starts&&d<starts);
+      const missing = excluded.filter(d => d <= (policy?.limit ?? to)&&(!starts||d>=starts));
+      const parentCoveredDays=period?dates.filter(d=>d<period.reporting_from&&inCoverage(l.station_code,d)).length:0;
       const lastAvailable = policy?.availability?.[l.station_code]?.to;
       return {
         station: l.station_code, from, requestedTo: to, limit: policy?.limit ?? to,
@@ -334,7 +352,9 @@ export function buildPnl(
         availableThrough: available.get(l.station_code) ?? (lastAvailable && lastAvailable <= (policy?.limit ?? to) ? lastAvailable : null) ?? cutoffs.get(l.station_code) ?? null,
         reportedDays: dates.length - excluded.length,
         excludedDays: excluded.length, missingDates: missing,
-        currentDaysExcluded: excluded.length - missing.length,
+        reportingFrom:period?.reporting_from??null,fixedPayoutFrom:period?.fixed_payout_from??null,
+        priorReportingStation:period?.prior_reporting_station??null,parentCoveredDays,beforeOpeningDays:beforeOpening.length,
+        currentDaysExcluded: excluded.filter(d=>d>(policy?.limit??to)&&(!starts||d>=starts)).length,
         excludedSourceCost: cps.daily.filter(d => d.station_code === l.station_code && excluded.includes(d.work_date)).reduce((s,d) => s + d.total, 0),
       };
     }),

@@ -34,6 +34,8 @@ export async function GET(request: Request) {
     );
   }
   try {
+    const billingPeriods=Object.fromEntries(context.locations.filter(l=>l.billing_period).map(l=>[l.station_code,l.billing_period!]));
+    const coverageCodes=[...new Set([...codes,...codes.flatMap(code=>{const parent=billingPeriods[code]?.prior_reporting_station;return parent&&context.locations.some(l=>l.station_code===parent)?[parent]:[];})])];
     const [data, rents, fuel, shipments] = await Promise.all([
       loadFinanceCpsEvidence(
         context.companyId,
@@ -61,7 +63,7 @@ export async function GET(request: Request) {
           .order("id"),
       ),
       basis === 'shipments' ? context.db.rpc('finance_pnl_revenue_snapshot', {
-        p_company: context.companyId, p_from: filters.from, p_through: filters.to, p_station_codes: codes,
+        p_company: context.companyId, p_from: filters.from, p_through: filters.to, p_station_codes: coverageCodes,
       }) : Promise.resolve({data:null,error:null}),
     ]);
     if (fuel.error) throw Error("Fuel transaction details unavailable");
@@ -76,7 +78,7 @@ export async function GET(request: Request) {
         codes,
         fuel.data ?? [],
         basis,
-        basis === 'shipments' ? reportedShipmentDays({limit:shipmentReportingLimit(filters.to),shipments:shipments.data?.daily_shipments??[]},filters.from,filters.to,new Set(codes)) : undefined,
+        basis === 'shipments' ? reportedShipmentDays({limit:shipmentReportingLimit(filters.to),shipments:shipments.data?.daily_shipments??[],billingPeriods},filters.from,filters.to,new Set(codes)) : undefined,
       ),
       { headers: { "Cache-Control": "private, no-store" } },
     );

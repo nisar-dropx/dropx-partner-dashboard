@@ -3,6 +3,7 @@ import { loadPricing, effectiveCards, type FinanceContext } from "./data";
 import {
   buildBusinessRows,
   settleAlignedMgGroups,
+  applyBillingPeriods,
   type Snapshot,
   type BusinessRow,
 } from "./performance";
@@ -27,6 +28,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
       !/^HO(?:_|$)/i.test(l.station_code),
   );
   const byCode = new Map(allowed.map(l => [l.station_code, l]));
+  const billingPeriods = Object.fromEntries(allowed.filter(l=>l.billing_period).map(l=>[l.station_code,l.billing_period!]));
   const selected = byCode.get(filters.location);
   if (selected) filters.location = stationGroupKey(selected);
   const locations = allowed.filter((l) => {
@@ -155,7 +157,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
           revision: card.revision,
         };
     revenue.push(
-      ...settleAlignedMgGroups(buildBusinessRows(
+      ...settleAlignedMgGroups(applyBillingPeriods(buildBusinessRows(
         {
           ...snapshot,
           shipments,
@@ -169,7 +171,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
         locations,
         { month, through: slice.to, provider: "" },
         parentRates,
-      ), shipmentReportingLimit(filters.to)),
+      ), billingPeriods, shipmentReportingLimit(filters.to)), shipmentReportingLimit(filters.to), billingPeriods),
     );
   }
   const cps: CpsSnapshot = costResponse.data ?? {
@@ -181,6 +183,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
     limit: shipmentReportingLimit(filters.to),
     shipments: snapshot.daily_shipments ?? [],
     availability: snapshot.availability,
+    billingPeriods,
   });
   const covered = new Set(
     report.days
@@ -202,6 +205,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
     filters,
     readAt: snapshot.read_at,
     availability: snapshot.availability,
+    billingPeriods,
     costError: costResponse.error,
     // Send minimal picker metadata, never entire station records or auth context.
     locations: allowed.map((l) => ({
