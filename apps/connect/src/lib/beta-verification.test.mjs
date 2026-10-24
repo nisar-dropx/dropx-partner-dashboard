@@ -1,3 +1,4 @@
+import * as lifecycle from './beta-lifecycle.ts';
 import {betaUanProgress,loadBetaUanMail} from './beta-uan.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +33,7 @@ test('newest verified link is selected first and duplicates are removed',()=>{
 });
 function fixture({beta=true,preview=false}={}){
  const calls=[];const account={workspace:'workforce',profileType:'workforce',onboardingBeta:beta,activationStage:'amazon_email_pilot:sent',id:'selected-candidate',companyId:'selected-company'};
- const mocks={'next/server':{NextResponse:{json:(b,o)=>Response.json(b,o)}},'@/lib/connect-auth':{requireConnectAccount:async()=>account},'@/lib/connect-preview':{resolveConnectPreview:async()=>preview},'@/lib/supabase-admin':{supabaseAdmin:{rpc:async(name,args)=>{calls.push({name,args});return {data:{ok:true}}}}}};
+ const mocks={'@/lib/beta-lifecycle':lifecycle,'next/server':{NextResponse:{json:(b,o)=>Response.json(b,o)}},'@/lib/connect-auth':{requireConnectAccount:async()=>account},'@/lib/connect-preview':{resolveConnectPreview:async()=>preview},'@/lib/supabase-admin':{supabaseAdmin:{rpc:async(name,args)=>{calls.push({name,args});return {data:{ok:true}}}}}};
  const src=fs.readFileSync(new URL('../../app/api/connect/beta-verification/route.ts',import.meta.url),'utf8');const mod={exports:{}};
  new Function('require','module','exports',ts.transpileModule(src,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{assert.ok(id in mocks,id);return mocks[id]},mod,mod.exports);
  return {POST:mod.exports.POST,calls};
@@ -66,7 +67,7 @@ test('beta inbox stays usable before migration; messages never masquerade as BGC
   ilike(){return q},or(){return q},order(){return q},limit(){return q},maybeSingle(){single=true;return q},
   then(resolve,reject){return Promise.resolve({data:single?rows[0]??null:rows,error:table.startsWith('workforce_beta_verification_')?{code:'PGRST205'}:null}).then(resolve,reject)}
  };return q;}};
- const mocks={
+ const mocks={'@/lib/beta-lifecycle':lifecycle,
   'next/server':{NextResponse:{json:(body,options)=>Response.json(body,options)}},
   '@/lib/beta-uan':{betaUanProgress,loadBetaUanMail},'@/lib/beta-verification':verification,'@/lib/beta-journey':{betaJourney},'@/lib/onboarding-action-url':actionUrls,
   '@/lib/beta-exit-notice':{},'@/lib/amazon-pilot':{},'@/lib/partner-onboarding':{},'@/lib/workforce-joining':{},
