@@ -695,6 +695,110 @@ export function providerFirstLocationIsAllowed(
   );
 }
 
+type ProviderFirstCoverageGap = {
+  uncoveredFrom: string;
+  coveredThrough?: string;
+  nextCoverageFrom?: string;
+};
+
+function previousIsoCalendarDate(value: string) {
+  const previous = new Date(`${value}T00:00:00.000Z`);
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  return previous.toISOString().slice(0, 10);
+}
+
+/** Finds the first date that is not covered by a canonical mapping timeline. */
+function providerFirstMappingCoverageGap(
+  mappings: ProviderFirstRegisteredMappingView[],
+  requestedEffectiveFrom: string,
+  requestedEffectiveTo: string
+): ProviderFirstCoverageGap | null {
+  const requestedFrom = String(requestedEffectiveFrom ?? "").trim();
+  const requestedTo = String(requestedEffectiveTo ?? "").trim();
+  if (!isIsoCalendarDate(requestedFrom)) return null;
+
+  const periods = mappings.filter((mapping) => {
+    const from = String(mapping.effectiveFrom ?? "").trim();
+    const to = String(mapping.effectiveTo ?? "").trim();
+    if (!isIsoCalendarDate(from) || (to && !isIsoCalendarDate(to))) return false;
+    return (mapping.status === "active" && !to)
+      || (mapping.status === "closed" && Boolean(to));
+  }).sort((left, right) => left.effectiveFrom.localeCompare(right.effectiveFrom)
+    || String(left.effectiveTo ?? "").localeCompare(String(right.effectiveTo ?? "")));
+
+  let nextUncovered = requestedFrom;
+  for (const period of periods) {
+    const from = period.effectiveFrom;
+    const to = String(period.effectiveTo ?? "").trim();
+    if (to && to < nextUncovered) continue;
+    if (from > nextUncovered) {
+      return {
+        uncoveredFrom: nextUncovered,
+        ...(nextUncovered > requestedFrom ? { coveredThrough: previousIsoCalendarDate(nextUncovered) } : {}),
+        nextCoverageFrom: from
+      };
+    }
+    if (!to || (requestedTo && to >= requestedTo)) return null;
+    nextUncovered = nextIsoCalendarDate(to);
+  }
+
+  return {
+    uncoveredFrom: nextUncovered,
+    ...(nextUncovered > requestedFrom ? { coveredThrough: previousIsoCalendarDate(nextUncovered) } : {})
+  };
+}
+
+/**
+ * Returns an actionable reason for a location failure. The generic boolean
+ * validator remains the source of truth; this helper only explains which
+ * registered-location dates are missing.
+ */
+export function providerFirstLocationIssue(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+) {
+  if (providerFirstLocationIsAllowed(row, worker)) return null;
+  if (!worker || !row.workforceId || row.workforceId !== worker.id) return "Location mismatch.";
+
+  const registeredStationId = String(worker.profileStationId ?? "").trim();
+  if (!registeredStationId || row.stationId === registeredStationId || !isIsoCalendarDate(row.effectiveFrom)) {
+    return "Location mismatch.";
+  }
+
+  const registeredLocation = worker.profileLocationLabel || "the registered location";
+  const registeredIdentityMappings = registeredWorkerMappings(worker).filter((mapping) =>
+    mapping.stationId === registeredStationId && mappingIdentityMatchesRow(mapping, row)
+  );
+  if (!registeredIdentityMappings.length) {
+    return `No matching registered-location mapping exists at ${registeredLocation}. Map this Provider ID there for the complete ${row.stationLabel} period first.`;
+  }
+
+  const gap = providerFirstMappingCoverageGap(
+    registeredIdentityMappings,
+    row.effectiveFrom,
+    row.effectiveTo
+  );
+  if (!gap) return "Location mismatch.";
+
+  if (gap.nextCoverageFrom) {
+    const beforeNextCoverage = previousIsoCalendarDate(gap.nextCoverageFrom);
+    const gapEnd = row.effectiveTo && row.effectiveTo < beforeNextCoverage
+      ? row.effectiveTo
+      : beforeNextCoverage;
+    return `Registered-location coverage at ${registeredLocation} has a gap from ${gap.uncoveredFrom} to ${gapEnd}. Cover that gap for the same Provider ID before mapping ${row.stationLabel}.`;
+  }
+  if (gap.coveredThrough) {
+    const requestedEnd = row.effectiveTo
+      ? `through ${row.effectiveTo}`
+      : "indefinitely";
+    const alternative = row.effectiveTo
+      ? ""
+      : `, or set this ${row.stationLabel} mapping's Effective to to ${gap.coveredThrough}`;
+    return `Registered-location coverage at ${registeredLocation} ends on ${gap.coveredThrough}, but the ${row.stationLabel} period continues ${requestedEnd}. Add the same Provider ID at ${registeredLocation} from ${gap.uncoveredFrom}${row.effectiveTo ? ` through ${row.effectiveTo}` : " onward"}${alternative}.`;
+  }
+  return `Registered-location coverage at ${registeredLocation} does not include ${gap.uncoveredFrom}. Map the same Provider ID there for the complete ${row.stationLabel} period first.`;
+}
+
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
   if (replacement.kind === "location") {
     const starts = replacement.effectiveFrom
@@ -1120,7 +1224,8 @@ export function providerFirstRowIssue(
     return "This DropX ID is already mapped to another Provider or Provider Member ID.";
   }
   if (providerFirstLocationNeedsDates(row, worker)) return "Enter Effective from to validate this location against the existing mapping.";
-  if (!providerFirstLocationIsAllowed(row, worker)) return "Location mismatch.";
+  const locationIssue = providerFirstLocationIssue(row, worker);
+  if (locationIssue) return locationIssue;
   if (!providerFirstNamesMatch(row.providerMemberName, row.dropxName)) return "Name mismatch.";
   if (!row.providerId) return "The selected location has no provider.";
   if (!row.paymentMethodId) return "Payment method is required.";

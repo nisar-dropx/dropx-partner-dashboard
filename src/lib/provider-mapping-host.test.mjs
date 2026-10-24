@@ -112,5 +112,5 @@ test("Dashboard and Ops apply the same effective-period registered-location proo
 
   const beforeRegisteredMapping = { ...additionalLocationRow, effectiveFrom: "2026-09-30" };
   assert.equal(providerFirstLocationIsAllowed(beforeRegisteredMapping, worker), false);
-  assert.equal(providerFirstRowIssue(beforeRegisteredMapping, worker, method), "Location mismatch.");
+  assert.match(providerFirstRowIssue(beforeRegisteredMapping, worker, method), /gap from 2026-09-30 to 2026-09-30/);
 });
