@@ -116,3 +116,25 @@ test("multiple station CMs still produce a manager review chain from the top-ran
   assert.equal(result?.managerReportingChain[0]?.name, "Alpha CM");
   assert.deepEqual(result?.managerReportingChain.map((person) => person.designationCode), ["CLM", "NH"]);
 });
+
+test("explicit People station owner overrides stale local manager links", () => {
+  const result = resolvePeopleOperationalHierarchy(
+    ["KGQE"],
+    [
+      assignment("tl", "p-tl", "LOCAL TL", "KGQE", "TL", "Team Lead"),
+      assignment("old-clm", "p-old", "FORMER CLM", "HO", "CLM", "Cluster Manager"),
+      assignment("new-clm", "p-new", "CURRENT CLM", "HO", "CLM", "Cluster Manager"),
+      assignment("aom", "p-aom", "AOM", "HO", "AOM", "Area Operations Manager")
+    ],
+    [
+      { subjectAssignmentId: "tl", managerAssignmentId: "old-clm" },
+      { subjectAssignmentId: "old-clm", managerAssignmentId: "aom" },
+      { subjectAssignmentId: "new-clm", managerAssignmentId: "aom" }
+    ],
+    new Map([["KGQE", ["new-clm"]]])
+  ).get("KGQE");
+
+  assert.deepEqual(result?.clusterManagers.map((person) => person.name), ["CURRENT CLM"]);
+  assert.deepEqual(result?.managerReportingChain.map((person) => person.name), ["CURRENT CLM", "AOM"]);
+  assert.deepEqual(result?.stationLeads, [{ name: "LOCAL TL", role: "Team Lead" }]);
+});

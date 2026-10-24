@@ -89,7 +89,7 @@ async function loadPeopleHierarchyGraph(companyId: string, day = indiaToday()) {
   return { assignments, relationships, error: null as string | null };
 }
 
-/** Current, explicit People station responsibilities supplement local reporting roots. */
+/** Current, explicit People station responsibilities override stale local manager roots. */
 async function loadStationResponsibilityRoots(companyId: string, locationIds: string[], assignments: PeopleHierarchyAssignment[]) {
   if (!supabaseAdmin) throw Error("Database unavailable.");
   const now = new Date().toISOString();
@@ -133,7 +133,10 @@ export async function loadPeopleOperationalHierarchy(
   const graph = await loadPeopleHierarchyGraph(companyId, options.asOf);
   if (graph.error) return { byLocation: empty, error: graph.error };
   try {
-    const roots = options.includeStationResponsibilities
+    // People is the operational source of truth. Callers may explicitly opt
+    // out for historical-only calculations, but current portal views must use
+    // the station responsibility maintained from Managed locations.
+    const roots = options.includeStationResponsibilities !== false
       ? await loadStationResponsibilityRoots(companyId, locationIds, graph.assignments)
       : undefined;
     return {

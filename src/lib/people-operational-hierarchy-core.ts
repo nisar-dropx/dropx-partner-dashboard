@@ -263,15 +263,18 @@ export function resolvePeopleOperationalHierarchy(
     const clusterCandidates = new Map<string, CandidateStats>();
     const aomCandidates = new Map<string, CandidateStats>();
     const authorityCandidates = new Map<string, CandidateStats>();
-    const roots = [...new Map([
-      ...(rootsByLocation.get(locationId) ?? []),
-      ...(stationAssignmentIds.get(locationId) ?? []).flatMap((id) => {
+    const localRoots = rootsByLocation.get(locationId) ?? [];
+    const responsibilityRoots = (stationAssignmentIds.get(locationId) ?? []).flatMap((id) => {
         const assignment = assignmentById.get(id);
         return assignment ? [assignment] : [];
-      })
-    ].map((assignment) => [assignment.id, assignment])).values()];
+      });
+    // An explicit People station responsibility is the current operational
+    // owner. Do not mix it with older local reporting links: doing so can keep
+    // a former CLM/AOM visible and routable after Managed locations changes.
+    const managerRoots = [...new Map((responsibilityRoots.length ? responsibilityRoots : localRoots)
+      .map((assignment) => [assignment.id, assignment])).values()];
 
-    roots.forEach((root) => {
+    managerRoots.forEach((root) => {
       const seen = new Set<string>();
       let currentId: string | undefined = root.id;
       let depth = 0;
@@ -295,14 +298,14 @@ export function resolvePeopleOperationalHierarchy(
         if (authority) addCandidate(authorityCandidates, authority.assignment, clusterManager.assignmentId, authority.depth);
       });
     } else {
-      roots.forEach((root) => {
+      managerRoots.forEach((root) => {
         const authority = firstAuthorityAbove(root.id, assignmentById, managerBySubject);
         if (authority) addCandidate(authorityCandidates, authority.assignment, root.id, authority.depth);
       });
     }
 
     const reportingAuthorities = rankedPeople(authorityCandidates);
-    const primaryRoot = [...roots]
+    const primaryRoot = [...localRoots]
       .filter((root) => operationalStartPriority(root) < 10)
       .sort((left, right) => (
         operationalStartPriority(left) - operationalStartPriority(right) ||
@@ -317,7 +320,7 @@ export function resolvePeopleOperationalHierarchy(
         ? assignmentById.get(areaOperationsManagers[0].assignmentId)
         : undefined;
     return [locationId, {
-      stationLeads: roots.filter(root => /(^| )(TL|ATL|STM|TEAM LEAD|TEAM LEADER|STATION MANAGER)( |$)/.test(normalizedRole(root)))
+      stationLeads: localRoots.filter(root => /(^| )(TL|ATL|STM|TEAM LEAD|TEAM LEADER|STATION MANAGER)( |$)/.test(normalizedRole(root)))
         .map(root => ({name: root.displayName, role: root.designationName || root.positionTitle || "Station lead"})),
       clusterManagers,
       areaOperationsManagers,
