@@ -180,12 +180,13 @@ export function RevenueCalculation({
                     ]}
                   />
                   <p className="pnl-formula">
-                    {first.model === "slab"
+                    {first.variablePooledAt ? `Variable delivery income is settled once in ${first.variablePooledAt}’s MG pool. This XPT retains its fixed payout, MFN and SWA earnings.` : first.model === "slab"
                       ? "Monthly cumulative delivered volume uses the configured slabs. Each date records the change in cumulative earnings."
                       : first.model === "xpt"
                         ? `All eligible XPT deliveries × ${money(card?.variable)} (parent ${card?.parent || "not configured"}). No MG threshold.`
                         : `Month to date: max(0, cumulative Amazon deliveries + C-returns − ${qty(card?.mgVolume)} × reported days ÷ ${calendarDays}) × ${money(card?.variable)}. Each date records the change in cumulative earnings, including reversals after quieter days. SWA is excluded from MG and billed separately.`}
                   </p>
+                  {first.mgGroupStations && <p className="pnl-formula">Billing pool: {first.mgGroupStations.join(" + ")}. The cumulative MG quantities below include these XPTs; individual delivery columns retain this station’s source counts.</p>}
                   {first.model === "slab" && (
                     <Table headers={["Above", "Up to", "Rate / delivery"]}>
                       {card?.slabs.map((s, i) => (

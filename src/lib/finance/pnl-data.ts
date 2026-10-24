@@ -2,6 +2,7 @@ import "server-only";
 import { loadPricing, effectiveCards, type FinanceContext } from "./data";
 import {
   buildBusinessRows,
+  settleAlignedMgGroups,
   type Snapshot,
   type BusinessRow,
 } from "./performance";
@@ -154,7 +155,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
           revision: card.revision,
         };
     revenue.push(
-      ...buildBusinessRows(
+      ...settleAlignedMgGroups(buildBusinessRows(
         {
           ...snapshot,
           shipments,
@@ -168,7 +169,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
         locations,
         { month, through: slice.to, provider: "" },
         parentRates,
-      ),
+      )),
     );
   }
   const cps: CpsSnapshot = costResponse.data ?? {

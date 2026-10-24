@@ -1256,3 +1256,16 @@ test("MFN billable total is priced once and preserves pickup/return evidence; XP
  const pending=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false,{xpt:true,parentRate:'21'})[0];
  assert.equal(pending.mfnRevenue,null);assert.match(pending.issues.join(),/Parent station MFN rate missing/);
 });
+
+test("Base and XPT settle one MG pool when dates align; missing XPT dates never silently join the pool",()=>{
+ const {pc,snap}=dailyFixture('2026-09',1,{delivery_mg_volume:'3000',variable_slab:'21'});
+ snap.daily_shipments=[{...snap.daily_shipments[0],deliveries:'60',returns:'0',mfn:'0'}];
+ const parentDay=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false)[0];
+ const base={provider:'Amazon',station:'KOZA',parentStation:null,model:'mg',mgVolume:'3000',variableRate:'21',daily:[parentDay]};
+ const child={...base,station:'XPT',parentStation:'KOZA',model:'xpt',daily:[{...parentDay,eligibleDeliveries:'60',deliveries:'60',base:'10.00',variable:'1260.00'}]};
+ const fixed=performance.settleAlignedMgGroups([base,child]);
+ assert.equal(fixed[0].daily[0].variable,'420.00');assert.equal(fixed[1].daily[0].variable,'0.00');assert.equal(fixed[1].daily[0].variablePooledAt,'KOZA');
+ assert.equal(fixed[0].daily[0].mgCumulativeEligible,'120');assert.equal(child.daily[0].variable,'1260.00');
+ const missing=performance.settleAlignedMgGroups([base,{...child,daily:[]}]);assert.equal(missing[0].daily[0].variable,parentDay.variable);
+ const noParent=performance.settleAlignedMgGroups([child]);assert.equal(noParent[0].daily[0].variable,'1260.00');
+});

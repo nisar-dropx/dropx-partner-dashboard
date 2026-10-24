@@ -126,6 +126,8 @@ export type DailyCost = {
   updated_at: string;
 };
 export type BusinessDay = {
+  variablePooledAt?: string;
+  mgGroupStations?: string[];
   mfnPickups?: string | null;
   mfnReturns?: string | null;
   mgCumulativeEligible?: string | null;
@@ -636,4 +638,31 @@ export function parentGroups(rows: BusinessRow[]) {
       ),
     };
   });
+}
+
+/** Invoice MG is settled once across a base and its XPTs. Never combine unequal source windows. */
+export function settleAlignedMgGroups(input: BusinessRow[]): BusinessRow[] {
+ const rows=input.map(r=>({...r,daily:r.daily.map(d=>({...d,issues:[...d.issues]}))}));
+ const reported=(r:BusinessRow)=>r.daily.filter(d=>d.shipmentReported&&d.eligibleDeliveries!==null&&d.deliveries!==null);
+ for(const parent of rows.filter(r=>r.provider==='Amazon'&&r.model==='mg')){
+  const children=rows.filter(r=>r.provider==='Amazon'&&r.model==='xpt'&&r.parentStation===parent.station);
+  if(!children.length||parent.mgVolume===null||parent.variableRate===null)continue;
+  const days=reported(parent), signature=days.map(d=>d.date).join(',');
+  if(!days.length||children.some(c=>reported(c).map(d=>d.date).join(',')!==signature))continue;
+  const group=[parent,...children], calendar=BigInt(Number(monthEnd(days[0].date.slice(0,7)).slice(8)));
+  const mg=decimal(parent.mgVolume),rate=decimal(parent.variableRate);let quantity=zero,previousExcess=zero,previousMoney='0.00';
+  for(let i=0;i<days.length;i++){
+   const day=days[i],members=group.map(r=>r.daily.find(d=>d.date===day.date)!);
+   for(const d of members)quantity+=decimal(d.eligibleDeliveries!);
+   const numerator=quantity*calendar-mg*BigInt(i+1),positive=numerator>zero?numerator:zero;
+   const cumulative=amount(positive*rate/(calendar*scale)),excess=positive/calendar;
+   day.variable=subtractAmounts(cumulative,previousMoney);day.excessVolume=units(excess-previousExcess);
+   day.mgCumulativeEligible=units(quantity);day.mgCumulativeThreshold=units(mg*BigInt(i+1)/calendar);day.mgCumulativeExcess=units(excess);day.mgReportedDays=i+1;day.mgGroupStations=group.map(r=>r.station);
+   previousMoney=cumulative;previousExcess=excess;
+   for(const d of members.slice(1)){d.variable='0.00';d.excessVolume='0';d.variablePooledAt=parent.station;}
+   for(const d of members){d.revenue=addAmounts([d.base,d.variable,d.mfnRevenue,d.swaRevenue??null]);d.profit=d.cost!==null&&d.costComplete?subtractAmounts(d.revenue!,d.cost):null;}
+  }
+  for(const r of group)r.revenue=addAmounts(r.daily.map(d=>d.revenue));
+ }
+ return rows;
 }
