@@ -1,6 +1,6 @@
 import type {Entry} from './model';
 type Row=Record<string,any>;
-export type ManagerPayroll={id:string;personId:string;profileType:string;from:string;to:string;paise:number;source:string};
+export type ManagerPayroll={id:string;personId:string;profileType:string;from:string;to:string;paise:number;source:string;final?:boolean};
 const active=(r:Row,date:string)=>r.effective_from<=date&&(!r.effective_to||r.effective_to>=date);
 const isManager=(p:Row)=>/manager/i.test(`${p.label} ${p.designation_name}`)||['CLM','AOM','RM','CM'].includes(p.designation_code);
 function split(total:number,weights:[string,number][]){const denominator=weights.reduce((n,[,w])=>n+w,0);let cumulative=0,previous=0;return weights.map(([code,w])=>{cumulative+=denominator?w/denominator:1/weights.length;const end=Math.round(total*cumulative),value=end-previous;previous=end;return [code,value] as const;});}
@@ -10,7 +10,7 @@ export function managerShares(input:{month:string;stations:Row[];people:Row;poli
  const {month,stations,people,policies,rules,payroll}=input,start=`${month}-01`,end=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);
  const dates=Array.from({length:Number(end.slice(8))},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);
  const byId=new Map(stations.map(s=>[s.id,s])),byCode=new Map(stations.map(s=>[s.station_code,s]));
- const operating=(code:string)=>{const s=byCode.get(code);return s&&!s.is_ho&&!s.hide_from_location_list&&!/^HO(?:_|$)/i.test(code);};
+ const operating=(code:string)=>{const s=byCode.get(code);return s&&s.is_active!==false&&!s.is_ho&&!s.hide_from_location_list&&!/^HO(?:_|$)/i.test(code);};
  const entries=new Map<string,Entry>(),consumedPayroll=new Map<string,number>(),issues=new Set<string>(),managerPeople=new Set<string>(),accruedPeople=new Set<string>(),staffPeople=new Set<string>(),accruedStaff=new Set<string>();
  const managersByStation=new Map<string,Set<string>>();
  const allocations=new Map<string,{days:Set<string>;basis:Set<string>;targets:Set<string>;totalPaise:number}>();
@@ -26,9 +26,9 @@ export function managerShares(input:{month:string;stations:Row[];people:Row;poli
    const history=(people.assignments??[]).filter((a:Row)=>a.employee_id===person.id);
    let codes:string[]=rule?.station_codes??history.filter((a:Row)=>active(a,date)&&(policy.mode==='managed'||a.kind==='home')&&operating(a.station_code)).map((a:Row)=>a.station_code);
    const home=byId.get(person.location_id);
-   if(!codes.length&&!history.length&&!person.has_home_assignments&&home&&!home.hide_from_location_list)codes=[home.station_code];
-   if(!codes.length&&home?.is_ho)codes=[home.station_code];
-   codes=[...new Set(codes)].sort();
+   if(!codes.length&&!history.length&&!person.has_home_assignments&&home&&home.is_active!==false&&!home.hide_from_location_list)codes=[home.station_code];
+   if(!codes.length&&home?.is_ho&&home.is_active!==false&&!home.hide_from_location_list)codes=[home.station_code];
+   codes=[...new Set(codes)].filter(code=>{const s=byCode.get(code);return !s||s.is_active!==false&&!s.hide_from_location_list;}).sort();
    if(!codes.length){issues.add(`${role} ${person.employee_code||person.full_name}: no effective cost allocation; assign a home or responsible station.`);continue;}
    if(codes.some(code=>!byCode.has(code)))throw Error('A manager allocation references an unknown station.');
    if(['CLM','CM'].includes(policy.designation_code)||/cluster (manager|head)/i.test(policy.designation_name??''))for(const code of codes){const names=managersByStation.get(code)??new Set<string>();names.add(person.full_name);managersByStation.set(code,names);}
@@ -36,7 +36,7 @@ export function managerShares(input:{month:string;stations:Row[];people:Row;poli
    if(actual.length>1)throw Error(`Overlapping final manager payroll for ${person.employee_code||person.full_name}.`);
    const salary=(people.salaries??[]).filter((s:Row)=>s.employee_id===person.id&&active(s,date)).sort((a:Row,b:Row)=>b.effective_from.localeCompare(a.effective_from)||String(b.id).localeCompare(String(a.id)))[0];
    let cost:number,source:string,basis:string;
-   if(actual.length){const p=actual[0];if(p.from<start||p.to>end)throw Error('Manager payroll spans accounting months; allocate its payroll period first.');const covered=dates.filter(d=>d>=p.from&&d<=p.to&&employed(d)),index=covered.indexOf(date)+1;cost=Math.round(p.paise*index/covered.length)-Math.round(p.paise*(index-1)/covered.length);source=p.source;basis=`Final payroll ${p.id} · ${p.from} to ${p.to}`;consumedPayroll.set(p.id,(consumedPayroll.get(p.id)??0)+cost);}
+   if(actual.length){const p=actual[0];if(p.from<start||p.to>end)throw Error('Manager payroll spans accounting months; allocate its payroll period first.');const covered=dates.filter(d=>d>=p.from&&d<=p.to&&employed(d)),index=covered.indexOf(date)+1;cost=Math.round(p.paise*index/covered.length)-Math.round(p.paise*(index-1)/covered.length);source=p.source;basis=`${p.final===false?'Payroll accrual':'Final payroll'} ${p.id} · ${p.from} to ${p.to}`;if(p.final===false)(manager?accruedPeople:accruedStaff).add(identity);consumedPayroll.set(p.id,(consumedPayroll.get(p.id)??0)+cost);}
    else{if(salary?.monthly_ctc==null||!Number.isFinite(Number(salary.monthly_ctc))||Number(salary.monthly_ctc)<=0){issues.add(`${role} ${person.employee_code||person.full_name}: monthly salary is missing for ${month}.`);continue;}cost=daily(Math.round(Number(salary.monthly_ctc)*100),start,end,date);source=manager?'Manager salary accrual':'People salary accrual';basis=`Monthly salary ₹${Number(salary.monthly_ctc).toFixed(2)} · effective ${salary.effective_from}`;(manager?accruedPeople:accruedStaff).add(identity);}
    (manager?managerPeople:staffPeople).add(identity);const method=rule?.allocation??policy.allocation??'equal';
    const weights=codes.map(code=>[code,method==='delivery_share'?Math.max(0,(people.volumes??[]).filter((v:Row)=>v.station_code===code&&v.work_date===date).reduce((n:number,v:Row)=>n+Number(v.deliveries||0),0)):1] as [string,number]);

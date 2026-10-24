@@ -21,3 +21,10 @@ test('organizational HO parent links never merge separate office cost pools',()=
  const s=[{id:'mjr',station_code:'HO_MJR',parent_station_id:null,is_ho:true},{id:'clt',station_code:'HO_CLT',parent_station_id:'mjr',is_ho:true},{id:'base',station_code:'BASE',parent_station_id:'mjr',is_ho:false},{id:'xpt',station_code:'XPT',parent_station_id:'base',is_ho:false}];
  assert.deepEqual(baseStations(s,[]).map(s=>[s.code,s.base]),[['HO_MJR','HO_MJR'],['HO_CLT','HO_CLT'],['BASE','BASE'],['XPT','BASE']]);
 });
+test('missing or malformed delivered volume cannot silently become zero or contaminate HO weights',()=>{
+ const topology=[location('A')],dimensions=[dimension('A','Kerala')];
+ const daily=[{station_code:'A',work_date:'2026-08-31',shipment_present:true,deliveries:999},{station_code:'A',work_date:'2026-09-01',shipment_present:true,deliveries:10},{station_code:'A',work_date:'2026-09-02',shipment_present:true,deliveries:'bad'}];
+ const result=deliveryVolumes('2026-09',daily,[],topology,dimensions)[0];assert.equal(result.delivered,10);assert.deepEqual(result.missingSources,['A']);assert.equal(result.reportedDays,1);
+ for(const units of [null,undefined,'',-1,'bad']){const result=deliveryVolumes('2026-09',[],[{station_code:'A',month:'2026-09-01',units,through_date:'2026-09-30'}],topology,[dimension('A','Kerala','NOW')])[0];assert.equal(result.delivered,null);assert.deepEqual(result.missingSources,['A']);}
+ const zero=deliveryVolumes('2026-09',[{station_code:'A',work_date:'2026-09-01',shipment_present:true,deliveries:0}],[],topology,dimensions)[0];assert.equal(zero.delivered,0);assert.deepEqual(zero.missingSources,[]);
+});

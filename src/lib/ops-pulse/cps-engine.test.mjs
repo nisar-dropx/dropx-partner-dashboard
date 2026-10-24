@@ -583,3 +583,58 @@ test('Finance fuel fallback covers punched workdays without shipment rows and re
  f.payout_inputs={};f.attendance[0].status='A';
  const absent=rebuildCps(b,f);assert.equal(absent.daily[0].da,0);assert.ok(absent.da_details.every(d=>d.fuel===0));
 });
+
+test('zero or invalid People CTC does not erase known workforce fixed pay',()=>{
+ for(const monthly_ctc of [0,-100,'', 'invalid']) {
+  const f=facts();
+  f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
+  f.mappings[0].payment_values={SALARY:30000};
+  f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
+  f.employees=[{id:'e1',employee_code:'E1',full_name:'Employee',location_id:'station-a',is_active:true,designation:'DA'}];
+  f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc}];
+  const r=rebuildCps(base(),f);
+  assert.equal(r.daily[0].da_salary,1000,`known fixed pay with CTC=${monthly_ctc}`);
+  assert.ok(r.gaps.some(g=>g.kind==='People CTC missing'));
+  assert.ok(!r.breakup.some(line=>line.source==='People CTC'));
+ }
+});
+
+test('an expired People allocation cannot suppress an effective workforce salary',()=>{
+ const f=facts();
+ f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
+ f.mappings[0].payment_values={SALARY:30000};
+ f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
+ f.employees=[{id:'e1',employee_code:'E1',full_name:'Manager with delivery pay',location_id:'ho',is_active:true,designation:'CLM'}];
+ f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
+ f.people_assignments=[{employee_id:'e1',station_code:'A',effective_from:'2026-01-01',effective_to:'2026-08-31'}];
+ const r=rebuildCps(base(),f);
+ assert.equal(r.daily[0].total,1000);
+ assert.equal(r.daily[0].da_salary,1000);
+ assert.ok(!r.breakup.some(line=>line.source==='People CTC'));
+ assert.ok(r.gaps.some(g=>g.kind==='People allocation missing; workforce fixed pay retained'));
+});
+
+test('positive allocated People CTC replaces fixed pay even when its station is outside the current filter',()=>{
+ const f=facts();
+ f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
+ f.mappings[0].payment_values={SALARY:30000};
+ f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
+ f.employees=[{id:'e1',employee_code:'E1',full_name:'Manager with delivery pay',location_id:'ho',is_active:true,designation:'CLM'}];
+ f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
+ f.people_assignments=[{employee_id:'e1',station_code:'B',effective_from:'2026-01-01',effective_to:null}];
+ assert.equal(rebuildCps(base(),f).daily[0].total,0);
+ const all=rebuildCps(base([day('A'),day('B')]),f);
+ assert.equal(all.daily.reduce((sum,d)=>sum+d.total,0),1100);
+ assert.equal(all.daily.find(d=>d.station_code==='B').utr,1100);
+});
+
+test('inactive and HO locations cannot receive or dilute explicit People cost allocations',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce=[];
+ f.stations[1].is_active=false;f.stations.push({id:'ho',station_code:'HO_KL',is_active:true,is_ho:true});
+ f.employees=[{id:'e1',employee_code:'E1',full_name:'Manager',location_id:'station-a',is_active:true,designation:'CLM'}];
+ f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:30000}];
+ f.people_rules=[{employee_id:'e1',station_codes:['A','B','HO_KL'],head:'UTR',allocation:'equal',effective_from:'2026-01-01'}];
+ const r=rebuildCps(base(),f);
+ assert.equal(r.daily[0].utr,1000);
+ assert.ok(r.breakup.every(line=>line.station_code==='A'));
+});

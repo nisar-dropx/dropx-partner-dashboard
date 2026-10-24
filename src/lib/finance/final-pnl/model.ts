@@ -23,7 +23,7 @@ export interface Report {
  dimensions?:Dimension[];
  month:string;entries:Entry[];schedules:Schedule[];losses:Loss[];stations:string[];issues:string[];capturedAt:string|null;counts:Record<string,number>;
  totals:{income:number;expense:number;profit:number;recovery:number;gst:number};
- invoices:{key:string;month:string;station:string;reference:string;date:string;taxPaise:number;totalPaise:number;issues:string[]}[];
+ invoices:{key:string;month:string;station:string;baseStation?:string;reference:string;date:string;taxPaise:number;totalPaise:number;issues:string[]}[];
  audit:{sequence:number;entry_id:string;kind:string;action:string;actor:string;reason:string;at:string;before_json:string|null;after_json:string}[];
  ingest:{runId:string;at:string;documents:number;problems:string[]}|null;
 }

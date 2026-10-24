@@ -496,12 +496,85 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   const people=new Map<string,CpsPersonCost>();
   const detailDays:CpsDaDay[]=[];
   const employeeCostDays=new Set<string>();
-  // Canonical employee CTC replaces fixed DA components for that employee, so it cannot be counted twice.
+  const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
+  const policyHistoryProvided=Array.isArray(facts.policy_history);
+  const paymentPolicyOn=(w:RecordRow,date:string):{
+    station_id:string|null;
+    station_code_snapshot:string|null;
+    designation_is_active:boolean;
+    is_field_operations:boolean;
+    provider_mapping_required:boolean;
+  }|null=>{
+    if(!policyHistoryProvided) return {
+      station_id:w.location_id??null,
+      station_code_snapshot:stationById.get(w.location_id)?.station_code??null,
+      designation_is_active:w.designation_is_active!==false,
+      is_field_operations:w.designation_is_active!==false&&w.is_field_operations!==false,
+      provider_mapping_required:w.designation_is_active!==false&&w.provider_mapping_required!==false,
+    };
+    const history=facts.policy_history!.filter(policy=>policy.workforce_id===w.id&&activeOn(policy,date))
+      .sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0];
+    return history ? {
+      station_id:history.station_id??null,
+      station_code_snapshot:history.station_code_snapshot??null,
+      designation_is_active:history.designation_is_active!==false,
+      is_field_operations:history.designation_is_active!==false&&history.is_field_operations===true,
+      provider_mapping_required:history.designation_is_active!==false&&history.provider_mapping_required===true,
+    } : null;
+  };
+  const operating=facts.stations.filter(s=>s.is_active && !s.hide_from_location_list && !s.is_ho && !/^HO(?:_|$)/.test(s.station_code));
+  const operatingCodes=new Set(operating.map(s=>s.station_code));
+  const peopleAllocation=(e:RecordRow,date:string,policy:CpsPeoplePolicy)=>{
+    const home=stationById.get(e.location_id);
+    const rules=facts.people_rules.filter(r=>r.employee_id===e.id && activeOn(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
+    const rule=rules[0];
+    const overhead=policy.mode==='managed';
+    const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
+    const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
+    const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
+    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||(linkedPolicy?.designation_is_active&&linkedPolicy.is_field_operations)));
+    const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
+      ??stationById.get(linkedPolicy?.station_id)?.station_code
+      ??linkedPolicy?.station_code_snapshot;
+    let codes:string[]=rule?.station_codes??[];
+    let head:CpsHead=rule?.head ?? policy.head;
+    if(!rule) {
+      if(!overhead) {
+        const homeHistory=(facts.people_assignments??[]).filter(a=>a.employee_id===e.id && (a as RecordRow).kind==='home');
+        const assigned=homeHistory.filter(a=>activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code));
+        codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):(homeHistory.length||e.has_home_assignments)
+          ? [...new Set(assigned.map(a=>a.station_code))] : operating.some(s=>s.id===home?.id)?[home!.station_code]:[];
+      }
+      else {
+        // The current People assignment history is authoritative when supplied;
+        // an expired assignment must not revive an old org-position/email scope.
+        if(facts.people_assignments) codes=[...new Set(facts.people_assignments.filter(a=>a.employee_id===e.id&&activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code)).map(a=>a.station_code))];
+        else {
+          codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
+          if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
+        }
+      }
+    }
+    return {codes:[...new Set(codes)].filter(code=>operatingCodes.has(code)),head,rule,linkedWorkforce};
+  };
+  const peopleCostAssignments=new Map<string,ReturnType<typeof peopleAllocation>&{policy:CpsPeoplePolicy;salary:RecordRow|undefined}>();
+  // Only an actual, positive, allocated People CTC can replace workforce fixed pay.
+  // Reuse the exact allocation below so a missing/expired assignment cannot erase salary.
   for(const e of facts.employees) for(const date of dates) {
     if(!employedOn(e,date)) continue;
+    const policy=policyFor(e,date);
+    if(!policy || policy.mode==='excluded') continue;
+    const allocation=peopleAllocation(e,date,policy);
     const salary=facts.salaries.filter(s=>s.employee_id===e.id && activeOn(s,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
-    if(salary?.monthly_ctc!=null && policyFor(e,date)?.mode && policyFor(e,date)?.mode!=='excluded') employeeCostDays.add(`${e.id}|${date}`);
+    peopleCostAssignments.set(`${e.id}|${date}`,{...allocation,policy,salary});
+    if(num(salary?.monthly_ctc)>0 && allocation.codes.length) employeeCostDays.add(`${e.id}|${date}`);
   }
+  const reviewUnallocatedCtc=(worker:RecordRow,date:string,stations:string[],knownSalary:number)=>{
+    if(worker.source_profile_type!=='employee' || knownSalary<=0) return;
+    const assignment=peopleCostAssignments.get(`${worker.source_profile_id}|${date}`);
+    if(assignment && num(assignment.salary?.monthly_ctc)>0 && !assignment.codes.length)
+      for(const station of new Set(stations)) gap('People allocation missing; workforce fixed pay retained',station,date,'','','',0,0,'People / Finance');
+  };
   for(const g of groups.values()) {
     // A single effective card belongs to the DropX identity; multiple provider IDs share fixed pay once.
     const candidates=mappings.filter(m=>m.worker?.id===g.worker.id && activeOn(m,g.date) && configured(m));
@@ -538,6 +611,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       for(const row of g.rows) {row.mapping_status=issue;gap(issue,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));}
       if(conflict || !card || thresholdConfigurationMissing) continue;
     }
+    reviewUnallocatedCtc(g.worker,g.date,g.rows.map(row=>row.station_code),costs.salary);
     if(g.worker.source_profile_type==='employee' && employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)) costs.salary=0;
     const volumes=new Map<string,number>();g.rows.forEach(r=>volumes.set(r.station_code,(volumes.get(r.station_code)??0)+num(r.total_delivery)));
     const salaryByStation=allocateCost(costs.salary,[...volumes.keys()],volumes);
@@ -599,32 +673,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   // Providerless designations accrue from their direct, effective-dated allocation.
   // A historical provider mapping remains authoritative for its own dates; a direct
   // allocation may never overlap it because that would create duplicate pay.
-  const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
-  const policyHistoryProvided=Array.isArray(facts.policy_history);
-  const paymentPolicyOn=(w:RecordRow,date:string):{
-    station_id:string|null;
-    station_code_snapshot:string|null;
-    designation_is_active:boolean;
-    is_field_operations:boolean;
-    provider_mapping_required:boolean;
-  }|null=>{
-    if(!policyHistoryProvided) return {
-      station_id:w.location_id??null,
-      station_code_snapshot:stationById.get(w.location_id)?.station_code??null,
-      designation_is_active:w.designation_is_active!==false,
-      is_field_operations:w.designation_is_active!==false&&w.is_field_operations!==false,
-      provider_mapping_required:w.designation_is_active!==false&&w.provider_mapping_required!==false,
-    };
-    const history=facts.policy_history!.filter(policy=>policy.workforce_id===w.id&&activeOn(policy,date))
-      .sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0];
-    return history ? {
-      station_id:history.station_id??null,
-      station_code_snapshot:history.station_code_snapshot??null,
-      designation_is_active:history.designation_is_active!==false,
-      is_field_operations:history.designation_is_active!==false&&history.is_field_operations===true,
-      provider_mapping_required:history.designation_is_active!==false&&history.provider_mapping_required===true,
-    } : null;
-  };
   for(const w of facts.workforce) {
     for(const date of dates) {
       if(!employedOn(w,date)) continue;
@@ -683,6 +731,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         else if(line.bucket==='fuel') {fuel+=line.amount;add(station,date,'DA',line.label,line.amount,'Direct workforce allocation');}
         else if(!salaryCoveredByPeople) {salary+=line.amount;add(station,date,'DA',`Salary / ${line.label}`,line.amount,'Direct workforce allocation');}
       }
+      reviewUnallocatedCtc(w,date,[station],salary);
       if(salaryCoveredByPeople && salary===0 && fuel===0 && van===0) continue;
       if(!result.total&&!result.present&&!result.lines.some(line=>line.schedule==='per_month')) continue;
       const synthetic={id:`direct:${w.id}:${date}`,client:'Direct',work_date:date,station_code:station,provider_employee_id:'',provider_employee_name:w.full_name,dropx_name:w.full_name,dropx_emp_code:w.dropx_id,pay_type:'DIRECT',total_delivery:0,total_activity:result.present?1:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:salary,fuel_pay:fuel,van_pay:van,da_total_pay:salary+fuel,mapping_status:'Mapped'} as LiveAssociate;
@@ -713,47 +762,11 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   const staff=new Map<string,CpsStaffCost>();
   const allocationNotices=new Set<string>();
   const staffed=new Set<string>(),missingCtc=new Set<string>();
-  const operating=facts.stations.filter(s=>s.is_active && !s.hide_from_location_list && !s.is_ho && !/^HO(?:_|$)/.test(s.station_code));
   for(const e of facts.employees) for(const date of dates) {
-    if(!employedOn(e,date)) continue;
-    const policy=policyFor(e,date);
-    if(!policy) continue;
-    if(policy.mode==='excluded') continue;
-    const home=stationById.get(e.location_id);
-    const rules=facts.people_rules.filter(r=>r.employee_id===e.id && activeOn(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
-    const rule=rules[0];
-    const overhead=policy.mode==='managed';
-    const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
-    const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
-    const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
-    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||(linkedPolicy?.designation_is_active&&linkedPolicy.is_field_operations)));
-    const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
-      ??stationById.get(linkedPolicy?.station_id)?.station_code
-      ??linkedPolicy?.station_code_snapshot;
-    let codes:string[]=rule?.station_codes??[];
-    let head:CpsHead=rule?.head ?? policy.head;
-    if(!rule) {
-      if(!overhead) {
-        const homeHistory=(facts.people_assignments??[]).filter(a=>a.employee_id===e.id && (a as RecordRow).kind==='home');
-        const assigned=homeHistory.filter(a=>activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code));
-        codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):(homeHistory.length||e.has_home_assignments)
-          ? [...new Set(assigned.map(a=>a.station_code))] : operating.some(s=>s.id===home?.id)?[home!.station_code]:[];
-      }
-      else {
-        // The current People assignment history is authoritative when supplied;
-        // an expired assignment must not revive an old org-position/email scope.
-        if(facts.people_assignments) codes=[...new Set(facts.people_assignments.filter(a=>a.employee_id===e.id&&activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code)).map(a=>a.station_code))];
-        else {
-          codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
-          if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
-        }
-      }
-    }
-    // An unassigned role is not a station exception. Missing CTC is flagged
-    // only after a verified operating-station assignment exists.
-    if(!codes.length) continue;
-    if(!codes.some(c=>selected.has(c))) continue;
-    const salary=facts.salaries.filter(s=>s.employee_id===e.id && activeOn(s,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
+    const assignment=peopleCostAssignments.get(`${e.id}|${date}`);
+    if(!assignment) continue;
+    const {policy,codes,head,rule,linkedWorkforce,salary}=assignment;
+    if(!codes.length || !codes.some(c=>selected.has(c))) continue;
     if(!salary || salary.monthly_ctc==null || num(salary.monthly_ctc)<=0) {
       for(const c of codes) {missingCtc.add(`${c}|${date}`);gap('People CTC missing',c,date,'',e.full_name,e.employee_code,0,0,'People / Finance');}continue;
     }

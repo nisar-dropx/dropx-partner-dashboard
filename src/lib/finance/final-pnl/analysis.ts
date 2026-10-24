@@ -1,4 +1,4 @@
-import type {Dimension,Entry} from './model';
+import type {Dimension,Entry,Report} from './model';
 export type PnlFilters={region:string[];state:string[];model:string[];format:string[];manager:string[];station:string[]};
 export const emptyFilters=():PnlFilters=>({region:[],state:[],model:[],format:[],manager:[],station:[]});
 const facetValues=(d:Dimension,key:keyof PnlFilters)=>key==='manager'?d.managers:[key==='station'?d.code:key==='format'?(d.format||'Not applicable'):d[key]];
@@ -39,5 +39,25 @@ export type GroupBy='region'|'state'|'model'|'manager'|'station';
 export function dimensionFor(code:string,dimensions:Dimension[]):Dimension{return dimensions.find(d=>d.code===code)??{code,name:code,region:'Unassigned',state:'Unassigned',model:'Unassigned',cluster:'Unassigned',managers:['Unassigned'],isHo:/^HO(?:_|$)/i.test(code)};}
 export function matchesDimension(d:Dimension,f:PnlFilters){return (!f.region.length||f.region.includes(d.region))&&(!f.state.length||f.state.includes(d.state))&&(!f.model.length||f.model.includes(d.model))&&(!f.format.length||f.format.includes(d.format||'Not applicable'))&&(!f.manager.length||d.managers.some(m=>f.manager.includes(m)))&&(!f.station.length||f.station.includes(d.code));}
 export function filterEntries(entries:Entry[],dimensions:Dimension[],filters:PnlFilters){return entries.filter(e=>!e.deleted&&matchesDimension(dimensionFor(e.station,dimensions),filters));}
-export function entryTotals(entries:Entry[]){const income=entries.filter(e=>e.side==='income').reduce((n,e)=>n+e.paise,0),expense=entries.filter(e=>e.side==='expense').reduce((n,e)=>n+e.paise,0),manager=entries.filter(e=>e.side==='expense'&&e.head==='Manager share').reduce((n,e)=>n+e.paise,0),recovery=entries.filter(e=>e.recovery).reduce((n,e)=>n+e.paise,0);return {income,expense,manager,recovery,profit:income-expense,margin:income?100*(income-expense)/income:null};}
-export function groupEntries(entries:Entry[],dimensions:Dimension[],by:GroupBy){const groups=new Map<string,Entry[]>();for(const e of entries){const d=dimensionFor(e.station,dimensions),key=by==='station'?d.code:by==='manager'?[...new Set(d.managers)].sort().join(' / '):d[by];const list=groups.get(key)??[];list.push(e);groups.set(key,list);}return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([key,entries])=>({key,entries,stations:[...new Set(entries.map(e=>e.station))],...entryTotals(entries)}));}
+export function entryTotals(rows:Entry[]){const entries=rows.filter(e=>!e.deleted),income=entries.filter(e=>e.side==='income').reduce((n,e)=>n+e.paise,0),expense=entries.filter(e=>e.side==='expense').reduce((n,e)=>n+e.paise,0),manager=entries.filter(e=>e.side==='expense'&&e.head==='Manager share').reduce((n,e)=>n+e.paise,0),recovery=entries.filter(e=>e.recovery).reduce((n,e)=>n+e.paise,0);return {income,expense,manager,recovery,profit:income-expense,margin:income?100*(income-expense)/income:null};}
+export function groupEntries(entries:Entry[],dimensions:Dimension[],by:GroupBy){const groups=new Map<string,Entry[]>();for(const e of entries){if(e.deleted)continue;const d=dimensionFor(e.station,dimensions),key=by==='station'?d.code:by==='manager'?[...new Set(d.managers)].sort().join(' / '):d[by];const list=groups.get(key)??[];list.push(e);groups.set(key,list);}return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([key,entries])=>({key,entries,stations:[...new Set(entries.map(e=>e.station))],...entryTotals(entries)}));}
+
+/** Invoice identity includes supplier GSTIN; a displayed reference alone is not unique.
+ * Rejected invoices have no posted entries, but must remain visible for review. */
+export function invoiceRegister(invoices:Report['invoices'],entries:Entry[],dimensions:Dimension[],filters:PnlFilters,station=''){
+ const companyView=!station&&Object.values(filters).every(values=>!values.length);
+ return invoices.filter(invoice=>{
+  if(companyView)return true;
+  const linked=entries.filter(entry=>entry.id.startsWith(`invoice:${invoice.key}:`));
+  const bases=[...new Set(linked.length?linked.map(entry=>entry.station):[invoice.baseStation||invoice.station])];
+  return bases.some(code=>(!station||code===station)&&matchesDimension(dimensionFor(code,dimensions),filters));
+ });
+}
+/** Source presence is separate from the arithmetic result. HO alone is not operating-cost evidence. */
+export function entryCoverage(rows:Entry[]){
+ const entries=rows.filter(e=>!e.deleted),stations=[...new Set(entries.map(e=>e.station))];
+ return {
+  missingIncome:stations.filter(station=>entries.some(e=>e.station===station&&e.side==='expense')&&!entries.some(e=>e.station===station&&e.side==='income'&&!e.recovery)),
+  missingExpenses:stations.filter(station=>entries.some(e=>e.station===station&&e.side==='income'&&!e.recovery)&&!entries.some(e=>e.station===station&&e.side==='expense'&&!e.id.startsWith('ho-allocation:'))),
+ };
+}

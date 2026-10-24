@@ -32,7 +32,7 @@ export function SourceExpenses({days,report,includeOverhead}:{days:CfoDay[];repo
    </>}
   </details>)}
   {sum('contracts')!==0&&<details className="pnl-expense"><summary><span>Outsourced contracts</span><strong>{money(sum('contracts'))}</strong></summary><CostSourceGroups lines={lines.filter(l=>l.source==='Finance contract')} flattenSingle/></details>}
-  <details className="pnl-expense"><summary><span>Regional HO allocation{!includeOverhead?' · shown separately':''}</span><strong>{money(sum('regional'))}</strong></summary><p>Existing staff allocations are removed before the remaining HO cost is allocated.</p><Link href="/master/business">Review HO allocation →</Link></details>
+  <details className="pnl-expense"><summary><span>Regional HO allocation{!includeOverhead?' · shown separately':''}</span><strong>{money(sum('regional'))}</strong></summary><p>Existing staff allocations are removed first. Regional HO follows delivered volume; Amazon Now regional HO follows revenue. Shares are calculated before display filters.</p><Link href="/master/business">Review HO allocation →</Link></details>
   <div className="pnl-line pnl-total"><b>{includeOverhead?'Expenses including regional HO':'Direct operating expenses'}</b><b>{money(includeOverhead?total.expense:total.direct)}</b></div>
  </section>;
 }

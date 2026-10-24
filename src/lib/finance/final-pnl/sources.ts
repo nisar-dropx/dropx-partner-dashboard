@@ -2,7 +2,7 @@ import 'server-only';
 import {defaultOverheadRules,deliveryVolumes,pnlRegion} from './overhead-policy';
 import {hoSalaries} from './ho-salaries';
 import {operatingCosts} from './operating-costs';
-import {boundedReads,sourceReadError,transientSourceError} from './source-read';
+import {boundedReads,reconcileWorkforcePayroll,sourceReadError,transientSourceError} from './source-read';
 import {managerShares,type ManagerPayroll} from './manager-shares';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {baseStations,latestPublications,monthEnd,monthValue,paise,recoveryRecognitionMonth,reportingState,type Sources,type Entry,type Loss} from './model';
@@ -26,10 +26,10 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  const capturedAt=new Date().toISOString(),start=`${month}-01`,end=monthEnd(month);
  const historyStart='2020-01-01';
  const table=(name:string,fields='*')=>db.from(name).select(fields).eq('company_id',company);
- const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims,peopleFacts,peoplePolicies,peopleRules,businessMasters,workforceProfiles,paymentDetails,hoFacts,nowVolumes]=await boundedReads([
+ const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims,peopleFacts,peoplePolicies,peopleRules,businessMasters,workforceProfiles,paymentDetails,hoFacts,nowVolumes,workforceRuns]=await boundedReads([
   ()=>rows(table('stations','id,station_code,station_name,parent_station_id,region,state,city,cluster,is_ho,is_active,hide_from_location_list,location_models(code,name)').order('id'),'Station topology'),
   ()=>rows(table('cod_station_settings','location_id,portal_station_code').order('location_id'),'Station aliases'),
-  ()=>rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
+  ()=>rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end,payroll_run_id,source_calculated_at').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
   ()=>rows(table('helper_payout_publications','id,helper_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end').gte('period_end',historyStart).order('id'),'Published helper payouts'),
   ()=>rows(table('hr_payroll_runs','id,period_start,period_end,status,published_at,approved_at').gte('period_end',historyStart).order('id'),'Employee payroll runs'),
   ()=>rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present').lte('month',month).order('month').order('case_key'),'Ops Pulse losses'),
@@ -43,7 +43,8 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   ()=>rows(table('workforce','id,source_profile_type,source_profile_id').in('source_profile_type',['employee','contractor']).order('id'),'Payroll identity links'),
   ()=>rows(table('payment_requests','id,location_id,station_code,location_code,work_date,request_no,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,amount_approved,amount,amount_requested,payment_heads(name)').gte('work_date',start).lte('work_date',end).order('id'),'Expense request details'),
   ()=>db.rpc('finance_ho_people',{p_company:company,p_from:start,p_through:end}),
-  ()=>rows(table('finance_now_volumes','station_code,month,through_date,units').eq('month',start).order('station_code'),'Amazon Now volume')
+  ()=>rows(table('finance_now_volumes','station_code,month,through_date,units').eq('month',start).order('station_code'),'Amazon Now volume'),
+  ()=>rows(table('workforce_payroll_runs','id,status,period_start,period_end,calculated_at').gte('period_end',historyStart).order('id'),'Workforce payroll status')
  ]);
  const topology=baseStations(stations as any,aliases as any).map(t=>{const s=stations.find(s=>s.station_code===t.code)!;return {...t,active:s.is_active!==false,isHo:!!s.is_ho,hidden:!!s.hide_from_location_list};}),stationById=new Map(stations.map(s=>[s.id,s.station_code]));
  const issues:string[]=[],entries:Entry[]=[],losses:Loss[]=[];
@@ -56,7 +57,15 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  entries.push(...costs.values());
  if(pendingFleet)issues.push(`${pendingFleet} daily fleet accrual rows use pending vehicle identifiers. Verify their final bills before closing the month.`);
  if(heldCosts)issues.push(`${heldCosts} salary-labelled expense groups are excluded to avoid counting payroll twice. Review salary payments outside published payroll.`);
- const allWorkforce=latestPublications(workforce,'workforce_id'),allHelpers=latestPublications(helpers,'helper_id');
+ const finalWorkforceItems:Row[]=[];
+ const approvedWorkforceRuns=workforceRuns.filter(r=>['approved','paid'].includes(r.status));
+ for(let i=0;i<approvedWorkforceRuns.length;i+=50)finalWorkforceItems.push(...await rows(table('workforce_payroll_items').in('payroll_run_id',approvedWorkforceRuns.slice(i,i+50).map(r=>r.id)).order('id'),'Approved workforce payroll items'));
+ const stationIdsByCode=new Map(stations.map(s=>[s.station_code,s.id]));
+ const workforceSelection=reconcileWorkforcePayroll(latestPublications(workforce,'workforce_id'),workforceRuns,finalWorkforceItems.map(item=>({...item,station_id:item.station_id||stationIdsByCode.get(item.station_code)})));
+ const allWorkforce=workforceSelection.publications,allHelpers=latestPublications(helpers,'helper_id');
+ const reviewWorkforceCount=allWorkforce.filter(p=>!p.payrollFinal&&p.period_start<=end&&p.period_end>=start).length;
+ issues.push(...workforceSelection.issues.filter(issue=>!issue.includes('workforce publications remain under payroll review')));
+ if(reviewWorkforceCount)issues.push(`${reviewWorkforceCount} workforce publications for this month are under review or have no verifiable final payroll run. Their amounts are disclosed accruals; approved or paid payroll replaces them.`);
  const finalRuns=hrRuns.filter(r=>['approved','locked','published'].includes(r.status));
  const hrPeople:Row[]=[],hrItems:Row[]=[];
  for(let i=0;i<finalRuns.length;i+=50){const ids=finalRuns.slice(i,i+50).map(r=>r.id);if(!ids.length)continue;
@@ -65,7 +74,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  if(peopleFacts.error||!peopleFacts.data||!Array.isArray(peopleFacts.data.employees))throw Error('People salary and responsibility assignments could not be read.');
  const runMap=new Map(finalRuns.map(r=>[r.id,r]));
  const managerPayroll:ManagerPayroll[]=hrPeople.flatMap(p=>{const run=runMap.get(p.run_id)!;return run.period_start<=end&&run.period_end>=start?[{id:p.id,personId:p.worker_id,profileType:p.worker_type,from:run.period_start,to:run.period_end,paise:paise(p.net_pay)+paise(p.statutory_deductions)+paise(p.other_deductions)+paise(p.employer_contributions),source:'Approved People payroll'}]:[];});
- for(const p of allWorkforce){const link=workforceProfiles.find(w=>w.id===p.workforce_id);if(link&&p.period_start<=end&&p.period_end>=start&&p.item?.gross_amount!=null)managerPayroll.push({id:`workforce:${p.id}`,personId:link.source_profile_id,profileType:link.source_profile_type,from:p.period_start,to:p.period_end,paise:paise(p.item.gross_amount),source:'Published People payroll'});}
+ for(const p of allWorkforce){const link=workforceProfiles.find(w=>w.id===p.workforce_id);if(link&&p.period_start<=end&&p.period_end>=start&&p.item?.gross_amount!=null)managerPayroll.push({id:`workforce:${p.id}`,personId:link.source_profile_id,profileType:link.source_profile_type,from:p.period_start,to:p.period_end,paise:paise(p.item.gross_amount),source:p.payrollFinal?'Approved workforce payroll':'Published payroll accrual',final:p.payrollFinal===true});}
  const manager=managerShares({month,stations,people:peopleFacts.data,policies:peoplePolicies,rules:peopleRules,payroll:managerPayroll});
  if(hoFacts.error||!hoFacts.data||!Array.isArray(hoFacts.data.people))throw Error('HO People salary sources could not be read. The saved report is retained.');
  const ho=hoSalaries(month,hoFacts.data,stations,manager.entries,managerPayroll);
@@ -73,15 +82,15 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  entries.push(...manager.entries,...ho.entries);issues.push(...manager.issues,...ho.issues);
  let payrollCount=0;
  for(const [kind,list] of [['Workforce',allWorkforce],['Helper',allHelpers]] as const){
-  const groups=new Map<string,{paise:number;count:number}>();
+  const groups=new Map<string,{paise:number;count:number;review:number;details:NonNullable<Entry['details']>}>();
   for(const r of list){
    if(r.period_start>end||r.period_end<start)continue;
    if(r.period_start<start||r.period_end>end){issues.push(`${kind} publication ${r.id} crosses month boundaries; add a documented allocation.`);continue;}
    const item=r.item;if(!item||item.gross_amount==null){issues.push(`${kind} publication ${r.id} has no final gross amount.`);continue;}
    const station=stationById.get(r.station_id)||item.station_code||'UNKNOWN';
-   const n=paise(item.gross_amount)-(kind==='Workforce'?(manager.consumedPayroll.get(`workforce:${r.id}`)??0):0);if(!n){payrollCount++;continue;}const existing=groups.get(station)??{paise:0,count:0};existing.paise+=n;existing.count++;groups.set(station,existing);payrollCount++;
+   const n=paise(item.gross_amount)-(kind==='Workforce'?(manager.consumedPayroll.get(`workforce:${r.id}`)??0):0);if(!n){payrollCount++;continue;}const existing=groups.get(station)??{paise:0,count:0,review:0,details:[]};existing.paise+=n;existing.count++;if(kind==='Workforce'&&!r.payrollFinal)existing.review++;existing.details.push({date:end,paise:n,reference:r.id,label:`${item.worker_name||item.dropx_id||r.workforce_id||r.helper_id} · ${kind==='Workforce'?(r.payrollFinal?'approved payroll':r.payrollUnverified?'unverified publication accrual':'payroll review accrual'):'published payout'}`});groups.set(station,existing);payrollCount++;
   }
-  for(const [station,g] of groups)add({id:`payroll:${kind}:${station}`,station,side:'expense',head:`${kind} payouts`,description:`${g.count} latest published payouts · gross before recoveries`,paise:g.paise,source:'Published payroll',reference:`${kind} publications / ${month}`,date:end});
+  for(const [station,g] of groups)add({id:`payroll:${kind}:${station}`,station,side:'expense',head:`${kind} payouts`,description:`${g.count} payroll items · gross before recoveries${g.review?` · ${g.review} unverified or under review`:''}`,paise:g.paise,source:kind==='Workforce'?(g.review?'Payroll with review accruals':'Approved workforce payroll'):'Published payroll',reference:`${kind} payroll / ${month}`,date:end,details:g.details});
  }
  const hrSeen=new Set<string>();const employeeCosts=new Map<string,{paise:number;count:number}>();
  for(const p of hrPeople){const run=runMap.get(p.run_id)!;if(run.period_start> end||run.period_end<start)continue;
@@ -144,5 +153,5 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  if(nlPlans.some(p=>Array.isArray(p.allocations)&&p.allocations.length))issues.push('NL allocations are plans. Their source currently has no explicit payroll posting link; confirm the deduction evidence before recording recovery.');
  issues.push('Final P&L remains open for expense completeness review. Contract premises rent and fleet rent are accrued; configured CPS estimates are excluded. Invoice chargebacks already count as expenses, so loss-register amounts are not charged again.');
  const dimensions=[...new Set(topology.map(s=>s.base))].map(code=>{const station=stations.find(s=>s.station_code===code)!;const model=Array.isArray(station.location_models)?station.location_models[0]:station.location_models;const children=topology.filter(s=>s.base===code).map(s=>s.code);const managers=[...new Set(children.flatMap(child=>[...(manager.managersByStation.get(child)??[])]))].sort();return {code,name:station.station_name||code,region:pnlRegion(reportingState(station.state),businessMasters.find(m=>m.kind==='reporting_region'&&m.data.station_code===code)?.data.region||station.region||'Unassigned'),state:reportingState(station.state),model:station.is_ho?'HO':model?.code||'Unassigned',format:model?.code==='NOW'?(businessMasters.filter(m=>m.kind==='now_store'&&m.data.station_code===code&&m.data.effective_from<=end&&(!m.data.effective_to||m.data.effective_to>=start)).sort((a,b)=>b.data.effective_from.localeCompare(a.data.effective_from))[0]?.data.category||'Unassigned'):'Not applicable',cluster:station.cluster||'Unassigned',managers:managers.length?managers:['Unassigned'],isHo:!!station.is_ho};});
- return {company,month,capturedAt,dimensions,volumes:deliveryVolumes(month,cps.data.daily??[],nowVolumes,topology,dimensions),overheadRules:defaultOverheadRules(month,dimensions,topology),stations:topology,entries,losses,issues:[...new Set(issues)],counts:{schemaVersion:4,managerCount:manager.managerCount,accruedManagerCount:manager.accruedManagerCount,managerSharePaise:manager.entries.filter(e=>e.head==='Manager share').reduce((n,e)=>n+e.paise,0),hoSalaryRows:ho.entries.length,peopleCount:manager.peopleCount,accruedPeopleCount:manager.accruedPeopleCount,utrSalaryPaise:manager.entries.filter(e=>e.head==='UTR salaries').reduce((n,e)=>n+e.paise,0),expenseDetailRows:entries.reduce((n,e)=>n+(e.details?.length??0),0),invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,employeePayrollRows:hrSeen.size,finalEmployeeRuns:finalRuns.filter(r=>r.period_start<=end&&r.period_end>=start).length,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
+ return {company,month,capturedAt,dimensions,volumes:deliveryVolumes(month,cps.data.daily??[],nowVolumes,topology,dimensions),overheadRules:defaultOverheadRules(month,dimensions,topology),stations:topology,entries,losses,issues:[...new Set(issues)],counts:{schemaVersion:5,reviewWorkforcePublications:reviewWorkforceCount,managerCount:manager.managerCount,accruedManagerCount:manager.accruedManagerCount,managerSharePaise:manager.entries.filter(e=>e.head==='Manager share').reduce((n,e)=>n+e.paise,0),hoSalaryRows:ho.entries.length,peopleCount:manager.peopleCount,accruedPeopleCount:manager.accruedPeopleCount,utrSalaryPaise:manager.entries.filter(e=>e.head==='UTR salaries').reduce((n,e)=>n+e.paise,0),expenseDetailRows:entries.reduce((n,e)=>n+(e.details?.length??0),0),invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,employeePayrollRows:hrSeen.size,finalEmployeeRuns:finalRuns.filter(r=>r.period_start<=end&&r.period_end>=start).length,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
 }

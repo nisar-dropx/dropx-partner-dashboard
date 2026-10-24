@@ -1,7 +1,7 @@
 'use client';
 import {Fragment,useState} from 'react';
 import {money,type Entry,type Dimension} from '@/lib/finance/final-pnl/model';
-import {entryTotals,groupEntries,modelLabel,statementGroups,type GroupBy} from '@/lib/finance/final-pnl/analysis';
+import {entryTotals,entryCoverage,groupEntries,modelLabel,statementGroups,type GroupBy} from '@/lib/finance/final-pnl/analysis';
 
 type EntryProps={entries:Entry[];canEdit:boolean;onEdit:(entry:Entry)=>void};
 const sum=(entries:Entry[])=>entries.reduce((n,e)=>n+e.paise,0);
@@ -63,13 +63,13 @@ function EntryEvidence({entry:e,canEdit,onEdit}:{entry:Entry;canEdit:boolean;onE
 export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit}:EntryProps&{dimensions:Dimension[];by:GroupBy}){
  const [expanded,setExpanded]=useState<{key:string;column:string}|null>(null);
  const groups=groupEntries(entries,dimensions,by),heads=statementGroups(entries),totals=entryTotals(entries);
- const missingIncome=(items:Entry[])=>[...new Set(items.filter(e=>e.side==='expense').map(e=>e.station))].some(station=>!items.some(e=>e.station===station&&e.side==='income'&&!e.recovery));
+ const incomplete=(items:Entry[])=>{const coverage=entryCoverage(items);return !!(coverage.missingIncome.length||coverage.missingExpenses.length);};
  const label=(key:string)=>by==='model'?modelLabel(key):key;
  const toggle=(key:string,column='')=>setExpanded(previous=>previous?.key===key&&previous.column===column?null:{key,column});
  const selected=expanded?heads.find(g=>g.key===expanded.key):null;
  const selectedEntries=selected?.entries.filter(e=>!expanded?.column||groups.find(g=>g.key===expanded.column)?.entries.includes(e))??[];
  if(!heads.length)return <p className="fp-empty">No recorded entries match these filters.</p>;
- return <div className="fp-sheet-scroll"><table className="fp-sheet"><caption>Amounts in ₹ · Click a cost head or amount to expand · — means no recorded entry · Operating result is before corporate HO and unallocated regional HO</caption><thead><tr><th>Particulars</th><th>Total</th>{groups.map(g=><th key={g.key}>{label(g.key)}<small>{g.stations.length} station{g.stations.length!==1?'s':''}</small>{missingIncome(g.entries)&&<small className="fp-pending">Income incomplete</small>}</th>)}</tr></thead><tbody>
+ return <div className="fp-sheet-scroll"><table className="fp-sheet"><caption>Amounts in ₹ · Click a cost head or amount to expand · — means no recorded entry · Operating result is before corporate HO and unallocated regional HO</caption><thead><tr><th>Particulars</th><th>Total</th>{groups.map(g=><th key={g.key}>{label(g.key)}<small>{g.stations.length} station{g.stations.length!==1?'s':''}</small>{incomplete(g.entries)&&<small className="fp-pending">Sources incomplete</small>}</th>)}</tr></thead><tbody>
   {(['expense','income'] as const).map(side=><Fragment key={side}>
    <tr className="fp-sheet-section"><th colSpan={groups.length+2}>{side==='expense'?'Expenses':'Income'}</th></tr>
    {heads.filter(g=>g.side===side).map(head=><Fragment key={head.key}><tr>
@@ -79,5 +79,5 @@ export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit}:EntryProp
    </tr>{expanded?.key===head.key&&<tr className="fp-sheet-expanded"><td colSpan={groups.length+2}><div className="fp-section-head"><h3>{head.head} · {expanded.column?label(expanded.column):'All selected'} · {money(sum(selectedEntries))}</h3><button onClick={()=>setExpanded(null)}>Close detail</button></div><HeadBreakdown key={`${head.key}:${expanded.column}`} entries={selectedEntries} canEdit={canEdit} onEdit={onEdit}/></td></tr>}</Fragment>)}
    <tr className="fp-sheet-total"><th>Total {side==='expense'?'expenses':'income'}</th><td>{money(totals[side])}</td>{groups.map(g=><td key={g.key}>{money(g[side])}</td>)}</tr>
   </Fragment>)}
- </tbody><tfoot><tr><th>Operating profit / loss</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}{missingIncome(entries)&&<small>Income incomplete</small>}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}{missingIncome(g.entries)&&<small>Income incomplete</small>}</td>)}</tr></tfoot></table></div>;
+ </tbody><tfoot><tr><th>Operating profit / loss</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}{incomplete(entries)&&<small>Sources incomplete</small>}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}{incomplete(g.entries)&&<small>Sources incomplete</small>}</td>)}</tr></tfoot></table></div>;
 }

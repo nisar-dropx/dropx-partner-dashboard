@@ -27,7 +27,7 @@
     "test:session-verification": "node --test scripts/test-session-verification.mjs && node scripts/verify-portal-notification-routing.mjs && node scripts/verify-portal-preview.mjs",
     "test:finance-treasury": "node --test src/lib/finance/treasury/treasury.test.mjs",
     "test:finance-final-pnl": "node --experimental-strip-types --test src/lib/finance/final-pnl/model.test.mjs",
-    "test:finance-cost-heads": "node --test src/lib/finance/pnl-cost-heads.test.mjs"
+    "test:finance-cost-heads": "node --test src/lib/finance/pnl-cost-heads.test.mjs src/lib/finance/cfo-overhead.test.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
