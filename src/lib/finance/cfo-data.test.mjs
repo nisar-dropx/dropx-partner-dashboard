@@ -45,3 +45,19 @@ test('XPT contract replacement stays on its original station day and cannot borr
  assert.equal(r.days.find(d=>d.sourceStation==='A').cost,100);assert.equal(r.days.find(d=>d.sourceStation==='X').cost,10);
  assert.deepEqual(r.lines.map(l=>[l.sourceStation,l.amount]),[['X',10]]);
 });
+
+test('regional HO stops on excluded shipment dates while accrued costs stay disclosed',async()=>{
+ const pricing=compile('./pricing.ts'),now=compile('./now.ts',{'./pricing':pricing}),cfo=compile('./cfo.ts',{'./now':now});
+ const report={daily:[{station_code:'A',work_date:'2026-10-02',shipment_present:true}],breakup:[],gaps:[]};
+ const {loadCfo}=compile('./cfo-data.ts',{...baseMocks,'./now':now,'./cfo':cfo,
+  './pnl':{...cps,pnlFilters:q=>({from:q.from,to:q.to,region:'',cluster:'',location:''})},
+  './data':{loadRent:async()=>[{allocation_station_code:'HO_KL',monthly_rent:'310',monthly_maintenance:'0',effective_from:'2026-10-01',effective_to:null,site_code:'HO_KL',payee_name:'HO rent'}]},
+  './pnl-comparison':{stationGroupKey:l=>l.station_code},
+  './business-master':{loadBusinessMaster:async()=>[],loadNowVolumes:async()=>[],locationModel:()=> 'EDSP'},
+  '../ops-pulse/cps-data':{loadFinanceCpsEvidence:async()=>({report,evidence:{staff:[],associates:[]}})},
+  './pnl-data':{loadPnl:async()=>({days:[{station:'A',date:'2026-10-01',cost:100,revenue:200,deliveries:10,da:0,utr:0,van:0,rent:0,other:100,issues:[]}],costs:[],pricing:[],revenueCalculations:[],coverage:[{station:'A',limit:'2026-10-01',missingDates:[]}]})},
+ });
+ const c={companyId:'regional-date-audit',authorization:{userId:'u',hasAllLocationAccess:true},locations:[{station_code:'A',state:'Kerala'},{station_code:'HO_KL',is_ho:true,state:'Kerala'}],db:{rpc:async()=>({data:{people:[],salaries:[],assignments:[],breakup:[]},error:null})}};
+ const r=await loadCfo(c,{from:'2026-10-01',to:'2026-10-02'});
+ assert.equal(r.days[0].regional,10);assert.equal(r.overhead.filter(x=>x.mode==='deferred').reduce((n,x)=>n+x.amount,0),10);assert.equal(r.overhead.filter(x=>x.mode==='unallocated').length,0);
+});

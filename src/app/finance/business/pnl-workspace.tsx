@@ -16,6 +16,7 @@ import { PnlInsights } from "./pnl-insights";
 import { PnlComparison } from "./pnl-comparison";
 import { fixedRevenueBreakdown, pnlResultClass, stationGroupKey } from "@/lib/finance/pnl-comparison";
 import { LiveRefresh } from "./refresh";
+import { ShipmentCoverage } from "../profitability/coverage";
 import {
   RevenueCalculation,
   ExpenseCalculation,
@@ -642,21 +643,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
         </div>
       ) : (
         <>
-          <div className="pnl-cutoff" role="status">
-            <strong>
-              Revenue and expenses use the same delivery-data cutoff.
-            </strong>
-            <p>
-              Requested: {dateLabel(report.filters.from)} –{" "}
-              {dateLabel(report.filters.to)}.{" "}
-              {report.coverage.length === 1
-                ? `Calculated through ${dateLabel(report.coverage[0].through)}.`
-                : "Each station stops on its latest reported delivery date; see Data through below."}{" "}
-              Dates after that cutoff are excluded from both sides. Monthly
-              fixed costs are divided by the actual calendar days in that month;
-              fuel uses dated transactions.
-            </p>
-          </div>
+          <ShipmentCoverage coverage={report.coverage}/>
           <section className="pnl-kpis">
             <div>
               <span>Revenue</span>

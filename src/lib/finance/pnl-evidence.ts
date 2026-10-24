@@ -68,13 +68,14 @@ export function buildPnlEvidence(
   codes: string[],
   fuel: PnlFuel[] = [],
   basis: 'shipments' | 'operating' = 'shipments',
+  coveredDates?: Set<string>,
 ) {
   const allowed = new Set(codes),
     cutoffs = new Map<string, string>();
   for (const d of snapshot.daily)
     if (
       allowed.has(d.station_code) &&
-      (basis === 'operating' || d.shipment_present) &&
+      (coveredDates ? coveredDates.has(`${d.station_code}/${d.work_date}`) : basis === 'operating' || d.shipment_present) &&
       d.work_date >= from &&
       d.work_date <= to
     )
@@ -84,6 +85,7 @@ export function buildPnlEvidence(
       );
   const included = (station: string, date: string) =>
     allowed.has(station) &&
+    (!coveredDates || coveredDates.has(`${station}/${date}`)) &&
     date >= from &&
     date <= (cutoffs.get(station) || "");
   const staffMap = new Map<
@@ -128,6 +130,7 @@ export function buildPnlEvidence(
     if (!allowed.has(r.allocation_station_code) || start > end) return [];
     const monthGroups = new Map<string, string[]>();
     for (const date of dates(start, end)) {
+      if (!included(r.allocation_station_code, date)) continue;
       const month = date.slice(0, 7);
       monthGroups.set(month, [...(monthGroups.get(month) || []), date]);
     }
@@ -168,22 +171,19 @@ export function buildPnlEvidence(
       end = [to, b.period_to, cutoffs.get(b.station_code) || ""].sort()[0];
     if (!allowed.has(b.station_code) || start > end) return [];
     const totalDays = daysBetween(b.period_from, b.period_to);
-    const amount =
-      (Math.round(
-        (Number(b.amount) * 100 * daysBetween(b.period_from, end)) / totalDays,
-      ) -
-        Math.round(
-          (Number(b.amount) * 100 * (daysBetween(b.period_from, start) - 1)) /
-            totalDays,
-        )) /
-      100;
+    const workDates = dates(start, end).filter(date => included(b.station_code, date));
+    if (!workDates.length) return [];
+    const amount = workDates.reduce((sum, date) => sum + (
+      Math.round(Number(b.amount) * 100 * daysBetween(b.period_from, date) / totalDays) -
+      Math.round(Number(b.amount) * 100 * (daysBetween(b.period_from, date) - 1) / totalDays)
+    ) / 100, 0);
     return [
       {
         ...b,
         amount: Number(b.amount),
         considered_from: start,
         considered_to: end,
-        considered_days: daysBetween(start, end),
+        considered_days: workDates.length,
         period_days: totalDays,
         considered_amount: amount,
       },
@@ -198,8 +198,9 @@ export function buildPnlEvidence(
     .map((v) => {
       const start = [from, v.from_date].sort().at(-1)!,
         end = [to, v.through_date, cutoffs.get(v.station_code)!].sort()[0];
-      const rentLedger = snapshot.breakup.filter(l=>l.source==='Fleet Vehicle Master' && l.station_code===v.station_code && l.sub_head===`Vehicle rent · ${v.vehicle_no}` && l.work_date>=start && l.work_date<=end);
-      const complete = start === v.from_date && end === v.through_date;
+      const rentLedger = snapshot.breakup.filter(l=>l.source==='Fleet Vehicle Master' && l.station_code===v.station_code && l.sub_head===`Vehicle rent · ${v.vehicle_no}` && l.work_date>=start && l.work_date<=end && included(l.station_code,l.work_date));
+      const workDates = dates(start,end).filter(date => included(v.station_code,date));
+      const complete = start === v.from_date && end === v.through_date && workDates.length === daysBetween(start,end);
       const contiguous = v.days === daysBetween(v.from_date, v.through_date);
       return {
         ...v,
@@ -211,7 +212,7 @@ export function buildPnlEvidence(
         considered_days: complete
           ? v.days
           : contiguous
-            ? daysBetween(start, end)
+            ? workDates.length
             : null,
         rent_blocked_days: new Set(rentLedger.filter(l=>Number(l.amount)===0).map(l=>l.work_date)).size,
         considered_amount: rentLedger.length
@@ -221,9 +222,9 @@ export function buildPnlEvidence(
             ? null
             : Number(v.amount)
           : contiguous && v.daily_rent != null
-            ? Number(v.daily_rent)*daysBetween(start,end)
+            ? Number(v.daily_rent)*workDates.length
           : contiguous && v.monthly_rent != null
-            ? dates(start, end).reduce(
+            ? workDates.reduce(
                 (sum, date) =>
                   sum + calendarAccrual(String(v.monthly_rent), date),
                 0,

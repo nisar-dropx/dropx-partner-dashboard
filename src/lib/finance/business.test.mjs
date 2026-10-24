@@ -607,22 +607,22 @@ test("Daily MG uses actual calendar days for 28, 29, 30 and 31 day months", () =
     );
   }
 });
-test("Daily excess never carries a shortfall forward; MFN adds earnings independently", () => {
+test("Billing-period excess offsets quiet and busy days; MFN adds earnings independently", () => {
   const { rows } = dailyFixture();
   assert.equal(rows[0].variable, "0.00");
-  assert.equal(rows[1].excessVolume, "50");
-  assert.equal(rows[1].variable, "1000.00");
+  assert.equal(rows[1].excessVolume, "0");
+  assert.equal(rows[1].variable, "0.00");
   assert.equal(rows[1].mfnRevenue, "80.00");
-  assert.equal(pricing.addAmounts(rows.map((d) => d.revenue)), "3160.00");
-  // A pooled MTD threshold would incorrectly remove this day's 50 excess shipments.
+  assert.equal(pricing.addAmounts(rows.map((d) => d.revenue)), "2160.00");
+  // 50 + 150 deliveries exactly meet the two-day MG of 200.
 });
 test("Fractional daily MG is not rounded to whole packages or money before applying the slab", () => {
   const { rows } = dailyFixture("2026-08", 2, {
     delivery_mg_volume: "3100.31",
   });
   assert.equal(rows[0].mgVolume, "100.01");
-  assert.equal(rows[1].excessVolume, "49.99");
-  assert.equal(rows[1].variable, "999.80");
+  assert.equal(rows[1].excessVolume, "0");
+  assert.equal(rows[1].variable, "0.00");
   const zero = dailyFixture("2026-08", 2, { delivery_mg_volume: "4650" })
     .rows[1];
   assert.equal(zero.excessVolume, "0");
@@ -664,7 +664,7 @@ test("Unknown positive-volume rates are not silently zero; zero-volume reports a
     mfn_rate: null,
   });
   assert.equal(rows[0].variable, "0.00");
-  assert.equal(rows[1].variable, null);
+  assert.equal(rows[1].variable, "0.00"); // No pooled excess at 200 deliveries / 200 MG.
   assert.equal(rows[1].mfnRevenue, null);
   assert.match(rows[1].issues.join(), /rate missing/);
   const { pc, snap } = dailyFixture();
@@ -698,7 +698,7 @@ test("SMD does not get charged twice and IHS is not guessed from the MFN/return 
     "2026-08-02",
     false,
   )[1];
-  assert.equal(d.revenue, "2080.00");
+  assert.equal(d.revenue, "1080.00");
   assert.equal(d.smd, "5");
   assert.equal(d.ihs, "20");
   assert.match(d.issues.join(), /separate SMD billing rule pending/);
@@ -798,7 +798,7 @@ test("Corrected source counts change live estimates without adding a second copy
     "2026-08-02",
     false,
   );
-  assert.equal(days[1].variable, "2000.00");
+  assert.equal(days[1].variable, "1000.00");
   assert.equal(days.length, 2);
 });
 
@@ -1223,4 +1223,25 @@ test("An XPT-only reader inherits the company/month-scoped parent rate without p
       (s) => s[0] === "eq" && s[1] === "provider" && s[2] === "Amazon",
     ),
   );
+});
+
+test('MG settlement reverses earlier excess on quiet days and is invariant to daily order',()=>{
+ const run=volumes=>{const {pc,snap}=dailyFixture('2026-09',3,{delivery_mg_volume:'3000',variable_slab:'21'});snap.daily_shipments=volumes.map((n,i)=>({...snap.daily_shipments[0],work_date:`2026-09-0${i+1}`,deliveries:String(n),mfn:'0'}));return performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-03',false);};
+ const first=run([250,0,80]),last=run([0,80,250]);
+ assert.equal(first[0].variable,'3150.00');assert.equal(first[1].variable,'-2100.00');assert.equal(first[2].variable,'-420.00');
+ assert.equal(pricing.addAmounts(first.map(d=>d.variable)),'630.00');assert.equal(pricing.addAmounts(last.map(d=>d.variable)),'630.00');
+ assert.equal(first[2].mgCumulativeEligible,'330');assert.equal(first[2].mgCumulativeThreshold,'300');assert.equal(first[2].mgCumulativeExcess,'30');
+});
+test('Missing shipment dates do not advance the pooled MG threshold; unknown excess rates remain pending',()=>{
+ const {pc,snap}=dailyFixture('2026-09',3,{delivery_mg_volume:'3000',variable_slab:null});
+ snap.daily_shipments=[{...snap.daily_shipments[0],deliveries:'250',mfn:'0'},{...snap.daily_shipments[1],work_date:'2026-09-03',deliveries:'0',mfn:'0'}];
+ const rows=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-03',false);
+ assert.equal(rows[0].variable,null);assert.match(rows[0].issues.join(),/rate missing/);
+ assert.equal(rows[1].variable,null);assert.equal(rows[2].mgReportedDays,2);assert.equal(rows[2].mgCumulativeThreshold,'200');assert.equal(rows[2].mgCumulativeExcess,'50');assert.equal(rows[2].variable,null);
+});
+test('fractional excess reversals remain valid signed decimal quantities',()=>{
+ const {pc,snap}=dailyFixture('2026-09',2,{delivery_mg_volume:'1000',variable_slab:'21'});
+ snap.daily_shipments[0].deliveries='80';snap.daily_shipments[1].deliveries='20';
+ const days=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-02',false);
+ assert.match(days[1].excessVolume,/^-13\.333333/);assert.ok(Number.isFinite(Number(days[1].excessVolume)));assert.equal(pricing.addAmounts(days.map(d=>d.variable)),'700.00');
 });

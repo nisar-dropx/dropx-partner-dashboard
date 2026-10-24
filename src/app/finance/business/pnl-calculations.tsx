@@ -107,8 +107,7 @@ export function RevenueCalculation({
               <span>
                 {first.station} · {first.provider}
                 <small>
-                  {first.date} – {days.at(-1)!.date} · {days.length} calendar
-                  days
+                  {first.date} – {days.at(-1)!.date} · {days.length} reported days
                 </small>
               </span>
               <strong>{money(amount)}</strong>
@@ -175,7 +174,8 @@ export function RevenueCalculation({
                           : qty(card?.mgVolume),
                       ],
                       ["Eligible deliveries + C-returns", qty(eligible)],
-                      ["Billable excess / XPT volume", qty(excess)],
+                      ["Excess volume change in selected dates / XPT volume", qty(excess)],
+                      ...(first.model === "mg" ? [["Reported days month to date", days.at(-1)?.mgReportedDays ?? "—"], ["Eligible volume month to date", qty(days.at(-1)?.mgCumulativeEligible ?? null)], ["MG volume for reported days", qty(days.at(-1)?.mgCumulativeThreshold ?? null)], ["Billable excess month to date", qty(days.at(-1)?.mgCumulativeExcess ?? null)]] as [string, ReactNode][] : []),
                       ["Variable earnings", money(amount)],
                     ]}
                   />
@@ -184,7 +184,7 @@ export function RevenueCalculation({
                       ? "Monthly cumulative delivered volume uses the configured slabs. Each date records the change in cumulative earnings."
                       : first.model === "xpt"
                         ? `All eligible XPT deliveries × ${money(card?.variable)} (parent ${card?.parent || "not configured"}). No MG threshold.`
-                        : `Each day: max(0, Amazon deliveries + C-returns − ${qty(card?.mgVolume)} ÷ ${calendarDays}) × ${money(card?.variable)}. SWA is excluded. Daily shortfalls do not offset another day’s excess.`}
+                        : `Month to date: max(0, cumulative Amazon deliveries + C-returns − ${qty(card?.mgVolume)} × reported days ÷ ${calendarDays}) × ${money(card?.variable)}. Each date records the change in cumulative earnings, including reversals after quieter days. SWA is excluded from MG and billed separately.`}
                   </p>
                   {first.model === "slab" && (
                     <Table headers={["Above", "Up to", "Rate / delivery"]}>
@@ -205,10 +205,10 @@ export function RevenueCalculation({
                       "Amazon / delivered",
                       "C-returns",
                       "Eligible",
-                      "MG threshold",
-                      "Within MG",
-                      "Additional",
-                      "Earnings",
+                      "MG threshold / day",
+                      "MG used month to date",
+                      "Excess change",
+                      "Earnings change",
                     ]}
                   >
                     {days.map((d) => (
@@ -226,14 +226,9 @@ export function RevenueCalculation({
                         <td>{qty(d.eligibleDeliveries)}</td>
                         <td>{qty(d.mgVolume)}</td>
                         <td>
-                          {d.mgVolume == null || d.eligibleDeliveries == null
+                          {d.mgCumulativeThreshold == null || d.mgCumulativeEligible == null
                             ? "—"
-                            : qty(
-                                Math.min(
-                                  Number(d.mgVolume),
-                                  Number(d.eligibleDeliveries),
-                                ),
-                              )}
+                            : qty(Math.min(Number(d.mgCumulativeThreshold), Number(d.mgCumulativeEligible)))}
                         </td>
                         <td>{qty(d.excessVolume)}</td>
                         <td>{money(d.variable)}</td>
@@ -262,7 +257,7 @@ export function RevenueCalculation({
                   <p className="pnl-formula">
                     Quantity × configured rate.{" "}
                     {kind === "swa"
-                      ? "SWA stays separate from Amazon MG. Matching delivery rates are provisional until the contract rate is confirmed."
+                      ? "SWA stays separate from Amazon MG. The feed has no COD / prepaid / payable-reject split. This combined-rate estimate excludes SWA reject payouts and invoice incentives; compare the final invoice before settling."
                       : "An unconfigured XPT MFN settlement remains pending."}
                   </p>
                   <Table headers={["Date", "Quantity", "Earnings"]}>

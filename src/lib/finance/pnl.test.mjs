@@ -422,3 +422,29 @@ test('shared CFO cost evidence cannot leak another model or unauthorized station
  assert.equal(out.total.cost,100);assert.deepEqual(out.costs,[line]);assert.equal(out.staffGroups.length,1);
  assert.ok(!JSON.stringify(out).includes('Private store'));assert.equal(common.daily.length,2);
 });
+
+test('shipment P&L excludes today, newer CPS dates and internal missing shipment dates from both sides',()=>{
+ const ds=['2026-10-01','2026-10-02','2026-10-03','2026-10-04','2026-10-05'];
+ const source={...snapshot,daily:ds.map(work_date=>({...cday,work_date})),breakup:ds.map(work_date=>({station_code:'A',work_date,head:'UTR',sub_head:'Salary',source:'People',amount:100}))};
+ const shipments=[{station_code:'A',work_date:ds[0],deliveries:'10'},{station_code:'A',work_date:ds[2],deliveries:'0'},{station_code:'A',work_date:ds[4],deliveries:'20'}];
+ const report=p.buildPnl([{station:'A',daily:ds.map(date=>({...day,date}))}],source,[place],ds[0],ds[4],{limit:p.shipmentReportingLimit(ds[4],ds[4]),shipments});
+ assert.deepEqual(report.days.map(d=>d.date),[ds[0],ds[2]]);
+ assert.equal(report.total.revenue,400);assert.equal(report.total.cost,200);
+ assert.deepEqual(report.costs.map(d=>d.work_date),[ds[0],ds[2]]);
+ assert.deepEqual(report.coverage[0].missingDates,[ds[1],ds[3]]);
+ assert.equal(report.coverage[0].currentDaysExcluded,1);assert.equal(report.coverage[0].excludedSourceCost,300);
+});
+test('yesterday selection reports the earlier available date and never invents a loss for an empty period',()=>{
+ const r=p.buildPnl([],snapshot,[place],'2026-10-04','2026-10-04',{limit:'2026-10-04',shipments:[{station_code:'A',work_date:'2026-10-02',deliveries:0}]});
+ assert.equal(r.coverage[0].availableThrough,'2026-10-02');assert.equal(r.coverage[0].through,null);
+ assert.equal(r.coverage[0].excludedDays,1);assert.equal(r.total.cost,null);assert.equal(r.total.revenue,null);assert.equal(r.total.profit,null);
+});
+test('previous-day cutoff handles month, year and leap boundaries without changing Amazon Now date filters',()=>{
+ for(const [today,expected] of [['2026-10-01','2026-09-30'],['2026-01-01','2025-12-31'],['2024-03-01','2024-02-29']])assert.equal(p.shipmentReportingLimit(today,today),expected);
+ assert.equal(p.shipmentReportingLimit('2026-09-30','2026-10-24'),'2026-09-30');
+ assert.equal(p.pnlFilters({period:'today'},'2026-10-24').to,'2026-10-24');
+});
+test('XPT dates remain independent and malformed counts cannot establish shipment coverage',()=>{
+ const policy={limit:'2026-10-04',shipments:[{station_code:'A',work_date:'2026-10-01',deliveries:'0'},{station_code:'X',work_date:'2026-10-02',deliveries:3},...['',null,'invalid',-1].map(deliveries=>({station_code:'A',work_date:'2026-10-03',deliveries}))]};
+ const keys=p.reportedShipmentDays(policy,'2026-10-01','2026-10-04',new Set(['A']));assert.deepEqual([...keys],['A/2026-10-01']);
+});

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { financeContext, loadRent } from "@/lib/finance/data";
 import { locationModel } from '@/lib/finance/business-master';
-import { pnlFilters } from "@/lib/finance/pnl";
+import { pnlFilters, shipmentReportingLimit, reportedShipmentDays } from "@/lib/finance/pnl";
 import { evidenceStations, buildPnlEvidence } from "@/lib/finance/pnl-evidence";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { loadFinanceCpsEvidence } from "@/lib/ops-pulse/cps-data";
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     );
   }
   try {
-    const [data, rents, fuel] = await Promise.all([
+    const [data, rents, fuel, shipments] = await Promise.all([
       loadFinanceCpsEvidence(
         context.companyId,
         filters.from,
@@ -60,8 +60,12 @@ export async function GET(request: Request) {
           .order("transaction_date")
           .order("id"),
       ),
+      basis === 'shipments' ? context.db.rpc('finance_pnl_revenue_snapshot', {
+        p_company: context.companyId, p_from: filters.from, p_through: filters.to, p_station_codes: codes,
+      }) : Promise.resolve({data:null,error:null}),
     ]);
     if (fuel.error) throw Error("Fuel transaction details unavailable");
+    if (shipments.error) throw Error('Shipment coverage could not be verified');
     return NextResponse.json(
       buildPnlEvidence(
         data.report,
@@ -72,6 +76,7 @@ export async function GET(request: Request) {
         codes,
         fuel.data ?? [],
         basis,
+        basis === 'shipments' ? reportedShipmentDays({limit:shipmentReportingLimit(filters.to),shipments:shipments.data?.daily_shipments??[]},filters.from,filters.to,new Set(codes)) : undefined,
       ),
       { headers: { "Cache-Control": "private, no-store" } },
     );

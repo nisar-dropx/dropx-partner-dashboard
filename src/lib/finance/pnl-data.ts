@@ -5,7 +5,7 @@ import {
   type Snapshot,
   type BusinessRow,
 } from "./performance";
-import { buildPnl, pnlFilters, cpsMonthSlices, type PnlQuery } from "./pnl";
+import { buildPnl, pnlFilters, shipmentReportingLimit, cpsMonthSlices, type PnlQuery } from "./pnl";
 import { loadCpsSnapshot } from "../ops-pulse/cps-data";
 import type { CpsSnapshot } from "../ops-pulse/cps";
 import { addQuantities } from "./pricing";
@@ -175,7 +175,11 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
     breakup: [],
     generated_at: new Date().toISOString(),
   };
-  const report = buildPnl(revenue, cps, locations, filters.from, filters.to);
+  const report = buildPnl(revenue, cps, locations, filters.from, filters.to, {
+    limit: shipmentReportingLimit(filters.to),
+    shipments: snapshot.daily_shipments ?? [],
+    availability: snapshot.availability,
+  });
   const covered = new Set(
     report.days
       .filter((d) => d.cost !== null || d.revenue !== null)

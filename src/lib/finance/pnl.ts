@@ -60,6 +60,21 @@ export function pnlFilters(query: PnlQuery, today = todayIndia()) {
   };
 }
 export { cpsMonthSlices };
+export function shipmentReportingLimit(to: string, today = todayIndia()) {
+  const yesterday = new Date(Date.parse(today) - 86400000).toISOString().slice(0, 10);
+  return to < yesterday ? to : yesterday;
+}
+export type ShipmentCoveragePolicy = {
+  limit: string;
+  shipments: { station_code: string; work_date: string; deliveries: string | number | null }[];
+  availability?: Record<string, { to: string | null }>;
+};
+export function reportedShipmentDays(policy: ShipmentCoveragePolicy, from: string, to: string, codes: Set<string>) {
+  return new Set(policy.shipments.filter(d => codes.has(d.station_code) && d.work_date >= from &&
+    d.work_date <= to && d.work_date <= policy.limit && d.deliveries !== null &&
+    String(d.deliveries).trim() !== '' && Number.isFinite(Number(d.deliveries)) && Number(d.deliveries) >= 0)
+    .map(d => `${d.station_code}/${d.work_date}`));
+}
 export type PnlLocation = {
   station_code: string;
   station_name: string | null;
@@ -184,6 +199,7 @@ export function buildPnl(
   locations: PnlLocation[],
   from: string,
   to: string,
+  policy?: ShipmentCoveragePolicy,
 ) {
   // A caller may share a company-scoped snapshot with several reports. Apply
   // this report's authorized station scope before deriving coverage or details.
@@ -214,7 +230,18 @@ export function buildPnl(
   // Revenue and cost must stop together at each station's latest delivery report.
   // Zero-delivery reports are valid evidence; absence of a report is not zero.
   const cutoffs = new Map<string, string>();
-  for (const row of revenue)
+  const reported = policy ? reportedShipmentDays(policy, from, to, stationCodes) : new Set<string>();
+  const available = new Map<string, string>();
+  if (policy) for (const day of policy.shipments) {
+    if (!stationCodes.has(day.station_code) || day.work_date > policy.limit ||
+      day.deliveries === null || String(day.deliveries).trim() === '' ||
+      !Number.isFinite(Number(day.deliveries)) || Number(day.deliveries) < 0) continue;
+    available.set(day.station_code, [available.get(day.station_code) || '', day.work_date].sort().at(-1)!);
+    if (day.work_date < from || day.work_date > to) continue;
+    reported.add(`${day.station_code}/${day.work_date}`);
+    cutoffs.set(day.station_code, [cutoffs.get(day.station_code) || '', day.work_date].sort().at(-1)!);
+  }
+  if (!policy) for (const row of revenue)
     for (const day of row.daily)
       if (
         day.shipmentReported &&
@@ -226,14 +253,14 @@ export function buildPnl(
           row.station,
           [cutoffs.get(row.station) || "", day.date].sort().at(-1)!,
         );
-  for (const day of cps.daily)
+  if (!policy) for (const day of cps.daily)
     if (day.shipment_present && day.work_date >= from && day.work_date <= to)
       cutoffs.set(
         day.station_code,
         [cutoffs.get(day.station_code) || "", day.work_date].sort().at(-1)!,
       );
   const inCoverage = (station: string, date: string) =>
-    date >= from && date <= (cutoffs.get(station) || "");
+    policy ? reported.has(`${station}/${date}`) : date >= from && date <= (cutoffs.get(station) || "");
   const review = cpsReviewItems(cps);
   const days: PnlDay[] = [];
   for (const location of locations)
@@ -295,20 +322,22 @@ export function buildPnl(
   // Explicit public projection: never return People profiles, identities or individual CTC.
   return {
     days,
-    coverage: locations.map((l) => ({
-      station: l.station_code,
-      from,
-      requestedTo: to,
-      through: cutoffs.get(l.station_code) ?? null,
-      reportedDays: days.filter(
-        (d) => d.station === l.station_code && d.deliveries !== null,
-      ).length,
-      excludedDays:
-        Math.round(
-          (Date.parse(to) - Date.parse(cutoffs.get(l.station_code) || from)) /
-            86400000,
-        ) + (cutoffs.has(l.station_code) ? 0 : 1),
-    })),
+    coverage: locations.map((l) => {
+      const dates: string[] = [];
+      for (let d = Date.parse(from); d <= Date.parse(to); d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
+      const excluded = dates.filter(d => !inCoverage(l.station_code, d));
+      const missing = excluded.filter(d => d <= (policy?.limit ?? to));
+      const lastAvailable = policy?.availability?.[l.station_code]?.to;
+      return {
+        station: l.station_code, from, requestedTo: to, limit: policy?.limit ?? to,
+        through: cutoffs.get(l.station_code) ?? null,
+        availableThrough: available.get(l.station_code) ?? (lastAvailable && lastAvailable <= (policy?.limit ?? to) ? lastAvailable : null) ?? cutoffs.get(l.station_code) ?? null,
+        reportedDays: dates.length - excluded.length,
+        excludedDays: excluded.length, missingDates: missing,
+        currentDaysExcluded: excluded.length - missing.length,
+        excludedSourceCost: cps.daily.filter(d => d.station_code === l.station_code && excluded.includes(d.work_date)).reduce((s,d) => s + d.total, 0),
+      };
+    }),
     advertising: (cps.advertising ?? []).filter(c => inCoverage(c.station_code, c.spend_date)),
     staffGroups: (cps.staff ?? []).map((s) => ({
       station: s.station_code,

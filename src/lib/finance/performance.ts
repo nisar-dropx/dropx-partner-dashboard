@@ -124,6 +124,10 @@ export type DailyCost = {
   updated_at: string;
 };
 export type BusinessDay = {
+  mgCumulativeEligible?: string | null;
+  mgCumulativeThreshold?: string | null;
+  mgCumulativeExcess?: string | null;
+  mgReportedDays?: number;
   eligibleDeliveries: string | null;
   swa: string | null;
   swaRevenue?: string | null;
@@ -147,9 +151,11 @@ export type BusinessDay = {
   issues: string[];
 };
 const zero = BigInt(0);
-const units = (v: bigint) =>
-  `${v / scale}.${String(v % scale).padStart(24, "0")}`.replace(/\.?0+$/, "") ||
-  "0";
+const units = (value: bigint) => {
+  const v = value < zero ? -value : value;
+  const text = `${v / scale}.${String(v % scale).padStart(24, "0")}`.replace(/\.?0+$/, "") || "0";
+  return value < zero ? `-${text}` : text;
+};
 // Cumulative component rounding reconciles every displayed day to the displayed MTD.
 function accrual() {
   let total = zero,
@@ -196,6 +202,7 @@ export function buildDailyRows(
   const rates = pricing?.rates ?? {};
   let flipkartQuantity = zero,
     flipkartPrevious = "0.00";
+  let mgQuantity = zero, mgDays = 0, previousExcess = zero, previousVariable = zero;
   return Array.from({ length: elapsed }, (_, index) => {
     const date = `${month}-${String(index + 1).padStart(2, "0")}`;
     const s = shipments.get(date),
@@ -231,6 +238,9 @@ export function buildDailyRows(
       mfnRevenue: string | null = null,
       mgVolume: string | null = null,
       excessVolume: string | null = null,
+      mgCumulativeEligible: string | null = null,
+      mgCumulativeThreshold: string | null = null,
+      mgCumulativeExcess: string | null = null,
       revenue: string | null = null;
     if (!s)
       issues.push("Shipment report pending; variable earnings incomplete");
@@ -279,14 +289,24 @@ export function buildDailyRows(
         const monthlyVolume = decimal(rates.delivery_mg_volume);
         mgVolume = units(monthlyVolume / monthDays);
         if (eligible != null) {
-          const excessNumerator = decimal(eligible) * monthDays - monthlyVolume;
+          // Amazon's billing worksheet settles excess across the operated
+          // period. A quiet day offsets a busy day; it is not a fresh daily slab.
+          // Missing shipment dates cannot advance the revenue/cost period.
+          mgQuantity += decimal(eligible);
+          mgDays += 1;
+          const excessNumerator = mgQuantity * monthDays - monthlyVolume * BigInt(mgDays);
           const positive = excessNumerator > zero ? excessNumerator : zero;
-          excessVolume = units(positive / monthDays);
-          if (positive === zero) variable = variableAccrual(zero);
-          else if (rates.variable_slab != null)
-            variable = variableAccrual(
-              (positive * decimal(rates.variable_slab)) / (monthDays * scale),
-            );
+          const cumulativeExcess = positive / monthDays;
+          excessVolume = units(cumulativeExcess - previousExcess);
+          previousExcess = cumulativeExcess;
+          mgCumulativeEligible = units(mgQuantity);
+          mgCumulativeThreshold = units(monthlyVolume * BigInt(mgDays) / monthDays);
+          mgCumulativeExcess = units(cumulativeExcess);
+          if (rates.variable_slab != null || positive === zero) {
+            const cumulative = rates.variable_slab == null ? zero : (positive * decimal(rates.variable_slab)) / (monthDays * scale);
+            variable = variableAccrual(cumulative - previousVariable);
+            previousVariable = cumulative;
+          }
           else issues.push("Excess-delivery rate missing");
         } else if (s) issues.push("Delivery count incomplete");
       } else issues.push("MG volume missing");
@@ -353,6 +373,7 @@ export function buildDailyRows(
       deliveries: s?.deliveries ?? null,
       returns,
       eligibleDeliveries: eligible,
+      mgCumulativeEligible, mgCumulativeThreshold, mgCumulativeExcess, mgReportedDays: mgDays,
       swa: s?.swa ?? null,
       swaRevenue,
       mgVolume,
@@ -451,7 +472,7 @@ export function buildBusinessRows(
       basis = `XPT fixed payout/calendar days + all XPT Amazon deliveries and C-returns × ${parentStation ?? "parent"} variable rate`;
     } else if (provider === "Amazon") {
       basis =
-        "Daily MG and monthly fee + daily excess Amazon deliveries and C-returns × variable slab + MFN × MFN rate";
+        "Daily MG and monthly fee + billing-period excess Amazon deliveries and C-returns × variable slab + MFN × MFN rate";
       issues.push(
         "IHS/SMD settlement rules, shortfall recovery, other fees and tax are not included",
       );

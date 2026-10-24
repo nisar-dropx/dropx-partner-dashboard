@@ -45,9 +45,9 @@ test('details API authorizes Finance before salary access and fails closed for f
  const {GET}=compile('../../app/finance/business/details/route.ts',{
   '@/lib/supabase-pagination':{readAllRows:async()=>({data:[],error:null})},
   'next/server':{NextResponse:{json:(body,init)=>({body,...init})}},
-  '@/lib/finance/data':{financeContext:async code=>{assert.equal(code,'finance_pnl');if(!permitted)throw Error('denied');return {db:{from:()=>{const q=new Proxy({}, {get:()=>()=>q});return q;}},companyId:'tenant',locations:[{station_code:'A'}]};},loadRent:async()=>rents},
+  '@/lib/finance/data':{financeContext:async code=>{assert.equal(code,'finance_pnl');if(!permitted)throw Error('denied');return {db:{rpc:async(name,args)=>{assert.equal(name,'finance_pnl_revenue_snapshot');assert.equal(args.p_company,'tenant');assert.deepEqual(args.p_station_codes,['A']);return {data:{daily_shipments:snap.daily.filter(d=>d.shipment_present).map(d=>({...d,deliveries:1}))},error:null}},from:()=>{const q=new Proxy({}, {get:()=>()=>q});return q;}},companyId:'tenant',locations:[{station_code:'A'}]};},loadRent:async()=>rents},
   '@/lib/finance/business-master':{locationModel:l=>l.model||'EDSP'},
-  '@/lib/finance/pnl':{pnlFilters:()=>({from:'2026-10-01',to:'2026-10-05'})},
+  '@/lib/finance/pnl':{pnlFilters:()=>({from:'2026-10-01',to:'2026-10-05'}),shipmentReportingLimit:to=>to,reportedShipmentDays:(p,from,to,codes)=>new Set(p.shipments.map(d=>d.station_code+'/'+d.work_date))},
   '@/lib/finance/pnl-evidence':{evidenceStations,buildPnlEvidence},
   '@/lib/ops-pulse/cps-data':{loadFinanceCpsEvidence:async(company,from,to,codes)=>{calls++;assert.equal(company,'tenant');assert.deepEqual(codes,['A']);return {report:snap,evidence};}},
  });
@@ -59,13 +59,13 @@ test('details API authorizes Finance before salary access and fails closed for f
  permitted=false;await assert.rejects(GET(new Request('https://fin.dropxlogistics.com/finance/business/details?stations=A')),/denied/);assert.equal(calls,1);
 });
 
-test('revenue disclosure shows MG denominator, separate SWA and per-day excess with scoped quantities',()=>{
+test('revenue disclosure shows MG denominator, separate SWA and billing-period excess with scoped quantities',()=>{
  const {RevenueCalculation}=compile('../../app/finance/business/pnl-calculations.tsx',{'@/lib/finance/pricing':pricing});
  const day={station:'A',provider:'Amazon',model:'mg',date:'2026-10-01',base:'100.00',eligibleDeliveries:'50',returns:'2',mgVolume:'10',excessVolume:'40',variable:'800',swa:'3',swaRevenue:'60',mfn:'1',mfnRevenue:'5',shipmentReported:true};
  const report={revenueCalculations:[day,{...day,station:'B',base:'99999'}],pricing:[{station:'A',provider:'Amazon',month:'2026-10',mg:'3100',monthlyFee:null,mgVolume:'310',variable:'20',swaRate:'20',effective:'2026-08-01',revision:1}]};
  const render=kind=>renderToStaticMarkup(RevenueCalculation({kind,report,rows:[{station:'A',date:'2026-10-01'}]}));
  assert.match(render('base'),/Monthly minimum guarantee/);assert.match(render('base'),/31/);assert.ok(!render('base').includes('99999'));
- assert.match(render('variable'),/Within MG/);assert.match(render('variable'),/SWA is excluded/);assert.match(render('swa'),/SWA delivered/);
+ assert.match(render('variable'),/MG used month to date/);assert.match(render('variable'),/SWA is excluded/);assert.match(render('swa'),/SWA delivered/);
 });
 
 test('daily Fleet rent evidence uses the canonical ledger including rent-blocked days and delivery cutoff',()=>{
@@ -83,4 +83,13 @@ test('Amazon Now operating evidence does not require a shipment event and stays 
  assert.equal(out.staff[0].amount,2000);assert.equal(out.rents[0].amount,220);
  assert.ok(!JSON.stringify(out).includes('Outside'));
  assert.equal(buildPnlEvidence({...snap,daily},evidence,rents,'2026-10-01','2026-10-02',['A']).staff.length,0);
+});
+
+test('missing shipment dates are excluded from salary, rent, bill, vehicle and source evidence',()=>{
+ const coverage=new Set(['A/2026-10-01','A/2026-10-03']);
+ const r=buildPnlEvidence(snap,evidence,rents,'2026-10-01','2026-10-05',['A'],[],'shipments',coverage);
+ assert(r.staff.every(s=>s.days.every(d=>coverage.has(d.station_code+'/'+d.date))));
+ assert(r.associateDays.every(d=>coverage.has(d.station_code+'/'+d.date)));
+ assert(r.ledger.every(d=>coverage.has(d.station_code+'/'+d.work_date)));
+ assert(r.rents.every(d=>d.days<=2));assert(r.bills.every(d=>d.considered_days<=2));assert(r.vehicles.every(d=>d.considered_days===null||d.considered_days<=2));
 });
