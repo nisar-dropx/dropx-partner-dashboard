@@ -169,7 +169,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
         locations,
         { month, through: slice.to, provider: "" },
         parentRates,
-      )),
+      ), shipmentReportingLimit(filters.to)),
     );
   }
   const cps: CpsSnapshot = costResponse.data ?? {

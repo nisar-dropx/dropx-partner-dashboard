@@ -641,9 +641,9 @@ export function parentGroups(rows: BusinessRow[]) {
 }
 
 /** Invoice MG is settled once across a base and its XPTs. Never combine unequal source windows. */
-export function settleAlignedMgGroups(input: BusinessRow[]): BusinessRow[] {
+export function settleAlignedMgGroups(input: BusinessRow[], through?: string): BusinessRow[] {
  const rows=input.map(r=>({...r,daily:r.daily.map(d=>({...d,issues:[...d.issues]}))}));
- const reported=(r:BusinessRow)=>r.daily.filter(d=>d.shipmentReported&&d.eligibleDeliveries!==null&&d.deliveries!==null);
+ const reported=(r:BusinessRow)=>r.daily.filter(d=>(!through||d.date<=through)&&d.shipmentReported&&d.eligibleDeliveries!==null&&d.deliveries!==null);
  for(const parent of rows.filter(r=>r.provider==='Amazon'&&r.model==='mg')){
   const children=rows.filter(r=>r.provider==='Amazon'&&r.model==='xpt'&&r.parentStation===parent.station);
   if(!children.length||parent.mgVolume===null||parent.variableRate===null)continue;

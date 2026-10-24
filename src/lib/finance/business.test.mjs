@@ -1268,4 +1268,6 @@ test("Base and XPT settle one MG pool when dates align; missing XPT dates never 
  assert.equal(fixed[0].daily[0].mgCumulativeEligible,'120');assert.equal(child.daily[0].variable,'1260.00');
  const missing=performance.settleAlignedMgGroups([base,{...child,daily:[]}]);assert.equal(missing[0].daily[0].variable,parentDay.variable);
  const noParent=performance.settleAlignedMgGroups([child]);assert.equal(noParent[0].daily[0].variable,'1260.00');
+ const todayPartial={...base,daily:[parentDay,{...parentDay,date:'2026-09-02'}]};
+ const capped=performance.settleAlignedMgGroups([todayPartial,child],'2026-09-01');assert.equal(capped[0].daily[0].variable,'420.00');
 });
