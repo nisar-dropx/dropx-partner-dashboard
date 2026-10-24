@@ -60,3 +60,10 @@ test('a head with one item expands straight to dates without another identical t
  const html=renderToStaticMarkup(CostSourceGroups({lines:[line('Adhoc Van',100),line('Adhoc Van',200)],flattenSingle:true}));
  assert.doesNotMatch(html,/<details|₹300.00/);assert.match(html,/₹100.00/);assert.match(html,/₹200.00/);
 });
+
+test('rent with revised rates does not label the whole period with its first rate',()=>{
+ const {CostSourceGroups}=compile('../../app/finance/profitability/expense-details.tsx',{'@/lib/finance/pnl-cost-heads':costs});
+ const evidence={fuel:[],vehicles:[{vehicle_no:'V1',station_code:'QLDA',daily_rent:500,monthly_rent:null,model:'Van'},{vehicle_no:'V1',station_code:'QLDA',daily_rent:700,monthly_rent:null,model:'Van'}]};
+ const html=renderToStaticMarkup(CostSourceGroups({lines:[line('Vehicle rent · V1',1200,'Van','Fleet Vehicle Master')],evidence}));
+ assert.doesNotMatch(html,/per eligible day/);assert.match(html,/₹1,200.00/);
+});

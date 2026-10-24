@@ -9,8 +9,10 @@ export function CostSourceGroups({ lines, evidence, flattenSingle = false }: { l
   const groups = groupCostLines(lines);
   return <div className="pnl-calculation-list">{groups.map(group => {
     const dates = new Set(group.entries.map(l => l.date));
-    const vehicle = group.source === 'Fleet Vehicle Master'
-      ? evidence?.vehicles.find(v => v.station_code === group.station && group.label === `Vehicle rent · ${v.vehicle_no}`) : undefined;
+    const rentals = group.source === 'Fleet Vehicle Master'
+      ? (evidence?.vehicles || []).filter(v => v.station_code === group.station && group.label === `Vehicle rent · ${v.vehicle_no}`) : [];
+    const vehicle = rentals.length && rentals.every(v => v.daily_rent === rentals[0].daily_rent && v.monthly_rent === rentals[0].monthly_rent)
+      && (rentals[0].daily_rent != null || rentals[0].monthly_rent != null) ? rentals[0] : undefined;
     const provider = group.label.toUpperCase().includes('BPCL') ? 'BPCL' : group.label.toUpperCase().includes('IOC') ? 'IOC' : '';
     const fuel = group.source === 'Fuel import' && provider ? (evidence?.fuel || []).filter(f =>
       f.station_code === group.station && dates.has(f.transaction_date) && f.provider.toUpperCase().startsWith(provider)) : [];
