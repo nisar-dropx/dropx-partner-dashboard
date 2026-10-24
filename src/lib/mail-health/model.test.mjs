@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {base,discover,dueDate,evaluate,validateSource} from './model.ts';
+import {base,discover,dueDate,evaluate,validateSource,editableSource} from './model.ts';
 const now=new Date('2026-10-24T10:00:00Z');
 const source={...base,key:'new_log',table:'new_mail_logs',label:'Example',portal:'new portal',mode:'daily',owner:'Mail operations',statusField:'status',timeField:'created_at',dateField:'report_date'};
 const row=(status,date='2026-10-24',at='2026-10-24T09:00:00Z')=>({id:status,status,date,at,recipient:'fixture@example.invalid',error:''});
@@ -21,3 +21,7 @@ test('unknown schedule and missing owner require setup',()=>{assert.equal(evalua
 test('event stream does not claim a missing daily run',()=>assert.equal(evaluate({...source,mode:'event'},[],now).state,'idle'));
 test('configuration rejects invalid time, timezone, ranges and non-mail tables',()=>{const c={new_mail_logs:{id:{},company_id:{},status:{},created_at:{},report_date:{}}};validateSource(source,c);for(const change of [{time:'25:00'},{timezone:'nowhere'},{graceMinutes:-1},{queueMinutes:1},{dayOffset:1},{table:'profiles'}])assert.throws(()=>validateSource({...source,...change},c));});
 test('tenant scoping, authorization and safe cron stay enforced',()=>{const server=readFileSync(new URL('./server.ts',import.meta.url),'utf8');assert.match(server,/\.select\(select\)\.eq\('company_id',companyId\)/);assert.doesNotMatch(server,/smtp_pass|sendMail|nodemailer/);const api=readFileSync(new URL('../../app/api/mail-health/route.ts',import.meta.url),'utf8');assert.match(api,/hasPermission\(auth,'mail_health'/);assert.match(api,/auth.isPreview/);const cron=readFileSync(new URL('../../app/api/cron/mail-health/route.ts',import.meta.url),'utf8');assert.match(cron,/timingSafeEqual/);assert.match(cron,/dashboard\.dropxlogistics\.com/);});
+
+test('old unresolved outcomes remain visible ahead of a busy recent-success list',()=>{const entries=Array.from({length:150},(_,i)=>({...row('sent'),id:String(i)}));entries.push({...row('uncertain','2026-08-01','2026-08-01T00:00:00Z'),id:'old-uncertain'});const health=evaluate(source,entries,now);assert.equal(health.entries[0].id,'old-uncertain');assert.equal(health.uncertain,1);});
+test('editor uses latest saved ownership and thresholds without replacing ledger mapping',()=>{const latest=editableSource(source,{owner:'Updated owner',graceMinutes:90,table:'profiles'});assert.equal(latest.owner,'Updated owner');assert.equal(latest.graceMinutes,90);assert.equal(latest.table,source.table);});
+test('shared sender schedule remains authoritative over monitoring overrides',()=>{const s={...source,time:'17:00',control:{state:'enabled',ready:true}};assert.equal(editableSource(s,{time:'10:00',owner:'New owner'}).time,'17:00');});

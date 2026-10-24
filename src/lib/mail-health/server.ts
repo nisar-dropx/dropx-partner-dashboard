@@ -60,7 +60,9 @@ async function readSource(companyId:string,original:Source,schema:Catalog,now:Da
   const filter=(q:any)=>{for(const [key,value] of Object.entries(source.filters??{})){if(!identifier.test(key)||!cols[key])throw new Error('Source filter is invalid.');q=q.eq(key,value);}return q;};
   const since=new Date(now.getTime()-9*86400000).toISOString();
   const recent=await paged(source.table,fields.join(','),companyId,q=>filter(q).gte(source.dateField??source.timeField,source.dateField?since.slice(0,10):since).order(source.timeField,{ascending:false,nullsFirst:false}).order('id'));
-  const blocked=await paged(source.table,fields.join(','),companyId,q=>filter(q).in(source.statusField,['uncertain','needs_review','sending','queued','pending']).order(source.timeField,{ascending:true,nullsFirst:true}).order('id'),500);
+  const allowed=cols[source.statusField].enum;
+  const pendingStates=['uncertain','needs_review','sending','queued','pending'].filter(s=>!allowed||allowed.includes(s));
+  const blocked=pendingStates.length?await paged(source.table,fields.join(','),companyId,q=>filter(q).in(source.statusField,pendingStates).order(source.timeField,{ascending:true,nullsFirst:true}).order('id'),500):{rows:[],partial:false};
   if(recent.partial||blocked.partial)warnings.push('Result limit reached. Coverage is partial; narrow or investigate this source.');
   const unique=new Map([...recent.rows,...blocked.rows].map(row=>[String(row.id),row]));
   const entries:Entry[]=[...unique.values()].map(row=>{

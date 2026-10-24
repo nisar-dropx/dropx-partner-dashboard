@@ -37,7 +37,7 @@ export function dueDate(source: Source, now: Date) {
 export function evaluate(source: Source, entries: Entry[], now=new Date(), run?: {count:number; date:string}, warnings: string[]=[]): Health {
   const due=dueDate(source,now);
   const rows=source.mode==='daily'&&due ? entries.filter(e=>e.date===due) : entries;
-  const result:Health={source,state:'idle',message:'No recent activity; this is not proof of delivery.',dueDate:due,expected:run?.date===due?run.count:null,accepted:0,failed:0,uncertain:0,queued:0,skipped:0,lastActivity:entries.map(e=>e.at).filter((v):v is string=>!!v).sort().at(-1)??null,entries:entries.slice(0,100),warnings};
+  const result:Health={source,state:'idle',message:'No recent activity; this is not proof of delivery.',dueDate:due,expected:run?.date===due?run.count:null,accepted:0,failed:0,uncertain:0,queued:0,skipped:0,lastActivity:entries.map(e=>e.at).filter((v):v is string=>!!v).sort().at(-1)??null,entries:[...entries].sort((a,b)=>Number(uncertain.has(b.status)||queued.has(b.status)||failed.has(b.status))-Number(uncertain.has(a.status)||queued.has(a.status)||failed.has(a.status))||(b.at??'').localeCompare(a.at??'')).slice(0,100),warnings};
   for(const e of rows){if(accepted.has(e.status))result.accepted++;else if(failed.has(e.status))result.failed++;else if(uncertain.has(e.status))result.uncertain++;else if(queued.has(e.status))result.queued++;else if(['skipped','cancelled'].includes(e.status))result.skipped++;}
   result.uncertain=entries.filter(e=>uncertain.has(e.status)).length;
   result.queued=entries.filter(e=>queued.has(e.status)).length;
@@ -60,7 +60,7 @@ export function evaluate(source: Source, entries: Entry[], now=new Date(), run?:
   if(result.accepted) return {...result,state:source.owner?'ok':'setup',message:source.owner?(result.expected===null?'Accepted deliveries recorded. Expected recipient coverage is not available.':'Expected recipients accepted by the mail server. Inbox delivery is not confirmed.'):'Deliveries recorded. Assign a responsible owner.'};
   return result;
 }
-export type Catalog = Record<string, Record<string,{type?:string;format?:string}>>;
+export type Catalog = Record<string, Record<string,{type?:string;format?:string;enum?:string[]}>>;
 export function discover(catalog:Catalog):Source[]{
   return Object.entries(catalog).flatMap(([table,cols])=>{
     const statusField=['status','delivery_status','state'].find(k=>cols[k]);
@@ -80,4 +80,9 @@ export function validateSource(s:Source,catalog:Catalog){
   localParts(new Date(),s.timezone);
   if(!Number.isInteger(s.graceMinutes)||s.graceMinutes<0||s.graceMinutes>360||!Number.isInteger(s.queueMinutes)||s.queueMinutes<5||s.queueMinutes>1440||!Number.isInteger(s.dayOffset)||s.dayOffset>0||s.dayOffset< -7)throw new Error('Grace must be 0–360 minutes, queue age 5–1440, and report offset −7 to 0.');
   if(s.startDate&&!/^\d{4}-\d{2}-\d{2}$/.test(s.startDate))throw new Error('Use YYYY-MM-DD for the first scheduled date.');
+}
+
+/** Open the editor with the latest saved rules, preserving server-owned source mapping. */
+export function editableSource(source:Source, saved:Partial<Source>):Source {
+ return {...source,...saved,key:source.key,table:source.table,statusField:source.statusField,timeField:source.timeField,dateField:source.dateField,recipientField:source.recipientField,errorField:source.errorField,filters:source.filters,control:source.control,settings:source.settings,...(source.control?{mode:source.mode,time:source.time,timezone:source.timezone,dayOffset:source.dayOffset,startDate:source.startDate,endDate:source.endDate}:{}),...(source.settings?.time?{time:source.time}:{})};
 }

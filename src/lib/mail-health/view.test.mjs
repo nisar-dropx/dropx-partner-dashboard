@@ -5,11 +5,12 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {base,evaluate} from './model.ts';
+import * as model from './model.ts';
+const {base,evaluate}=model;
 const code=ts.transpileModule(readFileSync(new URL('../../app/notifications/mail-health/view.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
 const mod={exports:{}};
 const jsx=await import('react/jsx-runtime');
-vm.runInNewContext(code,{module:mod,exports:mod.exports,require(name){if(name==='react')return React;if(name==='react/jsx-runtime')return jsx;if(name==='./view.css')return {};throw new Error(name);},Date,Set,Map});
+vm.runInNewContext(code,{module:mod,exports:mod.exports,require(name){if(name==='@/lib/mail-health/model')return model;if(name==='react')return React;if(name==='react/jsx-runtime')return jsx;if(name==='./view.css')return {};throw new Error(name);},Date,Set,Map});
 test('overview renders discovered portal, truthful failed coverage and read-only controls',()=>{
  const source={...base,key:'unexpected',table:'unexpected_mail_logs',label:'Newly connected mail',portal:'Future portal',statusField:'status',timeField:'created_at'};
  const fixture={checkedAt:new Date().toISOString(),watchdogAt:null,warnings:['Catalog connection is incomplete'],health:[evaluate(source,[],new Date(),undefined,['Fixture query failed'])]};
