@@ -55,7 +55,7 @@ async function calculateCfo(c:FinanceContext,query:PnlQuery){
  const locationByCode=new Map(operating.map(l=>[l.station_code,l]));
  const byKind=(kind:string)=>masters.filter(r=>r.kind===kind);
  const reportingRegion=(l:typeof operating[number])=>masters.find(r=>r.kind==='reporting_region'&&r.data.station_code===l.station_code)?.data.region||l.region||'Unassigned';
- const issues:string[]=[];if(pnl.costError)issues.push(pnl.costError);
+ const issues:string[]=['Operating expenses use recorded source amounts. Recoverable input GST and capital purchases are not separately classified in these feeds; review their accounting treatment before closing the month.'];if(pnl.costError)issues.push(pnl.costError);
  if(!c.authorization.hasAllLocationAccess)issues.push('This location view excludes company-wide HO allocations; business net profit requires company-wide Finance access.');
  const lines:CfoLine[]=[],days:CfoDay[]=[],overhead:OverheadLine[]=[],nowDetails:any[]=[];
  const latestReports=source.report.daily.filter(d=>d.shipment_present).map(d=>d.work_date).sort();

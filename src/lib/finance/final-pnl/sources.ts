@@ -47,7 +47,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   ()=>rows(table('workforce_payroll_runs','id,status,period_start,period_end,calculated_at').gte('period_end',historyStart).order('id'),'Workforce payroll status')
  ]);
  const topology=baseStations(stations as any,aliases as any).map(t=>{const s=stations.find(s=>s.station_code===t.code)!;return {...t,active:s.is_active!==false,isHo:!!s.is_ho,hidden:!!s.hide_from_location_list};}),stationById=new Map(stations.map(s=>[s.id,s.station_code]));
- const issues:string[]=[],entries:Entry[]=[],losses:Loss[]=[];
+ const issues:string[]=['Operating expenses use recorded source amounts. Recoverable input GST and capital purchases are not separately classified in these feeds; review their accounting treatment before closing the month.'],entries:Entry[]=[],losses:Loss[]=[];
  const add=(entry:Omit<Entry,'month'|'sourceStation'>)=>{entries.push({...entry,month,sourceStation:entry.station});};
  const codes=stations.map(s=>s.station_code);
  const cps=await db.rpc('ops_cps_base_v2',{p_company:company,p_from:start,p_through:end,p_stations:codes});
