@@ -47,7 +47,7 @@ export const buildAmazonNowDigest: DigestBuilder = async (db, control, date) => 
     for (const station of scope.stations) {
       const r = reviews.find(r => r.station_id === station.id), fact = facts.find(f => f.station_code === station.station_code);
       const pending = steps.filter(s => s.review_id === r?.id && s.status === "pending");
-      const openActions = actions.filter(a => a.review_id === r?.id && !["closed", "completed", "cancelled"].includes(a.status));
+      const openActions = actions.filter(a => a.review_id === r?.id && !["done", "closed", "completed", "cancelled"].includes(a.status));
       const complete = r?.status === "closed";
       const status = !fact ? "D−2 data missing" : !r ? "Review not started" : complete ? "Review complete" : "Review in progress";
       rows.push({ id: station.id, code: station.station_code, name: station.station_name || "", cells: [fact?.values_json?.score_pct != null ? `${fact.values_json.score_pct}% · ${fact.values_json.band || ""}` : "—", status,

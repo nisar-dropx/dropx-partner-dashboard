@@ -37,6 +37,13 @@ test('review mail reads D−2 and never treats unavailable or missing source dat
  const f=builderFixture(true);const result=await f.run();assert.match(result.messages[0].html,/D−2 data missing/);assert.equal(result.messages[0].scope.pending,1);assert(f.calls.some(c=>c[0]==='report_metric_facts'&&c[1]==='report_date'&&c[2]==='2026-10-23'));
  f.fail('report_metric_facts');await assert.rejects(f.run(),/offline/);
 });
+test('completed follow-up actions do not keep a completed store review pending',async()=>{
+ const f=builderFixture(true);
+ f.tables.ops_performance_reviews.push({id:'r',company_id:'c',station_id:'s1',source_date:'2026-10-23',review_type:'daily_operations',source_type:'qc_store_health_daily',status:'closed'});
+ f.tables.report_metric_facts.push({company_id:'c',station_code:'TCC3',report_date:'2026-10-23',source_type:'qc_store_health_daily',values_json:{score_pct:90}});
+ f.tables.ops_performance_followups.push({company_id:'c',review_id:'r',status:'done',due_date:'2026-10-22'});
+ const result=await f.run();assert.equal(result.messages[0].scope.pending,0);assert.match(result.messages[0].html,/0 open/);assert.doesNotMatch(result.messages[0].html,/overdue actions/);
+});
 test('activity mail keeps older pending work, excludes future handover slots and counts submitted separately',async()=>{
  const f=builderFixture(false);f.tables.ops_si_shift_checklists.push({company_id:'c',location_id:'s1',shift_date:'2026-10-24',shift_slot:'due',status:'submitted',incoming_name:'Incoming SI'},{company_id:'c',location_id:'s1',shift_date:'2026-10-23',shift_slot:'due',status:'open',outgoing_name:'Older SI'});f.tables.ops_store_ops_checklists.push({id:'d',company_id:'c',location_id:'s1',work_date:'2026-10-24',status:'submitted'});
  const result=await f.run();assert.match(result.messages[0].html,/0\/1 accepted/);assert.match(result.messages[0].html,/1 awaiting acceptance · 1 open \/ returned/);assert.doesNotMatch(result.messages[0].html,/not started/);assert.match(result.messages[0].html,/Older SI/);assert.equal(result.messages[0].scope.dataDate,'2026-10-24');
