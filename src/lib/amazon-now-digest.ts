@@ -10,7 +10,7 @@ export const nowDigestEvents = ["now_review_digest", "now_activity_digest"] as c
 export type NowDigestEvent = typeof nowDigestEvents[number];
 export function defaultNowControl(company: string, event: NowDigestEvent, domain: string): DigestControl {
   return { company_id: company, portal: "ops", event_key: event, state: "disabled", paused_until: null,
-    subject_template: `Amazon Now · ${event === "now_review_digest" ? "Store review" : "Activities & handover"} | {{month}} {{year}}`,
+    subject_template: "Amazon Now · Store operations | {{month}} {{year}}",
     config: { data_label: event === "now_review_digest" ? "D−2 review data" : "Previous day and older pending handovers", schedule_time: event === "now_review_digest" ? "19:00" : "07:15", timezone: "Asia/Kolkata", day_offset: 0, thread_mode: "monthly", delivery_window_minutes: 90, email_domain: domain, delivery_ready: false, send_zero_cases: true,
       recipient_role_codes: [...adHocOpsRoles].filter(r => !["OPERATIONS_FLTM", "OPERATIONS_TL", "OPERATIONS_SSA"].includes(r)), manager_reminder: "" } };
 }

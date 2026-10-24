@@ -160,6 +160,7 @@ const currentDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:
 let mailOptions=null,threadFilters=[];
 const sendModule=compile('src/lib/portal-digest-delivery.ts',{
  './portal-digest-attachments':attachmentMail,'server-only':{},'./timeout-fetch':{},'./adhoc-digest-scope':{},
+ './amazon-now-digest':{loadNowMailScope:async()=>({recipients:[{email:'user@example.com',stationIds:['s1']}]})},
  './cod-pending-mail-scope':{loadCodMailRecipients:async()=>[{email:'user@example.com',stationIds:['s1']}]},
  './ops-pulse/cod-pending-data':{loadCodPendingReport:async()=>[{station}]},
  './id-mapping-digest':{loadIdMappingRecipientScope:async()=>({recipients:[]})},
@@ -213,3 +214,18 @@ const streamTransport=require('nodemailer').createTransport({streamTransport:tru
 const mime=await streamTransport.sendMail({from:'mail@example.invalid',to:'recipient@example.invalid',subject:'COD attachment test',text:'Scoped report',attachments:attachmentMail.digestMailAttachments(evening.attachments)});
 assert.match(mime.message.toString(),/multipart\/mixed/);for(const file of evening.attachments)assert.ok(mime.message.toString().includes(file.filename));
 console.log('PASS COD attachments: inclusive two-day boundary, scoped station and shipment CSVs, pinned dates, absent-source handling, formula escaping, size limits, persisted SMTP bytes and MIME generation without sending.');
+
+// Amazon Now's two daily messages share the monthly conversation, but retain unique message IDs.
+responses.portal_digest_deliveries={scope_summary:{stationIds:['s1']}};
+responses.portal_digest_threads={root_message_id:'<now-root@example.com>',last_message_id:'<now-morning@example.com>',subject:'Amazon Now | October 2026'};
+const nowIds=[];
+for(const event of ['now_review_digest','now_activity_digest']){
+ threadFilters=[];mailOptions=null;
+ mailDb.rpc=async name=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:event,company_id:'c',event_key:event,recipient_email:'user@example.com',report_date:currentDate,subject:'new subject',html:'mock',body:'mock'}],error:null};
+ const result=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
+ assert.equal(result.accepted,1);assert.equal(mailOptions.subject,'Amazon Now | October 2026');assert.equal(mailOptions.inReplyTo,'<now-morning@example.com>');
+ assert.ok(threadFilters.some(f=>f[0]==='in'&&f[1]==='event_key'&&f[2].includes('now_review_digest')&&f[2].includes('now_activity_digest')));
+ nowIds.push(mailOptions.messageId);
+}
+assert.notEqual(nowIds[0],nowIds[1]);
+console.log('PASS Amazon Now delivery: shared monthly thread and distinct same-day message IDs.');

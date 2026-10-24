@@ -19,5 +19,5 @@ export async function AmazonNowNotificationSettings({ companyId, canEdit, domain
    <DigestSettingsForm control={control} canEdit={canEdit} action={saveAmazonNowDigestSettings.bind(null,event)} receipts={receipts.data || []}/>
   </details>;
  }));
- return <section id="amazon-now"><h2>Amazon Now · daily store summaries</h2><p>Two compact store tables. Each recipient gets one monthly thread for reviews and one for activities. Store accounts receive their own stores; managers receive their assigned stores.</p>{sections}</section>;
+ return <section id="amazon-now"><h2>Amazon Now · daily store summaries</h2><p>Two compact store tables. Both daily summaries reply in one monthly store-operations thread per recipient. Store accounts receive their own stores; managers receive their assigned stores.</p>{sections}</section>;
 }
