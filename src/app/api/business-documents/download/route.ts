@@ -1,3 +1,4 @@
+import { documentMatchesWorkspace } from "@/lib/business-document-workspace";
 import { NextResponse, type NextRequest } from "next/server";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
     if (!document?.storage_bucket || !document.storage_path) {
       return NextResponse.json({ error: "Document file is not available." }, { status: 404 });
     }
+    if (!(await documentMatchesWorkspace(authorization, document))) return NextResponse.json({ error: "Document is outside the selected workspace." }, { status: 403 });
     const roleAccessResult = await supabaseAdmin
       .from("document_type_role_access")
       .select("role_id")
@@ -50,6 +52,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Document access denied." }, { status: 403 });
     }
 
+    if (asInline) {
+      const signed = await supabaseAdmin.storage.from(document.storage_bucket).createSignedUrl(document.storage_path, 120);
+      if (signed.error || !signed.data?.signedUrl) throw new Error("Unable to open document.");
+      return NextResponse.redirect(signed.data.signedUrl, { headers: { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
+    }
     const file = await supabaseAdmin.storage.from(document.storage_bucket).download(document.storage_path);
     if (file.error) throw new Error(file.error.message);
 

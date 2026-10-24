@@ -1,5 +1,6 @@
 "use client";
 
+import { EvidencePreview } from "@/components/evidence-preview";
 import { useMemo, useState } from "react";
 import { Download, Eye } from "lucide-react";
 
@@ -14,6 +15,7 @@ export type BusinessDocumentTableRow = {
   status: string;
   days: string;
   signedUrl: string | null;
+  fileName?: string | null;
   canDownload: boolean;
   manageUrl: string;
 };
@@ -145,7 +147,7 @@ export function BusinessDocumentsTable({ allFilteredIds, canEdit, rows }: Props)
                 <td>
                   {document.signedUrl ? (
                     <div className="business-doc-file-actions">
-                      <a className="icon-button" href={document.signedUrl} target="_blank" rel="noreferrer" aria-label="Open document" title="Open document"><Eye size={16} /></a>
+                      <EvidencePreview className="icon-button" href={document.signedUrl} fileName={document.fileName} label={`${document.documentName} · ${document.scope}`}><Eye size={16} /></EvidencePreview>
                       <a className="icon-button" href={`/api/business-documents/download?id=${encodeURIComponent(document.id)}`} aria-label="Download document" title="Download document"><Download size={16} /></a>
                     </div>
                   ) : "-"}

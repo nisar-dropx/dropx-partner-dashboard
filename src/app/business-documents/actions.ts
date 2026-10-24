@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
+import { documentMatchesWorkspace } from "@/lib/business-document-workspace";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -146,6 +147,11 @@ export async function createBusinessDocument(formData: FormData) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const documentType = await loadDocumentType(companyId, required(formData.get("document_type_id"), "Document type"));
+    const proposedScope = parseScope(formData, documentType.business_scope_mode);
+    const additional = parseAdditionalScopeIds(formData, documentType.business_scope_mode, Boolean(documentType.enable_scope_access));
+    for (const scopeId of [proposedScope.scope_id, ...additional]) {
+      if (!(await documentMatchesWorkspace(authorization, { ...proposedScope, scope_id: scopeId, additional_scope_ids: [] }))) throw new Error("Choose a document scope within the selected workspace.");
+    }
     const filePayload = await uploadBusinessFile(companyId, String(documentType.code).toUpperCase(), formData.get("file"));
     const payload = {
       company_id: companyId,
@@ -173,7 +179,14 @@ export async function updateBusinessDocument(formData: FormData) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const id = required(formData.get("id"), "Business document");
+    const current = await supabaseAdmin.from("business_document_records").select("scope_type,scope_id,additional_scope_ids").eq("company_id", companyId).eq("id", id).eq("is_active", true).maybeSingle();
+    if (current.error || !current.data || !(await documentMatchesWorkspace(authorization, current.data))) throw new Error("Document is outside the selected workspace.");
     const documentType = await loadDocumentType(companyId, required(formData.get("document_type_id"), "Document type"));
+    const proposedScope = parseScope(formData, documentType.business_scope_mode);
+    const additional = parseAdditionalScopeIds(formData, documentType.business_scope_mode, Boolean(documentType.enable_scope_access));
+    for (const scopeId of [proposedScope.scope_id, ...additional]) {
+      if (!(await documentMatchesWorkspace(authorization, { ...proposedScope, scope_id: scopeId, additional_scope_ids: [] }))) throw new Error("Choose a document scope within the selected workspace.");
+    }
     const filePayload = await uploadBusinessFile(companyId, String(documentType.code).toUpperCase(), formData.get("file"));
     if (filePayload) await keepOldBusinessFileInTrash(companyId, id);
     const payload = {
@@ -205,6 +218,8 @@ export async function deleteBusinessDocument(formData: FormData) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const id = required(formData.get("id"), "Business document");
+    const current = await supabaseAdmin.from("business_document_records").select("scope_type,scope_id,additional_scope_ids").eq("company_id", companyId).eq("id", id).eq("is_active", true).maybeSingle();
+    if (current.error || !current.data || !(await documentMatchesWorkspace(authorization, current.data))) throw new Error("Document is outside the selected workspace.");
 
     const documentResult = await supabaseAdmin
       .from("business_document_records")

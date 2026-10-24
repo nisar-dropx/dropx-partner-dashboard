@@ -1,3 +1,4 @@
+import { documentMatchesWorkspace } from "@/lib/business-document-workspace";
 import JSZip from "jszip";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { NextResponse, type NextRequest } from "next/server";
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
         companyId,
         authorization.roleId
       );
-      if (!allowed) continue;
+      if (!allowed || !(await documentMatchesWorkspace(authorization, document))) continue;
       const file = await supabaseAdmin.storage.from(document.storage_bucket).download(document.storage_path);
       if (file.error) throw new Error(file.error.message);
       downloadable.push({ ...document, bytes: new Uint8Array(await file.data.arrayBuffer()) });

@@ -215,7 +215,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
       <InboxNotificationListener enabled={inboxNotificationsEnabled} />
       {authorization.isPreview ? <div className="owner-preview-banner"><strong>Read-only user preview</strong><span>You are viewing this portal as {authorization.fullName}. Exit preview to make changes.</span></div> : null}
       {children}
-      {isOpsHost && hasPermission(authorization, "ops_pulse", "access") ? <OpsAiChat /> : null}
+      {isOpsHost && hasPermission(authorization, "ops_pulse", "access") ? <OpsAiChat key={`${authorization.userId}:${opsContext.mode}:${opsContext.selectedLocations.map(l => l.id).sort().join(",")}`} /> : null}
     </AppShellFrame>
     </PaymentNotificationProvider>
   );
