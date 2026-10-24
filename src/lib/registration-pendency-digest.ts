@@ -1,6 +1,7 @@
 import type {DigestBuilder,DigestMessage} from "./portal-digest-delivery";
 import {createStreamingXlsx} from "./xlsx-stream.ts";
 import {registrationEvents,type RegistrationSnapshot,type RegistrationRow} from "./registration-pendency.ts";
+import {loadRegistrationSummaryRecipients,type RegistrationSummaryRecipient} from "./registration-summary-recipients.ts";
 
 const esc=(value:unknown)=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]!));
 const stamp=(value:string)=>value?new Date(value).toLocaleString("en-GB",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:true}):"—";
@@ -15,15 +16,17 @@ export async function registrationAttachment(rows:RegistrationRow[],date:string,
   if(bytes.length>10*1024*1024)throw Error("Registration report exceeds the email attachment limit; no incomplete attachment sent.");
   return {filename:`Registration_Pendency_${date}_${slot}.xlsx`,contentType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" as const,content:bytes.toString("base64"),encoding:"base64" as const};
 }
-export async function buildRegistrationMessages(snapshot:RegistrationSnapshot,event:string,subjectTemplate:string):Promise<DigestMessage[]>{
+export async function buildRegistrationMessages(snapshot:RegistrationSnapshot,event:string,subjectTemplate:string,summaryRecipients:RegistrationSummaryRecipient[]=[]):Promise<DigestMessage[]>{
   if(!registrationEvents.includes(event as typeof registrationEvents[number]))throw Error("Invalid registration schedule.");
   const morning=event.endsWith("_morning"),slot=morning?"Morning":"Afternoon";
   const month=new Date(`${snapshot.date}T12:00:00Z`).toLocaleDateString("en-GB",{month:"long",timeZone:"Asia/Kolkata"});
   const subject=subjectTemplate.replaceAll("{{month}}",month).replaceAll("{{year}}",snapshot.date.slice(0,4));
   if(!subject||/[\r\n]/.test(subject))throw Error("Invalid registration email subject.");
   const messages:DigestMessage[]=[];
-  for(const recipient of snapshot.recipients){
-    const rows=snapshot.rows.filter(row=>recipient.profileKeys.includes(row.key)&&row.managerEmail===recipient.email);
+  const summaryEmails=new Set(summaryRecipients.map(r=>r.email));
+  const recipients=[...snapshot.recipients.filter(r=>!summaryEmails.has(r.email)).map(r=>({...r,consolidated:false})),...summaryRecipients.map(r=>({...r,profileKeys:snapshot.rows.map(row=>row.key),consolidated:true}))];
+  for(const recipient of recipients){
+    const rows=snapshot.rows.filter(row=>recipient.profileKeys.includes(row.key)&&(recipient.consolidated||row.managerEmail===recipient.email));
     if(!rows.length)continue;
     const stations=[...new Set(rows.map(row=>row.stationId))].map(id=>{
       const scoped=rows.filter(row=>row.stationId===id);
@@ -34,7 +37,9 @@ export async function buildRegistrationMessages(snapshot:RegistrationSnapshot,ev
     const reminder=morning?"Start today by helping your team complete and submit the pending registrations.":"Afternoon follow-up: this is a fresh check of registrations still pending. Please follow up on the remaining actions; completed registrations no longer appear.";
     const html=`<!doctype html><html><body style="margin:0;background:#edf1f7;color:#1b2942;font-family:Arial,sans-serif"><table role="presentation" width="100%" cellspacing="0"><tr><td align="center" style="padding:22px 10px"><table role="presentation" width="680" cellspacing="0" style="width:100%;max-width:680px;background:white;border-radius:16px;overflow:hidden"><tr><td style="padding:26px;background:#20213f;background:linear-gradient(120deg,#18243d,#6e315d);color:white;border-top:5px solid #f45a2a"><div style="font-size:11px;font-weight:bold;letter-spacing:2px;color:#ffbb9c">DROPX · PEOPLE + WORKFORCE</div><h1 style="font-size:25px;line-height:1.25;margin:10px 0">Registration pendency</h1><div style="color:#e6e8f2">${slot} ${morning?"action list":"follow-up"} · ${esc(stamp(snapshot.checkedAt))} IST</div></td></tr><tr><td style="padding:24px"><p style="margin-top:0">Hello ${esc(recipient.name)},</p><p style="font-size:14px;line-height:1.6">${reminder}</p><table role="presentation" width="100%" cellspacing="0" style="margin:18px 0"><tr>${[[pending,"To complete","#fff0e7","#b84317"],[review,"Awaiting review","#f0eaff","#6d3bb1"],[stations.length,"Stations / stores","#e4f6f1","#11745c"]].map(([n,label,bg,color])=>`<td width="33%" style="padding:14px 10px;background:${bg};color:${color};border-right:5px solid white"><b style="font-size:28px">${n}</b><br><span style="font-size:12px">${label}</span></td>`).join("")}</tr></table>${table}<p style="font-size:11px;color:#64748b">Review is included in People / Workforce totals, not an additional count.</p><div style="padding:14px 16px;background:#fff8e9;border-left:4px solid #f59e0b;margin:20px 0"><b>What needs attention?</b><p style="margin:8px 0 0;font-size:13px;line-height:1.6">The attached Excel lists each profile’s status, exact missing required fields, saved-draft status, age and next action. A saved draft is not a submitted registration. Submitted profiles need reviewer follow-up, not re-entry.</p></div><p style="line-height:2.8"><a style="background:#ee5427;color:white;padding:11px 16px;text-decoration:none;border-radius:6px;font-weight:bold;font-size:13px" href="https://ops.dropxlogistics.com/work-force-register?view=pending">Workforce register →</a> &nbsp; <a style="background:#38294f;color:white;padding:11px 16px;text-decoration:none;border-radius:6px;font-weight:bold;font-size:13px" href="https://people.dropxlogistics.com/people">People directory →</a></p><p style="font-size:12px;line-height:1.6;color:#64748b">Only profiles assigned to you are included. Required fields follow the current registration settings. No identity numbers, bank details or document copies are included in this email or attachment.</p></td></tr><tr><td style="padding:16px 24px;background:#f4f6fa;color:#64748b;font-size:11px;line-height:1.6">Automatic checks at 9:30 a.m. and 4:00 p.m. IST daily. No email is sent when your mapped profiles have no pendency. Status shown is the snapshot time above.</td></tr></table></td></tr></table></body></html>`;
     const text=`DropX registration pendency · ${slot}\nAs of ${stamp(snapshot.checkedAt)} IST\n\nHello ${recipient.name},\n${reminder}\n\n${pending} to complete; ${review} awaiting review; ${stations.length} stations/stores.\nStation | People | Workforce | Review (included) | Total\n${stations.map(s=>`${s.code} | ${s.people} | ${s.workforce} | ${s.review} | ${s.total}`).join("\n")}\n\nSee the attached Excel for status, missing fields and next action for each profile.\nWorkforce: https://ops.dropxlogistics.com/work-force-register?view=pending\nPeople: https://people.dropxlogistics.com/people\nNo identity numbers or bank details are attached. No email when there is no pendency.`;
-    messages.push({email:recipient.email,name:recipient.name,subject,html,text,attachments:[await registrationAttachment(rows,snapshot.date,snapshot.checkedAt,slot)],scope:{profileKeys:rows.map(r=>r.key),stationIds:[...new Set(rows.map(r=>r.stationId))],pending:rows.length,reportDate:snapshot.date,slot}});
+    const summaryNote=`Company-wide overview: ${rows.length} pending profiles across ${stations.length} stations/stores. ${snapshot.unrouted.length} profiles have no verified manager email and are included here for routing follow-up.`;
+    const summaryHtml=recipient.consolidated?html.replace("<h1 style=\"font-size:25px;line-height:1.25;margin:10px 0\">Registration pendency</h1>","<h1 style=\"font-size:25px;line-height:1.25;margin:10px 0\">Registration pendency · Consolidated</h1>").replace(reminder,summaryNote+" "+reminder).replace("Only profiles assigned to you are included.","Company-wide owner summary, including profiles without a verified manager. Managers receive only their own assigned profiles.").replace("when your mapped profiles have no pendency","when the company has no registration pendency"):html;
+    messages.push({email:recipient.email,name:recipient.name,subject:recipient.consolidated?subject+" | Consolidated":subject,html:summaryHtml,text:recipient.consolidated?summaryNote+"\n\n"+text:text,attachments:[await registrationAttachment(rows,snapshot.date,snapshot.checkedAt,recipient.consolidated?slot+"_Consolidated":slot)],scope:{profileKeys:rows.map(r=>r.key),stationIds:[...new Set(rows.map(r=>r.stationId))],pending:rows.length,reportDate:snapshot.date,slot,consolidated:recipient.consolidated}});
   }
   return messages;
 }
@@ -42,5 +47,6 @@ export const buildRegistrationDigest:DigestBuilder=async(db,control,date)=>{
   const {loadRegistrationPendency}=await import("./registration-pendency-data");
   const snapshot=await loadRegistrationPendency(db,control.company_id,date,String(control.config.email_domain||""));
   if(snapshot.unrouted.length)console.warn("Registration pendency has unmapped managers",{profiles:snapshot.unrouted.length,stations:new Set(snapshot.unrouted.map(r=>r.stationId)).size});
-  return {checkedAt:snapshot.checkedAt,messages:await buildRegistrationMessages(snapshot,control.event_key,control.subject_template||"")};
+  const summaries=await loadRegistrationSummaryRecipients(db,control.company_id,control.config);
+  return {checkedAt:snapshot.checkedAt,messages:await buildRegistrationMessages(snapshot,control.event_key,control.subject_template||"",summaries)};
 };

@@ -9,6 +9,7 @@ import {loadAdHocMailScope} from "./adhoc-digest-scope";
 import {digestMailAttachments,type DigestAttachment} from "./portal-digest-attachments";
 import {loadIdMappingRecipientScope} from "./id-mapping-digest";
 import type {RegistrationSnapshot} from "./registration-pendency";
+import {loadRegistrationSummaryRecipients} from "./registration-summary-recipients";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
 export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>;attachments?:DigestAttachment[]};
@@ -150,7 +151,11 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      if(saved.error)throw Error(saved.error.message);
      const keys=saved.data.scope_summary?.profileKeys;
      // Profile-level (not just station-level) scope protects People reportees.
-     if(!recipient||!Array.isArray(keys)||!keys.length||keys.some((key:string)=>!recipient.profileKeys.includes(key)))throw Error('Registration completed or manager routing changed; saved reminder held for the next fresh run.');
+     if(saved.data.scope_summary?.consolidated===true){
+      const summaries=await loadRegistrationSummaryRecipients(db,delivery.company_id,control.config);
+      const currentKeys=new Set(snapshot.rows.map(row=>row.key));
+      if(!summaries.some(r=>r.email===delivery.recipient_email)||!Array.isArray(keys)||!keys.length||keys.some((key:string)=>!currentKeys.has(key)))throw Error('Consolidated registration subscription, owner access or pending profiles changed; saved reminder held.');
+     }else if(!recipient||!Array.isArray(keys)||!keys.length||keys.some((key:string)=>!recipient.profileKeys.includes(key)))throw Error('Registration completed or manager routing changed; saved reminder held for the next fresh run.');
      registrationRecipientVerified=true;
     }
     if(!digestEnabled(controlResult.data as DigestControl)||!smtpResult.data.is_enabled||!profileResult.data?.length) {

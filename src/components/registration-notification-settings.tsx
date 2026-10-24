@@ -2,7 +2,7 @@ import {digestDatabase} from "@/lib/portal-digest-delivery";
 import {registrationEvents} from "@/lib/registration-pendency";
 import {saveRegistrationDigestSettings} from "@/app/settings/notifications/actions";
 
-export async function RegistrationNotificationSettings({companyId,canEdit}:{companyId:string;canEdit:boolean}){
+export async function RegistrationNotificationSettings({companyId,canEdit,ownerUserId,ownerEmail}:{companyId:string;canEdit:boolean;ownerUserId?:string;ownerEmail?:string|null}){
  const db=digestDatabase();
  const [controls,history]=await Promise.all([
   db.from("portal_notification_controls").select("event_key,state,config").eq("company_id",companyId).eq("portal","ops").in("event_key",[...registrationEvents]).order("event_key",{ascending:false}),
@@ -17,6 +17,7 @@ export async function RegistrationNotificationSettings({companyId,canEdit}:{comp
    <input type="hidden" name="event" value={control.event_key}/>
    <label>{control.event_key.endsWith("_morning")?"Morning report":"Afternoon follow-up"}<select name="state" className="field" defaultValue={control.state} disabled={!canEdit}><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="disabled">Disabled</option></select></label>
    <label>Daily time · IST<input type="time" name="schedule_time" className="field" required defaultValue={control.config.schedule_time} disabled={!canEdit}/></label>
+   {ownerUserId?<label><input type="hidden" name="summary_subscription_present" value="1"/><input type="checkbox" name="consolidated_summary" defaultChecked={Array.isArray(control.config.consolidated_owner_user_ids)&&control.config.consolidated_owner_user_ids.includes(ownerUserId)} disabled={!canEdit}/> Email company-wide summary and Excel to me ({ownerEmail})</label>:null}
    <button type="submit" className="button primary" disabled={!canEdit}>Save schedule</button>
    <small>{control.config.delivery_ready?"Server delivery ready":"Pending production verification · no mail sent"}</small>
   </form>)}

@@ -2,7 +2,7 @@ import {CodNotificationSettings} from '@/components/cod-notification-settings';
 import {AppShell} from '@/components/app-shell';
 import {PageHead} from '@/components/page-head';
 import {DigestSettingsForm} from '@/components/digest-settings-form';
-import {requirePagePermission,hasPermission} from '@/lib/authorization';
+import {requirePagePermission,hasPermission,isCompanyOwner} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {digestDatabase} from '@/lib/portal-digest-delivery';
 import {saveAdHocDigestSettings,saveDigestSettings,saveLossRecoveryDigestSettings,savePerformanceDataUpdateSettings} from './actions';
@@ -25,7 +25,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  if(control.error||history.error||dataUpdate.error||updateHistory.error)throw new Error('Notification settings are temporarily unavailable.');
  return <AppShell active="Notifications" pageCode="ops_notification_settings"><PageHead title="Notifications" eyebrow="Ops Pulse settings" subtitle="Performance updates and daily review status · portal-run, individually scoped emails."/>
  {searchParams?.error?<p role="alert">{searchParams.error}</p>:searchParams?.saved?<p role="status">Notification settings saved.</p>:null}
- <RegistrationNotificationSettings companyId={company} canEdit={canEdit}/>
+ <RegistrationNotificationSettings companyId={company} canEdit={canEdit} ownerUserId={isCompanyOwner(auth)&&!auth.isPreview&&!auth.readOnly?auth.userId:undefined} ownerEmail={auth.email}/>
  {adhoc.data?<section id="adhoc-report"><h2>Ad hoc costs · Morning report</h2><a className="button" href="/api/ops-pulse/adhoc-email-preview" target="_blank" rel="noreferrer">Preview / send sample to me</a><p>Van, Driver and DA · Previous day and MTD · Estimated vs actual Excel · Monthly replies.</p><DigestSettingsForm control={adhoc.data} action={saveAdHocDigestSettings} canEdit={canEdit} receipts={adhocHistory.data||[]}/></section>:null}
  <CodNotificationSettings companyId={company} auth={auth}/>
  <PerformanceDataUpdateSettings control={dataUpdate.data} action={savePerformanceDataUpdateSettings} canEdit={canEdit} receipts={updateHistory.data||[]}/>

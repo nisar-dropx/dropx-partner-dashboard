@@ -24,6 +24,13 @@ The database migration deliberately installs both controls disabled.
   is not a fallback recipient. Ambiguous/missing/inactive managers are held.
 - Each manager gets only their own profiles, grouped by station/store.
   Managers with zero pending profiles receive no message.
+- Company owners can opt into a separate consolidated summary for each daily
+  slot in Settings → Notifications. The subscription stores the signed-in
+  owner's user ID, not an arbitrary recipient address. Active company identity
+  and current owner access are checked again before every send. No subscription
+  grants a role or broadens any manager's report. The summary includes unrouted
+  profiles so owner follow-up can repair missing manager mappings; its Excel
+  preserves each profile's actual manager. Zero company-wide pendency sends no mail.
 - Managers use their unique active HRMS-linked account email, including personal
   domains. The reporting relationship and active company identity authorize the
   recipient. Other digest types retain their company-domain restriction.

@@ -1,7 +1,7 @@
 "use server";
 import {redirect} from 'next/navigation';
 import {revalidatePath} from 'next/cache';
-import {requirePagePermission} from '@/lib/authorization';
+import {requirePagePermission,isCompanyOwner} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {digestDatabase} from '@/lib/portal-digest-delivery';
 import {validateDigestSettings} from '@/lib/digest-settings';
@@ -17,6 +17,11 @@ export async function saveRegistrationDigestSettings(form:FormData){
   const old=await db.from('portal_notification_controls').select('config').eq('company_id',company).eq('portal','ops').eq('event_key',event).single();
   if(old.error)throw Error('Registration schedule unavailable.');
   if(state==='enabled'&&old.data.config.delivery_ready!==true)throw Error('Production verification is required before enabling this schedule.');
+  if(form.has('summary_subscription_present')){
+   if(!isCompanyOwner(auth)||auth.isPreview||auth.readOnly)throw Error('Only the signed-in company owner can change their consolidated subscription.');
+   const existing=Array.isArray(old.data.config.consolidated_owner_user_ids)?old.data.config.consolidated_owner_user_ids:[];
+   old.data.config.consolidated_owner_user_ids=[...new Set([...existing.filter((id:unknown)=>id!==auth.userId),...(form.get('consolidated_summary')==='on'?[auth.userId]:[])])];
+  }
   const saved=await db.from('portal_notification_controls').update({state,paused_until:null,config:{...old.data.config,schedule_time:time,day_offset:0,timezone:'Asia/Kolkata',send_zero_cases:false},updated_by:auth.userId,updated_at:new Date().toISOString()}).eq('company_id',company).eq('portal','ops').eq('event_key',event).select('event_key').single();
   if(saved.error)throw Error('Registration schedule could not be saved.');
  }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
