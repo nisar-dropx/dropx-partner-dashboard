@@ -14,7 +14,8 @@ export interface Invoice {key:string;station:string;reference:string;date:string
 export interface BillingSource {month:string;invoices:Invoice[];reference:BillingReference|null;}
 export interface Station {code:string;base:string;active:boolean;region:string;model:string;aliases:string[];}
 export const zeroHeads = ():Record<Head,number> => Object.fromEntries(heads.map(h=>[h,0])) as Record<Head,number>;
-export function invoiceHead(head:string):Head {
+export function invoiceHead(head:string, description=""):Head {
+ if(/\bI\s*H\s*S\b/i.test(description))return 'ihs';
  if(head==='Amazon MG Income')return 'mg';
  if(head==='Amazon Variable Delivery Income')return 'variable';
  if(head==='Amazon MFN Income')return 'mfn';
@@ -47,7 +48,7 @@ export function reconcileBilling(source:BillingSource, live:LivePnl|null, statio
    estimate.variable+=paise(d.variable);
    estimate.mfn+=paise(d.mfnRevenue);estimate.swa+=paise(d.swaRevenue);
   }
-  let debit=0;for(const invoice of invoices)for(const entry of invoice.entries){if(entry.side==='income')billed[invoiceHead(entry.head)]+=entry.paise;else debit+=entry.paise;}
+  let debit=0;for(const invoice of invoices)for(const entry of invoice.entries){if(entry.side==='income')billed[invoiceHead(entry.head,entry.description)]+=entry.paise;else debit+=entry.paise;}
   const income=invoices.length?Object.values(billed).reduce((s,n)=>s+n,0):null;
   const provisional=rows.length?Object.values(estimate).reduce((s,n)=>s+n,0):null;
   const coverage=(live?.coverage??[]).filter(c=>base(c.station)===code);

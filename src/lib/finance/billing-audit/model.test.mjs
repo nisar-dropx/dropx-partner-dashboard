@@ -30,3 +30,9 @@ test('rate and source-count mismatches are actionable; aliases cannot silently o
  const [row]=reconcileBilling({month:'2026-09',reference,invoices:[]},live,[station('A'),station('X','A')]);
  assert.equal(row.estimate.mg,10000);assert.equal(row.estimate.variable,7000);assert.equal(row.estimate.xpt,3000);assert.equal(row.counts.eligible,20);assert.equal(row.counts.returns,4);assert.equal(row.provisional,20000);
  });
+
+test('I H S MG invoice lines remain IHS rather than creating a false base-MG difference',()=>{
+ const doc=invoice('A');doc.entries.push({id:'ihs',head:'Amazon MG Income',description:'I H S MG Payout',paise:650,side:'income'});
+ const [row]=reconcileBilling({month:'2026-09',reference:null,invoices:[doc]},null,[station('A')]);
+ assert.equal(row.billed.mg,10000);assert.equal(row.billed.ihs,650);assert.equal(row.income,10650);
+});
