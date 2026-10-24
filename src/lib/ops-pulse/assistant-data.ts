@@ -37,11 +37,11 @@ export async function readAssistantData(auth: AuthorizationContext, locations: C
   if (name === "ops_store_audit_summary") {
     const master = await supabaseAdmin.from("ops_store_audit_master").select("*").eq("company_id", companyId).maybeSingle();
     if (master.error || !master.data) throw Error("Store Audit Master is unavailable.");
-    const result = await storeWorkspace(scoped, master.data as Master, args.from, args.to);
+    const result = await storeWorkspace({ ...scoped, isMasterOwner: auth.isMasterOwner }, master.data as Master, args.from, args.to);
     return { from: args.from, to: args.to, rows: result.audits.filter(a => scoped.locationScopeIds.includes(a.location_id)).map(a => ({ station: a.store_name, number: a.number, status: a.status, scheduledFor: a.scheduled_for, completedAt: a.completed_at, score: a.score, findings: a.findings.length })).slice(0, 100), truncated: result.audits.length > 100 };
   }
   if (name === "ops_station_audit_summary") {
-    const result = await loadStationAuditWorkspace(companyId, scoped, args.from, args.to);
+    const result = await loadStationAuditWorkspace(companyId, { ...scoped, isMasterOwner: auth.isMasterOwner }, args.from, args.to);
     const audits = result.audits.filter(a => scoped.locationScopeIds.includes(a.location_id));
     return { from: args.from, to: args.to, rows: audits.slice(0, 100).map(a => ({ stationCode: selected.find(l => l.id === a.location_id)?.station_code, status: a.status_code, scheduledFor: a.scheduled_for, completedAt: a.completed_at })), truncated: result.truncated || audits.length > 100 };
   }

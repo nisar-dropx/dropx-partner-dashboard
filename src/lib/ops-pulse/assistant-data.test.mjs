@@ -30,7 +30,7 @@ test('adapter rejects permissions and mixed station requests before loading data
 });
 test('audit reads delegate to canonical visibility policy and remain location restricted',async()=>{
  const h=setup(),r=await h.readAssistantData({...auth,hasAllLocationAccess:true,isMasterOwner:true},locations,true,'ops_store_audit_summary',{},dates);
- assert.deepEqual(r.rows.map(x=>x.number),['visible']);assert.equal(h.calls[0].userId,'user');assert.equal(h.calls[0].isMasterOwner,false);assert.equal(h.calls[0].hasAllLocationAccess,false);assert.deepEqual(h.calls[0].locationScopeIds,['ds']);assert.equal(h.calls[0].readOnly,true);
+ assert.deepEqual(r.rows.map(x=>x.number),['visible']);assert.equal(h.calls[0].userId,'user');assert.equal(h.calls[0].isMasterOwner,true);assert.equal(h.calls[0].hasAllLocationAccess,false);assert.deepEqual(h.calls[0].locationScopeIds,['ds']);assert.equal(h.calls[0].readOnly,true);
 });
 test('document metadata matches page role and provider policy as well as workspace',async()=>{
  const h=setup(),r=await h.readAssistantData(auth,locations,true,'ops_business_documents',{},dates);assert.deepEqual(r.rows.map(x=>x.document),['allowed']);
