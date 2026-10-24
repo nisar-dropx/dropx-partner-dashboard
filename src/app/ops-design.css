@@ -285,94 +285,41 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 
 /* Install surfaces share OpsPulse typography without depending on an authenticated shell. */
 .ops-login-page, .ops-download-page { font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
-.ops-install { width:min(520px,100%); color:#344054; font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
-.ops-install-heading { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
-.ops-install-heading img { border-radius:9px; }
-.ops-install-heading div { display:grid; gap:3px; }
-.ops-install-heading strong { font-size:14px; color:#172033; }
-.ops-install-heading span { font-size:12px; color:#667085; line-height:1.4; }
-.ops-install-banner {
-  margin:0 0 12px;
-  padding:10px 12px;
-  border:1px solid #f0d9a8;
-  border-radius:10px;
-  background:#fff8eb;
-  color:#7a4e0b;
-  font-size:12px;
-  line-height:1.45;
-}
-.ops-install-recommend {
-  margin-bottom:12px;
-  padding:14px;
-  border:1px solid #cfe5da;
-  border-radius:14px;
-  background:linear-gradient(180deg,#f3fbf7 0%,#fff 70%);
-}
-.ops-install-recommend-head {
-  display:flex;
-  align-items:center;
-  gap:10px;
-  margin-bottom:10px;
-}
-.ops-install-recommend-head svg { color:#0f766e; flex-shrink:0; }
-.ops-install-recommend-head div { display:grid; gap:2px; }
-.ops-install-recommend-head strong { font-size:13px; color:#134e4a; }
-.ops-install-recommend-head small { font-size:11px; color:#5b6b7c; }
-.ops-install-steps {
-  margin:0 0 12px;
-  padding-left:1.2rem;
-  color:#344054;
-  font-size:12.5px;
-  line-height:1.55;
-}
-.ops-install-steps li + li { margin-top:4px; }
-.ops-install-steps b { font-weight:750; color:#172033; }
-.ops-install-primary {
-  display:flex;
-  align-items:center;
-  gap:10px;
-  width:100%;
-  min-height:52px;
-  padding:10px 12px;
-  border:0;
-  border-radius:11px;
-  background:#0f766e;
-  color:#fff;
-  font:inherit;
-  text-align:left;
-  cursor:pointer;
-}
+.ops-install { width:min(520px,100%); color:#344054; font-family:inherit; }
+.ops-install-heading { display:flex; align-items:center; gap:10px; margin-bottom:14px; font-size:15px; }
+.ops-install-content { display:grid; gap:14px; padding:18px; border:1px solid #e4e7ec; border-radius:14px; background:#fff; }
+.ops-install-toggle { display:flex; align-items:center; gap:10px; min-height:48px; padding:10px 16px; border-radius:12px; color:#475467; font-size:13px; font-weight:650; cursor:pointer; list-style:none; }
+.ops-install-toggle::-webkit-details-marker { display:none; }
+.ops-install-toggle > span { flex:1; }
+.ops-install-toggle > svg { flex-shrink:0; }
+.ops-install-toggle:hover { background:#eaecf0; color:#172033; }
+.ops-install[open] > .ops-install-toggle { margin-bottom:6px; }
+.ops-install[open] > .ops-install-toggle > svg:last-child { transform:rotate(180deg); }
+.ops-install-devices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; padding:4px; border-radius:10px; background:#f2f4f7; }
+.ops-install-devices button { min-height:40px; padding:6px 4px; border:1px solid transparent; border-radius:7px; background:transparent; color:#667085; font:inherit; font-size:12px; cursor:pointer; }
+.ops-install-devices button[aria-pressed="true"] { color:#172033; border-color:#e4e7ec; background:#fff; box-shadow:0 1px 3px #1018280a; font-weight:700; }
+.ops-install-banner { margin:0; padding:10px 12px; border-radius:9px; background:#fff8eb; color:#7a4e0b; font-size:12px; line-height:1.5; }
+.ops-install-primary { display:flex; align-items:center; justify-content:center; gap:9px; width:100%; min-height:44px; padding:10px 12px; border:1px solid #d0d5dd; border-radius:10px; background:#fff; color:#172033; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+.ops-install-primary:hover:not(:disabled) { border-color:#df6035; background:#fff9f5; }
 .ops-install-primary:disabled { opacity:.7; cursor:default; }
-.ops-install-primary svg { flex-shrink:0; }
-.ops-install-primary span { display:grid; gap:2px; }
-.ops-install-primary strong { font-size:13px; }
-.ops-install-primary small { font-size:10px; opacity:.85; }
-.ops-install-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.ops-install-actions > :is(a,button) { display:flex; align-items:center; gap:10px; min-height:66px; padding:12px; border:1px solid #d5dce5; border-radius:12px; background:#fff; color:#344054; font:inherit; text-align:left; text-decoration:none; cursor:pointer; }
-.ops-install-actions > :is(a,button):hover:not(:disabled) { border-color:#df6035; background:#fff9f5; }
-.ops-install-actions svg { color:#d94b24; flex-shrink:0; }
-.ops-install-actions span { display:grid; gap:4px; }
-.ops-install-actions strong { font-size:12px; line-height:1.35; }
-.ops-install-actions small { font-size:10px; line-height:1.4; color:#667085; }
-.ops-install-actions button:disabled { cursor:default; }
-.ops-install-apk { opacity:.92; }
-.ops-install-apk small { color:#9a5b00; }
-.ops-install-help { display:flex; align-items:center; gap:6px; margin-top:10px; min-height:36px; border:0; background:transparent; color:#475467; font:inherit; font-size:12px; cursor:pointer; }
-.ops-install-message { font-size:12px; line-height:1.5; color:#475467; }
-.ops-install-instructions { margin-top:14px; padding:0 16px; border:1px solid #e4e7ec; border-radius:12px; background:#fff; font-size:12px; line-height:1.6; }
-.ops-install-instructions p { margin:16px 0; }
-.ops-install-note { color:#667085; }
-.ops-install :is(a,button):focus-visible { outline:2px solid #d94b24; outline-offset:3px; }
+.ops-install-instructions { font-size:13px; line-height:1.6; color:#667085; }
+.ops-install-instructions p { margin:0; }
+.ops-install-instructions p + p { margin-top:8px; }
+.ops-install-instructions strong { font-weight:650; color:#344054; }
+.ops-install-message { margin:0; font-size:12px; line-height:1.5; color:#475467; }
+.ops-install-alternative { border-top:1px solid #eaecf0; padding-top:6px; font-size:12px; }
+.ops-install-alternative summary { min-height:36px; align-content:center; cursor:pointer; color:#667085; }
+.ops-install-alternative p { margin:6px 0; color:#9a5b00; line-height:1.5; }
+.ops-install-alternative a { display:inline-flex; align-items:center; gap:6px; min-height:44px; color:#b54708; font-weight:650; }
+.ops-install :is(a,button,summary):focus-visible { outline:2px solid #d94b24; outline-offset:3px; }
 .ops-download-page { width:min(620px,100%); margin:auto; padding:32px 24px; color:#172033; }
 .ops-download-page header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:48px; }
 .ops-download-page header a { font-size:12px; color:#475467; }
 .ops-download-page h1 { font-size:32px; letter-spacing:-.035em; line-height:1.15; }
 .ops-download-intro { color:#667085; font-size:14px; line-height:1.6; margin-bottom:30px; }
 @media(max-width:480px) {
-  .ops-install-actions { grid-template-columns:1fr; }
-  .ops-install-help { min-height:44px; }
-  .ops-install-recommend { padding:12px; }
-  .ops-install-steps { font-size:13px; }
+  .ops-install-content { padding:14px; }
+  .ops-install-devices button { min-height:44px; }
   .ops-install-primary { min-height:48px; }
   .ops-download-page { padding:24px 16px; }
   .ops-download-page header { flex-wrap:wrap; margin-bottom:32px; }

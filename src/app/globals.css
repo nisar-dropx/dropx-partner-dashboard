@@ -20588,9 +20588,9 @@ td strong,
 .ops-login-brand strong { font-size: 18px; letter-spacing: -.02em; }
 .ops-login-brand small { color: rgba(255, 255, 255, .62); font-size: 9px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
 
-.ops-login-story-copy { max-width: 660px; padding: 64px 0; }
+.ops-login-story-copy { max-width: 660px; margin-block: auto; padding: 64px 0; }
 .ops-login-kicker { color: var(--ops-orange); font-size: 10px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
-.ops-login-story-copy h1 { color: #fff; max-width: 600px; margin: 16px 0 20px; font-size: clamp(42px, 5.2vw, 76px); line-height: .98; letter-spacing: -.055em; }
+.ops-login-story-copy h1 { color: #fff; max-width: 600px; margin: 16px 0 20px; font-size: clamp(42px, 4.5vw, 68px); line-height: 1.05; letter-spacing: -.055em; }
 .ops-login-story-copy p { max-width: 580px; margin: 0; color: rgba(255, 255, 255, .7); font-size: clamp(15px, 1.25vw, 19px); line-height: 1.6; }
 
 .ops-login-proof { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 650px; }
@@ -20648,7 +20648,7 @@ td strong,
 .ops-google-login { border: 1px solid #d0d5dd; color: #344054; background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .03); }
 .ops-google-login:hover { border-color: #98a2b3; background: #f9fafb; }
 .ops-google-login img { width: 18px; height: 18px; }
-.ops-access-footnote { margin: 18px 0 0; color: #98a2b3; font-size: 10px; line-height: 1.5; text-align: center; }
+.ops-access-footnote { margin: 18px 0 0; color: #667085; font-size: 11px; line-height: 1.5; text-align: center; }
 
 .ops-app-downloads { width: min(480px, 100%); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ops-apk-download { display: inline-flex; align-items: center; gap: 10px; color: #344054; }
