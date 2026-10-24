@@ -46,7 +46,7 @@ const dashboardGroups: PermissionGroup[] = [
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "payment_recoveries", "workforce_payout_disputes", "workforce_advances", "payable_balance", "payment_reports"], hiddenCodes: ["payments"] },
   { key: "reports", label: "Reports", codes: ["attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
   { key: "trash", label: "Trash", codes: ["trash"] },
-  { key: "notifications", label: "Notifications", codes: ["notifications_whatsapp", "notifications_history", "notifications_email", "notifications_app"] },
+  { key: "notifications", label: "Notifications", codes: ["notifications_whatsapp", "notifications_history", "notifications_email", "notifications_app", "mail_health"] },
   { key: "users", label: "Users & Access", codes: ["users"] },
   { key: "master_data", label: "Master Data", codes: ["master_locations", "master_providers", "master_models", "payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts", "workforce_categories", "workforce_whatsapp", "designations", "biometric_devices", "master_documents", "master_imports"] },
   { key: "settings", label: "Settings", codes: ["app_settings", "payment_settings", "ai_connector", "amazon_connector", "developer_mode"] }

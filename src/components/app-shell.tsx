@@ -1,3 +1,4 @@
+import { MailHealthBanner } from "@/components/mail-health-banner";
 import { Download } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 import { OpsMenuClose } from "@/components/ops-menu-close";
@@ -214,6 +215,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
       <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : isFinanceHost ? "DropX Finance" : "DropX Dashboard"} />
       <InboxNotificationListener enabled={inboxNotificationsEnabled} />
       {authorization.isPreview ? <div className="owner-preview-banner"><strong>Read-only user preview</strong><span>You are viewing this portal as {authorization.fullName}. Exit preview to make changes.</span></div> : null}
+      {!isOpsHost && !isPeopleHost && !isFinanceHost && hasPermission(authorization, "mail_health", "view") ? <MailHealthBanner /> : null}
       {children}
       {isOpsHost && hasPermission(authorization, "ops_pulse", "access") ? <OpsAiChat /> : null}
     </AppShellFrame>

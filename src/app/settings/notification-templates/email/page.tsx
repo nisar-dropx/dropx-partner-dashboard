@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
-import { requirePagePermission } from "@/lib/authorization";
+import { requirePagePermission, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -107,6 +107,7 @@ export default async function EmailNotificationTemplatesPage() {
         subtitle="Configure each automated email notification template."
         action={(
           <div className="page-actions">
+            {hasPermission(authorization, "mail_health", "view") && <a className="button secondary" href="/notifications/mail-health">Mail Health</a>}
             <a className="button secondary" href="/settings/notification-templates/email/config">Email Config</a>
             <a className="button secondary" href="/settings/notification-templates">Back</a>
           </div>

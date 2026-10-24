@@ -108,6 +108,7 @@ export const accessPages = [
   { code: "notifications_whatsapp", name: "WhatsApp Notifications", sort_order: 108 },
   { code: "notifications_history", name: "Notification History", sort_order: 109 },
   { code: "notifications_email", name: "Email Notifications", sort_order: 110 },
+  { code: "mail_health", name: "Mail Health", sort_order: 112 },
   { code: "notifications_app", name: "App Notifications", sort_order: 111 },
   { code: "users", name: "Users & Access", sort_order: 112 },
   { code: "master_locations", name: "Locations", sort_order: 120 },

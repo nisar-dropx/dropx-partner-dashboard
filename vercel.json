@@ -94,6 +94,10 @@
     {
       "path": "/api/cron/attendance-catchup-audit",
       "schedule": "0 0 1 1 *"
+    },
+    {
+      "path": "/api/cron/mail-health",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "sources": {
+    "fleet_status_report_logs": {"label":"Daily fleet status","portal":"fleet","mode":"daily","settings":{"table":"fleet_control_settings","enabled":"daily_status_email_enabled","time":"daily_status_send_time"}},
+    "payment_email_attempts": {"label":"Payment notifications","portal":"payments","mode":"event"},
+    "hr_approval_email_attempts": {"label":"People approval notifications","portal":"people","mode":"event","settings":{"table":"hr_approval_email_settings","enabled":"is_enabled"}},
+    "fleet_document_notification_logs": {"label":"Fleet document expiry","portal":"fleet","mode":"event","settings":{"table":"fleet_document_notification_templates","enabled":"is_enabled"}},
+    "business_document_notification_logs": {"label":"Business document expiry","portal":"dashboard","mode":"event","settings":{"table":"business_document_notification_templates","enabled":"is_enabled"}},
+    "recruitment_ad_mail_deliveries": {"label":"Recruit advertising mail","portal":"recruit","mode":"setup"},
+    "recruitment_da_onboarding_mail_deliveries": {"label":"Recruit onboarding mail","portal":"recruit","mode":"setup"}
+  }
+}
