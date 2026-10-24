@@ -3,14 +3,9 @@ import { sendEmail } from "@/lib/email";
 import { resolveStationAuditRecipients } from "../station-audit-recipients";
 import { acquireStationAuditThread } from "../station-audit-thread";
 import { db, proofs, type context } from "./server";
-import { reportLines, storeAuditPdf } from "./report";
+import { storeAuditPdf } from "./report";
 import type { StoreAudit } from "./model";
-const escape = (v: string) =>
-  v
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+import { auditCompletionSummary } from "./mail-summary";
 /** Called only after a successful completion commit (or a manager's explicit resend). */
 export async function notifyStoreAudit(
   c: Awaited<ReturnType<typeof context>>,
@@ -60,17 +55,15 @@ export async function notifyStoreAudit(
       a.location_id,
       s.data.station_code,
     );
-    const lines = reportLines(a),
-      url = `https://ops.dropxlogistics.com/store-audits?audit=${a.id}`;
+    const url = `https://ops.dropxlogistics.com/store-audits?audit=${a.id}`;
+    const summary = auditCompletionSummary(a, url);
     await sendEmail({
       companyId: c.companyId,
       to: recipients.to,
       cc: recipients.cc,
       subject: thread.subject,
-      body:
-        lines.join("\n") +
-        `\n\nRespond to the findings and attach closure evidence in OpsPulse: ${url}`,
-      html: `<div style="font:14px Arial;color:#213047;max-width:760px;margin:auto"><h1>Store audit completed · ${escape(a.store_name)}</h1><p>Review the observations, actions and deadlines below. Submit each corrective response and its required evidence in OpsPulse.</p>${lines.map((l) => `<p>${escape(l)}</p>`).join("")}<p><a href="${url}">Open audit and respond</a></p></div>`,
+      body: summary.text,
+      html: summary.html,
       messageId: thread.messageId,
       inReplyTo: thread.inReplyTo,
       references: thread.references,

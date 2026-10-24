@@ -88,6 +88,8 @@ const db = {
         rows = rows.filter((r) => v.includes(r[k]));
         return q;
       },
+      lte(k,v) { rows=rows.filter(r=>r[k]<=v);return q; },
+      or(expression) { const [nil,range]=expression.split(",");const k=nil.split(".")[0],v=range.slice(range.indexOf(".gte.")+5);rows=rows.filter(r=>r[k]==null||r[k]>=v);return q; },
       order(k) {
         assert.ok(
           rows.length === 0 || k in rows[0],
@@ -206,6 +208,16 @@ assert.deepEqual(
   { to: ["user11@example.test"], cc: ["user15@example.test"] },
 );
 assert.deepEqual(await resolveStationAuditRecipients(company, {...st, station_manager_email:'user13@example.test', finance_manager_email:'user15@example.test'}, ['station_email'], ['station_manager_email','finance_manager_email']), {to:['station@example.test'], cc:['user15@example.test']});
+tables.station_responsibility_roles=[{id:id(50),company_id:company,is_active:true}];
+tables.station_responsibility_assignments=[21,22,23,24].map(n=>({id:id(100+n),company_id:company,station_id:station,responsibility_role_id:id(50),assignment_id:id(200+n),effective_from:'2020-01-01',effective_to:n===24?'2020-02-01':null}));
+tables.hr_work_assignments=[21,22,23,24].map(n=>({id:id(200+n),company_id:company,engagement_id:id(300+n)}));
+tables.hr_engagements=[21,22,23,24].map(n=>({id:id(300+n),company_id:company,person_id:id(n),status:'active',start_date:'2020-01-01',end_date:null}));
+tables.hr_people=[21,22,23,24].map(n=>({id:id(n),company_id:company,status:'active'}));
+assert.equal(validAuditRecipientRule('station_responsibilities'),true);
+assert.deepEqual(await resolveStationAuditRecipients(company,st,['station_email'],['station_responsibilities']),{to:['station@example.test'],cc:['user11@example.test']},'tagged responsibility still requires active user, audit access and station scope');
+failure='station_responsibility_assignments';
+await assert.rejects(resolveStationAuditRecipients(company,st,['station_email'],['station_responsibilities']),/DB unavailable/);
+failure='';
 failure = "role_page_permissions";
 await assert.rejects(loadAuditNotificationUsers(company), /DB unavailable/);
 failure = "";

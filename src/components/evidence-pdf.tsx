@@ -1,13 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import { evidenceFitWidth } from "@/lib/evidence-fit";
 import { loadPdfJs } from "@/lib/ops-pulse/pdf-slip";
 
-function PdfPage({ pdf, page, width }: { pdf: PDFDocumentProxy; page: number; width: number }) {
+function PdfPage({ pdf, page, width: availableWidth, height, zoom }: { pdf: PDFDocumentProxy; page: number; width: number; height: number; zoom: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page === 1);
   const [ratio, setRatio] = useState(1.414);
+  const width = evidenceFitWidth(10000, 10000 * ratio, availableWidth, height) * zoom;
   const [error, setError] = useState(false);
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: "400px" });
@@ -35,7 +37,7 @@ function PdfPage({ pdf, page, width }: { pdf: PDFDocumentProxy; page: number; wi
     {error ? <p role="alert">Page {page} could not be rendered. Use Open in new window.</p> : visible ? <canvas ref={canvas} aria-label={`Page ${page}`} style={{ width: "100%", display: "block" }} /> : <span>Page {page}</span>}
   </div>;
 }
-export function EvidencePdf({ href, width }: { href: string; width: number }) {
+export function EvidencePdf({ href, width, height, zoom }: { href: string; width: number; height: number; zoom: number }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -53,6 +55,6 @@ export function EvidencePdf({ href, width }: { href: string; width: number }) {
   if (error) return <p role="alert">Preview unavailable. Open the file in a new window or download it.</p>;
   if (!pdf) return <p role="status">Loading document…</p>;
   return <div aria-label={`${pdf.numPages} pages`}>
-    {Array.from({ length: pdf.numPages }, (_, i) => <PdfPage key={i} pdf={pdf} page={i + 1} width={width} />)}
+    {Array.from({ length: pdf.numPages }, (_, i) => <PdfPage key={i} pdf={pdf} page={i + 1} width={width} height={height} zoom={zoom} />)}
   </div>;
 }

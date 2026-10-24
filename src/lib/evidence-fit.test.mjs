@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {evidenceFitWidth} from './evidence-fit.ts';
+test('portrait, landscape and small evidence fit both dimensions at mobile and desktop sizes',()=>{for(const [w,h] of [[1200,2400],[2400,1200],[100,80],[595,842]])for(const [vw,vh] of [[850,480],[320,500],[320,160]]){const fit=evidenceFitWidth(w,h,vw,vh);assert(fit<=vw);assert(fit*h/w<=vh+.001);assert(fit<=w);}});

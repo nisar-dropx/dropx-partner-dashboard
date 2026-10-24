@@ -2,6 +2,7 @@ import { OpsWorkspaceShortcuts } from '@/components/ops-workspace-shortcuts';
 import { OpsCommandDateRange } from '@/components/ops-command-date-range';
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/app-shell';
 import { PageHead } from '@/components/page-head';
 import { OpsCommandAttention } from '@/components/ops-command-attention';
@@ -31,6 +32,7 @@ export default async function OpsPulsePage({searchParams = {}}:{searchParams?:Se
   const locationsResult = await loadCodLocations(companyId,authorization.locationScopeIds,authorization.hasAllLocationAccess);
   const context = resolveOperatingContext(locationsResult.locations);
   if (locationsResult.error) return <AppShell active={active} pageCode={pageCode}><div className={styles.notice} role="alert">Location access could not be loaded. Refresh to retry; no totals are shown.</div></AppShell>;
+  if (!context.availableModes.length && searchParams.view !== 'manpower') redirect('/unauthorized?page=ops_portal&reason=location');
   if (context.mode==='amazon_now' && searchParams.view!=='manpower') return <DarkStoreHome authorization={authorization} locations={context.selectedLocations} searchParams={searchParams}/>;
   return <AppShell active={active} pageCode={pageCode}><Suspense fallback={<CommandLoading label="Loading your command center"/>}>
     {searchParams.view==='manpower' ? <Manpower authorization={authorization} context={context} searchParams={searchParams}/> : <LastMile authorization={authorization} context={context} searchParams={searchParams}/>}

@@ -4,7 +4,7 @@ export function DigestSettingsForm({control,action,canEdit,receipts}:{control:Co
  const paused=control.paused_until?new Date(Date.parse(control.paused_until)+19800000).toISOString().slice(0,16):'';
  return <>
  <form action={action} className="panel" style={{padding:24,marginTop:20}}>
- <h2>Daily email delivery</h2><p>Runs on the portal server. No laptop, browser or signed-in session is required. Previous-day data; one separate email thread per recipient per month.</p>
+ <h2>Daily email delivery</h2><p>Runs on the portal server. No laptop, browser or signed-in session is required. {String(control.config.data_label || 'Previous-day data')}; one separate email thread per recipient per month.</p>
  <fieldset className="form-grid" disabled={!canEdit} style={{border:0,padding:0,minWidth:0,width:'100%',gap:18,gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,280px),1fr))'}}>
  <label>Delivery status<select className="field" name="state" defaultValue={control.state}><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="disabled">Disabled</option></select></label>
  <label>Send every day at · IST<input className="field" name="schedule_time" type="time" required defaultValue={String(control.config.schedule_time||'08:00')}/></label>

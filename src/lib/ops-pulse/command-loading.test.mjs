@@ -17,12 +17,12 @@ test('Last Mile heading, controls and checks render while the CPS snapshot is st
  const locations=[{id:'a',station_code:'A'}];const period={from:'2026-10-01',to:'2026-10-15',days:15};
  let costStarted=0;
  const mod=compile('../../app/ops-pulse/page.tsx',{
-  'react':{Suspense:'Suspense'},'next/link':'Link','@/components/app-shell':{AppShell:'Shell'},'@/components/page-head':{PageHead:'PageHead'},
+  'react':{Suspense:'Suspense'},'next/link':'Link','next/navigation':{redirect:()=>{throw Error('unexpected redirect')}},'@/components/app-shell':{AppShell:'Shell'},'@/components/page-head':{PageHead:'PageHead'},
   '@/components/ops-command-date-range':{OpsCommandDateRange:'DateRange'},'@/components/ops-command-attention':{OpsCommandAttention:'Attention'},'@/components/ops-station-manpower-board':{OpsStationManpowerBoard:'People'},'@/components/ops-command-center':{OpsCommandCenter:'Snapshots'},
   '@/components/ops-workspace-shortcuts':{OpsWorkspaceShortcuts:'Shortcuts'},
   '@/lib/authorization':{requirePagePermission:async()=>auth,hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=> 'company'},
   '@/lib/ops-pulse/cod':{loadCodLocations:async()=>({locations}),todayKolkata:()=> '2026-10-16'},
-  '@/lib/ops-pulse/operating-context':{resolveOperatingContext:()=>({mode:'amazon_edsp',selectedLocations:locations}),operatingModeLabel:()=> 'Amazon EDSP'},
+  '@/lib/ops-pulse/operating-context':{resolveOperatingContext:()=>({mode:'amazon_edsp',selectedLocations:locations,availableModes:['amazon_edsp']}),operatingModeLabel:()=> 'Amazon EDSP'},
   '@/lib/ops-pulse/cps':{cpsPeriod:()=>period},'@/lib/ops-pulse/command-center-data':{loadCommandCenter:()=>{costStarted++;return new Promise(()=>{});}},
   '@/lib/ops-pulse/command-center':{commandMetricAttention:()=>[]},'@/lib/ops-pulse/station-manpower':{},'@/lib/ops-pulse/edd-access':{hasEddAccess:()=>true},
   './dark-store-home':{DarkStoreHome:'DS',CommandLoading:'Loading'},'./command-center.module.css':{}

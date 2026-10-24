@@ -23,7 +23,7 @@ export function validAuditRecipientRule(rule: unknown) {
   return (
     typeof rule === "string" &&
     ((auditRecipientFields as readonly string[]).includes(rule) ||
-      ["people_reporting_chain", "company_owners"].includes(rule) ||
+      ["people_reporting_chain", "company_owners", "station_responsibilities"].includes(rule) ||
       /^(user|role):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         rule,
       ))
@@ -208,6 +208,28 @@ export async function resolveStationAuditRecipients(
         scoped.filter((u) => ids.has(u.id)).map((u) => u.email),
       );
     }
+  }
+  if (rules.includes("station_responsibilities")) {
+    const now = new Date().toISOString();
+    const day = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+    const activeRoles = await allAuditRows((from,to) => supabaseAdmin!.from("station_responsibility_roles").select("id").eq("company_id",companyId).eq("is_active",true).order("id").range(from,to));
+    if (activeRoles.error) throw Error(activeRoles.error.message);
+    const assignments = activeRoles.data?.length ? await allAuditRows((from,to) => supabaseAdmin!.from("station_responsibility_assignments").select("assignment_id").eq("company_id",companyId).eq("station_id",station.id).in("responsibility_role_id",activeRoles.data!.map(r=>r.id)).lte("effective_from",now).or(`effective_to.is.null,effective_to.gte.${now}`).order("id").range(from,to)) : {data:[],error:null};
+    if (assignments.error) throw Error(assignments.error.message);
+    const assignmentIds = [...new Set((assignments.data || []).map(r=>r.assignment_id))];
+    const work = assignmentIds.length ? await allAuditRows((from,to) => supabaseAdmin!.from("hr_work_assignments").select("engagement_id").eq("company_id",companyId).in("id",assignmentIds).order("id").range(from,to)) : {data:[],error:null};
+    if (work.error) throw Error(work.error.message);
+    const engagementIds = [...new Set((work.data || []).map(r=>r.engagement_id))];
+    const engaged = engagementIds.length ? await allAuditRows((from,to) => supabaseAdmin!.from("hr_engagements").select("person_id").eq("company_id",companyId).eq("status","active").in("id",engagementIds).lte("start_date",day).or(`end_date.is.null,end_date.gte.${day}`).order("id").range(from,to)) : {data:[],error:null};
+    if (engaged.error) throw Error(engaged.error.message);
+    const people = [...new Set((engaged.data || []).map(r=>r.person_id))];
+    const activePeople = people.length ? await allAuditRows((from,to) => supabaseAdmin!.from("hr_people").select("id").eq("company_id",companyId).eq("status","active").in("id",people).order("id").range(from,to)) : {data:[],error:null};
+    if (activePeople.error) throw Error(activePeople.error.message);
+    const activeIds = (activePeople.data || []).map(p=>p.id);
+    const links = activeIds.length ? await allAuditRows((from,to) => supabaseAdmin!.from("hr_user_person_links").select("user_id").eq("company_id",companyId).eq("status","active").in("person_id",activeIds).order("person_id").order("user_id").range(from,to)) : {data:[],error:null};
+    if (links.error) throw Error(links.error.message);
+    const linkedUsers = new Set((links.data || []).map(r=>r.user_id));
+    dynamic.set("station_responsibilities",scoped.filter(u=>linkedUsers.has(u.id)).map(u=>u.email));
   }
   const resolve = (configured: string[]) => [
     ...new Set(

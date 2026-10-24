@@ -8,6 +8,8 @@ export const adHocOpsRoles = new Set([
   "OPERATIONS_PGM", "OPERATIONS_BH", "OPERATIONS_NH", "OPERATIONS_FLTM"
 ]);
 
+export type OperationsMailPolicy = { stationFilter: (station: CodLocationRow) => boolean; roleCodes: string[] };
+export const isAmazonNowMailStation = (station: CodLocationRow) => !station.is_ho && relationCode(station.providers) === "AMAZON" && relationCode(station.location_models) === "NOW" && !/^(TEST|DEMO)(?:$|[\s_-])/i.test(String(station.station_code || ""));
 export type AdHocMailStation = CodLocationRow & { station_email?: string | null };
 export type AdHocMailRecipient = { email: string; name: string; stationIds: string[] };
 export type AdHocMembership = { user_id: string; role_id: string; has_all_location_access: boolean; location_scope_ids: string[] | null };
@@ -55,10 +57,10 @@ export function isAdHocMailStation(station: CodLocationRow) {
 
 export function resolveAdHocRecipients(
   stations: AdHocMailStation[], memberships: AdHocMembership[], roles: AdHocRole[],
-  profiles: AdHocProfile[], domain: string, operationsUserIds: ReadonlySet<string> = new Set()
+  profiles: AdHocProfile[], domain: string, operationsUserIds: ReadonlySet<string> = new Set(), policy?: OperationsMailPolicy
 ): AdHocMailRecipient[] {
-  const allowedStations = stations.filter(station => !station.hide_from_location_list && isAdHocMailStation(station));
-  const roleById = new Map(roles.filter(role => adHocOpsRoles.has(role.code)).map(role => [role.id, role]));
+  const allowedStations = stations.filter(station => !station.hide_from_location_list && (policy?.stationFilter || isAdHocMailStation)(station));
+  const roleById = new Map(roles.filter(role => policy ? policy.roleCodes.includes(role.code) : adHocOpsRoles.has(role.code)).map(role => [role.id, role]));
   const profileById = new Map(profiles.map(profile => [profile.id, profile]));
   const recipients = new Map<string, AdHocMailRecipient>();
   for (const membership of memberships) {
@@ -95,10 +97,10 @@ async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown
   throw new Error("Ad hoc recipient scope exceeds the supported size.");
 }
 
-export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, domain: string, additionalEmails: string[] = []) {
+export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, domain: string, additionalEmails: string[] = [], policy?: OperationsMailPolicy) {
   const [stations, memberships, roles, profiles, personLinks, people, engagements, assignments, departments] = await Promise.all([
     allRows<AdHocMailStation>(offset => db.from("stations")
-      .select("id,station_code,station_name,station_email,state,region,cluster,cluster_manager,aom,hide_from_location_list,providers(code,name),location_models(code,name)")
+      .select("id,station_code,station_name,station_email,city,state,region,cluster,cluster_manager,aom,is_ho,hide_from_location_list,providers(code,name),location_models(code,name)")
       .eq("company_id", companyId).eq("is_active", true).order("id").range(offset, offset + 999)),
     allRows<AdHocMembership>(offset => db.from("company_product_memberships")
       .select("user_id,role_id,has_all_location_access,location_scope_ids")
@@ -136,9 +138,9 @@ export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, 
   const unassignedRegions = stations.filter(station => !station.hide_from_location_list && adHocProgram(station)
     && !/^TEST(?:$|[\s_-])/i.test(String(station.station_code ?? "").trim())
     && adHocRegionLabel(station) === "Unassigned");
-  if (unassignedRegions.length) throw new Error(`Ad hoc stations have no KL/AP/ODCG region: ${unassignedRegions.map(station => station.station_code).join(", ")}`);
-  const included = stations.filter(station => !station.hide_from_location_list && isAdHocMailStation(station));
-  const recipients = resolveAdHocRecipients(included, memberships, roles, profiles, domain, operationsUserIds);
+  if (!policy && unassignedRegions.length) throw new Error(`Ad hoc stations have no KL/AP/ODCG region: ${unassignedRegions.map(station => station.station_code).join(", ")}`);
+  const included = stations.filter(station => !station.hide_from_location_list && (policy?.stationFilter || isAdHocMailStation)(station));
+  const recipients = resolveAdHocRecipients(included, memberships, roles, profiles, domain, operationsUserIds, policy);
   for (const email of additionalEmails.map(value=>value.trim().toLowerCase())) {
     const profile=profiles.find(p=>p.email?.trim().toLowerCase()===email);
     if(!profile || !email.endsWith('@'+domain.toLowerCase()) || !/^[^\s@<>]+@[^\s@<>]+$/.test(email)) continue;
