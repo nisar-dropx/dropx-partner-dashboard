@@ -24167,3 +24167,9 @@ td strong,
   .shell:has(> .sidebar .ops-brand-lockup) .ops-scope-menu > summary { padding: 6px 9px; }
   .shell:has(> .sidebar .ops-brand-lockup) .content { padding: 12px 16px 26px; }
 }
+
+/* Compact source and voice controls within Ask OpsPulse. */
+.ops-ai-answer-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;white-space:normal}
+.ops-ai-answer-actions button,.ops-ai-answer-actions a{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:5px 8px;border:1px solid #dde4ed;border-radius:7px;background:white;color:#46556d;text-decoration:none;cursor:pointer}
+.ops-ai-messages .assistant small{display:block;margin-top:7px;font-size:10px;color:#64748b}
+.ops-ai-voice{display:flex;align-items:center;gap:8px;padding:8px 14px 0;font-size:10px;color:#64748b;flex-wrap:wrap}.ops-ai-voice label{display:flex;align-items:center;gap:5px}.ops-ai-voice select{max-width:112px;border:1px solid #dfe5ee;border-radius:6px;background:white;padding:4px;font-size:11px}.ops-ai-voice-error{font-size:12px;padding:6px 14px;margin:0;color:#9a3412}

@@ -1,14 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, X, Mic, Volume2, Square } from "lucide-react";
 import {
   ASSISTANT_POSITION_KEY, DEFAULT_ASSISTANT_POSITION, assistantPoint, assistantPanel,
   clampAssistantPoint, dockAssistant, readAssistantPreference,
   type AssistantPoint, type AssistantPreference, type AssistantViewport
 } from "@/lib/ops-pulse/assistant-position";
 
-type Message = { role: "user" | "assistant"; text: string };
+type Message = { role: "user" | "assistant"; text: string; sources?: { label: string; href: string }[]; checkedAt?: string };
 
 export function OpsAiChat() {
   const [open, setOpen] = useState(false);
@@ -16,6 +16,11 @@ export function OpsAiChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState<number | null>(null);
+  const [voiceError, setVoiceError] = useState("");
+  const [language, setLanguage] = useState("en-IN");
+  const requestRef = useRef<AbortController | null>(null);
+  const messageList = useRef<HTMLDivElement>(null);
   const recognition = useRef<any>(null);
   const [preference, setPreference] = useState(DEFAULT_ASSISTANT_POSITION);
   const [viewport, setViewport] = useState<AssistantViewport | null>(null);
@@ -43,7 +48,9 @@ export function OpsAiChat() {
       window.removeEventListener("resize", updateViewport);
       window.visualViewport?.removeEventListener("resize", updateViewport);
       window.visualViewport?.removeEventListener("scroll", updateViewport);
-      recognition.current?.stop();
+      recognition.current?.abort?.();
+      window.speechSynthesis?.cancel();
+      requestRef.current?.abort();
     };
   }, []);
 
@@ -52,6 +59,23 @@ export function OpsAiChat() {
     else if (wasOpen.current) launcher.current?.focus();
     wasOpen.current = open;
   }, [open]);
+
+  useEffect(() => { messageList.current?.scrollTo?.({ top: messageList.current.scrollHeight, behavior: "smooth" }); }, [messages, loading]);
+
+  function speak(text: string, index: number) {
+    if (!("speechSynthesis" in window)) { setVoiceError("Read aloud is unavailable in this browser."); return; }
+    window.speechSynthesis.cancel();
+    if (speaking === index) { setSpeaking(null); return; }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = language;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find(v => v.lang === language) || voices.find(v => v.lang.split("-")[0] === language.split("-")[0]);
+    if (voice) utterance.voice = voice;
+    utterance.rate = .95;
+    utterance.onend = () => setSpeaking(null);
+    utterance.onerror = () => { setSpeaking(null); setVoiceError("Audio could not play. You can read the answer below."); };
+    setVoiceError(""); setSpeaking(index); window.speechSynthesis.speak(utterance);
+  }
 
   function remember(next: AssistantPreference) {
     setPreference(next);
@@ -102,6 +126,7 @@ export function OpsAiChat() {
 
   function closeChat() {
     recognition.current?.stop();
+    window.speechSynthesis?.cancel(); setSpeaking(null);
     setOpen(false);
   }
 
@@ -112,8 +137,11 @@ export function OpsAiChat() {
     setMessages((current) => [...current, { role: "user", text }]);
     setQuestion("");
     setLoading(true);
+    requestRef.current?.abort();
+    const controller = new AbortController(); requestRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 110000);
     const result = await fetch("/api/ops-pulse/ai-chat", {
-      method: "POST",
+      method: "POST", signal: controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         question: text,
@@ -121,7 +149,9 @@ export function OpsAiChat() {
         history: messages.slice(-6)
       })
     }).then((response) => response.json()).catch(() => ({ error: "Unable to reach the OpsPulse assistant." }));
-    setMessages((current) => [...current, { role: "assistant", text: result.answer || result.error || "No answer returned." }]);
+    window.clearTimeout(timeout);
+    if (requestRef.current !== controller) return;
+    setMessages((current) => [...current, { role: "assistant", text: result.answer || result.error || "No answer returned.", sources: result.sources, checkedAt: result.checkedAt }]);
     setLoading(false);
   }
 
@@ -130,21 +160,27 @@ export function OpsAiChat() {
     if (!SpeechRecognition) { setMessages((current) => [...current, { role: "assistant", text: "Voice typing is not supported in this browser. You can type the question." }]); return; }
     if (listening && recognition.current) { recognition.current.stop(); return; }
     const instance = new SpeechRecognition();
-    instance.lang = "en-IN";
+    window.speechSynthesis?.cancel(); setSpeaking(null); setVoiceError("");
+    instance.lang = language;
     instance.interimResults = true;
     instance.continuous = false;
     instance.onresult = (event: any) => setQuestion(Array.from(event.results).map((result: any) => result[0].transcript).join(""));
     instance.onstart = () => setListening(true);
     instance.onend = () => setListening(false);
-    instance.onerror = () => setListening(false);
+    instance.onerror = (event: any) => { setListening(false); setVoiceError(event.error === "not-allowed" ? "Microphone permission is blocked. Allow it in browser settings or type your question." : "Could not hear the question. Try again or type it."); };
     recognition.current = instance;
-    instance.start();
+    try { instance.start(); } catch { setListening(false); setVoiceError("Microphone could not start. Please type your question."); }
   }
 
   return <div className={`ops-ai ${open ? "open" : ""}`} onKeyDown={event => { if (event.key === "Escape" && open) { event.preventDefault(); closeChat(); } }}>
     {open ? <section aria-label="Ask OpsPulse" className="ops-ai-panel" role="dialog" style={viewport ? assistantPanel(preference, viewport) : undefined}><header><div><span>OPSPULSE ASSISTANT</span><strong>Ask OpsPulse</strong></div><button type="button" onClick={closeChat} aria-label="Close Ask OpsPulse"><X size={20} /></button></header>
-      <div className="ops-ai-messages" role="log" aria-live="polite">{!messages.length ? <div className="ops-ai-welcome"><b>Ask about your permitted operations.</b><span>Try “What is GDRD SPR?”, “How many active DAs are in my stations?” or “Which station is above CPS target?”</span></div> : null}{messages.map((message, index) => <div key={index} className={message.role}>{message.text}</div>)}{loading ? <div className="assistant loading">Checking live data…</div> : null}</div>
-      <form onSubmit={ask}><button className={listening ? "listening" : ""} type="button" onClick={dictate} aria-label="Voice typing">◉</button><input ref={input} aria-label="Question for OpsPulse" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={listening ? "Listening…" : "Ask about your operations"}/><button aria-label="Send question" type="submit" disabled={!question.trim() || loading}>↑</button></form>
+      <div ref={messageList} className="ops-ai-messages" role="log" aria-live="polite">{!messages.length ? <div className="ops-ai-welcome"><b>Ask about your permitted operations.</b><span>Try “Who is on shift today?”, “Which audits need action?” or “Explain this month’s costs.” Answers use your selected workspace and permitted data.</span></div> : null}{messages.map((message, index) => <div key={index} className={message.role}><span>{message.text}</span>{message.role === "assistant" && <>
+        <div className="ops-ai-answer-actions"><button type="button" onClick={() => speak(message.text, index)} aria-label={speaking === index ? "Stop reading" : "Read answer aloud"}>{speaking === index ? <Square size={14}/> : <Volume2 size={14}/>} {speaking === index ? "Stop" : "Listen"}</button>{message.sources?.map(source => <a key={source.href + source.label} href={source.href}>{source.label} ↗</a>)}</div>
+        {message.checkedAt && <small>Checked {new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(message.checkedAt))} IST</small>}
+      </>}</div>)}{loading ? <div className="assistant loading">Checking live data…</div> : null}</div>
+      <div className="ops-ai-voice"><label>Voice <select aria-label="Voice language" value={language} onChange={e => { recognition.current?.stop(); setLanguage(e.target.value); }}><option value="en-IN">English</option><option value="hi-IN">Hindi</option><option value="ml-IN">Malayalam</option><option value="te-IN">Telugu</option><option value="ta-IN">Tamil</option></select></label><span>Tap mic to dictate · Listen to hear answers</span></div>
+      {voiceError && <p className="ops-ai-voice-error" role="status">{voiceError}</p>}
+      <form onSubmit={ask}><button className={listening ? "listening" : ""} type="button" onClick={dictate} aria-label={listening ? "Stop voice typing" : "Voice typing"} aria-pressed={listening}>{listening ? <Square size={18}/> : <Mic size={18}/>}</button><input ref={input} aria-label="Question for OpsPulse" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={listening ? "Listening…" : "Ask about your operations"}/><button aria-label="Send question" type="submit" disabled={!question.trim() || loading}>↑</button></form>
     </section> : null}
     <div className={`ops-ai-dock${preference.collapsed ? " is-collapsed" : ""}${dragPoint ? " is-dragging" : ""}`} hidden={open} style={point ? { left: point.x, top: point.y } : undefined}>
       <button ref={launcher} className="ops-ai-launcher" type="button" aria-label="Ask OpsPulse" aria-haspopup="dialog" aria-describedby="ops-assistant-move-help" title="Ask OpsPulse · Drag to move" onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onKeyDown={moveWithKeyboard} onClick={event => {

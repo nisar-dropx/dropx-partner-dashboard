@@ -14,6 +14,7 @@ export async function resolveScopedLocations(
     authorization.locationScopeIds,
     authorization.hasAllLocationAccess
   );
+  if (locationResult.error) throw new Error("Location scope could not be verified.");
   const permitted = locationResult.locations;
   if (!requestedCodes.length) {
     return { locations: permitted, missing: [], companyId };

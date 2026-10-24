@@ -26,7 +26,7 @@ const COMPRESS_PASSES = [
 
 let pdfjsPromise: Promise<typeof PdfJs> | null = null;
 
-function loadPdfJs() {
+export function loadPdfJs() {
   if (!pdfjsPromise) {
     const url = `${PDFJS_BASE}/pdf.min.mjs`;
     pdfjsPromise = (import(/* webpackIgnore: true */ url) as Promise<typeof PdfJs>)

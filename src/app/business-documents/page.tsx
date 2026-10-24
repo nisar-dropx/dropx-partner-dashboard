@@ -1,3 +1,5 @@
+import { businessDocumentWorkspace } from "@/lib/business-document-workspace";
+import { documentInWorkspace } from "@/lib/business-document-workspace-policy";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -186,6 +188,9 @@ async function loadBusinessDocuments(companyId: string, authorization: Awaited<R
     return { documents: [], documentTypes: [], locations: [], models: [], providers: [], states: [], users: [], settings: { compliance_manager_user_id: null }, settingsError: null, error };
   }
 
+  const workspace = await businessDocumentWorkspace(authorization);
+  const workspaceIds = workspace === null ? null : new Set(workspace.map(row => row.id));
+  const scopedOptions = (locationsResult.data ?? []).filter(row => workspaceIds ? workspaceIds.has(row.id) : authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.locationScopeIds.includes(row.id));
   const allowedLocationIds = new Set(authorization.locationScopeIds);
   const allowedStates = new Set(
     (locationsResult.data ?? [])
@@ -208,10 +213,11 @@ async function loadBusinessDocuments(companyId: string, authorization: Awaited<R
       ...row,
       document_types: withAccessRoleIds(firstRelation(row.document_types), accessRolesByDocumentType.get(row.document_type_id) ?? [])
     }))
-    .filter((row) => canViewBusinessDocument(row, allowedLocationIds, allowedStates, canSeeAllScopedDocs, authorization.roleId));
+    .filter((row) => canViewBusinessDocument(row, allowedLocationIds, allowedStates, canSeeAllScopedDocs, authorization.roleId))
+    .filter(row => workspace === null || documentInWorkspace(row, workspace));
 
   const stateByCode = new Map<string, OptionRow>();
-  (locationsResult.data ?? []).forEach((row) => {
+  scopedOptions.forEach((row) => {
     const code = String(row.state ?? "").trim().toUpperCase();
     if (code && !stateByCode.has(code)) stateByCode.set(code, { id: code, code, name: code });
   });
@@ -225,7 +231,7 @@ async function loadBusinessDocuments(companyId: string, authorization: Awaited<R
       ...documentType,
       access_role_ids: accessRolesByDocumentType.get(documentType.id) ?? []
     })),
-    locations: (locationsResult.data ?? []).map((row) => ({
+    locations: scopedOptions.map((row) => ({
       id: row.id,
       code: row.station_code,
       name: row.station_name && row.station_name !== row.station_code ? row.station_name : row.station_code,
@@ -233,8 +239,8 @@ async function loadBusinessDocuments(companyId: string, authorization: Awaited<R
       provider_id: row.provider_id,
       state: row.state
     })),
-    models: (modelsResult.data ?? []).map((row) => ({ id: row.id, code: row.code, name: row.name, provider_id: row.provider_id })),
-    providers: (providersResult.data ?? []).map((row) => ({ id: row.id, code: row.code, name: row.name })),
+    models: (modelsResult.data ?? []).filter(row => scopedOptions.some(location => location.location_model_id === row.id)).map((row) => ({ id: row.id, code: row.code, name: row.name, provider_id: row.provider_id })),
+    providers: (providersResult.data ?? []).filter(row => scopedOptions.some(location => location.provider_id === row.id)).map((row) => ({ id: row.id, code: row.code, name: row.name })),
     states: Array.from(stateByCode.values()).sort((a, b) => a.code.localeCompare(b.code)),
     users: (usersResult.data ?? []).map((user) => ({
       id: user.id,
@@ -302,6 +308,7 @@ export default async function BusinessDocumentsPage({ searchParams }: { searchPa
     status: statusLabel(document),
     days: daysLabel(document.expiry_date),
     signedUrl: document.signed_url ?? null,
+    fileName: document.file_name,
     canDownload: Boolean(document.storage_bucket && document.storage_path),
     manageUrl: `/business-documents?edit=${document.id}`
   }));
