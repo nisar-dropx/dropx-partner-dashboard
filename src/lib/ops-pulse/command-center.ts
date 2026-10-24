@@ -85,16 +85,35 @@ export function buildCommandCenter(input: {
 }
 export type CommandCenterModel = ReturnType<typeof buildCommandCenter>;
 
+/** Narrow snapshot metrics to the stations in view for command-center insights. */
+export function scopeCommandModel(model:CommandCenterModel,codes:string[]):CommandCenterModel {
+  if(!codes.length)return model;
+  const selected=new Set(codes);
+  // Keep only groups fully covered by the filter so sibling XPT/parent totals
+  // are not attributed to a single selected station.
+  const rows=model.rows.filter(r=>r.members.length>0&&r.members.every(code=>selected.has(code)));
+  if(rows.length===model.rows.length)return model;
+  return {...model,rows,
+    aboveTarget:rows.filter(r=>r.aboveTarget).length,
+    missingTargets:rows.filter(r=>r.summary?.target==null).length,
+    dataGaps:rows.filter(r=>r.provisional).length,
+    provisional:rows.some(r=>r.provisional),
+    performanceRisk:model.performanceRisk===null?null:rows.filter(r=>(r.missed??0)>0).length,
+    performanceMissing:rows.filter(r=>r.performanceRows===null||r.performanceRows<r.members.length||!r.measured).length,
+    reviewCount:model.reviewCount===null?null:rows.reduce((n,r)=>n+(r.openReviews??0),0)};
+}
+
 export function commandMetricAttention({model:m,period,codes,canCost,canCostAttention,canReview,canPerformance,performanceDate,today}:{model:CommandCenterModel;period:CommandPeriod;codes:string[];canCost:boolean;canCostAttention?:boolean;canReview:boolean;canPerformance:boolean;performanceDate:string;today:string}):AttentionItem[] {
+  const scoped=scopeCommandModel(m,codes);
   const items:AttentionItem[]=[];
   const cost=commandCostHref(period,codes);
   const performance=(view:string)=>`/ops-pulse/performance?${new URLSearchParams({view,date:performanceDate,stations:codes.join(',')})}`;
-  if(canReview)items.push({key:'reviews',title:'Review Desk',value:m.reviewCount===null?'Unavailable':`${m.reviewCount} open reviews`,count:m.reviewCount??0,detail:'Unclosed operational reviews through today',href:performance('reviews'),action:'Open review queue',tone:m.reviewCount===null?'unknown':m.reviewCount?'action':'clear'});
-  if(canPerformance)items.push({key:'performance',title:'Service exceptions',value:m.performanceRisk===null?'Not assessed':`${m.performanceRisk} groups flagged`,count:(m.performanceRisk??0)+m.performanceMissing,detail:`${performanceDate} · ${m.performanceMissing} groups need data / targets`,href:performance('daily'),action:'Open performance',tone:m.performanceRisk||m.performanceMissing?'action':m.performanceRisk===null?'unknown':'clear'});
+  if(canReview)items.push({key:'reviews',title:'Review Desk',value:scoped.reviewCount===null?'Unavailable':`${scoped.reviewCount} open reviews`,count:scoped.reviewCount??0,detail:'Unclosed operational reviews through today',href:performance('reviews'),action:'Open review queue',tone:scoped.reviewCount===null?'unknown':scoped.reviewCount?'action':'clear'});
+  if(canPerformance)items.push({key:'performance',title:'Service exceptions',value:scoped.performanceRisk===null?'Not assessed':`${scoped.performanceRisk} groups flagged`,count:(scoped.performanceRisk??0)+scoped.performanceMissing,detail:`${performanceDate} · ${scoped.performanceMissing} groups need data / targets`,href:performance('daily'),action:'Open performance',tone:scoped.performanceRisk||scoped.performanceMissing?'action':scoped.performanceRisk===null?'unknown':'clear'});
   if(canCost){
-    const gaps=m.rows.filter(r=>r.gaps>0||r.missingDays>(period.to===today?r.members.length:0)).length;
-    items.push({key:'cost-data',title:'Cost & shipment inputs',value:m.total?`${gaps} groups need data`:'Unavailable',count:gaps,detail:`${period.from}–${period.to} · today's unfinished imports are not overdue`,href:commandCostHref(period,codes,undefined,canCostAttention?'unmapped':'overview'),action:'Review source gaps',tone:!m.total?'unknown':gaps?'action':'clear'});
-    if(m.aboveTarget||m.missingTargets)items.push({key:'cost',title:'Cost controls',value:`${m.aboveTarget} above target`,count:m.aboveTarget+m.missingTargets,detail:`${m.missingTargets} groups without targets${m.provisional?' · provisional costs':''}`,href:cost,action:'Open CPS controls',tone:'action'});
+    const gaps=scoped.rows.filter(r=>r.gaps>0||r.missingDays>(period.to===today?r.members.length:0)).length;
+    items.push({key:'cost-data',title:'Cost & shipment inputs',value:scoped.total?`${gaps} groups need data`:'Unavailable',count:gaps,detail:`${period.from}–${period.to} · today's unfinished imports are not overdue`,href:commandCostHref(period,codes,undefined,canCostAttention?'unmapped':'overview'),action:'Review source gaps',tone:!scoped.total?'unknown':gaps?'action':'clear'});
+    if(scoped.aboveTarget||scoped.missingTargets)items.push({key:'cost',title:'Cost controls',value:`${scoped.aboveTarget} above target`,count:scoped.aboveTarget+scoped.missingTargets,detail:`${scoped.missingTargets} groups without targets${scoped.provisional?' · provisional costs':''}`,href:cost,action:'Open CPS controls',tone:'action'});
   }
   return items;
 }

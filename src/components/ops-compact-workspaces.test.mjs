@@ -6,7 +6,7 @@ const jsx=(type,props)=>({type,props});
 const nodes=n=>!n||typeof n!=='object'?[]:[n,...[n.props?.children].flat(Infinity).flatMap(nodes)];
 function mount(file,exportName,props,extra={}){
  const values=[];let cursor=0,tree;const pushes=[];
- const hooks={useId:()=> 'controls-id',useState:v=>{const i=cursor++;if(!(i in values))values[i]=v;return [values[i],x=>values[i]=typeof x==='function'?x(values[i]):x]},useEffect:()=>{},useMemo:fn=>fn(),useRef:v=>({current:v}),createContext:()=>({}),useContext:()=>()=>{}};
+ const hooks={useId:()=> 'controls-id',useState:v=>{const i=cursor++;if(!(i in values))values[i]=v;return [values[i],x=>values[i]=typeof x==='function'?x(values[i]):x]},useEffect:()=>{},useMemo:fn=>fn(),useRef:v=>({current:v}),useTransition:()=>[false,fn=>fn()],createContext:()=>({}),useContext:()=>()=>{}};
  const router={push:(url,options)=>pushes.push({url,options})};
  const mocks={'react':hooks,'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react':new Proxy({},{get:()=> 'svg'}),'next/link':'a','@/lib/ops-pulse/command-attention':{attentionOrder:x=>x},'@/lib/ops-pulse/date-format':{formatOpsDate:v=>v??'-',formatOpsDateTime:v=>v??'-'},'next/navigation':{useRouter:()=>router,usePathname:()=>'/payments/approvals',useSearchParams:()=>new URLSearchParams('view=scope&status=pending&page=3')},...extra};
  const m={exports:{}};const code=ts.transpileModule(readFileSync(new URL(file,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
@@ -30,9 +30,23 @@ test('compact priorities keep every authorized link and toggle details without r
  nodes(tree).find(n=>n.props.className==='showAll').props.onClick();tree=h.render();assert.equal(tree.props['data-all'],true);
  nodes(tree).find(n=>n.props.className==='detailToggle').props.onClick();tree=h.render();assert.equal(tree.props['data-details'],true);assert.equal(nodes(tree).filter(n=>n.type==='a').length,14);
 });
+test('priority station filter defaults to all stations and keeps the date range when applied',()=>{
+ const items=[{key:'audits',tone:'action',title:'Audits',value:'2 to action',detail:'Detail',action:'Review',href:'/audits'}];
+ const stations=[{code:'KOZA',name:'Kochi'},{code:'BLRA',name:'Bangalore'}];
+ const h=mount('./ops-command-attention-live.tsx','CommandAttentionView',{items,today:'2026-10-20',stations,station:'',range:{from:'2026-10-01',to:'2026-10-19'}});
+ let tree=h.render();
+ const select=nodes(tree).find(n=>n.type==='select');
+ assert.equal(select.props.value,'');
+ assert.equal(select.props.children[0].props.value,'');
+ assert.equal(select.props.children[0].props.children,'All stations');
+ assert.ok(nodes(tree).find(n=>n.props.className==='detailToggle'));
+ select.props.onChange({target:{value:'KOZA'}});tree=h.render();
+ assert.equal(h.pushes[0].url,'/ops-pulse?from=2026-10-01&to=2026-10-19&station=KOZA');
+});
 test('opening and closing mobile date controls keeps the same form, date names and bounds',()=>{
- const h=mount('./ops-command-date-range.tsx','OpsCommandDateRange',{from:'2026-10-01',to:'2026-10-19',today:'2026-10-20'});let tree=h.render();
- const inputs=nodes(tree).filter(n=>n.type==='input').map(n=>n.props);assert.deepEqual(inputs.map(p=>[p.name,p.defaultValue,p.max]),[['from','2026-10-01','2026-10-20'],['to','2026-10-19','2026-10-20']]);
+ const h=mount('./ops-command-date-range.tsx','OpsCommandDateRange',{from:'2026-10-01',to:'2026-10-19',today:'2026-10-20',station:'KOZA'});let tree=h.render();
+ const inputs=nodes(tree).filter(n=>n.type==='input').map(n=>n.props);
+ assert.deepEqual(inputs.map(p=>[p.name,p.defaultValue??p.value,p.max]),[['station','KOZA',undefined],['from','2026-10-01','2026-10-20'],['to','2026-10-19','2026-10-20']]);
  nodes(tree).find(n=>n.props.className==='dateToggle').props.onClick();tree=h.render();assert.equal(tree.props['data-open'],true);assert.equal(nodes(tree).find(n=>n.type==='form').props.action,'/ops-pulse');
 });
 

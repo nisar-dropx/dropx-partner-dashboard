@@ -33,7 +33,11 @@ test('Last Mile heading, controls and checks render while the CPS snapshot is st
  assert.equal(typeof rendered?.then,'undefined','page content must not await the cost engine');
  const nodes=descendants(rendered);
  assert(nodes.some(node=>node.type==='h1'&&node.props.children==='Last Mile command center'));
- assert(nodes.some(node=>node.type==='Attention'&&node.props.extraItems instanceof Promise));
+ const attention=nodes.find(node=>node.type==='Attention');
+ assert(attention?.props.extraItems instanceof Promise);
+ assert.equal(attention.props.station,'');
+ assert.deepEqual(attention.props.stations,[{code:'A',name:'A'}]);
+ assert.deepEqual(attention.props.range,{from:period.from,to:period.to});
  assert(nodes.some(node=>node.type==='DateRange'&&node.props.from===period.from&&node.props.to===period.to));
  assert.equal(costStarted,1,'share a single snapshot across cost cards and priority flags');
  assert(nodes.filter(node=>node.type==='Link').every(node=>node.props.prefetch===false));

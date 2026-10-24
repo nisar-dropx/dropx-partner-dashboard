@@ -37,6 +37,23 @@ test('current configured thresholds and latest same-day Hawkeye row; zero is a v
 });
 test('cost links preserve exact period, group and scope; no broad implicit default',()=>{const q=new URL(commandCostHref(period,['A','X'],'A','unmapped'),'https://example.test').searchParams;assert.equal(q.get('scope'),'A,X');assert.equal(q.get('from'),period.from);assert.equal(q.get('to'),period.to);assert.equal(q.get('station'),'A');});
 test('review counts cannot include a location excluded from the cost/model scope',()=>{const m=model([day],{reviews:[{id:'1',station_code:'A'},{id:'2',station_code:'B'}]});assert.equal(m.reviewCount,1);});
+test('insight station scope narrows review and cost flags without changing the full snapshot',()=>{
+ const a={...day,station_code:'A'},b={...day,station_code:'B',deliveries:10,total:500,target:5};
+ const m=buildCommandCenter({snapshot:{daily:[a,b],breakup:[],gaps:[]},places:[{code:'A',name:'A'},{code:'B',name:'B'}],period,performance:[],targets:[],reviews:[{id:'1',station_code:'A'},{id:'2',station_code:'B'}],performanceDate:period.to});
+ assert.equal(m.reviewCount,2);assert.equal(m.rows.length,2);
+ const scoped=domain.scopeCommandModel(m,['A']);
+ assert.equal(scoped.rows.length,1);assert.equal(scoped.reviewCount,1);assert.equal(m.reviewCount,2);
+ const items=domain.commandMetricAttention({model:m,period,codes:['A'],canCost:true,canReview:true,canPerformance:false,performanceDate:period.to,today:period.to});
+ assert.equal(items.find(i=>i.key==='reviews').count,1);
+});
+test('insight station scope does not attribute sibling XPT group totals to one station',()=>{
+ const a={...day,station_code:'A'},x={...day,station_code:'X',deliveries:10,c_return:0,total:300};
+ const m=buildCommandCenter({snapshot:{daily:[a,x],breakup:[],gaps:[]},places:[{code:'A',name:'A'},{code:'X',name:'X',isXpt:true,parent:'A'}],period,performance:[],targets:[],reviews:[{id:'1',station_code:'A'},{id:'2',station_code:'X'}],performanceDate:period.to});
+ assert.equal(m.rows.length,1);assert.equal(m.reviewCount,2);
+ const scoped=domain.scopeCommandModel(m,['X']);
+ assert.equal(scoped.rows.length,0);assert.equal(scoped.reviewCount,0);assert.equal(scoped.provisional,false);
+ assert.equal(domain.scopeCommandModel(m,['A','X']).reviewCount,2);
+});
 test('station search and action filters use real row flags and preserve exact matches',()=>{
  const m=model([day],{places:[{code:'A',name:'North',owner:'Test manager'}]});
  assert.equal(domain.filterCommandRows(m.rows,' MANAGER ','all').length,1);

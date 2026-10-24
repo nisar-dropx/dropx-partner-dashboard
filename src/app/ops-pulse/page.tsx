@@ -45,20 +45,24 @@ function LastMile({authorization:a,context,searchParams}:ContentProps) {
   catch { return <div className={styles.notice} role="alert">Choose a valid date range of up to 93 days, ending on or before today. <Link prefetch={false} href="/ops-pulse">Reset dates</Link></div>; }
   const locations = context.selectedLocations;
   const codes = locations.map(l=>l.station_code);
+  const insightStation = locations.find(l=>l.station_code===searchParams.station)?.station_code ?? '';
+  const attentionLocations = insightStation ? locations.filter(l=>l.station_code===insightStation) : locations;
+  const attentionCodes = attentionLocations.map(l=>l.station_code);
+  const stations = locations.filter(l=>!l.is_ho&&!l.hide_from_location_list).map(l=>({code:l.station_code,name:l.station_name||l.city||l.station_code}));
   const result = loadCommandCenter(a,locations,period,context.mode==='amazon_edsp',today);
   const performanceDate = new Date(Date.parse(today+'T00:00:00Z')-86400000).toISOString().slice(0,10);
   const links = [
-    ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${locations.length===1?`&location=${encodeURIComponent(locations[0].id)}`:''}`],
-    ['performance_review','Review Desk',`/ops-pulse/performance?view=reviews&date=${performanceDate}&stations=${encodeURIComponent(codes.join(','))}`],
+    ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${attentionLocations.length===1?`&location=${encodeURIComponent(attentionLocations[0].id)}`:locations.length===1?`&location=${encodeURIComponent(locations[0].id)}`:''}`],
+    ['performance_review','Review Desk',`/ops-pulse/performance?view=reviews&date=${performanceDate}&stations=${encodeURIComponent(attentionCodes.join(','))}`],
     [context.mode==='flipkart_odh_mdh'?'cod_submission':'cod_executive_reconciliation','COD workspace',context.mode==='flipkart_odh_mdh'?'/ops-pulse/cod/submission?client=flipkart':'/ops-pulse/cod/executive-reconciliation?client=amazon'],
-    ['capacity_overview','Capacity',`/ops-pulse/capacity?stations=${encodeURIComponent(codes.join(','))}`],
+    ['capacity_overview','Capacity',`/ops-pulse/capacity?stations=${encodeURIComponent(attentionCodes.join(','))}`],
     ['delivery_associates','Workforce','/work-force-register'],
     ['payment_approvals','Payment Approvals','/payments/approvals'],
   ].filter(([permission])=>hasPermission(a,permission,'access') && (context.mode==='amazon_edsp'||!['performance_review','capacity_overview'].includes(permission)));
   return <div className={styles.command}>
-    <header className={styles.hero}><div><p className={styles.eyebrow}>LM · {operatingModeLabel(context.mode).toUpperCase()} · {locations.length} SELECTED LOCATIONS</p><h1>Last Mile command center</h1><p>Operational priorities, service performance and shipment economics.</p></div><OpsCommandDateRange from={period.from} to={period.to} today={today}/></header>
+    <header className={styles.hero}><div><p className={styles.eyebrow}>LM · {operatingModeLabel(context.mode).toUpperCase()} · {locations.length} SELECTED LOCATIONS</p><h1>Last Mile command center</h1><p>Operational priorities, service performance and shipment economics.</p></div><OpsCommandDateRange from={period.from} to={period.to} today={today} station={insightStation||undefined}/></header>
     <OpsWorkspaceShortcuts items={[...links.map(([,label,href])=>({label,href})),...(context.mode==='amazon_edsp'&&hasEddAccess(a)?[{label:'Live delivery view',href:'/ops-pulse/edd/flash'}]:[])]}/>
-    <Suspense fallback={<CommandLoading label="Checking audits, people and operational queues"/>}><OpsCommandAttention authorization={a} locations={locations} today={today} mode={context.mode} extraItems={result.then(data=>commandMetricAttention({...data,period,codes,today}))}/></Suspense>
+    <Suspense key={`attention:${insightStation||'all'}:${period.from}:${period.to}`} fallback={<CommandLoading label="Checking audits, people and operational queues"/>}><OpsCommandAttention authorization={a} locations={attentionLocations} today={today} mode={context.mode} station={insightStation} stations={stations} range={{from:period.from,to:period.to}} extraItems={result.then(data=>commandMetricAttention({...data,period,codes:attentionCodes,today}))}/></Suspense>
     {!locations.length ? <div className={styles.notice}>No operational locations are assigned to this workspace.</div> : <Suspense key={`${period.from}:${period.to}:${codes.join(',')}`} fallback={<CommandLoading label="Loading shipment and cost summaries"/>}><LastMileSnapshots result={result} period={period} codes={codes}/></Suspense>}
   </div>;
 }
