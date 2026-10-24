@@ -1,7 +1,7 @@
 import {roundMoney} from './now';
 export type CfoDay={station:string;name:string;model:string;region:string;city:string;cluster?:string;sourceStation?:string;date:string;unit:'shipments'|'units';volume:number|null;revenue:number|null;cost:number|null;regional:number;da:number;utr:number;van:number;rent:number;other:number;contracts:number;issues:string[]};
 export type OverheadLine={station:string;date:string;head:string;name:string;code:string;monthly:number|null;gross:number;alreadyAllocated:number;amount:number;mode:string;recipients:string[];issue?:string};
-export type CfoLine={station:string;date:string;head:string;source:string;amount:number;basis:string};
+export type CfoLine={station:string;date:string;head:string;source:string;amount:number;basis:string;costHead?:string;sourceStation?:string};
 export function totalCfo(rows:CfoDay[],corporate=0){
  const sum=(k:'revenue'|'cost')=>rows.every(r=>r[k]===null)?null:roundMoney(rows.reduce((s,r)=>s+(r[k]??0),0));
  const revenue=sum('revenue'),direct=sum('cost'),regional=roundMoney(rows.reduce((s,r)=>s+r.regional,0));

@@ -181,7 +181,8 @@ export function calculateRateCard(
     const amount=isProduction
       ? thresholdAllocation?.amount ?? rate*count!
       : aggregateFixed ?? (attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate);
-    const bucket=/VAN|VEHICLE|DOCK/.test(label) ? 'van' : /FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : !isProduction ? 'salary' : 'variable';
+    // Per-package ODCD earnings pay the associate; only fixed vehicle components are rent.
+    const bucket=/FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : isProduction ? 'variable' : /VAN|VEHICLE|DOCK/.test(label) ? 'van' : 'salary';
     cost[bucket]+=amount;
     if(isProduction) cost.production_details.push({label:c.label||c.component_code,basis:String(source).replaceAll("_"," ").toLowerCase(),rate,reported_units:count!,payable_units:thresholdAllocation?.payableUnits??count!,threshold_units:thresholdAllocation?.thresholdDeducted??0,amount,bucket});
   }

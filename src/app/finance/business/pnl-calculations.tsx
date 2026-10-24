@@ -341,9 +341,11 @@ export function useFinanceEvidence(rows: PnlDay[], version: string, basis: 'ship
 export function ExpenseCalculation({
   head,
   evidence,
+  hideLedger = false,
 }: {
   head: string;
   evidence: ReturnType<typeof useFinanceEvidence>;
+  hideLedger?: boolean;
 }) {
   const { data, error, empty } = evidence;
   if (empty)
@@ -779,7 +781,7 @@ export function ExpenseCalculation({
           </p>
         </details>
       )}
-      <details className="pnl-calculation-record">
+      {!hideLedger && <details className="pnl-calculation-record">
         <summary>
           <span>
             Daily source ledger
@@ -803,7 +805,7 @@ export function ExpenseCalculation({
             No recorded cost. Missing setup remains in Items to review.
           </p>
         )}
-      </details>
+      </details>}
     </div>
   );
 }

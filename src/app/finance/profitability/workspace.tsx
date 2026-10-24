@@ -15,7 +15,7 @@ export function CfoWorkspace({report:r}:{report:CfoReport}){
  const rows=useMemo(()=>filterCfoDays(r.days,{model,region,cluster,station}),[r.days,model,region,cluster,station]);
  const isBusiness=!model&&!region&&!cluster&&!station,corp=r.overhead.filter(o=>o.mode==='corporate'||o.mode==='unallocated').reduce((s,o)=>s+o.amount,0),total=totalCfo(rows,isBusiness?corp:0);
  const view=profitabilityView(total,includeOverhead);
- const charts=useMemo(()=>chartReport(rows,r.overhead,isBusiness&&includeOverhead,includeOverhead),[rows,r.overhead,isBusiness,includeOverhead]);
+ const charts=useMemo(()=>chartReport(rows,r.overhead,isBusiness&&includeOverhead,includeOverhead,r.lines),[rows,r.overhead,isBusiness,includeOverhead,r.lines]);
  function changeView(change:Partial<{model:string;region:string;cluster:string;station:string;includeOverhead:boolean}>){
   const next={model,region,cluster,station,includeOverhead,...change};
   setModel(next.model);setRegion(next.region);setCluster(next.cluster);setStation(next.station);setIncludeOverhead(next.includeOverhead);setAi('');

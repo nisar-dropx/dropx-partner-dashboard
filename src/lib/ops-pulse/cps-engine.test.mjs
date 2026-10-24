@@ -458,14 +458,16 @@ test('Fleet source rule excludes fixed rental without changing per-package, sala
  {payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',calculation_type:'fixed_daily',pay_schedule:'per_day'});
  f.component_policies=[{component_code:'VAN_RENT_PER_DAY',mode:'fleet',effective_from:'2026-09-01'}];
  let r=rebuildCps(base(),f);
- assert.equal(r.daily[0].van,200);assert.equal(r.daily[0].da,1400);
+ assert.equal(r.daily[0].van,0);assert.equal(r.daily[0].da,1600);
+ assert.equal(r.da_details[0].variable,1200);assert.equal(r.da_details[0].van,0);
+ assert.equal(r.daily[0].total,1600);
  assert.ok(!r.da_details[0].periods[0].rates.some(rate=>rate.label==='Van Rent Per Day'));
  // No rental value is needed in Workforce when Fleet owns that cost.
  delete f.mappings[0].payment_values.VAN_RENT_PER_DAY;
- r=rebuildCps(base(),f);assert.equal(r.associates[0].mapping_status,'Mapped');assert.equal(r.daily[0].van,200);
+ r=rebuildCps(base(),f);assert.equal(r.associates[0].mapping_status,'Mapped');assert.equal(r.daily[0].van,0);assert.equal(r.daily[0].da,1600);
  // Production cannot accidentally be excluded even by a malformed policy.
  f.component_policies.push({component_code:'VAN_PACKAGE',mode:'fleet',effective_from:'2026-09-01'});
- assert.equal(rebuildCps(base(),f).daily[0].van,200);
+ assert.equal(rebuildCps(base(),f).daily[0].da,1600);
 });
 
 test('rental source revisions apply by cost date and rental-only direct cards do not create false pay gaps',()=>{
