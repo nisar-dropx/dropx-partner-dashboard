@@ -64,8 +64,11 @@ export type Catalog = Record<string, Record<string,{type?:string;format?:string;
 export function discover(catalog:Catalog):Source[]{
   return Object.entries(catalog).flatMap(([table,cols])=>{
     const statusField=['status','delivery_status','state'].find(k=>cols[k]);
-    if(!cols.company_id||!statusField||!/(mail|digest|notification)/.test(table)||/(settings|templates|controls|audit|threads)$/.test(table))return [];
-    if(!/(mail|digest)/.test(table)&&!cols.recipients&&!cols.recipient_email)return [];
+    if(!cols.company_id||!statusField||/(settings|templates|controls|audit|threads)$/.test(table))return [];
+    // Discover delivery ledgers by their contract, not a fixed portal list or any email-related table.
+    const deliveryName=/(mail|digest|notification)/.test(table)&&/(logs?|attempts|deliveries|scheduled_messages)$/.test(table);
+    const deliveryShape=Boolean((cols.recipient_email||cols.recipients)&&(cols.report_date||cols.sent_at||cols.message_id||cols.error_message));
+    if(!deliveryName&&!deliveryShape)return [];
     const first=(names:string[])=>names.find(k=>cols[k]);
     const timeField=first(['created_at','started_at','sent_at','completed_at']);
     if(!timeField||!cols.id)return [];
