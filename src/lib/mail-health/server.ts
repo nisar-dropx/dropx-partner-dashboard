@@ -141,7 +141,7 @@ export async function runWatchdog(){
   const rows=owners.map(owner=>({company_id:company.id,recipient_user_id:owner.id,event_code:'mail_health_monitor',source_key:'latest',title:issues.length?'Mail Health needs attention':'Mail Health check',body:`${issues.length} streams need attention; ${summary.setup} need setup.`,href:'/notifications/mail-health',data:summary,created_at:data.checkedAt}));
   const saved=await db().from('people_web_notifications').upsert(rows,{onConflict:'company_id,event_code,source_key,recipient_user_id'});
   if(saved.error)throw new Error('Watchdog check could not be recorded.');
-  results.push({companyId:company.id,sources:summary.sources,issues:summary.issues,setup:summary.setup,warnings:data.warnings});
+  results.push({companyId:company.id,sources:summary.sources,issues:summary.issues,setup:summary.setup,warnings:data.warnings,checks:data.health.map(h=>({source:h.source.key,state:h.state,warnings:h.warnings}))});
  }
  return results;
 }
