@@ -1,3 +1,4 @@
+import { betaLifecycleEnabled } from '@/lib/beta-lifecycle';
 import { betaJourney } from "@/lib/beta-journey";
 import { createHash } from "crypto";
 import { userFacingError } from "@/lib/user-facing-error";
@@ -227,6 +228,7 @@ export async function POST(request: Request) {
         file_paths: nextPaths,
         status: submitted ? "submitted" : (current && "status" in current ? current.status : "draft"),
         submitted_at: submitted ? now : (current && "submittedAt" in current ? current.submittedAt : null),
+        ...(submitted&&betaLifecycleEnabled(account.companyId,account.id)?{confirmed_at:null,returned_at:null,return_note:null}:{}),
         updated_at: now
       }, { onConflict: "candidate_id" })
       : await supabaseAdmin.from("mob_app_registration_drafts").upsert({

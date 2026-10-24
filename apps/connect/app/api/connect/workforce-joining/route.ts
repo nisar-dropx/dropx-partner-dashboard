@@ -1,3 +1,4 @@
+import { betaLifecycleEnabled, betaLifecycleSummary } from '@/lib/beta-lifecycle';
 import { betaSourceProgress, betaInboxActions, betaChecks, betaLearning, verifiedBetaSnapshot } from "@/lib/beta-verification";
 import { betaUanProgress, loadBetaUanMail } from "@/lib/beta-uan";
 import { acknowledgedBetaExitNote } from "@/lib/beta-exit-notice";
@@ -78,17 +79,19 @@ export async function GET(request: NextRequest) {
       const verificationCases=cases.error?[]:(cases.data??[]).filter(item=>item.status!=="resolved");
       const journey=betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus,invitationAvailable:Boolean(rawInvitationUrl),bgcAction:bgcChecks.some(item=>item.status==="action")});
       const invitationUrl=journey.invitationUnlocked?rawInvitationUrl:null;
+      const lifecycleEnhanced=betaLifecycleEnabled(company,account.id);
+      const lifecycle=lifecycleEnhanced?betaLifecycleSummary({isolatedBeta:true,lifecycleEnhanced,stage:journey.stage,registrationStatus,registrationReturnNote:registration.data?.return_note,continuationStatus:candidate.data.continuation_status,...betaSourceProgress(live),bgcStatus:live?.bgc_status,bgcChecks,uan,learning,driverId:live?.driver_id,inboxActions,invitationAvailable:Boolean(rawInvitationUrl),operationalStatus:live?.operational_status,verificationClosed:verificationCases.some(item=>item.status==="offboarded"),offboardingRequested,latestAttendance:attendance.data?{inTime:attendance.data.in_time,outTime:attendance.data.out_time}:null}):null;
       return NextResponse.json({
         available:true,pilot:true,isolatedBeta:true,registeredMobile:candidate.data.mobile,
         stationState:(Array.isArray(candidate.data.stations)?candidate.data.stations[0]:candidate.data.stations)?.state??null,
-        stage:journey.stage,stageLabel:journey.label,instruction:journey.instruction,
+        lifecycleEnhanced,stage:lifecycle?.stage??journey.stage,stageLabel:lifecycle?.label??journey.label,instruction:lifecycle?.instruction??journey.instruction,
         registrationReady:journey.ready,
         reportUpdatedAt:live?.idfy_observed_at??null,reportDate:null,stale:Boolean(live?.idfy_observed_at&&Date.now()-Date.parse(live.idfy_observed_at)>24*3600000),syncDelayed:Boolean(snapshot.error||live?.sync_error||!live?.idfy_observed_at),
         inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanLinks,uan,uanStatus:uan.status,...betaSourceProgress(live),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
         sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at??null,idfyUpdatedAt:live?.idfy_observed_at??null,lastAttemptAt:snapshot.data?.updated_at??null,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error||uan.syncDelayed)},driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
         invitationUrl,invitationAvailable:Boolean(rawInvitationUrl),invitationReceivedAt:amazonMessage?.received_at??candidate.data.last_message_at,
-        registrationRequired:!registrationSubmitted,registrationStatus,registrationUpdatedAt:registration.data?.updated_at??null,
+        registrationRequired:!registrationSubmitted,registrationStatus,registrationReturnNote:lifecycleEnhanced?registration.data?.return_note??null:null,registrationUpdatedAt:registration.data?.updated_at??null,
         continuationStatus:candidate.data.continuation_status,continuationDecidedAt:candidate.data.continuation_decided_at,
         offboardingRequested,offboardingRequestedAt:exitRequest.data?.created_at??null,offboardingStatus:exitRequest.data?.status??null,exitReasons:exitReasons.error?[]:exitReasons.data??[],
         actionOwner:invitationReceived?"Associate":"Amazon / system",category:"amazon_email_pilot",amazonAction:null,bgcChecks,
