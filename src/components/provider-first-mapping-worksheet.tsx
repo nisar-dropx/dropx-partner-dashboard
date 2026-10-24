@@ -21,6 +21,7 @@ import {
   isScientificProviderMemberId,
   providerFirstNamesMatch,
   providerFirstLocationIsAllowed,
+  providerFirstLocationIssue,
   providerFirstLocationNeedsDates,
   providerFirstWorkerIsSelectable,
   providerFirstLocationRemap,
@@ -1155,7 +1156,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationRemap = providerFirstLocationRemap(row, selectedWorker);
         const locationNeedsDates = providerFirstLocationNeedsDates(row, selectedWorker);
-        const locationMismatch = Boolean(selectedWorker && !locationNeedsDates && !providerFirstLocationIsAllowed(row, selectedWorker));
+        const locationIssue = selectedWorker && !locationNeedsDates
+          ? providerFirstLocationIssue(row, selectedWorker)
+          : null;
+        const locationMismatch = Boolean(locationIssue);
         const profileLocationDrift = Boolean(selectedWorker?.profileStationId && selectedWorker.profileStationId !== selectedWorker.stationId);
         const priorMappingLocations = [...new Set(row.history.map((entry) => entry.locationLabel).filter(Boolean))];
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
@@ -1195,7 +1199,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {locationNeedsDates ? <div className="mapping-period-help" role="status">{row.stationId === selectedWorker?.profileStationId ? `Currently mapped at ${selectedWorker.locationLabel}. Enter Effective from to validate the move to the registered location ${selectedWorker.profileLocationLabel}.` : `Registered at ${selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional ${row.stationLabel} assignment.`} Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
             {locationRemap ? <div className="mapping-period-help">{locationRemap.allowMove === false ? `Additional location: ${locationRemap.newLocationLabel} from ${locationRemap.effectiveFrom}. Use Keep all when saving to preserve the existing ${locationRemap.existingLocationLabel} mapping for this period.` : `Location change: ${locationRemap.existingLocationLabel} → ${locationRemap.newLocationLabel} from ${locationRemap.effectiveFrom}. The earlier location remains unchanged before this date.`} Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
-            {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
+            {locationIssue ? <div className="mapping-row-error">{locationIssue}</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>

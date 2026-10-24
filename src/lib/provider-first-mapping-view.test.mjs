@@ -16,6 +16,7 @@ import {
   providerFirstLocationRemap,
   providerFirstLocationNeedsDates,
   providerFirstLocationIsAllowed,
+  providerFirstLocationIssue,
   providerFirstMappingReferenceForRow,
   providerFirstMappingTimelineCovers,
   providerFirstMappingReplacement,
@@ -606,6 +607,46 @@ test("adjacent registered-location payment periods jointly cover an additional-l
   assert.equal(providerFirstRowIssue(additionalLocation, splitRateWorker, method), null);
 });
 
+test("explains the uncovered registered-location dates for an ongoing additional-location assignment", () => {
+  const registeredPeriod = {
+    mappingId: "registered-rate-period-1",
+    stationId: "station-1",
+    locationLabel: "PEUA",
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "2026-10-22",
+    status: "closed"
+  };
+  const registeredWorker = {
+    ...worker,
+    profileLocationLabel: "PEUA - Kuttiady",
+    mappingId: "",
+    currentMappings: [],
+    mappingHistory: [registeredPeriod],
+    registeredLocationMappings: [registeredPeriod]
+  };
+  const additionalLocation = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "KGQE - Nadapuram",
+    mappingId: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: ""
+  };
+
+  const issue = providerFirstLocationIssue(additionalLocation, registeredWorker);
+  assert.match(issue, /coverage at PEUA - Kuttiady ends on 2026-10-22/);
+  assert.match(issue, /from 2026-10-23 onward/);
+  assert.match(issue, /set this KGQE - Nadapuram mapping's Effective to to 2026-10-22/);
+  assert.equal(providerFirstRowIssue(additionalLocation, registeredWorker, method), issue);
+  assert.equal(providerFirstLocationIssue({ ...additionalLocation, effectiveTo: "2026-10-22" }, registeredWorker), null);
+});
+
 test("a gap or identity change in the registered-location timeline cannot authorize another location", () => {
   const firstPeriod = {
     mappingId: "registered-before-gap",
@@ -648,6 +689,11 @@ test("a gap or identity change in the registered-location timeline cannot author
   assert.equal(providerFirstMappingTimelineCovers([firstPeriod, afterGap], "2026-10-01", ""), false);
   assert.equal(providerFirstLocationIsAllowed(additionalLocation, workerWithGap), false);
   assert.equal(providerFirstMappingReferenceForRow(additionalLocation, workerWithGap), undefined);
+  assert.match(
+    providerFirstLocationIssue({ ...additionalLocation, effectiveTo: "2026-10-22" }, workerWithGap),
+    /gap from 2026-10-22 to 2026-10-22/,
+    "a bounded assignment reports only the part of the registered-location gap that it needs"
+  );
 
   const changedIdentity = { ...afterGap, mappedProviderMemberId: "different-member" };
   const workerWithIdentityChange = {
