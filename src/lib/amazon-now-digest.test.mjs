@@ -16,7 +16,7 @@ test('monthly email subjects use sending month while review dates cross month/ye
  const r=renderNowDigest(base);assert.equal(r.subject,'Review January 2027');assert.match(r.html,/2026-12-30/);assert.match(r.html,/&lt;Store&gt;/);assert.doesNotMatch(r.html,/<Store>/);assert.match(r.text,/D−2 data missing/);
 });
 test('activity message distinguishes handover acceptance from checklist submission',()=>{
- const r=renderNowDigest({review:false,rows:[{id:'a',code:'TCC3',name:'Store',cells:['Submitted','2/3 accepted','1 awaiting acceptance · 0 open / returned','Incoming SI'],attention:true,href:'/si-handover/report'}],date:'2026-10-25',dataDate:'2026-10-24',checkedAt:'2026-10-25T01:45:00Z',name:'Store',subjectTemplate:'Activities {{month}} {{year}}',reminder:''});assert.match(r.html,/1 awaiting acceptance/);assert.match(r.html,/Future shifts are excluded/);assert.match(r.html,/monthly activities thread/);
+ const r=renderNowDigest({review:false,rows:[{id:'a',code:'TCC3',name:'Store',cells:['Submitted','2/3 accepted','1 awaiting acceptance · 0 open / returned','Incoming SI'],attention:true,href:'/si-handover/report'}],date:'2026-10-25',dataDate:'2026-10-24',checkedAt:'2026-10-25T01:45:00Z',name:'Store',subjectTemplate:'Activities {{month}} {{year}}',reminder:''});assert.match(r.html,/1 awaiting acceptance/);assert.match(r.html,/Future shifts are excluded/);assert.match(r.html,/monthly store-operations thread/);
 });
 function builderFixture(review) {
  const station={id:'s1',station_code:'TCC3',station_name:'Adyar',city:'Chennai'};

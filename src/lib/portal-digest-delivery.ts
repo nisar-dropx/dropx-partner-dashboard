@@ -89,7 +89,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     const manualCod=delivery.event_key==='cod_pending_current';
     let registrationRecipientVerified=false;
     const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
-    const threadEvents=delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:delivery.event_key.startsWith("id_mapping_")?["id_mapping_morning","id_mapping_afternoon"]:[delivery.event_key];
+    const threadEvents=delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:delivery.event_key.startsWith("id_mapping_")?["id_mapping_morning","id_mapping_afternoon"]:["now_review_digest","now_activity_digest"].includes(delivery.event_key)?["now_review_digest","now_activity_digest"]:[delivery.event_key];
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
