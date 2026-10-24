@@ -99,7 +99,7 @@ for(const code of ['GNTI','ST03','ST04','ST05','ST06'])assert.match(streakMail.h
 assert.match(streakMail.text,/Consecutive days without a COD update/);
 assert.equal(rows.find(r=>r.station.id==='s1').slipUploaded,true);
 assert.equal(rows.find(r=>r.station.id==='s2').slipUploaded,false);
-const delivery=compile('src/lib/portal-digest-delivery.ts',{'./portal-digest-attachments':attachmentMail,'server-only':{},'./timeout-fetch':{timeoutFetch:f=>f},'./adhoc-digest-scope':{},'./cod-pending-mail-scope':{},'./ops-pulse/cod-pending-data':{},'./id-mapping-digest':{loadIdMappingRecipientScope:async()=>({recipients:[]})}});
+const delivery=compile('src/lib/portal-digest-delivery.ts',{'./portal-digest-attachments':attachmentMail,'server-only':{},'./timeout-fetch':{timeoutFetch:f=>f},'./adhoc-digest-scope':{},'./cod-pending-mail-scope':{},'./ops-pulse/cod-pending-data':{},'./id-mapping-digest':{loadIdMappingRecipientScope:async()=>({recipients:[]})},'./registration-summary-recipients':{loadRegistrationSummaryRecipients:async()=>[]}});
 const control={state:'enabled',paused_until:null,config:{delivery_ready:true,timezone:'Asia/Kolkata',schedule_time:'20:30',day_offset:0,delivery_window_minutes:30,first_report_date:'2026-09-01'}};
 assert.equal(delivery.dueReportDate(control,new Date('2026-09-02T14:59:59Z')),null);
 assert.equal(delivery.dueReportDate(control,now),date);
@@ -163,6 +163,7 @@ const sendModule=compile('src/lib/portal-digest-delivery.ts',{
  './cod-pending-mail-scope':{loadCodMailRecipients:async()=>[{email:'user@example.com',stationIds:['s1']}]},
  './ops-pulse/cod-pending-data':{loadCodPendingReport:async()=>[{station}]},
  './id-mapping-digest':{loadIdMappingRecipientScope:async()=>({recipients:[]})},
+ './registration-summary-recipients':{loadRegistrationSummaryRecipients:async()=>[]},
  nodemailer:{default:{createTransport:()=>({sendMail:async options=>{mailOptions=options;return {accepted:['user@example.com'],messageId:options.messageId,response:'mock accepted'};},close(){}})}}
 });
 const responses={
