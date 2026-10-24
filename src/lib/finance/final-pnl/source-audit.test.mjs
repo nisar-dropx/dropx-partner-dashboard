@@ -16,7 +16,7 @@ test('matching calculation revision retains published deduction evidence',()=>{
 });
 test('cancelled publication never enters costs and review publications remain explicitly provisional',()=>{
  assert.equal(reconcileWorkforcePayroll([publication],[{...run,status:'cancelled'}],[]).publications.length,0);
- const review=reconcileWorkforcePayroll([publication],[{...run,status:'review'}],[]);assert.equal(review.reviewCount,1);assert.equal(review.publications[0].payrollFinal,false);assert.match(review.issues[0],/payroll accruals/);
+ const review=reconcileWorkforcePayroll([publication],[{...run,status:'review'}],[]);assert.equal(review.reviewCount,1);assert.equal(review.publications[0].payrollFinal,false);assert.deepEqual(review.publications[0].deductions,[]);assert.match(review.issues[0],/payroll accruals/);
 });
 test('legacy publications without payroll runs retain their known expense as an unverified accrual',()=>{
  const result=reconcileWorkforcePayroll([publication],[],[]);assert.equal(result.publications[0].item.gross_amount,100);assert.equal(result.publications[0].payrollFinal,false);assert.equal(result.publications[0].payrollUnverified,true);assert.deepEqual(result.publications[0].deductions,[]);assert.match(result.issues[0],/published amounts remain disclosed accruals/);

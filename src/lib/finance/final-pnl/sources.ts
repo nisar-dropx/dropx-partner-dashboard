@@ -131,7 +131,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
    if(e.event_type==='payout_deduction'){
     const a=caseAlloc.find(a=>a.id===e.allocation_id);
     if(a?.payout_run_person_id){const p=hrPeople.find(p=>p.id===a.payout_run_person_id);const item=hrItems.find(i=>i.run_person_id===a.payout_run_person_id&&i.code==='RECOVERY');confirmed=!!p&&!!item&&paise(item.amount)>=(allocationTotals.get(a.payout_run_person_id)??Infinity);}
-    else if(a?.deduction_value_id){const pubs=allWorkforce.filter(p=>p.workforce_id===a.workforce_id&&p.station_id===a.station_id&&p.period_start===e.period_start&&p.period_end===e.period_end);confirmed=pubs.some(p=>(p.deductions??[]).filter((l:Row)=>l.code==='RECOVERY').reduce((n:number,l:Row)=>n+Math.abs(paise(l.amount)),0)>=(allocationTotals.get(a.deduction_value_id)??Infinity));}
+    else if(a?.deduction_value_id){const pubs=allWorkforce.filter(p=>p.payrollFinal===true&&p.workforce_id===a.workforce_id&&p.station_id===a.station_id&&p.period_start===e.period_start&&p.period_end===e.period_end);confirmed=pubs.some(p=>(p.deductions??[]).filter((l:Row)=>l.code==='RECOVERY').reduce((n:number,l:Row)=>n+Math.abs(paise(l.amount)),0)>=(allocationTotals.get(a.deduction_value_id)??Infinity));}
    }
    if(!confirmed)continue;const n=paise(e.amount);posted+=n;
    const recognitionMonth=recoveryRecognitionMonth(e.period_start,e.created_at,e.event_type==='payout_deduction');

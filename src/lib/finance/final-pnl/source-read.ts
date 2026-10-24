@@ -38,7 +38,7 @@ export function reconcileWorkforcePayroll(publications: PayrollRow[], runs: Payr
    output.push({...publication,item,station_id:item.station_id||publication.station_id,period_start:run.period_start,period_end:run.period_end,payrollFinal:true,
     deductions:publication.source_calculated_at&&publication.source_calculated_at===run.calculated_at?publication.deductions:[]});
   }else{
-   reviewCount++;output.push({...publication,payrollFinal:false});
+   reviewCount++;output.push({...publication,payrollFinal:false,deductions:[]});
   }
  }
  for(const item of items){
