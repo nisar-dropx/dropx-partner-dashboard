@@ -266,7 +266,7 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
         .map((l) => l.parent_station_code!),
     ),
   ];
-  const parentRates: Record<string, { rate: string | null; revision: number }> =
+  const parentRates: Record<string, { rate: string | null; mfnRate?: string | null; revision: number }> =
     {};
   if (parents.length) {
     // Only unit rates for parents of authorized XPTs; no parent shipment, cost or P&L data is exposed.
@@ -288,6 +288,7 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
         if (!parentRates[p.station_code])
           parentRates[p.station_code] = {
             rate: p.rates?.variable_slab ?? null,
+            mfnRate: p.rates?.mfn_rate ?? null,
             revision: p.revision,
           };
       if (

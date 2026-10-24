@@ -44,4 +44,15 @@ assert.equal(optimized.daily_shipments[0].smd,'7');assert.equal(optimized.daily_
 const noAccess=(await db.query(`select finance_pnl_revenue_snapshot('00000000-0000-0000-0000-000000000001','2026-09-01','2026-09-02',array[]::text[]) r`)).rows[0].r;assert.deepEqual(noAccess.daily_shipments,[]);
 const security=(await db.query(`select prosecdef,has_function_privilege('anon',oid,'execute') anon,has_function_privilege('authenticated',oid,'execute') authenticated,has_function_privilege('service_role',oid,'execute') service from pg_proc where proname='finance_pnl_revenue_snapshot'`)).rows[0];
 assert.deepEqual(security,{prosecdef:false,anon:false,authenticated:false,service:true});
+// MFN seller returns are billable at the same rate; preserve source breakdown and nulls.
+await db.exec(`alter table cps_shipment_daily add column mfn_return numeric;
+update cps_shipment_daily set mfn=8,mfn_return=3;`);
+await db.exec(readFileSync('supabase/migrations/20261024182000_finance_mfn_seller_return_revenue.sql','utf8'));
+const mfnResult=(await db.query(`select finance_pnl_revenue_snapshot('00000000-0000-0000-0000-000000000001','2026-09-01','2026-09-02',array['PARENT']) r`)).rows[0].r;
+assert.equal(mfnResult.daily_shipments[0].mfn,'11');assert.equal(mfnResult.daily_shipments[0].mfn_pickups,'8');assert.equal(mfnResult.daily_shipments[0].mfn_returns,'3');
+await db.exec(`update cps_shipment_daily set mfn_return=null;`);
+const missingMfn=(await db.query(`select finance_pnl_revenue_snapshot('00000000-0000-0000-0000-000000000001','2026-09-01','2026-09-02',array['PARENT']) r`)).rows[0].r;
+assert.equal(missingMfn.daily_shipments[0].mfn,null);assert.equal(missingMfn.daily_shipments[0].mfn_pickups,'8');
+const mfnSecurity=(await db.query(`select prosecdef,has_function_privilege('anon',oid,'execute') anon,has_function_privilege('authenticated',oid,'execute') authenticated,has_function_privilege('service_role',oid,'execute') service from pg_proc where proname='finance_pnl_revenue_snapshot'`)).rows[0];
+assert.deepEqual(mfnSecurity,security);
 console.log('SQL verified: station scope, shipment grain, parent SWA inheritance, tenant scope, idempotent revisions, invoker/service-only grants');await db.close();

@@ -103,6 +103,8 @@ const providerName = (s: string) =>
       ? "Flipkart"
       : s;
 export type DailyShipment = {
+  mfn_pickups?: string | null;
+  mfn_returns?: string | null;
   mg_deliveries?: string | null;
   swa?: string | null;
   station_code: string;
@@ -124,6 +126,8 @@ export type DailyCost = {
   updated_at: string;
 };
 export type BusinessDay = {
+  mfnPickups?: string | null;
+  mfnReturns?: string | null;
   mgCumulativeEligible?: string | null;
   mgCumulativeThreshold?: string | null;
   mgCumulativeExcess?: string | null;
@@ -177,7 +181,7 @@ export function buildDailyRows(
   month: string,
   through: string,
   sharedCost: boolean,
-  options: { xpt?: boolean; parentRate?: string | null } = {},
+  options: { xpt?: boolean; parentRate?: string | null; parentMfnRate?: string | null } = {},
 ): BusinessDay[] {
   const monthDays = BigInt(Number(monthEnd(month).slice(8)));
   const elapsed = Number(through.slice(8));
@@ -269,11 +273,14 @@ export function buildDailyRows(
           );
         else issues.push("Parent station variable rate missing by this month");
       }
-      if (s?.mfn != null && decimal(s.mfn) > zero)
-        issues.push(
-          "XPT MFN settlement rule pending; not added to fixed-plus-delivery revenue",
-        );
-      revenue = addAmounts([base, variable]);
+      if (s?.mfn != null) {
+        if (decimal(s.mfn) === zero) mfnRevenue = mfnAccrual(zero);
+        else if (options.parentMfnRate != null)
+          mfnRevenue = mfnAccrual((decimal(s.mfn) * decimal(options.parentMfnRate)) / scale);
+        else issues.push("Parent station MFN rate missing; XPT MFN settlement pending");
+      } else if (s) issues.push("MFN count incomplete");
+      revenue = base === null && variable === null && (mfnRevenue === null || decimal(mfnRevenue) === zero)
+        ? null : addAmounts([base, variable, mfnRevenue]);
     } else if (provider === "Amazon") {
       if (rates.mg_amount_including_mhe != null) {
         const monthlyBase = addQuantities([
@@ -381,6 +388,8 @@ export function buildDailyRows(
       base,
       variable,
       mfn: s?.mfn ?? null,
+      mfnPickups: s?.mfn_pickups ?? null,
+      mfnReturns: s?.mfn_returns ?? null,
       mfnRevenue,
       smd: s?.smd ?? null,
       ihs: s?.ihs ?? null,
@@ -403,7 +412,7 @@ export function buildBusinessRows(
   cards: PricingCard[],
   locations: Location[],
   filters: { month: string; through: string; provider: string },
-  parentRates: Record<string, { rate: string | null; revision: number }> = {},
+  parentRates: Record<string, { rate: string | null; mfnRate?: string | null; revision: number }> = {},
 ): BusinessRow[] {
   const places = new Map(locations.map((l) => [l.station_code, l]));
   const shipments = new Map(
@@ -459,6 +468,7 @@ export function buildBusinessRows(
         (parentCard
           ? {
               rate: parentCard.rates.variable_slab ?? null,
+              mfnRate: parentCard.rates.mfn_rate ?? null,
               revision: parentCard.revision,
             }
           : undefined))
@@ -528,7 +538,7 @@ export function buildBusinessRows(
       filters.month,
       filters.through,
       (clientCounts.get(station) ?? 0) > 1,
-      { xpt, parentRate: parentRate?.rate },
+      { xpt, parentRate: parentRate?.rate, parentMfnRate: parentRate?.mfnRate },
     );
     if (provider === "Amazon")
       revenue = addAmounts(daily.map((d) => d.revenue));
@@ -550,7 +560,7 @@ export function buildBusinessRows(
         variableRate: xpt
           ? (parentRate?.rate ?? null)
           : (pricing?.rates.variable_slab ?? null),
-        mfnRate: pricing?.rates.mfn_rate ?? null,
+        mfnRate: xpt ? (parentRate?.mfnRate ?? null) : (pricing?.rates.mfn_rate ?? null),
         smdRate: pricing?.rates.smd_rate ?? null,
         ihsLowRate: pricing?.rates.ihs_rate_below_15_percent ?? null,
         ihsHighRate: pricing?.rates.ihs_rate_above_15_percent ?? null,

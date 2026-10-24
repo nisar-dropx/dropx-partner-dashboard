@@ -1245,3 +1245,14 @@ test('fractional excess reversals remain valid signed decimal quantities',()=>{
  const days=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-02',false);
  assert.match(days[1].excessVolume,/^-13\.333333/);assert.ok(Number.isFinite(Number(days[1].excessVolume)));assert.equal(pricing.addAmounts(days.map(d=>d.variable)),'700.00');
 });
+
+test("MFN billable total is priced once and preserves pickup/return evidence; XPT inherits parent MFN rate",()=>{
+ const {pc,snap}=dailyFixture('2026-09',1,{mfn_rate:'11'});
+ snap.daily_shipments=[{...snap.daily_shipments[0],mfn:'36',mfn_pickups:'33',mfn_returns:'3'}];
+ const base=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false)[0];
+ assert.equal(base.mfnRevenue,'396.00');assert.equal(base.mfnPickups,'33');assert.equal(base.mfnReturns,'3');
+ const child=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false,{xpt:true,parentRate:'21',parentMfnRate:'8'})[0];
+ assert.equal(child.mfnRevenue,'288.00');assert.equal(child.revenue,pricing.addAmounts([child.base,child.variable,child.mfnRevenue]));
+ const pending=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false,{xpt:true,parentRate:'21'})[0];
+ assert.equal(pending.mfnRevenue,null);assert.match(pending.issues.join(),/Parent station MFN rate missing/);
+});

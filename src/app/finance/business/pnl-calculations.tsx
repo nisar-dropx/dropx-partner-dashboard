@@ -242,7 +242,7 @@ export function RevenueCalculation({
                   <Facts
                     items={[
                       [
-                        kind === "swa" ? "SWA delivered" : "MFN count",
+                        kind === "swa" ? "SWA delivered" : "MFN billable units",
                         qty(
                           known(days, (d) => (kind === "swa" ? d.swa : d.mfn)),
                         ),
@@ -258,12 +258,13 @@ export function RevenueCalculation({
                     Quantity × configured rate.{" "}
                     {kind === "swa"
                       ? "SWA stays separate from Amazon MG. The feed has no COD / prepaid / payable-reject split. This combined-rate estimate excludes SWA reject payouts and invoice incentives; compare the final invoice before settling."
-                      : "An unconfigured XPT MFN settlement remains pending."}
+                      : "MFN pickups + seller returns, billed once at the MFN rate. XPT uses its parent station’s MFN rate."}
                   </p>
-                  <Table headers={["Date", "Quantity", "Earnings"]}>
+                  <Table headers={kind === "mfn" ? ["Date", "Pickups", "Seller returns", "Billable units", "Earnings"] : ["Date", "Quantity", "Earnings"]}>
                     {days.map((d) => (
                       <tr key={d.date}>
                         <td>{d.date}</td>
+                        {kind === "mfn" && <><td>{qty(d.mfnPickups)}</td><td>{qty(d.mfnReturns)}</td></>}
                         <td>{qty(kind === "swa" ? d.swa : d.mfn)}</td>
                         <td>
                           {money(kind === "swa" ? d.swaRevenue : d.mfnRevenue)}

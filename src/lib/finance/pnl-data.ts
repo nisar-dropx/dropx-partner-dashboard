@@ -141,7 +141,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
     }));
     const parentRates: Record<
       string,
-      { rate: string | null; revision: number }
+      { rate: string | null; mfnRate?: string | null; revision: number }
     > = {};
     for (const card of parentHistory)
       if (
@@ -150,6 +150,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCo
       )
         parentRates[card.station_code] = {
           rate: card.rates.variable_slab ?? null,
+          mfnRate: card.rates.mfn_rate ?? null,
           revision: card.revision,
         };
     revenue.push(
