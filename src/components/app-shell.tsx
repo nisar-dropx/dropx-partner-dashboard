@@ -27,6 +27,10 @@ import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
+import {
+  applyActivitiesNavAccess,
+  resolveActivitiesNavAccess,
+} from "@/lib/ops-pulse/activities-nav-access";
 import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
 import { isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { hasPeoplePortalAccess, peopleNavItems } from "@/lib/people/navigation";
@@ -105,7 +109,14 @@ export async function AppShell({ children, active, pageCode }: { children: React
   if (currentPageCode && !hasPermission(authorization, currentPageCode, "access")) {
     redirect(`/unauthorized?page=${encodeURIComponent(currentPageCode)}&reason=access`);
   }
-  const visibleNavItems = shellNavItems
+  const activitiesAccess =
+    isOpsHost && opsContext.mode === "amazon_now"
+      ? await resolveActivitiesNavAccess(authorization)
+      : null;
+  const navForPermissions = activitiesAccess
+    ? applyActivitiesNavAccess(shellNavItems, activitiesAccess)
+    : shellNavItems;
+  const visibleNavItems = navForPermissions
     .map((item) => item.children?.length ? {
       ...item,
       children: item.children.filter((child) => {

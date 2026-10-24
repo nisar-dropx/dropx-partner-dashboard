@@ -1,13 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useTransition,
-  type CSSProperties,
-} from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { statusLabels as siStatusLabels } from "@/lib/ops-pulse/si-handover/model";
 import {
   filterProgressRows as filterSi,
@@ -41,6 +35,8 @@ type Props = {
   to: string;
   showShift: boolean;
   showStore: boolean;
+  showShiftReport?: boolean;
+  showStoreReport?: boolean;
   shift?: { summary: SiSummary; rows: SiRow[]; stores: Store[] };
   store?: { summary: StoreSummary; rows: StoreRow[]; stores: Store[] };
 };
@@ -64,10 +60,54 @@ function formatIstRange(from: string, to: string) {
 
 const RANGE_PRESETS = [
   { id: "today", label: "Today", days: 0 },
-  { id: "7d", label: "Last 7 days", days: 6 },
-  { id: "14d", label: "Last 14 days", days: 13 },
-  { id: "30d", label: "Last 30 days", days: 29 },
+  { id: "7d", label: "7d", days: 6 },
+  { id: "14d", label: "14d", days: 13 },
+  { id: "30d", label: "30d", days: 29 },
 ] as const;
+
+function pctClass(pct: number) {
+  if (pct >= 80) return rui.pctOk;
+  if (pct >= 40) return rui.pctMid;
+  return rui.pctLow;
+}
+
+function barClass(pct: number) {
+  if (pct >= 80) return rui.bar;
+  if (pct >= 50) return rui.barMid;
+  return rui.barLow;
+}
+
+function trendClass(delta: number | null) {
+  if (delta == null) return rui.trendFlat;
+  if (delta > 0) return rui.trendUp;
+  if (delta < 0) return rui.trendDown;
+  return rui.trendFlat;
+}
+
+function formatWhen(iso: string | null) {
+  if (!iso) return "—";
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return iso;
+  return new Date(ms).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function sortBuckets<
+  T extends { staleOpen: number; open: number; avgPct: number; label: string },
+>(list: T[]) {
+  return [...list].sort(
+    (a, b) =>
+      b.staleOpen - a.staleOpen ||
+      b.open - a.open ||
+      a.avgPct - b.avgPct ||
+      a.label.localeCompare(b.label),
+  );
+}
 
 export function ActivitiesReportClient(props: Props) {
   const router = useRouter();
@@ -135,24 +175,32 @@ export function ActivitiesReportClient(props: Props) {
   const rowCount = isShift
     ? props.shift?.rows.length || 0
     : props.store?.rows.length || 0;
+
   return (
-    <div className={`${styles.pageWide} ${rui.shell}${pending ? ` ${rui.pending}` : ""}`}>
-      <header className={rui.hero}>
-        <p className={rui.eyebrow}>Dark Store · Activities & Handover</p>
-        <h1>{isShift ? "Shift operations report" : "Store operations report"}</h1>
-        <p className={rui.heroLead}>
-          {isShift
-            ? "See what’s stuck, who’s quiet, and what’s improving — then open any checklist as a full report."
-            : "See what’s stuck, who’s quiet, and what’s improving — then open any day checklist as a full report."}
-        </p>
-        <div className={rui.heroMeta}>
-          <span className={rui.metaPill}>
+    <div
+      className={`${styles.pageWide} ${rui.shell}${pending ? ` ${rui.pending}` : ""}`}
+    >
+      <header className={rui.head}>
+        <div className={rui.headLeft}>
+          <p className={rui.eyebrow}>Dark Store · Activities & Handover</p>
+          <h1>
+            {isShift ? "Shift operations report" : "Store operations report"}
+          </h1>
+          <p className={rui.sub}>
+            Who’s on track, who’s stuck, and where to follow up — then open any
+            checklist.
+          </p>
+        </div>
+        <div className={rui.meta}>
+          <span className={rui.pill}>
             Range <strong>{formatIstRange(from, to)}</strong>
           </span>
-          <span className={rui.metaPill}>
+          <span className={rui.pill}>
             {isShift ? "Shifts" : "Days"} <strong>{rowCount}</strong>
           </span>
-          <span className={rui.metaPill}>Timezone <strong>IST</strong></span>
+          <span className={rui.pill}>
+            TZ <strong>IST</strong>
+          </span>
         </div>
       </header>
 
@@ -160,15 +208,11 @@ export function ActivitiesReportClient(props: Props) {
         active={isShift ? "shift-report" : "store-report"}
         showShift={props.showShift}
         showStore={props.showStore}
-        showShiftReport={props.showShift}
-        showStoreReport={props.showStore}
+        showShiftReport={props.showShiftReport ?? props.showShift}
+        showStoreReport={props.showStoreReport ?? props.showStore}
       />
 
-      <section className={rui.rangeCard}>
-        <div className={rui.rangeHead}>
-          <strong>Date range</strong>
-          <span>{formatIstRange(from, to)} · IST</span>
-        </div>
+      <section className={rui.toolbar}>
         <div className={rui.presets} role="group" aria-label="Quick ranges">
           {RANGE_PRESETS.map((p) => (
             <button
@@ -182,40 +226,38 @@ export function ActivitiesReportClient(props: Props) {
             </button>
           ))}
         </div>
-        <div className={rui.rangeRow}>
-          <label className={rui.field}>
-            From
-            <input
-              type="date"
-              value={from}
-              max={to || undefined}
-              onChange={(e) => setFrom(e.target.value)}
-            />
-          </label>
-          <label className={rui.field}>
-            To
-            <input
-              type="date"
-              value={to}
-              min={from || undefined}
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            className={rui.applyBtn}
-            disabled={pending || (!from && !to)}
-            onClick={applyRange}
-          >
-            {pending ? "Loading…" : "Apply"}
-          </button>
-          <span className={rui.kindChip}>
-            {props.tab === "shift" ? "Shift handovers" : "Store day checklists"}
-          </span>
-        </div>
+        <label className={rui.field}>
+          From
+          <input
+            type="date"
+            value={from}
+            max={to || undefined}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </label>
+        <label className={rui.field}>
+          To
+          <input
+            type="date"
+            value={to}
+            min={from || undefined}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className={rui.applyBtn}
+          disabled={pending || (!from && !to)}
+          onClick={applyRange}
+        >
+          {pending ? "…" : "Apply"}
+        </button>
+        <span className={rui.kindChip}>
+          {isShift ? "Shift handovers" : "Store day checklists"}
+        </span>
       </section>
 
-      {props.tab === "shift" && props.shift ? (
+      {isShift && props.shift ? (
         <ShiftReportBody
           summary={props.shift.summary}
           rows={props.shift.rows}
@@ -238,7 +280,7 @@ export function ActivitiesReportClient(props: Props) {
         />
       ) : null}
 
-      {props.tab === "store" && props.store ? (
+      {!isShift && props.store ? (
         <StoreReportBody
           summary={props.store.summary}
           rows={props.store.rows}
@@ -268,178 +310,27 @@ export function ActivitiesReportClient(props: Props) {
   );
 }
 
-function formatWhen(iso: string | null) {
-  if (!iso) return "—";
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return iso;
-  return new Date(ms).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function barClass(pct: number) {
-  if (pct >= 80) return rui.bar;
-  if (pct >= 50) return rui.barMid;
-  return rui.barLow;
-}
-
-function pctTone(pct: number) {
-  if (pct >= 80) return rui.pctOk;
-  if (pct >= 40) return rui.pctMid;
-  return rui.pctLow;
-}
-
-function PulseTile({
-  label,
-  value,
-  hint,
-  tone,
-  ringPct,
+function FilterChips({
+  items,
+  onClearAll,
 }: {
-  label: string;
-  value: string;
-  hint: string;
-  tone: "ok" | "warn" | "bad" | "neutral";
-  ringPct?: number | null;
+  items: { key: string; label: string; onClear: () => void }[];
+  onClearAll: () => void;
 }) {
-  const cls =
-    tone === "ok"
-      ? rui.pulseOk
-      : tone === "warn"
-        ? rui.pulseWarn
-        : tone === "bad"
-          ? rui.pulseBad
-          : rui.pulse;
-  const ringColor =
-    tone === "bad" ? "#ef4444" : tone === "warn" ? "#f59e0b" : "#14b8a6";
-  const showRing = ringPct != null && Number.isFinite(ringPct);
+  if (!items.length) return null;
   return (
-    <div className={cls}>
-      <div className={rui.pulseCopy}>
-        <p className={rui.pulseLabel}>{label}</p>
-        <p className={rui.pulseValue}>{value}</p>
-        <p className={rui.pulseHint}>{hint}</p>
-      </div>
-      {showRing ? (
-        <div
-          className={rui.ring}
-          style={
-            {
-              "--ring-pct": Math.max(0, Math.min(100, ringPct)),
-              "--ring-color": ringColor,
-            } as CSSProperties
-          }
-          aria-hidden
-        >
-          <span>{Math.round(ringPct)}%</span>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function heatClass(stale: number, open: number, active: boolean) {
-  const base =
-    stale > 0 ? rui.rankHot : open > 0 ? rui.rankWarm : rui.rank;
-  return active ? `${base} ${rui.rankActive}` : base;
-}
-
-function rankAttention(stale: number, open: number) {
-  if (stale > 0)
-    return {
-      flagClass: rui.flagBad,
-      label: `${stale} stale${open ? ` · ${open} open` : ""}`,
-    };
-  if (open > 0) return { flagClass: rui.flagWarn, label: `${open} open` };
-  return { flagClass: rui.flagOk, label: "On track" };
-}
-
-function sortBucketsForAttention<
-  T extends { staleOpen: number; open: number; avgPct: number; label: string },
->(list: T[]) {
-  return [...list].sort(
-    (a, b) =>
-      b.staleOpen - a.staleOpen ||
-      b.open - a.open ||
-      a.avgPct - b.avgPct ||
-      a.label.localeCompare(b.label),
-  );
-}
-
-function RankCard({
-  index,
-  label,
-  detail,
-  pct,
-  stale,
-  open,
-  countLabel,
-  trend,
-  active,
-  onClick,
-}: {
-  index: number;
-  label: string;
-  detail: string;
-  pct: number;
-  stale: number;
-  open: number;
-  countLabel: string;
-  trend: string | null;
-  active?: boolean;
-  onClick: () => void;
-}) {
-  const attention = rankAttention(stale, open);
-  const safePct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
-  return (
-    <button
-      type="button"
-      className={heatClass(stale, open, Boolean(active))}
-      onClick={onClick}
-      aria-pressed={Boolean(active)}
-    >
-      <span className={rui.rankIndex}>{index}</span>
-      <span className={rui.rankMain}>
-        <strong>{label}</strong>
-        <small>{detail}</small>
-        <span className={barClass(safePct)} aria-hidden>
-          <i className={rui.barFill} style={{ width: `${safePct}%` }} />
+    <div className={rui.filterChips} aria-label="Active filters">
+      {items.map((item) => (
+        <span key={item.key} className={rui.filterChip}>
+          {item.label}
+          <button type="button" aria-label={`Clear ${item.label}`} onClick={item.onClear}>
+            ×
+          </button>
         </span>
-        <span className={attention.flagClass}>{attention.label}</span>
-      </span>
-      <span className={rui.rankStats}>
-        <span className={rui.rankPct}>{safePct}%</span>
-        <span className={rui.rankMeta}>{countLabel}</span>
-        {trend ? <span className={rui.rankMeta}>{trend}</span> : null}
-      </span>
-    </button>
-  );
-}
-
-function networkTrendLabel(buckets: { trendDelta: number | null }[]) {
-  const deltas = buckets
-    .map((b) => b.trendDelta)
-    .filter((d): d is number => d != null);
-  if (!deltas.length) return null;
-  const avg = Math.round(deltas.reduce((a, b) => a + b, 0) / deltas.length);
-  return formatTrendDelta(avg)?.replace(/^Trend\s*/, "") || null;
-}
-
-function EmptyInsight({
-  title,
-  detail,
-}: {
-  title: string;
-  detail: string;
-}) {
-  return (
-    <div className={rui.empty}>
-      <strong>{title}</strong>
-      <p>{detail}</p>
+      ))}
+      <button type="button" className={rui.clearFilters} onClick={onClearAll}>
+        Clear all
+      </button>
     </div>
   );
 }
@@ -502,264 +393,261 @@ function ShiftReportBody({
       ),
     [rows, store, person, status, slot, q, sort],
   );
-  const paged = paginateRows(filtered, page, 20);
-  const storesRanked = useMemo(
-    () => sortBucketsForAttention(s.byStore).slice(0, 8),
-    [s.byStore],
-  );
-  const peopleRanked = useMemo(
-    () => sortBucketsForAttention(s.bySi).slice(0, 8),
-    [s.bySi],
-  );
-  const trendNet = networkTrendLabel(s.byStore);
+  const paged = paginateRows(filtered, page, 25);
+  const people = useMemo(() => sortBuckets(s.bySi), [s.bySi]);
+  const byStore = useMemo(() => sortBuckets(s.byStore), [s.byStore]);
   const feedItems = useMemo(
     () =>
       s.personActivity
-        .flatMap((p) =>
-          p.items.map((item) => ({ ...item, person: p.label })),
-        )
+        .flatMap((p) => p.items.map((item) => ({ ...item, person: p.label })))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-        .slice(0, 12),
+        .slice(0, 8),
     [s.personActivity],
   );
 
   const storeLabel =
     stores.find((st) => st.id === store)?.station_code || store;
-  const personLabel =
-    sis.find((x) => x.id === person)?.name || person;
-  const hasInsightFilters = Boolean(store || person || status || slot || q);
+  const personLabel = sis.find((x) => x.id === person)?.name || person;
+  const chips = [
+    store
+      ? {
+          key: "store",
+          label: `Store ${storeLabel}`,
+          onClear: () => {
+            setStore("");
+            setPage(1);
+          },
+        }
+      : null,
+    person
+      ? {
+          key: "person",
+          label: `SI ${personLabel}`,
+          onClear: () => {
+            setPerson("");
+            setPage(1);
+          },
+        }
+      : null,
+    status
+      ? {
+          key: "status",
+          label: `Status ${status}`,
+          onClear: () => {
+            setStatus("");
+            setPage(1);
+          },
+        }
+      : null,
+    slot
+      ? {
+          key: "slot",
+          label: `Slot ${slot}`,
+          onClear: () => {
+            setSlot("");
+            setPage(1);
+          },
+        }
+      : null,
+    q
+      ? {
+          key: "q",
+          label: `“${q}”`,
+          onClear: () => {
+            setQ("");
+            setPage(1);
+          },
+        }
+      : null,
+  ].filter(Boolean) as { key: string; label: string; onClear: () => void }[];
 
   return (
     <>
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
-          <div>
-            <h2>Pulse</h2>
-            <p>What’s stuck, who’s quiet, what’s improving</p>
-          </div>
+      <section className={rui.panel}>
+        <div className={rui.panelHead}>
+          <h2>Overview</h2>
+          <p>Same-length prior window for trend</p>
         </div>
         {!s.shifts ? (
-          <EmptyInsight
-            title="No shifts in this range"
-            detail="Widen the date range or clear filters once data exists."
-          />
+          <div className={rui.empty}>
+            <strong>No shifts in this range</strong>
+            Widen the date range or wait for activity.
+          </div>
         ) : (
-          <div className={rui.pulseGrid} aria-label="Shift pulse">
-            <PulseTile
-              label="Avg completion"
-              value={`${s.avgPct}%`}
-              hint={`${s.shifts} shifts · submit ${s.submitRate}%`}
-              tone={s.avgPct >= 80 ? "ok" : s.avgPct >= 40 ? "warn" : "bad"}
-              ringPct={s.avgPct}
-            />
-            <PulseTile
-              label="Still open"
-              value={String(s.open)}
-              hint={`Accept ${s.acceptRate}% · overdue ${s.overdueAccept}`}
-              tone={s.open ? "warn" : "ok"}
-            />
-            <PulseTile
-              label="Broken / stale"
-              value={String(s.staleOpen)}
-              hint="Quiet past escalate window"
-              tone={s.staleOpen ? "bad" : "ok"}
-            />
-            <PulseTile
-              label="Trend vs prior"
-              value={trendNet || "—"}
-              hint={
-                trendNet
-                  ? "Same-length previous window"
-                  : "No prior window to compare"
-              }
-              tone="ok"
-            />
+          <div className={rui.kpiGrid} aria-label="Shift overview">
+            <div className={rui.kpi}>
+              <strong>{s.shifts}</strong>
+              <span>Shifts</span>
+            </div>
+            <div className={s.avgPct >= 80 ? rui.kpiOk : s.avgPct >= 40 ? rui.kpiWarn : rui.kpiBad}>
+              <strong>{s.avgPct}%</strong>
+              <span>Avg completion</span>
+            </div>
+            <div className={rui.kpi}>
+              <strong>{s.submitRate}%</strong>
+              <span>Submit rate</span>
+            </div>
+            <div className={rui.kpi}>
+              <strong>{s.acceptRate}%</strong>
+              <span>Accept rate</span>
+            </div>
+            <div className={s.open ? rui.kpiWarn : rui.kpi}>
+              <strong>{s.open}</strong>
+              <span>Still open</span>
+            </div>
+            <div className={s.staleOpen || s.overdueAccept ? rui.kpiBad : rui.kpi}>
+              <strong>{s.staleOpen || s.overdueAccept}</strong>
+              <span>
+                {s.staleOpen ? "Stale / broken" : "Overdue accept"}
+              </span>
+            </div>
           </div>
         )}
       </section>
 
-      {hasInsightFilters ? (
-        <div className={rui.filterChips} aria-label="Active filters">
-          {store ? (
-            <span className={rui.filterChip}>
-              Store {storeLabel}
-              <button
-                type="button"
-                aria-label="Clear store filter"
-                onClick={() => {
-                  setStore("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {person ? (
-            <span className={rui.filterChip}>
-              SI {personLabel}
-              <button
-                type="button"
-                aria-label="Clear person filter"
-                onClick={() => {
-                  setPerson("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {status ? (
-            <span className={rui.filterChip}>
-              Status {status}
-              <button
-                type="button"
-                aria-label="Clear status filter"
-                onClick={() => {
-                  setStatus("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {slot ? (
-            <span className={rui.filterChip}>
-              Slot {slot}
-              <button
-                type="button"
-                aria-label="Clear slot filter"
-                onClick={() => {
-                  setSlot("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {q ? (
-            <span className={rui.filterChip}>
-              Search “{q}”
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => {
-                  setQ("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className={rui.clearFilters}
-            onClick={() => {
-              setStore("");
-              setPerson("");
-              setStatus("");
-              setSlot("");
-              setQ("");
-              setPage(1);
-            }}
-          >
-            Clear all
-          </button>
-        </div>
-      ) : null}
+      <FilterChips
+        items={chips}
+        onClearAll={() => {
+          setStore("");
+          setPerson("");
+          setStatus("");
+          setSlot("");
+          setQ("");
+          setPage(1);
+        }}
+      />
 
       <div className={rui.split}>
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
-          <div>
-            <h2>By store</h2>
-            <p>Worst open / stale first · click to filter detail</p>
-          </div>
-        </div>
-        {!storesRanked.length ? (
-          <EmptyInsight
-            title="No stores to rank"
-            detail="Checklists in this range will appear here."
-          />
-        ) : (
-          <div className={rui.rankList}>
-            {storesRanked.map((b, i) => (
-              <RankCard
-                key={b.key}
-                index={i + 1}
-                label={b.label}
-                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)}${
-                  b.overdue ? ` · ${b.overdue} overdue accept` : ""
-                }`}
-                pct={b.avgPct}
-                stale={b.staleOpen}
-                open={b.open}
-                countLabel={`${b.shifts} shifts`}
-                trend={formatTrendDelta(b.trendDelta)}
-                active={store === b.key}
-                onClick={() => {
-                  setStore(store === b.key ? "" : b.key);
-                  setPage(1);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
-          <div>
+        <section className={rui.panel}>
+          <div className={rui.panelHead}>
             <h2>By person</h2>
-            <p>Done vs open · click to filter detail</p>
+            <span className={rui.count}>{people.length}</span>
           </div>
-        </div>
-        {!peopleRanked.length ? (
-          <EmptyInsight
-            title="No people to rank"
-            detail="SIs with shifts in this range will appear here."
-          />
-        ) : (
-          <div className={rui.rankList}>
-            {peopleRanked.map((b, i) => (
-              <RankCard
-                key={b.key}
-                index={i + 1}
-                label={b.label}
-                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)} · accepted ${b.accepted}`}
-                pct={b.avgPct}
-                stale={b.staleOpen}
-                open={b.open}
-                countLabel={`${b.shifts} shifts · open ${b.open}`}
-                trend={formatTrendDelta(b.trendDelta)}
-                active={person === b.key}
-                onClick={() => {
-                  setPerson(person === b.key ? "" : b.key);
-                  setPage(1);
-                }}
-              />
-            ))}
+          <div className={rui.tableWrap}>
+            <table className={rui.table}>
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Shifts</th>
+                  <th>Avg %</th>
+                  <th>Open</th>
+                  <th>Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!people.length ? (
+                  <tr>
+                    <td colSpan={5}>No people in range.</td>
+                  </tr>
+                ) : (
+                  people.map((b) => (
+                    <tr key={b.key}>
+                      <td>
+                        <button
+                          type="button"
+                          className={
+                            person === b.key ? rui.linkBtnActive : rui.linkBtn
+                          }
+                          onClick={() => {
+                            setPerson(person === b.key ? "" : b.key);
+                            setPage(1);
+                          }}
+                        >
+                          {b.label}
+                        </button>
+                      </td>
+                      <td className={rui.num}>{b.shifts}</td>
+                      <td>
+                        <span className={pctClass(b.avgPct)}>{b.avgPct}%</span>
+                      </td>
+                      <td className={rui.num}>
+                        {b.open}
+                        {b.staleOpen ? (
+                          <span className={rui.muted}> · {b.staleOpen} stale</span>
+                        ) : null}
+                      </td>
+                      <td className={trendClass(b.trendDelta)}>
+                        {formatTrendDelta(b.trendDelta)?.replace(/^Trend\s*/, "") ||
+                          "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </section>
+        </section>
+
+        <section className={rui.panel}>
+          <div className={rui.panelHead}>
+            <h2>By store</h2>
+            <span className={rui.count}>{byStore.length}</span>
+          </div>
+          <div className={rui.tableWrap}>
+            <table className={rui.table}>
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Shifts</th>
+                  <th>Avg %</th>
+                  <th>Open</th>
+                  <th>Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!byStore.length ? (
+                  <tr>
+                    <td colSpan={5}>No stores in range.</td>
+                  </tr>
+                ) : (
+                  byStore.map((b) => (
+                    <tr key={b.key}>
+                      <td>
+                        <button
+                          type="button"
+                          className={
+                            store === b.key ? rui.linkBtnActive : rui.linkBtn
+                          }
+                          onClick={() => {
+                            setStore(store === b.key ? "" : b.key);
+                            setPage(1);
+                          }}
+                        >
+                          {b.label}
+                        </button>
+                      </td>
+                      <td className={rui.num}>{b.shifts}</td>
+                      <td>
+                        <span className={pctClass(b.avgPct)}>{b.avgPct}%</span>
+                      </td>
+                      <td className={rui.num}>
+                        {b.open}
+                        {b.staleOpen ? (
+                          <span className={rui.muted}> · {b.staleOpen} stale</span>
+                        ) : null}
+                      </td>
+                      <td className={trendClass(b.trendDelta)}>
+                        {formatTrendDelta(b.trendDelta)?.replace(/^Trend\s*/, "") ||
+                          "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
+      <section className={rui.panel}>
+        <div className={rui.panelHead}>
           <div>
-            <h2>Person activity</h2>
-            <p>Latest completed / missed / open · Open opens the report</p>
+            <h2>Attention</h2>
+            <p>Latest missed / open / completed</p>
           </div>
         </div>
         {!feedItems.length ? (
-          <EmptyInsight
-            title="No activity yet"
-            detail="When checklists move, their timeline shows up here."
-          />
+          <div className={rui.empty}>No recent activity.</div>
         ) : (
           <div className={rui.feed}>
             {feedItems.map((item) => (
@@ -788,20 +676,6 @@ function ShiftReportBody({
                     {formatWhen(item.at)} · {item.pct}% ·{" "}
                     {siStatusLabels[item.status] || item.status}
                   </small>
-                  <div className={rui.tags}>
-                    <span
-                      className={
-                        item.kind === "completed"
-                          ? rui.tagOk
-                          : item.kind === "missed"
-                            ? rui.tagWarn
-                            : rui.tag
-                      }
-                    >
-                      {item.kind}
-                    </span>
-                    <span className={rui.tag}>{item.pct}%</span>
-                  </div>
                 </div>
                 <button
                   type="button"
@@ -816,16 +690,15 @@ function ShiftReportBody({
         )}
       </section>
 
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
+      <section className={rui.panel}>
+        <div className={rui.panelHead}>
           <div>
             <h2>Shift detail</h2>
-            <p>Filter, sort, then open any checklist as a report</p>
+            <p>
+              {filtered.length} shown · slots{" "}
+              {s.bySlot.map((b) => `${b.label}:${b.shifts}`).join(" · ") || "—"}
+            </p>
           </div>
-          <span className={rui.countChip}>
-            {filtered.length} shown · slots{" "}
-            {s.bySlot.map((b) => `${b.label}:${b.shifts}`).join(" · ") || "—"}
-          </span>
         </div>
         <div className={rui.filterBar}>
           <label className={rui.field}>
@@ -929,8 +802,8 @@ function ShiftReportBody({
           </label>
         </div>
 
-        <div className={rui.tableWrap}>
-          <table className={rui.table}>
+        <div className={`${rui.tableWrap} ${rui.tableWideWrap}`}>
+          <table className={`${rui.table} ${rui.tableWide}`}>
             <thead>
               <tr>
                 <th>Shift</th>
@@ -949,12 +822,7 @@ function ShiftReportBody({
                 paged.rows.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <div className={rui.rowTitle}>
-                        <strong>
-                          {r.store_code} · {r.shift_slot}
-                        </strong>
-                        <small>{r.shift_date}</small>
-                      </div>
+                      {r.store_code} · {r.shift_date} {r.shift_slot}
                     </td>
                     <td>{r.outgoing_name}</td>
                     <td>
@@ -981,16 +849,16 @@ function ShiftReportBody({
                     </td>
                     <td>
                       <div className={rui.completionCell}>
-                        <div className={rui.completionTop}>
-                          <strong className={pctTone(r.pct)}>{r.pct}%</strong>
-                          <span>
-                            {r.answered}/{r.total}
-                          </span>
-                        </div>
+                        <span className={pctClass(r.pct)}>{r.pct}%</span>
+                        <span className={rui.muted}>
+                          {r.answered}/{r.total}
+                        </span>
                         <span className={barClass(r.pct)} aria-hidden>
                           <i
                             className={rui.barFill}
-                            style={{ width: `${Math.max(0, Math.min(100, r.pct))}%` }}
+                            style={{
+                              width: `${Math.max(0, Math.min(100, r.pct))}%`,
+                            }}
                           />
                         </span>
                       </div>
@@ -1001,7 +869,7 @@ function ShiftReportBody({
                         className={rui.openBtnPrimary}
                         onClick={() => onOpenReport(r.id)}
                       >
-                        Open report
+                        Open
                       </button>
                     </td>
                   </tr>
@@ -1066,246 +934,252 @@ function StoreReportBody({
       ),
     [rows, store, person, status, q, sort],
   );
-  const paged = paginateRows(filtered, page, 20);
-  const storesRanked = useMemo(
-    () => sortBucketsForAttention(s.byStore).slice(0, 8),
-    [s.byStore],
-  );
-  const peopleRanked = useMemo(
-    () => sortBucketsForAttention(s.byOwner).slice(0, 8),
-    [s.byOwner],
-  );
-  const trendNet = networkTrendLabel(s.byStore);
+  const paged = paginateRows(filtered, page, 25);
+  const people = useMemo(() => sortBuckets(s.byOwner), [s.byOwner]);
+  const byStore = useMemo(() => sortBuckets(s.byStore), [s.byStore]);
   const feedItems = useMemo(
     () =>
       s.personActivity
-        .flatMap((p) =>
-          p.items.map((item) => ({ ...item, person: p.label })),
-        )
+        .flatMap((p) => p.items.map((item) => ({ ...item, person: p.label })))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-        .slice(0, 12),
+        .slice(0, 8),
     [s.personActivity],
   );
 
   const storeLabel =
     stores.find((st) => st.id === store)?.station_code || store;
-  const personLabel =
-    owners.find((x) => x.id === person)?.name || person;
-  const hasInsightFilters = Boolean(store || person || status || q);
+  const personLabel = owners.find((x) => x.id === person)?.name || person;
+  const chips = [
+    store
+      ? {
+          key: "store",
+          label: `Store ${storeLabel}`,
+          onClear: () => {
+            setStore("");
+            setPage(1);
+          },
+        }
+      : null,
+    person
+      ? {
+          key: "person",
+          label: `Owner ${personLabel}`,
+          onClear: () => {
+            setPerson("");
+            setPage(1);
+          },
+        }
+      : null,
+    status
+      ? {
+          key: "status",
+          label: `Status ${status}`,
+          onClear: () => {
+            setStatus("");
+            setPage(1);
+          },
+        }
+      : null,
+    q
+      ? {
+          key: "q",
+          label: `“${q}”`,
+          onClear: () => {
+            setQ("");
+            setPage(1);
+          },
+        }
+      : null,
+  ].filter(Boolean) as { key: string; label: string; onClear: () => void }[];
 
   return (
     <>
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
-          <div>
-            <h2>Pulse</h2>
-            <p>What’s stuck, who’s quiet, what’s improving</p>
-          </div>
+      <section className={rui.panel}>
+        <div className={rui.panelHead}>
+          <h2>Overview</h2>
+          <p>Same-length prior window for trend</p>
         </div>
         {!s.days ? (
-          <EmptyInsight
-            title="No day checklists in this range"
-            detail="Widen the date range or wait for store closes to land."
-          />
+          <div className={rui.empty}>
+            <strong>No day checklists in this range</strong>
+            Widen the date range or wait for store closes.
+          </div>
         ) : (
-          <div className={rui.pulseGrid} aria-label="Store pulse">
-            <PulseTile
-              label="Avg completion"
-              value={`${s.avgPct}%`}
-              hint={`${s.days} days · submit ${s.submitRate}%`}
-              tone={s.avgPct >= 80 ? "ok" : s.avgPct >= 40 ? "warn" : "bad"}
-              ringPct={s.avgPct}
-            />
-            <PulseTile
-              label="Still open"
-              value={String(s.open)}
-              hint="Needs finish or close"
-              tone={s.open ? "warn" : "ok"}
-            />
-            <PulseTile
-              label="Broken / stale"
-              value={String(s.staleOpen)}
-              hint="Quiet past escalate window"
-              tone={s.staleOpen ? "bad" : "ok"}
-            />
-            <PulseTile
-              label="Trend vs prior"
-              value={trendNet || "—"}
-              hint={
-                trendNet
-                  ? "Same-length previous window"
-                  : "No prior window to compare"
-              }
-              tone="ok"
-            />
+          <div className={rui.kpiGrid} aria-label="Store overview">
+            <div className={rui.kpi}>
+              <strong>{s.days}</strong>
+              <span>Days</span>
+            </div>
+            <div className={s.avgPct >= 80 ? rui.kpiOk : s.avgPct >= 40 ? rui.kpiWarn : rui.kpiBad}>
+              <strong>{s.avgPct}%</strong>
+              <span>Avg completion</span>
+            </div>
+            <div className={rui.kpi}>
+              <strong>{s.submitRate}%</strong>
+              <span>Submit rate</span>
+            </div>
+            <div className={s.open ? rui.kpiWarn : rui.kpi}>
+              <strong>{s.open}</strong>
+              <span>Still open</span>
+            </div>
+            <div className={s.staleOpen ? rui.kpiBad : rui.kpi}>
+              <strong>{s.staleOpen}</strong>
+              <span>Stale / broken</span>
+            </div>
+            <div className={rui.kpi}>
+              <strong>
+                {formatStoreTrend(
+                  s.byStore.find((b) => b.trendDelta != null)?.trendDelta ?? null,
+                )?.replace(/^Trend\s*/, "") || "—"}
+              </strong>
+              <span>Trend sample</span>
+            </div>
           </div>
         )}
       </section>
 
-      {hasInsightFilters ? (
-        <div className={rui.filterChips} aria-label="Active filters">
-          {store ? (
-            <span className={rui.filterChip}>
-              Store {storeLabel}
-              <button
-                type="button"
-                aria-label="Clear store filter"
-                onClick={() => {
-                  setStore("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {person ? (
-            <span className={rui.filterChip}>
-              Owner {personLabel}
-              <button
-                type="button"
-                aria-label="Clear owner filter"
-                onClick={() => {
-                  setPerson("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {status ? (
-            <span className={rui.filterChip}>
-              Status {status}
-              <button
-                type="button"
-                aria-label="Clear status filter"
-                onClick={() => {
-                  setStatus("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          {q ? (
-            <span className={rui.filterChip}>
-              Search “{q}”
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => {
-                  setQ("");
-                  setPage(1);
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className={rui.clearFilters}
-            onClick={() => {
-              setStore("");
-              setPerson("");
-              setStatus("");
-              setQ("");
-              setPage(1);
-            }}
-          >
-            Clear all
-          </button>
-        </div>
-      ) : null}
+      <FilterChips
+        items={chips}
+        onClearAll={() => {
+          setStore("");
+          setPerson("");
+          setStatus("");
+          setQ("");
+          setPage(1);
+        }}
+      />
 
       <div className={rui.split}>
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
-          <div>
-            <h2>By store</h2>
-            <p>Worst open / stale first · click to filter detail</p>
-          </div>
-        </div>
-        {!storesRanked.length ? (
-          <EmptyInsight
-            title="No stores to rank"
-            detail="Day checklists in this range will appear here."
-          />
-        ) : (
-          <div className={rui.rankList}>
-            {storesRanked.map((b, i) => (
-              <RankCard
-                key={b.key}
-                index={i + 1}
-                label={b.label}
-                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)}`}
-                pct={b.avgPct}
-                stale={b.staleOpen}
-                open={b.open}
-                countLabel={`${b.days} days`}
-                trend={formatStoreTrend(b.trendDelta)}
-                active={store === b.key}
-                onClick={() => {
-                  setStore(store === b.key ? "" : b.key);
-                  setPage(1);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
-          <div>
+        <section className={rui.panel}>
+          <div className={rui.panelHead}>
             <h2>By person</h2>
-            <p>Done vs open · click to filter detail</p>
+            <span className={rui.count}>{people.length}</span>
           </div>
-        </div>
-        {!peopleRanked.length ? (
-          <EmptyInsight
-            title="No people to rank"
-            detail="Owners with days in this range will appear here."
-          />
-        ) : (
-          <div className={rui.rankList}>
-            {peopleRanked.map((b, i) => (
-              <RankCard
-                key={b.key}
-                index={i + 1}
-                label={b.label}
-                detail={`Started ${formatWhen(b.firstStartedAt)} · last update ${formatWhen(b.lastUpdatedAt)} · submitted ${b.submitted}`}
-                pct={b.avgPct}
-                stale={b.staleOpen}
-                open={b.open}
-                countLabel={`${b.days} days · open ${b.open}`}
-                trend={formatStoreTrend(b.trendDelta)}
-                active={person === b.key}
-                onClick={() => {
-                  setPerson(person === b.key ? "" : b.key);
-                  setPage(1);
-                }}
-              />
-            ))}
+          <div className={rui.tableWrap}>
+            <table className={rui.table}>
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Days</th>
+                  <th>Avg %</th>
+                  <th>Open</th>
+                  <th>Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!people.length ? (
+                  <tr>
+                    <td colSpan={5}>No people in range.</td>
+                  </tr>
+                ) : (
+                  people.map((b) => (
+                    <tr key={b.key}>
+                      <td>
+                        <button
+                          type="button"
+                          className={
+                            person === b.key ? rui.linkBtnActive : rui.linkBtn
+                          }
+                          onClick={() => {
+                            setPerson(person === b.key ? "" : b.key);
+                            setPage(1);
+                          }}
+                        >
+                          {b.label}
+                        </button>
+                      </td>
+                      <td className={rui.num}>{b.days}</td>
+                      <td>
+                        <span className={pctClass(b.avgPct)}>{b.avgPct}%</span>
+                      </td>
+                      <td className={rui.num}>
+                        {b.open}
+                        {b.staleOpen ? (
+                          <span className={rui.muted}> · {b.staleOpen} stale</span>
+                        ) : null}
+                      </td>
+                      <td className={trendClass(b.trendDelta)}>
+                        {formatStoreTrend(b.trendDelta)?.replace(/^Trend\s*/, "") ||
+                          "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </section>
+        </section>
+
+        <section className={rui.panel}>
+          <div className={rui.panelHead}>
+            <h2>By store</h2>
+            <span className={rui.count}>{byStore.length}</span>
+          </div>
+          <div className={rui.tableWrap}>
+            <table className={rui.table}>
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Days</th>
+                  <th>Avg %</th>
+                  <th>Open</th>
+                  <th>Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!byStore.length ? (
+                  <tr>
+                    <td colSpan={5}>No stores in range.</td>
+                  </tr>
+                ) : (
+                  byStore.map((b) => (
+                    <tr key={b.key}>
+                      <td>
+                        <button
+                          type="button"
+                          className={
+                            store === b.key ? rui.linkBtnActive : rui.linkBtn
+                          }
+                          onClick={() => {
+                            setStore(store === b.key ? "" : b.key);
+                            setPage(1);
+                          }}
+                        >
+                          {b.label}
+                        </button>
+                      </td>
+                      <td className={rui.num}>{b.days}</td>
+                      <td>
+                        <span className={pctClass(b.avgPct)}>{b.avgPct}%</span>
+                      </td>
+                      <td className={rui.num}>
+                        {b.open}
+                        {b.staleOpen ? (
+                          <span className={rui.muted}> · {b.staleOpen} stale</span>
+                        ) : null}
+                      </td>
+                      <td className={trendClass(b.trendDelta)}>
+                        {formatStoreTrend(b.trendDelta)?.replace(/^Trend\s*/, "") ||
+                          "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
+      <section className={rui.panel}>
+        <div className={rui.panelHead}>
           <div>
-            <h2>Person activity</h2>
-            <p>Latest completed / missed / open · Open opens the report</p>
+            <h2>Attention</h2>
+            <p>Latest missed / open / completed</p>
           </div>
         </div>
         {!feedItems.length ? (
-          <EmptyInsight
-            title="No activity yet"
-            detail="When day checklists move, their timeline shows up here."
-          />
+          <div className={rui.empty}>No recent activity.</div>
         ) : (
           <div className={rui.feed}>
             {feedItems.map((item) => (
@@ -1333,20 +1207,6 @@ function StoreReportBody({
                     {formatWhen(item.at)} · {item.pct}% ·{" "}
                     {storeStatusLabels[item.status] || item.status}
                   </small>
-                  <div className={rui.tags}>
-                    <span
-                      className={
-                        item.kind === "completed"
-                          ? rui.tagOk
-                          : item.kind === "missed"
-                            ? rui.tagWarn
-                            : rui.tag
-                      }
-                    >
-                      {item.kind}
-                    </span>
-                    <span className={rui.tag}>{item.pct}%</span>
-                  </div>
                 </div>
                 <button
                   type="button"
@@ -1361,13 +1221,12 @@ function StoreReportBody({
         )}
       </section>
 
-      <section className={rui.card}>
-        <div className={rui.cardHead}>
+      <section className={rui.panel}>
+        <div className={rui.panelHead}>
           <div>
             <h2>Day detail</h2>
-            <p>Filter, sort, then open any day checklist as a report</p>
+            <p>{filtered.length} shown</p>
           </div>
-          <span className={rui.countChip}>{filtered.length} shown</span>
         </div>
         <div className={rui.filterBar}>
           <label className={rui.field}>
@@ -1452,8 +1311,8 @@ function StoreReportBody({
           </label>
         </div>
 
-        <div className={rui.tableWrap}>
-          <table className={rui.table}>
+        <div className={`${rui.tableWrap} ${rui.tableWideWrap}`}>
+          <table className={`${rui.table} ${rui.tableWide}`}>
             <thead>
               <tr>
                 <th>Day</th>
@@ -1472,10 +1331,7 @@ function StoreReportBody({
                 paged.rows.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <div className={rui.rowTitle}>
-                        <strong>{r.store_code}</strong>
-                        <small>{r.work_date}</small>
-                      </div>
+                      {r.store_code} · {r.work_date}
                     </td>
                     <td>{r.owner_name}</td>
                     <td>
@@ -1493,16 +1349,16 @@ function StoreReportBody({
                     </td>
                     <td>
                       <div className={rui.completionCell}>
-                        <div className={rui.completionTop}>
-                          <strong className={pctTone(r.pct)}>{r.pct}%</strong>
-                          <span>
-                            {r.answered}/{r.total}
-                          </span>
-                        </div>
+                        <span className={pctClass(r.pct)}>{r.pct}%</span>
+                        <span className={rui.muted}>
+                          {r.answered}/{r.total}
+                        </span>
                         <span className={barClass(r.pct)} aria-hidden>
                           <i
                             className={rui.barFill}
-                            style={{ width: `${Math.max(0, Math.min(100, r.pct))}%` }}
+                            style={{
+                              width: `${Math.max(0, Math.min(100, r.pct))}%`,
+                            }}
                           />
                         </span>
                       </div>
@@ -1513,7 +1369,7 @@ function StoreReportBody({
                         className={rui.openBtnPrimary}
                         onClick={() => onOpenReport(r.id)}
                       >
-                        Open report
+                        Open
                       </button>
                     </td>
                   </tr>

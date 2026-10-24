@@ -58,6 +58,8 @@ type Props = {
   weeklyDoneIds: string[];
   monthlyDoneIds: string[];
   showShiftOps?: boolean;
+  showShiftReport?: boolean;
+  showStoreReport?: boolean;
 };
 
 function TaskCard({
@@ -350,8 +352,8 @@ export function StoreOpsWorkspace(props: Props) {
       <ActivitiesHub
         active="store"
         showShift={Boolean(props.showShiftOps)}
-        showShiftReport={manager && Boolean(props.showShiftOps)}
-        showStoreReport={manager}
+        showShiftReport={Boolean(props.showShiftReport)}
+        showStoreReport={Boolean(props.showStoreReport)}
       />
 
       <nav className={styles.tabBar} aria-label="Store operations stages">

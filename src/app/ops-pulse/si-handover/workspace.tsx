@@ -65,6 +65,8 @@ type Props = {
   error: string;
   canMaster: boolean;
   showStoreOps?: boolean;
+  showShiftReport?: boolean;
+  showStoreReport?: boolean;
 };
 
 function TaskCard({
@@ -509,8 +511,8 @@ export function SiHandoverWorkspace(props: Props) {
       <ActivitiesHub
         active="shift"
         showStore={Boolean(props.showStoreOps)}
-        showShiftReport={manager}
-        showStoreReport={manager && Boolean(props.showStoreOps)}
+        showShiftReport={Boolean(props.showShiftReport)}
+        showStoreReport={Boolean(props.showStoreReport)}
       />
 
       <nav className={styles.tabBar} aria-label="Activity stages">

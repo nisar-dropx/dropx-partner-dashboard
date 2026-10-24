@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { resolveActivitiesNavAccess } from "@/lib/ops-pulse/activities-nav-access";
 import {
   todayIst,
   type WorkspaceView,
@@ -28,7 +30,10 @@ export default async function Page({
 }) {
   const auth = await requirePagePermission("store_ops", "access");
   const c = await context();
-  const showShift = hasPermission(auth, "si_handover", "access");
+  const nav = await resolveActivitiesNavAccess(auth);
+  if (!nav.showStoreOps) {
+    redirect("/unauthorized?page=store_ops&reason=access");
+  }
   const view = parseView(searchParams?.view);
   const today = todayIst();
   const from = searchParams?.from || (() => {
@@ -78,7 +83,9 @@ export default async function Page({
         error={error}
         weeklyDoneIds={weeklyDoneIds}
         monthlyDoneIds={monthlyDoneIds}
-        showShiftOps={showShift}
+        showShiftOps={nav.showShiftOps}
+        showShiftReport={nav.showShiftReport}
+        showStoreReport={nav.showStoreReport}
       />
     </AppShell>
   );
