@@ -46,7 +46,7 @@ test('model calls are executed through approved tools and returned before final 
 
 test('configured Gemini executes live reads and preserves signed tool context',async()=>{
  const previousFetch=globalThis.fetch;process.env.GEMINI_API_KEY='test-placeholder';const sent=[];
- globalThis.fetch=async(url,init)=>{assert.match(url,/gemini-3.8-flash:generateContent/);sent.push(JSON.parse(init.body));return Response.json({candidates:[{content:sent.length===1?{role:'model',parts:[{thoughtSignature:'signature',functionCall:{name:'ops_shift_status',args:{stationCodes:['TCC3']},id:'call1'}}]}:{role:'model',parts:[{text:'TCC3: 3 people punched in today.'}]}}]});};
+ globalThis.fetch=async(url,init)=>{assert.match(url,/gemini-3.5-flash-lite:generateContent/);sent.push(JSON.parse(init.body));return Response.json({candidates:[{content:sent.length===1?{role:'model',parts:[{thoughtSignature:'signature',functionCall:{name:'ops_shift_status',args:{stationCodes:['TCC3']},id:'call1'}}]}:{role:'model',parts:[{text:'TCC3: 3 people punched in today.'}]}}]});};
  try{const h=harness(),r=await h.post({question:'TCC3 shift status'});assert.equal(h.calls.length,1);assert.equal(sent[0].toolConfig.functionCallingConfig.mode,'ANY');assert.equal(sent[1].contents[1].parts[0].thoughtSignature,'signature');assert.equal(sent[1].contents[2].parts[0].functionResponse.id,'call1');assert.equal(r.body.mode,'assistant');assert.match(r.body.answer,/3 people/);}
  finally{globalThis.fetch=previousFetch;delete process.env.GEMINI_API_KEY;}
 });
