@@ -171,7 +171,7 @@ function paymentDetailInputForQuestion(question: QuestionRow) {
           required={question.is_required}
           type="file"
         />
-        <p className="subtle" style={{ margin: "4px 0 0" }}>Upload up to 3 files. Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</p>
+        <p className="subtle" style={{ margin: "4px 0 0" }}>{question.is_required ? "Upload up to 3 files." : "Optional · upload up to 3 files."} Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</p>
       </>
     );
   }
@@ -222,7 +222,7 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
           required={question.is_required && !attachments.length}
           type="file"
         />
-        <p className="subtle" style={{ margin: "4px 0 0" }}>Upload up to 3 files. Adding files replaces the current attachment set.</p>
+        <p className="subtle" style={{ margin: "4px 0 0" }}>{question.is_required && !attachments.length ? "Upload up to 3 files." : "Optional · upload up to 3 files."} Adding files replaces the current attachment set.</p>
       </>
     );
   }

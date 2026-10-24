@@ -89,7 +89,7 @@ function inputForQuestion(question: PaymentQuestion, disabled = false, onValueCh
           required={question.is_required}
           type="file"
         />
-        <span className="helper-text">Upload up to 3 files. Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</span>
+        <span className="helper-text">{question.is_required ? "Upload up to 3 files." : "Optional · upload up to 3 files."} Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</span>
       </>
     );
   }
