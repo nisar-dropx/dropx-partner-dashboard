@@ -1,11 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';import ts from 'typescript';import {readFileSync} from 'node:fs';
 import * as policy from '../../../../lib/ops-pulse/assistant-policy.ts';
+import * as languages from '../../../../lib/ops-pulse/assistant-language.ts';
 import * as answers from '../../../../lib/ops-pulse/assistant-answer.ts';
 const source=ts.transpileModule(readFileSync(new URL('./route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 function harness({signedIn=true,scopeError=false,deny=false,model=false}={}){
  const calls=[],auth={userId:'user',companyId:'company',locationScopeIds:['store'],hasAllLocationAccess:false};
  const locations=[{id:'store',station_code:'TCC3',station_name:'Adyar'},{id:'lm',station_code:'KTUR',station_name:'LM'}];
  const mocks={
+ '@/lib/ops-pulse/assistant-language':languages,
+ '@/lib/ops-pulse/assistant-speech':{translateAssistantText:async(text,lang)=>lang==='ml-IN'?'TCC3: ഇന്ന് 3 പേർ ഹാജരായി.':text},
  '@/lib/authorization':{getAuthorization:async()=>signedIn?auth:null,hasPermission:()=>!deny},
  '@/lib/company-scope':{requireCompanyId:()=>auth.companyId},
  '@/lib/ops-pulse/cod':{loadCodLocations:async()=>({locations,error:scopeError?'unavailable':null})},
@@ -49,4 +52,11 @@ test('configured Gemini executes live reads and preserves signed tool context',a
  globalThis.fetch=async(url,init)=>{assert.match(url,/gemini-3.5-flash-lite:generateContent/);sent.push(JSON.parse(init.body));return Response.json({candidates:[{content:sent.length===1?{role:'model',parts:[{thoughtSignature:'signature',functionCall:{name:'ops_shift_status',args:{stationCodes:['TCC3']},id:'call1'}}]}:{role:'model',parts:[{text:'TCC3: 3 people punched in today.'}]}}]});};
  try{const h=harness(),r=await h.post({question:'TCC3 shift status'});assert.equal(h.calls.length,1);assert.equal(sent[0].toolConfig.functionCallingConfig.mode,'ANY');assert.equal(sent[1].contents[1].parts[0].thoughtSignature,'signature');assert.equal(sent[1].contents[2].parts[0].functionResponse.id,'call1');assert.equal(r.body.mode,'assistant');assert.match(r.body.answer,/3 people/);}
  finally{globalThis.fetch=previousFetch;delete process.env.GEMINI_API_KEY;}
+});
+
+test('selected Malayalam controls model instructions and returned answer even for an English question',async()=>{
+ const previousFetch=globalThis.fetch;process.env.OPENAI_API_KEY='test-placeholder';const sent=[];
+ globalThis.fetch=async(url,init)=>{sent.push(JSON.parse(init.body));return Response.json(sent.length===1?{output:[{type:'function_call',name:'ops_shift_status',arguments:'{}',call_id:'one'}]}:{output:[{type:'message',content:[{type:'output_text',text:'TCC3: 3 punched.'}]}]});};
+ try{const h=harness(),r=await h.post({question:'TCC3 shift',language:'ml-IN'});assert.match(sent[0].instructions,/in Malayalam using its native script/);assert.equal(r.body.language,'ml-IN');assert.match(r.body.answer,/ഹാജരായി/);}
+ finally{globalThis.fetch=previousFetch;delete process.env.OPENAI_API_KEY;}
 });

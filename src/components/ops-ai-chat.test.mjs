@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import * as language from "../lib/ops-pulse/assistant-language.ts";
 import * as position from "../lib/ops-pulse/assistant-position.ts";
 
 test("launcher and panel remain visible at desktop, phone, zoom and keyboard viewport sizes", () => {
@@ -65,7 +66,7 @@ function harness({ stored = new Map(), blocked = false } = {}) {
       if (!slots[i] || deps.some((dep, index) => !Object.is(dep, slots[i][index]))) { slots[i] = deps; effects.push(fn); }
     }
   };
-  const mocks = { react: hooks, "react/jsx-runtime": { jsx, jsxs: jsx }, "lucide-react": { ChevronLeft: "icon", ChevronRight: "icon", GripVertical: "icon", X: "icon" }, "@/lib/ops-pulse/assistant-position": position };
+  const mocks = { "@/lib/ops-pulse/assistant-language": language, react: hooks, "react/jsx-runtime": { jsx, jsxs: jsx }, "lucide-react": { ChevronLeft: "icon", ChevronRight: "icon", GripVertical: "icon", X: "icon" }, "@/lib/ops-pulse/assistant-position": position };
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled)(name => { if (!(name in mocks)) throw Error(name); return mocks[name]; }, module, module.exports);
   const render = () => { cursor = 0; tree = module.exports.OpsAiChat(); };
