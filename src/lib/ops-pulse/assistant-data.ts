@@ -1,5 +1,5 @@
 import "server-only";
-import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
+import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { callMcpTool } from "@/lib/mcp/tools";
 import { indiaDate } from "@/lib/mcp/dates";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -69,7 +69,10 @@ export async function readAssistantData(auth: AuthorizationContext, locations: C
     const rows = (documents.data ?? []).filter(d => {
       const type = Array.isArray(d.document_types) ? d.document_types[0] : d.document_types;
       const roleIds = roles.data.filter(r => r.document_type_id === d.document_type_id).map(r => r.role_id);
-      return documentInWorkspace(d, stationMetadata.data) && (isCompanyOwner(auth) || type?.doc_access_mode !== "role_based" || !roleIds.length || roleIds.includes(auth.roleId));
+      const broadDocumentAccess = auth.hasAllLocationAccess || auth.isMasterOwner;
+      // Match Business Documents' existing role/scope policy; a workspace filter cannot grant access.
+      if (!broadDocumentAccess && d.scope_type === "provider") return false;
+      return documentInWorkspace(d, stationMetadata.data) && (broadDocumentAccess || type?.doc_access_mode !== "role_based" || !roleIds.length || Boolean(auth.roleId && roleIds.includes(auth.roleId)));
     });
     return { asOf: indiaDate(), total: rows.length, truncated: documents.data.length === 1000 || rows.length > 100, rows: rows.slice(0, 100).map(d => ({ document: d.document_type_code, scope: d.scope_label, expiryDate: d.expiry_date, recordedStatus: d.status })) };
   }
