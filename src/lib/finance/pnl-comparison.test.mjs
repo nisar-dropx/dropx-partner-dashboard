@@ -67,7 +67,7 @@ test("loader expands a requested parent or child only within authorized location
   let seen,parentReads=0;
   const query = {}; for (const method of ["select", "eq", "in", "lte", "order"]) query[method] = () => query;
   query.range = async () => {parentReads++;return { data: [] };};
-  const loader = compile("./pnl-data.ts", { "server-only": {}, "./data": { loadPricing: async () => [], effectiveCards: () => [] }, "./performance": { buildBusinessRows: () => [] }, "./pnl": pnl, "./pricing": pricing, "./pnl-comparison": c, "../ops-pulse/cps-data": { loadCpsSnapshot: async (company, from, to, selected) => { assert.deepEqual(selected.map(l=>l.station_code),seen); return {daily:[],breakup:[]}; } } });
+  const loader = compile("./pnl-data.ts", { "server-only": {}, "./data": { loadPricing: async () => [], effectiveCards: () => [] }, "./performance": { ...compile("./performance.ts", { "./pricing": pricing }), buildBusinessRows: () => [] }, "./pnl": pnl, "./pricing": pricing, "./pnl-comparison": c, "../ops-pulse/cps-data": { loadCpsSnapshot: async (company, from, to, selected) => { assert.deepEqual(selected.map(l=>l.station_code),seen); return {daily:[],breakup:[]}; } } });
   const context = { companyId: "company", authorization:{hasAllLocationAccess:false}, locations, db: { from: () => query, rpc: async (name,args) => { seen=args.p_station_codes; return {data:{daily_shipments:[],read_at:"2026-10-06",availability:{}}}; } } };
   for (const location of ["P","X"]) {
     await loader.loadPnl(context,{location,region:"South",period:"month",month:"2026-09",includeXpts:"0"});
