@@ -57,7 +57,8 @@ export const buildAmazonNowDigest: DigestBuilder = async (db, control, date) => 
     }
   } else {
     const [sm, dm, shifts, days] = await Promise.all([
-      query(db, "ops_si_handover_master", control.company_id).maybeSingle(), query(db, "ops_store_ops_master", control.company_id).maybeSingle(),
+      db.from("ops_si_handover_master").select("settings").eq("company_id", control.company_id).maybeSingle(),
+      db.from("ops_store_ops_master").select("settings").eq("company_id", control.company_id).maybeSingle(),
       allRoutingRows(query(db, "ops_si_shift_checklists", control.company_id).in("location_id", ids).is("deleted_at", null).lte("shift_date", dataDate).or(`shift_date.eq.${dataDate},status.in.(open,submitted,rejected)`).neq("status","cancelled").order("shift_date").order("id")),
       allRoutingRows(query(db, "ops_store_ops_checklists", control.company_id).in("location_id", ids).is("deleted_at", null).lte("work_date", dataDate).or(`work_date.eq.${dataDate},status.eq.open`).neq("status","cancelled").order("work_date").order("id"))
     ]);
