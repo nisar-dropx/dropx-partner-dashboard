@@ -9,7 +9,8 @@ const nodes = (n) =>
     ? []
     : [n, ...[n.props?.children].flat(Infinity).flatMap(nodes)];
 
-function mount() {
+function mount({ userAgent = "Mozilla/5.0 (Windows NT 10.0)", maxTouchPoints = 0 } = {}) {
+  const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   const saved = globalThis.window,
     values = [],
     events = new Map(),
@@ -28,7 +29,7 @@ function mount() {
     navigator: { userAgent: "Mozilla/5.0 (Windows NT 10.0)" },
   };
   Object.defineProperty(globalThis, "navigator", {
-    value: { userAgent: "Mozilla/5.0 (Windows NT 10.0)" },
+    value: { userAgent, maxTouchPoints },
     configurable: true,
   });
   const hooks = {
@@ -49,7 +50,7 @@ function mount() {
       Monitor: "svg",
       Smartphone: "svg",
       Check: "svg",
-      Chrome: "svg",
+      ChevronDown: "svg",
     },
     "../../public/downloads/opspulse-android.json": JSON.parse(
       readFileSync(
@@ -85,43 +86,50 @@ function mount() {
     cleanup() {
       cleanups.forEach((fn) => fn?.());
       globalThis.window = saved;
+      if (savedNavigator) Object.defineProperty(globalThis, "navigator", savedNavigator);
+      else delete globalThis.navigator;
     },
   };
 }
 
-const desktopInstallButton = (tree) =>
-  nodes(tree).find(
-    (n) =>
-      n.type === "button" &&
-      nodes(n).some(
-        (c) =>
-          typeof c.props?.children === "string" &&
-          /Install on Windows|App installed|Opening installer/i.test(
-            c.props.children,
-          ),
-      ),
-  );
-
-const helpToggle = (tree) =>
-  nodes(tree).find(
-    (n) => n.type === "button" && n.props.className === "ops-install-help",
-  );
+const desktopInstallButton = (tree) => nodes(tree).find(
+  (n) => n.type === "button" && n.props.className === "ops-install-primary",
+);
+const chooseDevice = (tree, label) => nodes(tree).find(
+  (n) => n.type === "button" && n.props.children === label,
+).props.onClick();
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test("compact install shows Chrome steps by default", () => {
+test("login install is collapsed while device instructions remain reachable", () => {
   const h = mount();
   try {
     const tree = h.render();
-    assert(
-      nodes(tree).some((n) => n.props?.className === "ops-install-recommend"),
-    );
-    assert(
-      nodes(tree).some((n) => n.props?.className === "ops-install-instructions"),
-    );
-    assert(nodes(tree).some((n) => n.type === "ol"));
-  } finally {
-    h.cleanup();
+    assert.equal(tree.type, "details");
+    assert(!tree.props.open);
+    assert(nodes(tree).some((n) => n.type === "summary"));
+    assert(nodes(tree).some((n) => n.props?.className === "ops-install-instructions"));
+    assert(!nodes(tree).some((n) => n.type === "a" && n.props.download));
+    chooseDevice(tree, "Android");
+    const android = h.render();
+    assert(nodes(android).some((n) => n.type === "a" && n.props.download?.endsWith(".apk")));
+    assert(!desktopInstallButton(android), "do not offer this computer's installer for another device");
+  } finally { h.cleanup(); }
+});
+
+test("Android and desktop-mode iPad pick their own instructions without expanding login", () => {
+  for (const [userAgent, maxTouchPoints, selected] of [
+    ["Mozilla/5.0 Android", 5, "Android"],
+    ["Mozilla/5.0 Macintosh", 5, "iPhone / iPad"],
+  ]) {
+    const h = mount({ userAgent, maxTouchPoints });
+    try {
+      h.render();
+      const tree = h.render();
+      assert(!tree.props.open);
+      assert(nodes(tree).some((n) => n.type === "button" && n.props.children === selected && n.props["aria-pressed"]));
+      if (selected === "iPhone / iPad") assert(!desktopInstallButton(tree));
+    } finally { h.cleanup(); }
   }
 });
 
@@ -186,7 +194,7 @@ test("failed installation restores controls and exposes manual instructions", as
       nodes(tree).some((n) => n.props.className === "ops-install-instructions"),
     );
     assert(nodes(tree).some((n) => n.props.role === "status"));
-    helpToggle(tree).props.onClick();
+
   } finally {
     h.cleanup();
   }

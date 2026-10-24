@@ -2,46 +2,40 @@
 
 import { useEffect, useState } from "react";
 import androidRelease from "../../public/downloads/opspulse-android.json";
-import { Download, Monitor, Smartphone, Check, Chrome } from "lucide-react";
+import { Download, Monitor, Smartphone, Check, ChevronDown } from "lucide-react";
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
-
-function isAndroidUa(ua: string) {
-  return /android/i.test(ua);
-}
-
-function isIosUa(ua: string) {
-  return /iphone|ipad|ipod/i.test(ua);
-}
+type Device = "android" | "ios" | "desktop";
+const devices: { value: Device; label: string }[] = [
+  { value: "android", label: "Android" },
+  { value: "ios", label: "iPhone / iPad" },
+  { value: "desktop", label: "Computer" },
+];
 
 export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const [fromAndroidApp, setFromAndroidApp] = useState(false);
-  const [platform, setPlatform] = useState<"android" | "ios" | "desktop">("desktop");
-  const [instructions, setInstructions] = useState(true);
+  const [platform, setPlatform] = useState<Device>("desktop");
+  const [device, setDevice] = useState<Device>("desktop");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const ua = navigator.userAgent || "";
-    const android = isAndroidUa(ua);
-    const ios = isIosUa(ua);
-    setPlatform(android ? "android" : ios ? "ios" : "desktop");
-    setInstructions(true);
-
-    const params = new URLSearchParams(window.location.search);
-    setFromAndroidApp(params.get("source") === "android-app");
-
+    const detected = /android/i.test(ua)
+      ? "android"
+      : /iphone|ipad|ipod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
+        ? "ios"
+        : "desktop";
+    setPlatform(detected);
+    setDevice(detected);
+    setFromAndroidApp(new URLSearchParams(window.location.search).get("source") === "android-app");
     const standalone = window.matchMedia("(display-mode: standalone)");
-    const sync = () =>
-      setInstalled(
-        standalone.matches ||
-          Boolean((navigator as Navigator & { standalone?: boolean }).standalone),
-      );
+    const sync = () => setInstalled(standalone.matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
     const capture = (event: Event) => {
       event.preventDefault();
       setPrompt(event as InstallPromptEvent);
@@ -49,7 +43,7 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
     const complete = () => {
       setInstalled(true);
       setPrompt(null);
-      setMessage("OpsPulse is on your home screen. Open it from there next time.");
+      setMessage("OpsPulse is installed. Open it from your apps next time.");
     };
     sync();
     standalone.addEventListener("change", sync);
@@ -62,12 +56,9 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
     };
   }, []);
 
-  async function installDesktop() {
+  async function install() {
     if (!prompt) {
-      setInstructions(true);
-      setMessage(
-        "Use Chrome or Edge → install icon in the address bar, or the steps below.",
-      );
+      setMessage("Use your browser’s install option shown below.");
       return;
     }
     setBusy(true);
@@ -75,174 +66,85 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
     try {
       await prompt.prompt();
       const choice = await prompt.userChoice;
-      setMessage(
-        choice.outcome === "accepted"
-          ? "Installation accepted. Your browser will finish adding OpsPulse."
-          : "You can install OpsPulse whenever you’re ready.",
-      );
+      setMessage(choice.outcome === "accepted"
+        ? "Installation accepted. Your browser will finish adding OpsPulse."
+        : "You can install OpsPulse whenever you’re ready.");
     } catch {
-      setMessage("Use your browser’s install option. Steps are below.");
-      setInstructions(true);
+      setMessage("Use your browser’s install option shown below.");
     } finally {
       setPrompt(null);
       setBusy(false);
     }
   }
 
-  return (
-    <section
-      className={`ops-install${compact ? " is-compact" : ""}`}
-      aria-label="Get the OpsPulse app"
-    >
-      <div className="ops-install-heading">
-        <img src="/opspulse/icon-192.png?v=2" alt="" width="36" height="36" />
-        <div>
-          <strong>Install OpsPulse</strong>
-          <span>
-            {installed
-              ? "Already installed on this device"
-              : "Recommended: Chrome home screen (temporary while the store app is finished)"}
-          </span>
-        </div>
-      </div>
-
-      {fromAndroidApp ? (
-        <p className="ops-install-banner" role="status">
-          The Android package is still being stabilised. If this window closed
-          before, install from Chrome using the steps below — that path stays
-          open reliably.
-        </p>
-      ) : null}
-
-      <div className="ops-install-recommend">
-        <div className="ops-install-recommend-head">
-          <Chrome size={18} aria-hidden="true" />
-          <div>
-            <strong>Recommended · Chrome install</strong>
-            <small>Works today on Android phones</small>
-          </div>
-        </div>
-        <ol className="ops-install-steps">
-          <li>
-            Open <b>ops.dropxlogistics.com</b> in <b>Chrome</b>
-          </li>
-          <li>
-            Tap the <b>⋮</b> menu (top right)
-          </li>
-          <li>
-            Choose <b>Install app</b> or <b>Add to Home screen</b>
-          </li>
-          <li>
-            Tap <b>Install</b> — OpsPulse appears on your home screen
-          </li>
-        </ol>
-        {platform === "android" && prompt ? (
-          <button
-            type="button"
-            className="ops-install-primary"
-            disabled={busy || installed}
-            onClick={() => void installDesktop()}
-          >
-            {installed ? (
-              <Check size={18} aria-hidden="true" />
-            ) : (
-              <Smartphone size={18} aria-hidden="true" />
-            )}
-            <span>
-              <strong>
-                {installed
-                  ? "Already installed"
-                  : busy
-                    ? "Opening installer…"
-                    : "Install OpsPulse"}
-              </strong>
-              <small>Uses Chrome’s install prompt</small>
-            </span>
+  const content = (
+    <div className="ops-install-content">
+      <div className="ops-install-devices" role="group" aria-label="Choose your device">
+        {devices.map((item) => (
+          <button key={item.value} type="button" aria-pressed={device === item.value}
+            onClick={() => { setDevice(item.value); setMessage(""); }}>
+            {item.label}
           </button>
-        ) : null}
+        ))}
       </div>
 
-      <div className="ops-install-actions">
-        <button
-          type="button"
-          onClick={() => void installDesktop()}
-          disabled={busy || installed}
-        >
-          {installed ? (
-            <Check size={18} aria-hidden="true" />
-          ) : (
-            <Monitor size={18} aria-hidden="true" />
-          )}
-          <span>
-            <strong>
-              {installed
-                ? "App installed"
-                : busy
-                  ? "Opening installer…"
-                  : "Install on Windows / Mac"}
-            </strong>
-            <small>Chrome or Edge · automatic updates</small>
-          </span>
-        </button>
-        <a
-          href={androidRelease.url}
-          download={`DropX-OpsPulse-${androidRelease.version}.apk`}
-          className="ops-install-apk"
-        >
-          <Download size={18} aria-hidden="true" />
-          <span>
-            <strong>Android APK (beta)</strong>
-            <small>
-              v{androidRelease.version} · may close on some phones — prefer
-              Chrome install above
-            </small>
-          </span>
-        </a>
-      </div>
-
-      {message ? (
-        <p className="ops-install-message" role="status">
-          {message}
-        </p>
+      {fromAndroidApp && device === "android" ? (
+        <p className="ops-install-banner">If the Android app closes unexpectedly, use the Chrome install below.</p>
       ) : null}
 
-      {compact ? (
-        <button
-          className="ops-install-help"
-          type="button"
-          aria-expanded={instructions}
-          onClick={() => setInstructions(!instructions)}
-        >
-          <Smartphone size={14} aria-hidden="true" />
-          {instructions ? "Hide" : "Show"} iPhone &amp; other devices
+      {device === platform && platform !== "ios" ? (
+        <button type="button" className="ops-install-primary" disabled={busy || installed} onClick={() => void install()}>
+          {installed ? <Check size={18} aria-hidden="true" /> : <Download size={18} aria-hidden="true" />}
+          {installed ? "App installed" : busy ? "Opening installer…" : "Install OpsPulse"}
         </button>
       ) : null}
 
-      {instructions ? (
-        <div className="ops-install-instructions">
-          <p>
-            <strong>iPhone / iPad · Safari</strong>
-            <br />
-            Tap Share → Add to Home Screen. Enable “Open as Web App” if shown.
-          </p>
-          <p>
-            <strong>Windows / Mac · Chrome or Edge</strong>
-            <br />
-            Use Install above when available, or the install icon in the address
-            bar.
-          </p>
-          <p>
-            <strong>Mac · Safari</strong>
-            <br />
-            On macOS Sonoma or later, File → Add to Dock.
-          </p>
-          <p className="ops-install-note">
-            Use the Chrome home-screen method until the official Play/store
-            package is released. Live operations need internet; access matches
-            the website.
-          </p>
-        </div>
+      {message ? <p className="ops-install-message" role="status">{message}</p> : null}
+
+      <div className="ops-install-instructions">
+        {device === "android" ? (
+          <p>In <strong>Chrome</strong>, tap <strong>⋮ → Install app</strong> or <strong>Add to Home screen</strong>.</p>
+        ) : device === "ios" ? (
+          <p>In <strong>Safari</strong>, tap <strong>Share → Add to Home Screen</strong>. Enable “Open as Web App” if shown.</p>
+        ) : (
+          <>
+            <p><strong>Chrome / Edge:</strong> use the install icon in the address bar.</p>
+            <p><strong>Safari on Mac:</strong> File → Add to Dock (macOS Sonoma or later).</p>
+          </>
+        )}
+      </div>
+
+      {device === "android" ? (
+        <details className="ops-install-alternative">
+          <summary>Android APK (beta)</summary>
+          <p>May close on some phones. Chrome install is recommended.</p>
+          <a href={androidRelease.url} download={`DropX-OpsPulse-${androidRelease.version}.apk`}>
+            <Download size={15} aria-hidden="true" /> Download APK · v{androidRelease.version}
+          </a>
+        </details>
       ) : null}
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <details className="ops-install is-compact">
+        <summary className="ops-install-toggle">
+          <Monitor size={18} aria-hidden="true" />
+          <span>Get the OpsPulse app</span>
+          <ChevronDown size={16} aria-hidden="true" />
+        </summary>
+        {content}
+      </details>
+    );
+  }
+  return (
+    <section className="ops-install" aria-label="Get the OpsPulse app">
+      <div className="ops-install-heading">
+        <Smartphone size={20} aria-hidden="true" />
+        <strong>Install on your device</strong>
+      </div>
+      {content}
     </section>
   );
 }
