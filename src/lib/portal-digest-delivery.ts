@@ -69,6 +69,7 @@ export async function processPortalDigests(portal:"people"|"ops",eventKey:string
 
 /** Shared SMTP/thread/receipt handling; event queues have independent claim eligibility. */
 export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"|"ops",summary:DeliverySummary,claimRpc:"portal_claim_digest"|"portal_claim_ops_data_updates"="portal_claim_digest") {
+ const nowScopes = new Map<string, Promise<Awaited<ReturnType<typeof import("./amazon-now-digest").loadNowMailScope>>>>();
  const codScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadCodMailRecipients>>>>();
  const registrationScopes=new Map<string,Promise<RegistrationSnapshot>>();
  const deadline=Date.now()+180_000;
@@ -97,6 +98,18 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
+    if (["now_review_digest", "now_activity_digest"].includes(delivery.event_key)) {
+     const control = controlResult.data as DigestControl;
+     if (dueReportDate(control) !== delivery.report_date) throw Error("Amazon Now delivery window ended; stale summary held.");
+     const scopeKey = delivery.company_id + ":" + delivery.event_key;
+     if (!nowScopes.has(scopeKey)) nowScopes.set(scopeKey, import("./amazon-now-digest").then(m => m.loadNowMailScope(db, control)));
+     const current = await nowScopes.get(scopeKey)!;
+     const recipient = current.recipients.find(r => r.email === delivery.recipient_email);
+     const saved = await db.from("portal_digest_deliveries").select("scope_summary").eq("id", delivery.id).single();
+     if (saved.error) throw Error(saved.error.message);
+     const ids = saved.data?.scope_summary?.stationIds;
+     if (!recipient || !Array.isArray(ids) || !ids.length || ids.some((id: string) => !recipient.stationIds.includes(id))) throw Error("Amazon Now recipient scope changed; summary held.");
+    }
     if(delivery.event_key.startsWith('cod_pending_')) {
      if(!manualCod&&dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw new Error('COD reminder delivery window ended; held for verification.');
      const scopeKey=delivery.company_id+':'+delivery.report_date;

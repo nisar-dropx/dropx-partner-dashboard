@@ -246,6 +246,7 @@ export function StoreAuditMaster({
             <legend>Completion email CC</legend>
             {[
               ["people_reporting_chain", "People reporting chain"],
+              ["station_responsibilities", "Tagged store responsibilities · including SLP"],
               ["company_owners", "Company owners"],
               ["cluster_manager_email", "Cluster manager"],
               ["ops_manager_email", "Operations manager"],
@@ -269,6 +270,13 @@ export function StoreAuditMaster({
                 {label}
               </label>
             ))}
+          </fieldset>
+          <fieldset className={styles.choiceList}>
+            <legend>Additional stakeholder roles · assigned stores only</legend>
+            <details><summary>Choose additional roles</summary>
+            <p className={styles.muted}>Select the SLP and operations roles that should receive completed reports. Only active accounts with audit access and this store in their scope receive a copy.</p>
+            {roles.map(role => <label key={role.id}><input type="checkbox" checked={settings.ccRules.includes(`role:${role.id}`)} onChange={() => { const key = `role:${role.id}`; setSettings({ ...settings, ccRules: settings.ccRules.includes(key) ? settings.ccRules.filter(x => x !== key) : [...settings.ccRules, key] }); setDirty(true); }}/>{role.name}</label>)}
+            </details>
           </fieldset>
         </details>
         <div className={styles.editor}>

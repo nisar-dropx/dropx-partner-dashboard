@@ -1,3 +1,4 @@
+import { previewProductCode } from "@/lib/portal-preview";
 import { Headphones, LogOut, ShieldX } from "lucide-react";
 import { signOut } from "@/app/login/actions";
 import { SubmitButton } from "@/components/submit-button";
@@ -24,16 +25,18 @@ const pageNames: Record<string, string> = {
   service_network_master: "Network Planning Master"
 };
 
-export default function UnauthorizedPage({ searchParams }: { searchParams?: { page?: string } }) {
+export default function UnauthorizedPage({ searchParams }: { searchParams?: { page?: string; reason?: string } }) {
+  const ops = previewProductCode() === "operations";
+  const locationMissing = searchParams?.reason === "location";
   const requestedPage = pageNames[String(searchParams?.page ?? "")] ?? "this page";
   return (
     <main className="login-page">
       <section className="login-panel">
-        <img className="login-logo" src="/dropx-logo.png" alt="DropX" />
+        <img className="login-logo" src={ops ? "/opspulse/mark.svg" : "/dropx-logo.png"} alt={ops ? "OpsPulse" : "DropX"} />
         <div className="login-copy">
           <span className="eyebrow"><ShieldX size={15} aria-hidden="true" /> Access not provided</span>
-          <h1>You don&apos;t have access to {requestedPage}.</h1>
-          <p>This account is signed in, but access to the requested platform or page has not been assigned. You have not been redirected to another DropX platform.</p>
+          <h1>{locationMissing ? "Your workspace is not assigned yet." : <>You don&apos;t have access to {requestedPage}.</>}</h1>
+          <p>{ops ? "You are signed in to OpsPulse. Ask your operations administrator to check your portal access and assigned stores or stations." : "This account is signed in, but access to the requested platform or page has not been assigned."}</p>
           <div className="message-panel warning"><Headphones size={16} aria-hidden="true" /><span>Contact HR or your platform administrator to request access. Share the platform name and your station or jurisdiction.</span></div>
         </div>
         <PreviewRecovery />

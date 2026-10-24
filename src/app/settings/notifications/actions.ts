@@ -1,4 +1,5 @@
 "use server";
+import { defaultNowControl, nowDigestEvents, buildAmazonNowDigest, type NowDigestEvent } from "@/lib/amazon-now-digest";
 import {redirect} from 'next/navigation';
 import {revalidatePath} from 'next/cache';
 import {requirePagePermission,isCompanyOwner} from '@/lib/authorization';
@@ -148,4 +149,29 @@ export async function saveAdHocDigestSettings(form:FormData){
   if(result.error)throw new Error('Settings could not be saved.');
  }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
  revalidatePath('/settings/notifications');redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#adhoc-report');
+}
+
+export async function saveAmazonNowDigestSettings(event: NowDigestEvent, form: FormData) {
+ const auth = await requirePagePermission('ops_notification_settings','edit'), company = requireCompanyId(auth), db = digestDatabase();
+ let error = '';
+ try {
+  if (!nowDigestEvents.includes(event) || auth.isPreview || auth.readOnly) throw Error('Notification settings cannot be changed in this session.');
+  const [old, base] = await Promise.all([
+   db.from('portal_notification_controls').select('*').eq('company_id',company).eq('portal','ops').eq('event_key',event).maybeSingle(),
+   db.from('portal_notification_controls').select('config').eq('company_id',company).eq('portal','ops').eq('event_key','review_digest').single()
+  ]);
+  if (old.error || base.error) throw Error('Schedule configuration is unavailable.');
+  const control = old.data || defaultNowControl(company,event,String(base.data.config.email_domain || ''));
+  const update = validateDigestSettings(form,control.config);
+  const next = {...control,...update,config:{...update.config,day_offset:0,delivery_ready:true}};
+  if (next.state === 'enabled') {
+   const date = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
+   const sample = await buildAmazonNowDigest(db,next,date);
+   if (!sample.messages.length) throw Error('No eligible recipients or store rows. Preview the scope before enabling.');
+  }
+  const result = await db.from('portal_notification_controls').upsert({...next,updated_by:auth.userId,updated_at:new Date().toISOString()},{onConflict:'company_id,portal,event_key'});
+  if (result.error) throw Error('Amazon Now schedule could not be saved.');
+ } catch (e) { error = e instanceof Error ? e.message : 'Settings unavailable.'; }
+ revalidatePath('/settings/notifications');
+ redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#amazon-now');
 }
