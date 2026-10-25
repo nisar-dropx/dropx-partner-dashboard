@@ -13,7 +13,7 @@ import {
   type LiveWindow,
   type PhaseKey,
 } from "@/lib/ops-pulse/nl-dispute-policy";
-import { type LossSettings, type RecoveryOutcome, recoveryCsv } from "@/lib/ops-pulse/nl-loss-policy";
+import { type LossSettings, type RecoveryOutcome, recoveryCsv, recoveryPending, recoveryNeedsReview } from "@/lib/ops-pulse/nl-loss-policy";
 import type { LiveCase } from "@/lib/ops-pulse/nl-live";
 import { RecoveryForm } from "./nl-loss-cases";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
@@ -229,7 +229,7 @@ export function NlLiveCases({
                       {phase.label}
                     </span>
                     {stageView === "final" && ["not_disputed", "sla_missed"].includes(c.details.case_status || "") ? <span className={styles.hint}>{c.details.case_status?.replaceAll("_", " ")}</span> : null}
-                    {c.recoverable ? <span className={styles.pending}>{c.recovery && !c.recovery.is_deleted ? "Recovery plan recorded" : "Assign recovery person"}</span> : null}
+                    {c.recoverable ? <span className={styles.pending}>{recoveryNeedsReview(c) ? "Recovery review needed" : recoveryPending(c.recovery) ? "Recovery outstanding" : "Recovery plan recorded"}</span> : null}
                     {c.request &&
                     !filedInCloak(c.request, likeOf(c)) &&
                     (requestSent(c.request, c.details.extra?.current_sla_stage) ||

@@ -160,11 +160,14 @@ export function splitRecovery(amount: number, refs: string[]) {
       (Math.floor(total / ids.length) + (i < total % ids.length ? 1 : 0)) / 100,
   }));
 }
+export function recoveryPending(recovery: Recovery | null) {
+  return !recovery || recovery.is_deleted || ["post_dispute", "non_recoverable", "da_left", "utr_left", "responsible_left"].includes(recovery.outcome_code);
+}
 export function recoveryNeedsReview(row: NlCase) {
   return (
     !!row.recovery &&
     !row.recovery.is_deleted &&
-    (Number(row.recovery.source_amount) !== Number(row.amount) ||
+    (["post_dispute", "non_recoverable", "da_left", "utr_left"].includes(row.recovery.outcome_code) || Number(row.recovery.source_amount) !== Number(row.amount) ||
       // SLP Initial → Final at the same amount is the settled loss the plan already covers.
       (row.report !== "slp" && row.recovery.source_status !== row.source_status))
   );

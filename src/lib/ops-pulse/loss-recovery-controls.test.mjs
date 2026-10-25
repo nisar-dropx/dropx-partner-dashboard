@@ -38,3 +38,14 @@ test('only a confirmed source outcome moves a case to Final', () => {
   assert.equal(casePhase({case_status:'not_disputed',nl_status:'Pending'}).key,'accepted');
   assert.equal(casePhase({case_status:'resolved',nl_status:''}).key,'amazon');
 });
+
+import { recoveryPending, recoveryNeedsReview } from './nl-loss-policy.ts';
+test('legacy exceptions never look like completed recovery', () => {
+  for (const code of ['post_dispute','non_recoverable','da_left','utr_left']) {
+    const r={outcome_code:code,is_deleted:false,source_amount:100,source_status:'Recoverable'};
+    assert.equal(recoveryPending(r),true);
+    assert.equal(recoveryNeedsReview({recovery:r,amount:100,source_status:'Recoverable'}),true);
+  }
+  assert.equal(recoveryPending({outcome_code:'responsible_left',is_deleted:false}),true);
+  assert.equal(recoveryPending({outcome_code:'already_recovered',is_deleted:false}),false);
+});
