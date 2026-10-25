@@ -8,6 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import {
   lossClusterScope,
+  lossContext,
   lossSchemaReady,
   nlStationScope,
   type NlFilters,
@@ -22,9 +23,11 @@ import {
   type LiveWindow,
   type PhaseKey,
 } from "./nl-dispute-policy";
-import type { NlCase } from "./nl-loss-policy";
+import { type NlCase, type Recovery, isRecoverable } from "./nl-loss-policy";
+import { lossFilterValues, lossFilterValue, lossFilterMatches, sortLossRows } from "./loss-list-controls";
 
-export type LiveCase = Omit<NlCase, "recovery"> & {
+export type LiveCase = NlCase & {
+  recoverable: boolean;
   source_status: string | null;
   request: DisputeRequest | null;
 };
@@ -62,7 +65,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
   const { company, stations, clusterOptions } = await lossClusterScope(auth);
   const codes = stations.map((s) => s.source_code);
   const db = supabaseAdmin;
-  const [meta, source, runResult] = await Promise.all([
+  const [meta, source, runResult, recoveryContext] = await Promise.all([
     ready
       ? readAllRows(
           db
@@ -94,6 +97,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    lossContext(company, "nl"),
   ]);
   if (meta.error || source.error)
     throw Error("Live Cloak cases could not be loaded. Please retry.");
@@ -119,16 +123,12 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
   const requestByCase = new Map(
     (requests.data ?? []).map((r) => [r.case_key as string, r as DisputeRequest]),
   );
-  const cluster =
-    filters.cluster && clusterOptions.some((o) => o.value === filters.cluster)
-      ? filters.cluster
-      : "";
+  const cluster = lossFilterValue(lossFilterValues(filters.cluster).filter(v => clusterOptions.some(o => o.value === v)));
   const matchingStations = stations.filter(
-    (s) => !cluster || s.clusterKeys.includes(cluster),
+    (s) => !cluster || s.clusterKeys.some((k: string) => lossFilterValues(cluster).includes(k)),
   );
   const allowed = new Set(matchingStations.map((s) => s.source_code));
-  const station =
-    filters.station && allowed.has(filters.station) ? filters.station : "";
+  const station = lossFilterValue(lossFilterValues(filters.station).filter(v => allowed.has(v)));
   // Opens the case list on a status group: todo (waiting on station), amazon or decided.
   const phase = ["todo", "amazon", "decided"].includes(filters.phase ?? "")
     ? filters.phase!
@@ -146,14 +146,13 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
   const reasons = [
     ...new Set(monthRows.map((r) => r.reason || "Unspecified")),
   ].sort();
-  const reason =
-    filters.reason && reasons.includes(filters.reason) ? filters.reason : "";
+  const reason = lossFilterValue(lossFilterValues(filters.reason).filter(v => reasons.includes(v)));
   // Station totals ignore the phase filter so the overview always adds up; the case list applies it.
   const filtered = monthRows.filter(
     (r) =>
       allowed.has(r.station_code) &&
-      (!station || r.station_code === station) &&
-      (!reason || (r.reason || "Unspecified") === reason),
+      lossFilterMatches(station, r.station_code) &&
+      lossFilterMatches(reason, r.reason || "Unspecified"),
   );
   const tally = (rows: typeof filtered) => {
     const by = (keys: PhaseKey[]) => rows.filter((r) => keys.includes(r.phase));
@@ -194,19 +193,24 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
         .eq("report", "nl")
         .eq("data_source", "live")
         .eq("month", month)
-        .eq("station_code", station)
+        .in("station_code", lossFilterValues(station))
         .eq("source_present", true)
         .order("amount", { ascending: false })
         .order("case_key"),
     );
     if (rows.error) throw Error("Live cases could not be loaded.");
+    const plans = await readAllRows(db.from("nl_loss_recoveries").select("*").eq("company_id", company).eq("month", month).order("case_key"));
+    if (plans.error) throw Error("Recovery plans could not be loaded.");
+    const planByKey = new Map((plans.data ?? []).map(r => [r.case_key, r as Recovery]));
     cases = (rows.data ?? [])
       .filter(
-        (r) => !reason || (r.details?.category || "Unspecified") === reason,
+        (r) => lossFilterMatches(reason, r.details?.category || "Unspecified"),
       )
       .map((r) => ({
         ...r,
         request: requestByCase.get(r.case_key) ?? null,
+        recovery: planByKey.get(r.case_key) ?? null,
+        recoverable: isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []),
       })) as LiveCase[];
   }
   const inScope = new Set(filtered.map((r) => r.case_key));
@@ -224,7 +228,11 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
     phase,
     station,
     stations: matchingStations,
-    totals,
+    totals: sortLossRows(totals, filters.sort),
+    sort: filters.sort || "value_desc",
+    outcomes: recoveryContext.outcomes,
+    settings: recoveryContext.settings,
+    canRecovered: !auth.readOnly && hasPermission(auth, "ops_loss_recovered", "edit"),
     summary: tally(filtered),
     cases,
     deskQueue: (requests.data ?? []).filter(

@@ -1,6 +1,6 @@
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
-import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
+import { assertLifecycleAction, lossLifecycleActors } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { deductionMonth } from "@/lib/ops-pulse/nl-loss-policy";
 import { hasPermission } from "@/lib/authorization";
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
       });
       return r.error ? deductionMonth(timing) : (r.data as string | null);
     };
-    const [people, history, currentMonth, nextMonth] = await Promise.all([
+    const [people, history, currentMonth, nextMonth, actors] = await Promise.all([
       loadRecoveryPayables(
         auth,
         scope.company,
@@ -70,6 +70,7 @@ export async function GET(request: Request) {
       ),
       salaryMonth("current_month"),
       salaryMonth("next_month"),
+      lossLifecycleActors(auth, station.id),
     ]);
     if (history.error)
       throw Error("Recovery people and history could not be loaded.");
@@ -83,6 +84,7 @@ export async function GET(request: Request) {
       // SLP is deducted only once its Final file is in; the month above is provisional until then.
       awaiting_final: report === "slp" && !finalSeenAt,
       people,
+      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && (actors.isCluster || actors.isSlp),
       history: history.data ?? [],
     });
   } catch (e) {

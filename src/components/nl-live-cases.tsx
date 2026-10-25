@@ -13,8 +13,10 @@ import {
   type LiveWindow,
   type PhaseKey,
 } from "@/lib/ops-pulse/nl-dispute-policy";
-import { recoveryCsv } from "@/lib/ops-pulse/nl-loss-policy";
+import { type LossSettings, type RecoveryOutcome, recoveryCsv } from "@/lib/ops-pulse/nl-loss-policy";
 import type { LiveCase } from "@/lib/ops-pulse/nl-live";
+import { RecoveryForm } from "./nl-loss-cases";
+import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -73,6 +75,7 @@ export function NlLiveCases({
   initialPhase,
   canDispute,
   canDesk,
+  outcomes, settings, canRecovered,
 }: {
   month: string;
   cases: LiveCase[];
@@ -80,7 +83,9 @@ export function NlLiveCases({
   initialPhase: string;
   canDispute: boolean;
   canDesk: boolean;
+  outcomes: RecoveryOutcome[]; settings: LossSettings | null; canRecovered: boolean;
 }) {
+  const [sort, setSort] = useState("value_desc");
   const [filter, setFilter] = useState(
     FILTERS.some((f) => f.key === initialPhase) ? initialPhase : "",
   );
@@ -113,7 +118,8 @@ export function NlLiveCases({
     );
   }, [withPhase, filter, query]);
   const pages = Math.ceil(shown.length / 15);
-  const current = shown.slice(page * 15, page * 15 + 15);
+  const sorted = sortLossRows(shown.map(x => x.c), sort).map(c => ({ c, phase: phaseOf(c) }));
+  const current = sorted.slice(page * 15, page * 15 + 15);
   function download() {
     const columns = [
       "Month", "Station", "TID", "Loss reason", "Sub reason", "Shipment type", "Value",
@@ -122,7 +128,7 @@ export function NlLiveCases({
       "OpsPulse request", "Request decision", "Request reason", "Request remarks",
       "CCTV link", "Updated by", "Updated at",
     ];
-    const rows = shown.map(({ c }) => {
+    const rows = sorted.map(({ c }) => {
       const x = c.details.extra ?? {};
       return [
         c.month, c.station_code, c.details.tid, c.details.category, c.details.sub_category,
@@ -156,6 +162,7 @@ export function NlLiveCases({
           </p>
         </div>
         <div className={styles.toolbar}>
+          <select aria-label="Sort live cases" value={sort} onChange={e=>{setSort(e.target.value);setPage(0);}}>{LOSS_SORTS.filter(o=>o.value!=="cases_desc").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <input
             aria-label="Search live cases"
             placeholder="Search TID or reason"
@@ -197,7 +204,7 @@ export function NlLiveCases({
                 onClick={() => setActive(active === c.case_key ? null : c.case_key)}
               >
                 <div>
-                  <strong>{c.details.tid || c.case_key}</strong>
+                  <strong>{c.station_code} · {c.details.tid || c.case_key}</strong>
                   <span>
                     {c.details.category || "Unspecified reason"}
                     {c.details.sub_category && c.details.sub_category !== c.details.category
@@ -211,6 +218,7 @@ export function NlLiveCases({
                     <span className={`${styles.badge} ${styles[phase.tone]}`}>
                       {phase.label}
                     </span>
+                    {c.recoverable ? <span className={styles.pending}>{c.recovery && !c.recovery.is_deleted ? "Recovery plan recorded" : "Assign recovery person"}</span> : null}
                     {c.request &&
                     !filedInCloak(c.request, likeOf(c)) &&
                     (requestSent(c.request, c.details.extra?.current_sla_stage) ||
@@ -225,12 +233,15 @@ export function NlLiveCases({
                 <span aria-hidden>{active === c.case_key ? "−" : "+"}</span>
               </button>
               {active === c.case_key ? (
+                <>
                 <LiveDetail
                   row={c}
                   window={window}
                   canDispute={canDispute}
                   canDesk={canDesk}
                 />
+                {c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canDesk} /> : null}
+                </>
               ) : null}
             </article>
           );

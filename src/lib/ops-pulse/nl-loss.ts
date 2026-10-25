@@ -13,7 +13,10 @@ import {
   type RecoveryOutcome,
   type LossSettings,
 } from "./nl-loss-policy";
+import { lossFilterValues, lossFilterValue, lossFilterMatches, sortLossRows } from "./loss-list-controls";
 export type NlFilters = {
+  sort?: string;
+  periodFallback?: string;
   month?: string;
   period?: string;
   station?: string;
@@ -119,7 +122,7 @@ type MetaRow = {
 };
 
 /** Run health + Master settings every Losses view needs. */
-async function lossContext(company: string, report: RecoveryKind) {
+export async function lossContext(company: string, report: RecoveryKind) {
   const db = supabaseAdmin!;
   const [runResult, failResult, outcomesResult, settingsResult] =
     await Promise.all([
@@ -230,27 +233,19 @@ export async function loadRecoveryView(
     .sort((a, b) => b[1].localeCompare(a[1]) || b[0].localeCompare(a[0]))
     .map(([p]) => p);
   const requested = slp ? filters.period : filters.month;
-  const month =
-    requested && periods.includes(requested)
-      ? requested
-      : slp && requested === ALL_PERIODS && periods.length > 1
-        ? ALL_PERIODS
-        : (periods[0] ?? null);
+  const requestedPeriods = lossFilterValues(requested).filter(p => periods.includes(p));
+  const month = (requested === ALL_PERIODS || (!requested && filters.periodFallback === "all")) ? ALL_PERIODS : requestedPeriods.length ? lossFilterValue(requestedPeriods) : (periods[0] ?? null);
   const periodOptions = [
     ...periods.map((value) => ({
       value,
       label: slp ? value : monthLabel(value),
     })),
-    ...(slp && periods.length > 1
+    ...(periods.length > 1
       ? [{ value: ALL_PERIODS, label: "All periods" }]
       : []),
   ];
-  const cluster =
-    filters.cluster &&
-    clusterOptions.some((option) => option.value === filters.cluster)
-      ? filters.cluster
-      : "";
-  const inPeriod = (r: MetaRow) => month === ALL_PERIODS || periodOf(r) === month;
+  const cluster = lossFilterValue(lossFilterValues(filters.cluster).filter(v => clusterOptions.some(o => o.value === v)));
+  const inPeriod = (r: MetaRow) => month === ALL_PERIODS || lossFilterMatches(month || "", periodOf(r));
   const recoverable = (r: { source_status: string | null }) =>
     slp || isRecoverable(r.source_status, accepted);
   const monthRows = all.filter(
@@ -259,19 +254,17 @@ export async function loadRecoveryView(
   const reasons = [
     ...new Set(monthRows.map((r) => r.reason || "Unspecified")),
   ].sort();
-  const reason =
-    filters.reason && reasons.includes(filters.reason) ? filters.reason : "";
+  const reason = lossFilterValue(lossFilterValues(filters.reason).filter(v => reasons.includes(v)));
   const matchingStations = stations.filter(
-    (s) => !cluster || s.clusterKeys.includes(cluster),
+    (s) => !cluster || s.clusterKeys.some((k: string) => lossFilterValues(cluster).includes(k)),
   );
   const allowed = new Set(matchingStations.map((s) => s.source_code));
-  const station =
-    filters.station && allowed.has(filters.station) ? filters.station : "";
+  const station = lossFilterValue(lossFilterValues(filters.station).filter(v => allowed.has(v)));
   const filtered = monthRows.filter(
     (r) =>
       allowed.has(r.station_code) &&
-      (!station || r.station_code === station) &&
-      (!reason || (r.reason || "Unspecified") === reason),
+      lossFilterMatches(station, r.station_code) &&
+      lossFilterMatches(reason, r.reason || "Unspecified"),
   );
   const totals = matchingStations
     .map((s) => {
@@ -288,7 +281,7 @@ export async function loadRecoveryView(
   const wanted = options.allStations
     ? totals.map((t) => t.source_code)
     : station
-      ? [station]
+      ? lossFilterValues(station)
       : [];
   if (wanted.length && month) {
     const months = [
@@ -329,8 +322,8 @@ export async function loadRecoveryView(
           recoverable(r) &&
           (!slp || inStage(r.details ?? {})) &&
           (month === ALL_PERIODS ||
-            (slp ? r.details?.period || r.month : r.month) === month) &&
-          (!reason || (r.details?.category || "Unspecified") === reason),
+            lossFilterMatches(month || "", slp ? r.details?.period || r.month : r.month)) &&
+          lossFilterMatches(reason, r.details?.category || "Unspecified"),
       )
       .map((r) => ({
         ...r,
@@ -351,7 +344,8 @@ export async function loadRecoveryView(
     reasons,
     station,
     stations: matchingStations,
-    totals,
+    totals: sortLossRows(totals, filters.sort),
+    sort: filters.sort || "value_desc",
     cases,
     outcomes,
     checked,

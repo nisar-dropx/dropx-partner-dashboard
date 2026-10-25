@@ -1,3 +1,5 @@
+import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
+import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
 import Link from "next/link";
 import type { LossTab } from "@/components/ops-loss-report";
 import { LossHeader, LOSSES_PATH, NlViewSwitch } from "./nl-loss-report";
@@ -43,6 +45,7 @@ export function NlLiveReport({
     if (v.month && v.month !== v.months[0]) q.set("month", v.month);
     if (v.cluster) q.set("cluster", v.cluster);
     if (v.reason) q.set("reason", v.reason);
+    if (v.sort) q.set("sort", v.sort);
     const station = next.station ?? v.station;
     if (station) q.set("station", station);
     const phase = next.phase ?? v.phase;
@@ -204,37 +207,9 @@ export function NlLiveReport({
                 </select>
               </label>
             ) : null}
-            <label>
-              Cluster
-              <select name="cluster" defaultValue={v.cluster} key={v.cluster}>
-                <option value="">All my clusters</option>
-                {v.clusterOptions.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Station
-              <select name="station" defaultValue={v.station} key={v.station}>
-                <option value="">All my stations</option>
-                {v.stations.map((st) => (
-                  <option key={st.id} value={st.source_code}>
-                    {st.station_code} · {st.station_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Loss reason
-              <select name="reason" defaultValue={v.reason} key={v.reason}>
-                <option value="">All reasons</option>
-                {v.reasons.map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </select>
-            </label>
+            <LossMultiFilter key={`cluster:${v.cluster}`} name="cluster" label="Cluster / AOM" value={v.cluster} options={v.clusterOptions} allLabel="All my clusters" />
+            <LossMultiFilter key={`station:${v.station}`} name="station" label="Station" value={v.station} options={v.stations.map(s => ({ value: s.source_code, label: `${s.station_code} · ${s.station_name}` }))} allLabel="All my stations" />
+            <LossMultiFilter key={`reason:${v.reason}`} name="reason" label="Loss reason" value={v.reason} options={v.reasons.map(r => ({ value: r, label: r }))} allLabel="All reasons" />
             <button className={styles.primary}>Apply filters</button>
             <Link href={`${base}?view=live`} className={styles.button}>
               Reset
@@ -246,7 +221,7 @@ export function NlLiveReport({
                 <Link href={href({ station: "", phase: "" })}>
                   ← All station totals
                 </Link>
-                <span>Station {v.station}</span>
+                <span>Stations {lossFilterValues(v.station).join(", ")}</span>
               </div>
               <NlLiveCases
                 key={[v.month, v.station, v.reason].join(":")}
@@ -256,13 +231,16 @@ export function NlLiveReport({
                 initialPhase={v.phase}
                 canDispute={v.canDispute}
                 canDesk={v.canDesk}
+                outcomes={v.outcomes}
+                settings={v.settings}
+                canRecovered={v.canRecovered}
               />
             </>
           ) : (
             <section className={styles.panel}>
               <div className={styles.panelHead}>
                 <h2>Station dispute overview</h2>
-                <span>Stations with the most cases waiting come first</span>
+                <LossTableSort value={v.sort} />
               </div>
               <div className={styles.tableWrap}>
                 <table>
