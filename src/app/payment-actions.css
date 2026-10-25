@@ -37,3 +37,69 @@
   opacity: .55;
   cursor: not-allowed;
 }
+
+/* Correction workspace: context first, editable fields second, evidence on demand. */
+.modal-panel.payment-correction-modal { width:min(900px,calc(100vw - 24px)); }
+.payment-correction-modal .panel-head { padding:14px 20px; flex-direction:row; flex-wrap:nowrap; align-items:flex-start; gap:12px; text-align:left; }
+.payment-correction-modal .panel-head h2 { font-size:19px; }
+.payment-correction-modal .panel-head p { margin:4px 0 0; font-size:12px; }
+.payment-correction-modal .payment-resubmit-form { padding:16px 20px 0; }
+.payment-correction-modal .form-grid { padding:0; gap:12px; margin:12px 0; }
+.payment-correction-modal .form-grid label,
+.payment-correction-modal .payment-resubmit-remarks { font-size:12px; text-transform:none; letter-spacing:0; line-height:1.5; }
+.payment-correction-modal .helper-text,
+.payment-correction-modal label .subtle { font-size:11px; font-weight:400; text-transform:none; line-height:1.4; }
+.payment-correction-modal .field { min-height:38px; padding:8px 10px; font-size:13px; }
+.payment-correction-modal .field[readonly] { background:#f4f6f9; color:#536176; }
+.payment-correction-modal .payment-resubmit-remarks { margin:14px 0 0; }
+.payment-correction-modal .payment-resubmit-remarks .field { min-height:76px; max-height:160px; overflow:auto; }
+.resubmit-context { display:grid; gap:10px; }
+.resubmit-facts { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; font-size:13px; }
+.resubmit-facts > span { color:#536176; }
+.resubmit-facts .resubmit-stage { font-size:11px; margin-left:auto; background:#fff4db; color:#854a0e; padding:3px 8px; border-radius:6px; }
+.resubmit-return { padding:12px 14px; border:1px solid #efd49c; border-left:3px solid #c88a22; background:#fffbf2; border-radius:8px; }
+.resubmit-return > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; }
+.resubmit-return strong { font-size:13px; color:#714715; }
+.resubmit-return small { color:#667085; font-size:11px; }
+.resubmit-return p { margin:5px 0 0; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.resubmit-disclosure { border:1px solid #e1e6ed; border-radius:8px; background:#fff; }
+.resubmit-disclosure > summary { cursor:pointer; padding:10px 12px; font-size:12px; font-weight:600; }
+.resubmit-disclosure > summary span { margin-left:8px; color:#667085; font-size:11px; font-weight:400; }
+.resubmit-disclosure[open] > summary { border-bottom:1px solid #e1e6ed; }
+.resubmit-timeline { list-style:none; margin:0; padding:12px 16px; max-height:260px; overflow:auto; }
+.resubmit-timeline li { border-left:2px solid #dce3ed; padding:0 0 14px 12px; }
+.resubmit-timeline li:last-child { padding-bottom:0; }
+.resubmit-timeline li > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 10px; }
+.resubmit-timeline strong { font-size:12px; text-transform:capitalize; }
+.resubmit-timeline time,.resubmit-timeline small { color:#667085; font-size:11px; }
+.resubmit-timeline p,.resubmit-original { margin:5px 0 0; font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.resubmit-original { padding:12px; margin:0; max-height:180px; overflow:auto; }
+.resubmit-edit-heading { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:baseline; margin-top:16px; font-size:13px; }
+.resubmit-edit-heading small { font-size:11px; color:#667085; }
+.payment-correction-modal .resubmit-supporting .form-grid { padding:0 12px; }
+.resubmit-file-link { border:0; padding:0; color:#175cd3; background:transparent; font:inherit; text-align:left; cursor:pointer; text-decoration:underline; overflow-wrap:anywhere; }
+.resubmit-error { font-size:12px; color:#b42318; }
+.payment-correction-modal .modal-actions { position:sticky; bottom:0; padding:12px 0; background:#fff; margin-top:12px; border-top:1px solid #e1e6ed; z-index:2; }
+@media(max-width:640px) {
+  .payment-correction-modal .panel-head { padding:12px; }
+  .payment-correction-modal .payment-resubmit-form { padding:12px 12px 0; }
+  .payment-correction-modal .form-grid.two { grid-template-columns:minmax(0,1fr); }
+  .payment-correction-modal .form-grid > .span-2 { grid-column:1/-1; }
+  .resubmit-facts .resubmit-stage { margin-left:0; }
+  .resubmit-disclosure > summary span { margin-left:6px; font-size:10px; }
+  .payment-correction-modal .modal-actions { flex-wrap:wrap; }
+  .payment-correction-modal .modal-actions .button { min-height:44px; }
+}
+.resubmit-vehicle { margin:0; font-size:12px; padding:8px 10px; background:#f4f6f9; border-radius:6px; overflow-wrap:anywhere; }
+.resubmit-vehicle strong { margin-right:6px; }
+
+.payment-correction-modal .resubmit-saved { margin-top:10px; }
+.resubmit-saved dl { margin:0; padding:0 12px; max-height:240px; overflow:auto; }
+.resubmit-saved dl > div { display:grid; grid-template-columns:minmax(100px,1fr) minmax(0,2fr); gap:12px; padding:10px 0; border-bottom:1px solid #eef1f5; font-size:12px; }
+.resubmit-saved dt { color:#667085; }
+.resubmit-saved dd { margin:0; min-width:0; }
+.resubmit-saved dd p { margin:0; max-height:90px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+.resubmit-saved dd button { display:block; margin:0 0 4px; }
+
+.payment-correction-modal .panel-head > div { flex:1; min-width:0; }
+.payment-correction-modal .panel-head .icon-button { flex-shrink:0; }

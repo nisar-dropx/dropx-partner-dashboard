@@ -1,3 +1,9 @@
+import { PaymentResubmissionSavedDetails } from "@/components/payment-resubmission-saved-details";
+import { EvidencePreview } from "@/components/evidence-preview";
+import { PaymentResubmissionContext } from "@/components/payment-resubmission-context";
+import { PaymentResubmissionFields } from "@/components/payment-resubmission-fields";
+import { loadResubmissionContext } from "@/lib/payment-resubmission-context";
+import { resubmissionQuestions, resubmissionOptions, isFixedReplacementQuestion } from "@/lib/payment-resubmission";
 import { PaymentTrackingInput } from "@/components/payment-tracking-input";
 import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
 import { AppShell } from "@/components/app-shell";
@@ -87,7 +93,6 @@ type AnswerRow = {
   attachments?: unknown;
 };
 
-type ApprovalRemarkRow = { action: string | null; comments: string | null; created_at: string };
 
 const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -186,15 +191,20 @@ function paymentDetailInputForQuestion(question: QuestionRow) {
   );
 }
 
-function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
+function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow, reasonKey?: string | null) {
   const name = `answers[${question.id}]`;
   const attachments = paymentRequestAttachments(answer);
+  if (isFixedReplacementQuestion(reasonKey, question.question_text, answer?.answer_value)) return <>
+    <input className="field" name={name} value={answer?.answer_value ?? ""} readOnly />
+    <small className="helper-text">Saved vehicle context · cannot be changed here.</small>
+  </>;
+
   if (isPaymentTrackingQuestion(question)) return <PaymentTrackingInput key={answer?.id ?? question.id} name={name} required={question.is_required} disabled={false} defaultValue={answer?.answer_value ?? ""} />;
   if (question.answer_type === "dropdown") {
     return (
       <select className="field" name={name} required={question.is_required} defaultValue={answer?.answer_value ?? ""}>
         <option value="">Select</option>
-        {optionsFromText(question.dropdown_options).map((option) => <option key={option} value={option}>{option}</option>)}
+        {resubmissionOptions(question.dropdown_options, answer?.answer_value).map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
     );
   }
@@ -213,7 +223,7 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
   if (question.answer_type === "file") {
     return (
       <>
-        {attachments.length ? <p className="subtle" style={{ margin: "4px 0 8px" }}>Current files: {attachments.map((attachment, index) => <span key={attachment.path}>{index ? ", " : ""}<a href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer!.id)}&attachment_index=${index}`} target="_blank" rel="noreferrer">{attachment.name}</a></span>)}</p> : null}
+        {attachments.length ? <div className="subtle" style={{ margin: "4px 0 8px" }}>Saved files: {attachments.map((attachment, index) => <span key={attachment.path}>{index ? ", " : ""}<EvidencePreview href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer!.id)}&attachment_index=${index}`} label={attachment.name} fileName={attachment.name} className="resubmit-file-link" /></span>)}</div> : null}
         <input
           accept={paymentFileAccept(question.dropdown_options)}
           className="field"
@@ -222,7 +232,7 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
           required={question.is_required && !attachments.length}
           type="file"
         />
-        <p className="subtle" style={{ margin: "4px 0 0" }}>{question.is_required && !attachments.length ? "Upload up to 3 files." : "Optional · upload up to 3 files."} Adding files replaces the current attachment set.</p>
+        <p className="subtle" style={{ margin: "4px 0 0" }}>{question.is_required && !attachments.length ? "Upload up to 3 files." : "Keep saved files, or replace with up to 3 files."} New uploads replace saved files.</p>
       </>
     );
   }
@@ -246,25 +256,7 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
   );
 }
 
-async function loadReturnRemark(companyId: string, requestId: string) {
-  if (!supabaseAdmin) return null;
-  for (const requestColumn of ["payment_request_id", "request_id"] as const) {
-    const result = await supabaseAdmin
-      .from("payment_request_approvals")
-      .select("action, comments, created_at")
-      .eq("company_id", companyId)
-      .eq(requestColumn, requestId)
-      .order("created_at", { ascending: false })
-      .limit(10);
-    if (result.error) continue;
-    const returnLog = ((result.data ?? []) as ApprovalRemarkRow[]).find((log) => {
-      const action = String(log.action ?? "").toLowerCase();
-      return action === "returned" || action === "rejected";
-    });
-    if (returnLog) return returnLog;
-  }
-  return null;
-}
+
 
 async function loadExpenseRequestData(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) {
@@ -364,17 +356,17 @@ export default async function ExpenseRequestPage({
   // Returned after payout details were submitted (e.g. by finance): correct the
   // payout details and send it back to processing instead of re-approving the estimate.
   const resubmitPayout = resubmitRequest ? hasSubmittedPaymentDetails(resubmitRequest) : false;
-  const resubmitQuestions = questionsForStage(resubmitHead?.payment_head_questions, resubmitPayout ? "payment" : "expense");
-  const [resubmitAnswersResult, returnRemark] = resubmitRequest && supabaseAdmin
+  const resubmitQuestions = resubmissionQuestions(resubmitHead?.payment_head_questions, resubmitPayout ? "payment" : "expense");
+  const [resubmitAnswersResult, resubmitContext] = resubmitRequest && supabaseAdmin
     ? await Promise.all([
         supabaseAdmin
           .from("payment_request_answers")
           .select("id, question_id, answer_value, file_name, file_path, file_size, attachments")
           .eq("company_id", companyId)
           .eq("payment_request_id", resubmitRequest.id),
-        loadReturnRemark(companyId, resubmitRequest.id)
+        loadResubmissionContext(companyId, resubmitRequest)
       ])
-    : [{ data: [] as AnswerRow[] }, null];
+    : [{ data: [] as AnswerRow[], error: null }, null];
   const answerByQuestionId = new Map(((resubmitAnswersResult.data ?? []) as AnswerRow[]).map((answer) => [answer.question_id, answer]));
 
   return (
@@ -475,32 +467,21 @@ export default async function ExpenseRequestPage({
 
       {resubmitRequest ? (
         <div className="modal-backdrop">
-          <section className="modal-panel wide-modal" role="dialog" aria-modal="true" aria-labelledby="expense-resubmit-title">
+          <section className="modal-panel wide-modal payment-correction-modal" role="dialog" aria-modal="true" aria-labelledby="expense-resubmit-title">
             <div className="panel-head">
               <div>
-                <h2 id="expense-resubmit-title">{resubmitPayout ? "Correct and resubmit payment details" : "Correct and resubmit expense request"}</h2>
-                <p className="subtle">{resubmitRequest.request_no} - {resubmitPayout ? "Update the payment method or beneficiary details and send it back for payment processing." : "Update the returned details and send it back for approval."}</p>
+                <h2 id="expense-resubmit-title">{resubmitPayout ? "Correct payment details" : "Correct expense request"}</h2>
+                <p className="subtle">{resubmitRequest.request_no}</p>
               </div>
               <PendingLink className="icon-button" href="/payments/expense-request" scroll={false} aria-label="Close">x</PendingLink>
             </div>
             <form action={resubmitPayout ? resubmitPaymentRequest : resubmitExpenseRequest} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={resubmitRequest.id} />
               {resubmitPayout ? <input type="hidden" name="return_to" value="expense" /> : null}
-              {returnRemark?.comments ? (
-                <div className="message-panel warn" style={{ marginBottom: 16 }}>
-                  <strong>Return remarks</strong>
-                  <p className="subtle" style={{ marginTop: 6 }}>{returnRemark.comments}</p>
-                </div>
-              ) : null}
-              <div className="form-grid three">
-                <label>
-                  Location
-                  <input className="field" value={resubmitRequest.location_code} readOnly />
-                </label>
-                <label>
-                  Payment Head
-                  <input className="field" value={resubmitHead?.name ?? "-"} readOnly />
-                </label>
+              {resubmitContext ? <PaymentResubmissionContext context={resubmitContext} location={resubmitRequest.location_code} head={resubmitHead?.name ?? "Payment request"} amount={resubmitRequest.amount_requested ?? resubmitRequest.amount} remarks={resubmitRequest.remarks} payout={resubmitPayout} /> : null}
+              <PaymentResubmissionSavedDetails remarks={resubmitContext?.originalRemarks || resubmitRequest.remarks} original={Boolean(resubmitContext?.originalRemarks)} answers={Array.from(answerByQuestionId.values())} questions={resubmitHead?.payment_head_questions ?? []} />
+              <div className="resubmit-edit-heading"><strong>Corrections</strong><small>Saved details are kept unless changed.</small></div>
+              <div className="form-grid two">
                 {resubmitPayout ? (
                   <label>
                     Actual Amount *
@@ -512,8 +493,16 @@ export default async function ExpenseRequestPage({
                     <input className="field" min="0" name="amount" required step="0.01" type="number" defaultValue={resubmitRequest.amount_requested ?? ""} />
                   </label>
                 )}
+                {resubmitQuestions.filter(question => question.answer_type !== "file" && !isPaymentTrackingQuestion(question)).map(question => (
+                  <label key={question.id} className={question.answer_type === "textarea" ? "span-2" : undefined}>
+                    {question.question_text}{question.is_required ? " *" : ""}
+                    <input type="hidden" name="question_ids" value={question.id} />
+                    {resubmitInputForQuestion(question, answerByQuestionId.get(question.id), resubmitContext?.reasonKey)}
+                  </label>
+                ))}
               </div>
               {resubmitPayout ? (
+                <PaymentResubmissionFields title="Payment details" description="Saved method & beneficiary · open to correct" open={!hasSubmittedPaymentDetails(resubmitRequest)}>
                 <PaymentBeneficiaryFields
                   allowedPaymentModes={resubmitHead?.supported_payment_modes}
                   defaultAccountHolderName={resubmitRequest.account_holder_name}
@@ -525,26 +514,28 @@ export default async function ExpenseRequestPage({
                   defaultUpiId={resubmitRequest.payment_mode === "upi_payment" ? resubmitRequest.payment_reference : null}
                   savedContacts={savedContacts}
                 />
+                </PaymentResubmissionFields>
               ) : null}
-              <div className="form-grid three">
-                {resubmitQuestions.map((question) => {
-                  const isWideField = question.answer_type === "textarea";
-                  return (
-                    <label key={question.id} className={isWideField ? "span-3" : undefined}>
+
+              {resubmitQuestions.some(question => question.answer_type === "file" || isPaymentTrackingQuestion(question)) ? (
+                <PaymentResubmissionFields title={resubmitQuestions.some(isPaymentTrackingQuestion) ? "Shipments & supporting files" : "Supporting files"} description="Review or update saved evidence" open={resubmitQuestions.some(question => question.is_required && (question.answer_type === "file" ? !paymentRequestAttachments(answerByQuestionId.get(question.id)).length : isPaymentTrackingQuestion(question) && !answerByQuestionId.get(question.id)?.answer_value))}>
+                  {resubmitQuestions.filter(question => question.answer_type === "file" || isPaymentTrackingQuestion(question)).map(question => (
+                    <label key={question.id} className="span-2">
                       {question.question_text}{question.is_required ? " *" : ""}
                       <input type="hidden" name="question_ids" value={question.id} />
                       {resubmitInputForQuestion(question, answerByQuestionId.get(question.id))}
                     </label>
-                  );
-                })}
-              </div>
+                  ))}
+                </PaymentResubmissionFields>
+              ) : null}
               <label className="payment-resubmit-remarks">
-                Resubmission remarks *
-                <AutoGrowTextarea className="field" name="remarks" required rows={3} defaultValue={resubmitRequest.remarks ?? ""} />
+                Your response to the reviewer *
+                <AutoGrowTextarea className="field" name="remarks" required rows={3} placeholder="Explain what you corrected or clarify the reviewer’s question." />
               </label>
+              {resubmitAnswersResult.error ? <p role="alert" className="resubmit-error">Saved details could not be loaded. Reload before resubmitting.</p> : null}
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/expense-request" scroll={false}>Cancel</PendingLink>
-                <SubmitButton className="button payment-action-revise" pendingText="Resubmitting">Resubmit request</SubmitButton>
+                <SubmitButton disabled={Boolean(resubmitContext?.error || resubmitAnswersResult.error)} className="button payment-action-revise" pendingText="Resubmitting">Send corrected request</SubmitButton>
               </div>
             </form>
           </section>
