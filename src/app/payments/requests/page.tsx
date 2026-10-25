@@ -599,9 +599,9 @@ export default async function PaymentRequestsPage({
                         <div className="payment-row-actions">
                           <PendingLink className="button secondary compact" href={`/payments/requests?view=${request.id}`} scroll={false}>View</PendingLink>
                           {pagePermission.canAdd && canSubmitBankDetails(request, authorization.userId) ? (
-                            <PendingLink className="button compact payment-action-next" href={`/payments/requests?bank=${request.id}`} scroll={false}>Submit payout details</PendingLink>
+                            <PendingLink className="button compact payment-action-next" title="Approval is complete. Add payment and beneficiary details to send this request to Finance." href={`/payments/requests?bank=${request.id}`} scroll={false}>Add payment details →</PendingLink>
                           ) : pagePermission.canAdd && isResubmittable(request, authorization.userId) ? (
-                            <PendingLink className="button compact payment-action-revise" href={`/payments/requests?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
+                            <PendingLink className="button compact payment-action-revise" title="Review the return remarks, correct the request and submit it again for approval." href={`/payments/requests?resubmit=${request.id}`} scroll={false}>Correct &amp; resubmit</PendingLink>
                           ) : null}
                         </div>
                       </td>
@@ -679,7 +679,7 @@ export default async function PaymentRequestsPage({
               </label>
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
-                <SubmitButton className="button payment-action-next" pendingText="Submitting">Submit details</SubmitButton>
+                <SubmitButton className="button payment-action-next" pendingText="Submitting">Send to Finance</SubmitButton>
               </div>
             </form>
           </section>

@@ -457,9 +457,9 @@ export default async function ExpenseRequestPage({
                     {pagePermission.canAdd ? (
                       <td className="payment-cell-action">
                         {isResubmittable(request, authorization.userId) ? (
-                          <PendingLink className="button compact payment-action-revise" href={`/payments/expense-request?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
+                          <PendingLink className="button compact payment-action-revise" title="Review the return remarks, correct the request and submit it again for approval." href={`/payments/expense-request?resubmit=${request.id}`} scroll={false}>Correct &amp; resubmit</PendingLink>
                         ) : canSubmitBankDetails(request, authorization.userId) ? (
-                          <PendingLink className="button compact payment-action-next" href={`/payments/expense-request?bank=${request.id}`} scroll={false}>Submit details</PendingLink>
+                          <PendingLink className="button compact payment-action-next" title="Approval is complete. Add payment and beneficiary details to send this request to Finance." href={`/payments/expense-request?bank=${request.id}`} scroll={false}>Add payment details →</PendingLink>
                         ) : "-"}
                       </td>
                     ) : null}
@@ -615,7 +615,7 @@ export default async function ExpenseRequestPage({
               </label>
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/expense-request" scroll={false}>Cancel</PendingLink>
-                <SubmitButton className="button payment-action-next" pendingText="Submitting">Submit details</SubmitButton>
+                <SubmitButton className="button payment-action-next" pendingText="Submitting">Send to Finance</SubmitButton>
               </div>
             </form>
           </section>
