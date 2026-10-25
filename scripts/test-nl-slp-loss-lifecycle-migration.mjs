@@ -209,6 +209,8 @@ eq("Empty action day yields no rows", (await db.query(`select * from nl_loss_rec
 
 // New recovery controls are idempotent and cannot close a departed-person balance.
 const controlSql = readFileSync("supabase/migrations/20261026153000_loss_recovery_case_controls.sql", "utf8");
+// Production function definitions may retain CRLF and different indentation.
+await db.exec(`do $$ declare f record; begin for f in select oid from pg_proc where pronamespace='public'::regnamespace and proname='save_nl_recovery' loop execute replace(pg_get_functiondef(f.oid),E'else\\n    p_details',E'else\\r\\n      p_details'); end loop; end $$;`);
 await db.exec(controlSql);
 await db.exec(controlSql);
 await db.exec(`insert into nl_recovery_outcomes(company_id,code,label,allocation_required) values('${C}','da_left','DA left',false)`);
