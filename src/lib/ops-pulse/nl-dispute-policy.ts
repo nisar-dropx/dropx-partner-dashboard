@@ -123,10 +123,10 @@ export const PHASES: Record<
   action: { label: "Dispute pending", tone: "warn" },
   respond: { label: "Amazon asked for details", tone: "warn" },
   amazon: { label: "With Amazon", tone: "info" },
-  accepted: { label: "Accepted · not disputed", tone: "muted" },
+  accepted: { label: "Not disputed · decision pending", tone: "muted" },
   won: { label: "Non-recoverable", tone: "good" },
   lost: { label: "Recoverable", tone: "bad" },
-  missed: { label: "SLA missed", tone: "bad" },
+  missed: { label: "SLA missed · decision pending", tone: "bad" },
 };
 
 export function casePhase(c: LiveCaseLike): { key: PhaseKey } & (typeof PHASES)[PhaseKey] {
@@ -134,8 +134,10 @@ export function casePhase(c: LiveCaseLike): { key: PhaseKey } & (typeof PHASES)[
   const stage = String(c.extra?.current_sla_stage ?? "");
   const decision = String(c.nl_status ?? "").toLowerCase();
   let key: PhaseKey;
-  if (status === "resolved")
-    key = decision.startsWith("non-recoverable") ? "won" : "lost";
+  const terminal = ["resolved", "sla_missed", "not_disputed"].includes(status) || !["eDSP1", "eDSP2", "NL1", "NL2"].includes(stage);
+  if (terminal && /^non[ -]?recoverable(?:\b|$)/.test(decision)) key = "won";
+  else if (terminal && /^recoverable(?:\b|$)/.test(decision)) key = "lost";
+  else if (status === "resolved") key = "amazon";
   else if (status === "not_disputed") key = "accepted";
   else if (status === "sla_missed") key = "missed";
   else if (stage === "eDSP2") key = "respond";

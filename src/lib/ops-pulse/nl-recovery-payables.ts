@@ -18,6 +18,7 @@ export async function loadRecoveryPayables(
   caseKey: string,
   policy: RecoveryPolicy,
   policyUpdated: string,
+  selectedRefs?: string[],
 ) {
   const db = supabaseAdmin!;
   const current = deductionMonth("current_month")!;
@@ -34,7 +35,7 @@ export async function loadRecoveryPayables(
     p_station: station,
   });
   if (directory.error) throw Error("Station employees could not be loaded.");
-  const people = (directory.data || []) as RecoveryPerson[];
+  const people = ((directory.data || []) as RecoveryPerson[]).filter(p => !selectedRefs || selectedRefs.includes(p.ref));
   const employeeIds = people
     .filter((p) => p.ref.startsWith("employee:"))
     .map((p) => p.ref.slice(9));

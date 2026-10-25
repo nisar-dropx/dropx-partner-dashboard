@@ -1,4 +1,5 @@
 import "server-only";
+import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import {
   getAuthorization,
   hasPermission,
@@ -45,6 +46,7 @@ function storedWindow(value: unknown): LiveWindow {
 
 type LiveMeta = {
   month: string;
+  data_source?: string;
   case_key: string;
   station_code: string;
   amount: number | null;
@@ -59,7 +61,7 @@ type LiveMeta = {
  * The month Cloak is still deciding. Stations see every case in their scope — not
  * only final recoverable ones — with where it stands in the dispute window.
  */
-export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters) {
+export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters, stageView: "initial" | "final" | "all" = "all") {
   if (!supabaseAdmin) throw Error("Database unavailable.");
   const ready = await lossSchemaReady();
   const { company, stations, clusterOptions } = await lossClusterScope(auth);
@@ -71,11 +73,10 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
           db
             .from("nl_loss_month_cases")
             .select(
-              "month,case_key,station_code,amount,source_status,status:details->>case_status,stage:details->extra->>current_sla_stage,reason:details->>category,last_seen_at",
+              "month,case_key,station_code,amount,source_status,data_source,status:details->>case_status,stage:details->extra->>current_sla_stage,reason:details->>category,last_seen_at",
             )
             .eq("company_id", company)
             .eq("report", "nl")
-            .eq("data_source", "live")
             .eq("source_present", true)
             .in("station_code", codes.length ? codes : ["__NONE__"])
             .order("month")
@@ -101,14 +102,19 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
   ]);
   if (meta.error || source.error)
     throw Error("Live Cloak cases could not be loaded. Please retry.");
-  const all = (meta.data ?? []) as LiveMeta[];
+  const inStage = (status: string | null, caseStatus?: string | null, stage?: string | null) => {
+    const final = hasFinalLossOutcome(isRecoverable(status, recoveryContext.settings?.recoverable_statuses ?? []), status, caseStatus, stage);
+    return stageView === "all" || (stageView === "final" ? final : !final);
+  };
+  const all = ((meta.data ?? []) as LiveMeta[]).filter(r => inStage(r.source_status, r.status, r.stage));
   const months = [...new Set(all.map((r) => r.month))].sort().reverse();
   const month =
     filters.month && months.includes(filters.month)
       ? filters.month
       : (months[0] ?? null);
   // Cloak publishes deadlines for the month it is currently deciding (the newest live month).
-  const window = month === months[0] ? storedWindow(source.data?.live_window) : {};
+  const latestLiveMonth = ((meta.data ?? []) as LiveMeta[]).filter(r => r.data_source === "live").map(r => r.month).sort().at(-1);
+  const window = month === latestLiveMonth ? storedWindow(source.data?.live_window) : {};
   const requests = month
     ? await readAllRows(
         db
@@ -130,7 +136,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
   const allowed = new Set(matchingStations.map((s) => s.source_code));
   const station = lossFilterValue(lossFilterValues(filters.station).filter(v => allowed.has(v)));
   // Opens the case list on a status group: todo (waiting on station), amazon or decided.
-  const phase = ["todo", "amazon", "decided"].includes(filters.phase ?? "")
+  const phase = ["todo", "amazon", "decided", "recoverable", "nonrecoverable", "all"].includes(filters.phase ?? "")
     ? filters.phase!
     : "";
   const monthRows = all
@@ -172,8 +178,8 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
       withAmazonAmount: sum(by(["amazon"])),
       saved: by(["won"]).length,
       savedAmount: sum(by(["won"])),
-      recoverable: by(["lost", "accepted", "missed"]).length,
-      recoverableAmount: sum(by(["lost", "accepted", "missed"])),
+      recoverable: rows.filter(r => isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []) && hasFinalLossOutcome(true, r.source_status, r.status, r.stage)).length,
+      recoverableAmount: sum(rows.filter(r => isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []) && hasFinalLossOutcome(true, r.source_status, r.status, r.stage))),
     };
   };
   const totals = matchingStations
@@ -191,7 +197,6 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
         .select("*")
         .eq("company_id", company)
         .eq("report", "nl")
-        .eq("data_source", "live")
         .eq("month", month)
         .in("station_code", lossFilterValues(station))
         .eq("source_present", true)
@@ -204,17 +209,18 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters)
     const planByKey = new Map((plans.data ?? []).map(r => [r.case_key, r as Recovery]));
     cases = (rows.data ?? [])
       .filter(
-        (r) => lossFilterMatches(reason, r.details?.category || "Unspecified"),
+        (r) => inStage(r.source_status, r.details?.case_status, r.details?.extra?.current_sla_stage) && lossFilterMatches(reason, r.details?.category || "Unspecified"),
       )
       .map((r) => ({
         ...r,
         request: requestByCase.get(r.case_key) ?? null,
         recovery: planByKey.get(r.case_key) ?? null,
-        recoverable: isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []),
+        recoverable: isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []) && hasFinalLossOutcome(true, r.source_status, r.details?.case_status, r.details?.extra?.current_sla_stage),
       })) as LiveCase[];
   }
   const inScope = new Set(filtered.map((r) => r.case_key));
   return {
+    stageView,
     ready,
     month,
     months,
@@ -307,7 +313,7 @@ export async function disputeContext(
           open: false,
           kind: null,
           deadline: null,
-          reason: "This month is final in Cloak. Use the recovery view for re-disputes.",
+          reason: "This month is final in Cloak. Case response requires leadership activation.",
         } as const);
   return {
     auth,

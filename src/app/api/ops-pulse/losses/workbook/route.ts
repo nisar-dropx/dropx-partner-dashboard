@@ -1,3 +1,5 @@
+import { recoveryActionAllowed } from "@/lib/ops-pulse/loss-recovery-controls";
+import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -102,7 +104,7 @@ export async function GET(request: Request) {
       }),
     );
     const outcomes = view.outcomes.filter(
-      (o) => o.is_active && (!o.restricted || view.canRecovered),
+      (o) => o.is_active && recoveryActionAllowed(o) && o.code !== "responsible_left" && (!o.restricted || view.canRecovered),
     );
     const caseRows = view.cases.map((c) => {
       const r = c.recovery && !c.recovery.is_deleted ? c.recovery : null;
@@ -305,6 +307,8 @@ export async function POST(request: Request) {
           throw Error("This case is no longer recoverable at source.");
         const outcome = matchOutcome(cell(row, "Recovery action"), outcomes);
         if (!outcome) throw Error(`“${cell(row, "Recovery action")}” is not an active recovery action. Copy one from the Recovery actions sheet.`);
+        if (!recoveryActionAllowed(outcome) || outcome.code === "responsible_left") throw Error("Use the recovery form to record departed-person details; redisputes need case-specific activation.");
+        await assertLifecycleAction(auth, station.id, "propose");
         if (outcome.restricted && !canRecovered) throw Error(`You do not have access to mark a case as “${outcome.label}”.`);
         const plan = plans.get(id) ?? null;
         const version = Number(cell(row, "Version") || 0);

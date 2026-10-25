@@ -1,4 +1,5 @@
 import "server-only";
+import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { nlStationScope } from "./nl-loss";
@@ -7,6 +8,7 @@ export async function recoveryContext(
   month: string,
   key: string,
   edit: boolean,
+  allowPending = false,
 ) {
   const auth = await getAuthorization();
   if (
@@ -57,13 +59,15 @@ export async function recoveryContext(
     // SLP recovery files only list amounts Amazon is recovering.
     // Station claims are recoverable once their cluster manager approved them.
     (row.data.report === "station" && row.data.source_status !== "Approved") ||
-    (row.data.report === "nl" &&
+    (row.data.report === "nl" && !allowPending &&
       !isRecoverable(
         row.data.source_status,
         settings.data?.recoverable_statuses ?? [],
       ))
   )
     throw Error("Case is unavailable or outside your station access.");
+  if (!allowPending && row.data.report === "nl" && !hasFinalLossOutcome(true, row.data.source_status, row.data.details?.case_status, row.data.details?.extra?.current_sla_stage))
+    throw Error("Recovery is available after the final source outcome. This case is still in Initial.");
   return {
     auth,
     scope,
