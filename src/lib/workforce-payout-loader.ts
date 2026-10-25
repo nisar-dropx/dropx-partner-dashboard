@@ -168,16 +168,9 @@ export async function loadWorkforcePayoutRows(
   const paidDays = paidAdhocDays(paidDaysResult.data ?? []);
   const paidDayForMapping = (mapping: any, date: string) => {
     const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
-    return paidDays.get(adhocPaidDayKey(String(mapping.station_id), String(provider?.code ?? provider?.name ?? ""), String(mapping.provider_member_id ?? ""), date));
+    return paidDays.get(adhocPaidDayKey(String(mapping.station_id), `${provider?.code ?? ""} ${provider?.name ?? ""}`, String(mapping.provider_member_id ?? ""), date));
   };
   const paidWorkforceDays = new Map<string, string>();
-  for (const payment of paidDaysResult.data ?? []) {
-    const matches = allMappings.filter((mapping: any) => String(mapping.station_id) === payment.location_id
-      && String(mapping.effective_from) <= payment.adhoc_work_date && (!mapping.effective_to || String(mapping.effective_to) >= payment.adhoc_work_date)
-      && paidDayForMapping(mapping, payment.adhoc_work_date) === payment.request_no);
-    const identities = [...new Set(matches.map((mapping: any) => mapping.workforce_id).filter(Boolean))];
-    if (identities.length === 1) paidWorkforceDays.set(`${identities[0]}|${payment.location_id}|${payment.adhoc_work_date}`, payment.request_no);
-  }
   const paidWorkerDay = (workerId: string, stationId: string, date: string) => paidWorkforceDays.get(`${workerId}|${stationId}|${date}`);
   const primaryScopedMappings = scopeEnabled ? allMappings.filter(mappingBelongsToScope) : allMappings;
   const scopedMappingIds = new Set(primaryScopedMappings.map((mapping: any) => String(mapping.id)));
@@ -251,6 +244,13 @@ export async function loadWorkforcePayoutRows(
   // not create a payout row or influence attendance/overlap validation. Keep
   // provider mappings independent: their stored Provider ID remains valid
   // payout evidence even when the linked profile is no longer active.
+  for (const payment of paidDaysResult.data ?? []) {
+    const matches = allMappings.filter((mapping: any) => String(mapping.station_id) === payment.location_id
+      && String(mapping.effective_from) <= payment.adhoc_work_date && (!mapping.effective_to || String(mapping.effective_to) >= payment.adhoc_work_date)
+      && paidDayForMapping(mapping, payment.adhoc_work_date) === payment.request_no);
+    const identities = [...new Set(matches.map((mapping: any) => workerBySource.get(mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id)?.id).filter(Boolean))];
+    if (identities.length === 1) paidWorkforceDays.set(`${identities[0]}|${payment.location_id}|${payment.adhoc_work_date}`, payment.request_no);
+  }
   const directAllocationProfileIsVisible = (allocation: any) => directPaymentProfileIsVisible(
     workerBySource.get(String(allocation.workforce_id)) ?? {},
     "workforce"
