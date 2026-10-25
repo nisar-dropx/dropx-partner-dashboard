@@ -54,3 +54,25 @@ test('audit email stays compact while retaining action owners and deadlines',()=
  const audit={store_name:'Store',number:'AUDIT-1',score:80,score_band:'Watch',template:{sections:[{questions}]},answers:Object.fromEntries(questions.map(q=>[q.id,{outcome:'gap',action:'Clean & verify',owner:'Store SI',dueAt:'2026-10-26T12:00:00Z'}]))};
  const result=auditCompletionSummary(audit,'https://ops.dropxlogistics.com/store-audits');assert.match(result.html,/10 findings/);assert.match(result.html,/\+2 more findings/);assert.match(result.html,/Clean &amp; verify/);assert.match(result.html,/Store SI/);assert.match(result.html,/IST/);assert.doesNotMatch(result.html,/<Gap/);assert.match(result.text,/2026/);
 });
+
+test('configured additional recipients reach both builders without hardcoded identities',async()=>{
+ let actual;
+ const mod=compile('./amazon-now-digest.ts',{'./adhoc-digest-scope':{adHocOpsRoles:new Set(),isAmazonNowMailStation:scope.isAmazonNowMailStation,loadAdHocMailScope:async(...args)=>{actual=args;return {recipients:[]}}},'./ops-pulse/people-review-routing':{},'./ops-pulse/si-handover/model':{},'./ops-pulse/store-ops/model':{},'./ops-pulse/store-ops/server':{},'./amazon-now-digest-view':{}});
+ for(const event of mod.nowDigestEvents){await mod.loadNowMailScope({}, {...mod.defaultNowControl('c',event,'example.com'),config:{email_domain:'example.com',recipient_role_codes:['OPS'],additional_recipient_emails:['owner@example.com','ct@example.com']}});assert.deepEqual(actual[3],['owner@example.com','ct@example.com']);assert.equal(actual[4].allowAdditionalProductMembers,true);}
+});
+
+test('send-now appends only added recipients and never repeats an existing daily receipt',async()=>{
+ const recorded=new Map([['old@example.com','accepted']]);let sent=[];let run=true;
+ const db={from(table){let rows=[];const q={select:()=>q,eq:()=>q,single:async()=>({data:{config:{additional_recipient_emails:['owner@example.com','ct@example.com']}}}),maybeSingle:async()=>({data:run?{id:'run'}:null}),upsert:(values,opts)=>{assert.equal(opts.ignoreDuplicates,true);rows=values.filter(v=>!recorded.has(v.recipient_email));rows.forEach(v=>recorded.set(v.recipient_email,v.status));return q},then:r=>Promise.resolve({data:rows}).then(r)};return q}};
+ const mod=compile('./amazon-now-send-additional.ts',{'server-only':{},'./amazon-now-digest':{buildAmazonNowDigest:async()=>({checkedAt:new Date().toISOString(),messages:['old','owner','ct'].map(n=>({email:n+'@example.com',scope:{stationIds:['now']}}))})},'./portal-digest-delivery':{digestEnabled:()=>true,deliverPortalDigestQueue:async(_db,_portal,summary,_rpc,reserved)=>{sent.push(...reserved.map(r=>r.recipient_email));return {...summary,accepted:reserved.length}}}});
+ const first=await mod.sendNowAdditionalRecipients(db,'c');assert.equal(first.accepted,2);assert.deepEqual(sent,['owner@example.com','ct@example.com']);assert.equal(recorded.get('old@example.com'),'accepted');
+ const second=await mod.sendNowAdditionalRecipients(db,'c');assert.equal(second.accepted,0);assert.equal(second.existing,2);assert.equal(sent.length,2);
+ run=false;await assert.rejects(mod.sendNowAdditionalRecipients(db,'c'),/has not run yet/);
+});
+
+test('additional Amazon Now accounts retain current location scope and reject missing memberships',async()=>{
+ const tables={stations:[{id:'now',station_code:'TCC3',station_email:'store@example.com',providers:{code:'AMAZON'},location_models:{code:'NOW'}},{id:'other',station_code:'TTG9',providers:{code:'AMAZON'},location_models:{code:'NOW'}},{id:'lm',station_code:'KTUR',providers:{code:'AMAZON'},location_models:{code:'EDSP'}}],company_product_memberships:[{user_id:'ct',role_id:'ct',location_scope_ids:['now','lm']},{user_id:'owner',role_id:'owner',has_all_location_access:true},{user_id:'mail',role_id:'mail',has_all_location_access:true}],user_roles:[{id:'ct',code:'CONTROL_TOWER'},{id:'owner',code:'OWNER'},{id:'mail',code:'OPERATIONS_LOCATION'}],profiles:[{id:'ct',email:'ct@example.com'},{id:'owner',email:'owner@example.com'},{id:'mail',email:'store@example.com'},{id:'removed',email:'removed@example.com'}]};
+ const db={from(t){const q={select:()=>q,eq:()=>q,order:()=>q,range:async()=>({data:tables[t]||[],error:null})};return q}};
+ const result=await scope.loadAdHocMailScope(db,'c','example.com',['ct@example.com','owner@example.com','store@example.com','removed@example.com'],{stationFilter:scope.isAmazonNowMailStation,roleCodes:['NO_DEFAULT_RECIPIENTS'],allowAdditionalProductMembers:true});
+ assert.deepEqual(result.recipients.map(r=>[r.email,r.stationIds]),[['ct@example.com',['now']],['owner@example.com',['now','other']],['store@example.com',['now']]]);
+});
