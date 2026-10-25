@@ -76,3 +76,15 @@ test('literal reviewer feedback is shown without inventing an interpretation',()
  const tree=JSON.stringify(PaymentResubmissionContext({context,head:'Driver',location:'Station',amount:700}));
  assert.match(tree,/NO REMARKS/);assert.doesNotMatch(tree,/No specific return reason/);
 });
+
+test('same-named evidence uses the current stage field without duplicate upload prompts',()=>{
+ const questions=[
+  {id:'expense-doc',question_text:' Supporting   Doc ',answer_type:'file',field_stage:'expense',sort_order:1,is_required:true},
+  {id:'payment-doc',question_text:'SUPPORTING DOC',answer_type:'file',field_stage:'payment',sort_order:2,is_required:true},
+  {id:'other',question_text:'Approval email',answer_type:'file',field_stage:'expense',sort_order:3,is_required:true}
+ ];
+ const payment=policy.resubmissionQuestions(questions,'payment');
+ assert.deepEqual(payment.map(q=>q.id),['payment-doc','other']);
+ assert.equal(payment[0].is_required,true);assert.equal(payment[1].is_required,false);
+ assert.deepEqual(policy.resubmissionQuestions(questions,'expense').map(q=>q.id),['expense-doc','other']);
+});

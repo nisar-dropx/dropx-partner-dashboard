@@ -729,7 +729,10 @@ export default async function PaymentRequestsPage({
               </div>
             </form>
             <div className="panel-body payment-cancel-wrap">
-              <CancelRequestPanel eligibility={cancelEligibility(resubmitRequest)} request={resubmitRequest} />
+              <details className="resubmit-disclosure">
+                <summary>Cancel this request instead</summary>
+                <CancelRequestPanel eligibility={cancelEligibility(resubmitRequest)} request={resubmitRequest} />
+              </details>
             </div>
           </section>
         </div>
