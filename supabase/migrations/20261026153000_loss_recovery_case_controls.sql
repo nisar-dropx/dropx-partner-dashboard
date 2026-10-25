@@ -36,7 +36,10 @@ do $$ declare f record; definition text; begin
      definition:=replace(definition,'when o.code = ''already_recovered'' then ''recovered''',
        'when o.code = ''responsible_left'' then ''exit_balance'' when o.code = ''already_recovered'' then ''recovered''');
    end if;
-   definition:=replace(definition,E'else\n    p_details:=''{}'';',E'elsif o.code <> ''responsible_left'' then\n    p_details:=''{}'';');
+   definition:=regexp_replace(definition,'else[[:space:]]+p_details[[:space:]]*:=[[:space:]]*''\{\}'';','elsif o.code <> ''responsible_left'' then p_details:=''{}'';','g');
+   if position('when o.code = ''responsible_left''' in definition)>0 and position('elsif o.code <> ''responsible_left''' in definition)=0 then
+     raise exception 'Recovery details patch could not be verified';
+   end if;
    execute definition;
  end loop;
 end $$;
