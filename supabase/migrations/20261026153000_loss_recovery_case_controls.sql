@@ -58,7 +58,7 @@ create table if not exists public.nl_case_response_events (
 create index if not exists nl_case_response_history on public.nl_case_response_events(company_id,month,case_key,created_at);
 alter table public.nl_case_response_windows enable row level security;
 alter table public.nl_case_response_events enable row level security;
-revoke all on public.nl_case_response_windows,public.nl_case_response_events from anon,authenticated;
+revoke all on public.nl_case_response_windows,public.nl_case_response_events from anon,authenticated,service_role;
 grant select on public.nl_case_response_windows,public.nl_case_response_events to service_role;
 
 -- Only the authenticated, scoped server route may invoke this function. Events are append-only.
