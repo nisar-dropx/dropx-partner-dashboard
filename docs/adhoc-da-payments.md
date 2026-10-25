@@ -1,5 +1,22 @@
 # Adhoc DA / Wishmaster payments
 
+## Current work-date policy (25 October 2026)
+
+OpsPulse and Dashboard share the payment form and Workforce calculation. The associate selector now reads Amazon or Flipkart imports according to the configured station provider. It returns the latest record for each distinct provider ID across import history, so a fortnightly report does not hide people absent on its final day.
+
+For Flipkart ODH/MDH, **Wishmaster name not reflecting** accepts a required 12-digit FHR ID (stored as text, including leading zeroes) and optional name. Users can find the ID using Aadhaar search in Casper; this form does not collect Aadhaar. Amazon's fallback requires a provider ID as well. Database validation derives the provider from the station and validates imported rows against company, station and provider.
+
+**Work date** is explicit and defaults to today in IST. New submissions use `adhoc_payout_policy=work_day`. Only `processed` / `paid` bank states exclude that provider ID's work at that station on that date. Pending/approved/processing requests do not exclude anything. Shipment imports remain unchanged; the payout calculation excludes the day's production, fixed/attendance pay and route fuel. Future imports/reimports match the saved provider ID/date, not the shipment row UUID. The zero-value daily line cites the paid request. Monthly attendance/production accumulation excludes the day; aggregate attendance spanning an excluded day requires dated inputs before publication.
+
+No cash-recovery adjustment is also created for a work-day request. An existing paid request for that ID/date prevents a second paid ad hoc request. An identified worker/date already in finalized Workforce payroll requires Finance review. Paid transitions share the payroll company lock, bump the dependency revision and enqueue publication refresh, invalidating stale calculation reviews. Failure to read paid-day records blocks payout calculation.
+
+Historical requests keep the original cash-recovery policy below. No paid record, existing deduction or finalized payroll is silently rewritten. Historical dates were defaulted at submission, so retrospective conversion requires a reviewed correction, not an inferred work date.
+
+Verification: `pnpm verify:adhoc-da` includes migration-twice PGlite lifecycle tests and actual Workforce-loader calculations for Amazon/Flipkart, per-packet/fixed pay, approval-only, date isolation, legacy deductions and failed exclusion lookups. Apply only `20261025120000_adhoc_wishmaster_paid_days.sql` before deploying the new form. No requests are paid or approved by the migration.
+
+## Historical cash-recovery policy
+
+
 - Applies to new **Payment Requests** and **Submit payment details** for approved requests, payment head `ADHOC_DA`. The initial Expense Request form is unchanged. Existing prior-approval requirements remain enforced; the DA is captured at the payment step even when that modal is opened from the expense register.
 - Select a DA name/provider ID from the latest available Amazon shipment roster for that company/station. The report date is not used. There is no date prompt or Workforce picker.
 - **DA name not available** accepts the exact SCC name alone. Missing, ambiguous or malformed provider mappings do not block payment submission or processing.

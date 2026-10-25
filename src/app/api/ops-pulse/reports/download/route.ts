@@ -103,7 +103,7 @@ export async function GET(request: Request) {
     if (head.error || !head.data) return Response.json({ error: "Adhoc DA payment head is unavailable." }, { status: 503 });
     const locationIds = locations.locations.filter(row => codes.includes(row.station_code)).map(row => row.id);
     const payments = await allRows<AdhocPayment>((start, end) => db.from("payment_requests")
-      .select("id,request_no,location_id,station_code,location_code,work_date,created_at,status,amount,amount_requested,amount_approved,processed_at,paid_at,utr_cin,adhoc_work_date,adhoc_da_name,adhoc_client,adhoc_provider_employee_id,adhoc_workforce_id,adhoc_adjustment_id")
+      .select("id,request_no,location_id,station_code,location_code,work_date,created_at,status,amount,amount_requested,amount_approved,processed_at,paid_at,utr_cin,adhoc_work_date,adhoc_da_name,adhoc_client,adhoc_provider_employee_id,adhoc_workforce_id,adhoc_adjustment_id,adhoc_payout_policy")
       .eq("company_id", companyId).eq("payment_head_id", head.data!.id).in("location_id", locationIds).gte("work_date", from).lte("work_date", to).order("work_date").order("id").range(start, end));
     if (payments.error) return Response.json({ error: "Adhoc payment report could not be loaded." }, { status: 503 });
     const shipments = await allRows<AdhocShipment>((start, end) => db.from("cps_shipment_daily")

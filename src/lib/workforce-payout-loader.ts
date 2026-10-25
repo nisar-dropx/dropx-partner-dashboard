@@ -1,4 +1,6 @@
 import "server-only";
+import { paidAdhocDays, paidAdhocDayBreakdown } from "@/lib/adhoc-paid-days";
+import { adhocPaidDayKey } from "@/lib/adhoc-da-identity";
 import { loadRouteDistanceContext } from "@/lib/workforce-route-distance-data";
 import { isKilometreField, kilometreRate, routeFuelForDay, type RouteDistanceContext } from "@/lib/workforce-route-distance";
 
@@ -158,6 +160,25 @@ export async function loadWorkforcePayoutRows(
     mapping.employee_id,
     mapping.field_executive_id
   ].some((identity) => identity && scopedIdentityIds.has(String(identity)));
+  const paidDaysResult = await readAllRows(admin.from("payment_requests")
+    .select("location_id,adhoc_client,adhoc_provider_employee_id,adhoc_work_date,status,adhoc_payout_policy,request_no")
+    .eq("company_id", companyId).eq("source_system", "OPS_ADHOC_DA").eq("adhoc_payout_policy", "work_day")
+    .in("status", ["processed", "paid"]).gte("adhoc_work_date", workforcePaymentMonthStart(fromDate)).lte("adhoc_work_date", toDate));
+  if (paidDaysResult.error) return { rows: [] as WorkforcePayoutRow[], error: "Unable to verify paid ad hoc work. Retry before calculating payouts." };
+  const paidDays = paidAdhocDays(paidDaysResult.data ?? []);
+  const paidDayForMapping = (mapping: any, date: string) => {
+    const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
+    return paidDays.get(adhocPaidDayKey(String(mapping.station_id), String(provider?.code ?? provider?.name ?? ""), String(mapping.provider_member_id ?? ""), date));
+  };
+  const paidWorkforceDays = new Map<string, string>();
+  for (const payment of paidDaysResult.data ?? []) {
+    const matches = allMappings.filter((mapping: any) => String(mapping.station_id) === payment.location_id
+      && String(mapping.effective_from) <= payment.adhoc_work_date && (!mapping.effective_to || String(mapping.effective_to) >= payment.adhoc_work_date)
+      && paidDayForMapping(mapping, payment.adhoc_work_date) === payment.request_no);
+    const identities = [...new Set(matches.map((mapping: any) => mapping.workforce_id).filter(Boolean))];
+    if (identities.length === 1) paidWorkforceDays.set(`${identities[0]}|${payment.location_id}|${payment.adhoc_work_date}`, payment.request_no);
+  }
+  const paidWorkerDay = (workerId: string, stationId: string, date: string) => paidWorkforceDays.get(`${workerId}|${stationId}|${date}`);
   const primaryScopedMappings = scopeEnabled ? allMappings.filter(mappingBelongsToScope) : allMappings;
   const scopedMappingIds = new Set(primaryScopedMappings.map((mapping: any) => String(mapping.id)));
   const scopedProviderKeys = new Set(primaryScopedMappings.flatMap((mapping: any) => {
@@ -871,6 +892,9 @@ export async function loadWorkforcePayoutRows(
     const markIssue = (message: string) => {
       if (!aggregateAttendanceIssueByPeriod.has(periodKey)) aggregateAttendanceIssueByPeriod.set(periodKey, message);
     };
+    if (dateRange(period.effective_from, period.effective_to).some(date => paidWorkerDay(period.workforce_id, period.station_id, date))) {
+      markIssue("This attendance range includes a day paid ad hoc. Replace the range with dated attendance to exclude that day correctly.");
+    }
     if (overlapsVisiblePeriod && (period.effective_from < fromDate || period.effective_to > toDate)) {
       markIssue("Aggregate attendance cannot be prorated in a partial payout view. Open the complete uploaded attendance range.");
     }
@@ -1035,6 +1059,7 @@ export async function loadWorkforcePayoutRows(
       }
       const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
       return dateRange(activeFrom, activeTo).flatMap((date) => {
+        if (paidDayForMapping(mapping, date)) return [];
         const rows = providerDailyRowsByDate.get(date) ?? [];
         return productionRules.filter(rule=>!(isKilometreField(rule.code)&&routeContext.enabledFrom&&date>=routeContext.enabledFrom)).map((rule) => {
           const providerUnits = rule.customProduction
@@ -1129,6 +1154,8 @@ export async function loadWorkforcePayoutRows(
     let missingThresholdConfiguration = false;
     let missingRouteDistance = false;
     const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
+      const paidAdhoc = paidDayForMapping(mapping, date);
+      if (paidAdhoc) return paidAdhocDayBreakdown(date, paidAdhoc);
       const rows = eligibleDailyByDate.get(date) ?? [];
       const kmRate = kilometreRate(mapping);
       const routeFuel = kmRate===null?null:routeFuelForDay(routeContext,{workforceId:String(worker.id),stationId:String(mapping.station_id),mappingId:String(mapping.id),date,rate:kmRate,hasActivity:rows.some(daily=>Number(daily.total_activity??daily.total_delivery??0)>0)||attendanceUnitForDate(String(worker.id),String(mapping.station_id),date,attendanceSourceKey)>0});
@@ -1197,6 +1224,7 @@ export async function loadWorkforcePayoutRows(
             date,
             [String(mapping.effective_from), String(worker?.date_of_join ?? mapping.effective_from)].sort().at(-1)!,
             (candidateDate) => {
+              if (paidDayForMapping(mapping, candidateDate)) return 0;
               const sourceAggregate = aggregateAttendanceForDate(String(worker.id), String(mapping.station_id), candidateDate, attendanceSourceKey);
               return sourceAggregate || attendanceOwnerOn(String(worker.id), String(mapping.station_id), candidateDate) === String(mapping.id)
                 ? attendanceUnitForDate(String(worker.id), String(mapping.station_id), candidateDate, attendanceSourceKey)
@@ -1258,7 +1286,7 @@ export async function loadWorkforcePayoutRows(
         || aggregateAttendance?.period.attendance_basis === "days";
       return {
         date,
-        attendanceUnit: attendanceUnitForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey),
+        attendanceUnit: paidDayForMapping(mapping, date) ? 0 : attendanceUnitForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey),
         source: aggregateAttendance?.period.attendance_basis === "days" && !aggregateAttendance.issue
           ? "bulk_upload_range"
           : importedDayAttendance
@@ -1414,6 +1442,8 @@ export async function loadWorkforcePayoutRows(
         requiresMonthlyDayHistory
       );
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
+        const paidAdhoc = paidWorkerDay(workforceId, String(allocation.station_id), date);
+        if (paidAdhoc) return { ...paidAdhocDayBreakdown(date, paidAdhoc), missing: false };
         const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
         const aggregateAttendance = aggregateAttendanceForDate(workforceId, String(allocation.station_id), date, attendanceSourceKey);
         const hasImportedAttendance = hasImportedAttendanceForDate(workforceId, String(allocation.station_id), date, attendanceSourceKey);
@@ -1429,7 +1459,7 @@ export async function loadWorkforcePayoutRows(
             cumulativeAttendanceUnitsBefore: cumulativeDirectPayUnitsBefore(
               date,
               [String(allocation.effective_from), String(worker?.date_of_join ?? allocation.effective_from)].sort().at(-1)!,
-              (candidateDate) => allocationActiveOn(allocation, candidateDate)
+              (candidateDate) => !paidWorkerDay(workforceId, String(allocation.station_id), candidateDate) && allocationActiveOn(allocation, candidateDate)
                 ? attendanceUnitForDate(workforceId, String(allocation.station_id), candidateDate, attendanceSourceKey)
                 : 0
             ),
@@ -1497,7 +1527,7 @@ export async function loadWorkforcePayoutRows(
     const workDaySummary = summarizeWorkDays(rawDailyBreakdown.map((day) => ({
       date: day.date,
       attendanceUnit: day.workDayUnits,
-      source: day.workDaysSummarySource,
+      source: day.workDaysSummarySource ?? "shipment_data",
       aggregateRange: day.aggregateWorkDays
     })));
     const workDays = workDaySummary.workDays;
