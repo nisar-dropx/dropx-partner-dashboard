@@ -3,6 +3,7 @@ export type AdhocPayment = {
   work_date: string; created_at: string; status: string; amount: number | string | null; amount_requested: number | string | null; amount_approved: number | string | null;
   processed_at: string | null; paid_at: string | null; utr_cin: string | null;
   adhoc_work_date: string | null; adhoc_da_name: string | null; adhoc_client: string | null; adhoc_provider_employee_id: string | null;
+  adhoc_payout_policy?: string | null;
   adhoc_workforce_id: string | null; adhoc_adjustment_id: string | null;
 };
 export type AdhocShipment = { station_code: string; client: string; provider_employee_id: string; work_date: string; amazon_delivery: number | string; total_delivery: number | string };
@@ -20,11 +21,11 @@ export function adhocDaReport(payments: AdhocPayment[], shipments: AdhocShipment
     const count = shipmentCounts.get(id) ?? { amazon: 0, delivered: 0 };
     count.amazon += n(row.amazon_delivery); count.delivered += n(row.total_delivery); shipmentCounts.set(id, count);
   }
-  const groups = new Map<string, { station: string; client: string; providerId: string; name: string; workforceId: string; requests: number; requested: number; paid: number; recovered: number; pending: number; tracked: boolean }>();
+  const groups = new Map<string, { station: string; client: string; providerId: string; name: string; workforceId: string; requests: number; requested: number; paid: number; recovered: number; pending: number; tracked: boolean; dayPolicy: boolean }>();
   const details = payments.map(row => {
     const station = row.station_code || row.location_code || "", tracked = Boolean(row.adhoc_workforce_id);
     const groupKey = key(station, row.adhoc_client || "", row.adhoc_provider_employee_id || `UNLINKED:${row.id}`);
-    const group = groups.get(groupKey) ?? { station, client: row.adhoc_client || "", providerId: row.adhoc_provider_employee_id || "UNLINKED", name: row.adhoc_da_name || "Historical request — DA not captured", workforceId: row.adhoc_workforce_id || "", requests: 0, requested: 0, paid: 0, recovered: 0, pending: 0, tracked };
+    const group = groups.get(groupKey) ?? { station, client: row.adhoc_client || "", providerId: row.adhoc_provider_employee_id || "UNLINKED", name: row.adhoc_da_name || "Historical request — DA not captured", workforceId: row.adhoc_workforce_id || "", requests: 0, requested: 0, paid: 0, recovered: 0, pending: 0, tracked, dayPolicy: row.adhoc_payout_policy === "work_day" };
     const paid = isAdhocPaid(row.status) ? n(row.amount ?? row.amount_requested) : 0;
     const deduction = row.adhoc_adjustment_id ? adjustmentById.get(row.adhoc_adjustment_id) : undefined;
     group.requests++; group.requested += n(row.amount_requested ?? row.amount); group.paid += paid;
@@ -38,7 +39,8 @@ export function adhocDaReport(payments: AdhocPayment[], shipments: AdhocShipment
       "Approved amount": row.amount_approved == null ? "" : n(row.amount_approved), "Paid amount": paid,
       "Paid / processed at": row.processed_at || row.paid_at || "", "Bank reference": row.utr_cin || "",
       "Deduction ID": row.adhoc_adjustment_id || "", "Deduction posting date": deduction?.effective_date || "",
-      "Deduction status": deduction?.status || (row.adhoc_da_name ? (paid ? "Paid — awaiting identity reconciliation" : "Not paid") : "Historical — not linked; no automatic deduction"), "Payroll run ID": deduction?.payroll_run_id || ""
+      "Workforce treatment": row.adhoc_payout_policy === "work_day" ? (paid ? "Paid work date excluded — no cash deduction" : "Work date excluded only after payment") : "Legacy cash recovery",
+      "Deduction status": row.adhoc_payout_policy === "work_day" ? "Not applicable — work-day policy" : deduction?.status || (row.adhoc_da_name ? (paid ? "Paid — awaiting identity reconciliation" : "Not paid") : "Historical — not linked; no automatic deduction"), "Payroll run ID": deduction?.payroll_run_id || ""
     };
   });
   const summary = [...groups.values()].map(group => {
@@ -47,7 +49,7 @@ export function adhocDaReport(payments: AdhocPayment[], shipments: AdhocShipment
       "Amazon delivered (selected range)": group.tracked ? counts?.amazon ?? 0 : "", "Total delivered (selected range)": group.tracked ? counts?.delivered ?? 0 : "",
       "Payment requests": group.requests, "Requested amount": round(group.requested), "Paid amount": round(group.paid),
       "Recovery in payroll snapshot": round(group.recovered), "Recovery awaiting payroll": round(group.pending),
-      "Tracking": group.tracked ? "Linked" : (group.client ? "Reference captured — identity reconciliation pending" : "Historical — needs manual reconciliation") };
+      "Tracking": group.dayPolicy ? "Work-date exclusion by provider ID" : group.tracked ? "Linked" : (group.client ? "Reference captured — identity reconciliation pending" : "Historical — needs manual reconciliation") };
   });
   return { summary, details };
 }

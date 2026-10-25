@@ -1,4 +1,5 @@
 "use server";
+import { adhocDaIdentityFields } from "@/lib/adhoc-da-identity";
 import { prepareAdhocRequest, validateAdhocResubmission } from "@/lib/adhoc-vehicle-server";
 
 import { randomInt } from "crypto";
@@ -35,31 +36,6 @@ function required(value: FormDataEntryValue | null, field: string) {
   return text;
 }
 
-function adhocDaIdentityFields(formData: FormData) {
-  // Names are reference data, not a dated shipment/payroll submission.
-  const workDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-  const identityMode = clean(formData.get("adhoc_identity_mode"));
-  if (identityMode === "manual_scc") {
-    const manualName = required(formData.get("adhoc_manual_name"), "Exact SCC associate name");
-    if (manualName.length < 2 || manualName.length > 160) throw new Error("Enter the exact SCC associate name (2–160 characters).");
-    return {
-      source_system: "OPS_ADHOC_DA",
-      adhoc_shipment_id: null,
-      adhoc_work_date: workDate,
-      adhoc_da_name: manualName,
-      adhoc_workforce_id: null
-    };
-  }
-  const shipmentId = required(formData.get("adhoc_shipment_id"), "DA name / Provider ID");
-  if (!/^[a-f0-9-]{36}$/i.test(shipmentId)) throw new Error("Select a valid DA from the latest Amazon roster.");
-  return {
-    source_system: "OPS_ADHOC_DA",
-    adhoc_shipment_id: shipmentId,
-    adhoc_work_date: workDate,
-    adhoc_da_name: null,
-    adhoc_workforce_id: null
-  };
-}
 
 function safeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
