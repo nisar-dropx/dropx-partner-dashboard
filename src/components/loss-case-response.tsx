@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import styles from "./nl-loss.module.css";
+const eventLabels: Record<string, string> = { activate: "Redispute activated", revoke: "Window closed", response: "Station response", vendor_response: "Vendor response" };
 type Event = { id: string; action: string; note: string; evidence_url: string | null; actor_name: string; created_at: string };
 type Data = { window: { version: number; enabled: boolean }; events: Event[]; canActivate: boolean; readOnly: boolean; row: { station_code: string; amount: number; source_status: string; details: { tid?: string; extra?: Record<string, string> } } };
 export function LossCaseResponse({ month, caseKey }: { month: string; caseKey: string }) {
@@ -54,7 +55,7 @@ export function LossCaseResponse({ month, caseKey }: { month: string; caseKey: s
         <small>Saved for the case team. This does not submit a dispute to Amazon.</small>
       </form> : null}
       <details className={styles.compactDetails} open><summary>Response history · {data.events.length}</summary>{data.events.map(event => <article className={styles.allocation} key={event.id}>
-        <strong>{{ activate: "Redispute activated", revoke: "Window closed", response: "Station response", vendor_response: "Vendor response" }[event.action]}</strong>
+        <strong>{eventLabels[event.action] || event.action}</strong>
         <small> · {event.actor_name} · {new Date(event.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small>
         <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{event.note}</p>
         {event.evidence_url ? <a href={event.evidence_url} target="_blank" rel="noreferrer">View evidence ↗</a> : null}
