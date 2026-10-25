@@ -147,7 +147,9 @@ await assert.rejects(()=>insert({request_no:'DUP',adhoc_payout_policy:'work_day'
 await assert.rejects(()=>db.query("update payment_requests set adhoc_payout_policy='cash_recovery' where id=$1",[dated.id]),/policy is frozen/);
 await assert.rejects(()=>db.query("update payment_requests set adhoc_work_date='2026-10-12' where id=$1",[dated.id]),/identity is frozen/);
 await db.exec(`update providers set code='FLIPKART',name='Flipkart'; update field_executive_provider_mappings set provider_member_id='001234567890';`);
-await assert.rejects(()=>insert({adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_provider_employee_id:'123',adhoc_da_name:'Missing'}),/12-digit/);
+for (const invalidId of ['123', '12345678901', '1234567890123', '12345678901A', '123 45678901', '1.2345678e11']) {
+  await assert.rejects(()=>insert({adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_provider_employee_id:invalidId,adhoc_da_name:'Missing'}),/12-digit/);
+}
 await assert.rejects(()=>insert({adhoc_payout_policy:'work_day'}),/this station and provider/);
 const wm=await insert({request_no:'FHR-MANUAL',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-12',adhoc_provider_employee_id:'001234567890',adhoc_da_name:'Wishmaster'});
 assert.equal(wm.adhoc_client,'Flipkart'); assert.equal(wm.adhoc_provider_employee_id,'001234567890'); assert.equal(wm.adhoc_workforce_id,worker);
