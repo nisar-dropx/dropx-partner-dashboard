@@ -107,6 +107,7 @@ export function buildInterimSalary(run: SalaryRun, person: SalaryPerson | null, 
       name: isLossRecoverySalaryItem(row) ? lossRecoverySplitLabel(row) : row.name,
       amount: money(row.amount),
       lossSplit: isLossRecoverySalaryItem(row),
+      recoveryKey: typeof metaRecord(row.metadata).recovery_key === "string" ? String(metaRecord(row.metadata).recovery_key) : null,
     }));
   const totalEarnings = person ? money(money(person.gross_pay) + money(person.other_earnings)) : null;
   const deductionTotal = money(deductions.reduce((sum, row) => sum + row.amount, 0));

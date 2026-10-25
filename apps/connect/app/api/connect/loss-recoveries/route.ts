@@ -87,9 +87,13 @@ export async function GET(request: Request) {
       }
       throw new Error(ledger.error.message);
     }
+    // Keep completed deductions visible, and never widen the session-bound person's scope.
+    const requestedMonth = url.searchParams.get("month");
+    const requestedCase = url.searchParams.get("caseKey");
     const rows = (ledger.data ?? []).filter(
-      (r: { outstanding?: number | string; status?: string }) =>
-        Number(r.outstanding) > 0 || r.status === "in_progress" || r.status === "scheduled",
+      (r: { employee_ref?: string; month?: string; case_key?: string }) =>
+        r.employee_ref === ref && (!requestedMonth || r.month === requestedMonth)
+        && (!requestedCase || r.case_key === requestedCase),
     );
     const recoveries = [];
     for (const row of rows) {
@@ -110,7 +114,10 @@ export async function GET(request: Request) {
         .eq("case_key", row.case_key)
         .maybeSingle();
       // Only SLP-approved plans are payroll-due; hide proposals until locked.
-      if (plan.data && plan.data.approval_status !== "approved") continue;
+      if (caseRow.error) throw new Error("Unable to load the loss case. Please retry.");
+      if (plan.error) throw new Error("Unable to load the recovery plan. Please retry.");
+      // Retain payroll history even if a later source change pauses the remaining plan.
+      if (!plan.data || (plan.data.approval_status !== "approved" && (Number(row.deducted) || 0) <= 0 && (Number(row.in_payroll) || 0) <= 0)) continue;
       const details = (caseRow.data?.details ?? {}) as Record<string, unknown>;
       const share = myAllocation(plan.data?.allocations, ref);
       recoveries.push({
@@ -141,10 +148,13 @@ export async function GET(request: Request) {
         installmentCount: row.installment_count ?? share?.installmentCount ?? null,
         monthlyAmount: Number(row.monthly_amount ?? share?.monthlyAmount ?? 0),
         deducted: Number(row.deducted),
+        inPayroll: Number(row.in_payroll) || 0,
+        waived: Number(row.waived) || 0,
+        lastDeductedMonth: row.last_deducted_in ?? null,
         outstanding: Number(row.outstanding),
         status: row.status,
         lifecycleStatus: caseRow.data?.lifecycle_status ?? null,
-        nextDueMonth: plan.data?.deduction_month ?? row.first_salary_month,
+        scheduledFromMonth: plan.data?.deduction_month ?? row.first_salary_month,
         capOverride: Boolean(row.cap_override || plan.data?.cap_override),
         finalSettlement: row.status === "exit_balance",
         approvalStatus: plan.data?.approval_status ?? null,

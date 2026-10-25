@@ -503,7 +503,7 @@ export function RecoveryForm({
         },
         ...h,
       ]);
-      setSuccess("Recovery plan saved.");
+      setSuccess(option?.deduction_timing === "none" ? "Recovery decision saved." : "Recovery plan saved. Final approval is required before payroll deduction.");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -619,7 +619,7 @@ export function RecoveryForm({
                     const j = await res.json();
                     if (!res.ok) throw Error(j.error);
                     setRecovery(j.recovery);
-                    setSuccess("Recovery approved and scheduled for payroll.");
+                    setSuccess("Recovery approved. The eligible payroll calculation will deduct it from net pay; any balance carries forward.");
                     router.refresh();
                   } catch (e) {
                     setError(

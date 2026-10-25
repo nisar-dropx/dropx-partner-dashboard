@@ -1,4 +1,5 @@
 "use client";
+import { RecoveryDetailButton } from "./connect-loss-recovery-detail";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -300,7 +301,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         <div className={styles.tableWrap}>
           <table className={`${styles.breakdownTable} ${styles.deductionTable}`} aria-label="Deduction heads breakdown">
             <thead><tr><th scope="col">Deduction</th><th scope="col">Amount</th></tr></thead>
-            <tbody>{visibleDeductions.map((line) => <tr key={line.code}><th scope="row">{line.label}</th><td>− {money(line.amount)}</td></tr>)}</tbody>
+            <tbody>{visibleDeductions.map((line) => <tr key={line.recoveryKey || line.code}><th scope="row">{line.label}{line.recoveryKey ? <RecoveryDetailButton accountId={accountId} profileType={profileType} recoveryKey={line.recoveryKey} amount={line.amount} payrollLabel="published payout"/> : null}</th><td>− {money(line.amount)}</td></tr>)}</tbody>
             <tfoot><tr><th scope="row">Gross deductions</th><td>− {money(payout.deductions)}</td></tr></tfoot>
           </table>
         </div>

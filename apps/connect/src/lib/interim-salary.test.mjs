@@ -225,3 +225,12 @@ test('notification inbox and dashboard CTA are independently scoped; preview mak
   assert.ok(reads[1].some(row => String(row[0]).includes('data->>dashboardUntil.is.null')));
   selected = null; assert.equal((await api.GET(req)).status, 401); assert.equal(reads.length, 2);
 });
+
+
+test('salary deduction keeps the case key for an own-account detail lookup', () => {
+  const recovery_key = '2026-09|slp:TID1|employee:worker|1';
+  const result = salary.buildInterimSalary(run, {...person, hr_payroll_run_items: [...person.hr_payroll_run_items, {...item('OPS_LOSS_RECOVERY',400),metadata:{recovery_key}}]}, [], null);
+  const loss = result.deductions.find(row => row.lossSplit);
+  assert.equal(loss.recoveryKey, recovery_key);
+  assert.equal(loss.amount, 400);
+});

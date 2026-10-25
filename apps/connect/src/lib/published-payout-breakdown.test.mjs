@@ -126,3 +126,11 @@ test("associate payout disputes show approvals, correction progress and final pa
   assert.match(styles, /\.workflowProgress/);
   assert.match(styles, /\.correctionTotals/);
 });
+
+test("each loss case and instalment remains individually traceable in published deductions", () => {
+  const keys = ['2026-09|TID1|workforce:w1', '2026-09|slp:TID2|workforce:w1|2'];
+  const result = publishedPayoutBreakdown({ worksheet: { deduction_breakdown: keys.map((recoveryKey,i) => ({code:'LOSS_RECOVERY',label:`Loss ${i}`,amount:100+i*100,recoveryKey})) } }, [], {});
+  assert.deepEqual(result.deductions.map(l => [l.recoveryKey,l.amount]), [[keys[0],100],[keys[1],200]]);
+  const legacy = publishedPayoutBreakdown(null, keys.map((recoveryKey,i) => ({source_type:'deduction',adjustment_amount:-(100+i*100),calculation_snapshot:{category:'LOSS_RECOVERY',reason:'Loss',recoveryKey}})), {});
+  assert.deepEqual(legacy.deductions.map(l => [l.recoveryKey,l.amount]), [[keys[0],100],[keys[1],200]]);
+});
