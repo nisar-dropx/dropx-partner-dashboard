@@ -81,6 +81,7 @@ export function NlLiveCases({
   initialPhase,
   canDispute,
   canDesk,
+  canApprove = false,
   outcomes, settings, canRecovered,
 }: {
   month: string;
@@ -90,6 +91,7 @@ export function NlLiveCases({
   initialPhase: string;
   canDispute: boolean;
   canDesk: boolean;
+  canApprove?: boolean;
   outcomes: RecoveryOutcome[]; settings: LossSettings | null; canRecovered: boolean;
 }) {
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
@@ -245,7 +247,7 @@ export function NlLiveCases({
               </button>
               {active === c.case_key ? (
                 <>
-                {stageView === "initial" ? <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?${new URLSearchParams({ month: c.month, case: c.case_key })}`}>Case response ↗</a> : null}
+
                 <details className={styles.compactDetails} open={historyOpen === c.case_key} onToggle={e => setHistoryOpen(e.currentTarget.open ? c.case_key : null)}><summary>{stageView === "initial" ? "Dispute / respond" : "Vendor response & case history"}</summary>
                 {historyOpen === c.case_key ? <LiveDetail
                   row={c}
@@ -254,7 +256,7 @@ export function NlLiveCases({
                   canDesk={canDesk}
                 /> : null}
                 </details>
-                {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canDesk} /> : null}
+                {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canApprove} /> : null}
                 </>
               ) : null}
             </article>
@@ -312,11 +314,13 @@ function LiveDetail({
   window,
   canDispute,
   canDesk,
+  canApprove = false,
 }: {
   row: LiveCase;
   window: LiveWindow;
   canDispute: boolean;
   canDesk: boolean;
+  canApprove?: boolean;
 }) {
   const router = useRouter();
   const x = row.details.extra ?? {};

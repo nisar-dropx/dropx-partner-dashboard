@@ -15,7 +15,7 @@ export const CLAIM_CATEGORIES: Record<ClaimCategory, string> = {
 
 /** Who acts next, shown on every claim so the station and Ops both know where it stands. */
 export const CLAIM_STATUS: Record<ClaimStatus, { label: string; tone: "warn" | "info" | "good" | "muted" | "danger"; next: string }> = {
-  submitted: { label: "With cluster manager", tone: "warn", next: "Cluster manager to approve, return or reject" },
+  submitted: { label: "With final approver", tone: "warn", next: "Final approver to approve, return or reject" },
   returned: { label: "Returned to station", tone: "danger", next: "Station to add the details asked for and resubmit" },
   approved: { label: "Approved", tone: "good", next: "Assign the people responsible in the recovery panel" },
   rejected: { label: "Rejected", tone: "muted", next: "Closed" },

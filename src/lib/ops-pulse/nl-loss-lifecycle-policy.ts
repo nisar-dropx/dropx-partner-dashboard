@@ -54,7 +54,6 @@ export type LifecycleAction =
 const CLUSTER_ACTIONS = new Set<LifecycleAction>([
   "ready_for_cluster",
   "return_to_station",
-  "reject",
   "propose",
   "clear_needs_review",
   "mark_needs_review",
@@ -62,19 +61,18 @@ const CLUSTER_ACTIONS = new Set<LifecycleAction>([
 const SLP_ACTIONS = new Set<LifecycleAction>([
   "approve",
   "return_to_station",
-  "reject",
   "hold",
   "resume",
   "mark_needs_review",
 ]);
-const STATION_ACTIONS = new Set<LifecycleAction>(["clarify"]);
+const STATION_ACTIONS = new Set<LifecycleAction>(["clarify", "propose"]);
 
 export function lifecycleLabel(status: string | null | undefined) {
   if (status && status in LIFECYCLE_LABELS) return LIFECYCLE_LABELS[status as LifecycleStatus];
   return status || "Unknown";
 }
 
-/** Station users: view + dispute/clarify only — never plan/approve/write-off. */
+/** Station users may submit updates; final approval and write-off remain restricted. */
 export function stationMayAct(action: LifecycleAction) {
   return STATION_ACTIONS.has(action);
 }

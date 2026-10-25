@@ -24,6 +24,7 @@ const render = compile("./loss-recovery-action-digest-render.ts");
 test("empty action set produces no digest messages (builder short-circuits)", async () => {
   const digest = compile("./loss-recovery-action-digest.ts", {
     "./portal-digest-delivery": {},
+    "./ops-pulse/loss-recovery-controls": compile("./ops-pulse/loss-recovery-controls.ts"),
     "@/lib/people-operational-hierarchy": { loadPeopleOperationalHierarchy: async () => ({ byLocation: new Map(), error: null }) },
     "./ops-pulse/salary-hold-policy": { holdApprovers: () => ({ personIds: [] }) },
     "./approval-covers": { loadActiveApprovalCovers: async () => [] },

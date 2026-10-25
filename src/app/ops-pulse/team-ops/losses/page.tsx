@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-
-/** Team Ops → Losses opens on the NL Loss sub-page. */
+import { defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
+export const dynamic = "force-dynamic";
 export default function LossesPage() {
-  redirect("/team-ops/losses/nl");
+ redirect(defaultLossFilter()==="recoverable" ? "/team-ops/losses/recovery" : "/team-ops/losses/nl?view=live");
 }

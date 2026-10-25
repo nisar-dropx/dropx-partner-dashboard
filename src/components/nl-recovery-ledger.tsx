@@ -26,6 +26,9 @@ const lineKey = (l: LedgerLine) => `${l.month}|${l.case_key}|${l.employee_ref}`;
 
 const FILTERS = [
   { key: "open", label: "Outstanding" },
+  { key: "awaiting_approval", label: "Awaiting approval" },
+  { key: "returned", label: "Returned" },
+  { key: "needs_review", label: "Needs review" },
   { key: "exit_balance", label: "Exit balances" },
   { key: "in_progress", label: "Recovering" },
   { key: "scheduled", label: "Scheduled" },
@@ -89,7 +92,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
       <section className={styles.panel}>
         <div className={styles.panelHead}>
           <div>
-            <h2>Recovery ledger</h2>
+            <h2>Collections</h2>
             <p>One line per person per loss: what was assigned, what payroll deducted and what is still due.</p>
           </div>
           <div className={styles.toolbar}>
@@ -142,7 +145,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                         <small>{l.employee_code || l.employee_ref} · {l.station_code}</small>
                       </td>
                       <td>
-                        <span>{caseLabel(l)}</span>
+                        <a href={`/team-ops/losses/recovery?case=${encodeURIComponent(l.case_key)}`}>{caseLabel(l)}</a>
                         <small>{l.outcome_label}{l.updated_by_name ? ` · by ${l.updated_by_name}` : ""}</small>
                       </td>
                       <td>

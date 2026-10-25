@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     const claim = view.claims.find((c) => c.id === id);
     if (!claim) return reply({ error: "This claim is not in your stations." }, 403);
     if (!claim.actions.includes(action))
-      return reply({ error: ["approve", "reject", "return"].includes(action) ? "Only the station's cluster manager can decide this claim, and never their own." : "Only the person who raised this claim can do that, at this stage." }, 403);
+      return reply({ error: ["approve", "reject", "return"].includes(action) ? "Only SLP Manager, National Head, Finance Manager or Managing Partner can decide a claim, and never their own." : "Only the person who raised this claim can do that, at this stage." }, 403);
     let patch = {};
     if (action === "resubmit") {
       const invalid = validateClaim({ stationId: claim.stationId, reference: claim.reference, incidentDate: claim.incidentDate, category: claim.category, amount: String(body.amount ?? ""), description: String(body.description ?? ""), evidenceUrl: String(body.evidenceUrl ?? ""), people: "" });
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     const done: Record<ClaimAction, string> = {
       approve: "Approved. Assign the people responsible below; the recovery then follows payroll.",
       reject: "Claim rejected.", return: "Returned to the station for more information.",
-      resubmit: "Resubmitted to the cluster manager.", withdraw: "Claim withdrawn.",
+      resubmit: "Resubmitted for final approval.", withdraw: "Claim withdrawn.",
     };
     return reply({ ok: true, message: done[action] });
   } catch (e) {

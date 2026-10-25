@@ -68,6 +68,7 @@ export function NlLiveReport({
         active="nl"
       />
       <NlViewSwitch active={viewKey} />
+      {isFinal?<p className={styles.hint}><Link href="/team-ops/losses/recovery">Open Recovery → all loss months, carried balances and returned updates</Link></p>:null}
       {!v.ready ? (
         <div className={styles.notice} role="status">
           The live dispute view is being enabled. Recovery for closed months
@@ -104,7 +105,7 @@ export function NlLiveReport({
               ) : current === "Completed" ? (
                 <div className={`${styles.countdown} ${styles.muted}`}>
                   <strong>Reviews complete</strong>
-                  <span>This month moves to Historic next</span>
+                  <span>Confirmed cases appear in Final</span>
                 </div>
               ) : (
                 <div className={`${styles.countdown} ${styles.muted}`}>
@@ -240,6 +241,7 @@ export function NlLiveReport({
                 initialPhase={v.phase}
                 canDispute={v.canDispute}
                 canDesk={v.canDesk}
+                canApprove={v.canApprove}
                 outcomes={v.outcomes}
                 settings={v.settings}
                 canRecovered={v.canRecovered}

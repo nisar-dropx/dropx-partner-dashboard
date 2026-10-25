@@ -59,6 +59,9 @@ export type RecoveryPolicy = {
 };
 export type RecoveryAttachment = { id: string; file_name: string };
 export type RecoveryDetails = {
+  received_amount?: string;
+  receipt_reference?: string;
+  received_date?: string;
   employee_id?: string;
   employee_name?: string;
   follow_up?: string;
@@ -87,6 +90,9 @@ export type RecoveryPlan = {
   cap_override_reason?: string;
 };
 export type Recovery = {
+  approval_status?: string;
+  approval_note?: string;
+  proposed_by?: string;
   recovery_mode?: RecoveryMode;
   installment_basis?: InstallmentBasis | null;
   installment_value?: number | null;
@@ -108,6 +114,11 @@ export type Recovery = {
   updated_at: string;
 };
 export type NlCase = {
+  source_final_nonrecoverable?: boolean;
+  lifecycle_status?: string;
+  lifecycle_version?: number;
+  lifecycle_note?: string;
+  source_present?: boolean;
   /** "slp" cases come from Amazon’s SLP recovery files; they share the NL recovery ledger. */
   report?: "nl" | "slp" | "station";
   case_key: string;
@@ -161,7 +172,7 @@ export function splitRecovery(amount: number, refs: string[]) {
   }));
 }
 export function recoveryPending(recovery: Recovery | null) {
-  return !recovery || recovery.is_deleted || ["post_dispute", "non_recoverable", "da_left", "utr_left", "responsible_left"].includes(recovery.outcome_code);
+  return !recovery || recovery.is_deleted || ["proposed", "returned", "needs_review"].includes(recovery.approval_status || "") || ["post_dispute", "non_recoverable", "da_left", "utr_left", "responsible_left"].includes(recovery.outcome_code);
 }
 export function recoveryNeedsReview(row: NlCase) {
   return (

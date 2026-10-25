@@ -1,3 +1,4 @@
+import { mayActivateRedispute } from "@/lib/ops-pulse/loss-recovery-controls";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { nlStationScope } from "@/lib/ops-pulse/nl-loss";
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
     if (request.headers.get("origin") && request.headers.get("origin") !== new URL(request.url).origin)
       return reply({ error: "Invalid request origin." }, 403);
     const auth = await getAuthorization();
-    if (!auth || auth.readOnly || !hasPermission(auth, "ops_loss_master", "edit") || !supabaseAdmin)
+    if (!auth || !mayActivateRedispute(auth) || !hasPermission(auth, "ops_loss_master", "edit") || !supabaseAdmin)
       return reply({ error: "Only people with Loss Recovery Master edit access can write off a balance." }, 403);
     const body = await request.json().catch(() => ({}));
     const month = String(body.month ?? ""), caseKey = String(body.case_key ?? ""), ref = String(body.employee_ref ?? "");

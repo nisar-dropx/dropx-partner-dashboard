@@ -1,3 +1,4 @@
+import { mayActivateRedispute } from "./loss-recovery-controls";
 import "server-only";
 import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import {
@@ -238,7 +239,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     sort: filters.sort || "value_desc",
     outcomes: recoveryContext.outcomes,
     settings: recoveryContext.settings,
-    canRecovered: !auth.readOnly && hasPermission(auth, "ops_loss_recovered", "edit"),
+    canRecovered: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
     summary: tally(filtered),
     cases,
     deskQueue: (requests.data ?? []).filter(
@@ -247,6 +248,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     checked: runResult.data?.checked_at || runResult.data?.finished_at || null,
     canDispute: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
     // The Cloak desk files what stations send and can return a request for correction.
+    canApprove: mayActivateRedispute(auth) && hasPermission(auth, "ops_losses", "edit"),
     canDesk: !auth.readOnly && hasPermission(auth, "ops_loss_master", "edit"),
   };
 }
