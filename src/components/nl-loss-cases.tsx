@@ -9,6 +9,7 @@ import {
   type LossSettings,
   splitRecovery,
   recoveryNeedsReview,
+  recoveryPending,
   recoveryCsv,
   allocationError,
   installmentSchedule,
@@ -78,7 +79,7 @@ export function NlLossCases({
   const shown = useMemo(
     () =>
       sortLossRows(cases.filter((c) =>
-        (status !== "pending" || !c.recovery || c.recovery.is_deleted) &&
+        (status !== "pending" || recoveryPending(c.recovery)) &&
         [
           c.station_code,
           ...(c.recovery?.allocations.map(p => `${p.full_name} ${p.employee_code}`) || []),
@@ -171,7 +172,7 @@ export function NlLossCases({
           <h2>Recoverable cases</h2>
           <p>
             {shown.length} cases ·{" "}
-            {cases.filter((c) => !c.recovery || c.recovery.is_deleted).length}{" "}
+            {cases.filter((c) => recoveryPending(c.recovery)).length}{" "}
             pending update
           </p>
         </div>
@@ -225,13 +226,13 @@ export function NlLossCases({
                 <strong>{money(c.amount)}</strong>
                 <span
                   className={
-                    c.recovery && !c.recovery.is_deleted
+                    !recoveryPending(c.recovery)
                       ? styles.done
                       : styles.pending
                   }
                 >
                   {recoveryNeedsReview(c)
-                    ? "Source changed · review"
+                    ? "Recovery review needed"
                     : c.recovery && !c.recovery.is_deleted
                       ? c.recovery.outcome_label
                       : "Assign recovery person"}
@@ -738,7 +739,7 @@ export function RecoveryForm({
                 {outcomes
                   .filter(
                     (o) =>
-                      (o.is_active && recoveryActionAllowed(o) && (!o.restricted || canRecovered)) ||
+                      (o.is_active && recoveryActionAllowed(o) && !o.restricted) ||
                       o.code === outcome,
                   )
                   .map((o) => (
