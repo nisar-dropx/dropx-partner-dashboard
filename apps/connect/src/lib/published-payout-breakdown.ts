@@ -15,6 +15,7 @@ export type PublishedPayoutEarning = {
 };
 
 export type PublishedPayoutDeduction = {
+  recoveryKey?: string;
   code: string;
   label: string;
   amount: number;
@@ -128,9 +129,11 @@ function deductionRows(rows: Row[]) {
     if (!amount) return;
     const code = text(source.code ?? source.category).toUpperCase() || `DEDUCTION_${index + 1}`;
     const label = text(source.label ?? source.reason) || code.replaceAll("_", " ");
-    const current = values.get(code) ?? { code, label, amount: 0 };
+    const recoveryKey = text(source.recoveryKey ?? source.recovery_key);
+    const key = recoveryKey ? `${code}|${recoveryKey}` : code;
+    const current = values.get(key) ?? { code, label, amount: 0, ...(recoveryKey ? { recoveryKey } : {}) };
     current.amount = rounded(current.amount + amount);
-    values.set(code, current);
+    values.set(key, current);
   });
   return [...values.values()];
 }
@@ -190,6 +193,7 @@ export function publishedPayoutBreakdown(snapshot: Row | null | undefined, rawLi
   const worksheetDeductions = Array.isArray(worksheet.deduction_breakdown) ? worksheet.deduction_breakdown : [];
   const rawDeductions = rawLines.filter((line) => text(line.source_type) === "deduction" || number(line.adjustment_amount) < 0).map((line) => ({
     code: line.calculation_snapshot?.category,
+    recoveryKey: line.calculation_snapshot?.recoveryKey,
     label: line.calculation_snapshot?.reason,
     amount: Math.abs(number(line.adjustment_amount)),
   }));

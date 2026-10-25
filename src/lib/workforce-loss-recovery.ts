@@ -66,6 +66,8 @@ export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: 
     if (list) list.push(line); else byWorker.set(line.worker_id, [line]);
   }
   const carried: WorkforceLossRecoveryLine[] = [];
+  // A worker can have several station/provider rows. Recalculation must find keys on all of them.
+  const appliedKeys = new Set(rows.flatMap(row => row.deductionBreakdown.flatMap(item => item.recoveryKey ? [item.recoveryKey] : [])));
   for (const [workerId, workerLines] of byWorker) {
     const target = rows
       .filter((row) => (row.reviewSubjectType ?? "workforce") === "workforce" && String(row.reviewSubjectId ?? "") === workerId)
@@ -77,10 +79,11 @@ export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: 
     for (const line of ordered) {
       const amount = rounded(Number(line.amount) || 0);
       if (amount <= 0) continue;
-      if (target.deductionBreakdown.some((item) => item.recoveryKey === line.recovery_key)) continue;
+      if (appliedKeys.has(line.recovery_key)) continue;
       if (amount > rounded(target.netAmount) || (!line.cap_exempt && amount > capLeft)) { carried.push(line); continue; }
       if (!line.cap_exempt) capLeft = rounded(capLeft - amount);
       target.deductionBreakdown = [...target.deductionBreakdown, { code: LOSS_RECOVERY_CODE, label: `Loss recovery · ${line.label}`, amount, recoveryKey: line.recovery_key }];
+      appliedKeys.add(line.recovery_key);
       target.deductions = rounded(target.deductions + amount);
       target.netAmount = rounded(target.netAmount - amount);
     }

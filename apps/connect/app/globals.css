@@ -18505,3 +18505,6 @@ img.dx-selfie-live {
 .dx-loss-recovery-detail dd{margin:0;color:#101828;font-size:13px;overflow-wrap:anywhere}
 .dx-loss-recovery-detail-note{margin-top:14px}
 .dx-loss-recovery-modal{width:min(560px,calc(100vw - 28px))}
+
+.dx-recovery-detail-link{display:block;margin-top:5px;border:0;background:transparent;color:#b54708;padding:6px 0;font:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.dx-loss-recovery-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}.dx-loss-recovery-detail>div{display:block;min-width:0}.dx-loss-recovery-detail dt{font-size:12px;color:#667085}.dx-loss-recovery-detail dd{margin:4px 0 0;font-size:14px;overflow-wrap:anywhere}.dx-loss-recovery-modal .dx-dialog-surface{width:100%}@media(max-width:360px){.dx-loss-recovery-detail{grid-template-columns:1fr}}

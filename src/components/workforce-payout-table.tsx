@@ -109,7 +109,7 @@ export type WorkforcePayoutRow = {
   paymentSummary?: WorkforcePayoutPaymentSummary;
   paymentSourceIdentity?: WorkforcePayoutSourceIdentity;
   paymentSourceIdentities?: WorkforcePayoutSourceIdentity[];
-  baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
+  baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number; recoveryKey?: string }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
 };
 
 export type WorkforcePayoutMappingUnlock = {

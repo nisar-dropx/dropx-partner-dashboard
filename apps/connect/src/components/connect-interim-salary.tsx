@@ -1,4 +1,5 @@
 "use client";
+import { RecoveryDetailButton } from "./connect-loss-recovery-detail";
 
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Files, Info, RefreshCw, WalletCards } from "lucide-react";
@@ -84,6 +85,7 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
                   <div className={styles.line} key={index}>
                     <span>
                       {row.name}
+                      {row.recoveryKey ? <RecoveryDetailButton accountId={account.id} profileType={account.profileType} recoveryKey={row.recoveryKey} amount={row.amount} payrollLabel="salary calculation"/> : null}
                       {row.lossSplit ? <small className={styles.helper}>Loss case split · payslip combines these as Loss Recovery Deduction</small> : null}
                     </span>
                     <b>{money(row.amount)}</b>
@@ -99,10 +101,10 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
         </details>
         {salary.calculatedAt ? <p className={styles.helper}>Payroll snapshot updated {new Date(salary.calculatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST.</p> : null}
       </div>
-      <ConnectLossRecoveries accountId={account.id} profileType={account.profileType} />
       {salary.attendance ? <div className={styles.card}><details key={`attendance-${salary.id}`}><summary><span>Days used in payroll <b>{salary.attendance.payable} / {salary.attendance.expected}</b></span><ChevronRight size={18}/></summary><PayrollDays attendance={salary.attendance}/><p className={styles.helper}>Calculation: {date(salary.calculatedFrom)} – {date(salary.calculatedThrough)}. Attendance corrections appear here after payroll is recalculated.</p>{onAttendance ? <button className={styles.textButton} onClick={onAttendance}>Review attendance <ChevronRight size={16}/></button> : null}</details></div> : null}
       <div className={styles.card}><details open key={`history-${salary.id}`}><summary>Payment history <ChevronRight size={18}/></summary>{salary.history.length ? <ul className={styles.history}>{salary.history.map(row => <li key={row.id}><div><strong>{money(row.amount)}</strong><span className={row.status === "paid" ? styles.paid : styles.pending}>{paymentLabels[row.status] ?? "Under review"}</span></div><small>Value date {date(row.date)} · {row.utr ? `UTR ${row.utr}` : `Reference ${row.reference}`}</small></li>)}</ul> : <p className={styles.helper}>No bank-confirmed payment recorded.</p>}</details></div>
     </>}
+    <ConnectLossRecoveries accountId={account.id} profileType={account.profileType} />
     <button className={styles.documents} onClick={onDocuments}><Files size={20}/><span><strong>Final payslip</strong><small>{salary?.documentId ? "Published · View in Documents" : "Available in Documents once published"}</small></span><ChevronRight size={20}/></button>
   </section>;
 }

@@ -72,6 +72,7 @@ export function buildWorkforcePayoutPublicationSnapshot(
     net_amount: -Math.abs(line.amount),
     calculation_snapshot: {
       category: line.code,
+      ...(line.recoveryKey ? { recoveryKey: line.recoveryKey } : {}),
       reason: line.label
     }
   }));

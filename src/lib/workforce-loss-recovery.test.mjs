@@ -92,3 +92,11 @@ test("an instalment line keeps its own recovery key", () => {
   applyWorkforceLossRecoveries(rows, [{ ...line("A", 250), recovery_key: "2026-09|A|workforce:w1|2", installment_no: 2, installment_count: 4 }]);
   assert.equal(rows[0].deductionBreakdown[0].recoveryKey, "2026-09|A|workforce:w1|2");
 });
+
+test("recalculation does not repeat a case when the largest station row changes", () => {
+  const rows = [row("a", "w1", 1100), row("b", "w1", 1000)];
+  applyWorkforceLossRecoveries(rows, [line("A", 300)]);
+  applyWorkforceLossRecoveries(rows, [line("A", 300)]);
+  assert.equal(rows.reduce((n, r) => n + r.deductions, 0), 300);
+  assert.equal(rows.reduce((n, r) => n + r.netAmount, 0), 1800);
+});

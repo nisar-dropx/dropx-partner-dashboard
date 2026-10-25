@@ -391,3 +391,12 @@ the loss delivery history.
 The existing scheduled loss digest was disabled on 24 October at the user's request.
 Recipients and timing are awaiting their decision. Its legacy recipient builder is
 separate from this manual report and must be reviewed before enabling broad delivery.
+
+
+### Recovery deductions in DropX One (2026-10-25)
+
+- Approved plans already enter `nl_loss_recovery_due` and reduce net pay in People payroll calculation and full-month Workforce payout calculation. Saving a proposal does not bypass SLP approval. Closed payroll stays unchanged; unapplied keys remain due for a later eligible calculation, subject to existing caps and instalment rules.
+- DropX One keeps completed recovery history, including deductions on plans later paused for review. Each salary/published payout loss line opens an own-account detail dialog with tracking ID, case amount, allocated share, this payroll's amount, confirmed deducted total, provisional draft amount and outstanding balance.
+- Workforce published deduction presentation groups losses by recovery key rather than merging all losses under one code. New raw snapshot lines retain the key too; old worksheet snapshots already contain it. Keys are never derived from an unverified name.
+- `scheduledFromMonth` is the eligibility start, not a promise of the next payroll month. Unpaid/outstanding includes provisional draft deductions until payroll confirmation.
+- Regression: `node scripts/test-connect-loss-recoveries.cjs`, the loss payroll suite, and Connect's `published-payout-breakdown.test.mjs` / `interim-salary.test.mjs`.
