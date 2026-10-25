@@ -1,5 +1,5 @@
 "use server";
-import { defaultNowControl, nowDigestEvents, buildAmazonNowDigest, type NowDigestEvent } from "@/lib/amazon-now-digest";
+import { defaultNowControl, nowDigestEvents, buildAmazonNowDigest, loadNowMailScope, type NowDigestEvent } from "@/lib/amazon-now-digest";
 import {redirect} from 'next/navigation';
 import {revalidatePath} from 'next/cache';
 import {requirePagePermission,isCompanyOwner} from '@/lib/authorization';
@@ -163,7 +163,13 @@ export async function saveAmazonNowDigestSettings(event: NowDigestEvent, form: F
   if (old.error || base.error) throw Error('Schedule configuration is unavailable.');
   const control = old.data || defaultNowControl(company,event,String(base.data.config.email_domain || ''));
   const update = validateDigestSettings(form,control.config);
-  const next = {...control,...update,config:{...update.config,day_offset:0,delivery_ready:true}};
+  const additional = [...new Set(String(form.get('additional_recipient_emails') || '').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean))];
+  const domain = String(control.config.email_domain || '').toLowerCase();
+  if (additional.length > 20 || additional.some(email=>! /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) || email.split('@')[1] !== domain)) throw Error('Enter up to 20 valid company email addresses.');
+  const next = {...control,...update,config:{...update.config,additional_recipient_emails:additional,day_offset:0,delivery_ready:true}};
+  const scope = await loadNowMailScope(db,next);
+  const missing = additional.filter(email=>!scope.recipients.some(r=>r.email===email));
+  if (missing.length) throw Error('Active OpsPulse access and assigned Amazon Now stores are required for: '+missing.join(', '));
   if (next.state === 'enabled') {
    const date = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
    const sample = await buildAmazonNowDigest(db,next,date);
@@ -174,4 +180,18 @@ export async function saveAmazonNowDigestSettings(event: NowDigestEvent, form: F
  } catch (e) { error = e instanceof Error ? e.message : 'Settings unavailable.'; }
  revalidatePath('/settings/notifications');
  redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#amazon-now');
+}
+
+export async function sendAmazonNowAdditionalRecipients() {
+ const auth = await requirePagePermission('ops_notification_settings','edit');
+ let error = '', message = '';
+ try {
+  if (auth.isPreview || auth.readOnly) throw Error('Emails cannot be sent in this session.');
+  const { sendNowAdditionalRecipients } = await import('@/lib/amazon-now-send-additional');
+  const result = await sendNowAdditionalRecipients(digestDatabase(), requireCompanyId(auth));
+  message = `${result.accepted} email(s) accepted by the mail server; ${result.existing} already recorded today.`;
+  if (result.uncertain || result.skipped || result.errors.length) throw Error(message+' Some deliveries require verification; check Recent deliveries before retrying.');
+ } catch (e) { error = e instanceof Error ? e.message : 'Email delivery unavailable.'; }
+ revalidatePath('/settings/notifications');
+ redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1&message='+encodeURIComponent(message))+'#amazon-now');
 }
