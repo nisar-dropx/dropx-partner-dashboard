@@ -3,21 +3,23 @@ export function recoveryActionAllowed(o: { code: string; allocation_required: bo
   return !o.dispute_fields_enabled && (o.allocation_required || o.code === "already_recovered" || o.code === "responsible_left");
 }
 
-export function mayActivateRedispute(auth: {
-  readOnly?: boolean; isMasterOwner: boolean; roleCode: string | null;
-  effectiveRoleCodes?: string[]; designationName?: string | null;
-}) {
-  if (auth.readOnly) return false;
+export type LossRole = { readOnly?: boolean; isMasterOwner: boolean; roleCode: string | null; effectiveRoleCodes?: string[]; designationName?: string | null };
+/** Only the four business-designated roles; a broad Master permission is insufficient. */
+export function mayViewLossApprovals(auth: LossRole) {
   if (auth.isMasterOwner) return true;
-  const allowed = new Set([
-    "AOM", "RM", "RH", "ZH", "NH", "BH", "HLM", "SLPM", "FINMGR", "MANAGING_PARTNER", "OWNER",
-    "AREA_OPERATIONS_MANAGER", "REGIONAL_HEAD", "NATIONAL_HEAD", "BUSINESS_HEAD", "HEAD_OF_OPERATIONS", "FINANCE_MANAGER", "SLP_MANAGER",
-  ]);
-  return [auth.roleCode, ...(auth.effectiveRoleCodes ?? []), auth.designationName]
-    .some(value => {
-      const code = String(value ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-      return allowed.has(code) || allowed.has(code.replace(/^(OPERATIONS|FINANCE)_/, ""));
-    });
+  const allowed = new Set(["SLPM", "NH", "FINMGR", "MANAGING_PARTNER", "MP", "SLP_MANAGER", "NATIONAL_HEAD", "FINANCE_MANAGER"]);
+  return [auth.roleCode, ...(auth.effectiveRoleCodes ?? []), auth.designationName].some(value => {
+    const code = String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    return allowed.has(code) || allowed.has(code.replace(/^(OPERATIONS|FINANCE)_/, ""));
+  });
+}
+export function mayActivateRedispute(auth: LossRole) { return !auth.readOnly && mayViewLossApprovals(auth); }
+
+export function receivedRecoveryError(details: Record<string, unknown>, amount: number) {
+  if (Math.round(Number(details.received_amount) * 100) !== Math.round(amount * 100)) return "Enter the full loss amount received. Partial collections must remain outstanding.";
+  if (String(details.receipt_reference ?? "").trim().length < 5) return "Enter the payment or receipt reference for final verification.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(details.received_date ?? ""))) return "Enter the date the recovery was received.";
+  return "";
 }
 
 export function departedPersonError(details: Record<string, unknown>, remarks: string) {

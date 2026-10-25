@@ -8,7 +8,7 @@ export function LossTabs({ tabs, active }: { tabs: LossTab[]; active: string }) 
   return (
     <nav className={styles.tabs} aria-label="Loss reports">
       {tabs.map((t) => (
-        <Link key={t.key} href={t.href} prefetch className={`${styles.tab} ${t.key === active ? styles.activeTab : ""}`} aria-current={t.key === active ? "page" : undefined}>
+        <Link key={t.key} href={t.href} prefetch={false} className={`${styles.tab} ${t.key === active ? styles.activeTab : ""}`} aria-current={t.key === active ? "page" : undefined}>
           {t.label}
         </Link>
       ))}
@@ -31,7 +31,8 @@ export function LossHeader({ eyebrow = "Team Ops · Losses", title, intro, tabs,
         </div>
         <div className={styles.search}><LossTidSearch /></div>
       </div>
-      <LossTabs tabs={tabs} active={active} />
+      <LossTabs tabs={tabs} active={["slp-initial","slp-final","potential"].includes(active)?"nl":active} />
+      {["nl","slp-initial","slp-final","potential"].includes(active)?<nav className={styles.tabs} aria-label="Loss sources">{[["nl","NL"],["slp-initial","SLP Initial"],["slp-final","SLP Final"],["potential","At risk"]].map(([key,label])=><Link key={key} prefetch={false} className={`${styles.tab} ${active===key?styles.activeTab:""}`} href={`/team-ops/losses/${key}`}>{label}</Link>)}</nav>:null}
     </header>
   );
 }

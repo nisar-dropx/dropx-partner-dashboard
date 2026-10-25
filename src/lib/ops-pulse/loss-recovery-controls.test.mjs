@@ -10,8 +10,8 @@ test('only accountable recovery actions remain', () => {
 });
 test('leadership activation excludes ground and cluster managers, including read-only leadership', () => {
   const auth={isMasterOwner:false,roleCode:null};
-  for (const roleCode of ['OPERATIONS_CM','OPERATIONS_CLM','OPERATIONS_TL',null]) assert.equal(mayActivateRedispute({...auth,roleCode}),false);
-  for (const roleCode of ['OPERATIONS_SLPM','OPERATIONS_AOM','OPERATIONS_NH','OPERATIONS_BH','FINANCE_MANAGER','FINANCE_FINMGR','OPERATIONS_MANAGING_PARTNER']) assert.equal(mayActivateRedispute({...auth,roleCode}),true,roleCode);
+  for (const roleCode of ['OPERATIONS_CM','OPERATIONS_CLM','OPERATIONS_TL','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_RH',null]) assert.equal(mayActivateRedispute({...auth,roleCode}),false);
+  for (const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','FINANCE_MANAGER','FINANCE_FINMGR','OPERATIONS_MANAGING_PARTNER']) assert.equal(mayActivateRedispute({...auth,roleCode}),true,roleCode);
   assert.equal(mayActivateRedispute({...auth,isMasterOwner:true,readOnly:true}),false);
 });
 test('departed person needs identity and accountable follow-up', () => {

@@ -232,5 +232,54 @@ await mustReject('Revoked response denied', transition(4,'response'));
 eq('Every response transition has immutable history', Number((await one(`select count(*) n from nl_case_response_events`)).n),4);
 eq('Redispute does not close recovery', (await one(`select lifecycle_status from nl_loss_month_cases where case_key='LEFT1'`)).lifecycle_status,'exit_balance');
 
+// Product lifecycle: every update needs independent approval; returns never erase debt.
+const productSql=readFileSync("supabase/migrations/20261026203000_loss_recovery_product_lifecycle.sql","utf8");
+await db.exec(productSql); await db.exec(productSql);
+await db.exec(`insert into nl_recovery_outcomes(company_id,code,label,allocation_required) values('${C}','already_recovered','Receipt received',false);
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values('${C}','nl','2026-09','RECEIPT','BLR1',500,'Recoverable'),('${C}','nl','2026-09','PLAN3','BLR1',900,'Recoverable')`);
+const receipt=(version,details)=>`select save_nl_recovery('${C}','2026-09','RECEIPT',${version},'already_recovered','none','[]','Payment received with reference','${CM}','Station','${JSON.stringify(details)}')`;
+await mustReject('A receipt cannot close without amount and reference',receipt(0,{}));
+await mustReject('A partial receipt cannot claim full recovery',receipt(0,{received_amount:'200',receipt_reference:'BANK123',received_date:'2026-10-01'}));
+await db.query(receipt(0,{received_amount:'500',receipt_reference:'BANK123',received_date:'2026-10-01'}));
+eq('Receipt is a proposal, never immediately recovered',(await one(`select approval_status s from nl_loss_recoveries where case_key='RECEIPT'`)).s,'proposed');
+await mustReject('Receipt proposer cannot self approve',`select nl_loss_recovery_approve('${C}','2026-09','RECEIPT',1,'${CM}','Station')`);
+await db.query(`select nl_loss_recovery_approve('${C}','2026-09','RECEIPT',1,'${SLP}','SLP')`);
+eq('Independent receipt approval completes recovery',(await one(`select lifecycle_status s from nl_loss_month_cases where case_key='RECEIPT'`)).s,'recovered');
+await db.query(`select save_nl_recovery('${C}','2026-09','LEFT1',1,'responsible_left','none','[]','Left on 20 October','${CM}','Station','{"employee_id":"D123","employee_name":"Departed Person","follow_up":"CM to collect by month end"}')`);
+eq('Departed person update waits for approval',(await one(`select approval_status s from nl_loss_recoveries where case_key='LEFT1'`)).s,'proposed');
+let state=await one(`select c.lifecycle_version lv,r.version from nl_loss_month_cases c join nl_loss_recoveries r using(company_id,month,case_key) where case_key='LEFT1'`);
+await db.query(`select nl_loss_lifecycle_transition('${C}','2026-09','LEFT1','return_to_station',${state.lv},'${SLP}','SLP','Provide recovery owner and due date')`);
+eq('Returned update remains unpaid',(await one(`select approval_status s from nl_loss_recoveries where case_key='LEFT1'`)).s,'returned');
+await mustReject('Returned proposal cannot be approved before resubmission',`select nl_loss_recovery_approve('${C}','2026-09','LEFT1',3,'${SLP}','SLP')`);
+await db.query(`select save_nl_recovery('${C}','2026-09','LEFT1',3,'responsible_left','none','[]','Left on 20 October','${CM}','Station','{"employee_id":"D123","employee_name":"Departed Person","follow_up":"CM to collect by 30 November"}')`);
+await db.query(`select nl_loss_recovery_approve('${C}','2026-09','LEFT1',4,'${SLP}','SLP')`);
+eq('Approved departure keeps exit balance',(await one(`select lifecycle_status s from nl_loss_month_cases where case_key='LEFT1'`)).s,'exit_balance');
+const alloc3=JSON.stringify([{employee_ref:`employee:${E1}`,amount:'900'}]);
+await db.query(`select save_nl_recovery('${C}','2026-09','PLAN3',0,'deduct','custom','${alloc3}','Recover over three paid cycles','${CM}','Station','{}','{"mode":"installments","basis":"months","value":"3"}')`);
+await db.query(`select nl_loss_recovery_approve('${C}','2026-09','PLAN3',1,'${SLP}','SLP')`);
+await db.exec(`update nl_loss_recoveries set deduction_month='2026-10' where case_key='PLAN3'`);
+for(const month of ['2026-10','2026-11','2026-12','2027-01']) {
+ const due=(await db.query(`select amount::text,recovery_key from nl_loss_recovery_due('${C}','${month}','hrms') where case_key='PLAN3'`)).rows;
+ eq(`No salary for three months: ${month} still has only the first instalment`,due.map(x=>[x.amount,x.recovery_key]),[['300.00',`2026-09|PLAN3|employee:${E1}|1`]]);
+}
+await db.query(`select save_nl_recovery('${C}','2026-09','PLAN3',2,'deduct','custom','${alloc3}','Updated follow-up details','${CM}','Station','{}','{"mode":"installments","basis":"months","value":"3"}')`);
+eq('Editing an approved plan requires approval again',(await one(`select approval_status s from nl_loss_recoveries where case_key='PLAN3'`)).s,'proposed');
+eq('Revised proposal stops future deduction',(await db.query(`select * from nl_loss_recovery_due('${C}','2027-01','hrms') where case_key='PLAN3'`)).rows.length,0);
+await mustReject('Unpaid loss cannot be rejected',`select nl_loss_lifecycle_transition('${C}','2026-09','PLAN3','reject',(select lifecycle_version from nl_loss_month_cases where case_key='PLAN3'),'${SLP}','SLP','No salary available')`);
+await db.query(transition(4,'activate'));
+const track=(version,status,ref='LSC-123',due="'2026-11-01'")=>`select nl_redispute_track('${C}','2026-09','LEFT1',${version},'${ref}','https://example.com/tt','${status}',${due},'Detailed vendor ticket follow-up','${SLP}','SLP')`;
+await mustReject('Filed TT needs a reference',track(5,'filed',''));
+await mustReject('Filed TT needs a follow-up date',track(5,'filed','LSC-123','null'));
+await db.query(track(5,'filed'));
+await mustReject('Stale TT update denied',track(5,'with_vendor'));
+await db.query(track(6,'won','LSC-123','null'));
+eq('Reported win waits for source verification',(await one(`select lifecycle_status s from nl_loss_month_cases where case_key='LEFT1'`)).s,'needs_review');
+await throws('An unapproved exit plan cannot be written off',`select waive_nl_recovery_balance('${C}','2026-09','PLAN3','employee:${E1}','No salary was payable','${SLP}','SLP')`,/independently approved/);
+await db.query(`select nl_case_response_transition('${C}','2026-09','RECEIPT',0,'activate','Review source after verified receipt','',false,'${SLP}','SLP')`);
+await db.query(`select nl_redispute_track('${C}','2026-09','RECEIPT',1,'TT-PAID','','won',null,'Vendor confirmed the source decision','${SLP}','SLP')`);
+eq('TT win never reopens a verified received payment',(await one(`select approval_status s from nl_loss_recoveries where case_key='RECEIPT'`)).s,'approved');
+eq('TT history saved',(await one(`select count(*)::int n from nl_case_response_events where action='tracking' and case_key='LEFT1'`)).n,2);
+eq('New migration does not rewrite actual payroll history',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

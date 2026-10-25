@@ -1,3 +1,4 @@
+import { mayActivateRedispute } from "./loss-recovery-controls";
 import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
@@ -355,10 +356,9 @@ export async function loadRecoveryView(
     failure,
     canEdit,
     // Restricted outcomes ("Already recovered") need their own permission on top of edit access.
-    canRecovered: canEdit && hasPermission(auth, "ops_loss_recovered", "edit"),
+    canRecovered: canEdit,
     canMaster: hasPermission(auth, "ops_loss_master", "access"),
-    canApprove:
-      !auth.readOnly && hasPermission(auth, "ops_loss_master", "edit"),
+    canApprove: mayActivateRedispute(auth) && hasPermission(auth, "ops_losses", "edit"),
     canRefresh:
       !slp && !auth.readOnly && hasPermission(auth, "ops_loss_master", "edit"),
     monthLastSeen:

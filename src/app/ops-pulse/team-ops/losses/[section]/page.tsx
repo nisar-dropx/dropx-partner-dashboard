@@ -1,3 +1,8 @@
+import { mayViewLossApprovals } from "@/lib/ops-pulse/loss-recovery-controls";
+import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
+import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
+import { LossRedisputeDesk } from "@/components/loss-redispute-desk";
+import { readAllRows } from "@/lib/supabase-pagination";
 import { defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { notFound, redirect } from "next/navigation";
 import { OpsLossReport, type LossTab } from "@/components/ops-loss-report";
@@ -56,14 +61,13 @@ const sections: Record<
       "Amazon's daily list of packages at risk of becoming a loss (EDSP Daily_Potential Package Loss_Consolidated Report). Report only — nothing here is assigned for recovery.",
   },
 };
-const tabs: LossTab[] = [
-  ...Object.entries(sections).map(([key, s]) => ({
-    key,
-    label: s.label,
-    href: `/team-ops/losses/${key}`,
-  })),
-  { key: "claims", label: "Station Claims", href: "/team-ops/losses/claims" },
-  { key: "ledger", label: "Recovery Ledger", href: "/team-ops/losses/ledger" },
+const primaryTabs: LossTab[] = [
+ {key:"nl",label:"Disputes & outcomes",href:"/team-ops/losses/nl"},
+ {key:"recovery",label:"Recovery",href:"/team-ops/losses/recovery"},
+ {key:"approvals",label:"Approvals",href:"/team-ops/losses/approvals"},
+ {key:"redisputes",label:"Redisputes",href:"/team-ops/losses/redisputes"},
+ {key:"claims",label:"Station claims",href:"/team-ops/losses/claims"},
+ {key:"ledger",label:"Collections",href:"/team-ops/losses/ledger"},
 ];
 
 export default async function LossesSectionPage({
@@ -73,18 +77,31 @@ export default async function LossesSectionPage({
   params: { section: string };
   searchParams?: NlFilters;
 }) {
+  const auth = await requirePagePermission("ops_losses", "access");
+  const restricted = mayViewLossApprovals(auth);
+  const tabs = primaryTabs.filter(t => !["approvals","redisputes"].includes(t.key) || restricted);
+  if (["recovery","approvals","redisputes"].includes(params.section)) {
+    if (params.section !== "recovery" && !restricted) notFound();
+    const [view, claimView] = await Promise.all([loadRecoveryWorkspace(auth, params.section === "redisputes"), params.section === "approvals" ? loadStationClaims(auth) : Promise.resolve(null)]);
+    if (params.section === "redisputes") {
+      const result = await readAllRows(supabaseAdmin!.from("nl_case_response_windows").select("*").eq("company_id",auth.companyId).order("updated_at",{ascending:false}).order("month").order("case_key"));
+      if(result.error) throw Error("Redisputes could not be loaded.");
+      const scope = new Set(view.rows.map(r=>`${r.month}|${r.case_key}`));
+      return <main className={styles.workspace}><LossHeader title="Redisputes" intro="Restricted case activation, LSC tickets and vendor follow-up." tabs={tabs} active="redisputes"/><LossRedisputeDesk rows={view.rows} windows={(result.data||[]).filter(w=>scope.has(`${w.month}|${w.case_key}`))}/></main>;
+    }
+    return <main className={styles.workspace}><LossHeader title={params.section==="approvals"?"Final approvals":"Recovery"} intro="Station updates become final only after independent approval. Unpaid balances carry forward." tabs={tabs} active={params.section}/>{claimView?.claims.some(c=>c.actions.includes("approve"))?<p className={styles.notice}><a href="/team-ops/losses/claims">{claimView.claims.filter(c=>c.actions.includes("approve")).length} station claims also await your final approval →</a></p>:null}<LossRecoveryWorkspace {...view} approvals={params.section==="approvals"}/></main>;
+  }
   if (params.section === "claims") {
-    const auth = await requirePagePermission("ops_losses", "access");
     try {
       const view = await loadStationClaims(auth);
       const canEdit = !auth.readOnly && hasPermission(auth, "ops_losses", "edit");
       return (
         <main className={styles.workspace}>
-          <LossHeader eyebrow="Team Ops · Losses" title="Station loss claims" intro="Losses a station finds itself, approved by the cluster manager and recovered through the same payroll trail." tabs={tabs} active="claims" />
+          <LossHeader eyebrow="Team Ops · Losses" title="Station loss claims" intro="Raise a loss, obtain final approval, then recover through the shared recovery queue." tabs={tabs} active="claims" />
           {view.ready ? (
             <StationClaimsDesk claims={view.claims} cases={view.cases} outcomes={view.outcomes} settings={view.settings}
               stations={view.stations.map((s) => ({ id: s.id, station_code: s.station_code }))}
-              canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit && hasPermission(auth, "ops_loss_recovered", "edit")} />
+              canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit} />
           ) : (
             <p className={styles.notice}>Station claims become available once the station loss claims update is applied to the database.</p>
           )}
@@ -95,15 +112,14 @@ export default async function LossesSectionPage({
     }
   }
   if (params.section === "ledger") {
-    const auth = await requirePagePermission("ops_losses", "access");
     try {
       const ledger = await loadRecoveryLedger(auth);
       return (
         <main className={styles.workspace}>
           <LossHeader
             eyebrow="Team Ops · Losses"
-            title="Recovery ledger"
-            intro="Every loss assigned to a person, traced to the salary deductions that recover it."
+            title="Collections"
+            intro="Verified payroll deductions, outstanding balances and write-offs. Plans remain open until collected."
             tabs={tabs}
             active="ledger"
           />
@@ -127,7 +143,6 @@ export default async function LossesSectionPage({
   }
   // Digest / lifecycle helpers once emitted /team-ops/losses/slp — map to real tabs.
   if (params.section === "slp") {
-    const auth = await requirePagePermission("ops_losses", "access");
     const q = new URLSearchParams();
     for (const [key, value] of Object.entries(searchParams ?? {})) {
       if (value == null || value === "") continue;
@@ -152,7 +167,6 @@ export default async function LossesSectionPage({
   }
   const section = sections[params.section];
   if (!section) notFound();
-  const auth = await requirePagePermission("ops_losses", "access");
   try {
     if (section.report === "nl") {
       const stageView = searchParams.view === "historic" || searchParams.view === "final"

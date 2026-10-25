@@ -1,3 +1,4 @@
+import { mayViewLossApprovals } from "./ops-pulse/loss-recovery-controls";
 import type { DigestBuilder, DigestMessage } from "./portal-digest-delivery";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { holdApprovers } from "./ops-pulse/salary-hold-policy";
@@ -25,17 +26,20 @@ async function resolveOwners(
   if (stations.error) throw new Error(stations.error.message);
   const byCode = new Map((stations.data ?? []).map((s) => [s.station_code, s.id as string]));
   const stationIds = [...byCode.values()];
-  const [hierarchy, covers, memberships] = await Promise.all([
+  const [hierarchy, covers, memberships, roles] = await Promise.all([
     loadPeopleOperationalHierarchy(company, stationIds, { includeStationResponsibilities: true }),
     loadActiveApprovalCovers(company),
     db
       .from("company_product_memberships")
-      .select("user_id,location_scope_ids,has_all_location_access,profiles!inner(id,email,full_name,is_active)")
+      .select("user_id,role_id,location_scope_ids,has_all_location_access,profiles!inner(id,email,full_name,is_active)")
       .eq("company_id", company)
       .eq("product_code", "operations")
       .eq("is_active", true),
+    db.from("user_roles").select("id,code").eq("company_id",company).eq("is_active",true),
   ]);
   if (hierarchy.error) throw new Error("Hierarchy unavailable for loss digest.");
+  if (roles.error) throw new Error("Loss approval roles unavailable.");
+  const roleById = new Map((roles.data || []).map((r:any)=>[r.id,r.code]));
   if (memberships.error) throw new Error(memberships.error.message);
 
   type Recipient = { email: string; name: string; stationIds: string[]; rows: ActionRow[] };
@@ -94,6 +98,8 @@ async function resolveOwners(
     }
     if (row.owner_role === "slp") {
       for (const m of slpUsers as any[]) {
+        const roleCode=String(roleById.get(m.role_id)||"");
+        if(!mayViewLossApprovals({isMasterOwner:roleCode==="OWNER",roleCode})) continue;
         const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
         const scope: string[] = m.location_scope_ids ?? [];
         if (m.has_all_location_access || scope.includes(stationId)) {

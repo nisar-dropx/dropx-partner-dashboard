@@ -19,7 +19,7 @@ import {
 } from "@/lib/ops-pulse/nl-loss-policy";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
-import { recoveryActionAllowed, departedPersonError } from "@/lib/ops-pulse/loss-recovery-controls";
+import { recoveryActionAllowed, departedPersonError, receivedRecoveryError } from "@/lib/ops-pulse/loss-recovery-controls";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
@@ -331,6 +331,9 @@ export function RecoveryForm({
   const [retry, setRetry] = useState(0);
   const [directoryReady, setDirectoryReady] = useState(false);
   const [canPropose, setCanPropose] = useState(false);
+  const [mayApproveCase,setMayApproveCase]=useState(false);
+  const [canResponse, setCanResponse] = useState(false);
+  const [returnNote, setReturnNote] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     let disposed = false;
@@ -355,6 +358,8 @@ export function RecoveryForm({
         setAwaitingFinal(!!j.awaiting_final);
         setPeople(j.people);
         setCanPropose(j.can_propose === true);
+        setCanResponse(j.can_response === true);
+        setMayApproveCase(j.can_approve === true);
         setHistory(j.history);
         setDirectoryReady(true);
       } catch (e) {
@@ -447,7 +452,8 @@ export function RecoveryForm({
       (details.cctv_url &&
         settings?.recovery_policy.cctv_public_confirmation &&
         !details.cctv_public_confirmed));
-  const cannotSave =
+  const receiptError = outcome === "already_recovered" ? receivedRecoveryError(details, Number(row.amount)) : "";
+  const cannotSave = !!receiptError ||
     (option?.allocation_required && (salaryLoading || !!salaryError)) ||
     !!validation ||
     !!reasonError ||
@@ -495,7 +501,7 @@ export function RecoveryForm({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (cannotSave || uploading) {
-      setError(validation || "Complete all required details before saving.");
+      setError(receiptError || validation || "Complete all required details before saving.");
       return;
     }
     setError("");
@@ -522,7 +528,7 @@ export function RecoveryForm({
                 }
             : { mode: "full" },
           remarks,
-          recovery_details: option?.dispute_fields_enabled || outcome === "responsible_left" ? details : {},
+          recovery_details: option?.dispute_fields_enabled || ["responsible_left", "already_recovered"].includes(outcome) ? details : {},
         }),
       });
       const j = await res.json();
@@ -537,7 +543,7 @@ export function RecoveryForm({
         },
         ...h,
       ]);
-      setSuccess(option?.deduction_timing === "none" ? "Recovery decision saved." : "Recovery plan saved. Final approval is required before payroll deduction.");
+      setSuccess("Update submitted for final approval. It remains pending until another authorised approver confirms it.");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -591,7 +597,7 @@ export function RecoveryForm({
   }
   return (
     <div className={styles.detail}>
-      <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}`}>Case response ↗</a>
+      {canResponse ? <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}`}>Redispute response ↗</a> : null}
       <details className={styles.compactDetails}><summary>Source details · {row.month}</summary>
       <div className={styles.sourceGrid}>
         <div>
@@ -626,9 +632,8 @@ export function RecoveryForm({
       {(recovery as { approval_status?: string } | null)?.approval_status ===
       "proposed" ? (
         <p className={styles.notice}>
-          Recovery proposal awaiting SLP final confirmation. It is not deducted
-          until approved by a different authorised person.
-          {canApprove ? (
+          Update awaiting final approval. Collection is not final until independently confirmed.
+          {canApprove && mayApproveCase ? (
             <>
               {" "}
               <button
@@ -656,7 +661,7 @@ export function RecoveryForm({
                     const j = await res.json();
                     if (!res.ok) throw Error(j.error);
                     setRecovery(j.recovery);
-                    setSuccess("Recovery approved. The eligible payroll calculation will deduct it from net pay; any balance carries forward.");
+                    setSuccess("Update approved. Scheduled balances remain outstanding until collected.");
                     router.refresh();
                   } catch (e) {
                     setError(
@@ -669,12 +674,23 @@ export function RecoveryForm({
                   }
                 }}
               >
-                Approve recovery (SLP)
+                Approve update
               </button>
             </>
           ) : null}
         </p>
       ) : null}
+      {recovery?.approval_status === "returned" || row.lifecycle_status === "returned_to_station" ? <p className={styles.notice}>Returned for update: {recovery?.approval_note || row.lifecycle_note}. Correct the details and submit again.</p> : null}
+      {canApprove && recovery && ["proposed", "approved", "needs_review"].includes(recovery.approval_status || "") && !["recovered", "written_off", "not_recoverable"].includes(row.lifecycle_status || "") ? <details className={styles.compactDetails}><summary>Return for correction</summary>
+        <textarea aria-label="Reason for return" value={returnNote} onChange={e => setReturnNote(e.target.value)} minLength={10} maxLength={2000} rows={2} placeholder="What must the station correct?" />
+        <button className={styles.button} disabled={busy || returnNote.trim().length < 10} onClick={async () => {
+          if (!recovery) return;
+          setBusy(true); setError(""); try {
+            const res = await fetch("/api/ops-pulse/losses/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "return_to_station", month: row.month, case_key: caseKey, version: row.lifecycle_version, note: returnNote }) });
+            const j=await res.json(); if(!res.ok) throw Error(j.error); setReturnNote(""); setRecovery({...recovery,approval_status:"returned",approval_note:returnNote}); setSuccess("Returned for correction. Resubmission needs final approval again."); router.refresh();
+          } catch(e) {setError(e instanceof Error?e.message:"Return failed.");} finally {setBusy(false);}
+        }}>Return update</button>
+      </details> : null}
       {error ? (
         <p role="alert" className={styles.error}>
           {error}{" "}
@@ -698,7 +714,7 @@ export function RecoveryForm({
           people with that access can change this plan.
         </p>
       ) : null}
-      {!loading && directoryReady && mayEdit && !canPropose ? <p className={styles.notice}>The station’s cluster manager, AOM cover or authorised SLP approver can assign recovery people. You can view the plan here.</p> : null}
+      {!loading && directoryReady && mayEdit && !canPropose ? <p className={styles.notice}>You have view access to this recovery.</p> : null}
       {loading ? (
         <p role="status">Loading recovery…</p>
       ) : (
@@ -750,6 +766,12 @@ export function RecoveryForm({
                   ))}
               </select>
             </label>
+            {outcome === "already_recovered" ? <div className={styles.departedFields}>
+              <label>Amount received<input required type="number" min="0.01" step="0.01" value={details.received_amount || ""} onChange={e=>setDetails({...details,received_amount:e.target.value})}/></label>
+              <label>Receipt / payment reference<input required minLength={5} maxLength={160} value={details.receipt_reference || ""} onChange={e=>setDetails({...details,receipt_reference:e.target.value})}/></label>
+              <label>Received date<input required type="date" value={details.received_date || ""} onChange={e=>setDetails({...details,received_date:e.target.value})}/></label>
+              {receiptError?<small>{receiptError}</small>:<small>Submitted for independent verification; no payroll deduction is created.</small>}
+            </div> : null}
             {outcome === "responsible_left" ? <div className={styles.departedFields}>
               <label>Employee ID<input required value={details.employee_id || ""} maxLength={80} onChange={e => setDetails({ ...details, employee_id: e.target.value })} /></label>
               <label>Full name<input required value={details.employee_name || ""} maxLength={160} onChange={e => setDetails({ ...details, employee_name: e.target.value })} /></label>
@@ -1160,7 +1182,7 @@ export function RecoveryForm({
                   ? "Saving…"
                   : recovery && !recovery.is_deleted
                     ? "Update recovery"
-                    : "Save recovery"}
+                    : "Submit for approval"}
               </button>
             ) : (
               <p className={styles.hint}>

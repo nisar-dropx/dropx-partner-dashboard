@@ -1,11 +1,12 @@
+import { mayActivateRedispute } from "./loss-recovery-controls";
 import "server-only";
-import { loadActiveApprovalCovers } from "@/lib/approval-covers";
+
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
-import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { nlStationScope } from "./nl-loss";
 import type { LossSettings, NlCase, Recovery, RecoveryOutcome } from "./nl-loss-policy";
-import { holdApprovers } from "./salary-hold-policy";
+
 import { claimActions, type ClaimAction, type ClaimCategory, type ClaimStatus } from "./station-claims-policy";
 
 export type ClaimEvent = { action: string; toStatus: string; actorName: string | null; note: string | null; createdAt: string };
@@ -30,31 +31,26 @@ export async function loadStationClaims(auth: AuthorizationContext) {
   const { company, stations } = await nlStationScope(auth);
   const stationIds = stations.map((s) => s.id);
   const since = new Date(Date.now() - 180 * 86400000).toISOString();
-  const [claimsResult, links] = await Promise.all([
+  const [claimsResult] = await Promise.all([
     stationIds.length
       ? db.from("ops_station_loss_claims").select(COLUMNS).eq("company_id", company).in("station_id", stationIds)
           .or(`status.in.(submitted,returned),raised_at.gte.${since}`).order("raised_at", { ascending: false }).limit(500)
       : Promise.resolve({ data: [], error: null }),
-    db.from("hr_user_person_links").select("person_id").eq("company_id", company).eq("user_id", auth.userId).eq("status", "active"),
+
   ]);
   if (claimsResult.error) {
     if (/does not exist|schema cache/i.test(claimsResult.error.message)) return { ready: false as const, company, stations, claims: [] as StationClaim[], cases: [] as NlCase[], outcomes: [] as RecoveryOutcome[], settings: null as LossSettings | null };
     throw Error("Station claims could not be loaded.");
   }
   const rows = (claimsResult.data ?? []) as Array<Record<string, any>>;
-  const viewerPeople = new Set((links.data ?? []).map((r) => r.person_id as string));
-  const claimStations = [...new Set(rows.map((r) => r.station_id as string))];
   const approvedKeys = rows.filter((r) => r.status === "approved" && r.case_key).map((r) => r.case_key as string);
-  const [hierarchy, events, cases, recoveries, outcomes, settings, covers] = await Promise.all([
-    loadPeopleOperationalHierarchy(company, claimStations),
+  const [events, cases, recoveries, outcomes, settings] = await Promise.all([
     rows.length ? db.from("ops_station_loss_claim_events").select("claim_id,action,to_status,actor_name,note,created_at").eq("company_id", company).in("claim_id", rows.map((r) => r.id)).order("created_at") : Promise.resolve({ data: [], error: null }),
     approvedKeys.length ? db.from("nl_loss_month_cases").select("*").eq("company_id", company).eq("report", "station").in("case_key", approvedKeys) : Promise.resolve({ data: [], error: null }),
     approvedKeys.length ? db.from("nl_loss_recoveries").select("*").eq("company_id", company).in("case_key", approvedKeys) : Promise.resolve({ data: [], error: null }),
     db.from("nl_recovery_outcomes").select("*").eq("company_id", company).order("sort_order").order("label"),
     db.from("nl_loss_sources").select("recoverable_statuses,allow_equal_split,allow_custom_split,include_inactive_people,history_months,updated_at,recovery_policy").eq("company_id", company).maybeSingle(),
-    loadActiveApprovalCovers(company),
   ]);
-  if (hierarchy.error) throw Error("Cluster managers could not be resolved from People. Please retry.");
   if (events.error || cases.error || recoveries.error || outcomes.error || settings.error) throw Error("Station claim details could not be loaded.");
   const history = new Map<string, ClaimEvent[]>();
   for (const e of (events.data ?? []) as Array<Record<string, any>>) {
@@ -64,14 +60,13 @@ export async function loadStationClaims(auth: AuthorizationContext) {
   }
   const canRaise = canRaiseClaims(auth);
   const claims: StationClaim[] = rows.map((r) => {
-    const approvers = holdApprovers(hierarchy.byLocation.get(r.station_id), new Set(), covers);
-    const isApprover = !auth.readOnly && approvers.personIds.some((id) => viewerPeople.has(id));
+    const isApprover = mayActivateRedispute(auth) && hasPermission(auth, "ops_losses", "edit");
     return {
       id: r.id, version: r.version, stationId: r.station_id, stationCode: r.station_code, reference: r.reference,
       incidentDate: r.incident_date, category: r.category, amount: Number(r.amount), description: r.description,
       evidenceUrl: r.evidence_url, people: r.people_involved, status: r.status, raisedByName: r.raised_by_name,
       raisedAt: r.raised_at, decidedByName: r.decided_by_name, decidedAt: r.decided_at, decisionNote: r.decision_note,
-      caseMonth: r.case_month, caseKey: r.case_key, approverNames: approvers.names,
+      caseMonth: r.case_month, caseKey: r.case_key, approverNames: ["SLP Manager / National Head / Finance Manager / Managing Partner"],
       actions: claimActions({ status: r.status, raisedBy: r.raised_by }, auth.userId, isApprover, canRaise),
       history: history.get(r.id) ?? [],
     };

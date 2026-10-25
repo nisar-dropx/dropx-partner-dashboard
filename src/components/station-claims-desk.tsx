@@ -11,7 +11,7 @@ import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(n) || 0);
 const day = (d: string | null) => (d ? new Date(d.length === 10 ? `${d}T00:00:00Z` : d).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: d.length === 10 ? "UTC" : "Asia/Kolkata" }) : "");
 const ACTION_LABEL: Record<ClaimAction, string> = { approve: "Approve", return: "Return for info", reject: "Reject", resubmit: "Resubmit", withdraw: "Withdraw" };
-const FILTERS = [["open", "Open"], ["submitted", "With CM"], ["returned", "Returned"], ["approved", "Approved"], ["closed", "Closed"], ["all", "All"]] as const;
+const FILTERS = [["open", "Open"], ["submitted", "Awaiting approval"], ["returned", "Returned"], ["approved", "Approved"], ["closed", "Closed"], ["all", "All"]] as const;
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 async function post(body: unknown) {
@@ -51,7 +51,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
     <>
       <div className={`${styles.metrics} ${styles.metrics4}`}>
         <div><span>Needs your action</span><strong>{mine}</strong><small>Decide, or resubmit what was returned</small></div>
-        <div><span>With cluster manager</span><strong>{money(sum("submitted"))}</strong><small>{claims.filter((c) => c.status === "submitted").length} claims waiting</small></div>
+        <div><span>Awaiting final approval</span><strong>{money(sum("submitted"))}</strong><small>{claims.filter((c) => c.status === "submitted").length} claims waiting</small></div>
         <div><span>Approved</span><strong>{money(sum("approved"))}</strong><small>{unassigned.length ? `${unassigned.length} still to assign to people` : "All assigned for recovery"}</small></div>
         <div><span>Returned to stations</span><strong>{claims.filter((c) => c.status === "returned").length}</strong><small>Waiting for more information</small></div>
       </div>
@@ -60,7 +60,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
         <div className={styles.panelHead}>
           <div>
             <h2>Station loss claims</h2>
-            <p>Station raises with evidence → cluster manager approves, returns or rejects → people are assigned and recovered through payroll.</p>
+            <p>Station raises → authorised final approver reviews → recovery proposal → collection.</p>
           </div>
           <div className={styles.toolbar}>
             <input aria-label="Search claims" placeholder="Reference, station, description" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -91,7 +91,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
                       <td className={styles.num}><strong>{money(c.amount)}</strong></td>
                       <td>
                         <span className={`${styles.statusPill} ${styles[`tone_${meta.tone}`]}`}>{meta.label}</span>
-                        <small>{c.status === "approved" ? (assigned ? `Recovering · ${linked!.recovery!.outcome_label}` : "Assign people for recovery") : meta.next}{c.status === "submitted" && c.approverNames.length ? ` · ${c.approverNames.join(", ")}` : ""}{c.status === "submitted" && !c.approverNames.length ? " · no cluster manager mapped in People" : ""}</small>
+                        <small>{c.status === "approved" ? (assigned ? `Recovering · ${linked!.recovery!.outcome_label}` : "Assign people for recovery") : meta.next}{c.status === "submitted" && c.approverNames.length ? ` · ${c.approverNames.join(", ")}` : ""}{c.status === "submitted" && !c.approverNames.length ? " · final approver required" : ""}</small>
                       </td>
                       <td><button className={styles.button} aria-expanded={open === c.id} onClick={() => setOpen(open === c.id ? null : c.id)}>{open === c.id ? "Close" : c.actions.length ? "Open · act" : "Open"}</button></td>
                     </tr>,

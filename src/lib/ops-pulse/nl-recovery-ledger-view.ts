@@ -1,6 +1,6 @@
 /** Recovery ledger rows and their summaries; shared by the server loader and the ledger view. */
 
-export type LedgerStatus = "scheduled" | "in_progress" | "recovered" | "needs_review" | "exit_balance" | "written_off";
+export type LedgerStatus = "awaiting_approval" | "returned" | "scheduled" | "in_progress" | "recovered" | "needs_review" | "exit_balance" | "written_off";
 
 export type LedgerLine = {
   month: string;
@@ -32,6 +32,8 @@ export type LedgerLine = {
 };
 
 export const LEDGER_STATUS: Record<LedgerStatus, { label: string; tone: "info" | "progress" | "good" | "warn" | "danger" | "muted" }> = {
+  awaiting_approval: { label: "Awaiting approval", tone: "warn" },
+  returned: { label: "Returned for update", tone: "warn" },
   scheduled: { label: "Scheduled", tone: "info" },
   in_progress: { label: "Recovering", tone: "progress" },
   recovered: { label: "Recovered", tone: "good" },

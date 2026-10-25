@@ -1,0 +1,13 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {recoveryQueueState,indiaMonth} from './loss-recovery-queue-policy.ts';
+const row={month:'2026-09',case_key:'T1',amount:900,source_present:true,recovery:{source_amount:900,approval_status:'approved',deduction_month:'2026-10',outcome_code:'deduct'}};
+const line={outstanding:900,deducted:0,waived:0,first_salary_month:'2026-10',last_deducted_in:null,recovery_mode:'installments',deducted_count:0,status:'scheduled'};
+test('unpaid instalment carries across three salary gaps without expiry',()=>{for(const m of ['2026-11','2026-12','2027-01']){const q=recoveryQueueState(row,[line],m);assert.equal(q.status,'carried');assert.equal(q.outstanding,900);assert.equal(q.nextDue,'2026-10');}});
+test('next month full recovery appears when due and carries after that',()=>{const r={...row,recovery:{...row.recovery,deduction_month:'2026-11'}};const l={...line,first_salary_month:'2026-11',recovery_mode:'full'};assert.equal(recoveryQueueState(r,[l],'2026-10').status,'scheduled');assert.equal(recoveryQueueState(r,[l],'2026-11').status,'due');assert.equal(recoveryQueueState(r,[l],'2026-12').status,'carried');});
+test('a delayed collected instalment advances to the next paid cycle',()=>{const q=recoveryQueueState(row,[{...line,deducted:300,outstanding:600,deducted_count:1,last_deducted_in:'2027-01'}],'2027-01');assert.equal(q.nextDue,'2027-02');assert.equal(q.status,'scheduled');assert.equal(q.outstanding,600);});
+test('no proposal or returned update can look recovered',()=>{for(const approval_status of ['proposed','returned','needs_review','none']){const q=recoveryQueueState({...row,recovery:{...row.recovery,outcome_code:'already_recovered',approval_status}},[],'2026-10');assert.equal(q.outstanding,900);assert.notEqual(q.status,'recovered');}});
+test('write-off is separate from collected recovery',()=>{const q=recoveryQueueState(row,[{...line,waived:900,outstanding:0}],'2026-10');assert.equal(q.status,'written_off');assert.equal(q.deducted,0);});
+test('missing source retains debt for review',()=>assert.equal(recoveryQueueState({...row,source_present:false},[line],'2026-11').status,'review'));
+test('month rollover uses India time',()=>assert.equal(indiaMonth(new Date('2026-10-31T18:30:00Z')),'2026-11'));
+
+test('confirmed non-recoverable outcomes do not stay collectible or inflate recovery',()=>{let q=recoveryQueueState({...row,source_final_nonrecoverable:true},[line],'2026-11');assert.equal(q.outstanding,0);assert.equal(q.status,'source_cleared');q=recoveryQueueState({...row,source_final_nonrecoverable:true},[{...line,deducted:300}],'2026-11');assert.equal(q.status,'review');assert.equal(q.deducted,300);});

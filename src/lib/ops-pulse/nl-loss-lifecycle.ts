@@ -1,4 +1,5 @@
 import "server-only";
+import { mayActivateRedispute } from "./loss-recovery-controls";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadActiveApprovalCovers } from "@/lib/approval-covers";
@@ -51,7 +52,7 @@ export async function lossLifecycleActors(
   );
   const isCluster =
     !auth.readOnly && approvers.personIds.some((id) => viewerPeople.has(id));
-  const isSlp = canEditLossRecoveryMaster(auth);
+  const isSlp = mayActivateRedispute(auth) && hasPermission(auth, "ops_losses", "edit");
   return {
     isCluster,
     isSlp,
@@ -66,6 +67,10 @@ export async function assertLifecycleAction(
   action: LifecycleAction,
   proposedBy?: string | null,
 ) {
+  if (action === "propose") {
+    if (auth.readOnly || !hasPermission(auth, "ops_losses", "edit")) throw Error("Loss recovery edit access is required to submit an update.");
+    return {isCluster:false,isSlp:mayActivateRedispute(auth),isStationOnly:true};
+  }
   const actors = await lossLifecycleActors(auth, stationId);
   if (action === "clarify" && (actors.isStationOnly || actors.isCluster || actors.isSlp)) {
     if (!stationMayAct(action) && !actors.isCluster && !actors.isSlp) {
@@ -73,19 +78,14 @@ export async function assertLifecycleAction(
     }
     return actors;
   }
-  if (action === "propose") {
-    if (!actors.isCluster && !actors.isSlp) {
-      throw Error("Only the cluster manager (or AOM cover) can propose a recovery plan.");
-    }
-    return actors;
-  }
   if (action === "approve") {
-    if (!actors.isSlp) throw Error("Only an authorised SLP approver can confirm this recovery.");
+    if (!actors.isSlp) throw Error("Only SLP Manager, National Head, Finance Manager or Managing Partner can approve this recovery.");
     if (proposedBy && auth.userId && proposedBy === auth.userId) {
       throw Error("You proposed this recovery, so another authorised person must approve it.");
     }
     return actors;
   }
+  if (action === "reject") throw Error("Return the update for correction; an unpaid loss cannot be rejected.");
   if (clusterMayAct(action) && (actors.isCluster || actors.isSlp)) return actors;
   if (slpMayAct(action) && actors.isSlp) return actors;
   throw Error("You do not have access to perform this loss lifecycle action.");

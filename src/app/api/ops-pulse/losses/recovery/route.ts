@@ -1,7 +1,7 @@
-import { recoveryActionAllowed, departedPersonError } from "@/lib/ops-pulse/loss-recovery-controls";
+import { recoveryActionAllowed, departedPersonError, receivedRecoveryError, mayActivateRedispute } from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
-import { assertLifecycleAction, lossLifecycleActors } from "@/lib/ops-pulse/nl-loss-lifecycle";
+import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { deductionMonth } from "@/lib/ops-pulse/nl-loss-policy";
 import { hasPermission } from "@/lib/authorization";
@@ -12,12 +12,12 @@ export const dynamic = "force-dynamic";
 async function lockedPlan(company: string, month: string, caseKey: string) {
   const plan = await supabaseAdmin!
     .from("nl_loss_recoveries")
-    .select("outcome_code,is_deleted")
+    .select("outcome_code,is_deleted,approval_status")
     .eq("company_id", company)
     .eq("month", month)
     .eq("case_key", caseKey)
     .maybeSingle();
-  if (!plan.data || plan.data.is_deleted) return null;
+  if (!plan.data || plan.data.is_deleted || plan.data.approval_status !== "approved") return null;
   const outcome = await supabaseAdmin!
     .from("nl_recovery_outcomes")
     .select("*")
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
       });
       return r.error ? deductionMonth(timing) : (r.data as string | null);
     };
-    const [people, history, currentMonth, nextMonth, actors] = await Promise.all([
+    const [people, history, currentMonth, nextMonth, responseWindow] = await Promise.all([
       directoryOnly
         ? supabaseAdmin!.rpc("station_audit_employee_directory", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
             if (error) throw Error("Station employees could not be loaded.");
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
       ),
       salaryMonth("current_month"),
       salaryMonth("next_month"),
-      lossLifecycleActors(auth, station.id),
+      supabaseAdmin!.from("nl_case_response_windows").select("enabled").eq("company_id", scope.company).eq("month", month).eq("case_key", caseKey).maybeSingle(),
     ]);
     if (history.error)
       throw Error("Recovery people and history could not be loaded.");
@@ -85,7 +85,9 @@ export async function GET(request: Request) {
       // SLP is deducted only once its Final file is in; the month above is provisional until then.
       awaiting_final: report === "slp" && !finalSeenAt,
       people,
-      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && (actors.isCluster || actors.isSlp),
+      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
+      can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
+      can_response: !!responseWindow.data?.enabled || mayActivateRedispute(auth),
       history: history.data ?? [],
     });
   } catch (e) {
@@ -103,7 +105,7 @@ export async function POST(request: Request) {
     )
       return reply({ error: "Invalid request origin." }, 403);
     const body = await request.json();
-    const { auth, scope, station, settings, caseKey } = await recoveryContext(
+    const { auth, scope, station, settings, caseKey, amount } = await recoveryContext(
       String(body.month || ""),
       String(body.case_key || ""),
       true,
@@ -127,19 +129,23 @@ export async function POST(request: Request) {
     if (outcome.error) throw Error("Recovery outcome could not be loaded.");
     if (!outcome.data || !recoveryActionAllowed(outcome.data)) return reply({ error: "Use a recovery plan or record the responsible person. Redisputes are managed in Case response." }, 400);
     await assertLifecycleAction(auth, station.id, "propose");
+    if (body.outcome === "already_recovered") {
+      const error = receivedRecoveryError(body.recovery_details ?? {}, Number(amount));
+      if (error) return reply({ error }, 400);
+    }
     if (body.outcome === "responsible_left") {
       const error = departedPersonError(body.recovery_details ?? {}, body.remarks);
       if (error) return reply({ error }, 400);
     }
     if (
-      outcome.data?.restricted &&
+      outcome.data?.restricted && body.outcome !== "already_recovered" &&
       !hasPermission(auth, "ops_loss_recovered", "edit")
     )
       return reply(
         { error: `You do not have access to mark a case as “${outcome.data.label}”.` },
         403,
       );
-    if (!hasPermission(auth, "ops_loss_recovered", "edit")) {
+    if (!hasPermission(auth, "ops_loss_recovered", "edit") && !mayActivateRedispute(auth)) {
       const locked = await lockedPlan(scope.company, body.month, caseKey);
       if (locked)
         return reply({ error: `This case is marked “${locked}”. Only people with that access can change it.` }, 403);
@@ -235,7 +241,7 @@ export async function DELETE(request: Request) {
       return reply({ error: "Invalid recovery version." }, 400);
     // Station users may dispute/clarify only — clearing a plan is Cluster/SLP.
     await assertLifecycleAction(auth, station.id, "propose");
-    if (!hasPermission(auth, "ops_loss_recovered", "edit")) {
+    if (!hasPermission(auth, "ops_loss_recovered", "edit") && !mayActivateRedispute(auth)) {
       const locked = await lockedPlan(scope.company, b.month, caseKey);
       if (locked)
         return reply({ error: `This case is marked “${locked}”. Only people with that access can remove it.` }, 403);
