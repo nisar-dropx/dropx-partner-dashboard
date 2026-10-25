@@ -302,7 +302,7 @@ export function PaymentApprovalReviewLauncher({
   ) : null;
 
   return <>
-    {showTrigger ? submitted ? <span className="status-pill good payment-review-submitted"><span className="inline-spinner" aria-hidden="true" />Saving decision…</span> : <button className="button secondary compact" onClick={() => { setDecisionError(""); setOpen(true); }} type="button">{canAct ? "Review" : "View"}</button> : null}
+    {showTrigger ? submitted ? <span className="status-pill good payment-review-submitted"><span className="inline-spinner" aria-hidden="true" />Saving decision…</span> : <button className={`button compact ${canAct ? "payment-action-next" : "secondary"}`} onClick={() => { setDecisionError(""); setOpen(true); }} type="button">{canAct ? "Review" : "View"}</button> : null}
     {!open && decisionError ? <small className="payment-review-inline-error" role="alert">{decisionError}</small> : null}
     {mounted && modal ? createPortal(modal, document.body) : null}
   </>;

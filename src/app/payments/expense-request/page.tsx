@@ -457,9 +457,9 @@ export default async function ExpenseRequestPage({
                     {pagePermission.canAdd ? (
                       <td className="payment-cell-action">
                         {isResubmittable(request, authorization.userId) ? (
-                          <PendingLink className="button compact" href={`/payments/expense-request?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
+                          <PendingLink className="button compact payment-action-revise" href={`/payments/expense-request?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
                         ) : canSubmitBankDetails(request, authorization.userId) ? (
-                          <PendingLink className="button compact" href={`/payments/expense-request?bank=${request.id}`} scroll={false}>Submit details</PendingLink>
+                          <PendingLink className="button compact payment-action-next" href={`/payments/expense-request?bank=${request.id}`} scroll={false}>Submit details</PendingLink>
                         ) : "-"}
                       </td>
                     ) : null}
@@ -544,7 +544,7 @@ export default async function ExpenseRequestPage({
               </label>
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/expense-request" scroll={false}>Cancel</PendingLink>
-                <SubmitButton pendingText="Resubmitting">Resubmit request</SubmitButton>
+                <SubmitButton className="button payment-action-revise" pendingText="Resubmitting">Resubmit request</SubmitButton>
               </div>
             </form>
           </section>
@@ -615,7 +615,7 @@ export default async function ExpenseRequestPage({
               </label>
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/expense-request" scroll={false}>Cancel</PendingLink>
-                <SubmitButton pendingText="Submitting">Submit details</SubmitButton>
+                <SubmitButton className="button payment-action-next" pendingText="Submitting">Submit details</SubmitButton>
               </div>
             </form>
           </section>
