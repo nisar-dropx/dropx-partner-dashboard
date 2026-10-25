@@ -87,7 +87,7 @@ export async function loadRecoveryPayables(
     throw Error(
       "Employee eligibility or payable salary could not be verified.",
     );
-  // Calculate the same company-wide DA pay used by Dashboard, but return only the scoped station directory.
+  // Calculate all-location pay only for this station’s directory, preserving cross-station salary totals.
   // Capacity is pay before Ops loss recoveries: every plan for this month is subtracted as "reserved" below.
   const payouts =
     workforceIds.length && policy.salary_cap_enabled
@@ -96,7 +96,7 @@ export async function loadRecoveryPayables(
           { ...auth, hasAllLocationAccess: true },
           start,
           end,
-          { includeLossRecoveries: false },
+          { workforceIds, includeLossRecoveries: false },
         )
       : { rows: [], error: null };
   // A payout-source issue blocks employee deductions, but never blocks a re-dispute.

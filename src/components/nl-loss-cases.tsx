@@ -16,6 +16,7 @@ import {
   type RecoveryDetails,
   type RecoveryPlan,
 } from "@/lib/ops-pulse/nl-loss-policy";
+import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
@@ -66,13 +67,18 @@ export function NlLossCases({
   canApprove?: boolean;
   showPeriod?: boolean;
 }) {
+  const [sort, setSort] = useState("value_desc");
+  const [status, setStatus] = useState("all");
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
     [active, setActive] = useState<string | null>(null);
   const shown = useMemo(
     () =>
-      cases.filter((c) =>
+      sortLossRows(cases.filter((c) =>
+        (status !== "pending" || !c.recovery || c.recovery.is_deleted) &&
         [
+          c.station_code,
+          ...(c.recovery?.allocations.map(p => `${p.full_name} ${p.employee_code}`) || []),
           c.details.tid,
           c.details.da_name,
           c.details.category,
@@ -82,10 +88,10 @@ export function NlLossCases({
           .join(" ")
           .toLowerCase()
           .includes(query.toLowerCase()),
-      ),
-    [cases, query],
+      ), sort),
+    [cases, query, sort, status],
   );
-  const paged = usePaged(shown, 25, query);
+  const paged = usePaged(shown, 25, `${query}:${sort}:${status}`);
   const current = paged.rows;
   function download() {
     const columns = [
@@ -166,6 +172,8 @@ export function NlLossCases({
           </p>
         </div>
         <div className={styles.toolbar}>
+          <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All recovery cases</option><option value="pending">Recovery update pending</option></select>
+          <select aria-label="Sort recovery cases" value={sort} onChange={e=>setSort(e.target.value)}>{LOSS_SORTS.filter(o=>o.value!=="cases_desc").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <input
             aria-label="Search recovery cases"
             placeholder="Search TID, person or reason"
@@ -182,21 +190,21 @@ export function NlLossCases({
       </div>
       <div className={styles.cases}>
         {current.map((c) => (
-          <article key={c.case_key} className={styles.case}>
+          <article key={`${c.month}:${c.case_key}`} className={styles.case}>
             <button
               className={styles.caseSummary}
-              aria-expanded={active === c.case_key}
+              aria-expanded={active === `${c.month}:${c.case_key}`}
               onClick={() =>
-                setActive(active === c.case_key ? null : c.case_key)
+                setActive(active === `${c.month}:${c.case_key}` ? null : `${c.month}:${c.case_key}`)
               }
             >
               <div>
                 <strong>
                   {c.details.tid_approximate ? "≈ " : ""}
-                  {c.details.tid || c.case_key}
+                  {c.station_code} · {c.details.tid || c.case_key}
                 </strong>
                 <span>
-                  {showPeriod && c.details.period ? `${c.details.period} · ` : ""}
+                  {showPeriod ? `${c.details.period || c.month} · ` : ""}
                   {c.details.category || "Unspecified reason"}
                   {c.details.sub_category ? ` · ${c.details.sub_category}` : ""}
                 </span>
@@ -221,12 +229,12 @@ export function NlLossCases({
                     ? "Source changed · review"
                     : c.recovery && !c.recovery.is_deleted
                       ? c.recovery.outcome_label
-                      : "Recovery update pending"}
+                      : "Assign recovery person"}
                 </span>
               </div>
-              <span aria-hidden>{active === c.case_key ? "−" : "+"}</span>
+              <span aria-hidden>{active === `${c.month}:${c.case_key}` ? "−" : "+"}</span>
             </button>
-            {active === c.case_key ? (
+            {active === `${c.month}:${c.case_key}` ? (
               <RecoveryForm
                 row={c}
                 outcomes={outcomes}
@@ -246,7 +254,7 @@ export function NlLossCases({
     </section>
   );
 }
-function RecoveryForm({
+export function RecoveryForm({
   row,
   outcomes,
   settings,
@@ -314,8 +322,11 @@ function RecoveryForm({
   // Opened cases load only their station directory and history; no company-wide people payload.
   const [retry, setRetry] = useState(0);
   const [directoryReady, setDirectoryReady] = useState(false);
+  const [canPropose, setCanPropose] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
+    let disposed = false;
+    const timeout = setTimeout(() => { controller.abort(); }, 90000);
     setLoading(true);
     setDirectoryReady(false);
     setError("");
@@ -335,16 +346,17 @@ function RecoveryForm({
         setDeductionMonths(j.deduction_months);
         setAwaitingFinal(!!j.awaiting_final);
         setPeople(j.people);
+        setCanPropose(j.can_propose === true);
         setHistory(j.history);
         setDirectoryReady(true);
       } catch (e) {
-        if (!controller.signal.aborted)
-          setError(e instanceof Error ? e.message : "Could not load recovery.");
+        if (!disposed) setError(controller.signal.aborted ? "Station salary checks took too long. Reload to retry; no recovery has been changed." : e instanceof Error ? e.message : "Could not load recovery.");
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        clearTimeout(timeout);
+        if (!disposed) setLoading(false);
       }
     })();
-    return () => controller.abort();
+    return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
   }, [row.month, row.case_key, retry]);
   const option = outcomes.find((o) => o.code === outcome);
   // A restricted plan (e.g. "Already recovered") can only be changed by people who may set it.
@@ -353,7 +365,7 @@ function RecoveryForm({
       ? outcomes.find((o) => o.code === recovery.outcome_code)
       : undefined;
   const locked = !!savedOutcome?.restricted && !canRecovered;
-  const canEdit = mayEdit && !locked;
+  const canEdit = mayEdit && canPropose && !locked;
   const quick = canRecovered
     ? outcomes.find((o) => o.restricted && o.is_active && o.code !== outcome)
     : undefined;
@@ -649,6 +661,7 @@ function RecoveryForm({
           people with that access can change this plan.
         </p>
       ) : null}
+      {!loading && directoryReady && mayEdit && !canPropose ? <p className={styles.notice}>The station’s cluster manager, AOM cover or authorised SLP approver can assign recovery people. You can view the plan here.</p> : null}
       {loading ? (
         <p role="status">Loading station employees and recovery history…</p>
       ) : (

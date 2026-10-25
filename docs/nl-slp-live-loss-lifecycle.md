@@ -252,3 +252,13 @@ modal for month, TID, category and outstanding.
 - Access: station scope isolation, no self-approve, API bypass denied
 
 Run: `pnpm run test:loss-recovery-payroll` plus targeted suites listed in the handoff after implementation.
+
+### Recovery controls and list usability (25 October 2026)
+
+Live NL cases whose source decision matches the Recovery Master's recoverable statuses expose the same recovery editor as the final recovery view. SLP Initial remains report-only; SLP Final permits recovery plans. The editor gets station lifecycle permission from the server (cluster/AOM cover or authorised SLP); existing proposal, independent approval, salary caps and payroll locks still apply.
+
+Recovery salary checks now calculate only the workforce IDs returned by the station recovery directory. Each selected individual's all-location pay is retained for an accurate salary cap. Loading failures show a retry instead of an indefinite loading indicator.
+
+Cluster/AOM, station and reason filters support multiple values; final recovery periods do too. Existing single-value URLs continue to work. Selecting several stations opens their combined cases with station labels. Station totals and case lists have value/station sorting; CSV follows the case sort. Clearing the period filter selects all periods, while an initial visit still starts with the latest period.
+
+Regression coverage: `pnpm run test:loss-recovery-payroll` includes filter/sort helpers, actual live/final loaders, authorised station isolation and station-scoped pay calculation, alongside the existing recovery/payroll lifecycle tests.

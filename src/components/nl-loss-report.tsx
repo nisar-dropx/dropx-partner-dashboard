@@ -1,3 +1,5 @@
+import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
+import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
 import Link from "next/link";
 import { NlLossRefresh } from "./nl-loss-refresh";
 import { LossHeader, type LossTab } from "@/components/loss-header";
@@ -105,13 +107,12 @@ export function NlLossReport({
     if (v.month) q.set(v.periodParam, v.month);
     if (v.cluster) q.set("cluster", v.cluster);
     if (v.reason) q.set("reason", v.reason);
+    if (v.sort) q.set("sort", v.sort);
     if (station) q.set("station", station);
     return q;
   };
   const href = (station: string) => `${base}?${params(station)}`;
-  const periodLabel =
-    v.periodOptions.find((p) => p.value === v.month)?.label ??
-    `No ${copy.period.toLowerCase()} available`;
+  const periodLabel = v.month === ALL_PERIODS ? "All periods" : lossFilterValues(v.month).map(value => v.periodOptions.find(p => p.value === value)?.label || value).join(" · ") || `No ${copy.period.toLowerCase()} available`;
   const workbookQuery = params(v.station);
   workbookQuery.set("kind", v.kind);
   return (
@@ -145,45 +146,11 @@ export function NlLossReport({
         {v.kind === "nl" ? (
           <input type="hidden" name="view" value="historic" />
         ) : null}
-        <label>
-          {copy.period}
-          <select name={v.periodParam} defaultValue={v.month ?? ""} key={v.month}>
-            {v.periodOptions.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Cluster
-          <select name="cluster" defaultValue={v.cluster} key={v.cluster}>
-            <option value="">All my clusters</option>
-            {v.clusterOptions.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Station
-          <select name="station" defaultValue={v.station} key={v.station}>
-            <option value="">All my stations</option>
-            {v.stations.map((s) => (
-              <option key={s.id} value={s.source_code}>
-                {s.station_code} · {s.station_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Loss reason
-          <select name="reason" defaultValue={v.reason} key={v.reason}>
-            <option value="">All reasons</option>
-            {v.reasons.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
-        </label>
+        <LossMultiFilter key={`period:${v.month}`} name={v.periodParam} label={copy.period} value={v.month === ALL_PERIODS ? "" : v.month || ""} options={v.periodOptions.filter(p => p.value !== ALL_PERIODS)} allLabel="All periods" />
+        <input type="hidden" name="periodFallback" value="all" />
+        <LossMultiFilter key={`cluster:${v.cluster}`} name="cluster" label="Cluster / AOM" value={v.cluster} options={v.clusterOptions} allLabel="All my clusters" />
+        <LossMultiFilter key={`station:${v.station}`} name="station" label="Station" value={v.station} options={v.stations.map(s => ({ value: s.source_code, label: `${s.station_code} · ${s.station_name}` }))} allLabel="All my stations" />
+        <LossMultiFilter key={`reason:${v.reason}`} name="reason" label="Loss reason" value={v.reason} options={v.reasons.map(r => ({ value: r, label: r }))} allLabel="All reasons" />
         <button className={styles.primary}>Apply filters</button>
         <Link
           href={v.kind === "nl" ? `${base}?view=historic` : base}
@@ -229,7 +196,7 @@ export function NlLossReport({
           canUpload={v.canEdit}
           scope={
             v.station
-              ? `station ${v.station}`
+              ? `stations ${lossFilterValues(v.station).join(", ")}`
               : `${v.totals.length} station${v.totals.length === 1 ? "" : "s"} in your scope`
           }
         />
@@ -237,13 +204,13 @@ export function NlLossReport({
       {v.station ? (
         <div className={styles.context}>
           <Link href={href("")}>← All station totals</Link>
-          <span>Station {v.station}</span>
+          <span>Stations {lossFilterValues(v.station).join(", ")}</span>
         </div>
       ) : (
         <section className={styles.panel}>
           <div className={styles.panelHead}>
             <h2>Station recovery overview</h2>
-            <span>Select a station to review its cases</span>
+            <LossTableSort value={v.sort} />
           </div>
           <div className={styles.tableWrap}>
             <table>
@@ -297,7 +264,7 @@ export function NlLossReport({
           canEdit={v.canEdit}
           canRecovered={v.canRecovered}
           canApprove={v.canApprove}
-          showPeriod={v.kind !== "nl" && v.month === ALL_PERIODS}
+          showPeriod={v.month === ALL_PERIODS || lossFilterValues(v.month).length > 1}
         />
       ) : null}
       <p className={styles.footer}>{copy.footer}</p>

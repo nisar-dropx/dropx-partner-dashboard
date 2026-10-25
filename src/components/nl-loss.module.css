@@ -1093,3 +1093,8 @@
 .chips{padding:0 16px 10px}
 .case{border-radius:10px}
 .caseSummary{padding:10px 14px}
+
+/* Keep list tools compact without squeezing mobile labels or filter popovers. */
+.toolbar > select { width: auto; max-width: 220px; min-height: 38px; padding: 8px 10px; }
+.panelHead > label select { width: auto; max-width: 220px; }
+@media (max-width: 600px) { .toolbar > select { flex: 1 1 150px; max-width: 100%; min-height: 44px; } }
