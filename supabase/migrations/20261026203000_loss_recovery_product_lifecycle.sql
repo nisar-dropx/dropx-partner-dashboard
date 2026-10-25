@@ -288,4 +288,10 @@ do $$ declare f record; definition text; begin
  end loop;
 end $$;
 
+-- Explicitly authorised final roles retain their existing membership and station scopes.
+insert into public.role_page_permissions(company_id,role_id,page_id,can_view,can_add,can_edit)
+select r.company_id,r.id,p.id,true,false,true
+from public.user_roles r join public.app_pages p on p.company_id=r.company_id and p.code='ops_losses'
+where r.is_active and r.code in ('OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_NATIONAL_HEAD')
+on conflict(company_id,role_id,page_id) do update set can_view=true,can_edit=true;
 commit;

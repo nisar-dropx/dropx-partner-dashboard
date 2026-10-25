@@ -233,8 +233,14 @@ eq('Every response transition has immutable history', Number((await one(`select 
 eq('Redispute does not close recovery', (await one(`select lifecycle_status from nl_loss_month_cases where case_key='LEFT1'`)).lifecycle_status,'exit_balance');
 
 // Product lifecycle: every update needs independent approval; returns never erase debt.
+await db.exec(`create table user_roles(id uuid primary key,company_id uuid,code text,is_active boolean default true);
+create table app_pages(id uuid primary key,company_id uuid,code text);
+create table role_page_permissions(company_id uuid,role_id uuid,page_id uuid,can_view boolean,can_add boolean,can_edit boolean,primary key(company_id,role_id,page_id));
+insert into app_pages values('${SLP}','${C}','ops_losses');
+insert into user_roles values('${CM}','${C}','OPERATIONS_CLM',true),('${E1}','${C}','OPERATIONS_FINMGR',true),('${W1}','${C}','OPERATIONS_MANAGING_PARTNER',true),('${S}','${C}','OPERATIONS_NATIONAL_HEAD',true);`);
 const productSql=readFileSync("supabase/migrations/20261026203000_loss_recovery_product_lifecycle.sql","utf8");
 await db.exec(productSql); await db.exec(productSql);
+eq('Only the three authorised role aliases gain Losses access',(await db.query(`select code from user_roles r join role_page_permissions p on p.role_id=r.id where p.can_view and p.can_edit order by code`)).rows.map(r=>r.code),['OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_NATIONAL_HEAD']);
 await db.exec(`insert into nl_recovery_outcomes(company_id,code,label,allocation_required) values('${C}','already_recovered','Receipt received',false);
 insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values('${C}','nl','2026-09','RECEIPT','BLR1',500,'Recoverable'),('${C}','nl','2026-09','PLAN3','BLR1',900,'Recoverable')`);
 const receipt=(version,details)=>`select save_nl_recovery('${C}','2026-09','RECEIPT',${version},'already_recovered','none','[]','Payment received with reference','${CM}','Station','${JSON.stringify(details)}')`;

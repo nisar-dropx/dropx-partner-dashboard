@@ -289,3 +289,5 @@ This section supersedes the earlier station/cluster-only proposal and Master-per
 - Pending proposals cannot masquerade as scheduled collections. Legacy exception shortcuts remain flagged for review. Notifications remain in their existing enabled/disabled state; final-approval recipients now use the same role restriction.
 
 Migration: `20261026203000_loss_recovery_product_lifecycle.sql`, applied individually after testing twice. Shared HRMS and Workforce due contracts and keys are unchanged. Validation includes role/API denial, no self-approval, return/resubmit, receipt validation, no-salary carry-forward, deferred full recovery, source drift, immutable history and stale TT updates.
+
+The user explicitly approved enabling existing `OPERATIONS_FINMGR`, `OPERATIONS_MANAGING_PARTNER` and `OPERATIONS_NATIONAL_HEAD` roles for Losses view/edit. The migration changes only these page permissions, preserving memberships, location scopes and existing add rights.
