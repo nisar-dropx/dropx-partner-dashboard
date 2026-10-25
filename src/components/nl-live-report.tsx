@@ -1,3 +1,4 @@
+import { LossWorkbook } from "./loss-workbook";
 import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
 import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
 import Link from "next/link";
@@ -39,9 +40,11 @@ export function NlLiveReport({
   view: NlLiveView;
   tabs: LossTab[];
 }) {
+  const isFinal = v.stageView === "final";
+  const viewKey = isFinal ? "historic" : "live";
   const base = `${LOSSES_PATH}/nl`;
   const href = (next: { station?: string; phase?: string }) => {
-    const q = new URLSearchParams({ view: "live" });
+    const q = new URLSearchParams({ view: viewKey });
     if (v.month && v.month !== v.months[0]) q.set("month", v.month);
     if (v.cluster) q.set("cluster", v.cluster);
     if (v.reason) q.set("reason", v.reason);
@@ -58,13 +61,13 @@ export function NlLiveReport({
   return (
     <main className={styles.workspace}>
       <LossHeader
-        eyebrow="Team Ops · Cloak live month"
+        eyebrow="Team Ops · Losses"
         title="NL loss"
-        intro="Every loss Amazon has raised for the month still in dispute. Dispute or accept each case before the window closes."
+        intro={isFinal ? "Confirmed outcomes. Assign recovery for recoverable cases." : "Pending decisions. Dispute or respond within the source window."}
         tabs={tabs}
         active="nl"
       />
-      <NlViewSwitch active="live" />
+      <NlViewSwitch active={viewKey} />
       {!v.ready ? (
         <div className={styles.notice} role="status">
           The live dispute view is being enabled. Recovery for closed months
@@ -73,13 +76,12 @@ export function NlLiveReport({
       ) : !v.month ? (
         <section className={styles.panel}>
           <p className={styles.empty}>
-            Cloak has no open month for your stations right now. A new month
-            appears around the 4th; closed months are under Historic.
+            No cases in this section for your stations. Check the other section for pending or final cases.
           </p>
         </section>
       ) : (
         <>
-          <section className={styles.window} aria-label="Dispute window">
+          {!isFinal ? <details className={styles.compactDetails}><summary>Dispute dates · {monthLabel(v.month)}</summary><section className={styles.window} aria-label="Dispute window">
             <div className={styles.windowHead}>
               <div>
                 <h2>{monthLabel(v.month)} losses</h2>
@@ -138,7 +140,9 @@ export function NlLiveReport({
               })}
             </ol>
           </section>
+          </details> : null}
           <div className={`${styles.metrics} ${styles.metrics4}`}>
+            {!isFinal ? <>
             <div>
               <span>Waiting on stations</span>
               <strong>{s.pending.toLocaleString("en-IN")}</strong>
@@ -154,8 +158,10 @@ export function NlLiveReport({
               <strong>{s.withAmazon.toLocaleString("en-IN")}</strong>
               <small>{money(s.withAmazonAmount)} under review</small>
             </div>
+            </> : null}
+            {isFinal ? <>
             <div>
-              <span>Saved by dispute</span>
+              <span>Non-recoverable</span>
               <strong>{money(s.savedAmount)}</strong>
               <small>
                 {s.saved.toLocaleString("en-IN")} cases ruled non-recoverable
@@ -170,8 +176,9 @@ export function NlLiveReport({
                 raised
               </small>
             </div>
+            </> : null}
           </div>
-          {v.canDesk && v.deskQueue ? (
+          {!isFinal && v.canDesk && v.deskQueue ? (
             <div className={styles.workbook}>
               <div>
                 <strong>
@@ -194,7 +201,7 @@ export function NlLiveReport({
             </div>
           ) : null}
           <form className={styles.filters} action={base}>
-            <input type="hidden" name="view" value="live" />
+            <input type="hidden" name="view" value={viewKey} />
             {v.months.length > 1 ? (
               <label>
                 Open month
@@ -211,10 +218,11 @@ export function NlLiveReport({
             <LossMultiFilter key={`station:${v.station}`} name="station" label="Station" value={v.station} options={v.stations.map(s => ({ value: s.source_code, label: `${s.station_code} · ${s.station_name}` }))} allLabel="All my stations" />
             <LossMultiFilter key={`reason:${v.reason}`} name="reason" label="Loss reason" value={v.reason} options={v.reasons.map(r => ({ value: r, label: r }))} allLabel="All reasons" />
             <button className={styles.primary}>Apply filters</button>
-            <Link href={`${base}?view=live`} className={styles.button}>
+            <Link href={`${base}?view=${viewKey}`} className={styles.button}>
               Reset
             </Link>
           </form>
+          {isFinal && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind="nl" query={new URLSearchParams({ kind: "nl", month: v.month, station: v.station || "", cluster: v.cluster || "", reason: v.reason || "" }).toString()} canUpload={v.canDispute} scope={v.station ? `stations ${v.station}` : "your stations"} /></details> : null}
           {v.station ? (
             <>
               <div className={styles.context}>
@@ -224,7 +232,8 @@ export function NlLiveReport({
                 <span>Stations {lossFilterValues(v.station).join(", ")}</span>
               </div>
               <NlLiveCases
-                key={[v.month, v.station, v.reason].join(":")}
+                key={[viewKey, v.month, v.station, v.reason].join(":")}
+                stageView={isFinal ? "final" : "initial"}
                 month={v.month}
                 cases={v.cases}
                 window={v.window}
@@ -249,8 +258,7 @@ export function NlLiveReport({
                       <th>Station</th>
                       <th>Current cluster · People</th>
                       <th>Raised</th>
-                      <th>Waiting on station</th>
-                      <th>With Amazon</th>
+                      {!isFinal ? <><th>Waiting on station</th><th>With Amazon</th></> : null}
                       <th>Saved</th>
                       <th>Recoverable</th>
                       <th />
@@ -268,6 +276,7 @@ export function NlLiveReport({
                           {t.count}
                           <small>{money(t.amount)}</small>
                         </td>
+                        {!isFinal ? <>
                         <td>
                           {t.pending ? (
                             <span className={`${styles.badge} ${styles.warn}`}>
@@ -287,6 +296,7 @@ export function NlLiveReport({
                           ) : null}
                         </td>
                         <td>{t.withAmazon}</td>
+                        </> : null}
                         <td>{t.saved ? money(t.savedAmount) : "—"}</td>
                         <td>
                           {t.recoverable ? money(t.recoverableAmount) : "—"}
@@ -315,9 +325,7 @@ export function NlLiveReport({
             </section>
           )}
           <p className={styles.footer}>
-            Live data refreshes from Cloak every hour. Disputes close on the
-            dispute-window date; Amazon then reviews, may ask for more details,
-            and the month moves to Historic once every case is decided.
+            Cases refresh from Cloak every hour. Confirmed outcomes appear in Final; pending decisions stay in Initial.
           </p>
         </>
       )}

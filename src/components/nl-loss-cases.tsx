@@ -17,6 +17,8 @@ import {
   type RecoveryPlan,
 } from "@/lib/ops-pulse/nl-loss-policy";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
+import { TrackingDetailModal } from "./tracking-detail-modal";
+import { recoveryActionAllowed, departedPersonError } from "@/lib/ops-pulse/loss-recovery-controls";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
@@ -67,6 +69,7 @@ export function NlLossCases({
   canApprove?: boolean;
   showPeriod?: boolean;
 }) {
+  const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [sort, setSort] = useState("value_desc");
   const [status, setStatus] = useState("all");
   const [query, setQuery] = useState(""),
@@ -162,6 +165,7 @@ export function NlLossCases({
   }
   return (
     <section className={styles.panel}>
+      <TrackingDetailModal trackingId={tracking?.id ?? null} stationHint={tracking?.station} onClose={() => setTracking(null)} />
       <div className={styles.panelHead}>
         <div>
           <h2>Recoverable cases</h2>
@@ -191,6 +195,7 @@ export function NlLossCases({
       <div className={styles.cases}>
         {current.map((c) => (
           <article key={`${c.month}:${c.case_key}`} className={styles.case}>
+              {c.details.tid && !c.details.tid_approximate ? <button type="button" className={styles.trackingLink} onClick={() => setTracking({ id: c.details.tid!, station: c.station_code })} aria-label={`Track ${c.details.tid} in SCC`}>{c.station_code} · {c.details.tid} ↗</button> : null}
             <button
               className={styles.caseSummary}
               aria-expanded={active === `${c.month}:${c.case_key}`}
@@ -199,7 +204,7 @@ export function NlLossCases({
               }
             >
               <div>
-                <strong>
+                <strong style={c.details.tid && !c.details.tid_approximate ? { visibility: "hidden" } : undefined}>
                   {c.details.tid_approximate ? "≈ " : ""}
                   {c.station_code} · {c.details.tid || c.case_key}
                 </strong>
@@ -303,6 +308,8 @@ export function RecoveryForm({
     Record<string, string>
   >({});
   const [awaitingFinal, setAwaitingFinal] = useState(false);
+  const [salaryLoading, setSalaryLoading] = useState(false);
+  const [salaryError, setSalaryError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [people, setPeople] = useState<RecoveryPerson[]>([]),
     [history, setHistory] = useState<History[]>([]),
@@ -333,7 +340,7 @@ export function RecoveryForm({
     void (async () => {
       try {
         const res = await fetch(
-          `/api/ops-pulse/losses/recovery?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}`,
+          `/api/ops-pulse/losses/recovery?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}&directory=1`,
           { cache: "no-store", signal: controller.signal },
         );
         const j = await res.json();
@@ -358,6 +365,31 @@ export function RecoveryForm({
     })();
     return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
   }, [row.month, row.case_key, retry]);
+  const selectedKey = [...selected].sort().join(",");
+  useEffect(() => {
+    if (!directoryReady || !selectedKey) return;
+    const controller = new AbortController();
+    setSalaryLoading(true);
+    setSalaryError("");
+    const timeout = setTimeout(() => {
+      setSalaryError("Salary check timed out. Reload to retry.");
+      setSalaryLoading(false);
+      controller.abort();
+    }, 45000);
+    const params = new URLSearchParams({ month: row.month, case: row.case_key });
+    selectedKey.split(",").forEach(ref => params.append("person", ref));
+    fetch(`/api/ops-pulse/losses/recovery?${params}`, { signal: controller.signal, cache: "no-store" })
+      .then(async res => { const j = await res.json(); if (!res.ok) throw Error(j.error); return j; })
+      .then(j => {
+        if (controller.signal.aborted) return;
+        setPeople(current => current.map(p => j.people.find((checked: RecoveryPerson) => checked.ref === p.ref) ?? p));
+        if (selectedKey.split(",").some(ref => !j.people.some((p: RecoveryPerson) => p.ref === ref)))
+          setSalaryError("A selected person is not eligible for payroll recovery. Review their employment details.");
+      })
+      .catch(e => { if (!controller.signal.aborted) setSalaryError(e.message || "Salary check failed. Reload to retry."); })
+      .finally(() => { clearTimeout(timeout); if (!controller.signal.aborted) setSalaryLoading(false); });
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [directoryReady, selectedKey, row.month, row.case_key, retry]);
   const option = outcomes.find((o) => o.code === outcome);
   // A restricted plan (e.g. "Already recovered") can only be changed by people who may set it.
   const savedOutcome =
@@ -392,7 +424,7 @@ export function RecoveryForm({
     recovery.deduction_month
       ? recovery.deduction_month
       : deductionMonths[option?.deduction_timing || "none"];
-  const validation = !option?.is_active
+  const validation = outcome === "responsible_left" ? departedPersonError(details, remarks) : !option?.is_active || !recoveryActionAllowed(option)
     ? "Select an active recovery action."
     : option.allocation_required
       ? allocationError(
@@ -415,6 +447,7 @@ export function RecoveryForm({
         settings?.recovery_policy.cctv_public_confirmation &&
         !details.cctv_public_confirmed));
   const cannotSave =
+    (option?.allocation_required && (salaryLoading || !!salaryError)) ||
     !!validation ||
     !!reasonError ||
     (option?.remarks_required && remarks.trim().length < 5) ||
@@ -488,7 +521,7 @@ export function RecoveryForm({
                 }
             : { mode: "full" },
           remarks,
-          recovery_details: option?.dispute_fields_enabled ? details : {},
+          recovery_details: option?.dispute_fields_enabled || outcome === "responsible_left" ? details : {},
         }),
       });
       const j = await res.json();
@@ -557,6 +590,8 @@ export function RecoveryForm({
   }
   return (
     <div className={styles.detail}>
+      <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}`}>Case response ↗</a>
+      <details className={styles.compactDetails}><summary>Source details · {row.month}</summary>
       <div className={styles.sourceGrid}>
         <div>
           <small>{row.report === "slp" ? "Recovery file" : "Amazon decision"}</small>
@@ -580,6 +615,7 @@ export function RecoveryForm({
           {row.details.extra?.nl_res || row.details.remarks}
         </p>
       ) : null}
+      </details>
       {recoveryNeedsReview({ ...row, recovery }) ? (
         <p className={styles.notice}>
           Amazon’s amount or decision changed since the saved plan. Review and
@@ -663,14 +699,13 @@ export function RecoveryForm({
       ) : null}
       {!loading && directoryReady && mayEdit && !canPropose ? <p className={styles.notice}>The station’s cluster manager, AOM cover or authorised SLP approver can assign recovery people. You can view the plan here.</p> : null}
       {loading ? (
-        <p role="status">Loading station employees and recovery history…</p>
+        <p role="status">Loading recovery…</p>
       ) : (
         <form onSubmit={save}>
           {canEdit && quick ? (
             <div className={styles.quick}>
               <span>
-                Recovered earlier, outside this plan? No employee deduction is
-                created.
+                Recovery already received?
               </span>
               <button
                 type="button"
@@ -703,17 +738,23 @@ export function RecoveryForm({
                 {outcomes
                   .filter(
                     (o) =>
-                      (o.is_active && (!o.restricted || canRecovered)) ||
+                      (o.is_active && recoveryActionAllowed(o) && (!o.restricted || canRecovered)) ||
                       o.code === outcome,
                   )
                   .map((o) => (
-                    <option key={o.code} value={o.code} disabled={!o.is_active}>
+                    <option key={o.code} value={o.code} disabled={!o.is_active || !recoveryActionAllowed(o)}>
                       {o.label}
                       {!o.is_active ? " (removed)" : ""}
                     </option>
                   ))}
               </select>
             </label>
+            {outcome === "responsible_left" ? <div className={styles.departedFields}>
+              <label>Employee ID<input required value={details.employee_id || ""} maxLength={80} onChange={e => setDetails({ ...details, employee_id: e.target.value })} /></label>
+              <label>Full name<input required value={details.employee_name || ""} maxLength={160} onChange={e => setDetails({ ...details, employee_name: e.target.value })} /></label>
+              <label>Recovery owner &amp; next step<textarea required rows={2} maxLength={1000} placeholder="Who will follow up, by when, and how will the balance be recovered?" value={details.follow_up || ""} onChange={e => setDetails({ ...details, follow_up: e.target.value })} /></label>
+              <small>Departure does not close the loss. The full balance remains outstanding.</small>
+            </div> : null}
             {option?.allocation_required && deductionPeriod ? (
               <p className={styles.notice}>
                 <strong>
@@ -723,13 +764,7 @@ export function RecoveryForm({
                 {awaitingFinal
                   ? "SLP Initial is a report only. Assign employees once this case is in the SLP Final file. "
                   : null}
-                People are deducted in HRMS payroll and Workforce members in
-                the Workforce payout. A month that cannot carry it moves the
-                deduction to the next month.
-                <br />
-                {option.deduction_timing === "next_month"
-                  ? "Next-month exception: record employee IDs, the full amount and the reason now."
-                  : "Allocate the full loss amount to the responsible employee IDs."}
+                Allocate the full amount. Salary limits and approval apply.
               </p>
             ) : null}
             {option?.allocation_required ? (
@@ -841,17 +876,15 @@ export function RecoveryForm({
                     ? " A missed month moves the remaining instalments on. If a person exits, the balance is recovered in their final settlement."
                     : ""}
                 </p>
+                {salaryLoading && selected.length > 0 ? <p role="status" className={styles.hint}>Checking salary limits for selected people…</p> : null}
+                {salaryError ? <p role="alert" className={styles.error}>{salaryError}</p> : null}
+                {!search.trim() && !selected.length ? <p className={styles.hint}>Search by name or employee ID to assign responsibility.</p> : null}
                 <div className={styles.people}>
-                  {available.map((p) => (
+                  {available.filter(p => selected.includes(p.ref) || search.trim().length >= 2).slice(0, 30).map((p) => (
                     <div className={styles.person} key={p.ref}>
                       <label>
                         <input
                           type="checkbox"
-                          disabled={
-                            !selected.includes(p.ref) &&
-                            capEnabled &&
-                            (limitOf(p) == null || Number(limitOf(p)) <= 0)
-                          }
                           checked={selected.includes(p.ref)}
                           onChange={(e) =>
                             setSelected((ids) =>
@@ -867,7 +900,7 @@ export function RecoveryForm({
                             {p.employee_code} · {p.designation}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
-                          {capEnabled ? (
+                          {capEnabled && selected.includes(p.ref) ? (
                             <small
                               className={
                                 p.recovery_limit == null

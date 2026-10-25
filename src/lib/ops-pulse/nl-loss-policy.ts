@@ -59,6 +59,9 @@ export type RecoveryPolicy = {
 };
 export type RecoveryAttachment = { id: string; file_name: string };
 export type RecoveryDetails = {
+  employee_id?: string;
+  employee_name?: string;
+  follow_up?: string;
   reason?: string;
   details?: string;
   cctv_url?: string;

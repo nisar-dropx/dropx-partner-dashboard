@@ -18,10 +18,17 @@ data={stations:[{id:'a',company_id:'co',station_code:'ERSE',station_name:'Statio
  const {loadNlLive}=load('src/lib/ops-pulse/nl-live.ts'),{loadRecoveryView}=load('src/lib/ops-pulse/nl-loss.ts');
  let v=await loadNlLive(auth,{station:'["ERSE","SPBE"]',cluster:'["cm:cm1","aom:aom1"]',sort:'value_asc'});
  assert.equal(v.cases.length,3);assert.equal(v.totals[0].station_code,'SPBE');assert.ok(v.cases.find(c=>c.case_key==='nl:1').recovery);assert.equal(v.cases.find(c=>c.case_key==='nl:3').recoverable,false);assert.equal(v.cases.find(c=>c.case_key==='nl:1').recoverable,true);assert.ok(v.cases.every(c=>c.station_code!=='OUTSIDE'));
+ let final=await loadNlLive(auth,{station:'ERSE'},'final');assert.equal(final.cases.length,2);
+ let pending=await loadNlLive(auth,{station:'ERSE'},'initial');assert.equal(pending.cases.length,0);
+ data.nl_loss_month_cases.push({...row('pending','ERSE',200),status:'pending',stage:'eDSP2',details:{case_status:'pending',extra:{current_sla_stage:'eDSP2'}}});
+ pending=await loadNlLive(auth,{station:'ERSE'},'initial');assert.equal(pending.cases.length,1);assert.equal(pending.cases[0].case_key,'pending');
+ final=await loadNlLive(auth,{station:'ERSE'},'final');assert.equal(final.cases.length,2);
+ data.nl_loss_month_cases.pop();
  v=await loadRecoveryView(auth,'nl',{station:'["ERSE","SPBE"]',reason:'Ageing'});assert.equal(v.cases.length,2);assert.equal(v.totals.reduce((s,t)=>s+t.amount,0),35000);
  v=await loadRecoveryView(auth,'slp_final',{station:'SPBE',period:'Aug-Sep'});assert.equal(v.cases.length,1);assert.equal(v.cases[0].amount,8200);
  v=await loadRecoveryView(auth,'nl',{cluster:'aom:aom1',station:'SPBE'});assert.equal(v.cases.length,1);assert.equal(v.cases[0].station_code,'SPBE');
  const {loadRecoveryPayables}=load('src/lib/ops-pulse/nl-recovery-payables.ts');data.workforce=[{id:'w1',company_id:'co',is_active:true,date_of_join:'2020-01-01'}];data.nl_loss_recoveries=[];
  const people=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25');assert.deepEqual(payoutCalls[0][4],{workforceIds:['w1'],includeLossRecoveries:false});assert.equal(payoutCalls[0][1].hasAllLocationAccess,true,'All-location pay for selected people remains included');assert.equal(people[0].recovery_limit,5000);assert.equal(people[0].salary_gross,12000);
+ payoutCalls.length=0;await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25',[]);assert.equal(payoutCalls.length,0,'No salary calculation for unselected employees');
  console.log('PASS actual loss loaders: scoped multi-station/cluster/reason filters, recoverable NL plans, non-recoverable exclusion, SLP Final, scoped salary calculation retaining cap.');
 })().catch(e=>{console.error(e);process.exitCode=1});

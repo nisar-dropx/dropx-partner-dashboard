@@ -1098,3 +1098,21 @@
 .toolbar > select { width: auto; max-width: 220px; min-height: 38px; padding: 8px 10px; }
 .panelHead > label select { width: auto; max-width: 220px; }
 @media (max-width: 600px) { .toolbar > select { flex: 1 1 150px; max-width: 100%; min-height: 44px; } }
+
+/* Keep the worklist compact; imported evidence remains available on demand. */
+.case { position: relative; }
+.trackingLink { position: absolute; z-index: 1; top: 14px; left: 12px; border: 0; background: transparent; padding: 0; color: #255fa5; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.compactDetails { margin: 6px 0; font-size: 12px; }
+.compactDetails > summary { cursor: pointer; color: #53647c; padding: 6px 8px; }
+.detail { padding: 12px; }
+.sourceGrid { gap: 8px; }
+.allocation { padding: 10px; }
+.sourceNote { padding: 8px 10px; margin: 6px 0; }
+.responseLink { float: right; font-size: 12px; color: #255fa5; }
+.departedFields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.departedFields > :nth-child(n+3) { grid-column: 1 / -1; }
+.methods { gap: 8px; }
+.people { max-height: 230px; }
+@media (max-width: 600px) { .departedFields { grid-template-columns: 1fr; } .trackingLink { font-size: 12px; } }
+
+.caseSummary { padding: 14px 12px; }

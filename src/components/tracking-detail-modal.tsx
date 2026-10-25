@@ -86,11 +86,11 @@ export function TrackingDetailModal({
         className="tracking-search-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Tracking ID lookup result"
+        aria-label="Shipment details"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="tracking-search-modal-head">
-          <h2>{trackingId}</h2>
+          <h2>Shipment details · {trackingId}</h2>
           <button type="button" className="tracking-search-modal-close" aria-label="Close" onClick={onClose}>
             <X size={16} />
           </button>

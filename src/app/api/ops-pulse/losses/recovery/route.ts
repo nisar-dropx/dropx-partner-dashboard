@@ -1,3 +1,4 @@
+import { recoveryActionAllowed, departedPersonError } from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
 import { assertLifecycleAction, lossLifecycleActors } from "@/lib/ops-pulse/nl-loss-lifecycle";
@@ -37,6 +38,9 @@ export async function GET(request: Request) {
       key = url.searchParams.get("case") || "";
     const { auth, scope, station, settings, caseKey, amount, report, finalSeenAt } =
       await recoveryContext(month, key, false);
+    const selectedRefs = url.searchParams.getAll("person");
+    if (selectedRefs.length > 50) return reply({ error: "Select up to 50 people." }, 400);
+    const directoryOnly = url.searchParams.get("directory") === "1";
     // The salary month payroll deducts a plan saved now in, from the same rule the database applies.
     const salaryMonth = async (timing: "current_month" | "next_month") => {
       const r = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {
@@ -50,15 +54,12 @@ export async function GET(request: Request) {
       return r.error ? deductionMonth(timing) : (r.data as string | null);
     };
     const [people, history, currentMonth, nextMonth, actors] = await Promise.all([
-      loadRecoveryPayables(
-        auth,
-        scope.company,
-        station.id,
-        month,
-        caseKey,
-        settings!.recovery_policy,
-        settings!.updated_at,
-      ),
+      directoryOnly
+        ? supabaseAdmin!.rpc("station_audit_employee_directory", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
+            if (error) throw Error("Station employees could not be loaded.");
+            return data ?? [];
+          })
+        : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined),
       readAllRows(
         supabaseAdmin!
           .from("nl_loss_recovery_events")
@@ -124,6 +125,12 @@ export async function POST(request: Request) {
       .eq("code", body.outcome)
       .maybeSingle();
     if (outcome.error) throw Error("Recovery outcome could not be loaded.");
+    if (!outcome.data || !recoveryActionAllowed(outcome.data)) return reply({ error: "Use a recovery plan or record the responsible person. Redisputes are managed in Case response." }, 400);
+    await assertLifecycleAction(auth, station.id, "propose");
+    if (body.outcome === "responsible_left") {
+      const error = departedPersonError(body.recovery_details ?? {}, body.remarks);
+      if (error) return reply({ error }, 400);
+    }
     if (
       outcome.data?.restricted &&
       !hasPermission(auth, "ops_loss_recovered", "edit")
@@ -148,6 +155,7 @@ export async function POST(request: Request) {
         caseKey,
         settings!.recovery_policy,
         settings!.updated_at,
+        body.allocations.map((a: { employee_ref: string }) => a.employee_ref),
       );
     }
     if (JSON.stringify(body.recovery_details || {}).length > 20000)

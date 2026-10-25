@@ -30,8 +30,8 @@ const time = (s: string | null | undefined) =>
 /** NL has two data sets in Cloak: the month still in dispute, and the months Amazon has closed. */
 export function NlViewSwitch({ active }: { active: "live" | "historic" }) {
   const views = [
-    { key: "live", label: "Live · dispute window", hint: "Month Amazon is still deciding" },
-    { key: "historic", label: "Historic · recovery", hint: "Closed months to recover" },
+    { key: "live", label: "Initial · pending", hint: "Awaiting a final decision" },
+    { key: "historic", label: "Final · recovery", hint: "Confirmed outcomes and recovery" },
   ] as const;
   return (
     <nav className={styles.viewSwitch} aria-label="Cloak data set">

@@ -207,5 +207,28 @@ const otherStation = await one(`select nl_loss_recovery_command_summary('${C}', 
 eq("Command summary for other station is empty scope", Number(otherStation.s.total_recoverable || 0), 0);
 eq("Empty action day yields no rows", (await db.query(`select * from nl_loss_recovery_action_items('${C}') where station_code='HYD9'`)).rows.length, 0);
 
+// New recovery controls are idempotent and cannot close a departed-person balance.
+const controlSql = readFileSync("supabase/migrations/20261026153000_loss_recovery_case_controls.sql", "utf8");
+await db.exec(controlSql);
+await db.exec(controlSql);
+await db.exec(`insert into nl_recovery_outcomes(company_id,code,label,allocation_required) values('${C}','da_left','DA left',false)`);
+await db.exec(`insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values('${C}','nl','2026-09','LEFT1','BLR1',500,'Recoverable')`);
+async function mustReject(label, sql) { try { await db.query(sql); eq(label, 'accepted', 'rejected'); } catch { eq(label, 'rejected', 'rejected'); } }
+await mustReject('Legacy shortcut refused', `select save_nl_recovery('${C}','2026-09','LEFT1',0,'da_left','none','[]','Person has left','${CM}','CM','{}')`);
+await mustReject('Missing departed identity refused', `select save_nl_recovery('${C}','2026-09','LEFT1',0,'responsible_left','none','[]','Person has left','${CM}','CM','{}')`);
+await db.query(`select save_nl_recovery('${C}','2026-09','LEFT1',0,'responsible_left','none','[]','Left on 20 October','${CM}','CM','{"employee_id":"D123","employee_name":"Departed Person","follow_up":"CM to collect by month end"}')`);
+eq('Departed balance stays outstanding', (await one(`select lifecycle_status from nl_loss_month_cases where case_key='LEFT1'`)).lifecycle_status, 'exit_balance');
+const transition = (version,action,note='Detailed reason for this case',url='',publicLink=false) => `select nl_case_response_transition('${C}','2026-09','LEFT1',${version},'${action}','${note}','${url}',${publicLink},'${SLP}','SLP')`;
+await mustReject('Response before activation denied', transition(0,'response'));
+await db.query(transition(0,'activate'));
+await mustReject('Stale response rejected', transition(0,'response'));
+await mustReject('Private link not accepted', transition(1,'response','Clear details','https://drive.google.com/file/test',false));
+await db.query(transition(1,'response','Clear details','https://drive.google.com/file/test',true));
+await db.query(transition(2,'vendor_response'));
+await db.query(transition(3,'revoke'));
+await mustReject('Revoked response denied', transition(4,'response'));
+eq('Every response transition has immutable history', Number((await one(`select count(*) n from nl_case_response_events`)).n),4);
+eq('Redispute does not close recovery', (await one(`select lifecycle_status from nl_loss_month_cases where case_key='LEFT1'`)).lifecycle_status,'exit_balance');
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

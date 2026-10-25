@@ -1,3 +1,4 @@
+import { defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { notFound, redirect } from "next/navigation";
 import { OpsLossReport, type LossTab } from "@/components/ops-loss-report";
 import { requirePagePermission } from "@/lib/authorization";
@@ -154,29 +155,10 @@ export default async function LossesSectionPage({
   const auth = await requirePagePermission("ops_losses", "access");
   try {
     if (section.report === "nl") {
-      if (searchParams.view === "historic")
-        return (
-          <NlLossReport
-            view={await loadRecoveryView(auth, "nl", searchParams)}
-            tabs={tabs}
-          />
-        );
-      const live = await loadNlLive(auth, searchParams);
-      // With no explicit choice, open on whichever data set needs work: the live month
-      // while a station window is open (or its dates are unknown), else closed months.
-      const stage = windowSummary(live.window).stage;
-      const liveFirst =
-        live.ready &&
-        !!live.month &&
-        (stage === null || stage === "eDSP1" || stage === "eDSP2");
-      if (searchParams.view === "live" || liveFirst)
-        return <NlLiveReport view={live} tabs={tabs} />;
-      return (
-        <NlLossReport
-          view={await loadRecoveryView(auth, "nl", searchParams)}
-          tabs={tabs}
-        />
-      );
+      const stageView = searchParams.view === "historic" || searchParams.view === "final"
+        ? "final" : searchParams.view === "live" || searchParams.view === "initial"
+          ? "initial" : defaultLossFilter() === "recoverable" ? "final" : "initial";
+      return <NlLiveReport view={await loadNlLive(auth, searchParams, stageView)} tabs={tabs} />;
     }
     // Potential loss and SLP Initial are read-only reports; SLP is assigned for recovery on SLP Final only.
     if (section.report === "slp_final" && (await lossSchemaReady()))

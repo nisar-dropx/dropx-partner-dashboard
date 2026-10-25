@@ -17,6 +17,8 @@ import { type LossSettings, type RecoveryOutcome, recoveryCsv } from "@/lib/ops-
 import type { LiveCase } from "@/lib/ops-pulse/nl-live";
 import { RecoveryForm } from "./nl-loss-cases";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
+import { TrackingDetailModal } from "./tracking-detail-modal";
+import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -34,9 +36,12 @@ const when = (s: string) =>
     minute: "2-digit",
   });
 const FILTERS = [
+  { key: "recoverable", label: "Recoverable", phases: null },
+  { key: "nonrecoverable", label: "Non-recoverable", phases: null },
+  { key: "not_disputed", label: "Not disputed", phases: null },
+  { key: "sla_missed", label: "SLA missed", phases: null },
   { key: "todo", label: "Needs action", phases: ["action", "respond"] },
-  { key: "amazon", label: "With Amazon", phases: ["amazon"] },
-  { key: "decided", label: "Decided", phases: ["won", "lost", "accepted", "missed"] },
+  { key: "amazon", label: "Pending with Amazon", phases: ["amazon"] },
   { key: "", label: "All", phases: null },
 ] as const satisfies readonly { key: string; label: string; phases: readonly PhaseKey[] | null }[];
 const phaseOf = (c: LiveCase) =>
@@ -70,6 +75,7 @@ const actionLabel: Record<string, string> = {
 
 export function NlLiveCases({
   month,
+  stageView = "initial",
   cases,
   window,
   initialPhase,
@@ -78,6 +84,7 @@ export function NlLiveCases({
   outcomes, settings, canRecovered,
 }: {
   month: string;
+  stageView?: "initial" | "final";
   cases: LiveCase[];
   window: LiveWindow;
   initialPhase: string;
@@ -85,9 +92,11 @@ export function NlLiveCases({
   canDesk: boolean;
   outcomes: RecoveryOutcome[]; settings: LossSettings | null; canRecovered: boolean;
 }) {
+  const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   const [sort, setSort] = useState("value_desc");
+  const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [filter, setFilter] = useState(
-    FILTERS.some((f) => f.key === initialPhase) ? initialPhase : "",
+    initialPhase === "all" ? "" : initialPhase && FILTERS.some((f) => f.key === initialPhase) ? initialPhase : stageView === "final" ? "recoverable" : "",
   );
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
@@ -96,14 +105,13 @@ export function NlLiveCases({
     () => cases.map((c) => ({ c, phase: phaseOf(c) })),
     [cases],
   );
-  const counts = (phases: readonly PhaseKey[] | null) =>
-    withPhase.filter((x) => !phases || phases.includes(x.phase.key)).length;
+  const counts = (key: string) => withPhase.filter(x => lossStatusMatches(key, x.c.recoverable, x.phase.key)).length;
   const shown = useMemo(() => {
     const phases = FILTERS.find((f) => f.key === filter)?.phases ?? null;
     const q = query.trim().toLowerCase();
     return withPhase.filter(
       ({ c, phase }) =>
-        (!phases || (phases as readonly PhaseKey[]).includes(phase.key)) &&
+        lossStatusMatches(filter, c.recoverable, phase.key) &&
         (!q ||
           [
             c.details.tid,
@@ -153,9 +161,10 @@ export function NlLiveCases({
   }
   return (
     <section className={styles.panel}>
+      <TrackingDetailModal trackingId={tracking?.id ?? null} stationHint={tracking?.station} onClose={() => setTracking(null)} />
       <div className={styles.panelHead}>
         <div>
-          <h2>Live cases</h2>
+          <h2>{stageView === "final" ? "Final outcomes" : "Pending decisions"}</h2>
           <p>
             {shown.length} of {cases.length} cases ·{" "}
             {money(shown.reduce((v, x) => v + Number(x.c.amount || 0), 0))}
@@ -178,7 +187,7 @@ export function NlLiveCases({
         </div>
       </div>
       <div className={styles.chips} role="tablist" aria-label="Case status">
-        {FILTERS.map((f) => (
+        {FILTERS.filter(f => stageView === "final" ? !["todo", "amazon", "not_disputed", "sla_missed"].includes(f.key) : !["recoverable", "nonrecoverable"].includes(f.key)).map((f) => (
           <button
             key={f.key || "all"}
             role="tab"
@@ -190,7 +199,7 @@ export function NlLiveCases({
               setActive(null);
             }}
           >
-            {f.label} <b>{counts(f.phases)}</b>
+            {f.label} <b>{counts(f.key)}</b>
           </button>
         ))}
       </div>
@@ -198,13 +207,14 @@ export function NlLiveCases({
         {current.map(({ c, phase }) => {
           return (
             <article key={c.case_key} className={styles.case}>
+              {c.details.tid && !c.details.tid_approximate ? <button type="button" className={styles.trackingLink} onClick={() => setTracking({ id: c.details.tid!, station: c.station_code })} aria-label={`Track ${c.details.tid} in SCC`}>{c.station_code} · {c.details.tid} ↗</button> : null}
               <button
                 className={styles.caseSummary}
                 aria-expanded={active === c.case_key}
                 onClick={() => setActive(active === c.case_key ? null : c.case_key)}
               >
                 <div>
-                  <strong>{c.station_code} · {c.details.tid || c.case_key}</strong>
+                  <strong style={c.details.tid && !c.details.tid_approximate ? { visibility: "hidden" } : undefined}>{c.station_code} · {c.details.tid || c.case_key}</strong>
                   <span>
                     {c.details.category || "Unspecified reason"}
                     {c.details.sub_category && c.details.sub_category !== c.details.category
@@ -218,6 +228,7 @@ export function NlLiveCases({
                     <span className={`${styles.badge} ${styles[phase.tone]}`}>
                       {phase.label}
                     </span>
+                    {stageView === "final" && ["not_disputed", "sla_missed"].includes(c.details.case_status || "") ? <span className={styles.hint}>{c.details.case_status?.replaceAll("_", " ")}</span> : null}
                     {c.recoverable ? <span className={styles.pending}>{c.recovery && !c.recovery.is_deleted ? "Recovery plan recorded" : "Assign recovery person"}</span> : null}
                     {c.request &&
                     !filedInCloak(c.request, likeOf(c)) &&
@@ -234,13 +245,16 @@ export function NlLiveCases({
               </button>
               {active === c.case_key ? (
                 <>
-                <LiveDetail
+                {stageView === "initial" ? <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?${new URLSearchParams({ month: c.month, case: c.case_key })}`}>Case response ↗</a> : null}
+                <details className={styles.compactDetails} open={historyOpen === c.case_key} onToggle={e => setHistoryOpen(e.currentTarget.open ? c.case_key : null)}><summary>{stageView === "initial" ? "Dispute / respond" : "Vendor response & case history"}</summary>
+                {historyOpen === c.case_key ? <LiveDetail
                   row={c}
                   window={window}
                   canDispute={canDispute}
                   canDesk={canDesk}
-                />
-                {c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canDesk} /> : null}
+                /> : null}
+                </details>
+                {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canDesk} /> : null}
                 </>
               ) : null}
             </article>
@@ -306,7 +320,7 @@ function LiveDetail({
 }) {
   const router = useRouter();
   const x = row.details.extra ?? {};
-  const gate = gateOf(row, window);
+  const [gate, setGate] = useState(gateOf(row, window));
   const [request, setRequest] = useState<DisputeRequest | null>(row.request);
   const [history, setHistory] = useState<History[]>([]);
   const [decision, setDecision] = useState<"dispute" | "accept">(
@@ -332,6 +346,7 @@ function LiveDetail({
         const j = await res.json();
         if (!res.ok) throw Error(j.error);
         setHistory(j.history);
+        setGate(j.gate);
         // Someone may have updated the request since the list was loaded.
         if (j.request && j.request.version !== (row.request?.version ?? 0)) {
           setRequest(j.request);

@@ -1,3 +1,4 @@
+import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -114,6 +115,8 @@ type MetaRow = {
   station_code: string;
   amount: number | null;
   source_status: string | null;
+  status?: string | null;
+  stage?: string | null;
   source_present: boolean;
   reason: string | null;
   last_seen_at: string;
@@ -203,7 +206,7 @@ export async function loadRecoveryView(
   let metaQuery = supabaseAdmin
     .from("nl_loss_month_cases")
     .select(
-      "month,period:details->>period,station_code,amount,source_status,source_present,reason:details->>category,last_seen_at,in_initial:details->>in_initial,in_final:details->>in_final",
+      "month,period:details->>period,station_code,amount,source_status,status:details->>case_status,stage:details->extra->>current_sla_stage,source_present,reason:details->>category,last_seen_at,in_initial:details->>in_initial,in_final:details->>in_final",
     )
     .eq("company_id", company)
     .in("station_code", codes.length ? codes : ["__NONE__"]);
@@ -219,7 +222,7 @@ export async function loadRecoveryView(
   const inStage = (r: { in_initial?: unknown; in_final?: unknown }) =>
     String(kind === "slp_initial" ? r.in_initial : r.in_final) === "true";
   const all = ((meta.data ?? []) as MetaRow[]).filter((r) =>
-    slp ? inStage(r) : true,
+    slp ? inStage(r) : hasFinalLossOutcome(isRecoverable(r.source_status, accepted), r.source_status, r.status, r.stage),
   );
   const periodOf = (r: { month: string; period: string | null }) =>
     slp ? r.period || r.month : r.month;
@@ -319,7 +322,7 @@ export async function loadRecoveryView(
     cases = (rows.data ?? [])
       .filter(
         (r) =>
-          recoverable(r) &&
+          recoverable(r) && (slp || hasFinalLossOutcome(true, r.source_status, r.details?.case_status, r.details?.extra?.current_sla_stage)) &&
           (!slp || inStage(r.details ?? {})) &&
           (month === ALL_PERIODS ||
             lossFilterMatches(month || "", slp ? r.details?.period || r.month : r.month)) &&
