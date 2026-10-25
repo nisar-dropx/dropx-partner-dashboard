@@ -419,7 +419,7 @@ export function RecoveryForm({
   const available = people.filter(
     (p) =>
       selected.includes(p.ref) ||
-      `${p.full_name} ${p.employee_code} ${p.designation}`
+      `${p.full_name} ${p.employee_code} ${p.designation} ${p.locations || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -890,8 +890,7 @@ export function RecoveryForm({
                   </div>
                 ) : null}
                 <p className={styles.hint}>
-                  Eligible station DAs, People staff and mapped managers, using
-                  the rules in Master.
+                  Linked EDSP/XPT staff and mapped CLM/AOM. Salary eligibility follows Master rules.
                   {capEnabled
                     ? ` Loss recoveries take at most ${capPercent}% of a person's take-home in one month; a recurring debit counts one instalment.`
                     : ""}
@@ -920,7 +919,7 @@ export function RecoveryForm({
                         <span>
                           <strong>{p.full_name}</strong>
                           <small>
-                            {p.employee_code} · {p.designation}
+                            {p.employee_code} · {p.designation}{p.locations ? ` · ${p.locations}` : ""}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
                           {capEnabled && selected.includes(p.ref) ? (
