@@ -19,5 +19,7 @@ export function adhocDaIdentityFields(formData: FormData) {
 }
 
 export function adhocPaidDayKey(stationId: string, client: string, providerId: string, date: string) {
-  return [stationId, client.trim().toLowerCase(), providerId.trim().toUpperCase(), date].join("|");
+  const provider = client.trim().toLowerCase();
+  const canonical = provider.includes("flipkart") ? "flipkart" : provider.includes("amazon") ? "amazon" : provider;
+  return [stationId, canonical, providerId.trim().toUpperCase(), date].join("|");
 }
