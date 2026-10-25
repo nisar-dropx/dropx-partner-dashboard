@@ -1,0 +1,39 @@
+/* Payment workflow CTAs: next step, correction, then neutral read-only views.
+   Keep the labels: colour is a supporting cue, never the only action signal. */
+.button.payment-action-next,
+.ops-modern .button.payment-action-next {
+  background: #175cd3;
+  border-color: #175cd3;
+  color: #fff;
+  box-shadow: none;
+}
+.button.payment-action-next:hover:not(:disabled):not(.disabled),
+.ops-modern .button.payment-action-next:hover:not(:disabled):not(.disabled) {
+  background: #1849a9;
+  border-color: #1849a9;
+  color: #fff;
+  box-shadow: none;
+}
+.button.payment-action-revise,
+.ops-modern .button.payment-action-revise {
+  background: #fff4db;
+  border-color: #d99b37;
+  color: #854a0e;
+  box-shadow: none;
+}
+.button.payment-action-revise:hover:not(:disabled):not(.disabled),
+.ops-modern .button.payment-action-revise:hover:not(:disabled):not(.disabled) {
+  background: #ffe8b3;
+  border-color: #b87516;
+  color: #713f12;
+  box-shadow: none;
+}
+.button:is(.payment-action-next, .payment-action-revise):focus-visible,
+.ops-modern .button:is(.payment-action-next, .payment-action-revise):focus-visible {
+  outline: 3px solid #84adff;
+  outline-offset: 3px;
+}
+.button:is(.payment-action-next, .payment-action-revise):is(:disabled, .disabled, [aria-disabled="true"]) {
+  opacity: .55;
+  cursor: not-allowed;
+}
