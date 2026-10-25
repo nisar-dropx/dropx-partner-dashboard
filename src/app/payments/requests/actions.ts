@@ -1,4 +1,5 @@
 "use server";
+import { resubmissionQuestions } from "@/lib/payment-resubmission";
 import { adhocDaIdentityFields } from "@/lib/adhoc-da-identity";
 import { prepareAdhocRequest, validateAdhocResubmission } from "@/lib/adhoc-vehicle-server";
 
@@ -1159,7 +1160,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
       .eq("payment_request_id", request.id);
     if (existingAnswersError) throw new Error(existingAnswersError.message);
     const existingAnswerByQuestionId = new Map((existingAnswers ?? []).map((answer) => [answer.question_id, answer]));
-    const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
+    const expenseQuestions = resubmissionQuestions(headResult.data.payment_head_questions, "expense");
     validateQuestionDates(formData, expenseQuestions, existingAnswerByQuestionId);
     const questionById = new Map(expenseQuestions.map((question) => [question.id, question]));
 
@@ -1429,7 +1430,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
 
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     if (questionIds.length) {
-      const paymentQuestions = questionsForStage(headResult.data.payment_head_questions, "payment");
+      const paymentQuestions = resubmissionQuestions(headResult.data.payment_head_questions, "payment");
       validateQuestionDates(formData, paymentQuestions, existingAnswerByQuestionId);
       const questionById = new Map(paymentQuestions.map((question) => [question.id, question]));
       for (const questionId of questionIds) {
