@@ -45,7 +45,9 @@ export async function startDay(input: {
   try {
     const c = await context(true);
     if (!isFiller(c.actor, c.master.settings) && !c.actor.isMasterOwner)
-      throw Error("Only Store Manager / Store In-charge can start the day.");
+      throw Error(
+        "Only the assigned Store Manager / Store In-charge can start the day. Store location logins cannot fill Store Operations.",
+      );
     const locations = await stores(c.auth, c.master.settings);
     const store = locations.find((l) => l.id === input.locationId);
     if (!store) throw Error("Store is outside your scope.");

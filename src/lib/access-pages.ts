@@ -426,6 +426,54 @@ async function ensureSiHandoverRoleGrants(supabase: SupabaseClient, companyId: s
   await upsertPermissionRows(supabase, companyId, rows);
 }
 
+/**
+ * Shared station mailboxes inherited store_ops write bits when permissions were
+ * copied from si_handover. Store day checklists are for assigned people only —
+ * keep view if already granted, but never add/edit for LOCATION roles.
+ */
+async function revokeLocationMailboxStoreOpsWrites(
+  supabase: SupabaseClient,
+  companyId: string,
+) {
+  const pages = await getPagesByCodes(supabase, companyId, [
+    "store_ops",
+    "store_ops_master",
+  ]);
+  const pageIds = [...pages.values()].map((page) => page.id);
+  if (!pageIds.length) return;
+
+  const { data: roles, error: rolesError } = await supabase
+    .from("user_roles")
+    .select("id")
+    .eq("company_id", companyId)
+    .in("code", ["LOCATION", "OPERATIONS_LOCATION"]);
+  if (rolesError) throw new Error(rolesError.message);
+  const roleIds = (roles ?? []).map((role) => role.id);
+  if (!roleIds.length) return;
+
+  const { data: grants, error: grantsError } = await supabase
+    .from("role_page_permissions")
+    .select("role_id, page_id, can_view, can_add, can_edit")
+    .eq("company_id", companyId)
+    .in("role_id", roleIds)
+    .in("page_id", pageIds);
+  if (grantsError) throw new Error(grantsError.message);
+
+  await upsertPermissionRows(
+    supabase,
+    companyId,
+    (grants ?? [])
+      .filter((grant) => grant.can_add || grant.can_edit)
+      .map((grant) => ({
+        role_id: grant.role_id,
+        page_id: grant.page_id,
+        can_view: Boolean(grant.can_view || grant.can_add || grant.can_edit),
+        can_add: false,
+        can_edit: false,
+      })),
+  );
+}
+
 async function seedTargetPermissionsFromSources(
   supabase: SupabaseClient,
   companyId: string,
@@ -557,6 +605,10 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
       pageTopologyChanged = true;
     }
   }
+
+  // Always: location/store mailboxes must not fill or edit Store Operations.
+  // Not gated on catalog change — existing LOCATION grants stay until this runs.
+  await revokeLocationMailboxStoreOpsWrites(supabase, companyId);
 
   // Normal page visits should only validate the catalog. Permission migrations
   // and role repairs are needed when the catalog changes, not on every render.

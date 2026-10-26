@@ -52,6 +52,24 @@ test("Store manager sees Store ops and Store report", () => {
   });
 });
 
+test("Location mailbox never sees Store ops or Store report", () => {
+  const flags = activitiesNavFlags({
+    hasSi: false,
+    hasStore: true,
+    siManager: false,
+    explicitStoreFiller: true,
+    explicitStoreManager: true,
+    storeRolesConfigured: false,
+    isLocationAccount: true,
+  });
+  assert.deepEqual(flags, {
+    showShiftOps: false,
+    showStoreOps: false,
+    showShiftReport: false,
+    showStoreReport: false,
+  });
+});
+
 test("filters Activities children by href for SI worker", () => {
   const children = [
     { code: "si_handover", label: "Shift operations", href: "/si-handover?view=start" },

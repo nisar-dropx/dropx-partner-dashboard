@@ -39,6 +39,8 @@ function actorFromAuth(auth: AuthorizationContext): Actor {
     displayName: auth.fullName?.trim() || auth.email || "User",
     isMasterOwner: Boolean(auth.isMasterOwner),
     effectiveRoleIds: auth.effectiveRoleIds || [],
+    roleCodes: auth.effectiveRoleCodes || [],
+    roleCode: auth.roleCode || null,
     hasAllLocationAccess: Boolean(auth.hasAllLocationAccess),
     locationScopeIds: auth.locationScopeIds || [],
     readOnly: Boolean(auth.readOnly),

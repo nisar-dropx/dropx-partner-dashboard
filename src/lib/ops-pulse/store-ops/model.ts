@@ -13,6 +13,7 @@ import {
   type ProofRule,
   type TaskAnswer,
 } from "@/lib/ops-pulse/si-handover/model";
+import { isLocationMailboxRole } from "./location-mailbox";
 
 export type {
   AnswerType,
@@ -23,6 +24,7 @@ export type {
   TaskAnswer,
 };
 export { emptyAnswer, normalizeAnswer, proofMimeAllowed };
+export { isLocationMailboxRole };
 
 export type TaskFrequency =
   | "daily"
@@ -126,6 +128,9 @@ export type Actor = {
   displayName: string;
   isMasterOwner: boolean;
   effectiveRoleIds: string[];
+  /** Portal role codes (e.g. OPERATIONS_LOCATION for shared store mailboxes). */
+  roleCodes?: string[];
+  roleCode?: string | null;
   hasAllLocationAccess: boolean;
   locationScopeIds: string[];
   readOnly: boolean;
@@ -134,6 +139,10 @@ export type Actor = {
     { canView?: boolean; canAdd?: boolean; canEdit?: boolean }
   >;
 };
+
+export function isLocationMailboxActor(a: Pick<Actor, "roleCode" | "roleCodes">) {
+  return isLocationMailboxRole(a.roleCode, a.roleCodes);
+}
 
 export type WorkspaceView = "start" | "midday" | "compliance" | "close";
 
@@ -192,6 +201,8 @@ function hasAccess(a: Actor) {
 
 export function isFiller(a: Actor, s: Settings) {
   if (a.isMasterOwner) return true;
+  // Store day checklist is for assigned people only — never shared location logins.
+  if (isLocationMailboxActor(a)) return false;
   if (!hasFillPermission(a)) return false;
   if (!s.fillerRoles.length) return true;
   return a.effectiveRoleIds.some((id) => s.fillerRoles.includes(id));
@@ -199,6 +210,7 @@ export function isFiller(a: Actor, s: Settings) {
 
 export function isManager(a: Actor, s: Settings) {
   if (a.isMasterOwner) return true;
+  if (isLocationMailboxActor(a)) return false;
   // Empty allowlist = anyone with Store Operations access can oversee / report.
   if (!s.managerRoles.length) return hasAccess(a);
   return a.effectiveRoleIds.some((id) => s.managerRoles.includes(id));

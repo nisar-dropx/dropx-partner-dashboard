@@ -36,6 +36,13 @@ export async function resolveActivitiesNavAccess(
   let explicitStoreFiller = false;
   let explicitStoreManager = false;
   let storeRolesConfigured = false;
+  const roleCodes = [
+    ...(auth.effectiveRoleCodes || []),
+    ...(auth.roleCode ? [auth.roleCode] : []),
+  ].map((c) => String(c || "").trim().toUpperCase());
+  const isLocationAccount = roleCodes.some(
+    (c) => c === "OPERATIONS_LOCATION" || c === "LOCATION",
+  );
 
   if (auth.companyId && (hasSi || hasStore)) {
     const [siMaster, storeMaster] = await Promise.all([
@@ -64,6 +71,7 @@ export async function resolveActivitiesNavAccess(
     explicitStoreFiller,
     explicitStoreManager,
     storeRolesConfigured,
+    isLocationAccount,
   });
 }
 

@@ -29,7 +29,18 @@ export function activitiesNavFlags(input: {
   explicitStoreManager: boolean;
   /** Legacy fallback when both store role lists are empty. */
   storeRolesConfigured: boolean;
+  /** Shared station mailbox (OPERATIONS_LOCATION) — never fills Store ops. */
+  isLocationAccount?: boolean;
 }): ActivitiesNavAccess {
+  // Location logins may inherit store_ops from SI seeding; keep them off Store ops/report.
+  if (input.isLocationAccount) {
+    return {
+      showShiftOps: input.hasSi,
+      showStoreOps: false,
+      showShiftReport: input.hasSi && input.siManager,
+      showStoreReport: false,
+    };
+  }
   const onStoreProgramme = input.storeRolesConfigured
     ? input.explicitStoreFiller || input.explicitStoreManager
     : input.hasStore;
