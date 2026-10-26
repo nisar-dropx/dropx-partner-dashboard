@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import sharp from "sharp";
 import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
+import fontkit, { type Font } from "@pdf-lib/fontkit";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssistantReport } from "./assistant-report-token";
@@ -17,6 +17,24 @@ function flatten(value: unknown, prefix = "", rows: { Field: string; Value: stri
   return rows;
 }
 const scriptFont = (s: string) => /[\u0D00-\u0D7F]/.test(s)?"NotoSansMalayalam":/[\u0C00-\u0C7F]/.test(s)?"NotoSansTelugu":/[\u0900-\u097F]/.test(s)?"NotoSansDevanagari":/[\u0B80-\u0BFF]/.test(s)?"NotoSansTamil":/[\u0C80-\u0CFF]/.test(s)?"NotoSansKannada":"NotoSans";
+/** Outline bundled fonts: serverless images must not depend on installed system fonts. */
+export async function assistantReportImageSvg(lines: string[]) {
+ const fonts=new Map<string,Font>();
+ for(const name of new Set(["NotoSans",...Array.from(lines.join(" ")).map(scriptFont)]))fonts.set(name,fontkit.create(await readFile(path.join(process.cwd(),"assets/report-fonts",`${name}-Regular.ttf`))));
+ const wrapped=lines.flatMap(line=>{const words=line.split(/\s+/).flatMap(word=>Array.from(word.matchAll(/.{1,70}/gu),m=>m[0])),out:string[]=[];let current="";for(const word of words){if(current.length+word.length>78){out.push(current);current="";}current+=(current?" ":"")+word;}out.push(current);return out;});
+ if(wrapped.length>180)throw Error("This answer is too long for one image. Download PDF, Word or Excel.");
+ const height=Math.max(400,150+wrapped.length*28);
+ const outlines=wrapped.map((line,index)=>{
+  const runs:{text:string;font:Font}[]=[];
+  for(const char of line){const font=fonts.get(scriptFont(char))!;if(!font.hasGlyphForCodePoint(char.codePointAt(0)!))throw Error("A character is unsupported by the image fonts. Download Word or Excel to preserve it.");const last=runs.at(-1);if(last?.font===font)last.text+=char;else runs.push({text:char,font});}
+  const shaped=runs.map(r=>({font:r.font,run:r.font.layout(r.text)}));
+  const size=index===0?28:20,total=shaped.reduce((sum,r)=>sum+r.run.positions.reduce((n,p)=>n+p.xAdvance,0)/r.font.unitsPerEm*size,0),fit=total>1070?1070/total:1;
+  let x=65;const paths:string[]=[];
+  for(const {font,run} of shaped){const scale=size*fit/font.unitsPerEm;for(let n=0;n<run.glyphs.length;n++){const glyph=run.glyphs[n],position=run.positions[n],d=glyph.path.toSVG();if(d)paths.push(`<path d="${xml(d)}" transform="translate(${x+position.xOffset*scale} ${90+index*28-position.yOffset*scale}) scale(${scale} ${-scale})"/>`);x+=position.xAdvance*scale;}}
+  return `<g fill="${index===0?'#e65124':'#1a293a'}">${paths.join('')}</g>`;
+ }).join('');
+ return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="${height}"><rect width="1200" height="${height}" fill="#f3f6fa"/><rect x="24" y="24" width="1152" height="${height-48}" rx="24" fill="white"/><rect x="24" y="24" width="1152" height="10" fill="#e65124"/>${outlines}</svg>`;
+}
 export async function exportAssistantReport(report: AssistantReport, format: typeof assistantReportFormats[number]) {
   const lines=paragraphs(report);
   if (format==="xlsx") {
@@ -33,10 +51,7 @@ export async function exportAssistantReport(report: AssistantReport, format: typ
     return {bytes:await zip.generateAsync({type:"nodebuffer"}),mime:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"};
   }
   if(format==="png") {
-    const wrapped=lines.flatMap(line=>{const words=line.split(/\s+/).flatMap(word=>Array.from(word.matchAll(/.{1,70}/gu),m=>m[0])),out:string[]=[];let current="";for(const word of words){if(current.length+word.length>78){out.push(current);current="";}current+=(current?" ":"")+word;}out.push(current);return out;});
-    if(wrapped.length>180) throw Error("This answer is too long for one image. Download PDF, Word or Excel.");
-    const height=Math.max(400,150+wrapped.length*28);
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="${height}"><rect width="1200" height="${height}" fill="#f3f6fa"/><rect x="24" y="24" width="1152" height="${height-48}" rx="24" fill="white"/><rect x="24" y="24" width="1152" height="10" fill="#e65124"/>${wrapped.map((line,index)=>`<text x="65" y="${90+index*28}" font-family="Noto Sans,Arial,sans-serif" font-size="${index===0?28:20}" fill="${index===0?'#e65124':'#1a293a'}">${xml(line)}</text>`).join("")}</svg>`;
+    const svg=await assistantReportImageSvg(lines);
     return {bytes:await sharp(Buffer.from(svg)).png().toBuffer(),mime:"image/png"};
   }
   const pdf=await PDFDocument.create();pdf.registerFontkit(fontkit);pdf.setTitle(report.question);pdf.setAuthor("OpsPulse");

@@ -60,6 +60,13 @@ test('all four export files contain usable content',async()=>{
  const p=await exportAssistantReport(report,'pdf');const pdf=await require('pdf-lib').PDFDocument.load(p.bytes);assert.ok(pdf.getPageCount()>0);
  const png=await exportAssistantReport(report,'png');const meta=await require('sharp')(png.bytes).metadata();assert.equal(meta.width,1200);assert.ok(meta.height>=400);
 });
+test('image text uses bundled glyph outlines instead of server system fonts',async()=>{
+ const {assistantReportImageSvg}=load('assistant-report-export');
+ const svg=await assistantReportImageSvg(['OpsPulse insight report','Attendance: 100%','ഹാജർ']);
+ assert.ok(svg.includes('<path d='));assert.ok(!svg.includes('<text'));assert.ok(!svg.includes('font-family'));
+ const rendered=await require('sharp')(Buffer.from(svg)).png().toBuffer();assert.ok(rendered.length>5000);
+ if(process.env.INSIGHT_IMAGE_TEST_OUTPUT)fs.writeFileSync(process.env.INSIGHT_IMAGE_TEST_OUTPUT,rendered);
+});
 
 test('morning and evening continue the existing monthly Dark Store conversation',async()=>{
  const {digestThreadEvents}=await import('../digest-thread-policy.ts');
