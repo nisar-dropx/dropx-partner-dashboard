@@ -9,6 +9,8 @@ export type ReportPackProof = {
 };
 
 export type ReportPackTask = {
+  recordStatus?: string;
+  fieldLabels?: Record<string, string>;
   id: string;
   label: string;
   answerType: string;
@@ -46,6 +48,7 @@ export type ReportPack = {
     answered: number;
     total: number;
     pct: number;
+    notes?: string;
   };
   sections: ReportPackSection[];
   proofs: ReportPackProof[];

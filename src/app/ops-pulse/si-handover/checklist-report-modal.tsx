@@ -23,6 +23,7 @@ import {
 } from "@/lib/ops-pulse/checklist-report-pack";
 import { renderPdfPages } from "@/lib/ops-pulse/pdf-slip";
 import styles from "./si-handover.module.css";
+import { ChecklistSummaryActions } from "./checklist-summary-actions";
 
 type Props = {
   kind: "shift" | "store";
@@ -299,7 +300,7 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
               disabled={!pack || downloading || loading}
               onClick={() => void onDownload()}
             >
-              {downloading ? "Building PDF…" : "Download PDF"}
+              {downloading ? "Building PDF…" : "PDF with evidence"}
             </button>
             <button
               ref={closeRef}
@@ -313,6 +314,7 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
         </header>
 
         <div className={styles.reportModalBody}>
+          {pack ? <ChecklistSummaryActions kind={pack.kind} id={pack.checklist.id} pack={pack} completed={["submitted", "accepted"].includes(pack.checklist.status)} /> : null}
           {pack?.checklist ? (
             <div className={styles.reportModalSummary} aria-label="Report summary">
               <span><strong>{c?.pct ?? 0}%</strong><small>completion</small></span>

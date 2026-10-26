@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useEffect,
   useId,
@@ -79,10 +79,11 @@ function formatIstRange(from: string, to: string) {
 }
 
 const RANGE_PRESETS = [
-  { id: "today", label: "Today", days: 0 },
-  { id: "7d", label: "7d", days: 6 },
-  { id: "14d", label: "14d", days: 13 },
-  { id: "30d", label: "30d", days: 29 },
+  { id: "yesterday", label: "Yesterday", days: 0, offset: -1 },
+  { id: "today", label: "Today", days: 0, offset: 0 },
+  { id: "7d", label: "7d", days: 6, offset: 0 },
+  { id: "14d", label: "14d", days: 13, offset: 0 },
+  { id: "30d", label: "30d", days: 29, offset: 0 },
 ] as const;
 
 function pctClass(pct: number) {
@@ -134,7 +135,8 @@ export function ActivitiesReportClient(props: Props) {
   const [pending, start] = useTransition();
   const [from, setFrom] = useState(props.from);
   const [to, setTo] = useState(props.to);
-  const [store, setStore] = useState("");
+  const searchParams = useSearchParams();
+  const [store, setStore] = useState(searchParams.get("store") || "");
   const [person, setPerson] = useState("");
   const [status, setStatus] = useState("");
   const [slot, setSlot] = useState("");
@@ -152,13 +154,13 @@ export function ActivitiesReportClient(props: Props) {
     setFrom(props.from);
     setTo(props.to);
     setPage(1);
-    setStore("");
+    setStore(searchParams.get("store") || "");
     setPerson("");
     setStatus("");
     setSlot("");
     setQ("");
     setReportId(null);
-  }, [props.from, props.to, props.tab]);
+  }, [props.from, props.to, props.tab, searchParams]);
 
   const pushRange = (nextFrom: string, nextTo: string) => {
     start(() => {
@@ -166,6 +168,7 @@ export function ActivitiesReportClient(props: Props) {
       params.set("tab", props.tab);
       if (nextFrom) params.set("from", nextFrom);
       if (nextTo) params.set("to", nextTo);
+      if (store) params.set("store", store);
       router.push(`/si-handover/report?${params.toString()}`);
     });
   };
@@ -182,8 +185,8 @@ export function ActivitiesReportClient(props: Props) {
     pushRange(from, to);
   };
 
-  const applyPreset = (daysBack: number) => {
-    const end = istToday();
+  const applyPreset = (daysBack: number, offset = 0) => {
+    const end = addDaysIst(istToday(), offset);
     const start = addDaysIst(end, -daysBack);
     setFrom(start);
     setTo(end);
@@ -191,7 +194,7 @@ export function ActivitiesReportClient(props: Props) {
   };
 
   const activePreset = RANGE_PRESETS.find((p) => {
-    const end = istToday();
+    const end = addDaysIst(istToday(), p.offset);
     const start = addDaysIst(end, -p.days);
     return from === start && to === end;
   });
@@ -245,7 +248,7 @@ export function ActivitiesReportClient(props: Props) {
               type="button"
               className={activePreset?.id === p.id ? rui.presetOn : rui.preset}
               disabled={pending}
-              onClick={() => applyPreset(p.days)}
+              onClick={() => applyPreset(p.days, p.offset)}
             >
               {p.label}
             </button>
@@ -1096,19 +1099,19 @@ function ShiftReportBody({
           <div className={rui.kpiGrid} aria-label="Shift overview">
             <div className={rui.kpi}>
               <strong>{s.shifts}</strong>
-              <span>Shifts</span>
+              <span>Reports started</span>
             </div>
             <div className={s.avgPct >= 80 ? rui.kpiOk : s.avgPct >= 40 ? rui.kpiWarn : rui.kpiBad}>
               <strong>{s.avgPct}%</strong>
               <span>Avg completion</span>
             </div>
             <div className={rui.kpi}>
-              <strong>{s.submitRate}%</strong>
-              <span>Submit rate</span>
+              <strong>{s.shifts ? Math.round(100 * (s.submitted + s.accepted) / s.shifts) : 0}%</strong>
+              <span>Currently submitted</span>
             </div>
             <div className={rui.kpi}>
-              <strong>{s.acceptRate}%</strong>
-              <span>Accept rate</span>
+              <strong>{s.submitted + s.accepted ? Math.round(100 * s.accepted / (s.submitted + s.accepted)) : 0}%</strong>
+              <span>Submitted handovers accepted</span>
             </div>
             <div className={s.open ? rui.kpiWarn : rui.kpi}>
               <strong>{s.open}</strong>
@@ -1153,7 +1156,7 @@ function ShiftReportBody({
       <div className={rui.split}>
         <section className={rui.panel}>
           <div className={rui.panelHead}>
-            <h2>By person</h2>
+            <h2>People & stores</h2>
             <span className={rui.count}>{people.length}</span>
           </div>
           <div className={rui.tableWrap}>
@@ -1161,7 +1164,7 @@ function ShiftReportBody({
               <thead>
                 <tr>
                   <th>Person</th>
-                  <th>Shifts</th>
+                  <th title="Submitted / started reports">Submitted</th>
                   <th>Avg %</th>
                   <th>Open</th>
                   <th>Trend</th>
@@ -1188,8 +1191,9 @@ function ShiftReportBody({
                         >
                           {b.label}
                         </button>
+                        <small className={rui.personStores}>{[...new Set(rows.filter(r => (r.outgoing_user_id || r.outgoing_name) === b.key).map(r => { const st = stores.find(s => s.id === r.location_id); return `${r.store_code}${st?.station_name ? ` · ${st.station_name}` : ""}`; }))].join(" · ")}</small>
                       </td>
-                      <td className={rui.num}>{b.shifts}</td>
+                      <td className={rui.num}>{b.submitted + b.accepted}/{b.shifts}</td>
                       <td>
                         <span className={pctClass(b.avgPct)}>{b.avgPct}%</span>
                       </td>
@@ -1272,13 +1276,13 @@ function ShiftReportBody({
         </section>
       </div>
 
-      <section className={rui.panel}>
-        <div className={rui.panelHead}>
+      <details className={rui.panel}>
+        <summary className={rui.panelHead}>
           <div>
-            <h2>Attention</h2>
+            <h2>Recent reporting activity</h2>
             <p>Latest missed / open / completed</p>
           </div>
-        </div>
+        </summary>
         {!feedItems.length ? (
           <div className={rui.empty}>No recent activity.</div>
         ) : (
@@ -1321,7 +1325,7 @@ function ShiftReportBody({
             ))}
           </div>
         )}
-      </section>
+      </details>
 
       <section className={rui.panel}>
         <div className={rui.panelHead}>
@@ -1730,7 +1734,7 @@ function StoreReportBody({
       <div className={rui.split}>
         <section className={rui.panel}>
           <div className={rui.panelHead}>
-            <h2>By person</h2>
+            <h2>People & stores</h2>
             <span className={rui.count}>{people.length}</span>
           </div>
           <div className={rui.tableWrap}>
@@ -1738,7 +1742,7 @@ function StoreReportBody({
               <thead>
                 <tr>
                   <th>Person</th>
-                  <th>Days</th>
+                  <th title="Submitted / started store days">Submitted</th>
                   <th>Avg %</th>
                   <th>Open</th>
                   <th>Trend</th>
@@ -1765,8 +1769,9 @@ function StoreReportBody({
                         >
                           {b.label}
                         </button>
+                        <small className={rui.personStores}>{[...new Set(rows.filter(r => (r.owner_user_id || r.owner_name) === b.key).map(r => { const st = stores.find(s => s.id === r.location_id); return `${r.store_code}${st?.station_name ? ` · ${st.station_name}` : ""}`; }))].join(" · ")}</small>
                       </td>
-                      <td className={rui.num}>{b.days}</td>
+                      <td className={rui.num}>{b.submitted}/{b.days}</td>
                       <td>
                         <span className={pctClass(b.avgPct)}>{b.avgPct}%</span>
                       </td>
@@ -1849,13 +1854,13 @@ function StoreReportBody({
         </section>
       </div>
 
-      <section className={rui.panel}>
-        <div className={rui.panelHead}>
+      <details className={rui.panel}>
+        <summary className={rui.panelHead}>
           <div>
-            <h2>Attention</h2>
+            <h2>Recent reporting activity</h2>
             <p>Latest missed / open / completed</p>
           </div>
-        </div>
+        </summary>
         {!feedItems.length ? (
           <div className={rui.empty}>No recent activity.</div>
         ) : (
@@ -1897,7 +1902,7 @@ function StoreReportBody({
             ))}
           </div>
         )}
-      </section>
+      </details>
 
       <section className={rui.panel}>
         <div className={rui.panelHead}>

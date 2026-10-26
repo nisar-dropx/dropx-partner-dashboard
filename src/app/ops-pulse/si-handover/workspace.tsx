@@ -1,4 +1,5 @@
 "use client";
+import { ChecklistSummaryActions } from "./checklist-summary-actions";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -660,6 +661,7 @@ export function SiHandoverWorkspace(props: Props) {
             </div>
           ) : null}
 
+          <ChecklistSummaryActions kind="shift" id={focused.id} revision={focused.updated_at} completed={["submitted", "accepted"].includes(focused.status)} />
           {emptyTemplate ? (
             <div className={styles.warn}>
               Task list missing — start the shift again, or open Master once to refresh the catalogue.
