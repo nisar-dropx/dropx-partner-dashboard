@@ -6,6 +6,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadPayAdvanceWorkerContexts, type PayAdvanceWorkerContext } from "@/lib/pay-advance-payment-context";
 import { workerCodeFromDetails } from "@/lib/pay-advance-worker-facts";
+import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type PaymentBankRow = {
@@ -120,6 +121,12 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
+function isProcessedPayment(request: PaymentRequestRow) {
+  const status = String(request.status ?? "").toUpperCase();
+  const approvalStatus = String(request.approval_status ?? "").toUpperCase();
+  return status === "PROCESSED" || approvalStatus === "PROCESSED" || Boolean(request.processed_at);
+}
+
 function isReadyForPaymentProcess(request: PaymentRequestRow) {
   const status = String(request.status ?? "").toUpperCase();
   const approvalStatus = String(request.approval_status ?? "").toUpperCase();
@@ -136,11 +143,13 @@ function isReadyForPaymentProcess(request: PaymentRequestRow) {
       request.ifsc?.trim() &&
       request.account_holder_name?.trim()
     );
+  // Include plain APPROVED (not only *_APPROVED) so final-approved expense payouts stay visible.
   return hasPaymentDetails && (status === "APPROVED" ||
     status === "RE_APPROVED" ||
     status === "PROCESSING" ||
     status === "PROCESSED" ||
     status === "OWNER_APPROVED" ||
+    approvalStatus === "APPROVED" ||
     approvalStatus === "PROCESSING" ||
     approvalStatus === "PROCESSED" ||
     approvalStatus === "OWNER_APPROVED" ||
@@ -180,11 +189,14 @@ async function loadPaymentProcess(
   }
   const admin = supabaseAdmin;
 
+  // Paginate past Supabase's default 1,000-row cap. Older approved payouts (e.g. 0R43OER7ZI)
+  // were invisible because ~1,800 processed rows filled the first page by created_at.
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
     .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
     .eq("company_id", companyId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   if (!hasAllLocationAccess) {
     requestsQuery = locationScopeIds.length
       ? requestsQuery.in("location_id", locationScopeIds)
@@ -198,7 +210,7 @@ async function loadPaymentProcess(
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("display_name"),
-    requestsQuery
+    hasAllLocationAccess || locationScopeIds.length ? readAllRows(requestsQuery) : Promise.resolve({ data: [], error: null })
   ]);
 
   const error = banksResult.error?.message || requestsResult.error?.message || null;
@@ -208,9 +220,21 @@ async function loadPaymentProcess(
     .filter((request) => canSeePaymentProcessRequest(request, userId, effectiveRoleIds, canSeeAllFinalApproved));
   const requestRows = visibleRows
     .filter(isReadyForPaymentProcess)
-    .filter((request) => canSeeAllFinalApproved || String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId || (request.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)));
+    .filter((request) => canSeeAllFinalApproved || String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId || (request.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)))
+    // Keep unpaid/processing ahead of already-paid history in the working list.
+    .sort((left, right) => {
+      const leftDone = isProcessedPayment(left) ? 1 : 0;
+      const rightDone = isProcessedPayment(right) ? 1 : 0;
+      if (leftDone !== rightDone) return leftDone - rightDone;
+      return String(right.created_at).localeCompare(String(left.created_at));
+    });
   const awaitingDetailsRows = visibleRows.filter((request) => isFinalApprovedForPayment(request) && !hasPaymentDetails(request));
-  const requestIds = requestRows.map((request) => request.id);
+  // Enrich every actionable row; only a recent processed slice needs full history in the modal.
+  const detailRequestIds = [
+    ...requestRows.filter((request) => !isProcessedPayment(request)).map((request) => request.id),
+    ...requestRows.filter(isProcessedPayment).slice(0, 150).map((request) => request.id)
+  ];
+  const requestIds = Array.from(new Set(detailRequestIds));
   const requestIdBatches = chunkValues(requestIds, PROCESS_DETAIL_BATCH_SIZE);
   const [answerBatchResults, approvalBatchResults] = requestIds.length ? await Promise.all([
     Promise.all(requestIdBatches.map((batch) => admin

@@ -324,6 +324,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [status, setStatus] = useState("approved");
+  const [search, setSearch] = useState("");
   const [selectedBankId, setSelectedBankId] = useState("");
   const [fileType, setFileType] = useState("");
   const [hiddenProcessResultKey, setHiddenProcessResultKey] = useState("");
@@ -397,15 +398,26 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
   }
 
   const filteredRequests = useMemo(() => {
+    const needle = search.trim().toLowerCase();
     return requests.filter((request) => {
       const created = dateOnly(request.created_at);
       if (fromDate && created < fromDate) return false;
       if (toDate && created > toDate) return false;
       const rowStatus = statusLabel(request).toLowerCase();
       if (status !== "all" && rowStatus !== status) return false;
-      return true;
+      if (!needle) return true;
+      const haystack = [
+        request.request_no,
+        request.location_code,
+        request.location_name,
+        request.payment_head_name,
+        request.account_holder_name,
+        request.payment_reference,
+        request.request_remarks
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(needle);
     });
-  }, [fromDate, requests, status, toDate]);
+  }, [fromDate, requests, search, status, toDate]);
 
   const visibleIds = filteredRequests.filter(isAccountTransfer).map((request) => request.id);
   const visibleSelected = visibleIds.filter((id) => selectedIds.includes(id));
@@ -507,12 +519,21 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
             style={{
               display: "grid",
               gap: 14,
-              gridTemplateColumns: "repeat(3, minmax(180px, 220px))",
+              gridTemplateColumns: "minmax(180px, 1.2fr) repeat(3, minmax(140px, 180px))",
               justifyContent: "end",
               marginLeft: "auto",
-              width: "min(100%, 720px)"
+              width: "min(100%, 900px)"
             }}
           >
+            <label>Search
+              <input
+                className="field"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Request no, station, payee…"
+                type="search"
+                value={search}
+              />
+            </label>
             <label>From
               <input className="field" onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} />
             </label>
