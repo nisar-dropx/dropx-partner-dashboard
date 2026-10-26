@@ -13,6 +13,17 @@ export function missingPunchReason(currentIn: unknown, currentOut: unknown) {
   return "";
 }
 
+/**
+ * Clock OUT earlier than clock IN is a valid overnight shift (OUT next calendar day).
+ * Matches hr_review_attendance_regularization, which adds one day when out <= in.
+ * Only identical IN and OUT are rejected.
+ */
+export function isOvernightRegularizationPair(inTime: string, outTime: string) {
+  const inClock = regularizationClock(inTime);
+  const outClock = regularizationClock(outTime);
+  return Boolean(inClock && outClock && outClock < inClock);
+}
+
 export function regularizationTimeInput(input: {
   reason: string;
   currentIn: string;
@@ -35,6 +46,12 @@ export function regularizationTimeInput(input: {
   if (!outTime) throw new Error(requestsOut
     ? "Enter the requested OUT time in 24-hour format (HH:MM)."
     : "The existing OUT punch is missing. Select Missed both punches.");
-  if (outTime <= inTime) throw new Error("Requested OUT time must be after IN time.");
-  return { inTime, outTime };
+  if (outTime === inTime) {
+    throw new Error("Requested IN and OUT times cannot be the same.");
+  }
+  return {
+    inTime,
+    outTime,
+    overnight: outTime < inTime
+  };
 }

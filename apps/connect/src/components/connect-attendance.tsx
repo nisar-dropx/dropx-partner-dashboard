@@ -29,7 +29,7 @@ import {
   type AttendanceInsightRow
 } from "@/lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
-import { missingPunchReason, regularizationTimeInput } from "@/lib/regularization-input";
+import { isOvernightRegularizationPair, missingPunchReason, regularizationTimeInput } from "@/lib/regularization-input";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 import { attendanceCorrectionHint, attendanceFilterLabels, summarizeAttendance, type AttendanceFilter } from "../lib/attendance-summary";
 import summaryStyles from "./attendance-summary-controls.module.css";
@@ -1034,6 +1034,15 @@ function RegularizationSheet({
           {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
           {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
         </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
+        {reason && requestsInTime && requestsOutTime && isOvernightRegularizationPair(inTime, outTime)
+          ? <p className="dx-time-prompt">OUT is earlier on the clock than IN, so this is treated as an overnight shift ending the next calendar day (for example IN 21:54 and OUT 08:20).</p>
+          : null}
+        {reason && !requestsInTime && requestsOutTime && isOvernightRegularizationPair(row.inTime, outTime)
+          ? <p className="dx-time-prompt">OUT is earlier on the clock than the recorded IN, so this is treated as an overnight shift ending the next calendar day.</p>
+          : null}
+        {reason && requestsInTime && !requestsOutTime && isOvernightRegularizationPair(inTime, row.outTime)
+          ? <p className="dx-time-prompt">Recorded OUT is earlier on the clock than the requested IN, so this is treated as an overnight shift ending the next calendar day.</p>
+          : null}
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />

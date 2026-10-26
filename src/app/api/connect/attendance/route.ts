@@ -314,9 +314,19 @@ export async function POST(request: NextRequest) {
     if (requestsOutTime && !validTime(requestedOutTime)) throw new Error("Requested OUT time is required for this reason.");
     if (!remarksOnly && !requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
     if (!remarksOnly && !requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
-    if (!remarksOnly && normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
-    if (remarksOnly && validTime(normalizedRequestedInTime) && validTime(normalizedRequestedOutTime) && normalizedRequestedOutTime <= normalizedRequestedInTime) {
-      throw new Error("Existing OUT time must be after IN time.");
+    // Clock OUT earlier than clock IN is an overnight shift (OUT next calendar day),
+    // matching hr_review_attendance_regularization. Only identical times are rejected.
+    const padClock = (value: string) => {
+      const match = String(value ?? "").trim().match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+      return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
+    };
+    const pairedIn = padClock(normalizedRequestedInTime);
+    const pairedOut = padClock(normalizedRequestedOutTime);
+    if (!remarksOnly && pairedIn && pairedOut && pairedOut === pairedIn) {
+      throw new Error("Requested IN and OUT times cannot be the same.");
+    }
+    if (remarksOnly && pairedIn && pairedOut && pairedOut === pairedIn) {
+      throw new Error("Existing IN and OUT times cannot be the same.");
     }
     if (remarks.length < 5) throw new Error("Enter a short explanation.");
     const worker = await resolveWorker({ accountId, profileType });
