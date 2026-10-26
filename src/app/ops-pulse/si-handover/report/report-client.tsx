@@ -895,7 +895,7 @@ function StoreContinuityCard({
           const body = (
             <>
               <span className={rui.contSlotTime}>
-                {isStore ? (multiDay ? "Latest" : "Today") : cell.slot}
+                {isStore ? formatOpsDate(cell.date, cell.date) : cell.slot}
               </span>
               <span className={rui.contSlotState}>
                 {isStore && cell.kind === "accepted"
@@ -1675,7 +1675,7 @@ function StoreReportBody({
           <div className={rui.kpiGrid} aria-label="Store overview">
             <div className={rui.kpi}>
               <strong>{s.days}</strong>
-              <span>Days</span>
+              <span>Reports started</span>
             </div>
             <div className={s.avgPct >= 80 ? rui.kpiOk : s.avgPct >= 40 ? rui.kpiWarn : rui.kpiBad}>
               <strong>{s.avgPct}%</strong>
