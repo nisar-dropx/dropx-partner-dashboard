@@ -20,6 +20,10 @@ test('scorecard qualifiers, dates, missing stores and newest revision survive su
  const facts=storeInsightFacts([{id:'s',station_code:'TCD4',station_name:'Nesapakkam'},{id:'missing',station_code:'TTG9'}],[{station_code:'TCD4',report_date:'2026-10-25',created_at:'2026-10-26',values_json:{score_pct:29,band:'Critical',points_available:79,points_earned:23,metrics:{reconciliation:{scored:true,status:'Red',actual_text:'100% (87% not reconciled)',target_text:'98.5%'}}}},{station_code:'TCD4',report_date:'2026-10-25',created_at:'2026-10-25',values_json:{score_pct:90}}],{shifts:[],days:[],actions:[]},'2026-10-27');
  assert.equal(facts.find(f=>f.id==='s:health').value,'29%');assert.equal(facts.find(f=>f.id==='s:reconciliation').value,'100% (87% not reconciled)');assert.equal(facts.find(f=>f.id==='missing:missing-health').value,'No imported scorecard');assert.match(facts.find(f=>f.id==='s:handover').detail,/zero does not establish/);
 });
+test('amber metrics are attention signals, never presented as wins',()=>{
+ const facts=storeInsightFacts([{id:'s',station_code:'TCC3'}],[{station_code:'TCC3',report_date:'2026-10-25',values_json:{score_pct:50,metrics:{ppi:{scored:true,status:'Amber',actual_text:'25 s',target_text:'20 s'}}}}],{shifts:[],days:[],actions:[]},'2026-10-27');
+ assert.equal(facts.find(f=>f.id==='s:ppi').sentiment,'attention');
+});
 const fact={id:'f',topic:'Health',label:'Score',value:'29%',detail:'Verified',href:'//evil.test',sentiment:'attention',storeCode:'TCD4'};
 test('lower-weight loss and shortage facts remain available alongside speed problems',()=>{
  const keys=['order_drop_to_picker_acceptance','ppi','stowed_within_sla','shorts_per_1000_orders','reconciliation','loss_rate','iol_aged_7_plus'];
