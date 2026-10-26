@@ -530,7 +530,11 @@ function StoreContinuityPanel({
           slots={board.slots}
           dates={board.dates}
           onClose={() => setDetailRow(null)}
-          onOpenReport={onOpenReport}
+          onOpenReport={(id) => {
+            // Close continuity first so the checklist report is not trapped under it.
+            setDetailRow(null);
+            onOpenReport(id);
+          }}
           onClearFilter={() => {
             onClearStoreFilter();
             setDetailRow(null);
