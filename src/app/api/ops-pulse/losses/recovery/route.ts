@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     };
     const [people, history, currentMonth, nextMonth, responseWindow] = await Promise.all([
       directoryOnly
-        ? supabaseAdmin!.rpc("station_audit_employee_directory", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
+        ? supabaseAdmin!.rpc("nl_recovery_employee_directory", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
             if (error) throw Error("Station employees could not be loaded.");
             return data ?? [];
           })

@@ -22,6 +22,8 @@ export type RecoveryPerson = {
   full_name: string;
   designation: string;
   is_active: boolean;
+  /** Linked EDSP/XPT stations or mapped management responsibility. */
+  locations?: string;
   salary_month?: string;
   salary_payable?: number | null;
   recovery_limit?: number | null;

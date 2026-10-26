@@ -85,7 +85,7 @@ export async function GET(request: Request) {
     // Same directory the recovery form uses; salary limits are verified when the file is uploaded.
     const directories = await Promise.all(
       view.totals.map(async (s) => {
-        const people = await supabaseAdmin!.rpc("station_audit_employee_directory", {
+        const people = await supabaseAdmin!.rpc("nl_recovery_employee_directory", {
           p_company: requireCompanyId(auth),
           p_station: s.id,
         });
@@ -100,7 +100,7 @@ export async function GET(request: Request) {
                   (d) => d.toLowerCase() === String(p.designation).toLowerCase(),
                 )),
           )
-          .map((p) => [s.station_code, p.employee_code, p.full_name, p.designation, p.is_active ? "Active" : "Inactive / left"]);
+          .map((p) => [s.station_code, p.employee_code, p.full_name, p.designation, p.is_active ? "Active" : "Inactive / left", p.locations || s.station_code]);
       }),
     );
     const outcomes = view.outcomes.filter(
@@ -155,7 +155,7 @@ export async function GET(request: Request) {
     );
     sheet(
       "Employees",
-      [["Station", "Employee ID", "Name", "Designation", "Status"], ...directories.flat()],
+      [["Station", "Employee ID", "Name", "Designation", "Status", "Linked locations"], ...directories.flat()],
       [10, 14, 32, 30, 16],
     );
     sheet(
