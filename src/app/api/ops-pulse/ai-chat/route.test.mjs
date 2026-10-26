@@ -7,6 +7,8 @@ function harness({signedIn=true,scopeError=false,deny=false,model=false}={}){
  const calls=[],auth={userId:'user',companyId:'company',locationScopeIds:['store'],hasAllLocationAccess:false};
  const locations=[{id:'store',station_code:'TCC3',station_name:'Adyar'},{id:'lm',station_code:'KTUR',station_name:'LM'}];
  const mocks={
+ '@/lib/ops-pulse/assistant-model-read':{assistantModelRead:r=>r},
+    '@/lib/ops-pulse/assistant-report-token':{signAssistantReport:()=>null},
  '@/lib/ops-pulse/assistant-language':languages,
  '@/lib/ops-pulse/assistant-speech':{translateAssistantText:async(text,lang)=>lang==='ml-IN'?'TCC3: ഇന്ന് 3 പേർ ഹാജരായി.':text},
  '@/lib/authorization':{getAuthorization:async()=>signedIn?auth:null,hasPermission:()=>!deny},

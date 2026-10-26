@@ -108,7 +108,7 @@ function StepStatus({ row }: { row: ReviewStatusRow }) {
 
 type RowAccess = Awaited<ReturnType<typeof getReviewAccess>>;
 
-function ReviewStatusDetail({ row, access }: { row: ReviewStatusRow; access: RowAccess | null }) {
+function ReviewStatusDetail({ row, access, darkStore }: { row: ReviewStatusRow; access: RowAccess | null; darkStore: boolean }) {
   const openItems = row.items.filter((item) => item.status !== "done");
   const openFollowups = row.followups.filter((item) => item.status !== "done");
   const discussion = row.updates.filter((update) => update.update_type !== "action").slice(0, 4);
@@ -135,6 +135,7 @@ function ReviewStatusDetail({ row, access }: { row: ReviewStatusRow; access: Row
         canStart={false}
         hasRoute={Boolean(row.review || routeLabel)}
         routeLabel={routeLabel}
+        darkStore={darkStore}
         reviewerEditReopened={access.reviewerEditReopened}
         firstReviewerName={row.steps[0]?.reviewer_name ?? row.clusterManager ?? row.aom ?? null}
       />
@@ -289,7 +290,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
               <span data-label="Dependency"><strong>{row.currentDependency}</strong><small>{row.lastActivityAt ? formatOpsDateTime(row.lastActivityAt) : "No activity"}</small></span>
               <i aria-hidden="true">⌄</i>
             </summary>
-            <ReviewStatusDetail row={row} access={rowAccess.get(row.key) ?? null} />
+            <ReviewStatusDetail darkStore={darkStore} row={row} access={rowAccess.get(row.key) ?? null} />
           </details>) : <div className="review-status-empty">No {locationLabel.toLowerCase()} reviews match these filters.</div>}
         </div>
         {totalPages > 1 ? <footer className="review-status-pagination">

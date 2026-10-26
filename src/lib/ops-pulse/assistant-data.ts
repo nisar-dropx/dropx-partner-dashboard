@@ -1,3 +1,7 @@
+import { mapWithConcurrency } from "@/lib/bounded-concurrency";
+import { loadReviewAttendanceHistory } from "./review-attendance-history-data";
+import { summarizeAssistantAttendance } from "./assistant-attendance";
+import { allRoutingRows } from "./people-review-routing";
 import "server-only";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { callMcpTool } from "@/lib/mcp/tools";
@@ -25,6 +29,22 @@ export async function readAssistantData(auth: AuthorizationContext, locations: C
   const scoped = scopedAssistantAuth(auth, selected);
   if (!supabaseAdmin) throw Error("Data source is unavailable.");
   const companyId = auth.companyId!;
+  if (name === "ops_attendance_analysis") {
+    if (selected.length > 20) throw Error("Select up to 20 locations for detailed attendance analysis.");
+    if (args.to > indiaDate()) throw Error("Choose an attendance period ending today or earlier.");
+    const histories = await mapWithConcurrency(selected, 3, location => loadReviewAttendanceHistory(companyId, location, args.to, { from: args.from }));
+    return { ...summarizeAssistantAttendance(histories, args.from, args.to, { role: typeof raw.role === "string" ? raw.role.slice(0,100) : undefined, person: typeof raw.person === "string" ? raw.person.slice(0,100) : undefined }), checkedAt: new Date().toISOString() };
+  }
+  if (name === "ops_store_health_analysis") {
+    const [facts, actions] = await Promise.all([
+      allRoutingRows(supabaseAdmin.from("report_metric_facts").select("station_code,report_date,values_json,created_at").eq("company_id", companyId).eq("source_type", "qc_store_health_daily").in("station_code", args.stationCodes).gte("report_date", args.from).lte("report_date", args.to).order("created_at", { ascending: false }).order("id")),
+      allRoutingRows(supabaseAdmin.from("ops_performance_followups").select("station_id,title,owner_label,due_date,status").eq("company_id", companyId).in("station_id", selected.map(l=>l.id)).not("status", "in", "(done,closed,completed,cancelled)").lte("due_date", args.to).order("due_date").order("id"))
+    ]);
+    const latest = new Map<string, typeof facts[number]>();
+    for (const fact of facts) { const key = `${fact.station_code}|${fact.report_date}`; if (!latest.has(key)) latest.set(key, fact); }
+    const rows = [...latest.values()].sort((a,b)=>a.report_date.localeCompare(b.report_date) || a.station_code.localeCompare(b.station_code));
+    return { source: "Imported Store Health scorecards and saved review actions", from: args.from, to: args.to, checkedAt: new Date().toISOString(), note: "Store Health is normally available D-2; no imported row means missing data, not a zero score. Open actions are current outstanding items due by the period end. Percentage actual_number fields are fractions; use actual_text with its qualifiers and metric-specific dates. Reported status is authoritative; audit numbers can be dates, not measurements. Unscored metrics are unavailable, not zero. Imported narrative snippets may be incomplete; use structured metrics.", rows, openActions: actions.map(a=>({...a,stationCode:selected.find(l=>l.id===a.station_id)?.station_code})), truncated: false };
+  }
   if (name === "ops_shift_status") {
     const result = await loadOpsStationManpower(companyId, selected, args.asOf, { historical: args.asOf < indiaDate() });
     return { source: "Shift Attendance · approved rosters and People punches", asOf: args.asOf, checkedAt: new Date().toISOString(), rows: selected.map(location => {

@@ -14,6 +14,11 @@ export function factualAnswer(reads: AssistantRead[]) {
     const source = assistantSource(read.name).label;
     if (read.error) return `${source}: ${read.error}`;
     const data = read.data;
+    if (read.name === "ops_attendance_analysis") {
+      const best = data.topPunctuality ?? [];
+      return `${source} · ${data.from} to ${data.to}\n${data.totals.people} matching people; ${data.totals.reported} reported working shifts, ${data.totals.late} late, ${data.totals.confirmedAbsent} confirmed absent and ${data.totals.unresolved} unresolved days.\n` +
+        (best.length ? "Strong punctuality: " + best.map((person: any) => `${person.name} (${person.stationCode}): ${person.punctualityPct}% on time across ${person.reported} reported shifts; ${person.attendancePct}% attendance across ${person.assessedDays} assessed days`).join("; ") : "No fair ranking is available yet: at least 3 assessed days and no unresolved days are required.") + `\n${data.definitions.attendance} ${data.definitions.punctuality}\n${data.cohort}`;
+    }
     if (read.name === "ops_shift_status") return `${source} · ${data.asOf} IST\n` + data.rows.map((r: any) => r.dataAvailable
       ? `${r.stationCode}: ${r.scheduled} scheduled, ${r.punched} punched, ${r.notReported} not reported, ${r.upcoming} upcoming. ${r.late} late, ${r.onLeave} on leave; ${r.noRoster + r.rosterPending} without a completed roster.`
       : `${r.stationCode}: no active people or shift records returned for this date. This does not establish that nobody is working.`).join("\n");
