@@ -1,9 +1,9 @@
 .page {
-  padding: 28px;
+  padding: 16px 18px;
   max-width: 1720px;
   margin: auto;
-  color: #24334a;
-  font-size: 14px;
+  color: var(--ink, #1f2937);
+  font-size: 12.25px;
 }
 .page h1 {
   font-size: 28px;
@@ -89,12 +89,13 @@
   color: #185f51;
 }
 .page .primary {
-  background: #176b5c;
+  background: var(--ops-action, linear-gradient(110deg, #d4561d, #c32338));
   color: #fff;
-  border-color: #176b5c;
+  border-color: transparent;
+  box-shadow: 0 3px 10px rgba(195, 35, 56, 0.12);
 }
 .page .primary:hover {
-  background: #125747;
+  background: var(--ops-action-hover, linear-gradient(110deg, #bd4713, #ad1c31));
 }
 .page .danger {
   color: #ab3340;
@@ -113,9 +114,10 @@
 }
 .eyebrow {
   font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 1.5px;
-  color: #237766;
+  font-weight: 850;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--brand-dark, #de5a16);
 }
 .inline {
   display: flex;
@@ -131,11 +133,12 @@
   padding: 12px 0;
 }
 .card {
-  background: #fff;
-  border: 1px solid #e1e8f0;
-  border-radius: 13px;
-  padding: 22px;
-  margin-bottom: 18px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 12px;
+  padding: 13px 15px;
+  margin-bottom: 12px;
+  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045), 0 6px 18px rgba(16, 24, 40, 0.025));
 }
 .card summary {
   cursor: pointer;
@@ -201,16 +204,17 @@
   text-align: left;
 }
 .tableWrap th {
-  font-size: 10px;
-  letter-spacing: 0.5px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  background: #f4f7fa;
-  color: #72829a;
-  padding: 16px;
+  background: var(--surface-soft, #f8fafc);
+  color: var(--muted, #667085);
+  padding: 9px 12px;
+  font-weight: 750;
 }
 .tableWrap td {
-  padding: 17px 16px;
-  border-top: 1px solid #e9eef4;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line, #e9eef4);
   font-size: 12px;
 }
 .tableWrap small {
@@ -300,9 +304,9 @@
   margin-top: 2px;
 }
 .sectionNav [aria-current="step"] {
-  background: #eaf3f0;
-  border-color: #82b6a5;
-  color: #155f4b;
+  background: var(--ops-selected-bg, #fff7f2);
+  border-color: var(--ops-selected-border, #f0ded3);
+  color: var(--ops-selected-ink, #a63d1d);
 }
 .hero {
   display: grid;
@@ -866,10 +870,10 @@
   font-size: 12px;
 }
 .page input[type="checkbox"] {
-  accent-color: #176b5c;
+  accent-color: var(--brand-dark, #de5a16);
 }
 .page a {
-  color: #216f68;
+  color: var(--ops-selected-ink, #a63d1d);
 }
 @media (max-width: 900px) {
   .page {

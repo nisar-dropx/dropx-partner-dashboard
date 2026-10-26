@@ -11,11 +11,12 @@
 
 /* One dense board: groups sit side-by-side (not five full-width stacked bands). */
 .store-health-score-meta {
-  margin: 0 12px 8px;
-  padding: 8px 10px;
-  border: 1px solid #e8edf3;
-  border-radius: 8px;
-  background: #f8fafc;
+  margin: 0 10px 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 9px;
+  background: var(--canvas, #f8fafc);
+  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, .035));
 }
 
 .store-health-score-meta p {
@@ -55,8 +56,8 @@
 .store-health-metric-board {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 0 12px 12px;
+  gap: 7px;
+  padding: 0 10px 10px;
   align-items: start;
 }
 
@@ -138,8 +139,8 @@
 
 .store-health-review-desk .store-health-metric-card:hover,
 .store-health-review-desk .store-health-metric-card:focus-visible {
-  border-color: #94a3b8;
-  box-shadow: 0 0 0 2px rgba(15, 23, 42, .06);
+  border-color: var(--ops-selected-border, #f0ded3);
+  box-shadow: 0 0 0 2px rgba(222, 90, 22, .08);
   outline: none;
 }
 
@@ -437,7 +438,7 @@
 
 .store-health-review-desk .store-health-rca-item .review-rca-edit-label {
   margin: 0;
-  color: #0f766e;
+  color: var(--ops-selected-ink, #a63d1d);
   font-size: 11px;
   font-weight: 750;
 }
@@ -499,7 +500,7 @@
 .store-health-bar.neutral,
 .store-health-bar.missing { background: #cbd5e1; opacity: .7; }
 .store-health-bar.selected {
-  box-shadow: 0 0 0 1px #172033;
+  box-shadow: 0 0 0 1px var(--brand-dark, #de5a16);
 }
 
 .store-health-metric-modal-backdrop {
@@ -710,4 +711,22 @@
     justify-self: end;
     align-self: start;
   }
+}
+
+.ops-modern .store-health-review-desk { font-size: 12.25px; }
+.ops-modern .store-health-board-section,
+.ops-modern .store-health-review-desk .store-health-metric-card {
+  border-radius: 9px;
+  box-shadow: var(--ops-shadow);
+}
+.ops-modern .store-health-review-desk .store-health-insights > summary {
+  padding: 9px 11px;
+}
+.ops-modern .store-health-metric-modal {
+  border-radius: 13px;
+  box-shadow: var(--ops-shadow);
+}
+.ops-modern .store-health-review-desk .store-health-metric-card:focus-visible {
+  outline: 2px solid var(--ops-focus);
+  outline-offset: 2px;
 }

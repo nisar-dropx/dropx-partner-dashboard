@@ -17,9 +17,9 @@
 }
 .review-trend-button:hover,
 .review-trend-button[aria-expanded="true"] {
-  color: #c2410c !important;
-  border-color: #fb923c !important;
-  background: #fff7ed !important;
+  color: var(--ops-selected-ink, #a63d1d) !important;
+  border-color: var(--ops-selected-border, #f0ded3) !important;
+  background: var(--ops-selected-bg, #fff7f2) !important;
 }
 .performance-review-metrics article { position: relative; }
 .performance-review-metrics article > .review-trend-card {
@@ -34,7 +34,7 @@
 }
 .performance-review-metrics article > .review-trend-card:hover,
 .performance-review-metrics article > .review-trend-card[aria-expanded="true"] {
-  border-color: #f97316 !important;
+  border-color: var(--brand-dark, #de5a16) !important;
   background: #ffffff18 !important;
 }
 .review-history-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -49,7 +49,7 @@
 .review-history-van-summary strong { display: block; overflow: hidden; color: #172033; font-size: 13px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .review-history-caption { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 11px; }
 .review-history-values { max-height: 300px; overflow: auto; overscroll-behavior: contain; }
-.review-history-values:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+.review-history-values:focus-visible { outline: 2px solid var(--ops-focus, #c45325); outline-offset: -2px; }
 .review-history-value-grid { min-width: 0; font-size: 12px; }
 .review-history-value-head,
 .review-history-value-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 40%); column-gap: 10px; align-items: start; }
@@ -75,12 +75,12 @@
 .review-trend-popover {
   position: fixed;
   z-index: 1200;
-  background: #fff;
-  color: #172033;
-  border: 1px solid #dbe3ec;
+  background: var(--surface, #fff);
+  color: var(--ink, #1f2937);
+  border: 1px solid var(--line, #e2e7ee);
   border-radius: 12px;
-  box-shadow: 0 12px 45px #0f172a38;
-  padding: 14px;
+  box-shadow: var(--ops-shadow, 0 12px 40px rgba(16, 24, 40, .12));
+  padding: 12px 13px;
   max-height: min(550px, calc(100dvh - 24px));
   overflow: auto;
   font-family: inherit;
@@ -118,7 +118,7 @@
 .review-trend-popover button:focus-visible,
 .review-trend-button:focus-visible,
 .review-trend-popover select:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--ops-focus, #c45325);
   outline-offset: 2px;
 }
 .review-trend-popover header > button {
@@ -138,9 +138,9 @@
   gap: 3px;
 }
 .review-trend-controls button[aria-pressed="true"] {
-  background: #172033;
+  background: var(--brand-dark, #de5a16);
   color: #fff;
-  border-color: #172033;
+  border-color: var(--brand-dark, #de5a16);
 }
 .review-trend-measure {
   font-size: 11px;
@@ -197,11 +197,11 @@
   stroke-dasharray: 5 4;
 }
 .trend-line {
-  stroke: #f97316;
+  stroke: var(--brand-dark, #de5a16);
   stroke-width: 2;
 }
 .trend-dot {
-  fill: #f97316;
+  fill: var(--brand-dark, #de5a16);
   cursor: pointer;
   stroke: #fff;
   stroke-width: 1.5;
@@ -260,8 +260,8 @@
   padding: 6px;
   color: #64748b;
 }
-.review-trend-table tr.selected td { background: #fff7ed; }
-.review-trend-day-button { width: auto !important; min-height: 24px !important; padding: 2px 5px !important; color: #c2410c !important; font-variant-numeric: tabular-nums; font-weight: 650; }
+.review-trend-table tr.selected td { background: var(--ops-selected-bg, #fff7f2); }
+.review-trend-day-button { width: auto !important; min-height: 24px !important; padding: 2px 5px !important; color: var(--ops-selected-ink, #a63d1d) !important; font-variant-numeric: tabular-nums; font-weight: 650; }
 .review-van-request-details { margin-top: 10px; padding: 10px; border: 1px solid #fed7aa; border-radius: 9px; background: #fffaf5; }
 .review-van-request-details > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid #ffedd5; }
 .review-van-request-details > header strong { font-size: 12px; }
@@ -291,3 +291,10 @@
   .review-history-van-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .review-van-request-list { grid-template-columns: 1fr; }
 }
+
+.ops-modern .review-trend-controls button[aria-pressed="true"] {
+  background: var(--ops-action);
+  border-color: transparent;
+}
+.ops-modern .review-trend-popover { box-shadow: var(--ops-shadow); }
+.ops-modern .review-van-request-details > header b { color: var(--brand-dark); }

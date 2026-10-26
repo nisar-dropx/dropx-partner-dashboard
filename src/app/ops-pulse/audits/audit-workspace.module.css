@@ -1,10 +1,10 @@
 .tabs {
   display: flex;
   gap: 4px;
-  padding: 5px;
-  background: #f2f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  padding: 4px;
+  background: var(--surface-soft, #f8fafc);
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 11px;
   width: max-content;
   max-width: 100%;
   overflow: auto;
@@ -14,16 +14,17 @@
   white-space: nowrap;
   border: 0;
   background: transparent;
-  color: #617086;
-  padding: 9px 13px;
+  color: var(--muted, #667085);
+  padding: 8px 12px;
   border-radius: 8px;
   font-weight: 700;
+  font-size: 12px;
   cursor: pointer;
 }
 .tabs button.active {
-  background: #1f2a44;
+  background: var(--brand-dark, #de5a16);
   color: #fff;
-  box-shadow: 0 1px 4px #1f2a4433;
+  box-shadow: 0 1px 3px rgba(222, 90, 22, 0.28);
 }
 .summary {
   display: grid;
@@ -32,10 +33,11 @@
   margin: 12px 0;
 }
 .metric {
-  border: 1px solid #e5eaf1;
-  background: #fff;
-  border-radius: 14px;
-  padding: 15px;
+  border: 1px solid var(--line, #e2e7ee);
+  background: var(--surface, #fff);
+  border-radius: 12px;
+  padding: 11px 12px;
+  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045), 0 6px 18px rgba(16, 24, 40, 0.025));
 }
 .metric span {
   display: block;
@@ -79,10 +81,10 @@
   gap: 10px;
 }
 .auditCard {
-  border: 1px solid #e1e7ef;
-  background: #fff;
-  border-radius: 14px;
-  padding: 14px;
+  border: 1px solid var(--line, #e2e7ee);
+  background: var(--surface, #fff);
+  border-radius: 12px;
+  padding: 11px 12px;
   display: grid;
   grid-template-columns:
     minmax(190px, 1.4fr) minmax(110px, 0.8fr) minmax(130px, 0.9fr)
@@ -150,11 +152,11 @@
 }
 .detailHead {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 18px;
-  border-bottom: 1px solid #e8edf3;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line, #e8edf3);
 }
 .detailHead h2 {
   font-size: 18px;
@@ -169,8 +171,8 @@
 .detailGrid {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
-  gap: 16px;
-  padding: 16px 18px;
+  gap: 12px;
+  padding: 11px 13px;
 }
 .section {
   border: 1px solid #e2e8f0;
@@ -435,9 +437,8 @@
   }
 }
 .workspace {
-  --ink: #21344d;
-  --muted: #697b90;
-  color: var(--ink);
+  color: var(--ink, #1f2937);
+  font-size: 12.25px;
   min-width: 0;
 }
 .topBar,
@@ -466,10 +467,10 @@
 }
 .eyebrow {
   font-size: 10px;
-  font-weight: 800;
-  color: #ed5429;
+  font-weight: 850;
+  color: var(--brand-dark, #de5a16);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.11em;
 }
 .context {
   font-size: 12px;
@@ -479,12 +480,13 @@
   margin-bottom: 16px;
 }
 .controlPanel {
-  background: #fff;
-  border: 1px solid #dfe7ef;
-  border-radius: 14px;
-  padding: 14px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 12px;
+  padding: 11px 13px;
   display: grid;
-  gap: 14px;
+  gap: 11px;
+  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045), 0 6px 18px rgba(16, 24, 40, 0.025));
 }
 .toolbar {
   align-items: center;
@@ -570,7 +572,7 @@
   min-width: 0;
 }
 .filterOptions input {
-  accent-color: #df5326;
+  accent-color: var(--brand-dark, #de5a16);
 }
 .textButton {
   background: transparent;
@@ -596,9 +598,10 @@
   cursor: pointer;
 }
 .typeSwitch button[aria-pressed="true"] {
-  background: #ebf2ff;
-  color: #235caa;
-  border-color: #bbd2fa;
+  background: var(--ops-selected-bg, #fff7f2);
+  color: var(--ops-selected-ink, #a63d1d);
+  border-color: var(--ops-selected-border, #f0ded3);
+  box-shadow: inset 0 -2px 0 var(--brand, #f5a400);
 }
 .monthPicker {
   display: flex;
@@ -705,8 +708,9 @@
 .slot:focus-visible,
 .day:focus-visible,
 .iconButton:focus-visible {
-  outline: 3px solid #4a7be0;
+  outline: 2px solid #fff0e5;
   outline-offset: 2px;
+  border-color: var(--brand-dark, #de5a16);
 }
 .fast {
   font-size: 10px;
@@ -719,15 +723,16 @@
 }
 .calendarPanel,
 .plan {
-  background: white;
-  border: 1px solid #dfe7ef;
-  border-radius: 14px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 12px;
   overflow: hidden;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
+  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045), 0 6px 18px rgba(16, 24, 40, 0.025));
 }
 .calendarHead {
-  padding: 16px 18px;
-  border-bottom: 1px solid #e8edf3;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line, #e8edf3);
 }
 .calendarHead h2 {
   font-size: 17px;
@@ -742,11 +747,12 @@
   margin: 5px 0 0;
 }
 .todayLabel {
-  font-size: 12px;
-  color: #2855a1;
-  background: #edf4ff;
-  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--ops-selected-ink, #a63d1d);
+  background: var(--ops-selected-bg, #fff7f2);
+  padding: 6px 9px;
   border-radius: 7px;
+  border: 1px solid var(--ops-selected-border, #f0ded3);
 }
 .calendar {
   border-radius: 0;
@@ -779,14 +785,14 @@
 }
 .day > strong > span {
   font-size: 9px;
-  background: #315faa;
+  background: var(--brand-dark, #de5a16);
   color: white;
   padding: 3px 5px;
   border-radius: 5px;
 }
 .day.today {
-  box-shadow: inset 0 0 0 2px #4675c8;
-  background: #f3f7ff;
+  box-shadow: inset 0 0 0 2px var(--brand-dark, #de5a16);
+  background: var(--ops-selected-bg, #fff7f2);
 }
 .day.outside {
   background: #f6f8fb;
@@ -930,8 +936,8 @@
   gap: 5px;
 }
 .daySelector > button[aria-pressed="true"] {
-  background: #edf4ff;
-  border-color: #6087c9;
+  background: var(--ops-selected-bg, #fff7f2);
+  border-color: var(--ops-selected-border, #f0ded3);
 }
 .daySelector > button > span {
   font-size: 11px;
@@ -1099,7 +1105,7 @@
     display: none;
   }
   .day.today > strong {
-    color: #245cb4;
+    color: var(--brand-dark, #de5a16);
   }
   .dayEntry {
     font-size: 9px;
@@ -1503,8 +1509,8 @@
   background: #f5f7fa;
 }
 .staffTriggerOpen {
-  border-color: #3b6ea5;
-  box-shadow: 0 0 0 3px rgba(59, 110, 165, 0.14);
+  border-color: var(--brand-dark, #de5a16);
+  box-shadow: 0 0 0 3px rgba(222, 90, 22, 0.12);
 }
 .staffTrigger i {
   font-style: normal;
@@ -1597,9 +1603,9 @@
 }
 .staffSearch input:focus {
   outline: none;
-  border-color: #3b6ea5;
+  border-color: var(--brand-dark, #de5a16);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(59, 110, 165, 0.12);
+  box-shadow: 0 0 0 3px rgba(222, 90, 22, 0.1);
 }
 .staffSelectAll {
   display: flex !important;
@@ -1632,7 +1638,7 @@
   background: #f4f7fb;
 }
 .staffOptionSelected {
-  background: #eaf2fb;
+  background: var(--ops-selected-bg, #fff7f2);
 }
 .staffOption span {
   display: grid;
@@ -1655,7 +1661,7 @@
   height: 16px;
   margin-top: 2px;
   flex: 0 0 auto;
-  accent-color: #2f6fad;
+  accent-color: var(--brand-dark, #de5a16);
 }
 .staffEmpty {
   margin: 8px 4px;
@@ -1674,17 +1680,17 @@
 }
 .staffFoot button {
   border: 0;
-  background: #2f6fad;
+  background: var(--ops-action, linear-gradient(110deg, #d4561d, #c32338));
   color: #fff;
   border-radius: 8px;
-  padding: 6px 14px;
+  padding: 6px 12px;
   font: inherit;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
 .staffFoot button:hover {
-  background: #255d93;
+  background: var(--ops-action-hover, linear-gradient(110deg, #bd4713, #ad1c31));
 }
 .staffHint {
   color: #6a7c94;
@@ -1726,7 +1732,7 @@
 .scorePhotos img{width:100%;height:120px;object-fit:cover;border-radius:8px;}
 .scorePhotos small{overflow-wrap:anywhere;display:block;}
 
-.reportPanel { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; }
+.reportPanel { background: var(--surface, #fff); border: 1px solid var(--line, #e2e7ee); border-radius: 12px; padding: 13px 15px; box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045), 0 6px 18px rgba(16, 24, 40, 0.025)); }
 .reportHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .reportHeader h2 { margin: 0 0 6px; font-size: 18px; }
 .reportHeader p, .reportHint { margin: 6px 0 14px; font-size: 12px; line-height: 1.6; color: #617086; }

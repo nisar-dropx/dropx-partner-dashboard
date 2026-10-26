@@ -1,10 +1,11 @@
 .review-van-fuel {
-  margin: 0 12px 12px;
+  margin: 0 10px 10px;
   min-width: 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #fff;
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 11px;
+  background: var(--surface, #fff);
   overflow: hidden;
+  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, .045));
 }
 .review-fuel-card {
   display: flex;
@@ -13,15 +14,15 @@
   flex-wrap: wrap;
   gap: 12px;
   width: 100%;
-  padding: 14px;
+  padding: 11px 12px;
   border: 0;
-  background: #f8fafc;
+  background: var(--canvas, #f8fafc);
   text-align: left;
   color: #172033;
   cursor: pointer;
 }
 .review-fuel-card:hover {
-  background: #fff7ed;
+  background: var(--ops-selected-bg, #fff7f2);
 }
 .review-fuel-card small,
 .review-fuel-totals small,
@@ -44,7 +45,7 @@
   font-variant-numeric: tabular-nums;
 }
 .review-fuel-card-values > b {
-  color: #f05a28;
+  color: var(--brand-dark, #de5a16);
 }
 .review-fuel-history {
   padding: 12px;
@@ -75,8 +76,8 @@
   min-height: 34px;
 }
 .review-fuel-history button[aria-pressed="true"] {
-  background: #172033;
-  border-color: #172033;
+  background: var(--brand-dark, #de5a16);
+  border-color: var(--brand-dark, #de5a16);
   color: #fff;
 }
 .review-fuel-totals {
@@ -225,11 +226,11 @@
   max-height: min(55dvh, 480px);
 }
 .review-fuel-dialog :is(button, [tabindex]):focus-visible {
-  outline: 2px solid #f97316;
+  outline: 2px solid var(--ops-focus, #c45325);
   outline-offset: -2px;
 }
 .review-van-fuel :is(button, summary, [tabindex]):focus-visible {
-  outline: 2px solid #f97316;
+  outline: 2px solid var(--ops-focus, #c45325);
   outline-offset: -2px;
 }
 @media (max-width: 600px) {
@@ -247,3 +248,10 @@
     padding: 8px;
   }
 }
+
+.ops-modern .review-fuel-history button[aria-pressed="true"] {
+  background: var(--ops-action);
+  border-color: transparent;
+}
+.ops-modern .review-van-fuel { box-shadow: var(--ops-shadow); }
+.ops-modern .review-fuel-dialog { border-radius: 13px; box-shadow: var(--ops-shadow); }
