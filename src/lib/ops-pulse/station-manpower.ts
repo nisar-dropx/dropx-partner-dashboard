@@ -274,7 +274,7 @@ export async function loadOpsStationManpower(
   const leaveFilters = [employeeIds.length ? `employee_id.in.(${employeeIds.join(",")})` : "", contractorIds.length ? `contractor_id.in.(${contractorIds.join(",")})` : ""].filter(Boolean);
   const workerIds = rawPeople.map((person) => person.id);
   const enrolmentIds = [...new Set(rawPeople.flatMap((person) => biometricVariants(person.biometricId)))];
-  const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult, rosterHints] = await Promise.all([
+  const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult, holidayResult, rosterHints] = await Promise.all([
     admin.from("attendance_daily")
       .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status,work_mode,wfh_scheduled_start_at,wfh_scheduled_end_at,wfh_credit_finalized_at")
       .eq("company_id", companyId).eq("punch_date", asOf).neq("status", "U").limit(5000),
@@ -290,10 +290,23 @@ export async function loadOpsStationManpower(
       .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").lte("effective_from", asOf).order("id")),
     leaveFilters.length ? admin.from("hr_leave_requests")
       .select("employee_id,contractor_id").eq("company_id", companyId).eq("status", "approved").or(leaveFilters.join(",")).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null }),
+    admin.from("hr_payroll_calendar_days")
+      .select("calendar_date,day_type,name,location_id")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .eq("calendar_date", asOf)
+      .in("day_type", ["paid_holiday", "working_day"])
+      .limit(5000),
     loadRosterSetupHints(admin, companyId, workerIds, asOf)
   ]);
-  const detailError = attendanceResult.error ?? punchResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
+  const detailError = attendanceResult.error ?? punchResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error ?? holidayResult.error;
   if (detailError) throw new Error(detailError.message);
+  const calendarDays = (holidayResult.data ?? []) as Array<{ calendar_date: string; day_type: string; name: string | null; location_id: string | null }>;
+  const calendarDayFor = (locationId: string) => {
+    const matches = calendarDays.filter((day) => !day.location_id || day.location_id === locationId);
+    matches.sort((left, right) => Number(Boolean(right.location_id)) - Number(Boolean(left.location_id)));
+    return matches[0] ?? null;
+  };
   const punchRows = (punchResult.data ?? []) as AttendancePunchRow[];
   const punchDeviceIds = [...new Set(punchRows.map((punch) => punch.device_id).filter((id): id is string => Boolean(id)))];
   const punchDevicesResult = punchDeviceIds.length ? await admin.from("biometric_devices")
@@ -372,9 +385,22 @@ export async function loadOpsStationManpower(
       const rightPlan = relation(right.hr_roster_plans as Relation<{ id: string | null; roster_kind: string | null; effective_from: string | null; revision_no: number | null; updated_at: string | null }>);
       return compareRosterPlanPreference(leftPlan, rightPlan);
     })[0];
-    const rosterShift = roster?.day_type === "working" ? relation(roster.hr_shifts as Relation<Shift>) : null;
+    const calendar = calendarDayFor(person.locationId);
+    // Holiday Master wins over a working or week-off roster, matching People attendance / payroll.
+    const rosterDayType = calendar?.day_type === "paid_holiday"
+      ? "holiday"
+      : calendar?.day_type === "working_day" && roster?.day_type === "weekly_off"
+        ? "working"
+        : roster?.day_type
+          ? String(roster.day_type)
+          : null;
+    const rosterShift = rosterDayType === "working" ? relation(roster?.hr_shifts as Relation<Shift>) : null;
     const shift = rosterShift;
-    const shiftSource = rosterShift ? "Active approved roster" : null;
+    const shiftSource = calendar?.day_type === "paid_holiday"
+      ? (calendar.name ? `Holiday · ${calendar.name}` : "Holiday")
+      : rosterShift
+        ? "Active approved roster"
+        : null;
     const attendance = attendanceByWorker.get(`${person.workerType}:${person.id}`);
     const punches = punchesByEnrolment.get(biometricKey(attendance?.enrolment_id ?? person.biometricId)) ?? [];
     const sameInstant = (left: string | null | undefined, right: string) => Boolean(left) && new Date(left!).getTime() === new Date(right).getTime();
@@ -411,8 +437,9 @@ export async function loadOpsStationManpower(
     const reported = Boolean(attendance?.in_time);
     const missingPunch = reported && (Number(attendance?.punch_count ?? 0) < 2 || !attendance?.out_time);
     const onLeave = person.workerType === "employee" ? leaveEmployeeIds.has(person.id) : leaveContractorIds.has(person.id);
+    const scheduledRest = rosterDayType === "weekly_off" || rosterDayType === "holiday";
     const availability = onLeave ? "On leave"
-      : !reported && roster?.day_type === "weekly_off" ? "Roster off"
+      : !reported && scheduledRest ? "Roster off"
         : !reported ? "Not reported"
           : missingPunch ? "Working" : "Completed";
     return {
@@ -426,8 +453,8 @@ export async function loadOpsStationManpower(
       availability,
       today: {
         ...bounds,
-        rosterSetupStatus: roster ? null : rosterHints.get(`${person.workerType}:${person.id}`)?.status ?? null,
-        rosterSetupLabel: roster ? null : rosterHints.get(`${person.workerType}:${person.id}`)?.label ?? null,
+        rosterSetupStatus: roster || calendar ? null : rosterHints.get(`${person.workerType}:${person.id}`)?.status ?? null,
+        rosterSetupLabel: roster || calendar ? null : rosterHints.get(`${person.workerType}:${person.id}`)?.label ?? null,
         earlyMinutes,
         workMode: attendance?.work_mode ?? null,
         wfhState,
@@ -437,7 +464,9 @@ export async function loadOpsStationManpower(
         workMinutes: Number(attendance?.work_minutes ?? 0),
         workMinutesRecorded: attendance?.work_minutes != null,
         missingPunch,
-        rosterDayType: roster?.day_type ? String(roster.day_type) : null,
+        rosterDayType,
+        // Keep holiday / week-off shiftName empty so week-off Excel and timetable
+        // filters (`!shiftName`) still include paid holidays with the off bucket.
         shiftName: shift ? `${shift.name} · ${formatShiftClock(shift.start_time)}-${formatShiftClock(shift.end_time)}` : null,
         shiftStartTime: shift?.start_time ?? null,
         shiftEndTime: shift?.end_time ?? null,

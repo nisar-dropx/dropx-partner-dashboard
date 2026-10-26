@@ -9,6 +9,7 @@ export type ShiftAttendance = {
     inTime: string | null; outTime: string | null;
     workMode?: string | null; wfhState?: string | null; approvedLeave?: boolean;
     shiftStartsAt?: string | null; shiftEndsAt?: string | null;
+    shiftSource?: string | null;
     rosterSetupStatus?: string | null; rosterSetupLabel?: string | null;
   };
 };
@@ -23,7 +24,7 @@ export function shiftCategory(p: ShiftAttendance, now = Date.now()) {
   if (t.approvedLeave || p.availability === "On leave") return "leave";
   if (t.workMode === "wfh") return "wfh";
   if (t.workMode === "business_trip") return "trip";
-  if (t.rosterDayType === "weekly_off") return "off";
+  if (t.rosterDayType === "weekly_off" || t.rosterDayType === "holiday") return "off";
   if (!t.shiftName && !t.rosterDayType) return t.rosterSetupStatus ? "pending" : "unassigned";
   if (!t.reported && t.shiftStartsAt && Date.parse(t.shiftStartsAt) > now) return "upcoming";
   if (t.lateMinutes > 0) return "late";
@@ -35,7 +36,7 @@ export function matchesShift(p: ShiftAttendance, filter: string, search = "", no
   const category = shiftCategory(p, now), t = p.today;
   const regular = !["leave", "off", "wfh", "trip"].includes(category);
   if (filter === "all") return true;
-  if (filter === "off") return t.rosterDayType === "weekly_off";
+  if (filter === "off") return t.rosterDayType === "weekly_off" || t.rosterDayType === "holiday";
   if (filter === "leave") return Boolean(t.approvedLeave || p.availability === "On leave");
   if (filter === "wfh") return t.workMode === "wfh";
   if (filter === "present") return t.reported;
@@ -47,7 +48,16 @@ export function matchesShift(p: ShiftAttendance, filter: string, search = "", no
 export function shiftLabel(p: ShiftAttendance, now = Date.now()) {
   const t = p.today, category = shiftCategory(p, now);
   if (category === "leave") return t.reported ? "Approved leave · punched" : "Approved leave";
-  if (category === "off") return t.reported ? "Week off · worked" : "Week off";
+  if (category === "off") {
+    if (t.rosterDayType === "holiday") {
+      const holidayName = t.shiftSource?.startsWith("Holiday")
+        ? t.shiftSource.replace(/^Holiday(?: · )?/, "").trim()
+        : "";
+      if (t.reported) return holidayName ? `Holiday · worked · ${holidayName}` : "Holiday · worked";
+      return holidayName ? `Holiday · ${holidayName}` : "Holiday";
+    }
+    return t.reported ? "Week off · worked" : "Week off";
+  }
   if (category === "wfh") return t.reported ? "WFH · punched" : ({
     upcoming: "WFH · upcoming", in_progress: "WFH · in progress",
     awaiting_finalization: "WFH · credit pending", credited: "WFH · credited"

@@ -21,6 +21,14 @@ const person = (today = {}) => ({ name: "Test", code: "D001", designation: "Exec
 test("late and early are independent", () => { assert(view.matchesShift(person(), "late")); assert(view.matchesShift(person(), "early")); assert.equal(view.shiftLabel(person(), now), "Late in 10m · Early out 30m"); });
 test("WFH is never missing attendance", () => { const p = person({ reported: false, inTime: null, outTime: null, workMode: "wfh", wfhState: "credited" }); assert(!view.matchesShift(p, "missing")); assert(!view.matchesShift(p, "late")); assert.equal(view.shiftLabel(p), "WFH · credited"); });
 test("approved leave and week off remain visible", () => { assert.equal(view.shiftLabel(person({ approvedLeave: true })), "Approved leave · punched"); assert(view.matchesShift(person({ rosterDayType: "weekly_off" }), "off")); });
+test("paid holiday is treated as scheduled rest, not not-reported", () => {
+  const holiday = person({ reported: false, inTime: null, outTime: null, lateMinutes: 0, rosterDayType: "holiday", shiftName: null, shiftSource: "Holiday · Gandhi Jayanti", availability: "Roster off" });
+  assert.equal(view.shiftCategory(holiday, now), "off");
+  assert(view.matchesShift(holiday, "off", "", now));
+  assert(!view.matchesShift(holiday, "missing", "", now));
+  assert.equal(view.shiftLabel(holiday, now), "Holiday · Gandhi Jayanti");
+  assert.equal(view.shiftLabel(person({ rosterDayType: "holiday", shiftName: null, shiftSource: "Holiday · Gandhi Jayanti" }), now), "Holiday · worked · Gandhi Jayanti");
+});
 test("unrostered is not absent", () => assert.equal(view.shiftCategory(person({ reported: false, shiftName: null, rosterDayType: null })), "unassigned"));
 test("unapproved roster never hides punch evidence from filters or Excel", () => {
   const xlsx = require("xlsx");

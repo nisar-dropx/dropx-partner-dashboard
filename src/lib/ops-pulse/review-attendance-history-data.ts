@@ -47,14 +47,20 @@ export async function loadReviewAttendanceHistory(companyId: string, station: Co
   const contractorIds = staff.discipline.rows.filter(p=>p.id.startsWith("contractor:")).map(p=>p.id.slice(11));
   const ids = [...employeeIds, ...contractorIds];
   const workerFilters = [employeeIds.length ? `employee_id.in.(${employeeIds.join(",")})` : "", contractorIds.length ? `contractor_id.in.(${contractorIds.join(",")})` : ""].filter(Boolean).join(",");
-  const [employees, contractors, engagements, plans, dated, leaves] = await Promise.all([
+  const [employees, contractors, engagements, plans, dated, leaves, holidays] = await Promise.all([
     employeeIds.length ? all<Profile>((a,b)=>db.from("employees").select("id,biometric_id,location_id,date_of_join,last_working_date").eq("company_id",companyId).in("id",employeeIds).order("id").range(a,b)) : [],
     contractorIds.length ? all<Profile>((a,b)=>db.from("contractors").select("id,biometric_id,location_id,date_of_join,last_working_date").eq("company_id",companyId).in("id",contractorIds).order("id").range(a,b)) : [],
     all((a,b)=>db.from("hr_engagements").select("id,worker_type,employee_id,contractor_id,start_date,end_date").eq("company_id",companyId).or(workerFilters).lte("start_date",date).or(`end_date.is.null,end_date.gte.${from}`).order("id").range(a,b)),
     all<Plan>((a,b)=>db.from("hr_roster_plans").select("id,roster_kind,effective_from,superseded_at,revision_no,location_id,hr_roster_plan_locations(location_id)").eq("company_id",companyId).eq("status","approved").eq("roster_kind","recurring_weekly").lte("effective_from",date).or(`superseded_at.is.null,superseded_at.gt.${from}`).order("id").range(a,b)),
     all<Roster>((a,b)=>db.from("hr_roster_entries").select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(name,start_time,end_time,grace_in_minutes),hr_roster_plans!inner(id,roster_kind,effective_from,superseded_at,revision_no,updated_at)").eq("company_id",companyId).in("worker_id",ids).gte("roster_date",dateOffset(from,-1)).lte("roster_date",date).eq("hr_roster_plans.status","approved").eq("hr_roster_plans.roster_kind","dated").order("id").range(a,b)),
-    all((a,b)=>db.from("hr_leave_requests").select("employee_id,contractor_id,start_date,end_date,status").eq("company_id",companyId).or(workerFilters).lte("start_date",date).gte("end_date",from).order("id").range(a,b))
+    all((a,b)=>db.from("hr_leave_requests").select("employee_id,contractor_id,start_date,end_date,status").eq("company_id",companyId).or(workerFilters).lte("start_date",date).gte("end_date",from).order("id").range(a,b)),
+    all<{ calendar_date: string; day_type: string; name: string | null; location_id: string | null }>((a,b)=>db.from("hr_payroll_calendar_days").select("calendar_date,day_type,name,location_id").eq("company_id",companyId).eq("is_active",true).gte("calendar_date",from).lte("calendar_date",date).in("day_type",["paid_holiday","working_day"]).order("calendar_date").range(a,b))
   ]);
+  const holidayFor = (day: string) => {
+    const matches = holidays.filter((row) => row.calendar_date === day && (!row.location_id || row.location_id === station.id));
+    matches.sort((left, right) => Number(Boolean(right.location_id)) - Number(Boolean(left.location_id)));
+    return matches[0] ?? null;
+  };
   const profiles = new Map<string, Profile>([...employees.map(p=>[`employee:${p.id}`,p] as const), ...contractors.map(p=>[`contractor:${p.id}`,p] as const)]);
   const bioPeople = new Map<string,string[]>();
   for (const [id,p] of profiles) { const key = `${id.split(":")[0]}:${bioKey(p.biometric_id)}`; bioPeople.set(key,[...(bioPeople.get(key)??[]),id]); }
@@ -109,7 +115,15 @@ export async function loadReviewAttendanceHistory(companyId: string, station: Co
       const inScope = Boolean(profile && (!profile.date_of_join||profile.date_of_join<=day) && (!profile.last_working_date||profile.last_working_date>=day)
         && (!personEngagements.length||activeEngagements.length) && (!personAssignments.length||assignment)
         && (assignment?.location_id??profile.location_id)===station.id);
-      const selected=rosterFor(roster,type,id,day), shift=selected?.day_type==="working"?one(selected.hr_shifts):null;
+      const selected=rosterFor(roster,type,id,day);
+      const calendar=holidayFor(day);
+      // Holiday Master wins over roster; an exceptional working day turns a week-off into a working day.
+      const dayType = calendar?.day_type === "paid_holiday"
+        ? "holiday"
+        : calendar?.day_type === "working_day" && selected?.day_type === "weekly_off"
+          ? "working"
+          : selected?.day_type ?? null;
+      const shift=dayType==="working"?one(selected?.hr_shifts):null;
       const records=attendanceMap.get(`${person.id}:${day}`)??[];
       // Multiple aggregates cannot manufacture an absence; prefer actual in/out evidence.
       const record=[...records].sort((a,b)=>Number(Boolean(b.in_time))-Number(Boolean(a.in_time)) || Number(b.punch_count??0)-Number(a.punch_count??0))[0];
@@ -120,10 +134,10 @@ export async function loadReviewAttendanceHistory(companyId: string, station: Co
       const rawRecorded = rawActivity.has(`${bioKey(profile?.biometric_id)}:${day}`) || Boolean(overnightActivity);
       const previous=rosterFor(roster,type,id,dateOffset(day,-1)), priorShift=previous?.day_type==="working"?one(previous.hr_shifts):null;
       const calendarStart=Date.parse(`${day}T00:00:00+05:30`), dayPunches=times.filter(t=>t>=calendarStart && t<calendarStart+86400000);
-      const overnightCarryoverOnly=selected?.day_type==="weekly_off" && priorShift && priorShift.end_time<=priorShift.start_time && dayPunches.length>0
+      const overnightCarryoverOnly=(dayType==="weekly_off"||dayType==="holiday") && priorShift && priorShift.end_time<=priorShift.start_time && dayPunches.length>0
         && dayPunches.every(t=>t<=Date.parse(`${day}T${priorShift.end_time}+05:30`));
       const ambiguousPunch = rawRecorded && (biometricOwners.get(bioKey(profile?.biometric_id))??0)>1 && !record?.in_time;
-      return classifyAttendanceDay({date:day,inScope,dayType:selected?.day_type??null,shift:shift?`${shift.name} · ${shift.start_time.slice(0,5)}–${shift.end_time.slice(0,5)}`:null,
+      return classifyAttendanceDay({date:day,inScope,dayType,shift:shift?`${shift.name} · ${shift.start_time.slice(0,5)}–${shift.end_time.slice(0,5)}`:dayType==="holiday"?(calendar?.name?`Holiday · ${calendar.name}`:"Holiday"):null,
         start:shift?.start_time??null,end:shift?.end_time??null,grace:Number(shift?.grace_in_minutes??0),inTime:record?.in_time??null,outTime:record?.out_time??null,
         workMinutes:record?.work_minutes??null,punchCount:Math.max(rawRecorded ? 1 : 0,...records.map(r=>r.punch_count??0)),ambiguousPunch,
         rawActivityOnly:rawRecorded && !records.some(r=>r.in_time||r.out_time||r.punch_count),overnightCarryoverOnly:Boolean(overnightCarryoverOnly),attendanceStatus:record?.status??null,

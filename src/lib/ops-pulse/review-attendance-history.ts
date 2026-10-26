@@ -1,5 +1,5 @@
 export type AttendancePeriod = "7d" | "mtd";
-export type HistoryStatus = "late" | "on_time" | "unplanned_absence" | "absence_unconfirmed" | "week_off_worked" | "week_off" | "leave" | "leave_pending" | "not_reported" | "upcoming" | "no_shift" | "outside_station" | "attendance_conflict";
+export type HistoryStatus = "late" | "on_time" | "unplanned_absence" | "absence_unconfirmed" | "week_off_worked" | "week_off" | "holiday_worked" | "holiday" | "leave" | "leave_pending" | "not_reported" | "upcoming" | "no_shift" | "outside_station" | "attendance_conflict";
 export type AttendanceHistoryDay = {
   date: string; shift: string | null; inTime: string | null; outTime: string | null;
   workMinutes: number | null; lateMinutes: number | null; status: HistoryStatus; note: string;
@@ -8,7 +8,8 @@ export type AttendanceHistoryPerson = { id: string; name: string; code: string; 
 export type ReviewAttendanceHistory = { station: string; date: string; people: AttendanceHistoryPerson[] };
 export const historyStatusLabels: Record<HistoryStatus, string> = {
   late: "Late", on_time: "On time", unplanned_absence: "Unplanned absence", absence_unconfirmed: "No punches · check",
-  week_off_worked: "Worked on week-off", week_off: "Roster off", leave: "Approved leave", leave_pending: "Leave requested",
+  week_off_worked: "Worked on week-off", week_off: "Roster off", holiday_worked: "Worked on holiday", holiday: "Holiday",
+  leave: "Approved leave", leave_pending: "Leave requested",
   not_reported: "Not reported yet", upcoming: "Shift not started", no_shift: "Shift not linked",
   outside_station: "Outside station / service dates", attendance_conflict: "Punch needs checking"
 };
@@ -27,7 +28,7 @@ export function summarizeAttendance(days: AttendanceHistoryDay[]) {
   return { late, reported, onTime: reported-late, repeated: late >= 2, allReportedLate: late >= 2 && late === reported,
     unplanned: days.filter(d => d.status === "unplanned_absence").length,
     unchecked: days.filter(d => d.status === "absence_unconfirmed" || d.status === "attendance_conflict").length,
-    weekOffWorked: days.filter(d => d.status === "week_off_worked").length };
+    weekOffWorked: days.filter(d => d.status === "week_off_worked" || d.status === "holiday_worked").length };
 }
 export type HistoryDayInput = {
   date: string; inScope: boolean; dayType: string | null; shift: string | null; start: string | null; end: string | null;
@@ -43,6 +44,7 @@ export function classifyAttendanceDay(input: HistoryDayInput, now = new Date()):
   if (input.overnightCarryoverOnly) return { ...row, status: "attendance_conflict", note: "These punches fall within the previous overnight shift; check the workday before counting week-off work." };
   if (input.rawActivityOnly && !input.inTime && !input.outTime) return { ...row, status: "attendance_conflict", note: "Raw punches are present but not reconciled to this person’s daily attendance; not classified absent or as confirmed week-off work." };
   if (input.dayType === "weekly_off") return { ...row, status: punched ? "week_off_worked" : "week_off", note: punched ? "Punch recorded on an approved weekly off; not an overtime or pay approval." : "Approved weekly off." };
+  if (input.dayType === "holiday") return { ...row, status: punched ? "holiday_worked" : "holiday", note: punched ? "Punch recorded on a paid holiday; not an overtime or pay approval." : "Paid holiday." };
   if (input.approvedLeave) return { ...row, status: "leave", note: punched ? "Punch recorded during approved leave; check attendance." : "Approved leave application." };
   if (input.dayType && input.dayType !== "working") return { ...row, status: "week_off", note: `Approved roster: ${input.dayType.replaceAll("_", " ")}.` };
   if (input.dayType !== "working" || !input.start || !input.end) return { ...row, note: "No approved working shift; lateness / absence is not assumed." };
