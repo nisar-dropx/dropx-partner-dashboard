@@ -13,11 +13,13 @@ import {
   type PersonActivity as PersonActivityCore,
   type PersonActivityItem as PersonActivityItemCore,
 } from "../si-handover/report-insights";
+import { resolveStoreOwnerLabel } from "./owner-label";
 
 export {
   applyBucketTrends,
   formatQuietLabel,
   formatTrendDelta,
+  resolveStoreOwnerLabel,
 };
 
 /** Quiet open checklists past this window count as stale (store has no SI escalate setting). */
@@ -103,6 +105,10 @@ export function enrichChecklistRows(
   staleMinutes = STORE_OPS_STALE_OPEN_MINUTES,
 ): ProgressRow[] {
   const cityById = new Map(stores.map((s) => [s.id, s.city || null]));
+  const storeCodes = new Set([
+    ...rows.map((r) => r.store_code),
+    ...stores.map((s) => s.station_code),
+  ]);
   void settings;
   return rows.map((row) => {
     const p = progress(
@@ -125,7 +131,7 @@ export function enrichChecklistRows(
       work_date: row.work_date,
       status: row.status,
       owner_user_id: row.owner_user_id,
-      owner_name: row.owner_name || "—",
+      owner_name: resolveStoreOwnerLabel(row.owner_name, storeCodes),
       started_at: row.started_at,
       updated_at: updatedAt,
       submitted_at: row.submitted_at,
