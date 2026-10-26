@@ -767,6 +767,12 @@
   flex-wrap: wrap;
   gap: 0.22rem;
   align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
 }
 .contDayDot {
   width: 0.55rem;
@@ -882,4 +888,168 @@ button.contCellBad:hover {
 @media (max-width: 640px) {
   .contGrid { grid-template-columns: 1fr; }
   .contSummary { justify-content: flex-start; }
+}
+
+/* —— Continuity days modal —— */
+.contModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: rgba(15, 23, 42, 0.48);
+  display: grid;
+  place-items: center;
+  padding: 0.85rem;
+}
+.contModal {
+  width: min(760px, 100%);
+  max-height: min(90vh, 880px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid var(--r-line);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+  overflow: hidden;
+}
+.contModalHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--r-line);
+  background: linear-gradient(180deg, #f0fdfa, #fff 85%);
+}
+.contModalEyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--r-ok);
+}
+.contModalTitle {
+  margin: 0.15rem 0 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+  font-weight: 850;
+}
+.contModalMeta {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--r-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.contModalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.contModalSummary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.4rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--r-line);
+  background: #f8fafc;
+}
+.contModalSummary span {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid var(--r-line);
+  background: #fff;
+}
+.contModalSummary strong {
+  font-size: 0.95rem;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--r-ink);
+}
+.contModalSummary small {
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--r-muted);
+}
+.contModalBody {
+  overflow: auto;
+  padding: 0.75rem 1rem 1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+.contDayBlock {
+  border: 1px solid var(--r-line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.55rem 0.65rem 0.65rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.contDayHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.contDayHead strong {
+  display: block;
+  font-size: 0.86rem;
+  letter-spacing: -0.02em;
+}
+.contDaySlots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: 0.4rem;
+}
+.contDaySlot {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 9px;
+  min-height: 4.2rem;
+}
+.contDaySlotTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+.contDaySlotTop strong {
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+.contDaySlotTop span {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.contDaySlotBody {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .contModalSummary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .contModalBackdrop { padding: 0; align-items: stretch; }
+  .contModal {
+    width: 100%;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+  }
 }

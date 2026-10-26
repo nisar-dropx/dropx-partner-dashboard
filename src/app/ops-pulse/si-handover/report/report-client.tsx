@@ -1,7 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { statusLabels as siStatusLabels } from "@/lib/ops-pulse/si-handover/model";
 import {
   buildStoreContinuity,
@@ -422,14 +429,31 @@ function StoreContinuityPanel({
   board,
   activeStoreId,
   onSelectStore,
+  onClearStoreFilter,
   onOpenReport,
 }: {
   board: StoreContinuityBoard;
   activeStoreId: string;
   onSelectStore: (locationId: string) => void;
+  onClearStoreFilter: () => void;
   onOpenReport: (id: string) => void;
 }) {
   const multiDay = board.dates.length > 1;
+  const [detailRow, setDetailRow] = useState<StoreContinuityRow | null>(null);
+
+  useEffect(() => {
+    // Range/data refresh: keep modal on the same store if it still exists.
+    setDetailRow((prev) => {
+      if (!prev) return null;
+      return board.stores.find((s) => s.locationId === prev.locationId) || null;
+    });
+  }, [board]);
+
+  const openStoreDetail = (row: StoreContinuityRow) => {
+    setDetailRow(row);
+    onSelectStore(row.locationId);
+  };
+
   return (
     <section className={rui.contPanel} aria-label="Store shift continuity">
       <div className={rui.contHead}>
@@ -438,7 +462,7 @@ function StoreContinuityPanel({
           <p>
             Every store × every configured slot
             {multiDay ? ` across ${board.dates.length} days` : " for this day"} —
-            gaps, stale opens, and unbroken handovers.
+            click a store card for the full day-by-day view.
           </p>
         </div>
         <div className={rui.contSummary}>
@@ -493,13 +517,247 @@ function StoreContinuityPanel({
               row={row}
               dates={board.dates}
               active={activeStoreId === row.locationId}
-              onSelect={() => onSelectStore(row.locationId)}
+              onSelect={() => openStoreDetail(row)}
               onOpenReport={onOpenReport}
             />
           ))}
         </div>
       )}
+
+      {detailRow ? (
+        <StoreContinuityDaysModal
+          row={detailRow}
+          slots={board.slots}
+          dates={board.dates}
+          onClose={() => setDetailRow(null)}
+          onOpenReport={onOpenReport}
+          onClearFilter={() => {
+            onClearStoreFilter();
+            setDetailRow(null);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function StoreContinuityDaysModal({
+  row,
+  slots,
+  dates,
+  onClose,
+  onOpenReport,
+  onClearFilter,
+}: {
+  row: StoreContinuityRow;
+  slots: string[];
+  dates: string[];
+  onClose: () => void;
+  onOpenReport: (id: string) => void;
+  onClearFilter: () => void;
+}) {
+  const titleId = useId();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const daySections = useMemo(() => {
+    // Newest first so “last 7 days” opens on the latest day.
+    return [...dates].reverse().map((date) => {
+      const cells = row.cells.filter((c) => c.date === date);
+      const bySlot = new Map(cells.map((c) => [c.slot, c]));
+      const ordered = slots.map(
+        (slot) =>
+          bySlot.get(slot) || {
+            date,
+            slot,
+            kind: "missing" as ContinuityCellKind,
+            checklistId: null,
+            pct: 0,
+            siName: null,
+          },
+      );
+      const health = dayHealthFromCells(ordered);
+      const covered = ordered.filter((c) => c.kind !== "missing").length;
+      const missing = ordered.filter((c) => c.kind === "missing").length;
+      const accepted = ordered.filter((c) => c.kind === "accepted").length;
+      const stale = ordered.filter((c) => c.kind === "stale").length;
+      return { date, cells: ordered, health, covered, missing, accepted, stale };
+    });
+  }, [dates, row.cells, slots]);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  const rangeLabel =
+    dates.length <= 1
+      ? formatOpsDate(dates[0] || "")
+      : `${formatOpsDate(dates[0] || "")} → ${formatOpsDate(dates[dates.length - 1] || "")}`;
+
+  return (
+    <div
+      className={rui.contModalBackdrop}
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={rui.contModal}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className={rui.contModalHead}>
+          <div>
+            <p className={rui.contModalEyebrow}>Store shift continuity</p>
+            <h2 id={titleId} className={rui.contModalTitle}>
+              {row.storeCode}
+            </h2>
+            <p className={rui.contModalMeta}>
+              {rangeLabel} · {dates.length} day{dates.length === 1 ? "" : "s"} ·{" "}
+              {slots.length} slot{slots.length === 1 ? "" : "s"}/day ·{" "}
+              <span className={healthClass(row.health)}>
+                {healthLabel(row.health)}
+              </span>
+            </p>
+          </div>
+          <div className={rui.contModalActions}>
+            <button
+              type="button"
+              className={rui.openBtn}
+              onClick={() => {
+                onClearFilter();
+                onClose();
+              }}
+            >
+              Clear filter
+            </button>
+            <button
+              ref={closeRef}
+              type="button"
+              className={rui.openBtnPrimary}
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
+        </header>
+
+        <div className={rui.contModalSummary}>
+          <span>
+            <strong>{row.continuityPct}%</strong>
+            <small>Accepted</small>
+          </span>
+          <span>
+            <strong>
+              {row.covered}/{row.expected}
+            </strong>
+            <small>Covered</small>
+          </span>
+          <span>
+            <strong>{row.missing}</strong>
+            <small>Gaps</small>
+          </span>
+          <span>
+            <strong>{row.stale}</strong>
+            <small>Stale</small>
+          </span>
+          <span>
+            <strong>{row.open}</strong>
+            <small>Open</small>
+          </span>
+          <span>
+            <strong>{row.rejected}</strong>
+            <small>Rejected</small>
+          </span>
+        </div>
+
+        <div className={rui.contModalBody}>
+          {!daySections.length ? (
+            <div className={rui.empty}>
+              <strong>No days in range</strong>
+              Pick a valid From / To window.
+            </div>
+          ) : (
+            daySections.map((day) => (
+              <section key={day.date} className={rui.contDayBlock}>
+                <div className={rui.contDayHead}>
+                  <div>
+                    <strong>{formatOpsDate(day.date)}</strong>
+                    <span className={rui.contModalMeta}>
+                      {day.covered}/{day.cells.length} slots · {day.accepted}{" "}
+                      accepted
+                      {day.missing ? ` · ${day.missing} gap` : ""}
+                      {day.stale ? ` · ${day.stale} stale` : ""}
+                    </span>
+                  </div>
+                  <span className={healthClass(day.health)}>
+                    {healthLabel(day.health)}
+                  </span>
+                </div>
+                <div className={rui.contDaySlots}>
+                  {day.cells.map((cell) => {
+                    const title = [
+                      `${cell.date} ${cell.slot}`,
+                      cell.kind,
+                      cell.siName ? `SI ${cell.siName}` : null,
+                      cell.pct ? `${cell.pct}%` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <div
+                        key={`${cell.date}-${cell.slot}`}
+                        className={`${rui.contDaySlot} ${continuityCellClass(cell.kind)}`}
+                        title={title}
+                      >
+                        <div className={rui.contDaySlotTop}>
+                          <strong>{cell.slot}</strong>
+                          <span>{continuityCellLabel(cell.kind)}</span>
+                        </div>
+                        <div className={rui.contDaySlotBody}>
+                          {cell.kind === "missing" ? (
+                            <span className={rui.muted}>No checklist started</span>
+                          ) : (
+                            <>
+                              <span>
+                                {cell.siName || "—"} · {cell.pct}%
+                              </span>
+                              {cell.checklistId ? (
+                                <button
+                                  type="button"
+                                  className={rui.openBtnPrimary}
+                                  onClick={() => onOpenReport(cell.checklistId!)}
+                                >
+                                  Open report
+                                </button>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -565,7 +823,12 @@ function StoreContinuityCard({
         ) : null}
       </div>
       {multiDay ? (
-        <div className={rui.contDays} aria-label="Day continuity">
+        <button
+          type="button"
+          className={rui.contDays}
+          aria-label={`Open ${row.storeCode} day continuity`}
+          onClick={onSelect}
+        >
           {dayDots.map((d) => (
             <span
               key={d.date}
@@ -573,7 +836,7 @@ function StoreContinuityCard({
               className={`${rui.contDayDot} ${healthClass(d.health)}`}
             />
           ))}
-        </div>
+        </button>
       ) : null}
       <div className={rui.contSlots} role="list">
         {detailCells.map((cell) => {
@@ -820,7 +1083,11 @@ function ShiftReportBody({
         board={continuity}
         activeStoreId={store}
         onSelectStore={(locationId) => {
-          setStore(store === locationId ? "" : locationId);
+          setStore(locationId);
+          setPage(1);
+        }}
+        onClearStoreFilter={() => {
+          setStore("");
           setPage(1);
         }}
         onOpenReport={onOpenReport}
