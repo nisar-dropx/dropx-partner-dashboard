@@ -1,8 +1,9 @@
+import { resolveStoreReviewLeaders } from "./people-review-route";
 import { loadReviewAssociatePay } from "./review-associate-pay-data";
 import type { ReviewAssociatePay } from "./review-associate-pay";
 import { readAllRows } from "../supabase-pagination";
 import type { AuthorizationContext } from "@/lib/authorization";
-import { allRoutingRows, loadPeopleReviewRoute, syncPeopleReviewRoutes } from "./people-review-routing";
+import { allRoutingRows, loadPeopleReviewGraph, loadPeopleReviewRoute, syncPeopleReviewRoutes } from "./people-review-routing";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadStationOpeningAttendance } from "@/lib/ops-pulse/station-opening-attendance";
@@ -589,7 +590,15 @@ export async function resolvePerformanceReviewChain(
   return route.chain;
 }
 
-export async function loadReviewStationLeads(companyId: string, stationId: string) {
+export async function loadReviewStationLeads(companyId: string, stationId: string, options?: { darkStore?: boolean }) {
+  if (options?.darkStore) {
+    try {
+      const leaders = resolveStoreReviewLeaders(await loadPeopleReviewGraph(companyId), stationId);
+      return leaders.length ? leaders.map(person => `${person.name} · ${person.role}`).join(", ") : "Store leader · not assigned in People";
+    } catch {
+      return "Store leader · unavailable";
+    }
+  }
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, [stationId]);
   if (hierarchy.error) return "Station TL · unavailable";
   const leads = hierarchy.byLocation.get(stationId)?.stationLeads ?? [];

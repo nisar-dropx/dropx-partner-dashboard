@@ -1,5 +1,5 @@
 import { loadPeopleReviewGraph } from "@/lib/ops-pulse/people-review-routing";
-import { resolvePeopleReviewRoute, type PeopleReviewRoute } from "@/lib/ops-pulse/people-review-route";
+import { resolvePeopleReviewRoute, resolveStoreReviewLeaders, type PeopleReviewRoute } from "@/lib/ops-pulse/people-review-route";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -74,7 +74,7 @@ function filterRows(rows: ReviewStatusRow[], filters: SearchParams) {
     if (filters.cluster && filters.cluster !== "all" && row.clusterManager !== filters.cluster) return false;
     if (filters.aom && filters.aom !== "all" && row.aom !== filters.aom) return false;
     if (filters.station && filters.station !== "all" && row.stationId !== filters.station) return false;
-    if (query && !`${row.stationCode} ${row.stationName} ${row.region} ${row.clusterManager} ${row.aom} ${row.currentDependency}`.toLowerCase().includes(query)) return false;
+    if (query && !`${row.stationCode} ${row.stationName} ${row.region} ${row.clusterManager} ${row.aom} ${row.currentDependency} ${row.storeLeaders?.map(person => `${person.name} ${person.role}`).join(" ") ?? ""}`.toLowerCase().includes(query)) return false;
     return true;
   });
 }
@@ -171,10 +171,12 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   const dailySource = dailyPerformanceSourceForMode(operatingContext.mode);
   const dataset = await loadReviewStatusDataset(companyId, locations.map((location) => location.station_code), range.from, range.to);
   const graph = await loadPeopleReviewGraph(companyId).catch(() => null);
-  const routes: Record<string, PeopleReviewRoute> = Object.fromEntries(locations.map(location => [location.id, graph ? resolvePeopleReviewRoute(graph, location.id) : { chain: [], error: "People routing could not be verified. Refresh and try again." }]));
   const darkStore = operatingContext.mode === "amazon_now";
+  const locationLabel = darkStore ? "Store" : "Station";
+  const routes: Record<string, PeopleReviewRoute> = Object.fromEntries(locations.map(location => [location.id, graph ? resolvePeopleReviewRoute(graph, location.id, { darkStore }) : { chain: [], error: "People routing could not be verified. Refresh and try again." }]));
+  const storeLeaders = graph && darkStore ? Object.fromEntries(locations.map(location => [location.id, resolveStoreReviewLeaders(graph, location.id)])) : {};
   const allRows = buildReviewStatusRows({
-    routes,
+    routes, storeLeaders,
     dates: reviewStatusDates(range.from, range.to),
     locations,
     ...dataset,
@@ -229,11 +231,11 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   }))) : new Map<string, Awaited<ReturnType<typeof getReviewAccess>>>();
 
   return <AppShell active="Review Status" pageCode="performance_review_status">
-    <main className="ops-command-center performance-workspace review-status-workspace">
+    <main className={`ops-command-center performance-workspace review-status-workspace${darkStore ? " dark-store" : ""}`}>
       <PageHead
         eyebrow="Performance"
         title="Review Status"
-        subtitle="One view of every station review, reviewer stage and pending dependency."
+        subtitle={`Every ${locationLabel.toLowerCase()} review, reviewer stage and pending dependency.`}
         action={canManageAccess ? <Link className="button secondary compact" href="/users?section=roles">Manage access</Link> : undefined}
       />
       <PerformanceWorkspaceTabs active="status" canViewReviews={canViewReviews} canViewReviewStatus darkStore={darkStore} />
@@ -252,8 +254,8 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
         <label><span>Region</span><select name="region" defaultValue={filters.region}><option value="all">All regions</option>{regions.map((region) => <option key={region}>{region}</option>)}</select></label>
         <label><span>{primaryLabel}</span><select name="cluster" defaultValue={filters.cluster}><option value="all">{darkStore ? "All city managers" : "All clusters"}</option>{clusters.map((cluster) => <option key={cluster}>{cluster}</option>)}</select></label>
         <label><span>{secondaryLabel}</span><select name="aom" defaultValue={filters.aom}><option value="all">{darkStore ? "All regional managers" : "All AOMs"}</option>{aoms.map((aom) => <option key={aom}>{aom}</option>)}</select></label>
-        <label><span>Station</span><select name="station" defaultValue={filters.station}><option value="all">All stations</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || "Station"}</option>)}</select></label>
-        <label className="review-status-search"><span>Find</span><input name="q" defaultValue={filters.q} placeholder="Station or reviewer" /></label>
+        <label><span>{locationLabel}</span><select name="station" defaultValue={filters.station}><option value="all">All {locationLabel.toLowerCase()}s</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || locationLabel}</option>)}</select></label>
+        <label className="review-status-search"><span>Find</span><input name="q" defaultValue={filters.q} placeholder={`${locationLabel} or person`} /></label>
         <button className="button compact">Apply</button>
         <Link className="button secondary compact" href="/performance/review-status">Clear</Link>
       </form>
@@ -262,7 +264,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
       {locationsResult.error || dataset.error ? <section className="panel message-panel error"><div className="panel-body">{locationsResult.error || dataset.error}</div></section> : null}
 
       <section className="review-status-summary" aria-label="Review completion summary">
-        <article><span>Expected</span><strong>{rows.length}</strong><small>Station-day reviews</small></article>
+        <article><span>Expected</span><strong>{rows.length}</strong><small>{locationLabel}-day reviews</small></article>
         <article className="green"><span>Completed</span><strong>{completed}</strong><small>{completionRate}% completion</small></article>
         <article className="amber"><span>In progress</span><strong>{inProgress}</strong><small>Waiting at a review stage</small></article>
         <article className="red"><span>Not started</span><strong>{notStarted}</strong><small>No review opened</small></article>
@@ -270,24 +272,25 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
 
       <section className="review-status-register">
         <header>
-          <div><h2>Station review register</h2><p>{rows.length} results · click any row for reviewers, RCA, actions and discussion.</p></div>
+          <div><h2>{locationLabel} review register</h2><p>{rows.length} results · click any row for reviewers, RCA, actions and discussion.</p></div>
           <span>{formatOpsDate(range.from)}{range.from !== range.to ? ` – ${formatOpsDate(range.to)}` : ""}</span>
         </header>
-        <div className="review-status-columns" aria-hidden="true"><span>Date</span><span>Station</span><span>{primaryLabel}</span><span>{secondaryLabel}</span><span>Status</span><span>Progress</span><span>Current dependency</span><span></span></div>
+        <div className="review-status-columns" aria-hidden="true"><span>Date</span><span>{locationLabel}</span>{darkStore ? <span>Store leader</span> : null}<span>{primaryLabel}</span><span>{secondaryLabel}</span><span>Status</span><span>Progress</span><span>Current dependency</span><span></span></div>
         <div className="review-status-rows">
           {pageRows.length ? pageRows.map((row) => <details className={`review-status-row ${row.status}`} key={row.key}>
             <summary>
               <span data-label="Date"><strong>{formatOpsDate(row.date)}</strong><small>Performance day</small></span>
-              <span data-label="Station"><strong>{row.stationCode}</strong><small>{row.stationName}</small></span>
-              <span data-label={primaryLabel}><strong>{row.clusterManager || primaryEmpty}</strong><small>{row.region || (darkStore ? "From People route" : "Region not set")}</small></span>
-              <span data-label={secondaryLabel}><strong>{row.aom || secondaryEmpty}</strong><small>{row.aom ? secondaryHint : secondaryMissingHint}</small></span>
+              <span data-label={locationLabel}><strong>{row.stationCode}</strong><small>{row.stationName}</small></span>
+              {darkStore ? <span data-label="Store leader">{row.storeLeaders?.length ? row.storeLeaders.map(person => <span key={person.personId}><strong title={person.name}>{person.name}</strong><small title={person.role}>{person.role}</small></span>) : <><strong>Not assigned</strong><small>Update People mapping</small></>}</span> : null}
+              <span data-label={primaryLabel}><strong>{row.clusterManager || (row.routingError ? "Mapping needs review" : primaryEmpty)}</strong><small>{row.region || (darkStore ? "From People route" : "Region not set")}</small></span>
+              <span data-label={secondaryLabel}><strong>{row.aom || (row.routingError ? "Mapping needs review" : secondaryEmpty)}</strong><small>{row.aom ? secondaryHint : row.routingError ? "Check People mapping" : secondaryMissingHint}</small></span>
               <span data-label="Status"><b className={`review-status-pill ${row.status}`}>{statusLabel(row.status)}</b></span>
               <span data-label="Progress"><strong>{row.totalSteps ? `${row.completedSteps + row.skippedSteps}/${row.totalSteps}` : "—"}</strong><small>{row.skippedSteps ? `${row.skippedSteps} skipped` : `${row.completedSteps} reviewed`}</small></span>
               <span data-label="Dependency"><strong>{row.currentDependency}</strong><small>{row.lastActivityAt ? formatOpsDateTime(row.lastActivityAt) : "No activity"}</small></span>
               <i aria-hidden="true">⌄</i>
             </summary>
             <ReviewStatusDetail row={row} access={rowAccess.get(row.key) ?? null} />
-          </details>) : <div className="review-status-empty">No station reviews match these filters.</div>}
+          </details>) : <div className="review-status-empty">No {locationLabel.toLowerCase()} reviews match these filters.</div>}
         </div>
         {totalPages > 1 ? <footer className="review-status-pagination">
           <span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}</span>

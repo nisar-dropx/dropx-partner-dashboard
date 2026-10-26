@@ -2,6 +2,8 @@
 export type ReviewPerson = {
   id: string; personId: string; name: string; designationId: string;
   code: string; role: string; locationId: string | null;
+  /** Explicit People managed locations, separate from portal access. */
+  managedScopeIds?: string[];
   canManage: boolean; oversight: boolean; userIds: string[]; scopeIds: string[]; allLocations: boolean;
 };
 export type PeopleReviewGraph = {
@@ -119,6 +121,15 @@ export function resolvePeopleReviewRoute(
   stationId: string,
   options?: { darkStore?: boolean }
 ): PeopleReviewRoute {
+  return resolveRoute(graph, stationId, options);
+}
+
+function resolveRoute(
+  graph: PeopleReviewGraph,
+  stationId: string,
+  options?: { darkStore?: boolean },
+  mappedRoots?: ReviewPerson[]
+): PeopleReviewRoute {
   const byId = new Map(graph.people.map(p => [p.id, p]));
   const managers = new Map<string, Set<string>>();
   for (const edge of graph.relationships) {
@@ -139,7 +150,7 @@ export function resolvePeopleReviewRoute(
     if (nationalHeadRole(p)) return true;
     return p.canManage && !p.oversight && !lastMileFloorRole(p);
   };
-  let roots = graph.people.filter(p => p.locationId === stationId && (managers.has(p.id) || eligible(p)));
+  let roots = mappedRoots ?? graph.people.filter(p => p.locationId === stationId && (managers.has(p.id) || eligible(p)));
   // A sub-station with nobody posted to it (its staff sit under the mother
   // station, e.g. XAPL under GNTI) is reviewed by its mother station's route.
   const parentId = graph.parentStationById?.get(stationId);
@@ -150,12 +161,14 @@ export function resolvePeopleReviewRoute(
         const person = byId.get(stage.assignmentId);
         return person && !person.allLocations && !person.scopeIds.includes(stationId);
       });
-      if (outside) return { chain: [], error: `${outside.reviewerName} does not have OpsPulse access to this station in People.` };
+      if (outside) return { chain: [], error: `${outside.reviewerName} does not have OpsPulse access to this ${darkStore ? "store" : "station"} in People.` };
       return parentRoute;
     }
   }
-  // Scope is only a seed when People has no station posting; relationships still define the entire route.
-  if (!roots.length) roots = graph.people.filter(p => eligible(p) && (p.allLocations || p.scopeIds.includes(stationId)));
+  // Explicit managed stores can seed DS routes; global access alone is not a store assignment.
+  const mappedStoreManagers = () => graph.people.filter(p => darkStoreReviewRole(p) && (p.managedScopeIds ?? p.scopeIds).includes(stationId));
+  if (!roots.length) roots = darkStore ? mappedStoreManagers()
+    : graph.people.filter(p => eligible(p) && (p.allLocations || p.scopeIds.includes(stationId)));
   const fail = (error: string): PeopleReviewRoute => ({ chain: [], error });
   if (!roots.length) {
     return fail(darkStore
@@ -194,6 +207,13 @@ export function resolvePeopleReviewRoute(
     }
     if (chain.length) chains.push(chain);
   }
+  // A store may have local staff whose line ends before City/RM. Do not let those
+  // postings hide the explicit managed-location mapping maintained in People.
+  // Never recover from an invalid line above: cycles, dangling edges and ambiguity fail closed.
+  if (darkStore && !mappedRoots && !chains.some(chain => isOperationalChain(chain, true))) {
+    const mapped = mappedStoreManagers();
+    if (mapped.length) return resolveRoute(graph, stationId, options, mapped);
+  }
   if (!chains.length) {
     return fail(darkStore
       ? 'No City Manager or Regional Manager is mapped in People.'
@@ -229,7 +249,7 @@ export function resolvePeopleReviewRoute(
   const selected = operationalChains[0];
   // Every other operational root must converge on the same route (suffix, peer root, or shared City→RM).
   if (operationalChains.some((chain) => !operationalChainConverges(chain, selected, darkStore))) {
-    return fail(`People has conflicting reporting routes for this station. Resolve the primary manager mapping.${conflictingRouteDetail(operationalChains, selected, darkStore)}`);
+    return fail(`People has conflicting reporting routes for this ${darkStore ? "store" : "station"}. Resolve the primary manager mapping.${conflictingRouteDetail(operationalChains, selected, darkStore)}`);
   }
   const stages = selected;
   if (!stages.length) {
@@ -240,7 +260,7 @@ export function resolvePeopleReviewRoute(
   const chain: PeopleReviewStage[] = [];
   for (const p of stages) {
     if (p.userIds.length !== 1) return fail(`${p.name} needs exactly one active OpsPulse account linked in People.`);
-    if (!p.allLocations && !p.scopeIds.includes(stationId)) return fail(`${p.name} does not have OpsPulse access to this station in People.`);
+    if (!p.allLocations && !p.scopeIds.includes(stationId)) return fail(`${p.name} does not have OpsPulse access to this ${darkStore ? "store" : "station"} in People.`);
     chain.push({ reviewerName: p.name, reviewerRole: p.role, reviewerUserId: p.userIds[0], personId: p.personId,
       assignmentId: p.id, designationId: p.designationId, routingSource: 'people' });
   }
@@ -265,4 +285,41 @@ export function isDarkStoreStationRow(row: {
     || modelName.includes("AMAZON NOW")
     || blended.includes("AMAZON NOW")
     || (providerName.includes("AMAZON") && modelName === "NOW");
+}
+
+/** Current store leadership for display only; never adds an approval stage. */
+export type StoreReviewLeader = { personId: string; name: string; role: string };
+function storeLeaderTier(person: ReviewPerson) {
+  const text = roleText(person);
+  if (/\b(SRSM|SSM|SENIOR STORE MANAGER|SR STORE MANAGER)\b/.test(text)) return 3;
+  if (/\b(SM|STORE MANAGER)\b/.test(text)) return 2;
+  if (/\b(SIC|STORE INCHARGE|STORE IN CHARGE|SHIFT INCHARGE|SHIFT IN CHARGE)\b/.test(text)) return 1;
+  return 0;
+}
+
+export function resolveStoreReviewLeaders(graph: PeopleReviewGraph, storeId: string): StoreReviewLeader[] {
+  const byId = new Map(graph.people.map(person => [person.id, person]));
+  const managers = new Map<string, string[]>();
+  for (const edge of graph.relationships) managers.set(edge.subjectId, [...(managers.get(edge.subjectId) ?? []), edge.managerId]);
+  const queue = graph.people.filter(person => person.locationId === storeId
+    || (storeLeaderTier(person) > 0 && (person.managedScopeIds ?? person.scopeIds).includes(storeId)));
+  const seen = new Set<string>();
+  const candidates = new Map<string, ReviewPerson>();
+  for (const person of queue) {
+    if (seen.has(person.id)) continue;
+    seen.add(person.id);
+    if (darkStoreReviewRole(person) || nationalHeadRole(person) || person.oversight || financeRole(person)) continue;
+    if (storeLeaderTier(person)) {
+      const previous = candidates.get(person.personId);
+      if (!previous || storeLeaderTier(person) > storeLeaderTier(previous)) candidates.set(person.personId, person);
+    }
+    for (const id of managers.get(person.id) ?? []) {
+      const manager = byId.get(id);
+      if (manager && !seen.has(id)) queue.push(manager);
+    }
+  }
+  const highest = Math.max(0, ...[...candidates.values()].map(storeLeaderTier));
+  return [...candidates.values()].filter(person => storeLeaderTier(person) === highest)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.personId.localeCompare(b.personId))
+    .map(({ personId, name, role }) => ({ personId, name, role }));
 }

@@ -846,9 +846,9 @@ async function renderStoreHealthReviewDesk({
       resolvePerformanceReviewChain(companyId, selectedReviewLocation.id, authorization, { darkStore: true }).catch((error: Error) => { peopleRouteError = error.message; return []; }),
       loadPerformanceReviewBacklog(companyId, selectedDate, deskCodes, reviewPendingPage(searchParams?.pendingPage)),
       loadPerformanceFollowups(companyId, selectedReviewLocation.id, selectedDate),
-      loadReviewStationLeads(companyId, selectedReviewLocation.id)
+      loadReviewStationLeads(companyId, selectedReviewLocation.id, { darkStore: true })
     ])
-    : [[], { rows: [], count: 0, page: 1, pageSize: 15, error: null }, { rows: [], count: 0, error: null }, "Store TL"];
+    : [[], { rows: [], count: 0, page: 1, pageSize: 15, error: null }, { rows: [], count: 0, error: null }, "Store leader"];
   const reviewAccess = selectedReviewLocation
     ? await getReviewAccess(
       authorization,
@@ -889,7 +889,7 @@ async function renderStoreHealthReviewDesk({
           programManager={Boolean(reviewAccess?.actor.programManager)}
           updates={reviewWorkspace.updates}
           reviewChain={reviewChain}
-          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "Map City Manager → Regional Manager → National Head in People for this store so reviews can start. FSD / Owner use Proxy and Skip after Start review." : null)}
+          routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "Map a City or Regional Manager to this store in People to start reviews." : null)}
           date={selectedDate}
           error={searchParams?.error || reviewWorkspace.error || (!selectedReviewRow ? "No Store Health Scorecard is imported for this store and date yet. Upload it in Report Imports before starting a review or adding RCA." : null)}
           items={reviewWorkspace.items}

@@ -1,4 +1,4 @@
-import type { PeopleReviewRoute } from "./people-review-route";
+import type { PeopleReviewRoute, StoreReviewLeader } from "./people-review-route";
 export const REVIEW_STATUS_MAX_DAYS = 31;
 
 export type ReviewStatusLocation = {
@@ -84,6 +84,7 @@ export type ReviewStatusFollowup = {
 };
 
 export type ReviewStatusRow = {
+  storeLeaders?: StoreReviewLeader[];
   peopleRoute?: PeopleReviewRoute;
   routingError?: string | null;
   key: string;
@@ -172,6 +173,7 @@ function reviewKey(stationId: string, date: string) {
 
 export function buildReviewStatusRows(input: {
   routes?: Record<string, PeopleReviewRoute>;
+  storeLeaders?: Record<string, StoreReviewLeader[]>;
   dates: string[];
   locations: ReviewStatusLocation[];
   reviews: ReviewStatusReview[];
@@ -213,11 +215,12 @@ export function buildReviewStatusRows(input: {
     const lastStepAt = steps.reduce<string | null>((latest, step) => !step.completed_at || (latest && latest > step.completed_at) ? latest : step.completed_at, null);
     return {
       peopleRoute, routingError,
+      storeLeaders: input.darkStore ? input.storeLeaders?.[location.id] ?? [] : [],
       key: reviewKey(location.id, date),
       date,
       stationId: location.id,
       stationCode: location.station_code,
-      stationName: location.station_name || location.city || "Station",
+      stationName: location.station_name || location.city || (input.darkStore ? "Store" : "Station"),
       region: location.region ?? "",
       clusterManager: input.darkStore
         ? stepName(steps, "city") || routeStageName(peopleRoute, "city")

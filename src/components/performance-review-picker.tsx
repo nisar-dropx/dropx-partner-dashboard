@@ -15,6 +15,7 @@ export function PerformanceReviewPicker({
   clusters = [],
   selectedCluster = "",
   canFilterClusters = false,
+  darkStore = false,
 }: {
   date: string;
   locations: ReviewLocation[];
@@ -22,6 +23,7 @@ export function PerformanceReviewPicker({
   clusters?: { value: string; label: string }[];
   selectedCluster?: string;
   canFilterClusters?: boolean;
+  darkStore?: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -53,17 +55,17 @@ export function PerformanceReviewPicker({
       setSelectedDate(nextDate);
       if (nextDate) open(nextDate, selectedStation, cluster);
     }}/></label>
-    {canFilterClusters && clusters.length ? <label>Cluster / AOM<select value={cluster} onChange={(event) => {
+    {canFilterClusters && clusters.length ? <label>{darkStore ? "City / Regional manager" : "Cluster / AOM"}<select value={cluster} onChange={(event) => {
       const nextCluster = event.target.value;
       setCluster(nextCluster);
       // Server re-scopes stations for the selected person; keep current review code
       // and let the page fall back to the first station in the new set if needed.
       open(selectedDate, selectedStation, nextCluster);
     }}>
-      <option value="">All stations</option>
+      <option value="">{darkStore ? "All stores" : "All stations"}</option>
       {clusters.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
     </select></label> : null}
-    <label>Station<select value={selectedStation} onChange={(event) => {
+    <label>{darkStore ? "Store" : "Station"}<select value={selectedStation} onChange={(event) => {
       const nextStation = event.target.value;
       setSelectedStation(nextStation);
       open(selectedDate, nextStation, cluster);

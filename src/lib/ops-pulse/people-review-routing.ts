@@ -19,7 +19,7 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
   if (!db) throw new Error('Review routing service is unavailable.');
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
   const effective = (q: any) => q.lte('effective_from', today).or(`effective_to.is.null,effective_to.gte.${today}`);
-  const [assignments, engagements, people, designations, mappings, relationships, links, profiles, memberships, oversight, stations] = await Promise.all([
+  const [assignments, engagements, people, designations, mappings, relationships, links, profiles, memberships, oversight, stations, managedScopes] = await Promise.all([
     allRoutingRows(effective(db.from('hr_work_assignments').select('id,engagement_id,location_id,designation_id,position_title').eq('company_id', companyId).eq('is_primary', true)).order('id')),
     allRoutingRows(db.from('hr_engagements').select('id,person_id').eq('company_id', companyId).eq('status', 'active').lte('start_date', today).or(`end_date.is.null,end_date.gte.${today}`).order('id')),
     allRoutingRows(db.from('hr_people').select('id,display_name').eq('company_id', companyId).eq('status', 'active').order('id')),
@@ -30,8 +30,10 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
     allRoutingRows(db.from('profiles').select('id').eq('company_id', companyId).eq('is_active', true).order('id')),
     allRoutingRows(db.from('company_product_memberships').select('id,user_id,has_all_location_access,location_scope_ids').eq('company_id', companyId).eq('product_code', 'operations').eq('is_active', true).order('id')),
     allRoutingRows(db.from('ops_performance_review_oversight_roles').select('id,match_text').eq('company_id', companyId).eq('is_active', true).eq('tier', 'full').order('id')),
-    allRoutingRows(db.from('stations').select('id,parent_station_id,station_code,station_name,providers(code,name),location_models(code,name)').eq('company_id', companyId).order('id'))
+    allRoutingRows(db.from('stations').select('id,parent_station_id,station_code,station_name,providers(code,name),location_models(code,name)').eq('company_id', companyId).order('id')),
+    allRoutingRows(db.from('people_person_access_scopes').select('person_id,location_scope_ids').eq('company_id', companyId).order('person_id'))
   ]);
+  const managedScopeByPerson = new Map(managedScopes.map(row => [row.person_id, row.location_scope_ids ?? []]));
   const engagementById = new Map(engagements.map(r => [r.id, r]));
   const personById = new Map(people.map(r => [r.id, r]));
   const designationById = new Map(designations.map(r => [r.id, r]));
@@ -49,6 +51,7 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
       const label = normalized(`${designation.code} ${designation.name}`);
       return [{ id: a.id, personId: person.id, name: person.display_name, designationId: designation.id,
         code: designation.code ?? '', role: designation.name || a.position_title || 'Reporting manager', locationId: a.location_id,
+        managedScopeIds: managedScopeByPerson.get(person.id) ?? [],
         canManage: managerIds.has(designation.id), oversight: oversight.some(o => o.match_text?.trim() && label.includes(normalized(o.match_text))),
         userIds: [...new Set(personLinks.filter(l => access.some(m => m.user_id === l.user_id)).map(l => String(l.user_id)))],
         scopeIds: [...new Set(access.flatMap(m => (m.location_scope_ids ?? []) as string[]))], allLocations: access.some(m => m.has_all_location_access) }];
