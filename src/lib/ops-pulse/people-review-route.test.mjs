@@ -72,6 +72,19 @@ test('Dark Store route is City Manager → Regional Manager only (no National He
  assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','rm']);
 });
 
+test('Dark Store City → National Head when People has no Regional Manager (TZC4 / Abdul)',()=>{
+ const g=darkStoreGraph();
+ // Point every store line at City → NH so a leftover finance→RM seed cannot invent a conflict.
+ g.relationships=[
+  {subjectId:'si',managerId:'sm'},
+  {subjectId:'sm',managerId:'city'},
+  {subjectId:'city',managerId:'nh'},
+  {subjectId:'nh',managerId:'pgm'},
+  {subjectId:'finance',managerId:'city'}
+ ];
+ assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','nh']);
+});
+
 test('Dark Store allows peer City Managers that share the same Regional Manager',()=>{
  const g=darkStoreGraph();
  g.people.push(person('city2','CTM',{role:'City Manager',name:'Other City',locationId:'store',scopeIds:['store']}));

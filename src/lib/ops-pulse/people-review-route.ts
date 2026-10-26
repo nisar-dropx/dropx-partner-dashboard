@@ -23,7 +23,10 @@ const roleText = (p: ReviewPerson) => ` ${`${p.code} ${p.role}`.toUpperCase().re
 const financeRole = (p: ReviewPerson) =>
   /\b(FIN|FINANCE|FINMGR|FH|FINANCE MANAGER|FINANCE HEAD|CFO)\b/.test(roleText(p));
 
-/** National Head (e.g. Abdul) stays on Last Mile routes; Dark Store stops at Regional Manager. */
+/**
+ * National Head (e.g. Abdul) stays on Last Mile routes. On Dark Store, NH is only a
+ * review stage when City Manager reports directly to NH (no Regional Manager in between).
+ */
 const nationalHeadRole = (p: ReviewPerson) => /\b(NH|NATIONAL HEAD)\b/.test(roleText(p));
 
 /** Last Mile station-floor seats — never review stages. */
@@ -42,9 +45,9 @@ const lastMileOperationalRole = (p: ReviewPerson) =>
   || nationalHeadRole(p);
 
 /**
- * Dark Store review seats: City Manager → Regional Manager only.
- * National Head (e.g. Abdul) is not a DS review stage — Proxy / Skip still cover above RM.
- * Shift Incharge / Store Manager run the store.
+ * Dark Store review seats: City Manager → Regional Manager, or City Manager → National Head
+ * when People has no RM between them (e.g. TZC4 Rahul → Abdul). Shift Incharge / Store Manager
+ * run the store; Proxy / Skip still cover roles above the last stage.
  */
 export function darkStoreReviewRole(p: Pick<ReviewPerson, "code" | "role">) {
   const text = roleText(p as ReviewPerson);
@@ -127,8 +130,9 @@ export function resolvePeopleReviewRoute(
   const eligible = (p: ReviewPerson) => {
     if (financeRole(p) || floorRole(p)) return false;
     if (darkStore) {
-      // DS review seats are always stages; other managers may sit in the line but are filtered out.
+      // DS review seats are always stages; NH is eligible only for the City→NH shortcut.
       if (darkStoreReviewRole(p)) return true;
+      if (nationalHeadRole(p)) return true;
       return p.canManage && !p.oversight;
     }
     // NH is shared across businesses and remains a review stage even if Master marks them oversight.
@@ -166,20 +170,24 @@ export function resolvePeopleReviewRoute(
       if (seen.has(current.id) || seenPeople.has(current.personId)) return fail('People reporting relationships contain a cycle or duplicate primary assignment.');
       seen.add(current.id); seenPeople.add(current.personId);
       // Full-tier oversight (e.g. Program Manager / finance) ends the route.
-      // Last Mile keeps National Head on the route; Dark Store stops at Regional Manager.
+      // Last Mile keeps National Head on the route; Dark Store may include NH only as City→NH.
       if (current.oversight && !nationalHeadRole(current) && !(darkStore && darkStoreReviewRole(current))) break;
-      if (darkStore && nationalHeadRole(current)) break;
       if (seen.size > 1 && !current.canManage && !floorRole(current) && !financeRole(current) && !(darkStore && darkStoreReviewRole(current)) && !nationalHeadRole(current)) {
         return fail(`${current.name} is not enabled as a reporting manager in People.`);
       }
       if (eligible(current)) chain.push(current);
-      // Dark Store: City → RM is enough; do not walk into NH / Program Manager.
+      // Dark Store: stop after RM, or after NH when City reports directly to NH.
       if (darkStore && darkStoreReviewTier(current) === "rm") break;
+      if (darkStore && nationalHeadRole(current)) break;
       const next = [...(managers.get(current.id) ?? [])];
       if (next.length > 1) return fail(`Multiple active reporting managers are mapped for ${current.name} in People.`);
       if (!next.length) break;
       const nextPerson = byId.get(next[0]);
-      if (darkStore && nextPerson && nationalHeadRole(nextPerson)) break;
+      // City → RM → NH: stop at RM. City → NH (no RM): walk into NH as second reviewer.
+      if (darkStore && nextPerson && nationalHeadRole(nextPerson)
+        && chain.some((person) => darkStoreReviewTier(person) === "rm")) {
+        break;
+      }
       current = nextPerson;
       if (!current) return fail('A reporting manager has an inactive, expired or missing People assignment.');
       if (seen.size > 64) return fail('People reporting hierarchy exceeds 64 levels.');
@@ -191,11 +199,15 @@ export function resolvePeopleReviewRoute(
       ? 'No City Manager or Regional Manager is mapped in People.'
       : 'No eligible review manager is mapped in People.');
   }
-  // Dark Store: compare City → RM so store-floor / finance cannot invent a conflict.
-  // Require at least City or Regional — National Head is not a DS review stage.
+  // Dark Store: compare City → RM (or City → NH) so store-floor / finance cannot invent a conflict.
+  // Require at least City or Regional; keep NH only when it follows City with no RM.
   const operationalChains = darkStore
     ? chains
-      .map((chain) => chain.filter(darkStoreReviewRole))
+      .map((chain) => chain.filter((person) => darkStoreReviewRole(person) || nationalHeadRole(person)))
+      .map((chain) => {
+        const hasRm = chain.some((person) => darkStoreReviewTier(person) === "rm");
+        return hasRm ? chain.filter((person) => !nationalHeadRole(person)) : chain;
+      })
       .filter((chain) => chain.some((person) => {
         const tier = darkStoreReviewTier(person);
         return tier === "city" || tier === "rm";
