@@ -9,6 +9,6 @@ test('morning insights reuse D−1 builder and retain preview recipient/store re
  }:{},m,m.exports);
  const q={select:()=>q,eq:()=>q,in:async()=>({data:[{config:{}}]})};const db={from:()=>q};
  await m.exports.buildInsightDigest(db,{company_id:'c',event_key:'now_insight_morning',subject_template:'Monthly {{month}}',config:{}},'2027-01-01',{email:'a@example.com',stationIds:['s1']});
- assert.equal(captured[1].event_key,'now_activity_digest');assert.equal(captured[1].subject_template,'Monthly {{month}}');assert.equal(captured[2],'2027-01-01');assert.deepEqual(captured[3].recipients.map(r=>[r.email,r.stationIds]),[['a@example.com',['s1']]]);assert.deepEqual(captured[3].stations.map(s=>s.id),['s1']);
+ assert.equal(captured[1].event_key,'now_activity_digest');assert.equal(captured[1].config.send_zero_cases,true);assert.equal(captured[1].subject_template,'Monthly {{month}}');assert.equal(captured[2],'2027-01-01');assert.deepEqual(captured[3].recipients.map(r=>[r.email,r.stationIds]),[['a@example.com',['s1']]]);assert.deepEqual(captured[3].stations.map(s=>s.id),['s1']);
 });
 test('legacy and replacement editions remain in the same monthly thread family',()=>{assert.deepEqual(digestThreadEvents('now_insight_morning'),digestThreadEvents('now_activity_digest'));});

@@ -61,7 +61,7 @@ export async function buildChecklistSummary(pack: ReportPack) {
   for (let i = 0; i < canvases.length; i++) {
     const c = canvases[i], context = c.getContext("2d")!;
     context.fillStyle = "#64748b"; context.font = "18px Arial, sans-serif";
-    context.fillText(`Saved system snapshot · ${i + 1}/${canvases.length} · Evidence remains in OpsPulse`, margin, height - 30);
+    context.fillText(`${pack.checklist.shift_date || pack.checklist.work_date} ${pack.checklist.shift_slot || ""} · ${i + 1}/${canvases.length} · Saved snapshot · Evidence in OpsPulse`, margin, height - 30);
     const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, "image/png"));
     if (!blob) throw Error("Could not create summary image.");
     images.push(new File([blob], `${data.filename}-${i + 1}.png`, {type:"image/png"}));
