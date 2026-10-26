@@ -120,7 +120,7 @@ body:has(.ops-modern) .ops-modern .topbar {
 .ops-page-context strong { color:#243044; font-weight:780; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 body:has(.ops-modern) .ops-modern .top-actions { gap:8px; }
 body:has(.ops-modern) .ops-modern .content {
-  width:100%; max-width:none; padding:23px clamp(18px,2.7vw,38px) 42px; gap:14px; align-content:start;
+  width:100%; max-width:none; padding:16px clamp(16px,2.4vw,28px) 28px; gap:10px; align-content:start;
   background:var(--canvas);
 }
 body:has(.ops-modern) .ops-modern .content:focus { outline:none; }
@@ -128,10 +128,10 @@ body:has(.ops-modern) .ops-modern .content:focus { outline:none; }
 .ops-skip-link:focus { top:8px; }
 .ops-modern :where(button,a,input,select,textarea,summary):focus-visible { outline:2px solid #fff0e5; outline-offset:2px; border-color:var(--brand-dark); }
 .ops-modern :where(button,input,select,textarea) { font-family:inherit; }
-.ops-modern h1 { font-size:clamp(23px,2vw,29px); letter-spacing:-.035em; line-height:1.12; color:#172033; margin:0; }
-.ops-modern .eyebrow { margin:0 0 4px; color:var(--brand-dark); letter-spacing:.11em; font-size:10px; font-weight:850; text-transform:uppercase; }
-.ops-modern .page-head { min-height:0; padding:0; margin-bottom:17px; gap:18px; align-items:flex-end; }
-.ops-modern .page-head .subtle,.ops-modern .page-head p.subtle { margin:5px 0 0; color:var(--muted); font-size:12.5px; line-height:1.45; }
+.ops-modern h1 { font-size:clamp(21px,1.9vw,26px); letter-spacing:-.035em; line-height:1.15; color:#172033; margin:0; }
+.ops-modern .eyebrow { margin:0 0 3px; color:var(--brand-dark); letter-spacing:.11em; font-size:10px; font-weight:850; text-transform:uppercase; }
+.ops-modern .page-head { min-height:0; padding:0; margin-bottom:12px; gap:12px; align-items:flex-end; }
+.ops-modern .page-head .subtle,.ops-modern .page-head p.subtle { margin:4px 0 0; color:var(--muted); font-size:11.5px; line-height:1.45; max-width:62ch; }
 .ops-modern .page-head-actions,.ops-modern .page-head > .toolbar { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
 .ops-modern :is(.panel,.table-wrap,.metric,.metric-card,.queue-card,.settings-tile,.card) {
   border:1px solid var(--line); border-radius:13px; box-shadow:var(--ops-shadow); background:var(--surface);
@@ -141,7 +141,7 @@ body:has(.ops-modern) .ops-modern .content:focus { outline:none; }
 }
 .ops-modern :is(.panel-head,.fleet-panel-head) h2 { margin:0; font-size:15px; letter-spacing:-.01em; }
 .ops-modern .panel-subtitle { margin:3px 0 0; color:var(--muted); font-size:12px; }
-.ops-modern :is(.panel-body,.fleet-panel-body) { padding:16px; }
+.ops-modern :is(.panel-body,.fleet-panel-body) { padding:12px 14px; }
 .ops-modern .button {
   display:inline-flex; align-items:center; justify-content:center; gap:6px;
   min-height:33px; padding:7px 12px; font-size:11.5px; font-weight:760; border-radius:9px;
@@ -178,10 +178,10 @@ body:has(.ops-modern) .ops-modern .content:focus { outline:none; }
   display:inline-flex; align-items:center; min-height:21px; padding:3px 7px; border-radius:999px;
   font-size:9.5px; font-weight:800; text-transform:capitalize;
 }
-.ops-modern .metric,.ops-modern .metric-card,.ops-modern .card.stat { padding:15px 16px; }
-.ops-modern .stat-label,.ops-modern .metric-label { color:var(--muted); font-size:11.5px; font-weight:700; }
-.ops-modern .stat-value,.ops-modern .metric-value { display:block; margin-top:7px; font-size:24px; letter-spacing:-.035em; }
-.ops-modern .stat-meta,.ops-modern .metric-meta { margin-top:3px; color:var(--muted); font-size:10.5px; }
+.ops-modern .metric,.ops-modern .metric-card,.ops-modern .card.stat { padding:12px 13px; }
+.ops-modern .stat-label,.ops-modern .metric-label { color:var(--muted); font-size:11px; font-weight:700; }
+.ops-modern .stat-value,.ops-modern .metric-value { display:block; margin-top:5px; font-size:22px; letter-spacing:-.035em; }
+.ops-modern .stat-meta,.ops-modern .metric-meta { margin-top:2px; color:var(--muted); font-size:10.5px; }
 .ops-modern .alert { padding:9px 11px; border-radius:8px; margin:0 0 14px; font-size:11.5px; }
 .ops-modern .empty-state { text-align:center; max-width:420px; margin:0 auto; padding:30px; border-top:3px solid var(--brand-dark); }
 .ops-modern .toolbar { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
@@ -522,7 +522,7 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
   .ops-permission-submenu-row td:first-child{padding-left:14px}
   .ops-permission-table-wrap{overflow-x:auto}
 }
-.ops-workspace-shortcuts{display:flex;align-items:stretch;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.ops-workspace-shortcuts{display:flex;align-items:stretch;flex-wrap:wrap;gap:5px;margin-bottom:10px}
 .ops-workspace-shortcuts-extra{display:contents}
 .ops-modern .ops-workspace-shortcuts a,.ops-modern .ops-workspace-shortcuts button{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-height:33px;padding:7px 11px;border:1px solid var(--line,#e2e7ee);border-radius:9px;background:#fff;color:#42536c;font:inherit;font-size:11.5px;font-weight:680;text-decoration:none}
 .ops-modern .ops-workspace-shortcuts a:hover,.ops-modern .ops-workspace-shortcuts button:hover{background:#f8fafc;border-color:#bdc7d5}
