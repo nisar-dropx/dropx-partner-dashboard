@@ -202,14 +202,20 @@ function resolveRoute(
         break;
       }
       current = nextPerson;
-      if (!current) return fail('A reporting manager has an inactive, expired or missing People assignment.');
+      if (!current) {
+        // A stale floor-level reporting link cannot hide a separately maintained
+        // explicit City/RM store assignment. Once a review stage has been reached,
+        // its broken chain still fails closed; mapped routes receive the same checks.
+        if (darkStore && !mappedRoots && !chain.some(person => darkStoreReviewRole(person) || nationalHeadRole(person)) && mappedStoreManagers().length) break;
+        return fail('A reporting manager has an inactive, expired or missing People assignment.');
+      }
       if (seen.size > 64) return fail('People reporting hierarchy exceeds 64 levels.');
     }
     if (chain.length) chains.push(chain);
   }
   // A store may have local staff whose line ends before City/RM. Do not let those
   // postings hide the explicit managed-location mapping maintained in People.
-  // Never recover from an invalid line above: cycles, dangling edges and ambiguity fail closed.
+  // Cycles, ambiguous managers and broken review-stage chains still fail closed.
   if (darkStore && !mappedRoots && !chains.some(chain => isOperationalChain(chain, true))) {
     const mapped = mappedStoreManagers();
     if (mapped.length) return resolveRoute(graph, stationId, options, mapped);
@@ -291,9 +297,10 @@ export function isDarkStoreStationRow(row: {
 export type StoreReviewLeader = { personId: string; name: string; role: string };
 function storeLeaderTier(person: ReviewPerson) {
   const text = roleText(person);
-  if (/\b(SRSM|SSM|SENIOR STORE MANAGER|SR STORE MANAGER)\b/.test(text)) return 3;
-  if (/\b(SM|STORE MANAGER)\b/.test(text)) return 2;
-  if (/\b(SIC|STORE INCHARGE|STORE IN CHARGE|SHIFT INCHARGE|SHIFT IN CHARGE)\b/.test(text)) return 1;
+  if (/\b(SRSM|SSM|SENIOR STORE MANAGER|SR STORE MANAGER)\b/.test(text)) return 4;
+  if (/\b(SM|STORE MANAGER)\b/.test(text)) return 3;
+  if (/\b(STORE INCHARGE|STORE IN CHARGE)\b/.test(text)) return 2;
+  if (/\b(SIC|SHIFT INCHARGE|SHIFT IN CHARGE)\b/.test(text)) return 1;
   return 0;
 }
 
@@ -309,7 +316,7 @@ export function resolveStoreReviewLeaders(graph: PeopleReviewGraph, storeId: str
     if (seen.has(person.id)) continue;
     seen.add(person.id);
     if (darkStoreReviewRole(person) || nationalHeadRole(person) || person.oversight || financeRole(person)) continue;
-    if (storeLeaderTier(person)) {
+    if (storeLeaderTier(person) && (person.locationId === storeId || (person.managedScopeIds ?? person.scopeIds).includes(storeId))) {
       const previous = candidates.get(person.personId);
       if (!previous || storeLeaderTier(person) > storeLeaderTier(previous)) candidates.set(person.personId, person);
     }

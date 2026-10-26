@@ -36,9 +36,15 @@ async function all<T>(query: (from: number, to: number) => PromiseLike<{ data: T
 }
 
 /** One bounded station/month read, not one full-company manpower request per day. */
-export async function loadReviewAttendanceHistory(companyId: string, station: CodLocationRow, date: string): Promise<ReviewAttendanceHistory> {
+export async function loadReviewAttendanceHistory(companyId: string, station: CodLocationRow, date: string, options?: { from?: string }): Promise<ReviewAttendanceHistory> {
   if (!supabaseAdmin) throw Error("Attendance service unavailable.");
-  const db = supabaseAdmin, dates = attendanceHistoryDates(date), from = dates[0];
+  const db = supabaseAdmin;
+  const defaultDates = attendanceHistoryDates(date);
+  const from = options?.from ?? defaultDates[0];
+  attendanceHistoryDates(from); // Validate dates without accepting normalized invalid calendar days.
+  const span = (Date.parse(date) - Date.parse(from)) / 86400000;
+  if (span < 0 || span > 92) throw Error("Choose an attendance period of 93 days or fewer.");
+  const dates = Array.from({ length: span + 1 }, (_, index) => dateOffset(from, index));
   const staff = await loadReviewUtrDiscipline(companyId, station, date);
   if (staff.error) throw Error(staff.error);
   if (!staff.discipline.rows.length) return {station:station.station_code,date,people:[]};

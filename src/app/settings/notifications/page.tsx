@@ -1,3 +1,4 @@
+import {InsightNotificationSettings} from '@/components/insight-notification-settings';
 import { AmazonNowNotificationSettings } from '@/components/amazon-now-notification-settings';
 import {CodNotificationSettings} from '@/components/cod-notification-settings';
 import {AppShell} from '@/components/app-shell';
@@ -26,6 +27,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  if(control.error||history.error||dataUpdate.error||updateHistory.error)throw new Error('Notification settings are temporarily unavailable.');
  return <AppShell active="Notifications" pageCode="ops_notification_settings"><PageHead title="Notifications" eyebrow="Ops Pulse settings" subtitle="Performance updates and daily review status · portal-run, individually scoped emails."/>
  {searchParams?.error?<p role="alert">{searchParams.error}</p>:searchParams?.saved?<p role="status">Notification settings saved.</p>:null}
+ <InsightNotificationSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly}/>
  <AmazonNowNotificationSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly} domain={String(control.data.config.email_domain || "")}/>
  <RegistrationNotificationSettings companyId={company} canEdit={canEdit} ownerUserId={isCompanyOwner(auth)&&!auth.isPreview&&!auth.readOnly?auth.userId:undefined} ownerEmail={auth.email}/>
  {adhoc.data?<section id="adhoc-report"><h2>Ad hoc costs · Morning report</h2><a className="button" href="/api/ops-pulse/adhoc-email-preview" target="_blank" rel="noreferrer">Preview / send sample to me</a><p>Van, Driver and DA · Previous day and MTD · Estimated vs actual Excel · Monthly replies.</p><DigestSettingsForm control={adhoc.data} action={saveAdHocDigestSettings} canEdit={canEdit} receipts={adhocHistory.data||[]}/></section>:null}

@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import ts from 'typescript';
 const require=createRequire(import.meta.url);
-function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??require(n),exports);return exports;}
+function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??(n==='./digest-thread-policy'?compile('src/lib/digest-thread-policy.ts'):require(n)),exports);return exports;}
 const policy=compile('src/lib/ops-pulse/cod-pending.ts'),ageing=compile('src/lib/ops-pulse/cod-ageing.ts'),streakPolicy=compile('src/lib/ops-pulse/cod-no-update-streak.ts');
 const station={is_active:true,id:'s1',station_code:'NLRC',station_name:'Station one',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
 const other={...station,id:'s2',station_code:'GNTI'};
@@ -159,6 +159,8 @@ console.log('PASS COD export: signed-out denial, permission denial, invalid date
 const currentDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 let mailOptions=null,threadFilters=[];
 const sendModule=compile('src/lib/portal-digest-delivery.ts',{
+ './digest-thread-policy':compile('src/lib/digest-thread-policy.ts'),
+ './ops-pulse/insight-digest':{loadInsightScope:async()=>({recipients:[{email:'user@example.com',stationIds:['s1']}]})},
  './portal-digest-attachments':attachmentMail,'server-only':{},'./timeout-fetch':{},'./adhoc-digest-scope':{},
  './amazon-now-digest':{loadNowMailScope:async()=>({recipients:[{email:'user@example.com',stationIds:['s1']}]})},
  './cod-pending-mail-scope':{loadCodMailRecipients:async()=>[{email:'user@example.com',stationIds:['s1']}]},
@@ -229,3 +231,18 @@ for(const event of ['now_review_digest','now_activity_digest']){
 }
 assert.notEqual(nowIds[0],nowIds[1]);
 console.log('PASS Amazon Now delivery: shared monthly thread and distinct same-day message IDs.');
+
+const insightIds=[];
+responses.portal_digest_threads={root_message_id:'<insight-month-root@example.com>',last_message_id:'<insight-last@example.com>',subject:'Dark Store insights | October 2026'};
+for(const event of ['now_insight_morning','now_insight_evening']){
+ threadFilters=[];mailOptions=null;
+ mailDb.rpc=async name=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:event,company_id:'c',event_key:event,recipient_email:'user@example.com',report_date:currentDate,subject:'new subject',html:'mock',body:'mock'}],error:null};
+ const result=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
+ assert.equal(result.accepted,1);assert.equal(mailOptions.subject,'Dark Store insights | October 2026');assert.deepEqual(mailOptions.references,['<insight-month-root@example.com>','<insight-last@example.com>']);
+ assert.ok(threadFilters.some(f=>f[0]==='in'&&f[1]==='event_key'&&f[2].includes('now_insight_morning')&&f[2].includes('now_insight_evening')));
+ assert.ok(threadFilters.some(f=>f[0]==='eq'&&f[1]==='report_month'&&f[2]===currentDate.slice(0,7)));insightIds.push(mailOptions.messageId);
+}
+assert.notEqual(...insightIds,'Twice-daily editions must not reuse a Message-ID');
+mailOptions=null;responses.portal_digest_deliveries={scope_summary:{stationIds:['removed']}};
+const insightHeld=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});assert.equal(insightHeld.skipped,1);assert.equal(mailOptions,null);
+console.log('PASS insight delivery: same monthly root, unique edition Message-IDs, month-bound lookup and current recipient-store scope enforced before SMTP.');

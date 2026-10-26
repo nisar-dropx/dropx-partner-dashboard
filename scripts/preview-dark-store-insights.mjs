@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import ts from 'typescript';
+const source=ts.transpileModule(fs.readFileSync('src/lib/ops-pulse/insight-email.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const module={exports:{}};new Function('module','exports',source)(module,module.exports);
+const facts=[
+{id:'ttb3-shorts',topic:'Picking & availability',storeCode:'TTB3',storeName:'Nizampet',city:'Hyderabad',owner:'NIKHIL MADIPELLI · Store Manager',label:'Shorts on the latest reported day',value:'82 / 1,886 orders',detail:'43.5 shorts per 1,000 orders · Source status Red. Picker acceptance: 124 s against a 30 s target.',period:'25 Oct 2026',href:'/performance/review-status?from=2026-10-25&to=2026-10-25&station=d94aa34e-a163-4c35-83e9-19cdc773a39c',sentiment:'attention'},
+{id:'tcd4-win',topic:'Order accuracy',storeCode:'TCD4',storeName:'Nesapakkam',city:'Chennai',owner:'R DHARUN RAJ · Store Incharge',label:'Shorts across the last three imported days',value:'0 shorts',detail:'23–25 Oct: 1,271 + 1,513 + 1,547 orders. A positive accuracy signal; Store Health remains Critical at 29%.',period:'23–25 Oct 2026',href:'/performance/review-status?from=2026-10-23&to=2026-10-25&station=e30d5543-eec7-4c5e-bddb-d9079e1eb832',sentiment:'good'},
+{id:'tta5-stow',topic:'Inbound execution',storeCode:'TTA5',storeName:'Moosapet',city:'Hyderabad',label:'Stowed within SLA',value:'98.2%',detail:'Above the 95% target for the two latest imported days. Shorts rose to 17 on 25 Oct; improvement is specific to stowing.',period:'23–25 Oct 2026',href:'/performance/review-status?from=2026-10-23&to=2026-10-25&station=61358fbe-c333-4535-9483-154cd5a15803',sentiment:'good',bars:[{label:'23 Oct',value:75.5},{label:'24 Oct',value:96.9},{label:'25 Oct',value:98.2}]}
+];
+const brief={headline:'Protect the wins. Fix the picking gap.',greeting:'A closer look at accuracy, picker response and inbound flow across your Dark Stores.',layout:'spotlight',cards:[
+{title:'Nizampet needs a picking check',explanation:'High shorts and slow acceptance appear together. The scorecard does not establish whether availability, process or staffing caused them.',action:'Review shortage reasons and picker response by shift before deciding the corrective action.',factIds:['ttb3-shorts']},
+{title:'Nesapakkam has an accuracy win',explanation:'Zero reported shorts across consecutive days is worth preserving, even while the overall score needs attention.',action:'Confirm what is working in pick checks, then test whether it can help Nizampet.',factIds:['tcd4-win']},
+{title:'Moosapet’s inbound flow improved',explanation:'Stowing recovered above target. Keep this progress separate from the unresolved order-accuracy issue.',action:'Keep the inbound routine stable and review the latest shortage cases separately.',factIds:['tta5-stow']}]};
+const result=module.exports.renderInsightEmail({name:'Jamsheer',date:'27 Oct 2026',edition:'Morning focus',checkedAt:'27 Oct · source audit',facts,brief,stores:['TCC3','TCD4','TTA5','TTB3','TTG9','TZC4'],preview:true,previewLabel:'Design preview · verified 23–25 Oct records; editorial example. Not sent.'});
+const out=process.argv[2]||'outputs/dark-store-insights-email-preview.html';fs.mkdirSync(new URL('.',`file://${out.startsWith('/')?out:process.cwd()+'/'+out}`),{recursive:true});
+// The local preview embeds the same generated asset; production emails use the public asset URL.
+fs.writeFileSync(out,result.html.replace('https://ops.dropxlogistics.com/opspulse/insights/guide.png','data:image/png;base64,'+fs.readFileSync('public/opspulse/insights/guide.png').toString('base64')));
+console.log(out);

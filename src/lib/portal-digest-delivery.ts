@@ -1,3 +1,4 @@
+import {digestThreadEvents} from './digest-thread-policy';
 import "server-only";
 import {createClient, type SupabaseClient} from "@supabase/supabase-js";
 import {createHash, timingSafeEqual} from "node:crypto";
@@ -92,7 +93,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     const manualCod=delivery.event_key==='cod_pending_current';
     let registrationRecipientVerified=false;
     const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
-    const threadEvents=delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:delivery.event_key.startsWith("id_mapping_")?["id_mapping_morning","id_mapping_afternoon"]:["now_review_digest","now_activity_digest"].includes(delivery.event_key)?["now_review_digest","now_activity_digest"]:[delivery.event_key];
+    const threadEvents=digestThreadEvents(delivery.event_key);
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
@@ -112,6 +113,16 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      if (saved.error) throw Error(saved.error.message);
      const ids = saved.data?.scope_summary?.stationIds;
      if (!recipient || !Array.isArray(ids) || !ids.length || ids.some((id: string) => !recipient.stationIds.includes(id))) throw Error("Amazon Now recipient scope changed; summary held.");
+    }
+    if(delivery.event_key.startsWith('now_insight_')) {
+     const control=controlResult.data as DigestControl;
+     if(dueReportDate(control)!==delivery.report_date)throw Error('Insight delivery window ended; stale edition held.');
+     const {loadInsightScope}=await import('./ops-pulse/insight-digest');
+     const scope=await loadInsightScope(db,control),recipient=scope.recipients.find(r=>r.email===delivery.recipient_email);
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw Error(saved.error.message);
+     const ids=saved.data?.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw Error('Insight recipient scope changed; edition held.');
     }
     if(delivery.event_key.startsWith('cod_pending_')) {
      if(!manualCod&&dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw new Error('COD reminder delivery window ended; held for verification.');

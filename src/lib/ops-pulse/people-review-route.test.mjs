@@ -192,10 +192,10 @@ test('DS fallback never treats global access as an explicit store assignment',()
  g.people.shift();
  assert.match(resolvePeopleReviewRoute(g,'store').error,/No City Manager or Regional Manager/);
 });
-test('DS scoped fallback does not conceal invalid local reporting relationships',()=>{
+test('explicit DS mapping handles an expired floor link but never conceals cycles',()=>{
  const g=orphanStoreGraph();
  g.relationships=[{subjectId:'local',managerId:'missing'}];
- assert.match(resolvePeopleReviewRoute(g,'store').error,/inactive, expired or missing/);
+ assert.equal(resolvePeopleReviewRoute(g,'store').error,null);
  g.relationships=[{subjectId:'local',managerId:'local'}];
  assert.match(resolvePeopleReviewRoute(g,'store').error,/cycle/);
 });
@@ -208,10 +208,10 @@ test('store leadership prefers Senior Store Manager, then Store Manager, then In
  g.people=g.people.filter(p=>p.id!=='sm');
  assert.deepEqual(resolveStoreReviewLeaders(g,'store'),[{personId:'si',name:'si',role:'Shift Incharge'}]);
 });
-test('store leadership follows local reporting lines but never borrows unrelated global managers',()=>{
+test('store leadership never borrows managers without a local or managed-store assignment',()=>{
  const g=darkStoreGraph();g.people.forEach(p=>{p.scopeIds=[];p.allLocations=true;});
  g.people.push(person('unrelated','SSM',{role:'Senior Store Manager',locationId:'other',scopeIds:[],allLocations:true}));
- assert.equal(resolveStoreReviewLeaders(g,'store')[0].personId,'sm');
+ assert.equal(resolveStoreReviewLeaders(g,'store')[0].personId,'si');
  assert.deepEqual(resolveStoreReviewLeaders(g,'unmapped'),[]);
 });
 test('store leadership preserves equal-tier names, deduplicates identities, and handles cycles',()=>{
@@ -235,4 +235,20 @@ test('DS managed locations are authoritative even when a portal membership is st
  assert.match(resolvePeopleReviewRoute(g,'store').error,/does not have OpsPulse access to this store/);
  g.people[1].scopeIds=['store'];
  assert.equal(resolvePeopleReviewRoute(g,'store').chain[0].personId,'ramesh');
+});
+
+test('Store Incharge outranks Shift Incharges at TCD4',()=>{
+ const g={people:[person('store','STIC',{role:'Store Incharge',locationId:'store'}),person('shift','SIC',{role:'Shift Incharge',locationId:'store'})],relationships:[]};
+ assert.deepEqual(resolveStoreReviewLeaders(g,'store').map(p=>p.personId),['store']);
+});
+
+
+test('stale DS floor link does not hide a verified explicit RM store assignment',()=>{
+ const g=darkStoreGraph();g.people=g.people.map(p=>({...p,managedScopeIds:p.id==='rm'?['store']:[]}));g.relationships[0].managerId='expired-floor-manager';
+ const r=resolvePeopleReviewRoute(g,'store');assert.equal(r.error,null);assert.deepEqual(r.chain.map(p=>p.personId),['rm']);
+ g.people.find(p=>p.id==='si').code='CM';g.people.find(p=>p.id==='si').role='City Manager';assert.match(resolvePeopleReviewRoute(g,'store').error,/inactive/);
+});
+test('a manager posted elsewhere is not displayed as store leader through a reporting line alone',()=>{
+ const g=darkStoreGraph();g.people=g.people.map(p=>({...p,managedScopeIds:[],locationId:p.id==='si'?'store':'elsewhere'}));
+ assert.deepEqual(resolveStoreReviewLeaders(g,'store').map(p=>p.name),['si']);
 });

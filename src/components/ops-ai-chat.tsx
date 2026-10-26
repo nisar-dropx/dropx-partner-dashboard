@@ -10,12 +10,14 @@ import {
 
 import { assistantLanguage, matchingAssistantVoice, textMatchesLanguage, type AssistantLanguage } from "@/lib/ops-pulse/assistant-language";
 
-type Message = { role: "user" | "assistant"; text: string; sources?: { label: string; href: string }[]; checkedAt?: string; language?: AssistantLanguage };
+type Message = { role: "user" | "assistant"; text: string; sources?: { label: string; href: string }[]; checkedAt?: string; reportToken?: string; language?: AssistantLanguage };
 
 export function OpsAiChat() {
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportError, setExportError] = useState("");
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null);
@@ -196,9 +198,21 @@ export function OpsAiChat() {
     }).then((response) => response.json()).catch(() => ({ error: "Unable to reach the OpsPulse assistant." }));
     window.clearTimeout(timeout);
     if (requestRef.current !== controller) return;
-    setMessages((current) => [...current, { role: "assistant", text: result.answer || result.error || "No answer returned.", sources: result.sources, checkedAt: result.checkedAt, language: result.language }]);
+    setMessages((current) => [...current, { role: "assistant", text: result.answer || result.error || "No answer returned.", sources: result.sources, reportToken: result.reportToken, checkedAt: result.checkedAt, language: result.language }]);
     if (result.languageError) setVoiceError(result.languageError);
     setLoading(false);
+  }
+
+  async function downloadReport(token: string, format: string) {
+    setExporting(format); setExportError("");
+    try {
+      const response = await fetch("/api/ops-pulse/ai-report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, format }) });
+      if (!response.ok) throw Error((await response.json()).error || "Report unavailable.");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a"); link.href = url; link.download = `opspulse-insights.${format}`; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { setExportError(error instanceof Error ? error.message : "Report unavailable."); }
+    finally { setExporting(null); }
   }
 
   function dictate() {
@@ -222,9 +236,11 @@ export function OpsAiChat() {
     {open ? <section aria-label="Ask OpsPulse" className="ops-ai-panel" role="dialog" style={viewport ? assistantPanel(preference, viewport) : undefined}><header><div><span>OPSPULSE ASSISTANT</span><strong>Ask OpsPulse</strong></div><button type="button" onClick={closeChat} aria-label="Close Ask OpsPulse"><X size={20} /></button></header>
       <div ref={messageList} className="ops-ai-messages" role="log" aria-live="polite">{!messages.length ? <div className="ops-ai-welcome"><b>Ask about your permitted operations.</b><span>Try “Who is on shift today?”, “Which audits need action?” or “Explain this month’s costs.” Answers use your selected workspace and permitted data.</span></div> : null}{messages.map((message, index) => <div key={index} className={message.role}><span>{message.text}</span>{message.role === "assistant" && <>
         <div className="ops-ai-answer-actions"><button type="button" onClick={() => speak(message.text, index)} aria-label={speaking === index ? "Stop reading" : "Read answer aloud"}>{speaking === index ? <Square size={14}/> : <Volume2 size={14}/>} {speaking === index ? preparingSpeech ? "Preparing… · Stop" : "Stop" : "Listen"}</button>{message.sources?.map(source => <a key={source.href + source.label} href={source.href}>{source.label} ↗</a>)}</div>
+        {message.reportToken ? <div className="ops-ai-answer-actions" aria-label="Download report">{["pdf", "docx", "xlsx", "png"].map(format => <button type="button" key={format} disabled={Boolean(exporting)} onClick={() => downloadReport(message.reportToken!, format)}>{exporting === format ? "Preparing…" : format === "docx" ? "Word" : format === "xlsx" ? "Excel" : format.toUpperCase()}</button>)}</div> : null}
         {message.checkedAt && <small>Checked {new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(message.checkedAt))} IST</small>}
       </>}</div>)}{loading ? <div className="assistant loading">Checking live data…</div> : null}</div>
       <div className="ops-ai-voice"><label>Language <select aria-label="Answer and voice language" value={language} onChange={e => { recognition.current?.stop(); stopSpeech(); setVoiceError(""); setLanguage(assistantLanguage(e.target.value)); }}><option value="en-IN">English</option><option value="hi-IN">Hindi</option><option value="ml-IN">Malayalam</option><option value="te-IN">Telugu</option><option value="ta-IN">Tamil</option></select></label><span>For answers, dictation and playback</span></div>
+      {exportError && <p className="ops-ai-voice-error" role="status">{exportError}</p>}
       {voiceError && <p className="ops-ai-voice-error" role="status">{voiceError}</p>}
       <form onSubmit={ask}><button className={listening ? "listening" : ""} type="button" onClick={dictate} aria-label={listening ? "Stop voice typing" : "Voice typing"} aria-pressed={listening}>{listening ? <Square size={18}/> : <Mic size={18}/>}</button><input ref={input} aria-label="Question for OpsPulse" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={listening ? "Listening…" : "Ask about your operations"}/><button aria-label="Send question" type="submit" disabled={!question.trim() || loading}>↑</button></form>
     </section> : null}
