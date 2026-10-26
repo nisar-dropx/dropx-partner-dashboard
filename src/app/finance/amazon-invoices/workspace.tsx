@@ -38,6 +38,7 @@ type CatalogRow = {
 };
 
 type RunStatus = {
+  runId?: string;
   id?: string;
   from?: string;
   to?: string;
@@ -45,10 +46,12 @@ type RunStatus = {
   parsed?: number;
   failed?: number;
   skipped?: number;
-  nextIndex?: number;
+  remaining?: number;
+  total?: number;
   invoices?: unknown[];
   fileName?: string;
   listingWarnings?: string[];
+  error?: string | null;
 };
 
 const TABS: { id: Tab; label: string }[] = [
@@ -56,6 +59,14 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'catalog', label: 'Catalog' },
   { id: 'tally', label: 'Tally' },
   { id: 'automation', label: 'Automation' },
+];
+
+const STATUS_FILTERS: { id: string; label: string; status?: string; approval?: string; bucket?: string }[] = [
+  { id: '', label: 'All' },
+  { id: 'pending', label: 'Pending', approval: 'PENDING_DSP_ACTION', bucket: 'pending_dsp' },
+  { id: 'ready', label: 'Ready', status: 'READY_FOR_PAYMENT_V2', bucket: 'ready' },
+  { id: 'paid', label: 'Paid', status: 'PAID_V2', bucket: 'paid' },
+  { id: 'disputed', label: 'Disputed', status: 'DISPUTED_V2', bucket: 'disputed' },
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -75,10 +86,24 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function money(paise: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(paise / 100);
 }
 
-function statusChip(status: string, approval: string) {
+function formatIst(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function statusKind(status: string, approval: string) {
   const s = `${status} ${approval}`.toUpperCase();
   if (s.includes('PENDING_DSP') || s.includes('AWAITING_REVIEW')) return 'pending';
   if (s.includes('READY') || s.includes('PENDING_PAYMENT')) return 'ready';
@@ -89,13 +114,29 @@ function statusChip(status: string, approval: string) {
 }
 
 function chipLabel(status: string, approval: string) {
-  const kind = statusChip(status, approval);
+  const kind = statusKind(status, approval);
   if (kind === 'pending') return 'Pending';
   if (kind === 'ready') return 'Ready';
   if (kind === 'paid') return 'Paid';
   if (kind === 'disputed') return 'Disputed';
   if (kind === 'hold') return 'Hold';
   return approval || status || '—';
+}
+
+function StatusChip({ status, approval }: { status: string; approval: string }) {
+  return <span className={`ai-chip ${statusKind(status, approval)}`}>{chipLabel(status, approval)}</span>;
+}
+
+function runIdOf(status: RunStatus | null | undefined) {
+  return status?.runId || status?.id || '';
+}
+
+function defaultRange() {
+  const to = new Date();
+  const from = new Date(to.getTime() - 21 * 24 * 60 * 60 * 1000);
+  const ymd = (d: Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  return { from: ymd(from), to: ymd(to) };
 }
 
 export function AmazonInvoicesWorkspace({
@@ -110,6 +151,7 @@ export function AmazonInvoicesWorkspace({
   const tab = (TABS.some((t) => t.id === initialTab) ? initialTab : 'queue') as Tab;
   const [notice, setNotice] = useState('');
   const [pending, startTransition] = useTransition();
+  const [stats, setStats] = useState({ pending: 0, ready: 0, paid: 0, catalog: 0 });
 
   const setTab = (next: Tab) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -117,20 +159,62 @@ export function AmazonInvoicesWorkspace({
     router.replace(`/finance/amazon-invoices?${params.toString()}`);
   };
 
+  const refreshStats = useCallback(() => {
+    Promise.all([
+      api<{ total: number }>('pending').then((d) => d.total ?? (d as any).invoices?.length ?? 0).catch(() => 0),
+      api<{ total: number }>('catalog?bucket=ready&pageSize=25').then((d) => d.total || 0).catch(() => 0),
+      api<{ total: number }>('catalog?bucket=paid&pageSize=25').then((d) => d.total || 0).catch(() => 0),
+      api<{ total: number }>('catalog?pageSize=25').then((d) => d.total || 0).catch(() => 0),
+    ]).then(([pendingCount, ready, paid, catalog]) => setStats({ pending: pendingCount, ready, paid, catalog }));
+  }, []);
+
+  useEffect(() => {
+    refreshStats();
+  }, [refreshStats, tab]);
+
   return (
-    <main className="final-pnl">
-      <header className="fp-header">
+    <main className="final-pnl ai-shell">
+      <header className="ai-hero">
         <div>
           <p className="fp-eyebrow">DROPX FINANCE / BUSINESS PERFORMANCE</p>
           <h1>Amazon invoices</h1>
-          <p>Accept pending DSP invoices, search the register, export Tally files, and control auto-accept.</p>
+          <p>Accept DSP reviews, search the paid register, export Tally files, and keep auto-accept under control — without putting worker keys in the browser.</p>
+        </div>
+        <div className="fp-actions">
+          <Link className="final-pnl" href="/finance/final-pnl" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', border: '1px solid #dce5ea', borderRadius: 7, padding: '9px 13px', fontWeight: 600, color: '#13566d' }}>
+            Final P&L
+          </Link>
         </div>
       </header>
+
+      <section className="ai-kpis" aria-label="Invoice snapshot">
+        <article className={stats.pending ? 'ai-kpi-warn' : ''}>
+          <small>Awaiting DSP accept</small>
+          <strong>{stats.pending}</strong>
+          <span>Live Amazon queue</span>
+        </article>
+        <article className={stats.ready ? 'ai-kpi-ok' : ''}>
+          <small>Ready for payment</small>
+          <strong>{stats.ready}</strong>
+          <span>From catalog</span>
+        </article>
+        <article>
+          <small>Recently paid</small>
+          <strong>{stats.paid}</strong>
+          <span>From catalog</span>
+        </article>
+        <article className={!stats.catalog ? 'ai-kpi-bad' : ''}>
+          <small>Catalog rows</small>
+          <strong>{stats.catalog}</strong>
+          <span>{stats.catalog ? 'Searchable in D1' : 'Sync required'}</span>
+        </article>
+      </section>
 
       <nav className="fp-tabs" aria-label="Amazon invoice sections">
         {TABS.map((entry) => (
           <button key={entry.id} aria-pressed={tab === entry.id} onClick={() => setTab(entry.id)}>
             {entry.label}
+            {entry.id === 'queue' && stats.pending > 0 ? ` (${stats.pending})` : ''}
           </button>
         ))}
       </nav>
@@ -141,10 +225,36 @@ export function AmazonInvoicesWorkspace({
         </p>
       )}
 
-      {tab === 'queue' && <QueuePanel canEdit={canEdit} pending={pending} startTransition={startTransition} setNotice={setNotice} />}
-      {tab === 'catalog' && <CatalogPanel setNotice={setNotice} />}
-      {tab === 'tally' && <TallyPanel canEdit={canEdit} pending={pending} startTransition={startTransition} setNotice={setNotice} />}
-      {tab === 'automation' && <AutomationPanel canEdit={canEdit} pending={pending} startTransition={startTransition} setNotice={setNotice} />}
+      {tab === 'queue' && (
+        <QueuePanel
+          canEdit={canEdit}
+          pending={pending}
+          startTransition={startTransition}
+          setNotice={setNotice}
+          onChanged={refreshStats}
+        />
+      )}
+      {tab === 'catalog' && (
+        <CatalogPanel
+          canEdit={canEdit}
+          pending={pending}
+          startTransition={startTransition}
+          setNotice={setNotice}
+          onChanged={refreshStats}
+        />
+      )}
+      {tab === 'tally' && (
+        <TallyPanel canEdit={canEdit} pending={pending} startTransition={startTransition} setNotice={setNotice} />
+      )}
+      {tab === 'automation' && (
+        <AutomationPanel
+          canEdit={canEdit}
+          pending={pending}
+          startTransition={startTransition}
+          setNotice={setNotice}
+          onChanged={refreshStats}
+        />
+      )}
     </main>
   );
 }
@@ -154,22 +264,34 @@ function QueuePanel({
   pending,
   startTransition,
   setNotice,
+  onChanged,
 }: {
   canEdit: boolean;
   pending: boolean;
   startTransition: (fn: () => void) => void;
   setNotice: (value: string) => void;
+  onChanged: () => void;
 }) {
   const [rows, setRows] = useState<ListedInvoice[]>([]);
+  const [readyRows, setReadyRows] = useState<CatalogRow[]>([]);
+  const [paidRows, setPaidRows] = useState<CatalogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    api<{ invoices: ListedInvoice[] }>('pending')
-      .then((data) => setRows(data.invoices || []))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load pending invoices.'))
+    Promise.all([
+      api<{ invoices: ListedInvoice[] }>('pending'),
+      api<{ rows: CatalogRow[] }>('catalog?bucket=ready&pageSize=25&sort=portal_ymd_desc'),
+      api<{ rows: CatalogRow[] }>('catalog?bucket=paid&pageSize=25&sort=portal_ymd_desc'),
+    ])
+      .then(([pendingData, readyData, paidData]) => {
+        setRows(pendingData.invoices || []);
+        setReadyRows(readyData.rows || []);
+        setPaidRows(paidData.rows || []);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load queue.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -191,6 +313,7 @@ function QueuePanel({
         .then(() => {
           setNotice(`Accepted ${row.amzlUniqueId || row.draftInvoiceNumber}`);
           load();
+          onChanged();
         })
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Accept failed.'));
     });
@@ -211,101 +334,216 @@ function QueuePanel({
         .then((result: any) => {
           setNotice(`Accepted ${result.accepted || 0} · ready ${result.ready || 0} · failed ${result.failed || 0}`);
           load();
+          onChanged();
         })
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Accept all failed.'));
     });
 
-  const readyCheck = (row: ListedInvoice) =>
+  const readyCheck = (row: { draftInvoiceNumber: string; batchId: string; amzlUniqueId?: string; invoiceNumber?: string }) =>
     startTransition(() => {
       setNotice('');
-      void api(`ready-check?draftInvoiceNumber=${encodeURIComponent(row.draftInvoiceNumber)}&batchId=${encodeURIComponent(row.batchId)}`)
+      void api(
+        `ready-check?draftInvoiceNumber=${encodeURIComponent(row.draftInvoiceNumber)}&batchId=${encodeURIComponent(row.batchId)}`,
+      )
         .then((result: any) => {
+          const label = row.amzlUniqueId || row.invoiceNumber || row.draftInvoiceNumber;
           setNotice(
             result.ready
-              ? `${row.amzlUniqueId || row.draftInvoiceNumber} is ready for payment`
-              : `${row.amzlUniqueId || row.draftInvoiceNumber} not ready yet (${result.batchStatus || result.draftStatus || 'unknown'})`,
+              ? `${label} is ready for payment`
+              : `${label} not ready yet (${result.batchStatus || result.draftStatus || 'unknown'})`,
           );
+          load();
+          onChanged();
         })
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Ready check failed.'));
     });
 
   return (
+    <div className="ai-stack">
+      <section className="fp-panel">
+        <div className="ai-card-head">
+          <div>
+            <h2>Pending DSP accept</h2>
+            <p>Live Amazon queue for invoices waiting on DSP review. Disputed and AMZL-pending stay out.</p>
+          </div>
+          <div className="fp-actions">
+            <span className="ai-section-count">{rows.length} open</span>
+            <button disabled={loading || pending} onClick={load}>
+              Refresh
+            </button>
+            <button disabled={!canEdit || pending || !rows.length} onClick={acceptAll}>
+              Accept all pending
+            </button>
+          </div>
+        </div>
+        {loading && <p className="ai-muted">Loading live queue…</p>}
+        {error && (
+          <p className="fp-warning" role="alert">
+            {error}
+          </p>
+        )}
+        {!loading && !rows.length && !error ? (
+          <div className="ai-empty">
+            <strong>Queue is clear</strong>
+            <p>No invoices are waiting for DSP accept right now. Auto-accept will keep watching every 2 hours.</p>
+          </div>
+        ) : (
+          <div className="ai-scroll">
+            <table className="ai-table">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Station</th>
+                  <th>Region</th>
+                  <th>Portal date</th>
+                  <th className="ai-money">Amount</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.draftInvoiceNumber}>
+                    <td>
+                      <strong>{row.amzlUniqueId || '—'}</strong>
+                      <small>{row.draftInvoiceNumber}</small>
+                    </td>
+                    <td>{row.serviceArea || '—'}</td>
+                    <td>{row.regionName || '—'}</td>
+                    <td>{row.portalYmd || '—'}</td>
+                    <td className="ai-money">{row.amount || '—'}</td>
+                    <td>
+                      <StatusChip status={row.status} approval={row.approvalStatus} />
+                    </td>
+                    <td>
+                      <div className="ai-row-actions">
+                        <button disabled={!canEdit || pending} onClick={() => acceptOne(row)}>
+                          Accept
+                        </button>
+                        <button disabled={pending} onClick={() => readyCheck(row)}>
+                          Ready check
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <CatalogSlice
+        title="Ready for payment"
+        subtitle="Accepted invoices waiting for Amazon settlement. Sourced from the D1 catalog."
+        rows={readyRows}
+        empty="No ready-for-payment invoices in the catalog yet. Sync the catalog or accept a pending invoice."
+        onReadyCheck={readyCheck}
+        pending={pending}
+      />
+
+      <CatalogSlice
+        title="Recently paid"
+        subtitle="Latest paid invoices from the catalog register."
+        rows={paidRows}
+        empty="No paid invoices in the catalog yet. Run Sync catalog on the Catalog tab."
+        pending={pending}
+      />
+    </div>
+  );
+}
+
+function CatalogSlice({
+  title,
+  subtitle,
+  rows,
+  empty,
+  onReadyCheck,
+  pending,
+}: {
+  title: string;
+  subtitle: string;
+  rows: CatalogRow[];
+  empty: string;
+  onReadyCheck?: (row: CatalogRow) => void;
+  pending: boolean;
+}) {
+  return (
     <section className="fp-panel">
-      <div className="fp-section-head">
+      <div className="ai-card-head">
         <div>
-          <h2>Pending DSP accept</h2>
-          <p>Only invoices waiting on DSP action. Disputed and AMZL-pending stay out of this queue.</p>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
         </div>
-        <div className="fp-actions">
-          <button disabled={loading || pending} onClick={load}>
-            Refresh
-          </button>
-          <button disabled={!canEdit || pending || !rows.length} onClick={acceptAll}>
-            Accept all pending
-          </button>
-        </div>
+        <span className="ai-section-count">{rows.length} shown</span>
       </div>
-      {loading && <p className="ai-muted">Loading queue…</p>}
-      {error && (
-        <p className="fp-warning" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="fp-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice</th>
-              <th>Station</th>
-              <th>Region</th>
-              <th>Portal date</th>
-              <th>Amount</th>
-              <th>Status</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.draftInvoiceNumber}>
-                <td>
-                  <strong>{row.amzlUniqueId || '—'}</strong>
-                  <small className="ai-muted" style={{ display: 'block' }}>
-                    {row.draftInvoiceNumber}
-                  </small>
-                </td>
-                <td>{row.serviceArea}</td>
-                <td>{row.regionName}</td>
-                <td>{row.portalYmd || '—'}</td>
-                <td className="ai-money">{row.amount || '—'}</td>
-                <td>
-                  <span className={`ai-chip ${statusChip(row.status, row.approvalStatus)}`}>
-                    {chipLabel(row.status, row.approvalStatus)}
-                  </span>
-                </td>
-                <td>
-                  <div className="ai-row-actions">
-                    <button disabled={!canEdit || pending} onClick={() => acceptOne(row)}>
-                      Accept
-                    </button>
-                    <button disabled={pending} onClick={() => readyCheck(row)}>
-                      Ready check
-                    </button>
-                  </div>
-                </td>
+      {!rows.length ? (
+        <div className="ai-empty">
+          <strong>{title}</strong>
+          <p>{empty}</p>
+        </div>
+      ) : (
+        <div className="ai-scroll">
+          <table className="ai-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Station</th>
+                <th>Portal</th>
+                <th className="ai-money">Amount</th>
+                <th>Status</th>
+                <th>Payment</th>
+                {onReadyCheck ? <th /> : null}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {!loading && !rows.length && !error && <p className="fp-empty">No invoices awaiting DSP accept.</p>}
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.draftInvoiceNumber}>
+                  <td>
+                    <strong>{row.invoiceNumber || '—'}</strong>
+                    <small>{row.draftInvoiceNumber}</small>
+                  </td>
+                  <td>{row.station || '—'}</td>
+                  <td>{row.portalYmd || '—'}</td>
+                  <td className="ai-money">{row.amountPaise ? money(row.amountPaise) : row.amountText || '—'}</td>
+                  <td>
+                    <StatusChip status={row.status} approval={row.approvalStatus} />
+                  </td>
+                  <td>{row.paymentDate || '—'}</td>
+                  {onReadyCheck ? (
+                    <td>
+                      <button disabled={pending} onClick={() => onReadyCheck(row)}>
+                        Ready check
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
 
-function CatalogPanel({ setNotice }: { setNotice: (value: string) => void }) {
+function CatalogPanel({
+  canEdit,
+  pending,
+  startTransition,
+  setNotice,
+  onChanged,
+}: {
+  canEdit: boolean;
+  pending: boolean;
+  startTransition: (fn: () => void) => void;
+  setNotice: (value: string) => void;
+  onChanged: () => void;
+}) {
+  const defaults = useMemo(() => defaultRange(), []);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
-  const [status, setStatus] = useState('');
+  const [filterId, setFilterId] = useState('');
   const [station, setStation] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -316,6 +554,9 @@ function CatalogPanel({ setNotice }: { setNotice: (value: string) => void }) {
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [syncFrom, setSyncFrom] = useState(defaults.from);
+  const [syncTo, setSyncTo] = useState(defaults.to);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -324,16 +565,20 @@ function CatalogPanel({ setNotice }: { setNotice: (value: string) => void }) {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQ, status, station, from, to, sort, pageSize]);
+  }, [debouncedQ, filterId, station, from, to, sort, pageSize]);
 
   useEffect(() => {
+    const selected = STATUS_FILTERS.find((f) => f.id === filterId);
     const params = new URLSearchParams({
       page: String(page),
       pageSize: String(pageSize),
       sort,
     });
     if (debouncedQ) params.set('q', debouncedQ);
-    if (status) params.set('status', status);
+    if (selected?.status) params.set('status', selected.status);
+    if (selected?.approval && !selected.status) params.set('approvalStatus', selected.approval);
+    if (selected?.bucket && selected.id !== 'pending') params.set('bucket', selected.bucket);
+    if (selected?.id === 'pending') params.set('bucket', 'pending_dsp');
     if (station) params.set('station', station);
     if (from) params.set('from', from);
     if (to) params.set('to', to);
@@ -346,15 +591,37 @@ function CatalogPanel({ setNotice }: { setNotice: (value: string) => void }) {
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Catalog unavailable.'))
       .finally(() => setLoading(false));
-  }, [debouncedQ, status, station, from, to, sort, page, pageSize]);
+  }, [debouncedQ, filterId, station, from, to, sort, page, pageSize, reloadToken]);
 
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
 
+  const clearFilters = () => {
+    setQ('');
+    setFilterId('');
+    setStation('');
+    setFrom('');
+    setTo('');
+    setSort('portal_ymd_desc');
+  };
+
+  const syncCatalog = () =>
+    startTransition(() => {
+      setNotice('');
+      void api('catalog/sync', {
+        method: 'POST',
+        body: JSON.stringify({ from: syncFrom || undefined, to: syncTo || undefined }),
+      })
+        .then((result: any) => {
+          setNotice(`Catalog synced · ${result.upserted || 0} invoices (${result.from} → ${result.to})`);
+          setPage(1);
+          setFilterId('');
+          setReloadToken((n) => n + 1);
+          onChanged();
+        })
+        .catch((err) => setNotice(err instanceof Error ? err.message : 'Catalog sync failed.'));
+    });
+
   const openPdf = (row: CatalogRow) => {
-    if (!row.pdfAvailable) {
-      setNotice('PDF is not available for this row yet.');
-      return;
-    }
     window.open(
       `/api/finance/amazon-invoices/pdf?draftInvoiceNumber=${encodeURIComponent(row.draftInvoiceNumber)}`,
       '_blank',
@@ -364,21 +631,18 @@ function CatalogPanel({ setNotice }: { setNotice: (value: string) => void }) {
 
   return (
     <section className="fp-panel">
-      <div className="fp-section-head">
+      <div className="ai-card-head">
         <div>
           <h2>Invoice catalog</h2>
-          <p>Search the D1 register — filters never call Amazon live.</p>
+          <p>Search the D1 register. Filters never call Amazon. Sync pulls a date range into the register once.</p>
         </div>
-        <small className="ai-muted">{total} matching</small>
+        <span className="ai-section-count">{total} matching</span>
       </div>
-      <div className="ai-filters">
-        <label>
+
+      <div className="ai-toolbar">
+        <label className="ai-grow">
           Search
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="INV-… / station / draft" />
-        </label>
-        <label>
-          Status
-          <input value={status} onChange={(e) => setStatus(e.target.value)} placeholder="READY_FOR_PAYMENT_V2" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="INV-… / station / draft id" />
         </label>
         <label>
           Station
@@ -406,66 +670,105 @@ function CatalogPanel({ setNotice }: { setNotice: (value: string) => void }) {
         </label>
         <label>
           Page size
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-          >
+          <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
             <option value={25}>25</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
           </select>
         </label>
+        <button type="button" onClick={clearFilters}>
+          Clear
+        </button>
       </div>
+
+      <div className="ai-status-pills" role="group" aria-label="Status filter">
+        {STATUS_FILTERS.map((filter) => (
+          <button key={filter.id || 'all'} aria-pressed={filterId === filter.id} onClick={() => setFilterId(filter.id)}>
+            {filter.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="ai-toolbar">
+        <label>
+          Sync from
+          <input type="date" value={syncFrom} onChange={(e) => setSyncFrom(e.target.value)} />
+        </label>
+        <label>
+          Sync to
+          <input type="date" value={syncTo} onChange={(e) => setSyncTo(e.target.value)} />
+        </label>
+        <button disabled={!canEdit || pending} onClick={syncCatalog}>
+          {pending ? 'Syncing…' : 'Sync catalog from Amazon'}
+        </button>
+        <span className="ai-muted">Lists invoices only — no PDF download, no Tally rebuild.</span>
+      </div>
+
       {loading && <p className="ai-muted">Loading catalog…</p>}
       {error && (
         <p className="fp-warning" role="alert">
           {error}
         </p>
       )}
-      <div className="fp-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice</th>
-              <th>Station</th>
-              <th>Region</th>
-              <th>Portal</th>
-              <th>Amount</th>
-              <th>Status</th>
-              <th>Payment</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.draftInvoiceNumber}>
-                <td>
-                  <strong>{row.invoiceNumber || '—'}</strong>
-                  <small className="ai-muted" style={{ display: 'block' }}>
-                    {row.draftInvoiceNumber}
-                  </small>
-                </td>
-                <td>{row.station}</td>
-                <td>{row.regionName}</td>
-                <td>{row.portalYmd || '—'}</td>
-                <td className="ai-money">{row.amountPaise ? money(row.amountPaise) : row.amountText || '—'}</td>
-                <td>
-                  <span className={`ai-chip ${statusChip(row.status, row.approvalStatus)}`}>
-                    {chipLabel(row.status, row.approvalStatus)}
-                  </span>
-                </td>
-                <td>{row.paymentDate || '—'}</td>
-                <td>
-                  <button type="button" onClick={() => openPdf(row)}>
-                    PDF
-                  </button>
-                </td>
+
+      {!loading && !rows.length && !error ? (
+        <div className="ai-empty">
+          <strong>No catalog rows yet</strong>
+          <p>
+            The searchable register is empty for these filters. Sync the last 21 days from Amazon, or clear filters if a
+            sync already ran.
+          </p>
+          <div className="fp-actions">
+            <button disabled={!canEdit || pending} onClick={syncCatalog}>
+              Sync last 21 days
+            </button>
+            <button type="button" onClick={clearFilters}>
+              Clear filters
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="ai-scroll">
+          <table className="ai-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Station</th>
+                <th>Region</th>
+                <th>Portal</th>
+                <th className="ai-money">Amount</th>
+                <th>Status</th>
+                <th>Payment</th>
+                <th>PDF</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {!loading && !rows.length && !error && <p className="fp-empty">No catalog rows match these filters.</p>}
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.draftInvoiceNumber}>
+                  <td>
+                    <strong>{row.invoiceNumber || '—'}</strong>
+                    <small>{row.draftInvoiceNumber}</small>
+                  </td>
+                  <td>{row.station || '—'}</td>
+                  <td>{row.regionName || '—'}</td>
+                  <td>{row.portalYmd || '—'}</td>
+                  <td className="ai-money">{row.amountPaise ? money(row.amountPaise) : row.amountText || '—'}</td>
+                  <td>
+                    <StatusChip status={row.status} approval={row.approvalStatus} />
+                  </td>
+                  <td>{row.paymentDate || '—'}</td>
+                  <td>
+                    <button type="button" onClick={() => openPdf(row)}>
+                      Open
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="ai-pager">
         <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
           Previous
@@ -492,10 +795,11 @@ function TallyPanel({
   startTransition: (fn: () => void) => void;
   setNotice: (value: string) => void;
 }) {
+  const defaults = useMemo(() => defaultRange(), []);
   const [status, setStatus] = useState<RunStatus | null>(null);
   const [error, setError] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
   const [polling, setPolling] = useState(false);
 
   const loadStatus = useCallback(async () => {
@@ -514,13 +818,13 @@ function TallyPanel({
     void loadStatus();
   }, [loadStatus]);
 
-  const pollUntilReady = async (runId?: string) => {
+  const pollUntilReady = async (id?: string) => {
     setPolling(true);
     const started = Date.now();
     let delay = 2000;
     try {
       while (Date.now() - started < 180000) {
-        const data = await api<RunStatus>(`status${runId ? `?runId=${encodeURIComponent(runId)}` : ''}`);
+        const data = await api<RunStatus>(`status${id ? `?runId=${encodeURIComponent(id)}` : ''}`);
         setStatus(data);
         if (data.filesReady) {
           setNotice('Tally export files are ready.');
@@ -546,58 +850,71 @@ function TallyPanel({
       })
         .then(async (data) => {
           setStatus(data);
+          const id = runIdOf(data);
           if (data.filesReady) {
             setNotice('Export ready.');
             return;
           }
           setNotice('Export started…');
-          await pollUntilReady(data.id);
+          await pollUntilReady(id);
         })
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Export failed.'));
     });
 
   const download = (format: string) => {
-    const runId = status?.id ? `&runId=${encodeURIComponent(status.id)}` : '';
-    window.open(`/api/finance/amazon-invoices/download?format=${format}${runId}`, '_blank', 'noopener,noreferrer');
+    const id = runIdOf(status);
+    const runQuery = id ? `&runId=${encodeURIComponent(id)}` : '';
+    window.open(`/api/finance/amazon-invoices/download?format=${format}${runQuery}`, '_blank', 'noopener,noreferrer');
   };
 
   const progress = useMemo(() => {
-    const total = status?.invoices?.length || 0;
+    const total = status?.total || status?.invoices?.length || 0;
+    if (!total) return status?.filesReady ? 'Complete' : '—';
     const done = (status?.parsed || 0) + (status?.failed || 0) + (status?.skipped || 0);
-    return total ? `${done} / ${total}` : '—';
+    return `${done} / ${total}`;
   }, [status]);
+
+  const id = runIdOf(status);
 
   return (
     <section className="fp-panel">
-      <div className="fp-section-head">
+      <div className="ai-card-head">
         <div>
           <h2>Tally export</h2>
-          <p>Weekly Monday cron builds the last 21 days. Use this panel for an on-demand date range.</p>
+          <p>Monday 07:30 IST builds the last 21 days. Use this panel for an on-demand range — status polls gently until files are ready.</p>
         </div>
         <button disabled={polling || pending} onClick={() => void loadStatus()}>
           Refresh status
         </button>
       </div>
+
       {error && <p className="ai-muted">{error}</p>}
-      <div className="ai-status-grid">
-        <section>
+      {status?.error && (
+        <p className="fp-warning" role="alert">
+          {status.error}
+        </p>
+      )}
+
+      <div className="ai-meta">
+        <article>
           <small>Run</small>
-          <strong>{status?.id ? status.id.slice(0, 8) : '—'}</strong>
-          <span className="ai-muted">
+          <strong>{id ? id.slice(0, 8) : '—'}</strong>
+          <span>
             {status?.from || '—'} → {status?.to || '—'}
           </span>
-        </section>
-        <section>
+        </article>
+        <article className={status?.filesReady ? 'ai-kpi-ok' : ''}>
           <small>Progress</small>
           <strong>{progress}</strong>
-          <span className="ai-muted">{status?.filesReady ? 'Files ready' : polling ? 'Working…' : 'Not ready'}</span>
-        </section>
-        <section>
+          <span>{status?.filesReady ? 'Files ready' : polling ? 'Working…' : status?.remaining != null ? `${status.remaining} remaining` : 'Not ready'}</span>
+        </article>
+        <article>
           <small>File</small>
-          <strong style={{ fontSize: 13 }}>{status?.fileName || '—'}</strong>
-        </section>
+          <strong className="ai-file">{status?.fileName || '—'}</strong>
+        </article>
       </div>
-      <div className="fp-actions" style={{ marginBottom: 16 }}>
+
+      <div className="fp-actions" style={{ marginBottom: 14, justifyContent: 'flex-start' }}>
         <button disabled={!status?.filesReady} onClick={() => download('xlsx')}>
           Download xlsx
         </button>
@@ -611,7 +928,8 @@ function TallyPanel({
           Components CSV
         </button>
       </div>
-      <div className="ai-filters">
+
+      <div className="ai-toolbar">
         <label>
           From
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -621,12 +939,15 @@ function TallyPanel({
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
         <button disabled={!canEdit || pending || polling} onClick={buildExport}>
-          Build export
+          {polling ? 'Building…' : 'Build export'}
         </button>
       </div>
+
       {!!status?.listingWarnings?.length && (
-        <details>
-          <summary>Listing warnings</summary>
+        <details className="fp-coverage">
+          <summary>
+            Listing warnings <span>{status.listingWarnings.length}</span>
+          </summary>
           <ul>
             {status.listingWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
@@ -643,12 +964,15 @@ function AutomationPanel({
   pending,
   startTransition,
   setNotice,
+  onChanged,
 }: {
   canEdit: boolean;
   pending: boolean;
   startTransition: (fn: () => void) => void;
   setNotice: (value: string) => void;
+  onChanged: () => void;
 }) {
+  const defaults = useMemo(() => defaultRange(), []);
   const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(true);
   const [lastAcceptRun, setLastAcceptRun] = useState<string | null>(null);
   const [lastCatalogSync, setLastCatalogSync] = useState<string | null>(null);
@@ -709,6 +1033,7 @@ function AutomationPanel({
               : `Tick done · accepted ${result.accepted || 0} · failed ${result.failed || 0}`,
           );
           load();
+          onChanged();
         })
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Auto-accept tick failed.'));
     });
@@ -724,103 +1049,174 @@ function AutomationPanel({
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Session probe failed.'));
     });
 
+  const syncCatalog = () =>
+    startTransition(() => {
+      setNotice('');
+      void api('catalog/sync', {
+        method: 'POST',
+        body: JSON.stringify({ from: defaults.from, to: defaults.to }),
+      })
+        .then((result: any) => {
+          setNotice(`Catalog synced · ${result.upserted || 0} invoices`);
+          load();
+          onChanged();
+        })
+        .catch((err) => setNotice(err instanceof Error ? err.message : 'Catalog sync failed.'));
+    });
+
   let lastAcceptSummary = '—';
+  let lastAcceptAt = '';
   try {
     if (lastAcceptRun) {
-      const parsed = JSON.parse(lastAcceptRun) as { at?: string; accepted?: number; failed?: number; reason?: string };
-      lastAcceptSummary = `${parsed.at || lastAcceptRun}${parsed.accepted != null ? ` · accepted ${parsed.accepted}` : ''}${parsed.failed ? ` · failed ${parsed.failed}` : ''}${parsed.reason ? ` · ${parsed.reason}` : ''}`;
+      const parsed = JSON.parse(lastAcceptRun) as {
+        at?: string;
+        accepted?: number;
+        failed?: number;
+        reason?: string;
+        attempted?: number;
+      };
+      lastAcceptAt = parsed.at || '';
+      lastAcceptSummary = [
+        parsed.accepted != null ? `accepted ${parsed.accepted}` : null,
+        parsed.attempted != null ? `attempted ${parsed.attempted}` : null,
+        parsed.failed ? `failed ${parsed.failed}` : null,
+        parsed.reason || null,
+      ]
+        .filter(Boolean)
+        .join(' · ') || 'Recorded';
     }
   } catch {
     lastAcceptSummary = lastAcceptRun || '—';
   }
 
+  const sessionLabel =
+    session?.probe === 'ok'
+      ? 'Healthy'
+      : session?.probe === 'expired'
+        ? 'Expired'
+        : session?.hasSession
+          ? 'Present'
+          : 'Missing';
+
   return (
     <section className="fp-panel">
-      <div className="fp-section-head">
+      <div className="ai-card-head">
         <div>
           <h2>Automation</h2>
           <p>
-            Auto-accept runs every 2 hours at :15 UTC for <code>PENDING_DSP_ACTION</code> only (cap 25 / tick). Monday
-            07:30 IST rebuilds Tally; Final P&L syncs daily at 08:00 IST.
+            Auto-accept runs every 2 hours at :15 UTC for pending DSP invoices only (cap 25 / tick). Monday 07:30 IST
+            rebuilds Tally. Final P&L syncs daily at 08:00 IST.
           </p>
         </div>
         <div className="fp-actions">
           <button disabled={!canEdit || pending} onClick={ensureSession}>
             Probe session
           </button>
+          <button disabled={!canEdit || pending} onClick={syncCatalog}>
+            Sync catalog
+          </button>
           <button disabled={!canEdit || pending} onClick={runNow}>
             Run accept now
           </button>
         </div>
       </div>
+
       {error && (
         <p className="fp-warning" role="alert">
           {error}
         </p>
       )}
-      <div className="ai-status-grid">
-        <section>
+
+      <div className="ai-meta">
+        <article className={autoAcceptEnabled ? 'ai-kpi-ok' : 'ai-kpi-warn'}>
           <small>Auto-accept</small>
           <strong>{autoAcceptEnabled ? 'On' : 'Off'}</strong>
-          <button disabled={!canEdit || pending} onClick={() => toggle(!autoAcceptEnabled)}>
-            {autoAcceptEnabled ? 'Turn off' : 'Turn on'}
-          </button>
-        </section>
-        <section>
-          <small>Session</small>
-          <strong>{session?.probe === 'ok' ? 'Healthy' : session?.probe === 'expired' ? 'Expired' : session?.hasSession ? 'Present' : 'Missing'}</strong>
-          <span className="ai-muted">{session?.savedAt || '—'}</span>
-        </section>
-        <section>
+          <div className="ai-toggle" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="ai-toggle-track"
+              aria-checked={autoAcceptEnabled}
+              disabled={!canEdit || pending}
+              onClick={() => toggle(!autoAcceptEnabled)}
+              aria-label={autoAcceptEnabled ? 'Turn auto-accept off' : 'Turn auto-accept on'}
+            >
+              <span className="ai-toggle-thumb" />
+            </button>
+            <span className="ai-muted">{autoAcceptEnabled ? 'Kill switch open' : 'Kill switch engaged'}</span>
+          </div>
+        </article>
+        <article className={session?.probe === 'ok' ? 'ai-kpi-ok' : 'ai-kpi-warn'}>
+          <small>Amazon session</small>
+          <strong>{sessionLabel}</strong>
+          <span>{formatIst(session?.savedAt)}</span>
+        </article>
+        <article>
           <small>Last accept run</small>
-          <strong style={{ fontSize: 12 }}>{lastAcceptSummary}</strong>
-        </section>
-        <section>
+          <strong style={{ fontSize: 13 }}>{lastAcceptSummary}</strong>
+          <span>{formatIst(lastAcceptAt)}</span>
+        </article>
+        <article className={!lastCatalogSync ? 'ai-kpi-warn' : ''}>
           <small>Last catalog sync</small>
-          <strong style={{ fontSize: 12 }}>{lastCatalogSync || '—'}</strong>
-        </section>
-        <section>
+          <strong style={{ fontSize: 13 }}>{lastCatalogSync ? formatIst(lastCatalogSync) : 'Never'}</strong>
+          <span>D1 register refresh</span>
+        </article>
+        <article>
           <small>Latest Tally run</small>
-          <strong style={{ fontSize: 12 }}>{lastTallyRunId || '—'}</strong>
-        </section>
+          <strong className="ai-file" style={{ fontSize: 12 }}>
+            {lastTallyRunId ? lastTallyRunId.slice(0, 8) : '—'}
+          </strong>
+          <span>{lastTallyRunId || 'No export yet'}</span>
+        </article>
       </div>
-      <h3>Recent accepts</h3>
-      <div className="fp-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Invoice</th>
-              <th>Actor</th>
-              <th>Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recent.map((row, index) => (
-              <tr key={`${row.at}-${index}`}>
-                <td>{String(row.at || '—')}</td>
-                <td>{String(row.invoice_number || row.draft_invoice_number || '—')}</td>
-                <td>{String(row.actor || '—')}</td>
-                <td>
-                  {row.error
-                    ? String(row.error)
-                    : row.accepted
-                      ? 'Accepted'
-                      : row.ready
-                        ? 'Ready'
-                        : 'Skipped'}
-                </td>
+
+      <div className="ai-card-head" style={{ marginTop: 8 }}>
+        <div>
+          <h2>Recent accepts</h2>
+          <p>Audit trail from cron and manual accepts.</p>
+        </div>
+      </div>
+      {!recent.length ? (
+        <div className="ai-empty">
+          <strong>No accept audit yet</strong>
+          <p>When auto-accept or Queue accept runs, results appear here with actor and outcome.</p>
+        </div>
+      ) : (
+        <div className="ai-scroll">
+          <table className="ai-table">
+            <thead>
+              <tr>
+                <th>When (IST)</th>
+                <th>Invoice</th>
+                <th>Actor</th>
+                <th>Result</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {!recent.length && <p className="fp-empty">No accept audit rows yet.</p>}
-      </div>
-      <p className="ai-muted">
-        Docs: set <code>FINANCE_WORKER_ADMIN_KEY</code> on Fin (worker <code>ADMIN_API_KEY</code>). Keep{' '}
-        <code>FIN_PNL_API_KEY</code> for Final P&L. Never expose either key to the browser.
-      </p>
-      <p className="ai-muted">
+            </thead>
+            <tbody>
+              {recent.map((row, index) => (
+                <tr key={`${row.at}-${index}`}>
+                  <td>{formatIst(String(row.at || ''))}</td>
+                  <td>{String(row.invoice_number || row.draft_invoice_number || '—')}</td>
+                  <td>{String(row.actor || '—')}</td>
+                  <td>
+                    {row.error ? (
+                      <span className="ai-chip disputed">Error</span>
+                    ) : row.accepted ? (
+                      <span className="ai-chip ready">Accepted</span>
+                    ) : row.ready ? (
+                      <span className="ai-chip ready">Ready</span>
+                    ) : (
+                      <span className="ai-chip">Skipped</span>
+                    )}
+                    {row.error ? <small>{String(row.error)}</small> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="ai-muted" style={{ marginTop: 14 }}>
         Related: <Link href="/finance/final-pnl">Final P&L</Link>
       </p>
     </section>
