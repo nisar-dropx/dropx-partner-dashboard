@@ -19,7 +19,7 @@ export function storeInsightFacts(stores:Store[], health:Health[], activities:{s
    const metrics=storeHealthMetricDefinitions.map(d=>({d,m:v.metrics?.[d.key]})).filter(x=>x.m?.scored===true);
    // Supply every scored metric; score weight alone must not hide a serious shortage or loss.
    const chosen=[...metrics].sort((a,b)=>Number(b.m.status==='Red')-Number(a.m.status==='Red')||b.d.weight-a.d.weight);
-   for(const {d,m} of chosen)facts.push({...base,id:`${store.id}:${d.key}`,topic:d.category,label:d.label,value:String(m.actual_text),detail:`Source status ${m.status} · target ${m.target_text}. ${fresh?'':`Older scorecard; expected ${expectedHealth}. `}Qualifiers and embedded dates belong to the source.`,period:latest.report_date,href,sentiment:!fresh||m.status==='Red'?'attention':'good'});
+   for(const {d,m} of chosen)facts.push({...base,id:`${store.id}:${d.key}`,topic:d.category,label:d.label,value:String(m.actual_text),detail:`Source status ${m.status} · target ${m.target_text}. ${fresh?'':`Older scorecard; expected ${expectedHealth}. `}Qualifiers and embedded dates belong to the source.`,period:latest.report_date,href,sentiment:!fresh||m.status!=='Green'?'attention':'good'});
   }
   const shifts=activities.shifts.filter(r=>r.location_id===store.id&&r.shift_date<=previousDay&&!['cancelled','accepted'].includes(r.status));
   const days=activities.days.filter(r=>r.location_id===store.id&&r.work_date<=previousDay&&r.status==='open');
