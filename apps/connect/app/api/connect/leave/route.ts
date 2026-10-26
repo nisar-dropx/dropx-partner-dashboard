@@ -179,7 +179,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
   const [entitlements, requestResult, approvalRoute] = await Promise.all([
     resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type }),
     db().from("hr_leave_requests")
-      .select("id,leave_type_id,start_date,end_date,days,reason,status,requested_at,reviewer_note,proof_path,proof_file_name,proof_mime_type,hr_leave_types(name,code,color)")
+      .select("id,leave_type_id,start_date,end_date,days,reason,status,requested_at,reviewer_note,cancellation_reason,proof_path,proof_file_name,proof_mime_type,hr_leave_types(name,code,color)")
       .eq("company_id", account.companyId).eq(workerColumn, account.id)
       .order("requested_at", { ascending: false }).limit(50),
     leaveApprovalPreview(account, type, previewDays)
@@ -214,6 +214,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
       status: request.status,
       requestedAt: request.requested_at,
       reviewerNote: request.reviewer_note,
+      cancellationReason: request.cancellation_reason,
       hasProof: Boolean(request.proof_path),
       proofFileName: request.proof_file_name,
       proofMimeType: request.proof_mime_type,

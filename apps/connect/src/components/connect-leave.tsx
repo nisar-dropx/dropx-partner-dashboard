@@ -45,6 +45,7 @@ type LeaveRequest = {
   reason: string;
   status: string;
   reviewerNote?: string | null;
+  cancellationReason?: string | null;
   hasProof?: boolean;
   proofFileName?: string | null;
   proofUrl?: string | null;
@@ -380,6 +381,7 @@ export function ConnectLeave({
             ) : null}
             {request.hasProof && request.proofUrl ? <a className="dx-leave-proof-link" href={request.proofUrl}><FileCheck2 />{request.proofFileName || "View medical proof"}</a> : null}
             {request.reviewerNote ? <small>{request.reviewerNote}</small> : null}
+            {request.status === "cancelled" && request.cancellationReason ? <small>Cancelled: {request.cancellationReason}</small> : null}
             {request.status === "pending" ? <footer className="dx-leave-history-actions">
               <button disabled={submitting} onClick={() => startEdit(request)} type="button"><Pencil />Edit</button>
               <button className="danger" disabled={submitting} onClick={() => void withdraw(request.id)} type="button"><RotateCcw />Withdraw</button>
