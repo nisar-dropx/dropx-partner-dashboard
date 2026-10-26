@@ -318,7 +318,7 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
           {pack?.checklist ? (
             <div className={styles.reportModalSummary} aria-label="Report summary">
               <span><strong>{c?.pct ?? 0}%</strong><small>completion</small></span>
-              <span><strong>{answeredTasks}/{c?.total ?? 0}</strong><small>answered</small></span>
+              <span><strong>{c?.answered ?? 0}/{c?.total ?? 0}</strong><small>required answers</small></span>
               <span><strong>{pack.proofs.length}</strong><small>evidence files</small></span>
               <span><strong>{pack.sections.length}</strong><small>sections</small></span>
             </div>
