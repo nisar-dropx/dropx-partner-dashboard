@@ -5,7 +5,7 @@ import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 export const metadata: Metadata = {
   title: "Get OpsPulse",
   description:
-    "Install OpsPulse from Chrome on your phone, or on Windows and Mac.",
+    "Get OpsPulse for Android, iPhone, Windows or Mac.",
 };
 
 export default function OpsAppDownloadPage() {
@@ -17,9 +17,8 @@ export default function OpsAppDownloadPage() {
       </header>
       <h1>Your operations, one tap away.</h1>
       <p className="ops-download-intro">
-        Until the store package is final, install OpsPulse from Chrome on your
-        phone (Install app / Add to Home screen). Same secure workspace as the
-        website.
+        Get the Android app or install OpsPulse from your browser. Your secure
+        workspace, on any device.
       </p>
       <OpsAppInstall />
     </main>
