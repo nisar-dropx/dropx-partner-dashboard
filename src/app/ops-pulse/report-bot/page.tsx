@@ -241,21 +241,21 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
       <Card title="Today's reports" icon={<CalendarCheck size={18} aria-hidden />} description="One row per group and report due today. Reminders stop as soon as the report photo arrives." flush>
         {rows.length ? (
           <div className={s.tableWrap}>
-            <table className={s.table}>
+            <table className={`${s.table} ${s.dueReports}`}>
               <thead><tr><th>Group</th><th>Report</th><th>Due</th><th>Reminders</th><th>Status</th><th>Result</th>{canEdit ? <th><span className="sr-only">Actions</span></th> : null}</tr></thead>
               <tbody>
                 {rows.map((row) => {
                   const verdict = row.last_verdict ? VERDICT[row.last_verdict] : null;
                   return (
                     <tr key={row.id}>
-                      <td className={s.cellTitle}>{lookup.groupName.get(row.group_id) ?? "—"}</td>
-                      <td>{lookup.reportName.get(row.report_type_id) ?? "—"}</td>
-                      <td>{row.schedule ? formatClock(row.schedule.due_time) : "—"}</td>
-                      <td>{row.reminders_sent} of {row.schedule?.reminder_times?.length ?? 0}</td>
-                      <td><StatusBadge value={row.status} />{row.received_at ? <span className={s.cellSub}>{when(row.received_at, settings.timezone)}</span> : null}</td>
-                      <td>{verdict ? <Badge tone={verdict[1]}>{verdict[0]}</Badge> : "—"}</td>
+                      <td data-label="Group" className={s.cellTitle}>{lookup.groupName.get(row.group_id) ?? "—"}</td>
+                      <td data-label="Report">{lookup.reportName.get(row.report_type_id) ?? "—"}</td>
+                      <td data-label="Due">{row.schedule ? formatClock(row.schedule.due_time) : "—"}</td>
+                      <td data-label="Reminders">{row.reminders_sent} of {row.schedule?.reminder_times?.length ?? 0}</td>
+                      <td data-label="Status"><StatusBadge value={row.status} />{row.received_at ? <span className={s.cellSub}>{when(row.received_at, settings.timezone)}</span> : null}</td>
+                      <td data-label="Result">{verdict ? <Badge tone={verdict[1]}>{verdict[0]}</Badge> : "—"}</td>
                       {canEdit ? (
-                        <td>
+                        <td data-label="Actions" className={s.dueActions}>
                           <div className={s.rowActions}>
                             {["pending", "overdue"].includes(row.status) ? (
                               <>
