@@ -295,7 +295,7 @@ type ShiftDefinition = {
 
 type ShiftSchedule = {
   shift: ShiftDefinition | null;
-  source: "Roster" | "Unassigned" | "Holiday";
+  source: "Roster" | "Unassigned" | "Holiday" | "Offboarded";
   dayType: string;
 };
 
@@ -562,6 +562,9 @@ function attendanceDayStatus({
   status: string;
   workMinutes: number;
 }) {
+  if (dayType === "offboarded") {
+    return punchCount > 0 ? "Present (Offboarded)" : "Offboarded";
+  }
   const restDay = Boolean(dayType && dayType !== "working" && dayType !== "unassigned");
   const dayLabel = restDay ? dayType.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "";
   // A week off worked with both punches is scored on its hours below, the way
@@ -771,20 +774,33 @@ async function loadAttendanceScheduleContext({
 
   // Part-time workers among these profiles (one lookup per report, not per row).
   const [partTimeEmployees, partTimeContractors] = workerIds.length ? await Promise.all([
-    supabaseAdmin.from("employees").select("id,employment_type,location_id,designations(code,name)").eq("company_id", companyId).in("id", workerIds),
-    supabaseAdmin.from("contractors").select("id,employment_type,location_id,designation").eq("company_id", companyId).in("id", workerIds)
+    supabaseAdmin.from("employees").select("id,employment_type,location_id,last_working_date,people_lifecycle_status,designations(code,name)").eq("company_id", companyId).in("id", workerIds),
+    supabaseAdmin.from("contractors").select("id,employment_type,location_id,last_working_date,people_lifecycle_status,designation").eq("company_id", companyId).in("id", workerIds)
   ]) : [{ data: [], error: null }, { data: [], error: null }];
   const partTimeIds = new Set<string>();
   const locationByWorker = new Map<string, string | null>();
-  for (const row of (partTimeEmployees.data ?? []) as Array<{ id: string; employment_type: string | null; location_id: string | null; designations: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null }>) {
+  const lastWorkingDateByWorker = new Map<string, string | null>();
+  const lifecycleByWorker = new Map<string, string | null>();
+  for (const row of (partTimeEmployees.data ?? []) as Array<{ id: string; employment_type: string | null; location_id: string | null; last_working_date: string | null; people_lifecycle_status: string | null; designations: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null }>) {
     locationByWorker.set(row.id, row.location_id);
+    lastWorkingDateByWorker.set(row.id, row.last_working_date ? String(row.last_working_date).slice(0, 10) : null);
+    lifecycleByWorker.set(row.id, row.people_lifecycle_status);
     const designation = relationFirst(row.designations);
     if (isPartTimeWorker({ employmentType: row.employment_type, designationCode: designation?.code, designationName: designation?.name })) partTimeIds.add(row.id);
   }
-  for (const row of (partTimeContractors.data ?? []) as Array<{ id: string; employment_type: string | null; location_id: string | null; designation: string | null }>) {
+  for (const row of (partTimeContractors.data ?? []) as Array<{ id: string; employment_type: string | null; location_id: string | null; last_working_date: string | null; people_lifecycle_status: string | null; designation: string | null }>) {
     locationByWorker.set(row.id, row.location_id);
+    lastWorkingDateByWorker.set(row.id, row.last_working_date ? String(row.last_working_date).slice(0, 10) : null);
+    lifecycleByWorker.set(row.id, row.people_lifecycle_status);
     if (isPartTimeWorker({ employmentType: row.employment_type, designationName: row.designation })) partTimeIds.add(row.id);
   }
+  const employmentEndedOn = (profileId: string | null, punchDate: string) => {
+    if (!profileId) return false;
+    const lifecycle = String(lifecycleByWorker.get(profileId) ?? "").toLowerCase();
+    const lastWorkingDate = lastWorkingDateByWorker.get(profileId) ?? null;
+    if (lifecycle === "offboarded") return !lastWorkingDate || punchDate > lastWorkingDate;
+    return Boolean(lastWorkingDate && punchDate > lastWorkingDate && (lifecycle === "offboarding" || lifecycle === "offboarded"));
+  };
   type CalendarDayRow = { calendar_date: string; day_type: string; name: string | null; location_id: string | null };
   const calendarDays = (calendarResult.data ?? []) as CalendarDayRow[];
   const calendarDayFor = (profileId: string, punchDate: string) => {
@@ -806,6 +822,10 @@ async function loadAttendanceScheduleContext({
     },
     scheduleFor(profileId: string | null, punchDate: string): ShiftSchedule {
       if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
+      // After last working day, never treat the day as a working absence.
+      if (employmentEndedOn(profileId, punchDate)) {
+        return { dayType: "offboarded", shift: null, source: "Offboarded" };
+      }
       const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
       const weekly = roster ? null : weeklyRosterValueForDate(
         weeklyIndex,
@@ -1782,6 +1802,8 @@ export async function fillAttendanceCalendarGaps({
     // into zero-punch rows because regularization must also be available when
     // the attendance engine has no daily row at all.
     if (!includeNoPunchDays && (schedule.dayType === "working" || schedule.dayType === "unassigned")) continue;
+    // Offboarded days without punches are not "not reporting" gaps to invent.
+    if (!includeNoPunchDays && schedule.dayType === "offboarded") continue;
     const shift = schedule.shift;
     const scheduledMinutes = scheduledDuration(shift);
     const rules = scheduleContext.rulesFor(profileId);
