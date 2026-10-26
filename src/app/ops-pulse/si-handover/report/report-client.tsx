@@ -35,6 +35,7 @@ import {
   type ReportSummary as StoreSummary,
   type SortKey as StoreSortKey,
 } from "@/lib/ops-pulse/store-ops/report";
+import { lockBodyScroll, resetBodyScrollLock } from "@/lib/body-scroll-lock";
 import { formatOpsDate } from "@/lib/ops-pulse/date-format";
 import { ActivitiesHub } from "../activities-hub";
 import { ChecklistReportModal } from "../checklist-report-modal";
@@ -141,6 +142,11 @@ export function ActivitiesReportClient(props: Props) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [reportId, setReportId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Recover if a prior modal race left the page unscrollable.
+    resetBodyScrollLock();
+  }, []);
 
   useEffect(() => {
     setFrom(props.from);
@@ -588,22 +594,24 @@ function StoreContinuityDaysModal({
     });
   }, [dates, row.cells, slots]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     closeRef.current?.focus();
+    const unlock = lockBodyScroll();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      unlock();
     };
-  }, [onClose]);
+  }, []);
 
   const rangeLabel =
     dates.length <= 1

@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { lockBodyScroll } from "@/lib/body-scroll-lock";
 import {
   buildChecklistReportPdf,
   downloadPdfBytes,
@@ -160,10 +161,12 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
     return () => ac.abort();
   }, [checklistId, kind]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!checklistId) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const unlock = lockBodyScroll();
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -171,15 +174,15 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
           void document.exitFullscreen();
           return;
         }
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = prev;
+      unlock();
       window.removeEventListener("keydown", onKey);
     };
-  }, [checklistId, onClose]);
+  }, [checklistId]);
 
   const toggleFullscreen = useCallback(async () => {
     const el = dialogRef.current;
