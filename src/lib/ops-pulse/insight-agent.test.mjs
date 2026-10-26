@@ -30,6 +30,18 @@ test('lower-weight loss and shortage facts remain available alongside speed prob
 const brief={headline:'Focus on inbound',greeting:'Check the evidence.',layout:'spotlight',cards:[{title:'TCD4 needs a check',explanation:'A source signal.',action:'Check the source.',factIds:['f']}]};
 test('AI cards reject unknown evidence, excessive claims and fabricated digits',()=>{
  assert.equal(validateInsightBrief(brief,[fact]).cards.length,1);assert.throws(()=>validateInsightBrief({...brief,cards:[{...brief.cards[0],factIds:['hidden']}]},[fact]));assert.throws(()=>validateInsightBrief({...brief,greeting:'Loss fell 99%'},[fact]));
+ assert.equal(validateInsightBrief({...brief,headline:'tcd4 needs attention'},[fact]).headline,'tcd4 needs attention');
+});
+test('editor retries an invalid draft once without weakening evidence validation',async()=>{
+ const originalFetch=globalThis.fetch,oldKey=process.env.OPENAI_API_KEY;
+ const {generateInsightBrief}=load('insight-editor');let calls=[];
+ process.env.OPENAI_API_KEY='test-only';
+ try{
+  globalThis.fetch=async(_url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({output:[{content:[{type:'output_text',text:JSON.stringify(calls.length===1?{...brief,greeting:'Check D-2 data'}:brief)}]}]})};};
+  assert.equal((await generateInsightBrief([fact],'Morning','',[])).cards.length,1);assert.equal(calls.length,2);assert.match(calls[1].input,/failed validation/);
+  calls=[];globalThis.fetch=async()=>{calls.push(1);return {ok:true,json:async()=>({output:[{content:[{type:'output_text',text:JSON.stringify({...brief,greeting:'Loss fell 99%'})}]}]})};};
+  await assert.rejects(()=>generateInsightBrief([fact],'Morning','',[]),/numeric claims/);assert.equal(calls.length,2);
+ }finally{globalThis.fetch=originalFetch;if(oldKey===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=oldKey;}
 });
 test('email escapes source content and prevents untrusted destinations',()=>{
  const r=renderInsightEmail({name:'<script>',date:'today',edition:'AM',checkedAt:'now',facts:[{...fact,detail:'<img onerror="bad">'}],brief});assert.ok(!r.html.includes('<script>'));assert.ok(!r.html.includes('href="https://ops.dropxlogistics.com//evil'));assert.ok(r.html.includes('&lt;img'));assert.ok(r.html.includes('Dark Store')||r.html.includes('DARK STORE'));assert.ok(r.html.includes('guide.png'));assert.ok(!r.text.includes('https://ops.dropxlogistics.com//evil'));
