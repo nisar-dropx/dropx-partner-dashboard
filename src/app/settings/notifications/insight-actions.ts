@@ -21,7 +21,10 @@ export async function saveInsightSettings(form:FormData){
   const base=await db.from('portal_notification_controls').select('config').eq('company_id',company).eq('portal','ops').eq('event_key','now_review_digest').single();if(base.error||!base.data.config.email_domain)throw Error('Configure existing Dark Store reports first.');
   const rows=insightEvents.map(event=>({...defaultInsightControl(company,event),state,config:{...defaultInsightControl(company,event).config,email_domain:base.data.config.email_domain,schedule_time:event==='now_insight_morning'?morning:evening,editorial_brief:editorial,accent,character_enabled:form.get('character')==='on',topics,delivery_ready:true},updated_by:auth.userId,updated_at:new Date().toISOString()}));
   const scope=await loadInsightScope(db,rows[0]);if(state==='enabled'&&!scope.recipients.length)throw Error('No eligible existing report recipients.');
-  const result=await db.from('portal_notification_controls').upsert(rows,{onConflict:'company_id,portal,event_key'});if(result.error)throw Error('Insight settings could not be saved.');
+  const legacy=await db.from('portal_notification_controls').select('*').eq('company_id',company).eq('portal','ops').in('event_key',['now_review_digest','now_activity_digest']);
+  if(legacy.error)throw Error('Existing schedules could not be checked.');
+  const updates=state==='enabled'?[...rows,...(legacy.data||[]).map(c=>({...c,state:'disabled',updated_by:auth.userId,updated_at:new Date().toISOString()}))]:rows;
+  const result=await db.from('portal_notification_controls').upsert(updates,{onConflict:'company_id,portal,event_key'});if(result.error)throw Error('Insight settings could not be saved.');
  }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
  revalidatePath('/settings/notifications');redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#store-insights');
 }

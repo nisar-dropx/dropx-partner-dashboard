@@ -39,9 +39,9 @@ test('all four export files contain usable content',async()=>{
  const png=await exportAssistantReport(report,'png');const meta=await require('sharp')(png.bytes).metadata();assert.equal(meta.width,1200);assert.ok(meta.height>=400);
 });
 
-test('morning and evening share a monthly thread group without mixing operational status mail',async()=>{
+test('morning and evening continue the existing monthly Dark Store conversation',async()=>{
  const {digestThreadEvents}=await import('../digest-thread-policy.ts');
  assert.deepEqual(digestThreadEvents('now_insight_morning'),digestThreadEvents('now_insight_evening'));
- assert.ok(!digestThreadEvents('now_insight_morning').includes('now_review_digest'));
+ assert.ok(digestThreadEvents('now_insight_morning').includes('now_review_digest'));
  const source=fs.readFileSync('src/lib/portal-digest-delivery.ts','utf8');assert.match(source,/eq\("report_month",delivery.report_date.slice\(0,7\)\)/);assert.match(source,/references:thread/);assert.match(source,/Insight recipient scope changed/);
 });
