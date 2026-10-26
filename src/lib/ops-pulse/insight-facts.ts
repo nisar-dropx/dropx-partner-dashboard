@@ -17,7 +17,8 @@ export function storeInsightFacts(stores:Store[], health:Health[], activities:{s
    facts.push({...base,id:`${store.id}:health`,topic:'Store Health',label:`${v.band||'Reported'} · Store Health score`,value:v.score_pct==null?'Not scored':`${v.score_pct}%`,detail:`${v.points_earned??'?'} / ${v.points_available??'?'} available points. ${fresh?'Latest expected performance day.':`Latest available ${latest.report_date}; expected ${expectedHealth}. Do not call this current.`}`,period:latest.report_date,href,sentiment:!fresh||v.band==='Critical'?'attention':v.band==='Healthy'?'good':'neutral',bars:history.slice(-3).filter(r=>Number.isFinite(r.values_json?.score_pct)).map(r=>({label:r.report_date.slice(5),value:r.values_json.score_pct}))});
    // Keep source text and status: some percentages have critical qualifiers and some numeric fields are audit dates.
    const metrics=storeHealthMetricDefinitions.map(d=>({d,m:v.metrics?.[d.key]})).filter(x=>x.m?.scored===true);
-   const chosen=[...metrics.filter(x=>x.m.status==='Red').sort((a,b)=>b.d.weight-a.d.weight).slice(0,3),...metrics.filter(x=>x.m.status==='Green').slice(0,1)];
+   // Supply every scored metric; score weight alone must not hide a serious shortage or loss.
+   const chosen=[...metrics].sort((a,b)=>Number(b.m.status==='Red')-Number(a.m.status==='Red')||b.d.weight-a.d.weight);
    for(const {d,m} of chosen)facts.push({...base,id:`${store.id}:${d.key}`,topic:d.category,label:d.label,value:String(m.actual_text),detail:`Source status ${m.status} · target ${m.target_text}. ${fresh?'':`Older scorecard; expected ${expectedHealth}. `}Qualifiers and embedded dates belong to the source.`,period:latest.report_date,href,sentiment:!fresh||m.status==='Red'?'attention':'good'});
   }
   const shifts=activities.shifts.filter(r=>r.location_id===store.id&&r.shift_date<=previousDay&&!['cancelled','accepted'].includes(r.status));

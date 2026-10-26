@@ -21,6 +21,12 @@ test('scorecard qualifiers, dates, missing stores and newest revision survive su
  assert.equal(facts.find(f=>f.id==='s:health').value,'29%');assert.equal(facts.find(f=>f.id==='s:reconciliation').value,'100% (87% not reconciled)');assert.equal(facts.find(f=>f.id==='missing:missing-health').value,'No imported scorecard');assert.match(facts.find(f=>f.id==='s:handover').detail,/zero does not establish/);
 });
 const fact={id:'f',topic:'Health',label:'Score',value:'29%',detail:'Verified',href:'//evil.test',sentiment:'attention',storeCode:'TCD4'};
+test('lower-weight loss and shortage facts remain available alongside speed problems',()=>{
+ const keys=['order_drop_to_picker_acceptance','ppi','stowed_within_sla','shorts_per_1000_orders','reconciliation','loss_rate','iol_aged_7_plus'];
+ const metrics=Object.fromEntries(keys.map(key=>[key,{scored:true,status:'Red',actual_text:'Source value',target_text:'Source target'}]));
+ const facts=storeInsightFacts([{id:'s',station_code:'TTB3'}],[{station_code:'TTB3',report_date:'2026-10-25',values_json:{score_pct:11,metrics}}],{shifts:[],days:[],actions:[]},'2026-10-27');
+ for(const key of keys)assert.ok(facts.some(f=>f.id===`s:${key}`),key);
+});
 const brief={headline:'Focus on inbound',greeting:'Check the evidence.',layout:'spotlight',cards:[{title:'TCD4 needs a check',explanation:'A source signal.',action:'Check the source.',factIds:['f']}]};
 test('AI cards reject unknown evidence, excessive claims and fabricated digits',()=>{
  assert.equal(validateInsightBrief(brief,[fact]).cards.length,1);assert.throws(()=>validateInsightBrief({...brief,cards:[{...brief.cards[0],factIds:['hidden']}]},[fact]));assert.throws(()=>validateInsightBrief({...brief,greeting:'Loss fell 99%'},[fact]));
