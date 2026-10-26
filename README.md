@@ -26,6 +26,9 @@ CASH_RECON_WORKER_URL=https://cash-recon-worker.withered-voice-1c40.workers.dev
 CASH_RECON_ADMIN_KEY=
 REPORT_AUTO_WORKER_URL=https://report-auto-worker.withered-voice-1c40.workers.dev
 REPORT_AUTO_ADMIN_KEY=
+# Fin Final P&L + Amazon invoices (server-only; never NEXT_PUBLIC_)
+# FIN_PNL_API_KEY=
+# FINANCE_WORKER_ADMIN_KEY=
 # Set to false to hide the Auto upload button until the worker is deployed
 # REPORT_AUTO_UI_ENABLED=true
 ```

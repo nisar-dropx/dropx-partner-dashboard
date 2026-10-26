@@ -4,6 +4,8 @@ Fin owns the user workflow at `/finance/final-pnl`; the existing `/finance/profi
 
 The company-scoped connection uses `FIN_PNL_API_KEY` in Vercel production and Finance-worker secrets. Fin's service-role credential remains inside the existing Fin server. The worker can read only the bounded, fixed-company monthly source endpoint, not arbitrary Supabase tables. User reads require `finance_pnl` access and full-company location scope. Edits/additions require the corresponding permission; preview roles remain read-only.
 
+Amazon invoices hub (`/finance/amazon-invoices`) reuses the same `finance_pnl` gate and proxies Finance-worker admin invoice APIs with `FINANCE_WORKER_ADMIN_KEY` (worker `ADMIN_API_KEY`). Never expose that key or `FIN_PNL_API_KEY` to the browser. Catalog search is D1-only; auto-accept is kill-switchable and capped at 25 accepts every 2 hours.
+
 The final view joins invoice documents retained by Finance-worker with server-generated final expense and recovery evidence. Invoice service month controls income, and XPT rollup follows station parent relationships and portal aliases. GST is excluded. Invoice chargebacks are expenses; the loss register is not an additional expense.
 
 Final workforce/helper costs use latest publication revisions, before recovery deductions. Employee costs use approved payroll net earnings plus statutory/other deductions and employer contributions. Operating costs reuse the existing CPS transaction deduplication and expense-period logic, including contract rent. Estimated shipment payout and configurable CPS inputs are excluded. Payroll-labelled transaction groups are held for review to avoid duplicate payroll expense. The view clearly identifies incomplete coverage and remains open for final cost adjustments.

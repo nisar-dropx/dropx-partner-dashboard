@@ -39,6 +39,7 @@ export const financeNavItems: NavItem[] = [
     { code: "finance_revenue", label: "Revenue & Billing", href: "/finance/business?tab=revenue" },
     { code: "finance_pnl", label: "Live provisional P&L", href: "/finance/profitability" },
     { code: "finance_pnl", label: "Final P&L", href: "/finance/final-pnl" },
+    { code: "finance_pnl", label: "Amazon invoices", href: "/finance/amazon-invoices" },
     { code: "finance_pnl", label: "Station Calculations", href: "/finance/business?tab=pnl" },
     { code: "finance_revenue", label: "Amazon Now Units", href: "/finance/now-volumes" }
   ] },

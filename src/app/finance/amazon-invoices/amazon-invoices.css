@@ -1,0 +1,20 @@
+.ai-chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid #dce5ea;background:#f4f8fa;color:#13566d;white-space:nowrap}
+.ai-chip.pending{background:#fff6e8;border-color:#f0d2a0;color:#8a5a12}
+.ai-chip.ready{background:#e8f7ee;border-color:#b7e0c5;color:#1b6b3a}
+.ai-chip.paid{background:#edf2f7;border-color:#c5d0db;color:#3a4f61}
+.ai-chip.disputed,.ai-chip.hold{background:#fdeeee;border-color:#efc0c0;color:#8a2b2b}
+.ai-money{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.ai-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin:12px 0}
+.ai-filters label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#5a6c78;font-weight:600}
+.ai-filters input,.ai-filters select{min-width:140px;padding:8px 10px;border:1px solid #dce5ea;border-radius:7px;font:inherit}
+.ai-pager{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-top:12px}
+.ai-muted{color:#637582;font-size:12px}
+.ai-row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ai-row-actions button{padding:5px 9px;font-size:12px}
+.ai-status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
+.ai-status-grid section{border:1px solid #dce5ea;border-radius:8px;padding:12px 14px;background:#fff}
+.ai-status-grid strong{display:block;font-size:18px;margin:6px 0}
+@media(max-width:700px){
+  .ai-filters input,.ai-filters select{min-width:100%;width:100%}
+  .fp-scroll{overflow-x:auto}
+}
