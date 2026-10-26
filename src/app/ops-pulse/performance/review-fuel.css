@@ -1,9 +1,9 @@
 .review-van-fuel {
   margin: 0 12px 12px;
   min-width: 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
   overflow: hidden;
 }
 .review-fuel-card {
@@ -15,13 +15,13 @@
   width: 100%;
   padding: 14px;
   border: 0;
-  background: #f8fafc;
+  background: var(--surface-soft);
   text-align: left;
-  color: #172033;
+  color: var(--ink);
   cursor: pointer;
 }
 .review-fuel-card:hover {
-  background: #fff7ed;
+  background: var(--ops-selected-bg);
 }
 .review-fuel-card small,
 .review-fuel-totals small,
@@ -31,7 +31,7 @@
   margin-top: 4px;
   font-size: 11px;
   font-weight: 400;
-  color: #64748b;
+  color: var(--muted);
 }
 .review-fuel-card-values {
   display: flex;
@@ -44,7 +44,7 @@
   font-variant-numeric: tabular-nums;
 }
 .review-fuel-card-values > b {
-  color: #f05a28;
+  color: var(--ops-orange);
 }
 .review-fuel-history {
   padding: 12px;
@@ -66,17 +66,17 @@
 .review-fuel-history button,
 .review-fuel-load button {
   border: 1px solid #dbe3ed;
-  background: #fff;
-  border-radius: 7px;
+  background: var(--surface);
+  border-radius: 3px;
   padding: 7px 9px;
   font-size: 12px;
-  color: #334155;
+  color: var(--ink);
   cursor: pointer;
   min-height: 34px;
 }
 .review-fuel-history button[aria-pressed="true"] {
-  background: #172033;
-  border-color: #172033;
+  background: var(--ops-navy);
+  border-color: var(--ops-navy);
   color: #fff;
 }
 .review-fuel-totals {
@@ -86,13 +86,13 @@
 }
 .review-fuel-totals > div {
   border: 1px solid #e8edf3;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 10px;
   min-width: 0;
 }
 .review-fuel-totals span {
   font-size: 11px;
-  color: #64748b;
+  color: var(--muted);
 }
 .review-fuel-totals strong {
   display: block;
@@ -104,7 +104,7 @@
 .review-fuel-note {
   font-size: 11px;
   line-height: 1.5;
-  color: #64748b;
+  color: var(--muted);
   margin: 10px 0;
 }
 .review-fuel-scroll {
@@ -112,7 +112,7 @@
   overflow: auto;
   max-height: 340px;
   border: 1px solid #e8edf3;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 .review-fuel-scroll table {
   width: 100%;
@@ -124,12 +124,12 @@
 .review-fuel-scroll caption {
   text-align: left;
   padding: 9px;
-  color: #64748b;
+  color: var(--muted);
   font-size: 11px;
 }
 .review-fuel-scroll :is(th, td) {
   padding: 9px 10px;
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--line);
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -143,15 +143,15 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #f8fafc;
-  color: #475569;
+  background: var(--surface-soft);
+  color: var(--muted);
   font-size: 11px;
 }
 .review-fuel-scroll tbody th {
   position: sticky;
   left: 0;
   z-index: 1;
-  background: #fff;
+  background: var(--surface);
 }
 .review-fuel-scroll thead th:first-child {
   left: 0;
@@ -165,11 +165,11 @@
   flex-wrap: wrap;
   gap: 7px 14px;
   margin: 12px 0;
-  color: #64748b;
+  color: var(--muted);
   font-size: 11px;
 }
 .review-fuel-pattern b {
-  color: #334155;
+  color: var(--ink);
 }
 .review-fuel-vehicles {
   margin-top: 14px;
@@ -182,7 +182,7 @@
 }
 .review-fuel-entries > summary {
   padding: 9px 0;
-  color: #334155;
+  color: var(--ink);
   cursor: pointer;
   font-size: 12px;
 }
@@ -193,7 +193,7 @@
 }
 .review-fuel-load {
   margin: 10px 14px;
-  color: #64748b;
+  color: var(--muted);
   font-size: 12px;
 }
 .review-fuel-dialog {
@@ -204,11 +204,11 @@
   margin: auto;
   padding: 20px;
   border: 1px solid #dbe3ed;
-  border-radius: 14px;
-  background: #fff;
-  color: #172033;
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
   overflow: auto;
-  box-shadow: 0 20px 70px #17203340;
+  box-shadow: 0 20px 70px var(--ink)40;
 }
 .review-fuel-dialog::backdrop {
   background: #0f172a70;
@@ -219,17 +219,17 @@
 }
 .review-fuel-dialog .review-fuel-toolbar span {
   font-size: 12px;
-  color: #64748b;
+  color: var(--muted);
 }
 .review-fuel-dialog .review-fuel-scroll {
   max-height: min(55dvh, 480px);
 }
 .review-fuel-dialog :is(button, [tabindex]):focus-visible {
-  outline: 2px solid #f97316;
+  outline: 2px solid var(--ops-focus);
   outline-offset: -2px;
 }
 .review-van-fuel :is(button, summary, [tabindex]):focus-visible {
-  outline: 2px solid #f97316;
+  outline: 2px solid var(--ops-focus);
   outline-offset: -2px;
 }
 @media (max-width: 600px) {

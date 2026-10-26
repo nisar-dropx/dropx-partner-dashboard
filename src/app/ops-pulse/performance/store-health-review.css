@@ -2,7 +2,7 @@
 
 .store-health-review-desk .store-health-band.green { color: #15803d; }
 .store-health-review-desk .store-health-band.amber { color: #b45309; }
-.store-health-review-desk .store-health-band.red { color: #b91c1c; }
+.store-health-review-desk .store-health-band.red { color: var(--red); }
 
 /* Five status cells + Start review — keep on one row like Last Mile’s status strip. */
 .store-health-review-desk .performance-review-statusbar {
@@ -14,8 +14,8 @@
   margin: 0 12px 8px;
   padding: 8px 10px;
   border: 1px solid #e8edf3;
-  border-radius: 8px;
-  background: #f8fafc;
+  border-radius: 4px;
+  background: var(--surface-soft);
 }
 
 .store-health-score-meta p {
@@ -25,11 +25,11 @@
   align-items: baseline;
   gap: 6px 12px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .store-health-score-meta strong {
-  color: #172033;
+  color: var(--ink);
   font-size: 13px;
 }
 
@@ -37,18 +37,18 @@
   font-style: normal;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: #172033;
+  color: var(--ink);
 }
 
 .store-health-score-meta-avg {
   margin-left: auto;
-  color: #475569;
+  color: var(--muted);
   font-weight: 700;
 }
 
 .store-health-score-meta-avg small {
   margin-left: 4px;
-  color: #94a3b8;
+  color: var(--muted);
   font-weight: 650;
 }
 
@@ -67,8 +67,8 @@
   min-width: 0;
   padding: 6px;
   border: 1px solid #e8edf3;
-  border-radius: 8px;
-  background: #fff;
+  border-radius: 4px;
+  background: var(--surface);
 }
 
 .store-health-board-label {
@@ -85,13 +85,13 @@
   font-weight: 800;
   letter-spacing: .03em;
   text-transform: uppercase;
-  color: #475569;
+  color: var(--muted);
 }
 
 .store-health-board-label > span {
   font-size: 10px;
   font-weight: 700;
-  color: #94a3b8;
+  color: var(--muted);
 }
 
 .store-health-metric-group-counts {
@@ -108,14 +108,14 @@
   min-width: 16px;
   text-align: center;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: 3px;
   letter-spacing: .02em;
 }
 
-.store-health-metric-group-counts em.red { background: #fee2e2; color: #b91c1c; }
-.store-health-metric-group-counts em.amber { background: #ffedd5; color: #c2410c; }
+.store-health-metric-group-counts em.red { background: #fee2e2; color: var(--red); }
+.store-health-metric-group-counts em.amber { background: var(--ops-selected-border); color: var(--ops-orange-ink); }
 .store-health-metric-group-counts em.green { background: #dcfce7; color: #15803d; }
-.store-health-metric-group-counts em.neutral { background: #e2e8f0; color: #64748b; }
+.store-health-metric-group-counts em.neutral { background: var(--line); color: var(--muted); }
 
 .store-health-review-desk .store-health-metric-card {
   display: flex;
@@ -125,20 +125,20 @@
   width: 100%;
   margin: 0;
   padding: 6px 7px 5px;
-  border: 1px solid #e2e8f0;
-  border-radius: 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
   min-height: 0;
   text-align: left;
   font: inherit;
   color: inherit;
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
   transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease;
 }
 
 .store-health-review-desk .store-health-metric-card:hover,
 .store-health-review-desk .store-health-metric-card:focus-visible {
-  border-color: #94a3b8;
+  border-color: var(--muted);
   box-shadow: 0 0 0 2px rgba(15, 23, 42, .06);
   outline: none;
 }
@@ -171,7 +171,7 @@
   font-weight: 650;
   white-space: normal;
   line-height: 1.2;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .store-health-review-desk .performance-review-facts {
@@ -192,7 +192,7 @@
 
 .store-health-review-desk .store-health-insights {
   margin: 0;
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--line);
 }
 
 .store-health-review-desk .store-health-insights > summary {
@@ -205,11 +205,11 @@
   padding: 10px 13px;
   font-size: 12px;
   font-weight: 750;
-  color: #172033;
+  color: var(--ink);
 }
 
 .store-health-review-desk .store-health-insights > summary small {
-  color: #94a3b8;
+  color: var(--muted);
   font-size: 11px;
   font-weight: 650;
 }
@@ -218,7 +218,7 @@
 .store-health-review-desk .store-health-insights > summary::after {
   content: "+";
   margin-left: auto;
-  color: #94a3b8;
+  color: var(--muted);
   font-weight: 700;
 }
 .store-health-review-desk .store-health-insights[open] > summary::after { content: "−"; }
@@ -232,10 +232,10 @@
 .store-health-review-desk .store-health-insights p {
   margin: 0;
   padding: 9px 11px;
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  color: #334155;
+  border-radius: 4px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: var(--ink);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -246,7 +246,7 @@
   font-size: 10px;
   letter-spacing: .04em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .store-health-review-desk .review-scorecard-toolbar {
@@ -261,22 +261,22 @@
 }
 
 .store-health-review-desk .store-health-metric-card.red {
-  background: linear-gradient(180deg, #fff5f5 0%, #fef2f2 100%);
-  border-color: #fecaca;
+  background: var(--surface);
+  border-color: var(--line);
 }
 
 .store-health-review-desk .store-health-metric-card.amber {
-  background: linear-gradient(180deg, #fffbeb 0%, #fff7ed 100%);
-  border-color: #fde68a;
+  background: var(--ops-selected-bg);
+  border-color: var(--ops-selected-border);
 }
 
 .store-health-review-desk .store-health-metric-card.green {
-  background: linear-gradient(180deg, #f0fdf4 0%, #ecfdf5 100%);
-  border-color: #bbf7d0;
+  background: var(--green-soft);
+  border-color: var(--line);
 }
 
 .store-health-review-desk .store-health-metric-card.neutral {
-  background: #f8fafc;
+  background: var(--surface-soft);
 }
 
 /* RCA / misses — denser grouped list */
@@ -289,9 +289,9 @@
   gap: 6px;
   margin: 0 0 12px;
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-soft);
 }
 
 .store-health-review-desk .store-health-rca-progress > div:first-child {
@@ -304,27 +304,27 @@
 .store-health-review-desk .store-health-rca-progress strong {
   font-size: 18px;
   font-variant-numeric: tabular-nums;
-  color: #172033;
+  color: var(--ink);
 }
 
 .store-health-review-desk .store-health-rca-progress span,
 .store-health-review-desk .store-health-rca-progress small {
-  color: #64748b;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 650;
 }
 
 .store-health-review-desk .store-health-rca-progress-track {
   height: 6px;
-  border-radius: 999px;
-  background: #e2e8f0;
+  border-radius: 3px;
+  background: var(--line);
   overflow: hidden;
 }
 
 .store-health-review-desk .store-health-rca-progress-track i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #f59e0b, #16a34a);
+  background: var(--ops-orange);
   border-radius: inherit;
 }
 
@@ -339,7 +339,7 @@
   font-weight: 800;
   letter-spacing: .04em;
   text-transform: uppercase;
-  color: #475569;
+  color: var(--muted);
 }
 
 .store-health-review-desk .store-health-rca-group small {
@@ -347,25 +347,25 @@
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
-  color: #94a3b8;
+  color: var(--muted);
 }
 
 .store-health-review-desk .store-health-rca-item {
   margin: 0 0 8px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
   overflow: hidden;
 }
 
 .store-health-review-desk .store-health-rca-item.red {
-  border-color: #fecaca;
-  background: linear-gradient(180deg, #fff8f8 0%, #fff 42%);
+  border-color: var(--line);
+  background: var(--surface);
 }
 
 .store-health-review-desk .store-health-rca-item.amber {
-  border-color: #fde68a;
-  background: linear-gradient(180deg, #fffbeb 0%, #fff 42%);
+  border-color: var(--ops-selected-border);
+  background: var(--ops-selected-bg);
 }
 
 .store-health-review-desk .store-health-rca-item > summary {
@@ -390,7 +390,7 @@
 .store-health-review-desk .store-health-rca-item > summary small {
   grid-column: 2;
   margin: 0;
-  color: #64748b;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 650;
   line-height: 1.35;
@@ -422,12 +422,12 @@
   letter-spacing: .02em;
   text-transform: uppercase;
   padding: 3px 7px;
-  border-radius: 999px;
+  border-radius: 3px;
 }
 
 .store-health-review-desk .store-health-rca-status.needed {
-  background: #ffedd5;
-  color: #c2410c;
+  background: var(--ops-selected-border);
+  color: var(--ops-orange-ink);
 }
 
 .store-health-review-desk .store-health-rca-status.saved {
@@ -464,8 +464,8 @@
 }
 
 .store-health-metric-trend em.up { color: #15803d; }
-.store-health-metric-trend em.down { color: #b91c1c; }
-.store-health-metric-trend em.flat { color: #94a3b8; }
+.store-health-metric-trend em.down { color: var(--red); }
+.store-health-metric-trend em.flat { color: var(--muted); }
 
 .store-health-bars {
   display: flex;
@@ -481,7 +481,7 @@
 .store-health-bars.empty {
   min-width: 56px;
   border-radius: 4px;
-  background: #e2e8f0;
+  background: var(--line);
 }
 
 .store-health-bar {
@@ -499,7 +499,7 @@
 .store-health-bar.neutral,
 .store-health-bar.missing { background: #cbd5e1; opacity: .7; }
 .store-health-bar.selected {
-  box-shadow: 0 0 0 1px #172033;
+  box-shadow: 0 0 0 1px var(--ink);
 }
 
 .store-health-metric-modal-backdrop {
@@ -527,14 +527,14 @@
   font-weight: 750;
   letter-spacing: .04em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .store-health-metric-modal h2 {
   margin: 0;
   font-size: 18px;
   line-height: 1.25;
-  color: #172033;
+  color: var(--ink);
 }
 
 .store-health-metric-modal-body {
@@ -551,9 +551,9 @@
 
 .store-health-metric-modal-facts article {
   padding: 10px 11px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-soft);
 }
 
 .store-health-metric-modal-facts article.red { background: #fef2f2; border-color: #fecaca; }
@@ -563,7 +563,7 @@
 .store-health-metric-modal-facts span,
 .store-health-metric-modal-facts small {
   display: block;
-  color: #64748b;
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
@@ -573,20 +573,20 @@
   margin: 4px 0;
   font-size: 18px;
   font-variant-numeric: tabular-nums;
-  color: #172033;
+  color: var(--ink);
 }
 
 .store-health-metric-modal-facts strong.up { color: #15803d; }
-.store-health-metric-modal-facts strong.down { color: #b91c1c; }
-.store-health-metric-modal-facts strong.flat { color: #64748b; }
+.store-health-metric-modal-facts strong.down { color: var(--red); }
+.store-health-metric-modal-facts strong.flat { color: var(--muted); }
 
 .store-health-metric-modal-chart {
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
 }
 
 .store-health-metric-modal-chart-head {
@@ -600,12 +600,12 @@
 .store-health-metric-modal-chart-head h3 {
   margin: 0;
   font-size: 13px;
-  color: #172033;
+  color: var(--ink);
 }
 
 .store-health-metric-modal-chart-head small,
 .store-health-metric-modal-note {
-  color: #64748b;
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -634,27 +634,27 @@
   align-items: center;
   padding: 6px 8px;
   border-radius: 6px;
-  background: #f8fafc;
+  background: var(--surface-soft);
   font-size: 12px;
 }
 
 .store-health-metric-modal-days li.selected {
-  outline: 1px solid #94a3b8;
-  background: #fff;
+  outline: 1px solid var(--muted);
+  background: var(--surface);
 }
 
 .store-health-metric-modal-days li.red { background: #fef2f2; }
 .store-health-metric-modal-days li.amber { background: #fffbeb; }
 .store-health-metric-modal-days li.green { background: #f0fdf4; }
 
-.store-health-metric-modal-days span { color: #64748b; font-weight: 700; }
-.store-health-metric-modal-days strong { font-variant-numeric: tabular-nums; color: #172033; }
+.store-health-metric-modal-days span { color: var(--muted); font-weight: 700; }
+.store-health-metric-modal-days strong { font-variant-numeric: tabular-nums; color: var(--ink); }
 .store-health-metric-modal-days em {
   font-style: normal;
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .store-health-metric-modal-note { margin: 0; }

@@ -4,7 +4,7 @@
   padding: 5px;
   background: #f2f5f9;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 5px;
   width: max-content;
   max-width: 100%;
   overflow: auto;
@@ -16,14 +16,14 @@
   background: transparent;
   color: #617086;
   padding: 9px 13px;
-  border-radius: 8px;
+  border-radius: 4px;
   font-weight: 700;
   cursor: pointer;
 }
 .tabs button.active {
-  background: #1f2a44;
+  background: var(--ops-navy);
   color: #fff;
-  box-shadow: 0 1px 4px #1f2a4433;
+  box-shadow: var(--ops-shadow);
 }
 .summary {
   display: grid;
@@ -34,7 +34,7 @@
 .metric {
   border: 1px solid #e5eaf1;
   background: #fff;
-  border-radius: 14px;
+  border-radius: 5px;
   padding: 15px;
 }
 .metric span {
@@ -81,7 +81,7 @@
 .auditCard {
   border: 1px solid #e1e7ef;
   background: #fff;
-  border-radius: 14px;
+  border-radius: 5px;
   padding: 14px;
   display: grid;
   grid-template-columns:
@@ -145,7 +145,7 @@
   margin-top: 14px;
   border: 1px solid #dce5ef;
   background: #fff;
-  border-radius: 16px;
+  border-radius: 5px;
   overflow: hidden;
 }
 .detailHead {
@@ -174,7 +174,7 @@
 }
 .section {
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 5px;
   overflow: hidden;
   background: #fff;
 }
@@ -219,7 +219,7 @@
   font-size: 14px;
   font-weight: 400;
   border: 1px solid #d6e0eb;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 9px 10px;
   background: #fff;
   color: #24314a;
@@ -254,7 +254,7 @@
 }
 .denom {
   border: 1px solid #e1e8f0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 8px;
   display: grid;
   gap: 5px;
@@ -297,7 +297,7 @@
 }
 .notice {
   padding: 10px 12px;
-  border-radius: 9px;
+  border-radius: 4px;
   background: #eaf5fe;
   color: #275a96;
   font-size: 13px;
@@ -331,7 +331,7 @@
   gap: 1px;
   background: #e4eaf2;
   border: 1px solid #e4eaf2;
-  border-radius: 12px;
+  border-radius: 5px;
   overflow: hidden;
 }
 .day {
@@ -360,7 +360,7 @@
 .scheduleForm {
   border: 1px solid #dbe5f0;
   background: #fff;
-  border-radius: 14px;
+  border-radius: 5px;
   padding: 15px;
   margin-bottom: 14px;
 }
@@ -435,8 +435,6 @@
   }
 }
 .workspace {
-  --ink: #21344d;
-  --muted: #697b90;
   color: var(--ink);
   min-width: 0;
 }
@@ -467,7 +465,7 @@
 .eyebrow {
   font-size: 10px;
   font-weight: 800;
-  color: #ed5429;
+  color: var(--brand);
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
@@ -475,13 +473,13 @@
   font-size: 12px;
   background: #edf3fa;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 4px;
   margin-bottom: 16px;
 }
 .controlPanel {
   background: #fff;
   border: 1px solid #dfe7ef;
-  border-radius: 14px;
+  border-radius: 5px;
   padding: 14px;
   display: grid;
   gap: 14px;
@@ -491,7 +489,7 @@
 }
 .toolbar > select {
   border: 1px solid #d7e1ec;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 11px;
   font: inherit;
   font-size: 12px;
@@ -501,7 +499,7 @@
   display: flex !important;
   align-items: center;
   border: 1px solid #d7e1ec;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 10px;
   gap: 8px;
   flex: 1;
@@ -527,7 +525,7 @@
   width: 100%;
   border: 1px solid #d7e1ec;
   background: #fff;
-  border-radius: 9px;
+  border-radius: 4px;
   padding: 7px 11px;
   color: var(--ink);
   cursor: pointer;
@@ -546,8 +544,8 @@
   padding: 12px;
   background: #fff;
   border: 1px solid #d7e1ec;
-  border-radius: 12px;
-  box-shadow: 0 12px 35px #1f334927;
+  border-radius: 5px;
+  box-shadow: var(--ops-shadow);
   z-index: 20;
 }
 .filterMenu > input {
@@ -570,7 +568,7 @@
   min-width: 0;
 }
 .filterOptions input {
-  accent-color: #df5326;
+  accent-color: var(--brand);
 }
 .textButton {
   background: transparent;
@@ -693,7 +691,7 @@
   transition: box-shadow 0.15s;
 }
 .auditCard:hover {
-  box-shadow: 0 4px 16px #1d345414;
+  box-shadow: var(--ops-shadow);
 }
 .auditCard p {
   font-size: 11px;
@@ -721,7 +719,7 @@
 .plan {
   background: white;
   border: 1px solid #dfe7ef;
-  border-radius: 14px;
+  border-radius: 5px;
   overflow: hidden;
   margin-bottom: 18px;
 }
@@ -840,7 +838,7 @@
 }
 .slot {
   border: 1px solid #dce5ef;
-  border-radius: 8px;
+  border-radius: 4px;
   background: white;
   padding: 10px;
   width: 100%;
@@ -870,13 +868,13 @@
 }
 .dialog {
   border: 0;
-  border-radius: 18px;
+  border-radius: 5px;
   width: calc(100% - 40px);
   max-width: 1260px;
   max-height: 92dvh;
   padding: 0;
   color: var(--ink);
-  box-shadow: 0 25px 90px #11274455;
+  box-shadow: var(--ops-shadow);
   overflow: auto;
 }
 .dialog::backdrop {
@@ -904,7 +902,7 @@
   padding: 8px;
   background: #f4f7fa;
   border: 1px solid #dce5ef;
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
 }
 .modalBody {
@@ -919,7 +917,7 @@
 .daySelector > button {
   flex-shrink: 0;
   border: 1px solid #dce5ef;
-  border-radius: 10px;
+  border-radius: 4px;
   background: white;
   padding: 10px;
   text-align: left;
@@ -963,7 +961,7 @@
   margin: 12px 18px;
   padding: 12px;
   border: 1px solid #dce5ef;
-  border-radius: 9px;
+  border-radius: 4px;
 }
 .reschedule summary {
   cursor: pointer;
@@ -1002,7 +1000,7 @@
 .empty {
   background: white;
   border: 1px dashed #dce5ef;
-  border-radius: 12px;
+  border-radius: 5px;
 }
 .detail {
   margin-top: 8px;
@@ -1188,7 +1186,7 @@
 .personal {
   border: 1px solid #e0e7f0;
   background: white;
-  border-radius: 16px;
+  border-radius: 5px;
   overflow: hidden;
 }
 .personalGrid {
@@ -1208,7 +1206,7 @@
   margin: 0 0 12px;
 }
 .personalGrid h3 span {
-  border-radius: 20px;
+  border-radius: 3px;
   background: #edf2f8;
   padding: 2px 9px;
 }
@@ -1268,7 +1266,7 @@
   gap: 12px;
   margin: 16px 0;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 5px;
   background: #f1f6fb;
 }
 .cashTotals span,
@@ -1283,7 +1281,7 @@
   padding: 16px;
   background: #fff5e8;
   border: 1px solid #f2c17e;
-  border-radius: 12px;
+  border-radius: 5px;
   display: grid;
   gap: 10px;
 }
@@ -1292,7 +1290,7 @@
   border: 1px solid #fecaca;
   background: #fff1f2;
   color: #b91c1c;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 9px 14px;
   font-weight: 700;
   cursor: pointer;
@@ -1305,7 +1303,7 @@
   margin: 12px 18px;
   padding: 16px;
   border: 1px solid #fecaca;
-  border-radius: 10px;
+  border-radius: 4px;
   background: #fff7f7;
 }
 .checkPhotos {
@@ -1313,7 +1311,7 @@
   padding: 12px;
   background: #f7f9fc;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 4px;
 }
 .checkPhotos input {
   max-width: 100%;
@@ -1370,7 +1368,7 @@
   gap: 1px;
   margin: 10px 18px 0;
   border: 1px solid #dce5ef;
-  border-radius: 10px;
+  border-radius: 4px;
   overflow: hidden;
   background: #dce5ef;
 }
@@ -1485,7 +1483,7 @@
   min-height: 42px;
   padding: 10px 12px;
   border: 1px solid #cfd9e6;
-  border-radius: 10px;
+  border-radius: 4px;
   background: #fff;
   color: #1c2940;
   font: inherit;
@@ -1583,13 +1581,13 @@
   padding: 10px;
   background: #fff;
   border: 1px solid #d5e0ec;
-  border-radius: 12px;
-  box-shadow: 0 16px 36px rgba(20, 40, 70, 0.16);
+  border-radius: 5px;
+  box-shadow: var(--ops-shadow);
 }
 .staffSearch input {
   width: 100%;
   border: 1px solid #d5e0ec;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 9px 11px;
   font: inherit;
   font-size: 13px;
@@ -1624,7 +1622,7 @@
   gap: 10px !important;
   margin: 0;
   padding: 8px 8px;
-  border-radius: 9px;
+  border-radius: 4px;
   cursor: pointer;
   font-weight: 400 !important;
 }
@@ -1676,7 +1674,7 @@
   border: 0;
   background: #2f6fad;
   color: #fff;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 6px 14px;
   font: inherit;
   font-size: 12px;
@@ -1691,7 +1689,7 @@
 }
 .shipmentResponse {
   border: 1px solid #dbe5f0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 12px;
   margin: 12px 0;
 }
@@ -1712,8 +1710,8 @@
 .preparationGrid>div {padding:16px;border:1px solid #dbe5f3;border-radius:12px;background:#f8faff;}
 .preparationGrid p {font-size:13px;line-height:1.6;color:#64748b;}
 .preparationGrid textarea {width:100%;box-sizing:border-box;background:white;border:1px solid #dbe5f3;border-radius:8px;padding:10px;}
-.scoreReport {background:white;border:1px solid #dbe5f3;border-radius:16px;overflow:hidden;padding:18px;}
-.scoreHeadline {background:linear-gradient(120deg,#122b48,#176f76);color:white;border-radius:12px;padding:22px;margin-bottom:16px;}
+.scoreReport {background:white;border:1px solid var(--line,#d5dbdb);border-radius:6px;overflow:hidden;padding:18px;}
+.scoreHeadline {background:var(--ops-navy);color:#fff;border-radius:5px;padding:18px;margin-bottom:14px;box-shadow:var(--ops-shadow);}
 .scoreHeadline h2 { color: #fff;font-size:36px;margin:8px 0;}.scoreHeadline h2 span {font-size:20px;margin-left:12px;}.scoreHeadline p {font-size:13px;line-height:1.6;}
 .scoreArea {border:1px solid #e2e8f0;border-radius:10px;margin-top:10px;overflow:hidden;}
 .scoreArea summary {display:flex;justify-content:space-between;gap:12px;padding:14px;cursor:pointer;font-weight:650;}
@@ -1726,13 +1724,13 @@
 .scorePhotos img{width:100%;height:120px;object-fit:cover;border-radius:8px;}
 .scorePhotos small{overflow-wrap:anywhere;display:block;}
 
-.reportPanel { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; }
+.reportPanel { background: #fff; border: 1px solid #e2e8f0; border-radius: 5px; padding: 18px; }
 .reportHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .reportHeader h2 { margin: 0 0 6px; font-size: 18px; }
 .reportHeader p, .reportHint { margin: 6px 0 14px; font-size: 12px; line-height: 1.6; color: #617086; }
 .reportDates { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
 .reportDates label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; color: #475569; }
-.reportDates input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; color: #1e293b; background: white; min-height: 40px; }
+.reportDates input { border: 1px solid #cbd5e1; border-radius: 4px; padding: 9px 10px; color: #1e293b; background: white; min-height: 40px; }
 .reportTable { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 .reportTable th { color: #53647b; background: #f5f7fb; white-space: nowrap; padding: 12px; }
 .reportTable td { padding: 12px; border-bottom: 1px solid #edf1f5; vertical-align: top; min-width: 130px; }
@@ -1754,7 +1752,7 @@
   margin: 8px 0 12px;
   padding: 10px 12px;
   border: 1px dashed #c9cfdb;
-  border-radius: 10px;
+  border-radius: 4px;
   background: #f7f8fb;
 }
 .bulkBar strong {
