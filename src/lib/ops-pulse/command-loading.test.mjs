@@ -32,7 +32,7 @@ test('Last Mile heading, controls and checks render while the CPS snapshot is st
  const rendered=content.type(content.props);
  assert.equal(typeof rendered?.then,'undefined','page content must not await the cost engine');
  const nodes=descendants(rendered);
- assert(nodes.some(node=>node.type==='h1'&&node.props.children==='Last Mile command center'));
+ assert(nodes.some(node=>node.type==='h1'&&node.props.children==='Command center'));
  const attention=nodes.find(node=>node.type==='Attention');
  assert(attention?.props.extraItems instanceof Promise);
  assert.equal(attention.props.station,'');

@@ -288,8 +288,8 @@ export function ActivitiesReportClient(props: Props) {
           rows={props.shift.rows}
           stores={props.shift.stores}
           shiftSlots={props.shift.shiftSlots || []}
-          from={from}
-          to={to}
+          from={props.from}
+          to={props.to}
           store={store}
           setStore={setStore}
           person={person}
@@ -313,6 +313,8 @@ export function ActivitiesReportClient(props: Props) {
           summary={props.store.summary}
           rows={props.store.rows}
           stores={props.store.stores}
+          from={props.from}
+          to={props.to}
           store={store}
           setStore={setStore}
           person={person}
@@ -433,18 +435,21 @@ function healthLabel(health: StoreContinuityHealth) {
 
 function StoreContinuityPanel({
   board,
+  mode = "shift",
   activeStoreId,
   onSelectStore,
   onClearStoreFilter,
   onOpenReport,
 }: {
   board: StoreContinuityBoard;
+  mode?: "shift" | "store";
   activeStoreId: string;
   onSelectStore: (locationId: string) => void;
   onClearStoreFilter: () => void;
   onOpenReport: (id: string) => void;
 }) {
   const multiDay = board.dates.length > 1;
+  const isStore = mode === "store";
   const [detailRow, setDetailRow] = useState<StoreContinuityRow | null>(null);
 
   useEffect(() => {
@@ -461,20 +466,24 @@ function StoreContinuityPanel({
   };
 
   return (
-    <section className={rui.contPanel} aria-label="Store shift continuity">
+    <section
+      className={rui.contPanel}
+      aria-label={isStore ? "Store day continuity" : "Store shift continuity"}
+    >
       <div className={rui.contHead}>
         <div>
-          <h2>Store shift continuity</h2>
+          <h2>{isStore ? "Store day continuity" : "Store shift continuity"}</h2>
           <p>
-            Every store × every configured slot
-            {multiDay ? ` across ${board.dates.length} days` : " for this day"} —
-            click a store card for the full day-by-day view.
+            {isStore
+              ? `Every store × every day${multiDay ? ` across ${board.dates.length} days` : ""} — gaps, stale opens, and submitted closes.`
+              : `Every store × every configured slot${multiDay ? ` across ${board.dates.length} days` : " for this day"} — gaps, stale opens, and unbroken handovers.`}{" "}
+            Click a store card for the full day-by-day view.
           </p>
         </div>
         <div className={rui.contSummary}>
           <span className={rui.contStat}>
             <strong>{board.continuityPct}%</strong>
-            accepted
+            {isStore ? "submitted" : "accepted"}
           </span>
           <span className={rui.contStat}>
             <strong>
@@ -502,12 +511,12 @@ function StoreContinuityPanel({
       </div>
 
       <div className={rui.contLegend} aria-label="Legend">
-        <span className={rui.contCellOk}>OK</span>
-        <span className={rui.contCellSubmit}>Submitted</span>
+        <span className={rui.contCellOk}>{isStore ? "Submitted" : "OK"}</span>
+        {!isStore ? <span className={rui.contCellSubmit}>Submitted</span> : null}
         <span className={rui.contCellOpen}>Open</span>
         <span className={rui.contCellStale}>Stale</span>
         <span className={rui.contCellMiss}>Missing</span>
-        <span className={rui.contCellBad}>Rejected</span>
+        {!isStore ? <span className={rui.contCellBad}>Rejected</span> : null}
       </div>
 
       {!board.stores.length ? (
@@ -522,6 +531,7 @@ function StoreContinuityPanel({
               key={row.locationId}
               row={row}
               dates={board.dates}
+              mode={mode}
               active={activeStoreId === row.locationId}
               onSelect={() => openStoreDetail(row)}
               onOpenReport={onOpenReport}
@@ -535,6 +545,7 @@ function StoreContinuityPanel({
           row={detailRow}
           slots={board.slots}
           dates={board.dates}
+          mode={mode}
           onClose={() => setDetailRow(null)}
           onOpenReport={(id) => {
             // Close continuity first so the checklist report is not trapped under it.
@@ -555,6 +566,7 @@ function StoreContinuityDaysModal({
   row,
   slots,
   dates,
+  mode = "shift",
   onClose,
   onOpenReport,
   onClearFilter,
@@ -562,10 +574,12 @@ function StoreContinuityDaysModal({
   row: StoreContinuityRow;
   slots: string[];
   dates: string[];
+  mode?: "shift" | "store";
   onClose: () => void;
   onOpenReport: (id: string) => void;
   onClearFilter: () => void;
 }) {
+  const isStore = mode === "store";
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -634,13 +648,18 @@ function StoreContinuityDaysModal({
       >
         <header className={rui.contModalHead}>
           <div>
-            <p className={rui.contModalEyebrow}>Store shift continuity</p>
+            <p className={rui.contModalEyebrow}>
+              {isStore ? "Store day continuity" : "Store shift continuity"}
+            </p>
             <h2 id={titleId} className={rui.contModalTitle}>
               {row.storeCode}
             </h2>
             <p className={rui.contModalMeta}>
-              {rangeLabel} · {dates.length} day{dates.length === 1 ? "" : "s"} ·{" "}
-              {slots.length} slot{slots.length === 1 ? "" : "s"}/day ·{" "}
+              {rangeLabel} · {dates.length} day{dates.length === 1 ? "" : "s"}
+              {!isStore
+                ? ` · ${slots.length} slot${slots.length === 1 ? "" : "s"}/day`
+                : ""}{" "}
+              ·{" "}
               <span className={healthClass(row.health)}>
                 {healthLabel(row.health)}
               </span>
@@ -671,7 +690,7 @@ function StoreContinuityDaysModal({
         <div className={rui.contModalSummary}>
           <span>
             <strong>{row.continuityPct}%</strong>
-            <small>Accepted</small>
+            <small>{isStore ? "Submitted" : "Accepted"}</small>
           </span>
           <span>
             <strong>
@@ -710,9 +729,10 @@ function StoreContinuityDaysModal({
                   <div>
                     <strong>{formatOpsDate(day.date)}</strong>
                     <span className={rui.contModalMeta}>
-                      {day.covered}/{day.cells.length} slots · {day.accepted}{" "}
-                      accepted
-                      {day.missing ? ` · ${day.missing} gap` : ""}
+                      {isStore
+                        ? `${day.covered ? "Checklist on file" : "No checklist"} · ${day.accepted ? "submitted" : day.stale ? "stale" : day.covered ? "open" : "missing"}`
+                        : `${day.covered}/${day.cells.length} slots · ${day.accepted} accepted`}
+                      {day.missing && !isStore ? ` · ${day.missing} gap` : ""}
                       {day.stale ? ` · ${day.stale} stale` : ""}
                     </span>
                   </div>
@@ -723,9 +743,11 @@ function StoreContinuityDaysModal({
                 <div className={rui.contDaySlots}>
                   {day.cells.map((cell) => {
                     const title = [
-                      `${cell.date} ${cell.slot}`,
+                      isStore ? cell.date : `${cell.date} ${cell.slot}`,
                       cell.kind,
-                      cell.siName ? `SI ${cell.siName}` : null,
+                      cell.siName
+                        ? `${isStore ? "Owner" : "SI"} ${cell.siName}`
+                        : null,
                       cell.pct ? `${cell.pct}%` : null,
                     ]
                       .filter(Boolean)
@@ -737,8 +759,12 @@ function StoreContinuityDaysModal({
                         title={title}
                       >
                         <div className={rui.contDaySlotTop}>
-                          <strong>{cell.slot}</strong>
-                          <span>{continuityCellLabel(cell.kind)}</span>
+                          <strong>{isStore ? "Day checklist" : cell.slot}</strong>
+                          <span>
+                            {isStore && cell.kind === "accepted"
+                              ? "Done"
+                              : continuityCellLabel(cell.kind)}
+                          </span>
                         </div>
                         <div className={rui.contDaySlotBody}>
                           {cell.kind === "missing" ? (
@@ -793,17 +819,20 @@ function dayHealthFromCells(
 function StoreContinuityCard({
   row,
   dates,
+  mode = "shift",
   active,
   onSelect,
   onOpenReport,
 }: {
   row: StoreContinuityRow;
   dates: string[];
+  mode?: "shift" | "store";
   active: boolean;
   onSelect: () => void;
   onOpenReport: (id: string) => void;
 }) {
   const multiDay = dates.length > 1;
+  const isStore = mode === "store";
   const latestDate = dates[dates.length - 1] || "";
   const detailCells = multiDay
     ? row.cells.filter((c) => c.date === latestDate)
@@ -826,7 +855,7 @@ function StoreContinuityCard({
       </button>
       <div className={rui.contMeta}>
         <span>
-          {row.covered}/{row.expected} slots
+          {row.covered}/{row.expected} {isStore ? "days" : "slots"}
         </span>
         {row.missing ? <span className={rui.contGap}>{row.missing} gap</span> : null}
         {row.stale ? <span className={rui.contGap}>{row.stale} stale</span> : null}
@@ -862,9 +891,13 @@ function StoreContinuityCard({
             .join(" · ");
           const body = (
             <>
-              <span className={rui.contSlotTime}>{cell.slot}</span>
+              <span className={rui.contSlotTime}>
+                {isStore ? (multiDay ? "Latest" : "Today") : cell.slot}
+              </span>
               <span className={rui.contSlotState}>
-                {continuityCellLabel(cell.kind)}
+                {isStore && cell.kind === "accepted"
+                  ? "Done"
+                  : continuityCellLabel(cell.kind)}
               </span>
               {cell.kind !== "missing" ? (
                 <span className={rui.contSlotPct}>{cell.pct}%</span>
@@ -1488,6 +1521,8 @@ function StoreReportBody({
   summary: s,
   rows,
   stores,
+  from,
+  to,
   store,
   setStore,
   person,
@@ -1505,6 +1540,8 @@ function StoreReportBody({
   summary: StoreSummary;
   rows: StoreRow[];
   stores: Store[];
+  from: string;
+  to: string;
   store: string;
   setStore: (v: string) => void;
   person: string;
@@ -1537,6 +1574,32 @@ function StoreReportBody({
   const paged = paginateRows(filtered, page, 25);
   const people = useMemo(() => sortBuckets(s.byOwner), [s.byOwner]);
   const byStore = useMemo(() => sortBuckets(s.byStore), [s.byStore]);
+  // One checklist per store per day — reuse shift continuity with a single "Day" slot.
+  // Submitted store days count as complete (mapped to accepted for scoring).
+  const continuity = useMemo(
+    () =>
+      buildStoreContinuity({
+        stores: stores.map((st) => ({
+          id: st.id,
+          station_code: st.station_code,
+        })),
+        rows: rows.map((r) => ({
+          id: r.id,
+          location_id: r.location_id,
+          store_code: r.store_code,
+          shift_date: r.work_date,
+          shift_slot: "Day",
+          status: r.status === "submitted" ? "accepted" : r.status,
+          pct: r.pct,
+          staleOpen: r.staleOpen,
+          outgoing_name: r.owner_name,
+        })),
+        slots: ["Day"],
+        from,
+        to,
+      }),
+    [stores, rows, from, to],
+  );
   const feedItems = useMemo(
     () =>
       s.personActivity
@@ -1637,6 +1700,21 @@ function StoreReportBody({
           </div>
         )}
       </section>
+
+      <StoreContinuityPanel
+        board={continuity}
+        mode="store"
+        activeStoreId={store}
+        onSelectStore={(locationId) => {
+          setStore(locationId);
+          setPage(1);
+        }}
+        onClearStoreFilter={() => {
+          setStore("");
+          setPage(1);
+        }}
+        onOpenReport={onOpenReport}
+      />
 
       <FilterChips
         items={chips}

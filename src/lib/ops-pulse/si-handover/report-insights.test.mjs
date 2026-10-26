@@ -191,3 +191,59 @@ test("buildStoreContinuity marks broken when a slot is missing", () => {
   assert.equal(board.stores[0]?.health, "broken");
   assert.equal(board.brokenStores, 1);
 });
+
+test("buildStoreContinuity store-day mode: one Day slot, submitted→accepted = continuous", () => {
+  // Store report maps work_date → shift_date, slot "Day", submitted → accepted.
+  const board = buildStoreContinuity({
+    stores: [
+      { id: "s1", station_code: "TCD4" },
+      { id: "s2", station_code: "TCD5" },
+    ],
+    rows: [
+      {
+        id: "d1",
+        location_id: "s1",
+        store_code: "TCD4",
+        shift_date: "2026-10-25",
+        shift_slot: "Day",
+        status: "accepted",
+        pct: 100,
+        outgoing_name: "Ravi",
+      },
+      {
+        id: "d2",
+        location_id: "s1",
+        store_code: "TCD4",
+        shift_date: "2026-10-26",
+        shift_slot: "Day",
+        status: "accepted",
+        pct: 100,
+        outgoing_name: "Ravi",
+      },
+      {
+        id: "d3",
+        location_id: "s2",
+        store_code: "TCD5",
+        shift_date: "2026-10-26",
+        shift_slot: "Day",
+        status: "open",
+        pct: 40,
+        staleOpen: true,
+        outgoing_name: "Meena",
+      },
+    ],
+    slots: ["Day"],
+    from: "2026-10-25",
+    to: "2026-10-26",
+  });
+  assert.equal(board.expected, 4); // 2 stores × 2 days
+  assert.equal(board.covered, 3);
+  assert.equal(board.missing, 1);
+  const tcd4 = board.stores.find((s) => s.storeCode === "TCD4");
+  const tcd5 = board.stores.find((s) => s.storeCode === "TCD5");
+  assert.equal(tcd4?.health, "continuous");
+  assert.equal(tcd4?.continuityPct, 100);
+  assert.equal(tcd5?.health, "broken"); // missing 25th + stale open on 26th
+  assert.equal(tcd5?.stale, 1);
+  assert.equal(tcd5?.missing, 1);
+});
