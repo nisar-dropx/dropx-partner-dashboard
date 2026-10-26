@@ -568,12 +568,24 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
               && selected.workMode !== "wfh"
               && selected.workMode !== "business_trip"
               && !["paid-leave", "leave"].includes(selectedInsight.calendarClass)
-              && (selectedInsight.calendarClass !== "week-off" || selectedInsight.needsRegularization)
-              && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+              && (selectedInsight.needsRegularization
+                || selectedInsight.issues.length > 0
+                || selectedInsight.payDayType === "week_off"
+                || selectedInsight.payDayType === "paid_holiday"
+                || selectedInsight.calendarClass === "week-off")
               && selected.regularizationOpen !== false
-              ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.issues.some(issue => issue.code === "missing_punch") ? "Regularize missing punch" : "Request regularization"}</button>
+              ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.issues.some(issue => issue.code === "missing_punch")
+                ? "Regularize missing punch"
+                : (selectedInsight.payDayType === "week_off" || selectedInsight.payDayType === "paid_holiday" || selectedInsight.calendarClass === "week-off")
+                  && !selectedInsight.needsRegularization
+                  ? "Claim worked rest day"
+                  : "Request regularization"}</button>
               : null}
-            {selected.regularizationOpen === false && canSubmitRegularization(selected) && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+            {selected.regularizationOpen === false && canSubmitRegularization(selected) && (selectedInsight.needsRegularization
+              || selectedInsight.issues.length > 0
+              || selectedInsight.payDayType === "week_off"
+              || selectedInsight.payDayType === "paid_holiday"
+              || selectedInsight.calendarClass === "week-off")
               ? <small className="dx-regularization-closed">Regularization closed{selected.regularizationClosesOn ? ` on ${new Date(`${selected.regularizationClosesOn}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}` : ""} for this day. Contact HR if it needs correcting.</small>
               : null}
           </footer>
@@ -908,9 +920,13 @@ function RegularizationSheet({
   const [inTime, setInTime] = useState("");
   const [outTime, setOutTime] = useState("");
   const missingReason = missingPunchReason(row.inTime, row.outTime);
+  const restDayClaim = (() => {
+    const insight = attendanceDayInsight(row);
+    return insight.payDayType === "week_off" || insight.payDayType === "paid_holiday" || insight.calendarClass === "week-off";
+  })();
   const [reason, setReason] = useState(() => {
     const previous = row.regularization?.reasonCode;
-    return previous && previous !== "other" ? previous : missingReason;
+    return previous && previous !== "other" ? previous : (missingReason || (restDayClaim ? "missed_both" : ""));
   });
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -987,7 +1003,9 @@ function RegularizationSheet({
     <button aria-label="Close regularization" className="dx-sheet-scrim" onClick={onClose} />
     <aside className="dx-regularization-sheet" role="dialog" aria-modal="true" aria-labelledby="regularization-title">
       <header>
-        <div><strong id="regularization-title">Attendance regularization</strong><small>Request a correction for this attendance day.</small></div>
+        <div><strong id="regularization-title">Attendance regularization</strong><small>{restDayClaim
+          ? "Claim a worked week off or holiday. After approval, present hours that meet policy earn comp-off."
+          : "Request a correction for this attendance day."}</small></div>
         <button aria-label="Close" onClick={onClose}><X /></button>
       </header>
       <form onSubmit={submit}>
@@ -1005,7 +1023,13 @@ function RegularizationSheet({
           <option value="late_in_permission">Permission – late IN</option>
           <option value="early_out_permission">Permission – early OUT</option>
         </select></label>
-        {missingReason ? <p className="dx-time-prompt">{missingReason === "missed_both" ? "No punches recorded. Enter your actual IN and OUT times." : "Enter the actual time of the missing punch."}</p> : null}
+        {missingReason || (restDayClaim && reason === "missed_both")
+          ? <p className="dx-time-prompt">{(missingReason === "missed_both" || (restDayClaim && reason === "missed_both"))
+            ? (restDayClaim
+              ? "No punches on this rest day. Enter the IN and OUT times you actually worked so it can count as present and earn comp-off after approval."
+              : "No punches recorded. Enter your actual IN and OUT times.")
+            : "Enter the actual time of the missing punch."}</p>
+          : null}
         {reason && (requestsInTime || requestsOutTime) ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
           {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
           {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}

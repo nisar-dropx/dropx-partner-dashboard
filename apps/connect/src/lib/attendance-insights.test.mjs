@@ -199,11 +199,16 @@ test("maps WFH to paid-leave color and holiday to week-off color", () => {
   assert.equal(wfh.label, "Present · WFH");
   // A rest day nobody worked has no punches (the default fixture has a full pair).
   const noPunches = { inTime: "--:--", outTime: "--:--", workHours: "00:00", punchCount: 0 };
-  assert.equal(attendanceDayInsight(row({
+  const weekOff = attendanceDayInsight(row({
     status: "WO",
     attendanceStatus: "Weekly Off",
     ...noPunches
-  })).calendarClass, "week-off");
+  }));
+  assert.equal(weekOff.calendarClass, "week-off");
+  assert.equal(weekOff.needsRegularization, false);
+  assert.equal(weekOff.payDayType, "week_off");
+  assert.match(weekOff.detail, /request regularization/i);
+  assert.match(weekOff.detail, /comp-off/i);
   const holiday = attendanceDayInsight(row({
     status: "H",
     attendanceStatus: "Holiday",
@@ -211,6 +216,10 @@ test("maps WFH to paid-leave color and holiday to week-off color", () => {
   }));
   assert.equal(holiday.calendarClass, "week-off");
   assert.equal(holiday.label, "Holiday");
+  assert.equal(holiday.needsRegularization, false);
+  assert.equal(holiday.payDayType, "paid_holiday");
+  assert.match(holiday.detail, /request regularization/i);
+  assert.match(holiday.detail, /comp-off/i);
 });
 
 test("a worked week off shows as present, not as a day off (SREEKANTH, 13 Sep)", () => {
@@ -293,4 +302,5 @@ test("scores a week off that was worked on the hours worked", () => {
   assert.equal(brief.calendarClass, "week-off");
   assert.equal(brief.payDayType, "week_off");
   assert.match(brief.detail, /under half a day/);
+  assert.match(brief.detail, /request regularization/i);
 });

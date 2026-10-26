@@ -311,14 +311,17 @@ export function attendanceDayInsight(
   }
 
   if (isWeekOffDay && payDayType !== "half_day") {
+    const shortHours = workedFullPunchPair(row);
     return {
       calendarClass: "week-off",
-      detail: workedFullPunchPair(row)
-        ? "You punched in on your weekly off, but the hours were under half a day. It stays a paid weekly off and does not count as a worked day."
-        : "Weekly off is recorded for this day.",
+      detail: shortHours
+        ? "You punched in on your weekly off, but the hours were under half a day. It stays a paid weekly off and does not count as a worked day. If you worked longer, request regularization so the day can count as present and earn comp-off."
+        : "Weekly off is recorded for this day. If you worked, request regularization with your actual IN and OUT times so the day counts as present and earns comp-off when hours meet company policy.",
       headline: /present/.test(state) ? label : "Weekly off",
       issues: [],
       label: /present/.test(state) ? label : "Weekly off",
+      // Clean rest days stay optional (no attention nudge); Connect still offers
+      // regularization so a worked week off can be claimed and accrue comp-off.
       needsRegularization: false,
       payDayType: "week_off",
       tone: "neutral"
@@ -327,9 +330,12 @@ export function attendanceDayInsight(
 
   if (isHolidayDay) {
     const holidayTitle = /present/.test(state) ? label : (state && state !== "holiday" ? label : "Holiday");
+    const shortHours = workedFullPunchPair(row);
     return {
       calendarClass: "week-off",
-      detail: "Paid holiday is recorded for this day.",
+      detail: shortHours
+        ? "You punched in on a paid holiday, but the hours were under half a day. It stays a paid holiday. If you worked longer, request regularization so the day can count as present and earn comp-off."
+        : "Paid holiday is recorded for this day. If you worked, request regularization with your actual IN and OUT times so the day counts as present and earns comp-off when hours meet company policy.",
       headline: holidayTitle,
       issues: [],
       label: holidayTitle,
