@@ -1,4 +1,5 @@
 "use client";
+import { ChecklistSummaryActions } from "../si-handover/checklist-summary-actions";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -518,6 +519,8 @@ export function StoreOpsWorkspace(props: Props) {
               </div>
             </div>
           ) : null}
+
+          <ChecklistSummaryActions kind="store" id={focused.id} revision={focused.updated_at} completed={focused.status === "submitted"} />
 
           {!tasks(focused.template).length ? (
             <div className={styles.warn}>Task catalogue missing — refresh.</div>

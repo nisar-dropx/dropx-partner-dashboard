@@ -1,5 +1,4 @@
 import {
-  isManager,
   progress,
   statusLabels,
 } from "@/lib/ops-pulse/store-ops/model";
@@ -8,6 +7,7 @@ import {
   proofs,
   readChecklist,
   stores,
+  periodCompletions,
 } from "@/lib/ops-pulse/store-ops/server";
 
 export const dynamic = "force-dynamic";
@@ -17,17 +17,17 @@ export async function GET(request: Request) {
     const id = String(new URL(request.url).searchParams.get("id") || "").trim();
     if (!id) throw Error("Checklist id is required.");
     const c = await context();
-    if (!isManager(c.actor, c.master.settings) && !c.actor.isMasterOwner) {
-      return Response.json({ error: "Managers only." }, { status: 403 });
-    }
+    // Same read policy as the checklist; exporting does not grant write access.
     const focused = await readChecklist(id, c);
     const row = focused.checklist;
     const locations = await stores(c.auth, c.master.settings);
     const city =
       locations.find((l) => l.id === row.location_id)?.city || null;
+    const period = await periodCompletions(c.companyId, row.location_id, row.work_date, row.id);
+    const progressContext = {city, settings:c.master.settings, weeklyDoneIds:period.weeklyDone, monthlyDoneIds:period.monthlyDone};
     const p = progress(
       { template: row.template, answers: row.answers },
-      { city, settings: c.master.settings },
+      progressContext,
     );
     const evidence = await proofs(c.companyId, row.id);
     return Response.json({
@@ -53,15 +53,18 @@ export async function GET(request: Request) {
         name: section.name,
         tasks: (section.tasks || []).map((task) => {
           const a = row.answers?.[task.id];
+          const taskProgress = progress({template:{...row.template,sections:[{...section,tasks:[task]}]},answers:row.answers}, progressContext);
           return {
             id: task.id,
             label: task.label,
             answerType: task.answerType,
             outcome: a?.outcome || "",
             numbers: a?.numbers || {},
+            fieldLabels: Object.fromEntries((task.numberFields || []).map(f => [f.key, f.label])),
             lines: a?.lines || [],
             text: a?.text || "",
             informed: a?.informed || "",
+            recordStatus: task.frequency === "weekly" && period.weeklyDone.has(task.id) ? "Completed this week" : task.frequency === "monthly" && period.monthlyDone.has(task.id) ? "Completed this month" : taskProgress.total && !taskProgress.answered ? "Not recorded" : ["no", "issue", "fail"].includes(a?.outcome || "") ? "Needs attention" : taskProgress.answered ? "Recorded" : "Optional / not required",
           };
         }),
       })),

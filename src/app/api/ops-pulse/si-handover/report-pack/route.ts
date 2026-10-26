@@ -1,5 +1,4 @@
 import {
-  isManager,
   progress,
   statusLabels,
 } from "@/lib/ops-pulse/si-handover/model";
@@ -17,9 +16,7 @@ export async function GET(request: Request) {
     const id = String(new URL(request.url).searchParams.get("id") || "").trim();
     if (!id) throw Error("Checklist id is required.");
     const c = await context();
-    if (!isManager(c.actor, c.master.settings) && !c.actor.isMasterOwner) {
-      return Response.json({ error: "Managers only." }, { status: 403 });
-    }
+    // readChecklist enforces company, page permission and current store scope.
     const focused = await readChecklist(id, c);
     const row = focused.checklist;
     const locations = await stores(c.auth, c.master.settings);
@@ -47,21 +44,25 @@ export async function GET(request: Request) {
         answered: p.answered,
         total: p.total,
         pct: p.pct,
+        notes: row.open_issues || "",
       },
       sections: (row.template?.sections || []).map((section) => ({
         id: section.id,
         name: section.name,
         tasks: (section.tasks || []).map((task) => {
           const a = row.answers?.[task.id];
+          const taskProgress = progress({template:{...row.template,sections:[{...section,tasks:[task]}]},answers:row.answers}, {city,settings:c.master.settings});
           return {
             id: task.id,
             label: task.label,
             answerType: task.answerType,
             outcome: a?.outcome || "",
             numbers: a?.numbers || {},
+            fieldLabels: Object.fromEntries((task.numberFields || []).map(f => [f.key, f.label])),
             lines: a?.lines || [],
             text: a?.text || "",
             informed: a?.informed || "",
+            recordStatus: taskProgress.total && !taskProgress.answered ? "Not recorded" : ["no", "issue", "fail"].includes(a?.outcome || "") ? "Needs attention" : taskProgress.answered ? "Recorded" : "Optional / not required",
           };
         }),
       })),

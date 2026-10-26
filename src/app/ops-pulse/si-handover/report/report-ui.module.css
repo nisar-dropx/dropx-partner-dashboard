@@ -267,6 +267,7 @@
 
 .split {
   display: grid;
+  align-items: start;
   grid-template-columns: 1fr 1fr;
   gap: 0.45rem;
 }
@@ -280,6 +281,10 @@
   border-radius: 8px;
   max-height: 16rem;
 }
+.personStores { display:block; white-space:normal; max-width:240px; font-size:11px; color:var(--r-muted); margin-top:3px; font-weight:500; }
+.panel { align-content:start; }
+.split .table td:first-child { white-space:normal; min-width:140px; }
+.split .linkBtn { color:var(--r-ink); font-weight:700; }
 .table {
   width: 100%;
   border-collapse: collapse;

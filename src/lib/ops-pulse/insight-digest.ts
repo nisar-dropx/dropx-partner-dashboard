@@ -1,7 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DigestBuilder, DigestControl } from '../portal-digest-delivery';
-import { loadNowMailScope, nowDigestEvents } from '../amazon-now-digest';
+import { buildAmazonNowDigest, loadNowMailScope, nowDigestEvents } from '../amazon-now-digest';
 import { allRoutingRows, loadPeopleReviewGraph } from './people-review-routing';
 import { resolveStoreReviewLeaders } from './people-review-route';
 import { storeInsightFacts } from './insight-facts';
@@ -27,6 +27,9 @@ export async function buildInsightDigest(db:SupabaseClient,control:DigestControl
  const scope=await loadInsightScope(db,control);
  if(preview){scope.recipients=scope.recipients.filter(r=>r.email===preview.email).map(r=>({...r,stationIds:r.stationIds.filter(id=>preview.stationIds.includes(id))})).filter(r=>r.stationIds.length);scope.stations=scope.stations.filter(s=>scope.recipients.some(r=>r.stationIds.includes(s.id)));}
  if(!scope.stations.length||!scope.recipients.length)throw Error('No eligible Dark Store insight recipients.');
+ // Morning is the factual D−1 reporting register. Keep the existing audience,
+ // schedule, receipt key and monthly thread; do not mix older backlog or AI-selected facts.
+ if(control.event_key==='now_insight_morning') return buildAmazonNowDigest(db,{...control,event_key:'now_activity_digest'},date,scope);
  const topics=Array.isArray(control.config.topics)?control.config.topics.map(String):['health','activities','attendance'];
  const ids=scope.stations.map(s=>s.id),codes=scope.stations.map(s=>s.station_code),from=new Date(Date.parse(date)-14*86400000).toISOString().slice(0,10),to=new Date(Date.parse(date)-86400000).toISOString().slice(0,10);
  const query=(table:string,select:string)=>db.from(table).select(select).eq('company_id',control.company_id);
