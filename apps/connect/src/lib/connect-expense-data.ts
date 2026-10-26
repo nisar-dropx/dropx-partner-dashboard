@@ -219,32 +219,93 @@ export type ExpenseClaimRequestAssignee = {
   approver_person_id: string | null;
 };
 
-async function resolveImmediateReportingManager(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>): Promise<ExpenseClaimRequestAssignee | null> {
-  const ssaManager = await resolveSsaApprovalManager({ companyId: account.companyId, workerType: identity.workerType, workerId: identity.workerId, asOf: identity.today });
-  if (ssaManager) return { assignee_role: "reporting_manager", approver_user_id: ssaManager.userId, approver_person_id: ssaManager.personId };
-  const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
-    .eq("company_id", account.companyId).eq("subject_assignment_id", identity.assignment.id)
-    .eq("relationship_type", "solid_line").eq("is_primary", true)
-    .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
-    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-  if (relationship.error) throw new Error(relationship.error.message);
-  if (!relationship.data) return null;
-  const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
-    .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
-  if (assignment.error || !assignment.data) return null;
-  const engagement = await db().from("hr_engagements").select("person_id,status")
-    .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
-  if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
-  if (engagement.data.person_id === identity.personId) return null;
-  const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
-  if (!approverUserId) {
-    throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+async function resolveActingCoverApprover(
+  companyId: string,
+  managerPersonId: string,
+  asOf: string
+): Promise<ExpenseClaimRequestAssignee | null> {
+  const cover = await db().from("hr_approval_delegations")
+    .select("delegate_person_id,workflow_code,effective_from")
+    .eq("company_id", companyId)
+    .eq("approver_person_id", managerPersonId)
+    .eq("is_active", true)
+    .lte("effective_from", asOf)
+    .gte("effective_to", asOf);
+  if (cover.error) {
+    if (/does not exist|schema cache/i.test(cover.error.message)) return null;
+    throw new Error(cover.error.message);
   }
+  const delegation = (cover.data ?? [])
+    .filter((row) => !row.workflow_code || row.workflow_code === "reimbursement")
+    .sort((left, right) => Number(Boolean(right.workflow_code)) - Number(Boolean(left.workflow_code))
+      || String(right.effective_from).localeCompare(String(left.effective_from)))[0];
+  if (!delegation?.delegate_person_id) return null;
+  const approverUserId = await resolveConnectApproverUserId(companyId, delegation.delegate_person_id);
+  if (!approverUserId) return null;
   return {
     assignee_role: "reporting_manager",
     approver_user_id: approverUserId,
-    approver_person_id: engagement.data.person_id
+    approver_person_id: delegation.delegate_person_id
   };
+}
+
+async function resolveManagerAssigneeFromAssignment(
+  companyId: string,
+  managerAssignmentId: string,
+  claimantPersonId: string,
+  asOf: string
+): Promise<ExpenseClaimRequestAssignee | null> {
+  const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
+    .eq("company_id", companyId).eq("id", managerAssignmentId).maybeSingle();
+  if (assignment.error || !assignment.data) return null;
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+  if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
+  if (engagement.data.person_id === claimantPersonId) return null;
+
+  const approverUserId = await resolveConnectApproverUserId(companyId, engagement.data.person_id);
+  if (approverUserId) {
+    return {
+      assignee_role: "reporting_manager",
+      approver_user_id: approverUserId,
+      approver_person_id: engagement.data.person_id
+    };
+  }
+
+  const cover = await resolveActingCoverApprover(companyId, engagement.data.person_id, asOf);
+  if (cover) return cover;
+  return null;
+}
+
+async function resolveImmediateReportingManager(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>): Promise<ExpenseClaimRequestAssignee | null> {
+  const ssaManager = await resolveSsaApprovalManager({ companyId: account.companyId, workerType: identity.workerType, workerId: identity.workerId, asOf: identity.today });
+  if (ssaManager) return { assignee_role: "reporting_manager", approver_user_id: ssaManager.userId, approver_person_id: ssaManager.personId };
+
+  // Walk the solid-line chain so an inactive/missing manager login can escalate
+  // to cover or the next manager with an active One/People login.
+  let subjectAssignmentId: string | null = identity.assignment.id;
+  const seen = new Set<string>();
+  for (let depth = 0; depth < 4 && subjectAssignmentId; depth += 1) {
+    if (seen.has(subjectAssignmentId)) break;
+    seen.add(subjectAssignmentId);
+    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
+      .eq("company_id", account.companyId).eq("subject_assignment_id", subjectAssignmentId)
+      .eq("relationship_type", "solid_line").eq("is_primary", true)
+      .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
+      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+    if (relationship.error) throw new Error(relationship.error.message);
+    if (!relationship.data?.manager_assignment_id) return null;
+
+    const assignee = await resolveManagerAssigneeFromAssignment(
+      account.companyId,
+      relationship.data.manager_assignment_id,
+      identity.personId,
+      identity.today
+    );
+    if (assignee) return assignee;
+    subjectAssignmentId = relationship.data.manager_assignment_id;
+  }
+  return null;
 }
 
 

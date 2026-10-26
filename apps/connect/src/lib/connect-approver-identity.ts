@@ -113,13 +113,37 @@ async function preferLinkedProfileId(companyId: string, personId: string, candid
  * Store / station managers without Google Workspace still receive approvals in One when
  * they have an active workforce record with a mobile number.
  */
+async function reactivateLinkedApproverProfile(companyId: string, personId: string, userId: string) {
+  // Active workforce managers keep approving in One even if a prior Workspace
+  // or access job flipped profiles.is_active off while leaving the person link.
+  const contact = await workforceContactForPerson(companyId, personId);
+  if (!contact) return null;
+  const restored = await db().from("profiles").update({
+    is_active: true,
+    updated_at: new Date().toISOString()
+  }).eq("company_id", companyId).eq("id", userId).select("id").maybeSingle();
+  if (restored.error) throw new Error(restored.error.message);
+  if (!restored.data?.id) return null;
+  await ensurePersonLink(companyId, personId, userId);
+  return userId;
+}
+
 export async function resolveConnectApproverUserId(companyId: string, personId: string): Promise<string | null> {
   const link = await db().from("hr_user_person_links").select("user_id,status")
     .eq("company_id", companyId).eq("person_id", personId).maybeSingle();
   if (link.error && !/does not exist|schema cache/i.test(link.error.message)) {
     throw new Error(link.error.message);
   }
-  if (link.data?.status === "active" && link.data.user_id) return link.data.user_id;
+  if (link.data?.status === "active" && link.data.user_id) {
+    const profile = await db().from("profiles").select("id,is_active")
+      .eq("company_id", companyId).eq("id", link.data.user_id).maybeSingle();
+    if (profile.error) throw new Error(profile.error.message);
+    if (profile.data?.is_active) return link.data.user_id;
+    if (profile.data) {
+      const restored = await reactivateLinkedApproverProfile(companyId, personId, link.data.user_id);
+      if (restored) return restored;
+    }
+  }
 
   const contact = await workforceContactForPerson(companyId, personId);
   if (!contact?.mobile && !contact?.email) return null;
@@ -222,13 +246,6 @@ export async function resolveConnectActorUserId(account: ConnectActorAccount): P
     .eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id)
     .eq("status", "active").limit(1).maybeSingle();
   if (engagement.error || !engagement.data?.person_id) return null;
-
-  const link = await db().from("hr_user_person_links").select("user_id,status")
-    .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
-  if (link.error && !/does not exist|schema cache/i.test(link.error.message)) {
-    throw new Error(link.error.message);
-  }
-  if (link.data?.status === "active" && link.data.user_id) return link.data.user_id;
 
   return resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
 }
