@@ -193,13 +193,13 @@
   .ops-reports-workspace .ops-report-parameters > * { min-width: 0; }
   .ops-reports-workspace .ops-report-parameters .ops-report-scope { position: static; min-width: 0; max-width: 100%; }
 }
-@media (max-width: 450px) {
-  .review-report-controls { grid-template-columns: minmax(0, 1fr); }
-  .review-report-actions button { flex: 1 1 100%; }
-  .review-report-builder > header { gap: 8px; }
-  .review-report-preview-head { padding: 12px 12px 0; }
+@media(max-width:450px){
+  .review-report-controls{grid-template-columns:minmax(0,1fr)}
+  .review-report-actions button{flex:1 1 100%}
+  .review-report-builder>header{gap:8px}
+  .review-report-preview-head{padding:12px 12px 0}
 }
-.ops-reports-workspace { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.ops-reports-workspace{grid-template-columns:minmax(0,1fr);min-width:0}
 .ops-reports-workspace > * { min-width: 0; max-width: 100%; }
 .review-report-controls > *,
 .review-report-builder > header > div { min-width: 0; }
