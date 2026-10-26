@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {resolvePeopleReviewRoute} from './people-review-route.ts';
+import {resolvePeopleReviewRoute,resolveStoreReviewLeaders} from './people-review-route.ts';
 import {visibleReviewStep,reviewRoutingIssue} from './review-policy.ts';
 const person=(id,code,extra={})=>({id,personId:id,name:id,designationId:code,code,role:code,locationId:null,canManage:true,oversight:false,userIds:[id],scopeIds:['station'],allLocations:false,...extra});
 const graph=()=>({people:[person('lead','TL',{locationId:'station'}),person('cluster','CLM'),person('area','AOM'),person('inayath','HLM',{role:'Head Operations- Last Mile'}),person('owner','MP',{oversight:true})],relationships:[{subjectId:'lead',managerId:'cluster'},{subjectId:'cluster',managerId:'area'},{subjectId:'area',managerId:'inayath'},{subjectId:'inayath',managerId:'owner'}]});
@@ -150,4 +150,89 @@ test('Dark Store still stops at Regional Manager when National Head is full over
  const g=darkStoreGraph();
  g.people.find(p=>p.personId==='nh').oversight=true;
  assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','rm']);
+});
+
+// TCC3/TCD4 regression: a current floor posting must not hide managed-store scope.
+const orphanStoreGraph = () => ({
+ darkStoreStationIds: new Set(['store']),
+ people: [person('local','SM',{role:'Store Manager',locationId:'store',scopeIds:[],userIds:[]}),
+  person('ramesh','RM',{role:'Regional Manager',name:'Ramesh',scopeIds:['store']})],
+ relationships: []
+});
+test('DS local posting without an operational chain falls back to the explicitly mapped RM',()=>{
+ const g=orphanStoreGraph();
+ const route=resolvePeopleReviewRoute(g,'store');
+ assert.equal(route.error,null);
+ assert.deepEqual(route.chain.map(p=>p.personId),['ramesh']);
+ // A normal non-manager store worker also must not mask the mapping.
+ g.people[0].code='PICKER';g.people[0].role='Picker';g.people[0].canManage=false;
+ assert.equal(resolvePeopleReviewRoute(g,'store').chain[0].personId,'ramesh');
+});
+test('DS fallback follows City → RM relationships and updates when managed locations change',()=>{
+ const g=orphanStoreGraph();
+ g.people.push(person('city','CTM',{role:'City Manager',scopeIds:['store']}));
+ g.relationships.push({subjectId:'city',managerId:'ramesh'});
+ assert.deepEqual(resolvePeopleReviewRoute(g,'store').chain.map(p=>p.personId),['city','ramesh']);
+ g.people=g.people.map(p=>({...p,scopeIds:[]}));
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/No City Manager or Regional Manager/);
+});
+test('DS fallback cannot guess between conflicting mapped RMs or missing Ops accounts',()=>{
+ const g=orphanStoreGraph();
+ g.people.push(person('rm2','RM',{role:'Regional Manager',scopeIds:['store']}));
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/conflicting.*store/);
+ g.people.pop();
+ for(const userIds of [[],['u1','u2']]) {
+  g.people[1].userIds=userIds;
+  assert.match(resolvePeopleReviewRoute(g,'store').error,/exactly one active/);
+ }
+});
+test('DS fallback never treats global access as an explicit store assignment',()=>{
+ const g=orphanStoreGraph();g.people[1].scopeIds=[];g.people[1].allLocations=true;
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/No City Manager or Regional Manager/);
+ g.people.shift();
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/No City Manager or Regional Manager/);
+});
+test('DS scoped fallback does not conceal invalid local reporting relationships',()=>{
+ const g=orphanStoreGraph();
+ g.relationships=[{subjectId:'local',managerId:'missing'}];
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/inactive, expired or missing/);
+ g.relationships=[{subjectId:'local',managerId:'local'}];
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/cycle/);
+});
+test('store leadership prefers Senior Store Manager, then Store Manager, then Incharge',()=>{
+ const g=darkStoreGraph();
+ g.people.push(person('senior','SRSM',{role:'Senior Store Manager',scopeIds:['store'],userIds:[]}));
+ assert.deepEqual(resolveStoreReviewLeaders(g,'store'),[{personId:'senior',name:'senior',role:'Senior Store Manager'}]);
+ g.people.pop();
+ assert.deepEqual(resolveStoreReviewLeaders(g,'store'),[{personId:'sm',name:'sm',role:'Store Manager'}]);
+ g.people=g.people.filter(p=>p.id!=='sm');
+ assert.deepEqual(resolveStoreReviewLeaders(g,'store'),[{personId:'si',name:'si',role:'Shift Incharge'}]);
+});
+test('store leadership follows local reporting lines but never borrows unrelated global managers',()=>{
+ const g=darkStoreGraph();g.people.forEach(p=>{p.scopeIds=[];p.allLocations=true;});
+ g.people.push(person('unrelated','SSM',{role:'Senior Store Manager',locationId:'other',scopeIds:[],allLocations:true}));
+ assert.equal(resolveStoreReviewLeaders(g,'store')[0].personId,'sm');
+ assert.deepEqual(resolveStoreReviewLeaders(g,'unmapped'),[]);
+});
+test('store leadership preserves equal-tier names, deduplicates identities, and handles cycles',()=>{
+ const g=orphanStoreGraph();
+ g.people.push(person('local2','SM',{role:'Store Manager',locationId:'store',scopeIds:[]}));
+ g.people.push({...g.people[0],id:'duplicate'});
+ g.relationships.push({subjectId:'local',managerId:'local2'},{subjectId:'local2',managerId:'local'});
+ assert.deepEqual(resolveStoreReviewLeaders(g,'store').map(p=>p.personId),['local','local2']);
+});
+test('store in-charge title is preserved and no manager is invented for an unmapped store',()=>{
+ const g={people:[person('sic','OTHER',{role:'Store In Charge',locationId:'store',scopeIds:[],userIds:[]})],relationships:[]};
+ assert.equal(resolveStoreReviewLeaders(g,'store')[0].role,'Store In Charge');
+ assert.deepEqual(resolveStoreReviewLeaders(g,'missing'),[]);
+});
+
+test('DS managed locations are authoritative even when a portal membership is stale',()=>{
+ const g=orphanStoreGraph();
+ g.people[1].managedScopeIds=[];
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/No City Manager or Regional Manager/);
+ g.people[1].managedScopeIds=['store'];g.people[1].scopeIds=[];
+ assert.match(resolvePeopleReviewRoute(g,'store').error,/does not have OpsPulse access to this store/);
+ g.people[1].scopeIds=['store'];
+ assert.equal(resolvePeopleReviewRoute(g,'store').chain[0].personId,'ramesh');
 });

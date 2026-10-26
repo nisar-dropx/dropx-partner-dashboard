@@ -73,3 +73,14 @@ test("closed reviews show resolved progress including an evidenced skip", () => 
   assert.equal(row.skippedSteps, 1);
   assert.equal(row.currentDependency, "Completed");
 });
+
+test("DS current store leader is display-only and does not create reviewer steps", () => {
+  const leader = { personId: "sm1", name: "Local manager", role: "Senior Store Manager" };
+  const input = { dates: ["2026-10-24"], locations: [{...location, station_name: null}], reviews: [], steps: [], items: [], updates: [], followups: [], storeLeaders: {"station-1": [leader]} };
+  const [ds] = buildReviewStatusRows({...input, darkStore:true});
+  assert.deepEqual(ds.storeLeaders, [leader]);
+  assert.equal(ds.stationName,"Store");
+  assert.equal(ds.totalSteps,0);
+  assert.equal(ds.clusterManager,"");
+  assert.deepEqual(buildReviewStatusRows(input)[0].storeLeaders,[]);
+});

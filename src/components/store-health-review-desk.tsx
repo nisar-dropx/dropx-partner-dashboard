@@ -181,6 +181,7 @@ export function StoreHealthReviewDesk(props: Props) {
     <section className="ops-control-strip performance-review-control">
       <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatOpsDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || hero.city || selectedLocation.city || "Store"}</small></div>
       <PerformanceReviewPicker
+        darkStore
         date={date}
         locations={locations.map((location) => ({
           code: location.station_code,
