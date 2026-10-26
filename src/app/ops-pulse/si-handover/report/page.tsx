@@ -104,7 +104,12 @@ export default async function Page({
           showStore={nav.showStoreOps}
           showShiftReport={nav.showShiftReport}
           showStoreReport={nav.showStoreReport}
-          shift={{ summary, rows: enriched, stores: locations }}
+          shift={{
+            summary,
+            rows: enriched,
+            stores: locations,
+            shiftSlots: c.master.settings.shiftSlots,
+          }}
         />
       </AppShell>
     );

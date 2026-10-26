@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { statusLabels as siStatusLabels } from "@/lib/ops-pulse/si-handover/model";
 import {
+  buildStoreContinuity,
   filterProgressRows as filterSi,
   formatTrendDelta,
   paginateRows,
@@ -11,7 +12,13 @@ import {
   type ProgressRow as SiRow,
   type ReportSummary as SiSummary,
   type SortKey as SiSortKey,
+  type StoreContinuityBoard,
 } from "@/lib/ops-pulse/si-handover/report";
+import type {
+  ContinuityCellKind,
+  StoreContinuityHealth,
+  StoreContinuityRow,
+} from "@/lib/ops-pulse/si-handover/report-insights";
 import { statusLabels as storeStatusLabels } from "@/lib/ops-pulse/store-ops/model";
 import {
   filterProgressRows as filterStore,
@@ -37,7 +44,12 @@ type Props = {
   showStore: boolean;
   showShiftReport?: boolean;
   showStoreReport?: boolean;
-  shift?: { summary: SiSummary; rows: SiRow[]; stores: Store[] };
+  shift?: {
+    summary: SiSummary;
+    rows: SiRow[];
+    stores: Store[];
+    shiftSlots?: string[];
+  };
   store?: { summary: StoreSummary; rows: StoreRow[]; stores: Store[] };
 };
 
@@ -262,6 +274,9 @@ export function ActivitiesReportClient(props: Props) {
           summary={props.shift.summary}
           rows={props.shift.rows}
           stores={props.shift.stores}
+          shiftSlots={props.shift.shiftSlots || []}
+          from={from}
+          to={to}
           store={store}
           setStore={setStore}
           person={person}
@@ -335,10 +350,289 @@ function FilterChips({
   );
 }
 
+function continuityCellClass(kind: ContinuityCellKind) {
+  switch (kind) {
+    case "accepted":
+      return rui.contCellOk;
+    case "submitted":
+      return rui.contCellSubmit;
+    case "open":
+      return rui.contCellOpen;
+    case "stale":
+      return rui.contCellStale;
+    case "rejected":
+      return rui.contCellBad;
+    case "cancelled":
+      return rui.contCellCancel;
+    default:
+      return rui.contCellMiss;
+  }
+}
+
+function continuityCellLabel(kind: ContinuityCellKind) {
+  switch (kind) {
+    case "accepted":
+      return "OK";
+    case "submitted":
+      return "Sub";
+    case "open":
+      return "Open";
+    case "stale":
+      return "Stale";
+    case "rejected":
+      return "Rej";
+    case "cancelled":
+      return "Can";
+    default:
+      return "—";
+  }
+}
+
+function healthClass(health: StoreContinuityHealth) {
+  switch (health) {
+    case "continuous":
+      return rui.contHealthOk;
+    case "in_progress":
+      return rui.contHealthProg;
+    case "at_risk":
+      return rui.contHealthRisk;
+    case "broken":
+      return rui.contHealthBad;
+    default:
+      return rui.contHealthEmpty;
+  }
+}
+
+function healthLabel(health: StoreContinuityHealth) {
+  switch (health) {
+    case "continuous":
+      return "Continuous";
+    case "in_progress":
+      return "In progress";
+    case "at_risk":
+      return "At risk";
+    case "broken":
+      return "Broken";
+    default:
+      return "No shifts";
+  }
+}
+
+function StoreContinuityPanel({
+  board,
+  activeStoreId,
+  onSelectStore,
+  onOpenReport,
+}: {
+  board: StoreContinuityBoard;
+  activeStoreId: string;
+  onSelectStore: (locationId: string) => void;
+  onOpenReport: (id: string) => void;
+}) {
+  const multiDay = board.dates.length > 1;
+  return (
+    <section className={rui.contPanel} aria-label="Store shift continuity">
+      <div className={rui.contHead}>
+        <div>
+          <h2>Store shift continuity</h2>
+          <p>
+            Every store × every configured slot
+            {multiDay ? ` across ${board.dates.length} days` : " for this day"} —
+            gaps, stale opens, and unbroken handovers.
+          </p>
+        </div>
+        <div className={rui.contSummary}>
+          <span className={rui.contStat}>
+            <strong>{board.continuityPct}%</strong>
+            accepted
+          </span>
+          <span className={rui.contStat}>
+            <strong>
+              {board.covered}/{board.expected}
+            </strong>
+            covered
+          </span>
+          <span className={rui.contStatWarn}>
+            <strong>{board.missing}</strong>
+            gaps
+          </span>
+          <span className={rui.contStatOk}>
+            <strong>{board.continuousStores}</strong>
+            continuous
+          </span>
+          <span className={rui.contStatRisk}>
+            <strong>{board.atRiskStores}</strong>
+            in flight
+          </span>
+          <span className={rui.contStatBad}>
+            <strong>{board.brokenStores}</strong>
+            broken
+          </span>
+        </div>
+      </div>
+
+      <div className={rui.contLegend} aria-label="Legend">
+        <span className={rui.contCellOk}>OK</span>
+        <span className={rui.contCellSubmit}>Submitted</span>
+        <span className={rui.contCellOpen}>Open</span>
+        <span className={rui.contCellStale}>Stale</span>
+        <span className={rui.contCellMiss}>Missing</span>
+        <span className={rui.contCellBad}>Rejected</span>
+      </div>
+
+      {!board.stores.length ? (
+        <div className={rui.empty}>
+          <strong>No stores in scope</strong>
+          Adjust location scope to see continuity.
+        </div>
+      ) : (
+        <div className={rui.contGrid}>
+          {board.stores.map((row) => (
+            <StoreContinuityCard
+              key={row.locationId}
+              row={row}
+              dates={board.dates}
+              active={activeStoreId === row.locationId}
+              onSelect={() => onSelectStore(row.locationId)}
+              onOpenReport={onOpenReport}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function dayHealthFromCells(
+  cells: StoreContinuityRow["cells"],
+): StoreContinuityHealth {
+  const expected = cells.length;
+  const missing = cells.filter((c) => c.kind === "missing").length;
+  const covered = expected - missing;
+  const accepted = cells.filter((c) => c.kind === "accepted").length;
+  const open = cells.filter((c) => c.kind === "open").length;
+  const stale = cells.filter((c) => c.kind === "stale").length;
+  const rejected = cells.filter((c) => c.kind === "rejected").length;
+  if (expected <= 0 || covered === 0) return "empty";
+  if (missing > 0 || rejected > 0) return "broken";
+  if (stale > 0) return "at_risk";
+  if (accepted === expected) return "continuous";
+  return open > 0 || accepted < covered ? "in_progress" : "continuous";
+}
+
+function StoreContinuityCard({
+  row,
+  dates,
+  active,
+  onSelect,
+  onOpenReport,
+}: {
+  row: StoreContinuityRow;
+  dates: string[];
+  active: boolean;
+  onSelect: () => void;
+  onOpenReport: (id: string) => void;
+}) {
+  const multiDay = dates.length > 1;
+  const latestDate = dates[dates.length - 1] || "";
+  const detailCells = multiDay
+    ? row.cells.filter((c) => c.date === latestDate)
+    : row.cells;
+  const dayDots = multiDay
+    ? dates.map((date) => {
+        const dayCells = row.cells.filter((c) => c.date === date);
+        return { date, health: dayHealthFromCells(dayCells) };
+      })
+    : [];
+
+  return (
+    <article
+      className={active ? `${rui.contCard} ${rui.contCardActive}` : rui.contCard}
+    >
+      <button type="button" className={rui.contCardHead} onClick={onSelect}>
+        <span className={rui.contStore}>{row.storeCode}</span>
+        <span className={healthClass(row.health)}>{healthLabel(row.health)}</span>
+        <span className={rui.contPct}>{row.continuityPct}%</span>
+      </button>
+      <div className={rui.contMeta}>
+        <span>
+          {row.covered}/{row.expected} slots
+        </span>
+        {row.missing ? <span className={rui.contGap}>{row.missing} gap</span> : null}
+        {row.stale ? <span className={rui.contGap}>{row.stale} stale</span> : null}
+        {multiDay ? (
+          <span>Latest {latestDate.slice(5)}</span>
+        ) : null}
+      </div>
+      {multiDay ? (
+        <div className={rui.contDays} aria-label="Day continuity">
+          {dayDots.map((d) => (
+            <span
+              key={d.date}
+              title={`${d.date} · ${healthLabel(d.health)}`}
+              className={`${rui.contDayDot} ${healthClass(d.health)}`}
+            />
+          ))}
+        </div>
+      ) : null}
+      <div className={rui.contSlots} role="list">
+        {detailCells.map((cell) => {
+          const title = [
+            `${cell.date} ${cell.slot}`,
+            cell.kind,
+            cell.siName ? `SI ${cell.siName}` : null,
+            cell.pct ? `${cell.pct}%` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          const body = (
+            <>
+              <span className={rui.contSlotTime}>{cell.slot}</span>
+              <span className={rui.contSlotState}>
+                {continuityCellLabel(cell.kind)}
+              </span>
+              {cell.kind !== "missing" ? (
+                <span className={rui.contSlotPct}>{cell.pct}%</span>
+              ) : null}
+            </>
+          );
+          if (cell.checklistId) {
+            return (
+              <button
+                key={`${cell.date}-${cell.slot}`}
+                type="button"
+                role="listitem"
+                title={title}
+                className={continuityCellClass(cell.kind)}
+                onClick={() => onOpenReport(cell.checklistId!)}
+              >
+                {body}
+              </button>
+            );
+          }
+          return (
+            <div
+              key={`${cell.date}-${cell.slot}`}
+              role="listitem"
+              title={title}
+              className={continuityCellClass(cell.kind)}
+            >
+              {body}
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
 function ShiftReportBody({
   summary: s,
   rows,
   stores,
+  shiftSlots,
+  from,
+  to,
   store,
   setStore,
   person,
@@ -358,6 +652,9 @@ function ShiftReportBody({
   summary: SiSummary;
   rows: SiRow[];
   stores: Store[];
+  shiftSlots: string[];
+  from: string;
+  to: string;
   store: string;
   setStore: (v: string) => void;
   person: string;
@@ -396,6 +693,20 @@ function ShiftReportBody({
   const paged = paginateRows(filtered, page, 25);
   const people = useMemo(() => sortBuckets(s.bySi), [s.bySi]);
   const byStore = useMemo(() => sortBuckets(s.byStore), [s.byStore]);
+  const continuity = useMemo(
+    () =>
+      buildStoreContinuity({
+        stores: stores.map((st) => ({
+          id: st.id,
+          station_code: st.station_code,
+        })),
+        rows,
+        slots: shiftSlots,
+        from,
+        to,
+      }),
+    [stores, rows, shiftSlots, from, to],
+  );
   const feedItems = useMemo(
     () =>
       s.personActivity
@@ -504,6 +815,16 @@ function ShiftReportBody({
           </div>
         )}
       </section>
+
+      <StoreContinuityPanel
+        board={continuity}
+        activeStoreId={store}
+        onSelectStore={(locationId) => {
+          setStore(store === locationId ? "" : locationId);
+          setPage(1);
+        }}
+        onOpenReport={onOpenReport}
+      />
 
       <FilterChips
         items={chips}

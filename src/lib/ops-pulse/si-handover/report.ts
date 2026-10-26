@@ -9,17 +9,21 @@ import {
 import {
   applyBucketTrends,
   buildPersonActivity as buildPersonActivityCore,
+  buildStoreContinuity,
   formatQuietLabel,
   formatTrendDelta,
   type PersonActivity as PersonActivityCore,
   type PersonActivityItem as PersonActivityItemCore,
+  type StoreContinuityBoard,
 } from "./report-insights";
 
 export {
   applyBucketTrends,
+  buildStoreContinuity,
   formatQuietLabel,
   formatTrendDelta,
 };
+export type { StoreContinuityBoard };
 
 export type StoreRef = {
   id: string;
