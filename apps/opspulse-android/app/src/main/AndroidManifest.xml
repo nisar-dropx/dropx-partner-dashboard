@@ -12,7 +12,7 @@
             <meta-data android:name="android.support.customtabs.trusted.SPLASH_SCREEN_FADE_OUT_DURATION" android:value="@integer/splash_fade"/>
             <meta-data android:name="android.support.customtabs.trusted.FILE_PROVIDER_AUTHORITY" android:value="com.dropxlogistics.opspulse.fileprovider"/>
             <!-- customtabs fallback exits when the tab closes (looks like the app "auto-closes"). Prefer in-app WebView until Digital Asset Links are confirmed on device. -->
-            <meta-data android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY" android:value="webview"/>
+            <meta-data android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY" android:value="customtabs"/>
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="ops.dropxlogistics.com"/></intent-filter>
         </activity>

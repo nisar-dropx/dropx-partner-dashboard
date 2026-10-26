@@ -199,3 +199,16 @@ test("failed installation restores controls and exposes manual instructions", as
     h.cleanup();
   }
 });
+
+test("Android download is primary and uses the published release metadata", () => {
+  const h = mount({ userAgent: "Mozilla/5.0 Android", maxTouchPoints: 5 });
+  try {
+    h.render();
+    const tree = h.render();
+    const release = JSON.parse(readFileSync(new URL("../../public/downloads/opspulse-android.json", import.meta.url), "utf8"));
+    const link = nodes(tree).find(n => n.type === "a" && n.props.className === "ops-install-primary");
+    assert.equal(link?.props.href, release.url);
+    assert.equal(link?.props.download, `DropX-OpsPulse-${release.version}.apk`);
+    assert(!desktopInstallButton(tree));
+  } finally { h.cleanup(); }
+});

@@ -1,12 +1,12 @@
 {
-  "version": "2.0.0",
-  "versionCode": 2,
+  "version": "2.1.0",
+  "versionCode": 3,
   "packageName": "com.dropxlogistics.opspulse",
   "minimumAndroid": "7.0",
   "minimumSdk": 24,
-  "releasedOn": "2026-10-20",
-  "url": "/downloads/DropX-OpsPulse.apk?v=2",
-  "bytes": 3836501,
-  "sha256": "07178ef88c47a45ef5b10cc077e980260d1443ad3bd9433e0071a352028888b6",
+  "releasedOn": "2026-10-27",
+  "url": "/downloads/DropX-OpsPulse.apk?v=3",
+  "bytes": 3836689,
+  "sha256": "44a7183521c9f4f9f2e7ebc289c1367aa92a1241fd585eb7739fcb473dcd4658",
   "signingCertificateSha256": "E4:1A:4D:81:21:43:27:61:29:A3:BC:2B:4A:E9:8F:60:35:C3:19:8A:6C:1A:23:30:A6:58:52:AE:01:EE:12:B1"
 }

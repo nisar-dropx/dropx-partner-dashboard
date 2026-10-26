@@ -1059,3 +1059,14 @@ button.contCellBad:hover {
     border-radius: 0;
   }
 }
+
+@media (max-width: 820px) {
+  .shell { min-width: 0; }
+  .shell :is(button, select, input:not([type="checkbox"]), summary) { min-height: 44px; }
+  .shell :is(select, input:not([type="checkbox"]), textarea) { font-size: 16px; min-width: 0; max-width: 100%; }
+  .contModal { max-height: 100dvh; }
+}
+
+@media (max-width: 820px) {
+  .shell button { min-width: 44px; }
+}

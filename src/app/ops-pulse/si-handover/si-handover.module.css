@@ -1831,3 +1831,27 @@
   .reportAnswer { grid-column: 2; justify-self: start; }
 }
 .reportVideoLink:hover { text-decoration: underline; }
+
+/* Frontline touch layout: keep desktop density without shrinking phone controls. */
+@media (max-width: 820px) {
+  .page { min-width: 0; font-size: 14px; }
+  .hubBar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hubTab, .hubTabOn { min-width: 0; min-height: 44px; white-space: normal; text-align: center; }
+  .tabBar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tab, .tabOn { min-width: 0; min-height: 44px; padding: .35rem .2rem; }
+  .page :is(button, .btn, .btnGhost, .btnDanger, .btnAccent, .btnTiny, .datePreset, .datePresetOn) { min-height: 44px; white-space: normal; }
+  .page :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { min-height: 44px; font-size: 16px; box-sizing: border-box; }
+  .filterBar .field input { width: 100%; max-width: none; }
+  .field { font-size: .75rem; }
+  .taskTitle strong { font-size: .875rem; line-height: 1.4; }
+  .taskHint { font-size: .75rem; line-height: 1.4; }
+  .taskTop { flex-wrap: wrap; }
+  .task { padding: .65rem; gap: .5rem; }
+  .task .fields .field { flex: 1 1 110px; min-width: 0; }
+  .task .fields .field input { width: 100%; max-width: none; }
+  .reportModal, .reportModalFs { max-height: 100dvh; }
+}
+
+@media (max-width: 820px) {
+  .page button { min-width: 44px; }
+}

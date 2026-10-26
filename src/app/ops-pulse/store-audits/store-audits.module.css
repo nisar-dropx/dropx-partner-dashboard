@@ -993,11 +993,31 @@
 @media(max-width:900px) { :global(.ops-modern) .stats { grid-template-columns:repeat(3,minmax(0,1fr)); } :global(.ops-modern) .editor { grid-template-columns:1fr; } :global(.ops-modern) .sectionNav { position:static; } }
 @media(max-width:600px) { :global(.ops-modern) .stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; } :global(.ops-modern) .stats button { min-height:72px; padding:11px; } :global(.ops-modern) .filters { flex-wrap:wrap; } :global(.ops-modern) .filters label { flex:1 1 130px; } :global(.ops-modern) .filterPanel { padding:12px; } :global(.ops-modern) .header .inline { width:100%; } :global(.ops-modern) .header .inline > * { flex:1; } :global(.ops-modern) .tableWrap table { min-width:650px; } }
 
-@media(max-width:600px) {
+@media(max-width:900px) {
   :global(.ops-modern) .page input:not([type="checkbox"]),
   :global(.ops-modern) .page select,
   :global(.ops-modern) .page textarea { min-height:44px; font-size:16px; min-width:0; max-width:100%; }
   :global(.ops-modern) .page button, :global(.ops-modern) .button { min-height:44px; }
   :global(.ops-modern) .sectionNav { grid-template-columns:1fr; }
   :global(.ops-modern) .calendar { overflow-x:auto; }
+}
+
+.page .mobileFiltersToggle { display: none; }
+@media (max-width: 900px) {
+  :global(.ops-modern) .header { align-items: flex-start; margin-bottom: 12px; }
+  .page .mobileFiltersToggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: #fff; border: 1px solid var(--line, #e2e7ee); }
+  :global(.ops-modern) .mobileFiltersClosed { display: none; }
+  :global(.ops-modern) .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  :global(.ops-modern) .stats button { min-height: 66px; padding: 8px; font-size: 11px; }
+  :global(.ops-modern) .stats b { font-size: 20px; }
+  :global(.ops-modern) .auditRegister { border: 0; overflow: visible; background: transparent; }
+  :global(.ops-modern) .auditRegister table { min-width: 0; display: block; }
+  .auditRegister thead { display: none; }
+  .auditRegister tbody { display: grid; gap: 10px; }
+  .auditRegister tr { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); padding: 12px; border: 1px solid var(--line, #e2e7ee); border-radius: 12px; background: #fff; }
+  .auditRegister td { display: grid; gap: 4px; padding: 7px 4px; border: 0; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .auditRegister td::before { content: attr(data-label); font-size: 11px; color: var(--muted, #667085); }
+  .auditRegister td:first-child, .auditRegister td:last-child { grid-column: 1 / -1; }
+  .auditRegister td:last-child::before { display: none; }
+  .auditRegister td:last-child a { display: flex; justify-content: center; }
 }

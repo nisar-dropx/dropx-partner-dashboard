@@ -372,6 +372,7 @@ function ProofFiles({
 export function StoreAuditWorkspace(p: Props) {
   const router = useRouter();
   const [transition, startTransition] = useTransition();
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(p.error),
     [search, setSearch] = useState(""),
@@ -2004,7 +2005,10 @@ export function StoreAuditWorkspace(p: Props) {
           </button>
         ))}
       </div>
-      <div className={`${styles.card} ${styles.filterPanel}`}>
+      <button type="button" className={styles.mobileFiltersToggle} aria-expanded={mobileFiltersOpen} aria-controls="store-audit-filters" onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}>
+        {mobileFiltersOpen ? "− Hide filters" : "+ Search & filters"}{search || location || auditTypeFilter || status !== "all" ? " · Active" : ""}
+      </button>
+      <div id="store-audit-filters" className={`${styles.card} ${styles.filterPanel} ${!mobileFiltersOpen ? styles.mobileFiltersClosed : ""}`}>
         <form className={styles.filters} action="/store-audits">
           <label>
             From
@@ -2151,7 +2155,7 @@ export function StoreAuditWorkspace(p: Props) {
             ))}
         </div>
       ) : (
-        <div className={styles.tableWrap}>
+        <div className={`${styles.tableWrap} ${styles.auditRegister}`}>
           <table>
             <thead>
               <tr>
@@ -2171,12 +2175,12 @@ export function StoreAuditWorkspace(p: Props) {
                 const band = auditBand(a);
                 return (
                 <tr key={a.id}>
-                  <td>
+                  <td data-label="Store / audit">
                     <b>{a.store_name}</b>
                     <small>{a.number}</small>
                   </td>
-                  <td>{auditTypeLabels[a.audit_type || "mock"]}</td>
-                  <td>
+                  <td data-label="Type">{auditTypeLabels[a.audit_type || "mock"]}</td>
+                  <td data-label="Score">
                     {a.completed_at && pct != null ? (
                       <>
                         {pct}%
@@ -2193,20 +2197,20 @@ export function StoreAuditWorkspace(p: Props) {
                       "—"
                     )}
                   </td>
-                  <td>{date(a.scheduled_for)}</td>
-                  <td>{a.assigned_name}</td>
-                  <td>
+                  <td data-label="Scheduled">{date(a.scheduled_for)}</td>
+                  <td data-label="Auditor">{a.assigned_name}</td>
+                  <td data-label="Status">
                     <span className={styles.badge} data-state={a.status}>
                       {statusLabels[a.status]}
                     </span>
                     {a.email_error && <small>Email needs attention</small>}
                   </td>
-                  <td>
+                  <td data-label="Open actions">
                     {a.completed_at
                       ? a.findings.filter((f) => f.state !== "closed").length
                       : "—"}
                   </td>
-                  <td>
+                  <td data-label="">
                     <Link
                       className={styles.button}
                       href={`/store-audits?audit=${a.id}`}
