@@ -3,6 +3,7 @@ import {requirePagePermission} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {digestDatabase} from '@/lib/portal-digest-delivery';
 import {defaultInsightControl,insightEvents,loadInsightScope} from '@/lib/ops-pulse/insight-digest';
+import {insightControlUpdates} from '@/lib/ops-pulse/insight-control-updates';
 import {redirect} from 'next/navigation';
 import {revalidatePath} from 'next/cache';
 export async function saveInsightSettings(form:FormData){
@@ -23,7 +24,7 @@ export async function saveInsightSettings(form:FormData){
   const scope=await loadInsightScope(db,rows[0]);if(state==='enabled'&&!scope.recipients.length)throw Error('No eligible existing report recipients.');
   const legacy=await db.from('portal_notification_controls').select('*').eq('company_id',company).eq('portal','ops').in('event_key',['now_review_digest','now_activity_digest']);
   if(legacy.error)throw Error('Existing schedules could not be checked.');
-  const updates=state==='enabled'?[...rows,...(legacy.data||[]).map(c=>({...c,state:'disabled',updated_by:auth.userId,updated_at:new Date().toISOString()}))]:rows;
+  const updates=insightControlUpdates(rows,legacy.data||[],auth.userId,new Date().toISOString());
   const result=await db.from('portal_notification_controls').upsert(updates,{onConflict:'company_id,portal,event_key'});if(result.error)throw Error('Insight settings could not be saved.');
  }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
  revalidatePath('/settings/notifications');redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#store-insights');

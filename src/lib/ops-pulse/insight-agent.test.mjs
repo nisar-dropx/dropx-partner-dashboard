@@ -74,3 +74,13 @@ test('morning and evening continue the existing monthly Dark Store conversation'
  assert.ok(digestThreadEvents('now_insight_morning').includes('now_review_digest'));
  const source=fs.readFileSync('src/lib/portal-digest-delivery.ts','utf8');assert.match(source,/eq\("report_month",delivery.report_date.slice\(0,7\)\)/);assert.match(source,/references:thread/);assert.match(source,/Insight recipient scope changed/);
 });
+test('enabling insight schedules atomically replaces legacy schedules with valid bulk row keys',()=>{
+ const {insightControlUpdates}=load('insight-control-updates');
+ const controls=['now_insight_morning','now_insight_evening'].map(event_key=>({company_id:'c',portal:'ops',event_key,state:'enabled',config:{schedule_time:'09:00'}}));
+ const legacy=['now_review_digest','now_activity_digest'].map(event_key=>({id:'old',created_at:'earlier',company_id:'c',portal:'ops',event_key,state:'enabled',paused_until:null,subject_template:'Existing monthly subject',config:{recipient_role_codes:['RM'],additional_emails:['existing@example.test']}}));
+ const updates=insightControlUpdates(controls,legacy,'u','now');
+ assert.equal(updates.length,4);
+ for(const row of updates)assert.deepEqual(Object.keys(row).sort(),Object.keys(updates[0]).sort());
+ assert.equal(updates[2].state,'disabled');assert.deepEqual(updates[2].config,legacy[0].config);assert.equal(updates[2].subject_template,legacy[0].subject_template);assert.ok(!('id' in updates[2]));assert.equal(legacy[0].state,'enabled');
+ assert.equal(insightControlUpdates(controls.map(c=>({...c,state:'disabled'})),legacy,'u','now').length,2);
+});
