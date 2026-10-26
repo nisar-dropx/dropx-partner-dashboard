@@ -303,7 +303,7 @@ body:has(.ops-modern) .modal-body { padding:18px 20px; }
 .ops-install-devices button { min-height:40px; padding:6px 4px; border:1px solid transparent; border-radius:7px; background:transparent; color:#667085; font:inherit; font-size:12px; cursor:pointer; }
 .ops-install-devices button[aria-pressed="true"] { color:#172033; border-color:#e4e7ec; background:#fff; box-shadow:0 1px 3px #1018280a; font-weight:700; }
 .ops-install-banner { margin:0; padding:10px 12px; border-radius:9px; background:#fff8eb; color:#7a4e0b; font-size:12px; line-height:1.5; }
-.ops-install-primary { display:flex; align-items:center; justify-content:center; gap:9px; width:100%; min-height:44px; padding:10px 12px; border:1px solid #d0d5dd; border-radius:10px; background:#fff; color:#172033; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+.ops-install-primary { text-decoration:none; box-sizing:border-box; display:flex; align-items:center; justify-content:center; gap:9px; width:100%; min-height:44px; padding:10px 12px; border:1px solid #d0d5dd; border-radius:10px; background:#fff; color:#172033; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
 .ops-install-primary:hover:not(:disabled) { border-color:#df6035; background:#fff9f5; }
 .ops-install-primary:disabled { opacity:.7; cursor:default; }
 .ops-install-instructions { font-size:13px; line-height:1.6; color:#667085; }

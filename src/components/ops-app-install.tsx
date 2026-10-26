@@ -18,7 +18,6 @@ const devices: { value: Device; label: string }[] = [
 export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
-  const [fromAndroidApp, setFromAndroidApp] = useState(false);
   const [platform, setPlatform] = useState<Device>("desktop");
   const [device, setDevice] = useState<Device>("desktop");
   const [message, setMessage] = useState("");
@@ -33,7 +32,6 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
         : "desktop";
     setPlatform(detected);
     setDevice(detected);
-    setFromAndroidApp(new URLSearchParams(window.location.search).get("source") === "android-app");
     const standalone = window.matchMedia("(display-mode: standalone)");
     const sync = () => setInstalled(standalone.matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
     const capture = (event: Event) => {
@@ -88,11 +86,16 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
         ))}
       </div>
 
-      {fromAndroidApp && device === "android" ? (
-        <p className="ops-install-banner">If the Android app closes unexpectedly, use the Chrome install below.</p>
+      {device === "android" ? (
+        <>
+          <a className="ops-install-primary" href={androidRelease.url} download={`DropX-OpsPulse-${androidRelease.version}.apk`}>
+            <Download size={18} aria-hidden="true" /> Download Android app
+          </a>
+          <p className="ops-install-message">v{androidRelease.version} · Android 7.0+ · {(androidRelease.bytes / 1024 / 1024).toFixed(1)} MB</p>
+        </>
       ) : null}
 
-      {device === platform && platform !== "ios" ? (
+      {device === platform && platform === "desktop" ? (
         <button type="button" className="ops-install-primary" disabled={busy || installed} onClick={() => void install()}>
           {installed ? <Check size={18} aria-hidden="true" /> : <Download size={18} aria-hidden="true" />}
           {installed ? "App installed" : busy ? "Opening installer…" : "Install OpsPulse"}
@@ -103,7 +106,7 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
 
       <div className="ops-install-instructions">
         {device === "android" ? (
-          <p>In <strong>Chrome</strong>, tap <strong>⋮ → Install app</strong> or <strong>Add to Home screen</strong>.</p>
+          <p>Open the downloaded APK to install or update OpsPulse. Keep Chrome up to date for Google sign-in and camera reporting.</p>
         ) : device === "ios" ? (
           <p>In <strong>Safari</strong>, tap <strong>Share → Add to Home Screen</strong>. Enable “Open as Web App” if shown.</p>
         ) : (
@@ -116,11 +119,8 @@ export function OpsAppInstall({ compact = false }: { compact?: boolean }) {
 
       {device === "android" ? (
         <details className="ops-install-alternative">
-          <summary>Android APK (beta)</summary>
-          <p>May close on some phones. Chrome install is recommended.</p>
-          <a href={androidRelease.url} download={`DropX-OpsPulse-${androidRelease.version}.apk`}>
-            <Download size={15} aria-hidden="true" /> Download APK · v{androidRelease.version}
-          </a>
+          <summary>Use the browser app instead</summary>
+          <p>In Chrome, tap ⋮ → Install app or Add to Home screen.</p>
         </details>
       ) : null}
     </div>
