@@ -28,7 +28,10 @@ type DocumentRow = {
 const LIST_CACHE_MS = 6 * 60 * 60 * 1000;
 const payMayChangeNote = "These figures may change if payroll is updated later.";
 const isWorkCycle = (document: DocumentRow) => /work\s*_?cycle/i.test(document.category);
-const isInsurance = (document: DocumentRow) => document.kind === "insurance" || (document.kind === "issued" && document.category === "insurance card");
+const isInsurance = (document: DocumentRow) =>
+  document.kind === "insurance" ||
+  (document.kind === "issued" && document.category === "insurance card") ||
+  /group medical|group personal accident|insurance/i.test(document.category);
 
 type RequestType = {
   id: string;

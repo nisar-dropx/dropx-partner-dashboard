@@ -109,8 +109,9 @@ export async function GET(request: Request) {
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
         .order("requested_at", { ascending: false }).limit(50),
       supabaseAdmin.from("connect_insurance_cards")
-        .select("id,drive_file_id,file_name,mime_type,policy_number,insurer_name,valid_to,source_updated_at")
+        .select("id,drive_file_id,file_name,mime_type,policy_number,insurer_name,policy_type,membership_no,valid_to,source_updated_at")
         .eq("company_id", account.companyId).eq("profile_type", profileType).eq("profile_id", account.id)
+        .order("policy_type", { ascending: true })
     ]);
     if (pay.error || issued.error || exit.error || types.error || requests.error) throw new Error(pay.error?.message ?? issued.error?.message ?? exit.error?.message ?? types.error?.message ?? requests.error?.message ?? "Unable to load documents.");
     // Insurance cards are optional: a missing table (migration not run yet) must not break Documents.
@@ -152,15 +153,28 @@ export async function GET(request: Request) {
         publishedAt: row.generated_at, expiresOn: null, downloadUrl: query("exit", row.id)
       })),
       // Served straight from Google Drive (the file is shared by link), never through this server.
-      ...insuranceRows.map((row) => ({
-        id: row.id, kind: "insurance", category: "insurance card",
-        title: row.insurer_name ? `${row.insurer_name} insurance card` : "Insurance card",
-        subtitle: row.policy_number ? `Policy ${row.policy_number}` : "Group insurance",
-        fileName: row.file_name || "insurance-card.pdf", mimeType: row.mime_type || null,
-        publishedAt: row.source_updated_at, expiresOn: row.valid_to,
-        downloadUrl: `https://drive.google.com/uc?export=download&id=${encodeURIComponent(row.drive_file_id)}`,
-        external: true
-      }))
+      ...insuranceRows.map((row) => {
+        const policyType = String(row.policy_type || "GMC").toUpperCase();
+        const label =
+          policyType === "GPA"
+            ? "Group Personal Accident"
+            : policyType === "GMC"
+              ? "Group Medical"
+              : row.insurer_name || "Insurance";
+        return {
+          id: row.id, kind: "insurance", category: policyType === "GPA" ? "group personal accident" : "group medical",
+          title: label,
+          subtitle: [
+            row.policy_number ? `Policy ${row.policy_number}` : null,
+            row.membership_no ? `Membership ${row.membership_no}` : null,
+            row.insurer_name && row.insurer_name !== label ? row.insurer_name : null
+          ].filter(Boolean).join(" · ") || "Company group insurance",
+          fileName: row.file_name || `${policyType.toLowerCase()}-card.pdf`, mimeType: row.mime_type || null,
+          publishedAt: row.source_updated_at, expiresOn: row.valid_to,
+          downloadUrl: `https://drive.google.com/uc?export=download&id=${encodeURIComponent(row.drive_file_id)}`,
+          external: true
+        };
+      })
     ].sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
 
     return NextResponse.json({

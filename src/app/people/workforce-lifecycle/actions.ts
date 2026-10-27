@@ -7,6 +7,7 @@ import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { requireCompanyId } from "@/lib/company-scope";
 import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { enqueueActivationAutomation, enqueueOffboardAutomation } from "@/lib/lifecycle-automation";
 
 function lifecycleRedirect(params: { error?: string; notice?: string; tab?: string }): never {
   const query = new URLSearchParams();
@@ -31,7 +32,7 @@ async function requireScopedApplicant(id: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status, identity_exception_required")
+    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status, identity_exception_required, pan_number, email, mobile, gender, date_of_birth")
     .eq("company_id", companyId)
     .eq("id", id)
     .maybeSingle();
@@ -212,6 +213,24 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
       remarks: remarks || "HO checklist completed and workforce ID activated."
     });
     if (event.error) throw new Error(event.error.message);
+    const station = applicant.location_id
+      ? await supabaseAdmin!.from("stations").select("station_code").eq("id", applicant.location_id).maybeSingle()
+      : { data: null };
+    await enqueueActivationAutomation({
+      profileType: "workforce",
+      profileId: id,
+      pan: (applicant as { pan_number?: string | null }).pan_number,
+      email: (applicant as { email?: string | null }).email,
+      fullName: applicant.full_name,
+      dob: (applicant as { date_of_birth?: string | null }).date_of_birth,
+      gender: (applicant as { gender?: string | null }).gender,
+      doj: applicant.date_of_join,
+      mobile: (applicant as { mobile?: string | null }).mobile,
+      designation: applicant.designation,
+      designationCode: policy.code,
+      stationCode: station.data?.station_code ?? null,
+      isDeliveryAssociate: /\bDA\b|DELIVERY\s*ASSOCIATE/i.test(`${policy.code} ${applicant.designation || ""}`)
+    });
     revalidatePath("/people/workforce-lifecycle");
     lifecycleRedirect({ notice: `${applicant.full_name} approved and activated.` });
   } catch (error) {
@@ -402,6 +421,13 @@ export async function completeWorkforceSettlement(formData: FormData) {
     await supabaseAdmin.from("biometric_enrolments").update({ status: "Inactive", updated_at: now })
       .eq("company_id", companyId).eq("profile_type", "field_executive")
       .eq("account_id", current.data.field_executive_id).is("effective_to", null);
+    const exited = await supabaseAdmin.from("workforce").select("pan_number").eq("company_id", companyId).eq("id", current.data.field_executive_id).maybeSingle();
+    await enqueueOffboardAutomation({
+      profileType: "workforce",
+      profileId: current.data.field_executive_id,
+      pan: exited.data?.pan_number,
+      dateOfLeaving: String(effectiveDate || now.slice(0, 10))
+    });
     revalidatePath("/people/workforce-lifecycle");
     lifecycleRedirect({ notice: "Final settlement recorded and workforce access deactivated.", tab: "exits" });
   } catch (error) {
