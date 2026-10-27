@@ -344,7 +344,7 @@ test('earnings combines road kilometres with delivery pay exactly once on the sa
 test('earnings uses the selected payroll month and includes only own recovery once',async()=>{
  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='workforce_adjustments'?[row()]:[],error:null}));
  const due={recovery_key:'2026-08|shipment|workforce:person',month:'2026-08',case_key:'shipment',report:'nl',worker_id:'person',amount:50,deduction_month:'2026-09',label:'Shipment recovery',cap_percent:50};
- db.rpc=async(name,args)=>{assert.equal(name,'nl_loss_recovery_due');assert.deepEqual(args,{p_company:'company',p_salary_month:'2026-09',p_target:'workforce'});return{data:[due,due,{...due,worker_id:'other',recovery_key:'other'}],error:null}};
+ db.rpc=async(name,args,options)=>{assert.deepEqual(options,{get:true});assert.equal(name,'nl_loss_recovery_due');assert.deepEqual(args,{p_company:'company',p_salary_month:'2026-09',p_target:'workforce'});return{data:[due,due,{...due,worker_id:'other',recovery_key:'other'}],error:null}};
  const response=await earningsRoute(db)(request()),body=await response.json();assert.equal(response.status,200,JSON.stringify(body));assert.equal(body.summary.lossRecoveryAmount,50);assert.equal(body.summary.deductionAmount,50);assert.equal(body.summary.netAmount,150);
  db.rpc=async()=>({data:null,error:{message:'PRIVATE DATABASE ERROR'}});
  const failed=await earningsRoute(db)(request());assert.equal(failed.status,400);assert.doesNotMatch(JSON.stringify(await failed.json()),/PRIVATE DATABASE/);

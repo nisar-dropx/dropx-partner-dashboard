@@ -225,7 +225,7 @@ export async function GET(request: Request) {
     // a separate historical record, never added again and never treated as outstanding dues.
     summary.additions=adjustments.summary.additions;
     summary.grossAmount=Math.round((summary.baseAmount+incentives.summary.amount+summary.additions)*100)/100;
-    const due = workforce?.id ? await db().rpc("nl_loss_recovery_due",{p_company:account.companyId,p_salary_month:month,p_target:"workforce"}) : {data:[],error:null};
+    const due = workforce?.id ? await db().rpc("nl_loss_recovery_due",{p_company:account.companyId,p_salary_month:month,p_target:"workforce"},{get:true}) : {data:[],error:null};
     if(due.error)throw new Error("Your loss deductions could not be verified. Please retry.");
     const {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due.data||[]);
     return NextResponse.json({ month, earnings, routeFuel, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
