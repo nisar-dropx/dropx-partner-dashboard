@@ -218,6 +218,15 @@ export default async function SettingsPage() {
               </div>
             </PendingLink>
           ) : null}
+          <PendingLink className="settings-tile actionable" href="/settings/marsh-insurance">
+            <div>
+              <h3>Marsh Insurance</h3>
+              <p className="subtle">Qover portal OTP login, GMC/GPA enroll jobs, and ecard sync to DropX One.</p>
+            </div>
+            <span className="settings-tile-actions">
+              <span className="button secondary compact">Connect</span>
+            </span>
+          </PendingLink>
           <PendingLink className="settings-tile actionable" href="/settings/payments">
             <div>
               <h3>Payment Settings</h3>
