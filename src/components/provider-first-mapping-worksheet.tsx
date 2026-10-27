@@ -5,6 +5,7 @@ import { Download, FileSpreadsheet, FileText, X } from "lucide-react";
 import { clearProviderMappingPeriod, saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
+import { ProviderIdInsights } from "@/components/provider-id-insights";
 import { ProviderMappingLookup } from "@/components/provider-mapping-lookup";
 import { mappingLookupToday } from "@/lib/provider-mapping-lookup";
 import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
@@ -1177,7 +1178,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           {dirtyRows[index] ? <span className="unsaved-badge mapping-unsaved-badge">Unsaved</span> : null}
           <div className="mapping-identity">
             <span className="mapping-identity-kicker">Provider ID</span>
-            <span className="mapping-dropx-id mono" title={roundedSourceId ? "The source file contains a rounded ID. Import a report containing the full provider ID to resolve it." : undefined}>{row.providerMemberId}</span>
+            <span className="mapping-dropx-id mono" title={roundedSourceId ? "The source file contains a rounded ID. Import a report containing the full provider ID to resolve it." : undefined}>{roundedSourceId ? row.providerMemberId : <ProviderIdInsights memberId={row.providerMemberId} stationId={row.stationId} providerId={row.providerId} />}</span>
             {roundedSourceId ? <span className="mapping-source-warning">Exact ID unavailable</span> : null}
             <span className="mapping-provider-name">{row.providerMemberName}</span>
             <span className="mapping-station-label">{row.stationLabel}</span>

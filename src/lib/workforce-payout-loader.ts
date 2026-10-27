@@ -110,6 +110,8 @@ export type WorkforcePayoutLoadScope = {
   workforceIds?: readonly string[];
   /** Ops loss recoveries (Team Ops → Losses) due in this month. Off when measuring salary capacity for a new plan. */
   includeLossRecoveries?: boolean;
+  /** Read-only ID insights: retain per-mapping costs before worker consolidation/adjustments. */
+  providerCostSegmentsOnly?: boolean;
 };
 
 export async function loadWorkforcePayoutRows(
@@ -1312,6 +1314,12 @@ export async function loadWorkforcePayoutRows(
   });
   const consolidatedProvider = consolidateProviderPayoutSegments(providerSegments);
   if (consolidatedProvider.conflicts.length) return { rows: [] as WorkforcePayoutRow[], error: "Overlapping provider payment methods exist for the same workforce date. Correct the effective dates before calculating payroll." };
+  if (scope.providerCostSegmentsOnly) {
+    return {
+      rows: providerSegments.filter(segment => !scopeEnabled || scopedIdentityIds.has(segment.workforceId)).map(segment => segment.row),
+      error: null
+    };
+  }
   const payoutDeductionContextByRowId = new Map<string, DeductionWorkerContext>();
   const providerRows: WorkforcePayoutRow[] = consolidatedProvider.rows.map(({ workforceId, categoryCode, panNumber, row }) => {
     const deductionContext = { categoryCode, panNumber } satisfies DeductionWorkerContext;

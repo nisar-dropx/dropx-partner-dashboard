@@ -1,5 +1,7 @@
 "use client";
 
+import { ProviderIdInsights } from "@/components/provider-id-insights";
+
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
@@ -662,6 +664,7 @@ export function ProviderMappingWorksheet({
                     providerMemberId={row.providerMemberId}
                   />
                 </label>
+                {row.providerMemberId && row.stationId && row.providerId ? <ProviderIdInsights memberId={row.providerMemberId} stationId={row.stationId} providerId={row.providerId} /> : null}
               </div>
 
               <div className="mapping-edit-grid">

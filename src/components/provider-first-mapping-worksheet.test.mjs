@@ -46,6 +46,7 @@ function worksheet(
   const boundaries = {
     react: hooks,
     '@/app/provider-mapping/actions': { clearProviderMappingPeriod: clearPeriod, saveProviderFirstMappingsInline: save },
+    '@/components/provider-id-insights': { ProviderIdInsights: 'ProviderIdInsights' },
     '@/components/provider-mapping-lookup': { ProviderMappingLookup: 'MappingLookup' },
     '@/components/provider-mapping-schedule': { ProviderMappingSchedule: 'MappingSchedule' },
     '@/components/searchable-select': { SearchableSelect: 'SearchableSelect' },
@@ -875,4 +876,12 @@ test('one provider member mapped at two active locations renders two independent
  assert.deepEqual(ui.all(node=>node.type==='input'&&node.props.type==='number').map(node=>node.props.value),['13000','17']);
  assert.deepEqual(ui.all(node=>node.type==='input'&&node.props.type==='date'&&node.props.required).map(node=>node.props.value),['2026-10-01','2025-02-21']);
  assert.deepEqual(ui.all(node=>node.type==='History').map(node=>node.props.entries.map(entry=>entry.id)),[['history-xapi','history-gntf'],['history-xapi','history-gntf']]);
+});
+
+test('provider IDs expose scoped delivery insights without submitting or changing the mapping', () => {
+  const w = worksheet();
+  const trigger = w.one(node => node.type === 'ProviderIdInsights');
+  assert.equal(trigger.props.memberId, row.providerMemberId);
+  assert.equal(trigger.props.stationId, row.stationId);
+  assert.equal(trigger.props.providerId, row.providerId);
 });
