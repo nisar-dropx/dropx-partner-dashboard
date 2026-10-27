@@ -83,7 +83,7 @@ export function ConnectLossRecoveries({
       <header>
         <h2>Loss recoveries</h2>
         <p>
-          Your approved recoveries and deduction history. Open a case to see its value, your share and the remaining balance.
+          Your assigned recoveries and deduction history. Open a case to see its value, your share and the remaining balance.
         </p>
       </header>
       {error ? (
@@ -100,14 +100,14 @@ export function ConnectLossRecoveries({
           return (
             <li key={key}>
               <strong>
-                {row.reason} · TID {row.tid || row.caseKey}
+                {row.reason} · Shipment ID {row.tid || row.caseKey}
               </strong>
               <small>
                 {monthLabel(row.month)} · {row.stationCode} ·{" "}
                 {row.recoveryMode === "installments"
                   ? `Instalments (${row.installmentCount || "—"})`
                   : "Full recovery"}{" "}
-                · Status {row.status}
+                · Status {row.status.replaceAll("_", " ")}
               </small>
               <p>
                 Your share {money(row.myShareAmount)} · Deducted {money(row.deducted)} · Outstanding{" "}
@@ -136,11 +136,11 @@ export function ConnectLossRecoveries({
                       Cancel
                     </button>
                   </div>
-                ) : (
+                ) : row.approvalStatus === "approved" ? (
                   <button type="button" onClick={() => setActive(key)}>
                     Request clarification
                   </button>
-                )}
+                ) : null}
               </div>
             </li>
           );

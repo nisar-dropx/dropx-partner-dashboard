@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ConnectDialog } from "./connect-dialog";
 
 export type Recovery = {
+  deductions?: {key:string;month:string;amount:number;confirmed:boolean}[];
   month: string;
   caseKey: string;
   tid: string;
@@ -25,6 +26,7 @@ export type Recovery = {
   deducted: number;
   outstanding: number;
   status: string;
+  approvalStatus?: string | null;
   lifecycleStatus: string | null;
   scheduledFromMonth: string | null;
   inPayroll: number;
@@ -67,7 +69,7 @@ export function RecoveryDetail({ detail, onClose, payrollAmount, payrollLabel }:
         >
           {payrollAmount != null ? <p className="dx-loss-recovery-detail-note"><strong>{money(payrollAmount)}</strong> included in this {payrollLabel || "payroll"} deduction. This is already included in net pay.</p> : null}
           <dl className="dx-loss-recovery-detail">
-            <DetailRow label="Tracking ID" value={detail.tidApproximate ? `${detail.tid} (approximate)` : detail.tid} />
+            <DetailRow label="Shipment ID" value={detail.tidApproximate ? `${detail.tid} (approximate)` : detail.tid} />
             <DetailRow label="Loss month" value={monthLabel(detail.month)} />
             <DetailRow label="Case value" value={money(detail.caseAmount)} />
             <DetailRow label="Your share" value={money(detail.myShareAmount)} />
@@ -76,6 +78,8 @@ export function RecoveryDetail({ detail, onClose, payrollAmount, payrollLabel }:
             {detail.inPayroll > 0 ? <DetailRow label="In draft payroll · provisional" value={money(detail.inPayroll)} /> : null}
             {detail.waived > 0 ? <DetailRow label="Written off" value={money(detail.waived)} /> : null}
           </dl>
+          {detail.status === "redispute_won" ? <p className="dx-loss-recovery-detail-note">Redispute won. Further recovery has stopped. Any earlier deductions remain in your history; this does not record a refund.</p> : detail.status === "redispute_pending" ? <p className="dx-loss-recovery-detail-note">Redispute in progress. Further recovery is paused.</p> : detail.approvalStatus && detail.approvalStatus !== "approved" ? <p className="dx-loss-recovery-detail-note">This assignment is awaiting review and is not a confirmed payroll deduction.</p> : null}
+          {detail.deductions?.length ? <details open><summary>Payroll deduction history · {detail.deductions.length}</summary><dl className="dx-loss-recovery-detail">{detail.deductions.map(d=><DetailRow key={d.key} label={`${monthLabel(d.month)} · ${d.confirmed?"Confirmed":"Draft"}`} value={money(d.amount)}/>)}</dl></details> : null}
           <details>
             <summary>Recovery plan and reason</summary>
             <dl className="dx-loss-recovery-detail">

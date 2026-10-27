@@ -1,3 +1,4 @@
+import { LossFinalMetrics } from "./loss-final-metrics";
 import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
 import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
 import Link from "next/link";
@@ -166,29 +167,8 @@ export function NlLossReport({
           {copy.decision} · Source refreshed {time(v.monthLastSeen)}
         </span>
       </div>
-      <div className={styles.metrics}>
-        <div>
-          <span>{copy.value}</span>
-          <strong>{money(v.totals.reduce((a, b) => a + b.amount, 0))}</strong>
-          <small>{copy.valueHint}</small>
-        </div>
-        <div>
-          <span>Cases</span>
-          <strong>
-            {v.totals.reduce((a, b) => a + b.count, 0).toLocaleString("en-IN")}
-          </strong>
-          <small>
-            {v.month === ALL_PERIODS
-              ? "Across all periods and selected filters"
-              : `For this ${v.kind === "nl" ? "month" : "period"} and selected filters`}
-          </small>
-        </div>
-        <div>
-          <span>Stations</span>
-          <strong>{v.totals.length}</strong>
-          <small>Within your authorized locations</small>
-        </div>
-      </div>
+      <LossFinalMetrics summary={v.totals.reduce((a,t)=>({count:a.count+t.count,amount:a.amount+t.amount,updated:a.updated+t.updated,updatedAmount:a.updatedAmount+t.updatedAmount,pendingUpdate:a.pendingUpdate+t.pendingUpdate,pendingUpdateAmount:a.pendingUpdateAmount+t.pendingUpdateAmount}),{count:0,amount:0,updated:0,updatedAmount:0,pendingUpdate:0,pendingUpdateAmount:0})}/>
+      <p className={styles.hint}>Updated means recovery details saved. Actual deductions are shown by payroll month in Recovery.</p>
       {v.totals.length ? (
         <LossWorkbook
           kind={v.kind}
@@ -218,8 +198,7 @@ export function NlLossReport({
                 <tr>
                   <th>Station</th>
                   <th>Current cluster · People</th>
-                  <th>Cases</th>
-                  <th>{copy.value}</th>
+                  <th>Total shipments / value</th><th>Updated / value</th><th>Pending / value</th>
                   <th />
                 </tr>
               </thead>
@@ -231,10 +210,7 @@ export function NlLossReport({
                       <small>{s.station_name}</small>
                     </td>
                     <td>{s.cluster}</td>
-                    <td>{s.count}</td>
-                    <td>
-                      <strong>{money(s.amount)}</strong>
-                    </td>
+                    <td>{s.count}<small>{money(s.amount)}</small></td><td>{s.updated}<small>{money(s.updatedAmount)}</small></td><td>{s.pendingUpdate}<small>{money(s.pendingUpdateAmount)}</small></td>
                     <td>
                       <Link
                         className={styles.button}

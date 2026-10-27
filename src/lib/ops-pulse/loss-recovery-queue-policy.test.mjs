@@ -11,3 +11,9 @@ test('missing source retains debt for review',()=>assert.equal(recoveryQueueStat
 test('month rollover uses India time',()=>assert.equal(indiaMonth(new Date('2026-10-31T18:30:00Z')),'2026-11'));
 
 test('confirmed non-recoverable outcomes do not stay collectible or inflate recovery',()=>{let q=recoveryQueueState({...row,source_final_nonrecoverable:true},[line],'2026-11');assert.equal(q.outstanding,0);assert.equal(q.status,'source_cleared');q=recoveryQueueState({...row,source_final_nonrecoverable:true},[{...line,deducted:300}],'2026-11');assert.equal(q.status,'review');assert.equal(q.deducted,300);});
+
+test('redispute hold, win and deferred loss keep deductions distinct',()=>{
+ let q=recoveryQueueState({...row,redispute:{enabled:true,workflow_status:'awaiting_review'}},[line],'2026-10');assert.equal(q.status,'redispute_pending');assert.equal(q.outstanding,900);
+ q=recoveryQueueState({...row,redispute:{enabled:false,workflow_status:'won'}},[{...line,deducted:200}],'2026-10');assert.equal(q.status,'redispute_won');assert.equal(q.outstanding,0);assert.equal(q.deducted,200);
+ q=recoveryQueueState({...row,redispute:{enabled:false,workflow_status:'lost',recovery_month:'2026-12'}},[line],'2026-11');assert.equal(q.status,'scheduled');assert.equal(q.nextDue,'2026-12');
+});

@@ -1,3 +1,4 @@
+import { LossFinalMetrics } from "./loss-final-metrics";
 import { LossWorkbook } from "./loss-workbook";
 import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
 import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
@@ -68,7 +69,7 @@ export function NlLiveReport({
         active="nl"
       />
       <NlViewSwitch active={viewKey} />
-      {isFinal?<p className={styles.hint}><Link href="/team-ops/losses/recovery">Open Recovery → all loss months, carried balances and returned updates</Link></p>:null}
+      {isFinal?<p className={styles.hint}><Link href="/team-ops/losses/recovery-updates">Pending recovery updates → all loss months</Link></p>:null}
       {!v.ready ? (
         <div className={styles.notice} role="status">
           The live dispute view is being enabled. Recovery for closed months
@@ -160,25 +161,8 @@ export function NlLiveReport({
               <small>{money(s.withAmazonAmount)} under review</small>
             </div>
             </> : null}
-            {isFinal ? <>
-            <div>
-              <span>Non-recoverable</span>
-              <strong>{money(s.savedAmount)}</strong>
-              <small>
-                {s.saved.toLocaleString("en-IN")} cases ruled non-recoverable
-              </small>
-            </div>
-            <div>
-              <span>Recoverable so far</span>
-              <strong>{money(s.recoverableAmount)}</strong>
-              <small>
-                {s.recoverable.toLocaleString("en-IN")} of{" "}
-                {s.count.toLocaleString("en-IN")} cases · {money(s.amount)}{" "}
-                raised
-              </small>
-            </div>
-            </> : null}
           </div>
+          {isFinal ? <><LossFinalMetrics summary={s}/><p className={styles.hint}>Updated means recovery details saved; deductions appear in Recovery by payroll month.</p></> : null}
           {!isFinal && v.canDesk && v.deskQueue ? (
             <div className={styles.workbook}>
               <div>
@@ -205,7 +189,7 @@ export function NlLiveReport({
             <input type="hidden" name="view" value={viewKey} />
             {v.months.length > 1 ? (
               <label>
-                Open month
+                Loss month
                 <select name="month" defaultValue={v.month} key={v.month}>
                   {v.months.map((m) => (
                     <option key={m} value={m}>
@@ -250,7 +234,7 @@ export function NlLiveReport({
           ) : (
             <section className={styles.panel}>
               <div className={styles.panelHead}>
-                <h2>Station dispute overview</h2>
+                <h2>{isFinal ? "Station recovery updates" : "Station dispute overview"}</h2>
                 <LossTableSort value={v.sort} />
               </div>
               <div className={styles.tableWrap}>
@@ -259,10 +243,9 @@ export function NlLiveReport({
                     <tr>
                       <th>Station</th>
                       <th>Current cluster · People</th>
-                      <th>Raised</th>
+                      <th>{isFinal ? "Total shipments / value" : "Raised"}</th>
                       {!isFinal ? <><th>Waiting on station</th><th>With Amazon</th></> : null}
-                      <th>Saved</th>
-                      <th>Recoverable</th>
+                      {isFinal ? <><th>Updated / value</th><th>Pending / value</th><th>Non-recoverable</th></> : <><th>Saved</th><th>Recoverable</th></>}
                       <th />
                     </tr>
                   </thead>
@@ -299,10 +282,7 @@ export function NlLiveReport({
                         </td>
                         <td>{t.withAmazon}</td>
                         </> : null}
-                        <td>{t.saved ? money(t.savedAmount) : "—"}</td>
-                        <td>
-                          {t.recoverable ? money(t.recoverableAmount) : "—"}
-                        </td>
+                        {isFinal ? <><td>{t.updated}<small>{money(t.updatedAmount)}</small></td><td>{t.pendingUpdate}<small>{money(t.pendingUpdateAmount)}</small></td><td>{t.nonrecoverable}<small>{money(t.nonrecoverableAmount)}</small></td></> : <><td>{t.saved ? money(t.savedAmount) : "—"}</td><td>{t.recoverable ? money(t.recoverableAmount) : "—"}</td></>}
                         <td>
                           <Link
                             className={t.pending ? styles.primary : styles.button}

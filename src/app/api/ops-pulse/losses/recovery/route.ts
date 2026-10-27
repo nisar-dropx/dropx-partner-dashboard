@@ -3,7 +3,6 @@ import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
 import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { deductionMonth } from "@/lib/ops-pulse/nl-loss-policy";
 import { hasPermission } from "@/lib/authorization";
 import { readAllRows } from "@/lib/supabase-pagination";
 export const maxDuration = 120;
@@ -41,6 +40,8 @@ export async function GET(request: Request) {
     const selectedRefs = url.searchParams.getAll("person");
     if (selectedRefs.length > 50) return reply({ error: "Select up to 50 people." }, 400);
     const directoryOnly = url.searchParams.get("directory") === "1";
+    const responseWindow = await supabaseAdmin!.from("nl_case_response_windows").select("enabled,workflow_status,recovery_month").eq("company_id", scope.company).eq("month", month).eq("case_key", caseKey).maybeSingle();
+    if(responseWindow.error) throw Error("Redispute status could not be loaded.");
     // The salary month payroll deducts a plan saved now in, from the same rule the database applies.
     const salaryMonth = async (timing: "current_month" | "next_month") => {
       const r = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {
@@ -49,17 +50,22 @@ export async function GET(request: Request) {
         p_assigned_at: new Date().toISOString(),
         p_final_seen_at: finalSeenAt,
         p_timing: timing,
-        p_cutoff_day: Number(settings?.recovery_policy?.payroll_cutoff_day) || 7,
+        p_cutoff_day: Number(settings?.recovery_policy?.payroll_cutoff_day) || 5,
       });
-      return r.error ? deductionMonth(timing) : (r.data as string | null);
+      if (r.error) throw Error("Payroll month could not be resolved. Please retry.");
+      const resolved = r.data as string | null;
+      return responseWindow.data?.recovery_month && (!resolved || responseWindow.data.recovery_month > resolved) ? responseWindow.data.recovery_month as string : resolved;
     };
-    const [people, history, currentMonth, nextMonth, responseWindow] = await Promise.all([
+    const currentMonth = await salaryMonth("current_month");
+    const requestedPayrollMonth = url.searchParams.get("payroll_month") || currentMonth;
+    if (!requestedPayrollMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedPayrollMonth)) throw Error("Choose a valid payroll month.");
+    const [people, history, nextMonth] = await Promise.all([
       directoryOnly
-        ? supabaseAdmin!.rpc("station_audit_employee_directory", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
+        ? supabaseAdmin!.rpc("loss_recovery_people", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
             if (error) throw Error("Station employees could not be loaded.");
             return data ?? [];
           })
-        : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined),
+        : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined, requestedPayrollMonth),
       readAllRows(
         supabaseAdmin!
           .from("nl_loss_recovery_events")
@@ -69,9 +75,7 @@ export async function GET(request: Request) {
           .eq("case_key", caseKey)
           .order("created_at", { ascending: false }),
       ),
-      salaryMonth("current_month"),
       salaryMonth("next_month"),
-      supabaseAdmin!.from("nl_case_response_windows").select("enabled").eq("company_id", scope.company).eq("month", month).eq("case_key", caseKey).maybeSingle(),
     ]);
     if (history.error)
       throw Error("Recovery people and history could not be loaded.");
@@ -85,7 +89,7 @@ export async function GET(request: Request) {
       // SLP is deducted only once its Final file is in; the month above is provisional until then.
       awaiting_final: report === "slp" && !finalSeenAt,
       people,
-      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
+      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && !responseWindow.data?.enabled && responseWindow.data?.workflow_status !== "won",
       can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
       can_response: !!responseWindow.data?.enabled || mayActivateRedispute(auth),
       history: history.data ?? [],
@@ -105,7 +109,7 @@ export async function POST(request: Request) {
     )
       return reply({ error: "Invalid request origin." }, 403);
     const body = await request.json();
-    const { auth, scope, station, settings, caseKey, amount } = await recoveryContext(
+    const { auth, scope, station, settings, caseKey, amount, report, finalSeenAt } = await recoveryContext(
       String(body.month || ""),
       String(body.case_key || ""),
       true,
@@ -150,6 +154,14 @@ export async function POST(request: Request) {
       if (locked)
         return reply({ error: `This case is marked “${locked}”. Only people with that access can change it.` }, 403);
     }
+    const responseWindow = await supabaseAdmin!.from("nl_case_response_windows").select("enabled,workflow_status,recovery_month").eq("company_id",scope.company).eq("month",body.month).eq("case_key",caseKey).maybeSingle();
+    if(responseWindow.error) throw Error("Redispute status could not be loaded.");
+    if(responseWindow.data?.enabled || responseWindow.data?.workflow_status === "won")return reply({error:"Recovery is paused or stopped by redispute. Open the redispute details for this shipment."},409);
+    if (outcome.data?.allocation_required && !body.plan?.deduction_month) {
+      const resolved = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {p_report:report,p_case_month:body.month,p_assigned_at:new Date().toISOString(),p_final_seen_at:finalSeenAt,p_timing:outcome.data.deduction_timing,p_cutoff_day:settings!.recovery_policy.payroll_cutoff_day || 5});
+      if(resolved.error || !resolved.data) throw Error("Payroll month could not be resolved.");
+      body.plan={...body.plan,deduction_month:responseWindow.data?.recovery_month && responseWindow.data.recovery_month>resolved.data ? responseWindow.data.recovery_month : resolved.data};
+    }
     if (outcome.data?.allocation_required) {
       // Station users may dispute/clarify only — recovery plans are Cluster propose → SLP approve.
       await assertLifecycleAction(auth, station.id, "propose");
@@ -162,6 +174,7 @@ export async function POST(request: Request) {
         settings!.recovery_policy,
         settings!.updated_at,
         body.allocations.map((a: { employee_ref: string }) => a.employee_ref),
+        body.plan?.deduction_month || undefined,
       );
     }
     if (JSON.stringify(body.recovery_details || {}).length > 20000)
@@ -169,6 +182,7 @@ export async function POST(request: Request) {
     // Full or recurring debit; the database validates the schedule and the salary cap.
     const rawPlan = body.plan && typeof body.plan === "object" ? body.plan : {};
     const plan = {
+      deduction_month: typeof rawPlan.deduction_month === "string" ? rawPlan.deduction_month : undefined,
       mode: rawPlan.mode === "installments" ? "installments" : "full",
       basis: rawPlan.basis === "months" || rawPlan.basis === "amount" ? rawPlan.basis : null,
       value: rawPlan.value == null ? null : String(rawPlan.value).trim().slice(0, 20),

@@ -410,3 +410,47 @@ Departed/inactive people, next-month timing, instalments, cap overrides and rece
 `20261027183000_loss_exception_approval.sql` patches the atomic writer. Automatic decisions have a null human approver and an explicit system label. Existing decisions are preserved; saving a routine proposal with refreshed eligibility applies the new rule. Production preflight found two approved plans and no pending proposals. No payroll history, published payout or recovery key is rewritten.
 
 The Recovery review groups scoped allocations by station, person or saved designation. Assigned, actually deducted, draft-payroll and outstanding amounts remain separate; pending review is a subset of outstanding, not an additional charge. Redisputes and Station claims remain under More. Actions and timing remain configured in Loss Recovery Master.
+
+
+## Directory, payroll month and redispute release — prepared 27 October 2026
+
+**Release status: not applied to production.** These changes require the two migrations below,
+OpsPulse/One deployment, and the companion HRMS contractor payroll change. Live database and browser
+verification remain blocked by the unavailable authenticated connection. Do not merge for automatic
+production deployment until the database preflight and coordinated release are ready.
+
+- `20261027203000_loss_people_payroll_month.sql`: canonical station People + Workforce directory,
+  contractors, current CM/AOM reporting chain, configurable ceiling/exclusions in Loss Recovery Master;
+  actual payroll-month debit report; current payroll with a fifth-day inclusive cutoff. Loss month and
+  payroll month remain separate. Explicit later payroll requires exception review.
+- `20261027210000_loss_redispute_review.sql`: Shipment ID activation, evidence, independent review,
+  post-dispute ticket and final outcome. Single and bulk activation require **SLP Manager, National Head,
+  Finance Manager or Managing Partner**, plus Losses edit permission and station scope. Master ownership,
+  GM, CM, AOM and station roles alone cannot activate. Managing Partner is the role used for Jamsheer;
+  no email/name-based bypass is introduced.
+- Bulk activation: Excel template, up to 100 shipments, preview and per-shipment outcome. Each row checks
+  scope and optimistic version again on the server. Duplicate/malformed batches are rejected before writes;
+  a valid mixed-scope batch returns failures for inaccessible rows without activating them.
+- Activation needs no station justification. Ground submission requires remarks, reason, ticket reference
+  and an HTTPS footage/evidence link. A different authorised reviewer approves/returns it. Final outcome
+  and post-dispute TT remain in the same append-only history.
+- Active redispute pauses future payroll. Won stops the remaining collectible balance without pretending
+  it was deducted or refunding historical payroll. Lost resumes in the selected open payroll month
+  (default next month), retaining original recovery keys. Ordinary plan edits cannot bypass these gates.
+- Recovery presents confirmed debits by station/person/actual payroll month, separate draft amounts,
+  nested Shipment IDs, monthly history and Excel export. Final NL/SLP totals distinguish updates from
+  pending updates; dispute savings are not recovery-plan updates.
+- One exposes only the signed-in person's assignment, proposal status, share and actual payroll history.
+  Employees, contractors and Workforce remain typed identities. Earlier deductions remain visible during
+  a later review or redispute; outstanding is not a new additional charge.
+
+Validation: full `test:loss-recovery-payroll` suite, including both migrations applied twice in PGlite,
+API role/bulk/scope tests, lifecycle and payroll gate tests, own-account One tests and reporting tests.
+Targeted OpsPulse and One TypeScript checks pass. Live visual checks and production schema verification
+are still required. The HRMS companion uses the existing payroll fitting/cap rules for contractor runs.
+
+Release order: inspect live schema and migration history; prepare successful builds for OpsPulse, One
+and HRMS; apply each migration individually with the existing runbook; promote the coordinated builds;
+verify read-only station directories and role visibility. Do not create financial test records in production.
+The redispute migration revokes the old mutation RPCs, so avoid leaving the old app serving writes after
+that migration. Do not use a blanket database push.

@@ -331,5 +331,90 @@ eq('Full debit with cap override needs approval',(await one(`select approval_sta
 await mustReject('Automatic routing never permits a partial allocation',full('CAP-FULL',`employee:${E1}`,'deduct',1).replace('"amount":"100"','"amount":"50"'));
 eq('Actual past payroll remains unchanged',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
 
+// Current People directory + explicit payroll month.
+await db.exec(`alter table employees add column deleted_at timestamptz;
+alter table workforce add column source_profile_type text; alter table workforce add column source_profile_id uuid;
+create table contractors(id uuid primary key,company_id uuid,dropx_id text,full_name text,designation text,is_active boolean default true,deleted_at timestamptz,location_id uuid,last_working_date date);
+create table designations(id uuid primary key,company_id uuid,code text,name text);
+create table hr_people(id uuid primary key,company_id uuid,display_name text,status text);
+create table hr_engagements(id uuid primary key,company_id uuid,person_id uuid,employee_id uuid,contractor_id uuid,worker_code text,start_date date,end_date date,status text);
+create table hr_work_assignments(id uuid primary key,company_id uuid,engagement_id uuid,location_id uuid,designation_id uuid,position_title text,is_primary boolean,effective_from date,effective_to date);
+create table hr_reporting_relationships(company_id uuid,subject_assignment_id uuid,manager_assignment_id uuid,is_primary boolean,relationship_type text,effective_from date,effective_to date);
+create table hr_user_person_links(company_id uuid,person_id uuid,user_id uuid,status text);
+create table station_responsibility_assignments(company_id uuid,station_id uuid,assignment_id uuid,assignee_user_id uuid,effective_from timestamptz,effective_to timestamptz);
+`);
+// SQL Editor can normalize indentation in production function definitions.
+// The migration must not depend on two-space indentation for its payroll guards.
+const liveFormattedWriter=await one(`select pg_get_functiondef(oid) definition from pg_proc where proname='save_nl_recovery'`);
+await db.exec(liveFormattedWriter.definition.replace(/^  /gm,' '));
+const directorySql=readFileSync("supabase/migrations/20261027203000_loss_people_payroll_month.sql","utf8");
+await db.exec(directorySql); await db.exec(directorySql);
+eq('Inclusive fifth keeps October', (await one(`select nl_recovery_deduction_month('nl','2026-09','2026-11-05T17:00:00+05:30',null,'current_month',5) m`)).m,'2026-10');
+eq('Sixth moves to November', (await one(`select nl_recovery_deduction_month('nl','2026-09','2026-11-06T00:00:00+05:30',null,'current_month',5) m`)).m,'2026-11');
+eq('Old loss uses current payroll', (await one(`select nl_recovery_deduction_month('nl','2026-02','2026-10-27T00:00:00+05:30',null,'current_month',5) m`)).m,'2026-10');
+eq('SLP uses final availability', (await one(`select nl_recovery_deduction_month('slp','2026-02','2026-10-27T00:00:00+05:30','2026-11-08','current_month',5) m`)).m,'2026-11');
+const CT='00000000-0000-0000-0000-0000000000c1';
+await db.exec(`insert into contractors(id,company_id,dropx_id,full_name,designation,location_id) values('${CT}','${C}','CT01','Contractor TL','TL','${S}');
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values('${C}','nl','2026-09','CONTRACTOR','BLR1',100,'Recoverable'),('${C}','nl','2026-09','FUTURE','BLR1',100,'Recoverable');
+insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at)
+select '${C}',r,nl_recovery_deduction_month('nl','2026-09',now(),null,'current_month',5),true,50000,60000,'x',(select updated_at from nl_loss_sources)
+from unnest(array['employee:${E1}','contractor:${CT}']) r on conflict(company_id,employee_ref,salary_month) do update set checked_at=now();`);
+eq('Contractor is visible', (await db.query(`select ref from loss_recovery_people('${C}','${S}') where ref='contractor:${CT}'`)).rows.length,1);
+await db.query(full('CONTRACTOR',`contractor:${CT}`));
+const contractorPlan=await one(`select * from nl_loss_recoveries where case_key='CONTRACTOR'`);
+eq('Contractor full plan routes automatically',contractorPlan.approval_status,'approved');
+eq('Contractor eligible for People payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${contractorPlan.deduction_month}','hrms') where case_key='CONTRACTOR'`)).rows.length,1);
+const future=(await one(`select to_char(to_date('${contractorPlan.deduction_month}','YYYY-MM')+interval '1 month','YYYY-MM') m`)).m;
+await db.exec(`insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at) select '${C}','employee:${E1}','${future}',true,50000,60000,'x',updated_at from nl_loss_sources on conflict do nothing;`);
+await db.query(full('FUTURE',`employee:${E1}`).replace('"mode":"full"',`"mode":"full","deduction_month":"${future}"`));
+eq('Explicit future month persists',(await one(`select deduction_month m from nl_loss_recoveries where case_key='FUTURE'`)).m,future);
+eq('Explicit future month requires approval',(await one(`select approval_status s from nl_loss_recoveries where case_key='FUTURE'`)).s,'proposed');
+eq('Real debit records stay in actual payroll month',(await db.query(`select payroll_month,amount::text from nl_recovery_debits('${C}') where case_key='L1'`)).rows,[{payroll_month:'2026-10',amount:'1000.00'}]);
+
+// Reporting chains include station staff and their CM/AOM, never the next senior role.
+const uid=n=>`10000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
+for(const [i,code,name] of [[1,'SSA','Station Associate'],[2,'CLM','Cluster Manager'],[3,'AOM','Area Operations Manager'],[4,'NH','National Head'],[5,'HLM','Head Operations- Last Mile']]){
+ await db.exec(`insert into designations values('${uid(i)}','${C}','${code}','${name}');
+ insert into employees(id,company_id,employee_code,full_name,location_id) values('${uid(10+i)}','${C}','P${i}','Person ${name}',${i===1||i===5?`'${S}'`:'null'});
+ insert into hr_people values('${uid(20+i)}','${C}','Person ${name}','active');
+ insert into hr_engagements values('${uid(30+i)}','${C}','${uid(20+i)}','${uid(10+i)}',null,'P${i}','2020-01-01',null,'active');
+ insert into hr_work_assignments values('${uid(40+i)}','${C}','${uid(30+i)}',${i===1||i===5?`'${S}'`:'null'},'${uid(i)}',null,true,'2020-01-01',null);`);
+ if(i>1)await db.exec(`insert into hr_reporting_relationships values('${C}','${uid(39+i)}','${uid(40+i)}',true,'solid_line','2020-01-01',null)`);
+}
+const names=(await db.query(`select designation from loss_recovery_people('${C}','${S}')`)).rows.map(r=>r.designation);
+eq('Station People name is available',names.includes('Station Associate'),true);
+eq('Mapped cluster manager is included',names.includes('Cluster Manager'),true);
+eq('AOM ceiling is included',names.includes('Area Operations Manager'),true);
+eq('National Head above ceiling excluded',names.includes('National Head'),false);
+eq('Station-mapped operations head above ceiling excluded',names.includes('Head Operations- Last Mile'),false);
+await db.exec(`insert into workforce(id,company_id,dropx_id,full_name,location_id,source_profile_type,source_profile_id) values('${uid(90)}','${C}','MIRROR','Duplicate person','${S}','employee','${uid(11)}')`);
+eq('People workforce mirror deduplicated',(await db.query(`select ref from loss_recovery_people('${C}','${S}') where ref='workforce:${uid(90)}'`)).rows.length,0);
+const redisputeSql=readFileSync("supabase/migrations/20261027210000_loss_redispute_review.sql","utf8");
+await db.exec(redisputeSql);await db.exec(redisputeSql);
+const rd=(version,action,details={},actor=SLP)=>`select nl_redispute_transition('${C}','2026-09','CONTRACTOR',${version},'${action}','${JSON.stringify(details)}','${actor}','Actor')`;
+await db.query(rd(0,'activate'));
+eq('Activation needs no station evidence',(await one(`select workflow_status s from nl_case_response_windows where case_key='CONTRACTOR'`)).s,'awaiting_station');
+eq('Active redispute pauses payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${contractorPlan.deduction_month}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
+eq('Ledger shows the active hold',(await one(`select status from nl_recovery_ledger('${C}',null,'contractor:${CT}') where case_key='CONTRACTOR'`)).status,'redispute_pending');
+await mustReject('Active redispute cannot be bypassed by a plan edit',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
+await mustReject('Empty station evidence rejected',rd(1,'response',{note:'Please reconsider this loss'},CM));
+await db.query(rd(1,'response',{note:'Delivery evidence attached for review',reason:'Delivered correctly',tt_reference:'TT-123',evidence_url:'https://example.com/cctv'},CM));
+await mustReject('Self review rejected',rd(2,'approve',{note:'Evidence checked and accepted'},CM));
+await mustReject('Outcome before approval rejected',rd(2,'lost',{note:'Vendor declined the dispute',tt_reference:'POST-1'}));
+await db.query(rd(2,'approve',{note:'Evidence checked and accepted'}));
+await db.query(rd(3,'tracking',{note:'Post dispute filed with vendor',tt_reference:'POST-1',followup_on:'2027-01-01'}));
+await db.query(rd(4,'lost',{note:'Vendor declined after review',tt_reference:'POST-1',recovery_month:future}));
+eq('Failed redispute stays out of earlier payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${contractorPlan.deduction_month}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
+eq('Failed redispute joins selected latest payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${future}','hrms') where case_key='CONTRACTOR'`)).rows.length,1);
+await mustReject('Earlier plan month cannot bypass failed redispute deferral',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
+eq('Original schedule/key unchanged',(await one(`select deduction_month m from nl_loss_recoveries where case_key='CONTRACTOR'`)).m,contractorPlan.deduction_month);
+eq('Old mutation path disabled',(await one(`select has_function_privilege('service_role','nl_case_response_transition(uuid,text,text,integer,text,text,text,boolean,uuid,text)','execute') x`)).x,false);
+await db.query(rd(5,'activate'));
+await db.query(rd(6,'response',{note:'Additional delivery footage received',reason:'Delivered correctly',tt_reference:'TT-124',evidence_url:'https://example.com/cctv2'},CM));
+await db.query(rd(7,'approve',{note:'Additional evidence has been checked'}));
+await db.query(rd(8,'won',{note:'Vendor accepted the final evidence',tt_reference:'POST-2'}));
+eq('Successful redispute stops future payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${future}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
+await mustReject('Successful redispute cannot be restarted by a recovery edit',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
+eq('Winning stops outstanding without inventing a deduction',(await one(`select status,outstanding::text,deducted::text from nl_recovery_ledger('${C}',null,'contractor:${CT}') where case_key='CONTRACTOR'`)),{status:'redispute_won',outstanding:'0',deducted:'0'});
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

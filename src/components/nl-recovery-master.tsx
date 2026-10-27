@@ -81,6 +81,7 @@ export function NlRecoveryMaster({
                 include_inactive_people: !f.has("active_only"),
                 recovery_policy: {
                   ...settings.recovery_policy,
+                  salary_month_offset: 0,
                   ...Object.fromEntries(
                     [
                       "active_only",
@@ -92,7 +93,7 @@ export function NlRecoveryMaster({
                   ),
                   ...Object.fromEntries(
                     [
-                      "salary_month_offset",
+                      "payroll_cutoff_day",
                       "salary_cap_percent",
                       "attachment_max_count",
                       "attachment_max_mb",
@@ -104,6 +105,8 @@ export function NlRecoveryMaster({
                       "people_calculation_statuses",
                       "workforce_payout_statuses",
                       "eligible_designations",
+                      "directory_ceiling_designations",
+                      "directory_excluded_designations",
                       "attachment_types",
                     ].map((k) => [
                       k,
@@ -196,10 +199,10 @@ export function NlRecoveryMaster({
                 {(
                   [
                     [
-                      "salary_month_offset",
-                      "Salary reference: months before current month",
+                      "payroll_cutoff_day",
+                      "Previous payroll update cutoff (inclusive day)",
                       1,
-                      12,
+                      28,
                     ],
                     [
                       "salary_cap_percent",
@@ -261,6 +264,8 @@ export function NlRecoveryMaster({
                       "eligible_designations",
                       "Eligible designation names (optional restriction)",
                     ],
+                    ["directory_ceiling_designations", "Stop at designation codes (included)"],
+                    ["directory_excluded_designations", "Exclude higher designation codes"],
                     ["attachment_types", "Allowed attachment MIME types"],
                   ] as const
                 ).map(([key, label]) => (
@@ -269,7 +274,7 @@ export function NlRecoveryMaster({
                     <textarea
                       name={key}
                       rows={3}
-                      defaultValue={settings.recovery_policy[key].join("\n")}
+                      defaultValue={(settings.recovery_policy[key] || []).join("\n")}
                     />
                   </label>
                 ))}
