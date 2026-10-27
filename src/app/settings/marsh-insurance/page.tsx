@@ -32,12 +32,14 @@ export default async function MarshInsuranceSettingsPage() {
     <AppShell active="Settings" pageCode="app_settings">
       <PageHead
         eyebrow="Configuration"
-        title="Marsh insurance"
-        subtitle="Qover identity login with one-time OTP. Cookies stay in Supabase for enroll, terminate, and ecard sync."
+        title="Marsh Insurance"
+        subtitle="Connect Qover once with email OTP. Session cookies power enroll, terminate, and GMC/GPA ecard sync to DropX One."
         action={
-          <PendingLink className="button secondary compact" href="/settings">
-            Back
-          </PendingLink>
+          <div className="page-actions">
+            <PendingLink className="button secondary compact" href="/settings">
+              Back to Settings
+            </PendingLink>
+          </div>
         }
       />
       {loadError ? (

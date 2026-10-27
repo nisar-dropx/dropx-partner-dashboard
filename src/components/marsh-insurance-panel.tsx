@@ -1,5 +1,6 @@
 "use client";
 
+import { HardDrive, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   ensureMarshSessionAction,
@@ -9,6 +10,7 @@ import {
   syncMarshEcardsAction,
   type MarshSessionView,
 } from "@/app/settings/marsh-actions";
+import styles from "./marsh-insurance-panel.module.css";
 
 type Props = {
   canEdit: boolean;
@@ -22,12 +24,30 @@ function statusTone(status: string) {
   return "";
 }
 
+function statusLabel(status: string) {
+  return status.replaceAll("_", " ");
+}
+
+function metricTone(status: string) {
+  if (status === "active") return styles.metricGood;
+  if (status === "otp_required" || status === "connecting") return styles.metricWarn;
+  if (status === "failed" || status === "expired") return styles.metricDanger;
+  return styles.metricIdle;
+}
+
 function mergeSession(prev: MarshSessionView, next: MarshSessionView): MarshSessionView {
   return {
     ...prev,
     ...next,
     driveConfigured: next.driveConfigured ?? prev.driveConfigured,
   };
+}
+
+function cookieLabel(session: MarshSessionView) {
+  if (!session.cookiePresent) return "None";
+  if (session.cookieAgeSeconds == null) return "Present";
+  const minutes = Math.max(0, Math.round(session.cookieAgeSeconds / 60));
+  return `${minutes} min old`;
 }
 
 export function MarshInsurancePanel({ canEdit, initial }: Props) {
@@ -82,127 +102,160 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
     }
   }
 
+  const needsOtp = session.status === "otp_required";
+  const sessionReady = session.status === "active";
+
   return (
-    <div className="settings-stack">
+    <div className={styles.page}>
+      <section className={`summary-grid ${styles.metrics}`}>
+        <article className={`metric-card ${metricTone(session.status)}`}>
+          <span>Session</span>
+          <strong style={{ textTransform: "capitalize" }}>{statusLabel(session.status)}</strong>
+          <small>{sessionReady ? "Ready for enroll jobs" : needsOtp ? "Enter the email OTP below" : "Connect to start"}</small>
+        </article>
+        <article className={`metric-card ${session.credentialsConfigured ? styles.metricGood : styles.metricDanger}`}>
+          <span>Credentials</span>
+          <strong>{session.credentialsConfigured ? "Configured" : "Missing"}</strong>
+          <small>{session.credentialsConfigured ? "Portal secrets on the worker" : "Set MARSH_PORTAL_* secrets"}</small>
+        </article>
+        <article className={`metric-card ${session.cookiePresent ? styles.metricGood : styles.metricIdle}`}>
+          <span>Cookie</span>
+          <strong>{cookieLabel(session)}</strong>
+          <small>{session.updatedAt ? new Date(session.updatedAt).toLocaleString() : "No session yet"}</small>
+        </article>
+        <article className={`metric-card ${session.driveConfigured ? styles.metricGood : styles.metricWarn}`}>
+          <span>Drive sync</span>
+          <strong>{session.driveConfigured ? "Ready" : "Setup needed"}</strong>
+          <small>{session.driveConfigured ? "GMC + GPA cards upload folder" : "Google OAuth + folder ID"}</small>
+        </article>
+      </section>
+
+      {session.lastError ? (
+        <div className="alert danger">
+          <strong>Last portal error</strong>
+          <span>{session.lastError}</span>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="alert danger">
+          <strong>Unable to continue</strong>
+          <span>{error}</span>
+        </div>
+      ) : null}
+      {message ? (
+        <div className="alert success">
+          <strong>Done</strong>
+          <span>{message}</span>
+        </div>
+      ) : null}
+
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h2>Marsh / Qover session</h2>
+            <h2>Connect Marsh</h2>
             <p className="subtle">
-              Portal email and password stay on the worker. Connect once, enter the email OTP here, and jobs reuse the cookie until it expires.
+              Portal email and password stay on the worker. Connect once, enter the email OTP here, then enroll and ecard jobs reuse the cookie.
             </p>
           </div>
-          <span className={`status-pill ${statusTone(session.status)}`}>{session.status.replaceAll("_", " ")}</span>
+          <span className={`status-pill ${statusTone(session.status)}`}>{statusLabel(session.status)}</span>
         </div>
 
-        <dl className="details-grid" style={{ padding: "0 20px 16px" }}>
-          <div>
-            <dt>Credentials on worker</dt>
-            <dd>{session.credentialsConfigured ? "Configured" : "Missing MARSH_PORTAL_* secrets"}</dd>
+        <div className={styles.panelBody}>
+          <div className={styles.steps}>
+            <article className={styles.step}>
+              <span className={styles.stepIndex}>1</span>
+              <strong>Connect</strong>
+              <p>Start the Qover identity login using the worker secrets.</p>
+            </article>
+            <article className={styles.step}>
+              <span className={styles.stepIndex}>2</span>
+              <strong>Verify OTP</strong>
+              <p>Enter the one-time code from the Marsh email. It is never stored.</p>
+            </article>
+            <article className={styles.step}>
+              <span className={styles.stepIndex}>3</span>
+              <strong>Sync cards</strong>
+              <p>Pull GMC and GPA ecards into Drive for DropX One and HRMS.</p>
+            </article>
           </div>
-          <div>
-            <dt>Cookie</dt>
-            <dd>
-              {session.cookiePresent
-                ? session.cookieAgeSeconds != null
-                  ? `Present · ${Math.round(session.cookieAgeSeconds / 60)} min old`
-                  : "Present"
-                : "None"}
-            </dd>
-          </div>
-          <div>
-            <dt>Last update</dt>
-            <dd>{session.updatedAt ? new Date(session.updatedAt).toLocaleString() : "—"}</dd>
-          </div>
-          <div>
-            <dt>Drive sync</dt>
-            <dd>{session.driveConfigured ? "Ready" : "Set GOOGLE_OAUTH_* and MARSH_DRIVE_FOLDER_ID"}</dd>
-          </div>
-        </dl>
 
-        {session.lastError ? (
-          <div className="alert danger">
-            <strong>Last error</strong>
-            <span>{session.lastError}</span>
-          </div>
-        ) : null}
-        {error ? (
-          <div className="alert danger">
-            <strong>Unable to continue</strong>
-            <span>{error}</span>
-          </div>
-        ) : null}
-        {message ? (
-          <div className="alert success">
-            <strong>Done</strong>
-            <span>{message}</span>
-          </div>
-        ) : null}
-
-        {session.status === "otp_required" ? (
-          <div className="form-grid" style={{ padding: "0 20px 16px" }}>
-            <label>
-              Email OTP
-              <input
-                autoComplete="one-time-code"
-                disabled={!canEdit || pending}
-                inputMode="numeric"
-                maxLength={8}
-                onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 8))}
-                placeholder="6-digit code"
-                value={otp}
-              />
-              <small className="field-hint">Code is never stored in logs. Challenge expires in about 10 minutes.</small>
-            </label>
-            <div className="form-actions">
-              <button
-                className="button primary"
-                disabled={!canEdit || pending || otp.length < 4 || !session.challengeId}
-                onClick={() => void run(() => submitMarshOtp(session.challengeId!, otp), "Marsh session is active.")}
-                type="button"
-              >
-                Verify OTP
-              </button>
+          {needsOtp ? (
+            <div className={styles.otpCard}>
+              <header>
+                <div>
+                  <h3>Email OTP required</h3>
+                  <p>Check the Marsh / Qover mailbox and enter the code before it expires (~10 minutes).</p>
+                </div>
+                <span className="status-pill warn">Waiting</span>
+              </header>
+              <label className={styles.otpField}>
+                <span>One-time code</span>
+                <input
+                  autoComplete="one-time-code"
+                  disabled={!canEdit || pending}
+                  inputMode="numeric"
+                  maxLength={8}
+                  onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 8))}
+                  placeholder="••••••"
+                  value={otp}
+                />
+                <small>Digits only. Challenge is discarded after success or expiry.</small>
+              </label>
+              <div className={styles.actions}>
+                <button
+                  className="button primary"
+                  disabled={!canEdit || pending || otp.length < 4 || !session.challengeId}
+                  onClick={() => void run(() => submitMarshOtp(session.challengeId!, otp), "Marsh session is active.")}
+                  type="button"
+                >
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  Verify OTP
+                </button>
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="form-actions" style={{ padding: "0 20px 20px" }}>
-          <button
-            className="button primary"
-            disabled={!canEdit || pending || !session.credentialsConfigured}
-            onClick={() => void run(() => startMarshLogin(), "Login started — check OTP if prompted.")}
-            type="button"
-          >
-            {session.status === "active" ? "Re-login" : "Connect Marsh"}
-          </button>
-          <button
-            className="button secondary"
-            disabled={!canEdit || pending}
-            onClick={() => void run(() => ensureMarshSessionAction(), "Session checked.")}
-            type="button"
-          >
-            Test session
-          </button>
-          <button
-            className="button secondary"
-            disabled={!canEdit || pending || session.status !== "active"}
-            onClick={() => {
-              setError(null);
-              setMessage(null);
-              setPending(true);
-              void syncMarshEcardsAction()
-                .then((result) => {
-                  if (!result.ok) throw new Error(result.error || "Ecard sync failed");
-                  setMessage(`Uploaded ${result.uploaded} card file(s); skipped ${result.skipped}.`);
-                })
-                .catch((err: unknown) => setError(err instanceof Error ? err.message : "Ecard sync failed"))
-                .finally(() => setPending(false));
-            }}
-            type="button"
-          >
-            Sync ecards → Drive
-          </button>
+          <div className={styles.actions}>
+            <button
+              className="button primary"
+              disabled={!canEdit || pending || !session.credentialsConfigured}
+              onClick={() => void run(() => startMarshLogin(), "Login started — check OTP if prompted.")}
+              type="button"
+            >
+              <KeyRound size={16} aria-hidden="true" />
+              {sessionReady ? "Re-login" : pending && session.status === "connecting" ? "Connecting…" : "Connect Marsh"}
+            </button>
+            <button
+              className="button secondary"
+              disabled={!canEdit || pending}
+              onClick={() => void run(() => ensureMarshSessionAction(), "Session checked.")}
+              type="button"
+            >
+              <RefreshCw size={16} aria-hidden="true" />
+              Test session
+            </button>
+            <button
+              className="button secondary"
+              disabled={!canEdit || pending || !sessionReady}
+              onClick={() => {
+                setError(null);
+                setMessage(null);
+                setPending(true);
+                void syncMarshEcardsAction()
+                  .then((result) => {
+                    if (!result.ok) throw new Error(result.error || "Ecard sync failed");
+                    setMessage(`Uploaded ${result.uploaded} card file(s); skipped ${result.skipped}.`);
+                  })
+                  .catch((err: unknown) => setError(err instanceof Error ? err.message : "Ecard sync failed"))
+                  .finally(() => setPending(false));
+              }}
+              type="button"
+            >
+              <HardDrive size={16} aria-hidden="true" />
+              Sync ecards → Drive
+            </button>
+          </div>
+          {!canEdit ? <p className={styles.hint}>You have view-only access to Settings. Ask an editor to connect Marsh.</p> : null}
         </div>
       </section>
 
@@ -211,15 +264,39 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
           <div>
             <h2>Automation scope</h2>
             <p className="subtle">
-              HO employees and Last Mile EDSP. Amazon Now / Flipkart ODH are held for Marsh. DAs skip IDfy (Amazon BGC).
+              HO and Last Mile EDSP enroll automatically. Amazon Now and Flipkart ODH stay on hold for Marsh. Delivery associates skip IDfy (Amazon BGC).
             </p>
           </div>
         </div>
-        <ul className="subtle" style={{ padding: "0 20px 20px", margin: 0, lineHeight: 1.6 }}>
-          <li>Activation enqueues GMC + GPA enroll when PAN is valid and membership is not already Active.</li>
-          <li>Offboarding enqueues termination (PAN + date of leaving).</li>
-          <li>Cron processes queues; if the session needs OTP, jobs pause until you reconnect here.</li>
-          <li>Confirm with Nisar whether LSC already feeds Marsh for EDSP — if yes, EDSP is card-sync only.</li>
+        <ul className={styles.scopeList}>
+          <li>
+            <i>1</i>
+            <div>
+              <strong>On activation</strong>
+              <span>Enqueue GMC + GPA enroll when PAN is valid and membership is not already Active.</span>
+            </div>
+          </li>
+          <li>
+            <i>2</i>
+            <div>
+              <strong>On offboarding</strong>
+              <span>Enqueue termination with PAN and date of leaving for both policies.</span>
+            </div>
+          </li>
+          <li>
+            <i>3</i>
+            <div>
+              <strong>Background jobs</strong>
+              <span>Cron processes queues. If OTP is needed again, jobs pause until you reconnect here.</span>
+            </div>
+          </li>
+          <li>
+            <i>4</i>
+            <div>
+              <strong>EDSP check with Nisar</strong>
+              <span>If LSC already feeds Marsh for EDSP, keep EDSP on card-sync only.</span>
+            </div>
+          </li>
         </ul>
       </section>
     </div>

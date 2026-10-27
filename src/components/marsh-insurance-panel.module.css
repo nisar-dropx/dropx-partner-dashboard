@@ -1,0 +1,238 @@
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+.metrics {
+  margin: 0;
+}
+
+.metricGood {
+  border-color: #bbf7d0;
+  background: linear-gradient(180deg, #f0fdf4 0%, #fff 70%);
+}
+
+.metricWarn {
+  border-color: #fde68a;
+  background: linear-gradient(180deg, #fffbeb 0%, #fff 70%);
+}
+
+.metricDanger {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fef2f2 0%, #fff 70%);
+}
+
+.metricIdle {
+  border-color: #e2e8f0;
+  background: linear-gradient(180deg, #f8fafc 0%, #fff 70%);
+}
+
+.panelBody {
+  display: grid;
+  gap: 16px;
+  padding: 0 20px 20px;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.step {
+  display: grid;
+  gap: 6px;
+  min-height: 108px;
+  padding: 14px 15px;
+  border: 1px solid #e8edf3;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.stepIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.step strong {
+  color: #172033;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.step p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.otpCard {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #fdba74;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fff7ed 0%, #fff 78%);
+}
+
+.otpCard header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.otpCard h3 {
+  margin: 0;
+  color: #9a3412;
+  font-size: 15px;
+  font-weight: 780;
+}
+
+.otpCard p {
+  margin: 4px 0 0;
+  color: #9a3412;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.otpField {
+  display: grid;
+  gap: 6px;
+  max-width: 280px;
+}
+
+.otpField span {
+  color: #9a3412;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.otpField input {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #fdba74;
+  border-radius: 10px;
+  background: #fff;
+  color: #172033;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: 0.28em;
+  text-align: center;
+}
+
+.otpField small {
+  color: #b45309;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.actions :global(.button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.hint {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.scopeList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0 20px 20px;
+  list-style: none;
+}
+
+.scopeList li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid #e8edf3;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.scopeList i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.scopeList strong {
+  display: block;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.scopeList span {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .otpCard header {
+    flex-direction: column;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions .button {
+    width: 100%;
+  }
+}
