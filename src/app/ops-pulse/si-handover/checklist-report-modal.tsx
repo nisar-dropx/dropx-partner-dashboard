@@ -1,6 +1,7 @@
 "use client";
+import { useOpsScreenRequest, useOpsScreenRuntime } from "@/components/ops-screen-runtime";
 
-import Link from "next/link";
+import { OpsScreenLink as Link } from "@/components/ops-screen-runtime";
 import {
   useCallback,
   useEffect,
@@ -115,6 +116,8 @@ function ImageProof({ url, alt }: { url: string; alt: string }) {
 }
 
 export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
+  const request = useOpsScreenRequest();
+  const demo = useOpsScreenRuntime();
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -143,7 +146,7 @@ export function ChecklistReportModal({ kind, checklistId, onClose }: Props) {
       kind === "shift"
         ? `/api/ops-pulse/si-handover/report-pack?id=${encodeURIComponent(checklistId)}`
         : `/api/ops-pulse/store-ops/report-pack?id=${encodeURIComponent(checklistId)}`;
-    fetch(path, { credentials: "same-origin", signal: ac.signal })
+    request(path, { credentials: "same-origin", signal: ac.signal })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw Error(body.error || "Unable to load report.");

@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { OpsScreenLink as Link } from "@/components/ops-screen-runtime";
 import { useEffect, useMemo, useState } from "react";
 import {
   statusLabels,

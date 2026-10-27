@@ -1,4 +1,5 @@
 "use client";
+import { useOpsScreenRequest, useOpsScreenRuntime } from "@/components/ops-screen-runtime";
 import { useEffect, useRef, useState } from "react";
 import type { ReportPack } from "@/lib/ops-pulse/checklist-report-pack";
 import { buildChecklistSummary, downloadSummary, summaryPdf } from "@/lib/ops-pulse/build-checklist-summary";
@@ -7,6 +8,8 @@ import styles from "./si-handover.module.css";
 export function ChecklistSummaryActions({ kind, id, completed, revision, pack }: {
   kind: "shift" | "store"; id: string; completed: boolean; revision?: string; pack?: ReportPack;
 }) {
+  const request = useOpsScreenRequest();
+  const demo = useOpsScreenRuntime();
   const [ready, setReady] = useState<Awaited<ReturnType<typeof buildChecklistSummary>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -21,7 +24,7 @@ export function ChecklistSummaryActions({ kind, id, completed, revision, pack }:
     try {
       let data = pack;
       if (!data) {
-        const res = await fetch(`/api/ops-pulse/${kind === "shift" ? "si-handover" : "store-ops"}/report-pack?id=${encodeURIComponent(id)}`, {credentials:"same-origin",cache:"no-store"});
+        const res = await request(`/api/ops-pulse/${kind === "shift" ? "si-handover" : "store-ops"}/report-pack?id=${encodeURIComponent(id)}`, {credentials:"same-origin",cache:"no-store"});
         const body = await res.json(); if (!res.ok) throw Error(body.error || "Could not load summary."); data = body;
       }
       const result = await buildChecklistSummary(data!);
@@ -31,6 +34,7 @@ export function ChecklistSummaryActions({ kind, id, completed, revision, pack }:
   }
   async function whatsapp() {
     if (!ready) return;
+    if (demo) { setMessage("Demo only — no message is sent. Download the sample PNG or PDF below."); return; }
     const text = `${ready.data.title}\n${ready.data.subtitle}\n${ready.data.status}\n${ready.data.submitted}`;
     // The system chooser is the supported way to share image files to WhatsApp.
     // WhatsApp web links cannot attach local files or target a private group.

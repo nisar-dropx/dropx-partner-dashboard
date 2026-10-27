@@ -37,7 +37,13 @@ for (const [workspace, items] of Object.entries(catalogs)) {
   const menus = model.demoMenus(items);
   assert.equal(new Set(menus.map((m) => m.id)).size, menus.length);
   for (const menu of menus) {
-    assert.ok(model.demoLink(workspace, menu.id).startsWith("/demo?"));
+    assert.ok(
+      model
+        .demoLink(workspace, menu.id)
+        .startsWith(
+          `/demo/${workspace === "last-mile" ? "last-mile" : "dark-store"}`,
+        ),
+    );
     const rows = model.seedRecords(menu, workspace);
     if (menu.definition.kind !== "dashboard")
       assert.ok(rows.length >= 3, `${workspace}: ${menu.label} needs samples`);
@@ -125,3 +131,82 @@ assert.equal((155000 + 37200 + 18600 + 12400) / 12400, 18);
 console.log(
   "Demo isolation, shared sample identities, menu completeness and export checks passed",
 );
+
+// Workspace links are independent routes; query strings cannot swap the catalogue.
+for (const path of ["/demo/last-mile", "/demo/dark-store"]) {
+  assert.equal(
+    surface.isOpsDemoRequest("ops.dropxlogistics.com", path, "GET"),
+    true,
+  );
+  assert.equal(
+    surface.isOpsDemoRequest("ops.dropxlogistics.com", path, "HEAD"),
+    true,
+  );
+  for (const method of ["POST", "PATCH", "DELETE"])
+    assert.equal(
+      surface.isOpsDemoRequest("ops.dropxlogistics.com", path, method),
+      false,
+    );
+}
+for (const path of [
+  "/demo/other",
+  "/demo/dark-store/api",
+  "/demo/last-mile/payments",
+  "/demo/dark-store/../payments",
+])
+  assert.equal(
+    surface.isOpsDemoRequest("ops.dropxlogistics.com", path, "GET"),
+    false,
+  );
+const page = fs.readFileSync("src/app/demo/[business]/page.tsx", "utf8");
+assert.match(page, /params.business/);
+assert.doesNotMatch(
+  page,
+  /searchParams|q-commerce.*opsNavCatalogForMode.*amazon_edsp/,
+);
+assert.doesNotMatch(client, /setWorkspace|Explore your|workspace === w/);
+assert.match(client, /AppShellFrame/);
+assert.match(client, /OpsDesignNavigation/);
+assert.match(client, /trackEvents=\{false\}/);
+const runtime = fs.readFileSync(
+  "src/app/demo/production-activities.tsx",
+  "utf8",
+);
+assert.doesNotMatch(runtime, /await fetch\(|supabase|liveActions/);
+assert.match(runtime, /No live request was made/);
+assert.match(runtime, /SiHandoverWorkspace/);
+assert.match(runtime, /StoreOpsWorkspace/);
+assert.match(runtime, /ActivitiesReportClient/);
+console.log(
+  "Separate workspace routes and production activity component reuse verified",
+);
+
+// Exercise the real checklist rules against the fictional production-screen fixtures.
+const shiftModel = load('src/lib/ops-pulse/si-handover/model.ts');
+const storeModel = load('src/lib/ops-pulse/store-ops/model.ts', {
+  '@/lib/ops-pulse/si-handover/model': shiftModel,
+  './location-mailbox': load('src/lib/ops-pulse/store-ops/location-mailbox.ts'),
+});
+const activities = load('src/lib/ops-pulse/demo/activities.ts', {
+  '@/lib/ops-pulse/si-handover/model': shiftModel,
+  '@/lib/ops-pulse/store-ops/model': storeModel,
+  '@/lib/ops-pulse/si-handover/template': load('src/lib/ops-pulse/si-handover/template.ts', {'./model': shiftModel}),
+  '@/lib/ops-pulse/store-ops/template': load('src/lib/ops-pulse/store-ops/template.ts'),
+});
+const activityState = activities.activitySeed();
+assert.equal(activityState.shifts.length, 57);
+assert.equal(activityState.stores.length, 21);
+assert.equal(new Set(activityState.shifts.map(r => r.id)).size, 57);
+for (const row of activityState.shifts) {
+  assert.ok(activities.sampleStores.some(s => s.id === row.location_id));
+  const pack = activities.activityPack(activityState, 'shift', row.id);
+  assert.ok(pack.checklist.store_code.startsWith('SAMPLE'));
+  assert.ok(pack.proofs.every(p => p.url === '/demo-assets/evidence.svg'));
+  if (row.status !== 'open') shiftModel.validateAnswersForSubmit(row, row.answers, activityState.evidence.filter(p => p.checklist_id === row.id), {city: 'Sample city', settings: shiftModel.defaultSettings()});
+}
+for (const row of activityState.stores) {
+  const gaps = storeModel.collectSubmitGaps(row, row.answers, activityState.evidence.filter(p => p.checklist_id === row.id), {city: 'Sample city', settings: storeModel.defaultSettings(), weeklyDoneIds: new Set(), monthlyDoneIds: new Set()});
+  assert.deepEqual(gaps, []);
+}
+assert.equal(activities.activityPack(activityState, 'shift', 'unknown'), null);
+console.log('Production checklist fixtures pass submission rules and sample-export checks');
