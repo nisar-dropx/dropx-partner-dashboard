@@ -633,6 +633,7 @@
   font-size: 9px;
 }
 .darkCard h2 {
+  color: #fff;
   font-size: 24px;
   line-height: 1.22;
   letter-spacing: -0.6px;
@@ -1313,6 +1314,7 @@
     padding: 24px 16px;
   }
   .darkCard h2 {
+  color: #fff;
     font-size: 29px;
   }
 }
