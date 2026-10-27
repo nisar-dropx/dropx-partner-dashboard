@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { payAdvanceDecision, payAdvanceFinanceTerms } from './connect-pay-advance-approval.ts';
+import { payAdvanceApprovalPayContext, payAdvanceDecision, payAdvanceFinanceTerms } from './connect-pay-advance-approval.ts';
 
 function fixture() {
   const state = { actors:['actor-a'], rpcCalls:[], error:null,
     hr_pay_advance_steps:[{id:'step-a',company_id:'company-a',request_id:'request-a',approver_user_id:'actor-a',status:'pending',step_name:'Reporting manager'},
       {id:'step-b',company_id:'company-b',request_id:'request-b',approver_user_id:'actor-a',status:'pending'},
       {id:'step-c',company_id:'company-a',request_id:'request-c',approver_user_id:'other-actor',status:'pending'}],
-    hr_pay_advance_requests:[{id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_name:'Test Person',requested_amount:2000,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'}] };
+    hr_pay_advance_requests:[{id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_type:'workforce',worker_name:'Test Person',requested_amount:2000,outstanding_pay_snapshot:12000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'}] };
   const db = { from(table) {
     let rows = state[table] ?? [];
     const query = {select(){return query},eq(key,value){rows=rows.filter(row=>row[key]===value);return query},in(key,values){rows=rows.filter(row=>values.includes(row[key]));return query},order(){return query},limit(n){rows=rows.slice(0,n);return query},
@@ -18,7 +18,7 @@ function fixture() {
   }, async rpc(name,args){state.rpcCalls.push({name,args});return {data:'pending',error:state.error}} };
   const mod={exports:{}};
   const source=ts.transpileModule(fs.readFileSync(new URL('./connect-pay-advance-approval-data.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const mocks={'server-only':{},'./connect-approver-identity':{resolveConnectActorUserIds:async()=>state.actors,resolveConnectVisibleApproverUserIds:async()=>state.actors,adoptPendingStepForHigherManager:async()=>{}},'./connect-pay-advance-approval':{payAdvanceDecision,payAdvanceFinanceTerms},'./supabase-admin':{supabaseAdmin:db}};
+  const mocks={'server-only':{},'./connect-approver-identity':{resolveConnectActorUserIds:async()=>state.actors,resolveConnectVisibleApproverUserIds:async()=>state.actors,adoptPendingStepForHigherManager:async()=>{}},'./connect-pay-advance-approval':{payAdvanceApprovalPayContext,payAdvanceDecision,payAdvanceFinanceTerms},'./supabase-admin':{supabaseAdmin:db}};
   new Function('require','module','exports',source)(id=>{assert.ok(id in mocks,id);return mocks[id]},mod,mod.exports);
   return {state,...mod.exports};
 }
@@ -28,6 +28,9 @@ test('pay advances are scoped to the authenticated company and pending assigned 
   const rows=await f.listConnectPayAdvanceApprovals(account);
   assert.deepEqual(rows.map(row=>row.requestId),['request-a']);
   assert.equal(rows[0].requestedAmount,2000);
+  assert.equal(rows[0].outstandingPay,12000);
+  assert.equal(rows[0].maxEligibleAmount,3000);
+  assert.equal(rows[0].eligibilityWithinLimit,true);
   for(const id of ['request-b','request-c','unknown']) await assert.rejects(f.decideConnectPayAdvanceApproval(account,id,'approved',''),/assigned/);
   assert.equal(f.state.rpcCalls.length,0);
   await f.decideConnectPayAdvanceApproval(account,'request-a','approved','Reviewed',1500,1);
@@ -44,6 +47,15 @@ test('unlinked accounts have no pay-advance approvals',async()=>{
   const f=fixture(); f.state.actors=[];
   assert.deepEqual(await f.listConnectPayAdvanceApprovals(account),[]);
   await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved',''),/not assigned/);
+});
+
+test('People pay amounts stay private while eligibility remains visible',async()=>{
+  const f=fixture(); f.state.hr_pay_advance_requests[0].worker_type='employee';
+  const [row]=await f.listConnectPayAdvanceApprovals(account);
+  assert.equal(row.outstandingPay,null);
+  assert.equal(row.maxEligibleAmount,null);
+  assert.equal(row.eligibilityPercent,null);
+  assert.equal(row.eligibilityWithinLimit,true);
 });
 
 test('Finance approval may adjust above the request but never above the eligibility cap',async()=>{

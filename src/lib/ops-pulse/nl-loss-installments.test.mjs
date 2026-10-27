@@ -45,3 +45,8 @@ test("the monthly amount never passes gross pay, even with the cap off", () => {
 test("schedule errors name the person", () => {
   assert.match(allocationError(1000, split(1000), [person()], false, { mode: "installments", basis: "amount", value: "1000" }), /^D0001: .*Full debit/);
 });
+
+test("People salary amounts remain server-side while the browser can still submit", () => {
+  const restricted = person({ pay_detail_access: "restricted", recovery_limit: undefined, override_limit: undefined, salary_gross: undefined });
+  assert.equal(allocationError(1200, split(1200), [restricted], true, { mode: "full" }, 24, 50), "");
+});

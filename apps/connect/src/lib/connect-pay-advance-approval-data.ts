@@ -1,7 +1,7 @@
 import "server-only";
 import type { ConnectAccount } from "./connect-auth";
 import { adoptPendingStepForHigherManager, resolveConnectActorUserIds, resolveConnectVisibleApproverUserIds } from "./connect-approver-identity";
-import { payAdvanceDecision, payAdvanceFinanceTerms, type PayAdvanceApproval } from "./connect-pay-advance-approval";
+import { payAdvanceApprovalPayContext, payAdvanceDecision, payAdvanceFinanceTerms, type PayAdvanceApproval } from "./connect-pay-advance-approval";
 import { supabaseAdmin } from "./supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -14,15 +14,17 @@ export async function listConnectPayAdvanceApprovals(account: ConnectAccount): P
   if (steps.error) throw new Error(steps.error.message);
   if (!steps.data?.length) return [];
   const requests = await db().from("hr_pay_advance_requests")
-    .select("id,request_number,worker_name,worker_code,requested_amount,approved_amount,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by")
+    .select("id,request_number,worker_type,worker_name,worker_code,requested_amount,approved_amount,outstanding_pay_snapshot,eligibility_percent_snapshot,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by")
     .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map(step => step.request_id));
   if (requests.error) throw new Error(requests.error.message);
   return (requests.data ?? []).map(row => {
     const step = steps.data.find(item => item.request_id === row.id)!;
+    const pay = payAdvanceApprovalPayContext(row.worker_type, row.requested_amount, row.outstanding_pay_snapshot,
+      row.eligibility_percent_snapshot, row.max_eligible_amount_snapshot);
     return { id: step.id, requestId: row.id, requestNumber: row.request_number, workerName: row.worker_name,
       workerCode: row.worker_code ?? "", stepName: step.step_name, stepType: step.step_type, requestedAmount: Number(row.requested_amount),
       approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
-      maxEligibleAmount: Number(row.max_eligible_amount_snapshot ?? row.requested_amount), recoveryMode: row.recovery_mode,
+      ...pay, recoveryMode: row.recovery_mode,
       installments: row.approved_installments ?? row.requested_installments, reason: row.reason, neededBy: row.needed_by };
   });
 }
