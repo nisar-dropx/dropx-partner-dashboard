@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import {useSearchParams} from 'next/navigation';
 import type { NlCase, LossSettings, RecoveryOutcome } from '@/lib/ops-pulse/nl-loss-policy';
 import type { LedgerLine } from '@/lib/ops-pulse/nl-recovery-ledger-view';
-import { indiaMonth, recoveryQueueState, RECOVERY_QUEUE_LABELS } from '@/lib/ops-pulse/loss-recovery-queue-policy';
+import { indiaMonth, recoveryQueueState, isRecoveryApprovalRequest, RECOVERY_QUEUE_LABELS } from '@/lib/ops-pulse/loss-recovery-queue-policy';
 import { LossClarificationInbox } from "./loss-clarification-inbox";
 import { RecoveryForm } from './nl-loss-cases';
 import { TrackingDetailModal } from './tracking-detail-modal';
@@ -26,15 +26,15 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
   if(r?.approval_status==='needs_review'||row.lifecycle_status==='needs_review') return 'Review required';
   return r?.approval_note || r?.outcome_label || 'Eligibility / correction review';
  };
- const shown=useMemo(()=>data.filter(x=>(!approvals || ['approval','review'].includes(x.status))&&(!station||x.row.station_code===station)&&(filter==='pending_update'?['update','review','returned'].includes(x.status):filter==='all'||filter==='open'?!['recovered','written_off','source_cleared'].includes(x.status)||filter==='all':x.status===filter)&&[x.row.case_key,x.row.station_code,x.row.details.tid,...(x.row.recovery?.allocations.map(a=>`${a.full_name} ${a.employee_code}`)||[])].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.outstanding-a.outstanding),[data,station,filter,query,approvals]);
+ const shown=useMemo(()=>data.filter(x=>(!approvals || isRecoveryApprovalRequest(x.row,x.status))&&(!station||x.row.station_code===station)&&(filter==='pending_update'?['update','review','returned'].includes(x.status):filter==='all'||filter==='open'?!['recovered','written_off','source_cleared'].includes(x.status)||filter==='all':x.status===filter)&&[x.row.case_key,x.row.station_code,x.row.details.tid,...(x.row.recovery?.allocations.map(a=>`${a.full_name} ${a.employee_code}`)||[])].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.outstanding-a.outstanding),[data,station,filter,query,approvals]);
  const paged=usePaged(shown,25,`${period}|${filter}|${station}|${query}`);
  const scoped=shown;
  return <>
   {approvals && canApprove ? <LossClarificationInbox/> : null}
-  {approvals ? <div className={styles.toolbar} style={{padding:'8px 0'}}><strong>{scoped.filter(x=>['approval','review'].includes(x.status)).length} pending exceptions</strong><span>· {money(scoped.filter(x=>['approval','review'].includes(x.status)).reduce((sum,x)=>sum+x.outstanding,0))}</span><a href="/team-ops/losses/recovery">Recovery review ↗</a></div> : <div className={styles.metrics}>
+  {approvals ? <div className={styles.toolbar} style={{padding:'8px 0'}}><strong>{scoped.filter(x=>isRecoveryApprovalRequest(x.row,x.status)).length} pending exceptions</strong><span>· {money(scoped.filter(x=>isRecoveryApprovalRequest(x.row,x.status)).reduce((sum,x)=>sum+x.outstanding,0))}</span><a href="/team-ops/losses/recovery">Recovery review ↗</a></div> : <div className={styles.metrics}>
    <div><span>Outstanding</span><strong>{money(scoped.reduce((s,x)=>s+x.outstanding,0))}</strong><small>Matching shipments · verified balance</small></div>
    <div><span>Carried forward</span><strong>{money(scoped.filter(x=>x.status==='carried').reduce((s,x)=>s+x.outstanding,0))}</strong><small>Unpaid scheduled recovery remains due</small></div>
-   <div><span>Awaiting approval</span><strong>{scoped.filter(x=>['approval','review'].includes(x.status)).length}</strong><small>Not final until independently approved</small></div>
+   <div><span>Awaiting approval</span><strong>{scoped.filter(x=>isRecoveryApprovalRequest(x.row,x.status)).length}</strong><small>Not final until independently approved</small></div>
   </div>}
   <section className={styles.panel}>
    <div className={styles.panelHead}><div><h2>{approvals?'Exception approvals':'Recovery queue'}</h2><small>{approvals?'Departures · deferred recovery · instalments · verification':'Unpaid balances carry forward. Expand a case to update recovery.'}</small></div></div>

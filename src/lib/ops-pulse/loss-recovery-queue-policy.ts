@@ -34,3 +34,7 @@ export function recoveryQueueState(row: NlCase, lines: LedgerLine[], period: str
  return { status, outstanding, deducted, waived, nextDue, verifiedReceipt };
 }
 export type RecoveryQueueState = ReturnType<typeof recoveryQueueState>;
+export function isRecoveryApprovalRequest(row: NlCase, status: string) {
+ const plan = row.recovery;
+ return Boolean(plan && !plan.is_deleted && ['approval', 'review'].includes(status));
+}

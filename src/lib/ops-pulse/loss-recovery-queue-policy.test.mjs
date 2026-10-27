@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {recoveryQueueState,indiaMonth} from './loss-recovery-queue-policy.ts';
+import {recoveryQueueState,indiaMonth,isRecoveryApprovalRequest} from './loss-recovery-queue-policy.ts';
 const row={month:'2026-09',case_key:'T1',amount:900,source_present:true,recovery:{source_amount:900,approval_status:'approved',deduction_month:'2026-10',outcome_code:'deduct'}};
 const line={outstanding:900,deducted:0,waived:0,first_salary_month:'2026-10',last_deducted_in:null,recovery_mode:'installments',deducted_count:0,status:'scheduled'};
 test('unpaid instalment carries across three salary gaps without expiry',()=>{for(const m of ['2026-11','2026-12','2027-01']){const q=recoveryQueueState(row,[line],m);assert.equal(q.status,'carried');assert.equal(q.outstanding,900);assert.equal(q.nextDue,'2026-10');}});
@@ -16,4 +16,13 @@ test('redispute hold, win and deferred loss keep deductions distinct',()=>{
  let q=recoveryQueueState({...row,redispute:{enabled:true,workflow_status:'awaiting_review'}},[line],'2026-10');assert.equal(q.status,'redispute_pending');assert.equal(q.outstanding,900);
  q=recoveryQueueState({...row,redispute:{enabled:false,workflow_status:'won'}},[{...line,deducted:200}],'2026-10');assert.equal(q.status,'redispute_won');assert.equal(q.outstanding,0);assert.equal(q.deducted,200);
  q=recoveryQueueState({...row,redispute:{enabled:false,workflow_status:'lost',recovery_month:'2026-12'}},[line],'2026-11');assert.equal(q.status,'scheduled');assert.equal(q.nextDue,'2026-12');
+});
+
+test('exception approvals require a saved recovery plan, not an unassigned source review',()=>{
+ assert.equal(isRecoveryApprovalRequest({...row,recovery:null,lifecycle_status:'needs_review'},'review'),false);
+ assert.equal(isRecoveryApprovalRequest({...row,recovery:{...row.recovery,is_deleted:true}},'review'),false);
+ assert.equal(isRecoveryApprovalRequest({...row,recovery:{...row.recovery,approval_status:'proposed'}},'approval'),true);
+ assert.equal(isRecoveryApprovalRequest({...row,recovery:{...row.recovery,approval_status:'needs_review'}},'review'),true);
+ assert.equal(isRecoveryApprovalRequest(row,'due'),false);
+ assert.equal(isRecoveryApprovalRequest(row,'returned'),false);
 });
