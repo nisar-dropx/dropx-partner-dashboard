@@ -296,7 +296,7 @@ The user explicitly approved enabling existing `OPERATIONS_FINMGR`, `OPERATIONS_
 
 Full allocation in the Master outcome's `current_month` timing, full debit mode, and no cap override becomes payroll-eligible automatically after the existing source, station directory, current payable, full-allocation and payroll-lock validations. This is eligibility for the next applicable payroll calculation, not an immediate salary transfer. The normal payroll cutoff still determines the deduction month.
 
-Departed/inactive people, next-month timing, instalments, cap overrides and receipt verification require independent approval. Source changes and returned corrections also require approval; repeated saves cannot bypass that review. SLP Manager, National Head, Finance Manager, General Manager and the existing Managing Partner role can approve within their page permissions and location scope. Proposers cannot approve their own exceptions.
+Departed/inactive people, next-month timing, instalments, cap overrides and receipt verification require independent approval. Source changes and returned corrections also require approval; repeated saves cannot bypass that review. SLP Manager, National Head, Finance Manager or Managing Partner can approve within their page permissions and location scope. Proposers cannot approve their own exceptions.
 
 `20261027183000_loss_exception_approval.sql` patches the atomic writer. Automatic decisions have a null human approver and an explicit system label. Existing decisions are preserved; saving a routine proposal with refreshed eligibility applies the new rule. Production preflight found two approved plans and no pending proposals. No payroll history, published payout or recovery key is rewritten.
 

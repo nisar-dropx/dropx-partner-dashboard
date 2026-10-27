@@ -79,7 +79,7 @@ export async function assertLifecycleAction(
     return actors;
   }
   if (action === "approve") {
-    if (!actors.isSlp) throw Error("Only SLP Manager, National Head, Finance Manager, General Manager or Managing Partner can approve this recovery.");
+    if (!actors.isSlp) throw Error("Only SLP Manager, National Head, Finance Manager or Managing Partner can approve this recovery.");
     if (proposedBy && auth.userId && proposedBy === auth.userId) {
       throw Error("You proposed this recovery, so another authorised person must approve it.");
     }
