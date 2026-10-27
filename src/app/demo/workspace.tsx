@@ -1001,7 +1001,7 @@ function Dashboard({
           <h2>
             {ds
               ? "From shift opening to the next handover."
-              : "From station readiness<br/>to the final delivery."}
+              : "From station readiness to the final delivery."}
           </h2>
           <p>See the record. Understand the context. Follow the next action.</p>
           <button
