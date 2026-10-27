@@ -31,7 +31,15 @@ async function handle(request: Request, segments: string[]) {
     let body: unknown;
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       const text = await request.text();
-      body = text ? JSON.parse(text) : {};
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          return NextResponse.json({ error: 'Request body must be valid JSON.' }, { status: 400 });
+        }
+      } else {
+        body = {};
+      }
       if (pathKey === 'accept' || pathKey === 'auto-accept-tick') {
         body = { ...(body as object), actor: ctx.authorization.userId };
       }

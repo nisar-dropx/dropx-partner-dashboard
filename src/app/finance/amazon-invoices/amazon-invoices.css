@@ -27,6 +27,7 @@
 .ai-muted{color:#637582;font-size:12px}
 .ai-row-actions{display:flex;gap:6px;flex-wrap:wrap}
 .ai-row-actions button{padding:5px 9px;font-size:12px}
+.final-pnl button[aria-busy=true]{opacity:.85;cursor:wait}
 .ai-empty{padding:28px 18px;text-align:center;color:#637582;background:linear-gradient(180deg,#f8fbfc,#fff);border:1px dashed #d5e0e7;border-radius:10px;margin-top:8px}
 .ai-empty strong{display:block;color:#142536;font-size:14px;margin-bottom:6px}
 .ai-empty p{margin:0 auto;max-width:34rem;line-height:1.55}
