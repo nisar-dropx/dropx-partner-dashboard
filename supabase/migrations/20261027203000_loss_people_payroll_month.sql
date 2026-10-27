@@ -95,8 +95,8 @@ do $$ declare f record; d text; begin
  d:=replace(d,'split_part(x->>''ref'','':'',1)=case p_target when ''hrms'' then ''employee'' when ''workforce'' then ''workforce'' end','((p_target=''hrms'' and split_part(x->>''ref'','':'',1) in (''employee'',''contractor'')) or (p_target=''workforce'' and split_part(x->>''ref'','':'',1)=''workforce''))');
  elsif f.proname='save_nl_recovery' and position('-- Explicit payroll month' in d)=0 then
  d:=replace(d,'station_audit_employee_directory(p_company,station)','loss_recovery_people(p_company,station)');
- d:=regexp_replace(d,'  pay_month:=to_char\(date_trunc\(''month'',now\(\) at time zone ''Asia/Kolkata''\).*?;', '  pay_month:=null;');
- d:=replace(d,'  if p_remarks is null', $patch$  -- Explicit payroll month, independent of the loss month. Old locked schedules stay immutable.
+ d:=regexp_replace(d,'pay_month:=to_char\(date_trunc\(''month'',now\(\) at time zone ''Asia/Kolkata''\).*?;', '  pay_month:=null;');
+ d:=replace(d,'if p_remarks is null', $patch$  -- Explicit payroll month, independent of the loss month. Old locked schedules stay immutable.
   pay_month:=coalesce(nullif(p_plan->>'deduction_month',''),nl_recovery_deduction_month(c.report,c.month,now(),c.final_seen_at,o.deduction_timing,coalesce((policy->>'payroll_cutoff_day')::int,5)));
   if o.allocation_required and (pay_month !~ '^\d{4}-(0[1-9]|1[0-2])$' or pay_month is null) then raise exception 'Choose a valid recovery payroll month.'; end if;
   if o.allocation_required and pay_month < nl_recovery_deduction_month(c.report,c.month,now(),c.final_seen_at,'current_month',coalesce((policy->>'payroll_cutoff_day')::int,5))
@@ -112,6 +112,7 @@ do $$ declare f record; d text; begin
  d:=replace(d,'or exists(select 1 from workforce w where','or exists(select 1 from contractors e where ''contractor:''||e.id=x->>''ref'' and e.company_id=p_company and e.last_working_date <= (now() at time zone ''Asia/Kolkata'')::date) or exists(select 1 from workforce w where');
  d:=replace(d,'Previous-month salary payable is unavailable.','Selected payroll month salary payable is unavailable.');
  end if;
+ if f.proname='save_nl_recovery' and (position('-- Explicit payroll month' in d)=0 or position('deduction:=pay_month;' in d)=0 or position('loss_recovery_people(p_company,station)' in d)=0) then raise exception 'Recovery directory/payroll month patch failed'; end if;
  execute d;
  end loop;
 end $$;

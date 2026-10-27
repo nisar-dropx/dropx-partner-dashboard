@@ -89,7 +89,7 @@ do $$ declare d text; begin
    raise exception 'Recovery is paused or stopped by redispute. Use the redispute desk for this shipment.';
   end if;
   -- Explicit payroll month$patch$);
-  d:=replace(d,'  if p_remarks is null', $patch$  if o.allocation_required and exists(select 1 from nl_case_response_windows rw where rw.company_id=p_company and rw.month=p_month and rw.case_key=p_case and rw.recovery_month>pay_month) then
+  d:=replace(d,'if p_remarks is null', $patch$  if o.allocation_required and exists(select 1 from nl_case_response_windows rw where rw.company_id=p_company and rw.month=p_month and rw.case_key=p_case and rw.recovery_month>pay_month) then
    raise exception 'Select the redispute recovery month or a later open payroll month.';
   end if;
   if p_remarks is null$patch$);

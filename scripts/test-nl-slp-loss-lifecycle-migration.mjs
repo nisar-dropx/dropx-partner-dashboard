@@ -343,6 +343,10 @@ create table hr_reporting_relationships(company_id uuid,subject_assignment_id uu
 create table hr_user_person_links(company_id uuid,person_id uuid,user_id uuid,status text);
 create table station_responsibility_assignments(company_id uuid,station_id uuid,assignment_id uuid,assignee_user_id uuid,effective_from timestamptz,effective_to timestamptz);
 `);
+// SQL Editor can normalize indentation in production function definitions.
+// The migration must not depend on two-space indentation for its payroll guards.
+const liveFormattedWriter=await one(`select pg_get_functiondef(oid) definition from pg_proc where proname='save_nl_recovery'`);
+await db.exec(liveFormattedWriter.definition.replace(/^  /gm,' '));
 const directorySql=readFileSync("supabase/migrations/20261027203000_loss_people_payroll_month.sql","utf8");
 await db.exec(directorySql); await db.exec(directorySql);
 eq('Inclusive fifth keeps October', (await one(`select nl_recovery_deduction_month('nl','2026-09','2026-11-05T17:00:00+05:30',null,'current_month',5) m`)).m,'2026-10');
