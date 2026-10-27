@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 export function OpsPwaRegister() {
   useEffect(() => {
+    if (window.location.pathname === "/demo") return;
     if (!("serviceWorker" in navigator)) return;
     const register = () => navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined);
     if (document.readyState === "complete") void register();
