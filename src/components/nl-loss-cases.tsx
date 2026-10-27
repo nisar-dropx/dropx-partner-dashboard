@@ -925,14 +925,18 @@ export function RecoveryForm({
                           {capEnabled && selected.includes(p.ref) ? (
                             <small
                               className={
-                                p.recovery_limit == null
+                                p.pay_check_state === "unavailable"
                                   ? styles.pending
                                   : styles.payFacts
                               }
                             >
-                              {p.recovery_limit == null
-                                ? "Salary payable unavailable · review payroll / mapping"
-                                : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payroll"}: take-home ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
+                              {p.pay_detail_access === "restricted"
+                                ? p.pay_check_state === "unavailable"
+                                  ? "Salary eligibility unavailable · review payroll / mapping"
+                                  : "Salary eligibility verified securely · amount hidden"
+                                : p.recovery_limit == null
+                                  ? "Payout payable unavailable · review payout / mapping"
+                                  : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) &&
@@ -961,7 +965,7 @@ export function RecoveryForm({
                                 type="number"
                                 min="0.01"
                                 max={
-                                  capEnabled && plan.mode === "full"
+                                  capEnabled && plan.mode === "full" && p.pay_detail_access !== "restricted"
                                     ? (limitOf(p) ?? undefined)
                                     : undefined
                                 }
@@ -1010,8 +1014,7 @@ export function RecoveryForm({
                           setPlan({ ...plan, cap_override: e.target.checked })
                         }
                       />
-                      Recover beyond the {capPercent}% salary cap (up to the
-                      whole take-home)
+                      Recover beyond the {capPercent}% salary cap (verified securely on save)
                     </label>
                     {plan.cap_override ? (
                       <label>

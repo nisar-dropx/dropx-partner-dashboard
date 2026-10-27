@@ -47,6 +47,7 @@ for (const file of [
   "20261016161000_loss_recovery_installments.sql",
   "20261016181000_station_loss_claims.sql",
   "20261022120000_nl_slp_loss_lifecycle.sql",
+  "20261028153000_private_people_loss_recovery_pay.sql",
 ]) {
   const sql = readFileSync(`supabase/migrations/${file}`, "utf8");
   await db.exec(sql); await db.exec(sql);
@@ -154,7 +155,7 @@ await db.query(save("CAP", 0, E2A(1200), { mode: "installments", basis: "months"
 eq("Same loss spread over 4 months fits the cap", (await one(`select allocations->0->>'monthly_amount' m from nl_loss_recoveries where case_key='CAP'`)).m, "300.00");
 await throws("Override still cannot pass take-home", save("CAP", 1, E2A(1200), { mode: "full", cap_override: true, cap_override_reason: "Approved by finance head" }), /more than the take-home salary limit of ₹800\.00/);
 await db.query(save("CAP", 1, E2A(1200), { mode: "installments", basis: "months", value: "2", cap_override: true, cap_override_reason: "Approved by finance head" }));
-eq("Override with reason saves and is recorded", (await one(`select cap_override,cap_override_reason r,allocations->0->>'salary_gross' g from nl_loss_recoveries where case_key='CAP'`)), { cap_override: true, r: "Approved by finance head", g: "2000.00" });
+eq("People salary stays private in saved recovery", (await one(`select cap_override,cap_override_reason r,allocations->0->>'salary_gross' g from nl_loss_recoveries where case_key='CAP'`)), { cap_override: true, r: "Approved by finance head", g: null });
 await approve("CAP");
 await db.exec(`update nl_loss_recoveries set deduction_month='2026-10' where case_key='CAP'`);
 eq("Override lines are cap-exempt in payroll", (await due("hrms", "2026-10")).filter((r) => r.recovery_key.includes("|CAP|")).map((r) => r.cap_exempt), [true]);

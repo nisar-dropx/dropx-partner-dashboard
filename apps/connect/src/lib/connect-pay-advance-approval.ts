@@ -1,9 +1,30 @@
 export type PayAdvanceApproval = {
   id: string; requestId: string; requestNumber: string; workerName: string; workerCode: string;
   stepName: string; stepType: string; requestedAmount: number; approvedAmount: number | null;
-  maxEligibleAmount: number;
+  workerType: string; outstandingPay: number | null; eligibilityPercent: number | null;
+  maxEligibleAmount: number | null; eligibilityWithinLimit: boolean;
   recoveryMode: string; installments: number; reason: string; neededBy: string | null;
 };
+
+export function payAdvanceApprovalPayContext(
+  workerTypeValue: unknown,
+  requestedAmountValue: unknown,
+  outstandingPayValue: unknown,
+  eligibilityPercentValue: unknown,
+  maxEligibleAmountValue: unknown,
+) {
+  const workerType = String(workerTypeValue ?? "").trim().toLowerCase();
+  const requestedAmount = Number(requestedAmountValue ?? 0);
+  const maximum = Number(maxEligibleAmountValue ?? requestedAmount);
+  const workforceAmountsVisible = workerType === "workforce";
+  return {
+    workerType,
+    outstandingPay: workforceAmountsVisible ? Number(outstandingPayValue ?? 0) : null,
+    eligibilityPercent: workforceAmountsVisible ? Number(eligibilityPercentValue ?? 25) : null,
+    maxEligibleAmount: workforceAmountsVisible ? maximum : null,
+    eligibilityWithinLimit: Number.isFinite(requestedAmount) && Number.isFinite(maximum) && requestedAmount <= maximum,
+  };
+}
 
 export function payAdvanceDecision(value: unknown, note: unknown) {
   if (value !== "approved" && value !== "rejected" && value !== "returned") throw new Error("Choose Approve, Return, or Reject.");

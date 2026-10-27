@@ -31,6 +31,10 @@ export type RecoveryPerson = {
   /** Monthly amount other plans already take from this person's salary month. */
   reserved?: number;
   salary_source?: string;
+  /** Pay amounts are returned only for Workforce profiles. */
+  pay_detail_access?: "workforce" | "restricted";
+  /** People profiles expose only whether the server-side pay check is ready. */
+  pay_check_state?: "ready" | "unavailable";
   /** Saved plan lines only. */
   monthly_amount?: number;
   installments?: { n: number; amount: number }[];
@@ -302,14 +306,17 @@ export function allocationError(
     const { schedule, error } = installmentSchedule(split.amount, plan, maxInstallments);
     if (error) return `${person.employee_code}: ${error}`;
     const monthly = Math.round((schedule[0] ?? 0) * 100);
-    if (capEnabled) {
+    // People-profile payroll figures are deliberately absent from the browser.
+    // The database performs the authoritative cap and gross-pay checks on save.
+    const privatePeoplePay = person.pay_detail_access === "restricted";
+    if (capEnabled && !privatePeoplePay) {
       const limit = override ? person.override_limit : person.recovery_limit;
       if (limit == null)
         return `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
       if (monthly > Math.round(limit * 100))
         return `The monthly recovery of ₹${(monthly / 100).toLocaleString("en-IN")} for ${person.employee_code} is more than the ${override ? "take-home" : `${capPercent}%`} salary limit of ₹${limit.toLocaleString("en-IN")}. ${override ? "Spread it over more instalments." : "Spread it over more instalments, or record a cap override."}`;
     }
-    if (person.salary_gross != null && monthly > Math.round(person.salary_gross * 100))
+    if (!privatePeoplePay && person.salary_gross != null && monthly > Math.round(person.salary_gross * 100))
       return `The monthly recovery for ${person.employee_code} is more than their gross pay of ₹${person.salary_gross.toLocaleString("en-IN")}.`;
   }
   return "";

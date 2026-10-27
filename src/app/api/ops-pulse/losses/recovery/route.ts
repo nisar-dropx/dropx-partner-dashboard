@@ -13,6 +13,11 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { hasPermission } from "@/lib/authorization";
 import { readAllRows } from "@/lib/supabase-pagination";
 import type { RecoveryPerson } from "@/lib/ops-pulse/nl-loss-policy";
+import {
+  privacySafeRecoveryError,
+  recoveryPersonPayDisclosure,
+  redactRecoverySnapshot,
+} from "@/lib/ops-pulse/loss-recovery-pay-privacy";
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 /** A plan saved with a restricted outcome can only be replaced or removed by people who may set it. */
@@ -96,12 +101,15 @@ export async function GET(request: Request) {
       },
       // SLP is deducted only once its Final file is in; the month above is provisional until then.
       awaiting_final: report === "slp" && !finalSeenAt,
-      people,
+      people: people.map(recoveryPersonPayDisclosure),
       can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && !responseWindow.data?.enabled && responseWindow.data?.workflow_status !== "won",
       can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
       can_recovered: false,
       can_response: !!responseWindow.data?.enabled,
-      history: history.data ?? [],
+      history: (history.data ?? []).map((event) => ({
+        ...event,
+        after_value: redactRecoverySnapshot(event.after_value),
+      })),
     });
   } catch (e) {
     return reply(
@@ -230,16 +238,21 @@ export async function POST(request: Request) {
       p_details: body.recovery_details || {},
       p_plan: plan,
     });
-    if (result.error)
+    if (result.error) {
+      const includesPeopleProfile = body.allocations.some(
+        (allocation: { employee_ref?: unknown }) =>
+          !String(allocation?.employee_ref ?? "").startsWith("workforce:"),
+      );
       return reply(
         {
           error:
             result.error.code === "P0001"
-              ? result.error.message
+              ? privacySafeRecoveryError(result.error.message, includesPeopleProfile)
               : "Recovery could not be saved. Refresh and try again.",
         },
         409,
       );
+    }
     return reply({ recovery: result.data });
   } catch (e) {
     return reply(
