@@ -8,8 +8,9 @@ export function isOpsDemoHost(host: string) {
     (name.startsWith("dropx-ops-pulse-") && name.endsWith(".vercel.app"))
   );
 }
+export const opsDemoPaths = ["/demo", "/demo/last-mile", "/demo/dark-store"] as const;
 export function isOpsDemoRequest(host: string, path: string, method: string) {
   return (
-    isOpsDemoHost(host) && path === "/demo" && ["GET", "HEAD"].includes(method)
+    isOpsDemoHost(host) && (opsDemoPaths as readonly string[]).includes(path) && ["GET", "HEAD"].includes(method)
   );
 }

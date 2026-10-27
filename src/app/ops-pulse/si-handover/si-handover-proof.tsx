@@ -1,8 +1,9 @@
 "use client";
+import { useOpsScreenRequest, useOpsScreenRuntime } from "@/components/ops-screen-runtime";
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { supabase } from "@/lib/supabase";
+
 import { OpsLiveCamera } from "@/components/ops-live-camera";
 import {
   prepareProofFile,
@@ -48,7 +49,8 @@ function MediaPreview({
   onFullscreen: () => void;
   onExitFullscreen: () => void;
 }) {
-  const src = `${apiBase}/evidence/${proof.id}`;
+  const runtime = useOpsScreenRuntime();
+  const src = runtime ? runtime.mediaUrl(proof.id) : `${apiBase}/evidence/${proof.id}`;
   const mime = proof.content_type || "";
   const [mounted, setMounted] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -173,6 +175,8 @@ export function ProofPanel({
   apiBase?: string;
   storeLabel?: string | null;
 }) {
+  const request = useOpsScreenRequest();
+  const demo = useOpsScreenRuntime();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [preview, setPreview] = useState<Evidence | null>(null);
@@ -218,7 +222,15 @@ export function ProofPanel({
     void uploadFiles(files).catch(() => undefined);
   };
 
+  const addSample = async () => {
+    if (!demo || !room) return;
+    const res = await demo.request(`${apiBase}/sample-proof`, {method:"POST", body:JSON.stringify({checklistId:checklist.id,taskId:task.id})});
+    const body = await res.json();
+    if (res.ok) { onChange([...proofs, body.proof]); setStatus("Sample evidence added · no upload or camera access."); }
+    else onError(body.error);
+  };
   const uploadFiles = async (files: FileList | File[]) => {
+    if (demo) { await addSample(); return; }
     const list = Array.from(files).slice(0, room);
     if (!list.length) {
       onError("No file was selected. Try Take, Live, or Attach again.");
@@ -271,7 +283,7 @@ export function ProofPanel({
         const size = Math.max(0, Math.round(Number(file.size) || 0));
         if (size < 1) throw Error("Captured file was empty. Try again.");
         setStatus(list.length > 1 ? `Uploading ${index}/${list.length}…` : "Uploading…");
-        const prep = await fetch(`${apiBase}/upload`, {
+        const prep = await request(`${apiBase}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -301,6 +313,7 @@ export function ProofPanel({
         if (!prepared.id || !prepared.path || !prepared.token) {
           throw Error("Upload prepare response was incomplete.");
         }
+        const { supabase } = await import("@/lib/supabase");
         if (!supabase) throw Error("Upload client unavailable. Refresh and try again.");
         const up = await supabase.storage
           .from("ops-pulse-documents")
@@ -309,7 +322,7 @@ export function ProofPanel({
             upsert: false,
           });
         if (up.error) throw Error(up.error.message || "Storage upload failed.");
-        const done = await fetch(`${apiBase}/upload`, {
+        const done = await request(`${apiBase}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -369,7 +382,7 @@ export function ProofPanel({
             >
               {isImageMime(p.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={`${apiBase}/evidence/${p.id}`} alt="" />
+                <img src={demo ? demo.mediaUrl(p.id) : `${apiBase}/evidence/${p.id}`} alt="" />
               ) : isVideoMime(p.content_type) ? (
                 <span className={styles.proofBadge}>Video</span>
               ) : isPdfMime(p.content_type) ? (
@@ -386,7 +399,7 @@ export function ProofPanel({
                 className={styles.linkDanger}
                 disabled={busy}
                 onClick={async () => {
-                  const r = await fetch(`${apiBase}/upload`, {
+                  const r = await request(`${apiBase}/upload`, {
                     method: "POST",
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify({
@@ -424,7 +437,7 @@ export function ProofPanel({
                   type="button"
                   className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
                   disabled={busy}
-                  onClick={() => camInputRef.current?.click()}
+                  onClick={() => demo ? void addSample() : camInputRef.current?.click()}
                 >
                   {busy ? "…" : task.proof.kind === "video" ? "Record" : "Take"}
                 </button>
@@ -433,7 +446,7 @@ export function ProofPanel({
                     type="button"
                     className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
                     disabled={busy}
-                    onClick={() => setLiveOpen(true)}
+                    onClick={() => demo ? void addSample() : setLiveOpen(true)}
                   >
                     Live
                   </button>
@@ -453,7 +466,7 @@ export function ProofPanel({
               type="button"
               className={`${styles.proofAdd}${busy ? ` ${styles.proofAddBusy}` : ""}`}
               disabled={busy}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => demo ? void addSample() : fileInputRef.current?.click()}
             >
               {busy ? "…" : preferCapture ? "Attach" : "Add"}
             </button>

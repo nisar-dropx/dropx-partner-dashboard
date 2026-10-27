@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { OpsScreenLink as Link } from "@/components/ops-screen-runtime";
 import styles from "./si-handover.module.css";
 
 type HubTab = "shift" | "store" | "shift-report" | "store-report";

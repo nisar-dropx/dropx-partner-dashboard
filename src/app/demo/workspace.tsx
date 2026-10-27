@@ -41,9 +41,14 @@ import {
   type Workspace,
 } from "@/lib/ops-pulse/demo/catalog";
 import s from "./workspace.module.css";
+import { ProductionActivities } from "./production-activities";
+import { AppShellFrame } from "@/components/app-shell-frame";
+import { OpsPulseBrand } from "@/components/ops-pulse-brand";
+import { OpsDesignNavigation } from "@/components/ops-design-navigation";
+import { OpsMenuClose } from "@/components/ops-menu-close";
 
 type Changes = Record<string, Partial<DemoRecord>>;
-const storageKey = "opspulse-synthetic-demo-v1";
+const storageKey = "opspulse-synthetic-demo-v2";
 const statusClass = (status: string) =>
   /accepted|paid|complete|closed|resolved|reconciled|approved/i.test(status)
     ? s.good
@@ -114,21 +119,21 @@ function cells(menu: DemoMenu, row: DemoRecord) {
   return [...row.values.slice(0, 3), `${done} / ${row.tasks.length}`];
 }
 export function DemoWorkspace({
-  catalogs,
+  workspace,
+  catalog,
 }: {
-  catalogs: Record<Workspace, NavItem[]>;
+  workspace: Workspace;
+  catalog: NavItem[];
 }) {
   const menus = useMemo(
-    () => ({
-      "last-mile": demoMenus(catalogs["last-mile"]),
-      "q-commerce": demoMenus(catalogs["q-commerce"]),
-    }),
-    [catalogs],
+    () =>
+      ({ [workspace]: demoMenus(catalog) }) as Record<Workspace, DemoMenu[]>,
+    [catalog, workspace],
   );
-  const [workspace, setWorkspace] = useState<Workspace | null>(null),
-    [screen, setScreen] = useState(""),
+  const [screen, setScreen] = useState(""),
     [changes, setChanges] = useState<Changes>({}),
     [initialized, setInitialized] = useState(false);
+  const [activityRoute, setActivityRoute] = useState("");
   const [mobile, setMobile] = useState(false),
     [navSearch, setNavSearch] = useState(""),
     [showSearch, setShowSearch] = useState(false),
@@ -147,19 +152,25 @@ export function DemoWorkspace({
   useEffect(() => {
     function read() {
       const p = new URLSearchParams(window.location.search);
-      const w = p.get("workspace");
-      const valid = w === "last-mile" || w === "q-commerce" ? w : null;
-      setWorkspace(valid);
+      const valid = workspace;
       const menu = valid
         ? menus[valid].find((m) => m.id === p.get("screen"))
         : null;
       setScreen(menu?.id || "");
+      if (menu) {
+        const route = new URL(menu.href, "https://demo.invalid");
+        for (const key of ["view", "id", "from", "to", "tab"])
+          if (p.has(key)) route.searchParams.set(key, p.get(key)!);
+        setActivityRoute(route.pathname + route.search);
+      }
       setSelected(null);
       setMobile(false);
     }
     read();
     try {
-      const data = JSON.parse(sessionStorage.getItem(storageKey) || "{}");
+      const data = JSON.parse(
+        sessionStorage.getItem(`${storageKey}:${workspace}`) || "{}",
+      );
       if (data.version === 1) {
         setChanges(data.changes || {});
         setCreated(data.created || {});
@@ -170,24 +181,25 @@ export function DemoWorkspace({
     setInitialized(true);
     window.addEventListener("popstate", read);
     return () => window.removeEventListener("popstate", read);
-  }, [menus]);
+  }, [menus, workspace]);
   useEffect(() => {
     if (!initialized) return;
     try {
       sessionStorage.setItem(
-        storageKey,
+        `${storageKey}:${workspace}`,
         JSON.stringify({ version: 1, changes, created }),
       );
     } catch {
       /* memory-only demo remains usable */
     }
-  }, [changes, created, initialized]);
+  }, [changes, created, initialized, workspace]);
   const menu = workspace
     ? menus[workspace].find((m) => m.id === screen) || menus[workspace][0]
     : null;
   function navigate(w: Workspace, m?: DemoMenu) {
-    setWorkspace(w);
+    if (w !== workspace) return;
     setScreen(m?.id || "");
+    setActivityRoute(m?.href || "");
     setQuery("");
     setLocation("All locations");
     setStatus("All statuses");
@@ -256,16 +268,42 @@ export function DemoWorkspace({
     setNotice("Sample CSV downloaded. It contains fictional records only.");
   }
   function resetSession() {
+    sessionStorage.removeItem("opspulse-production-activities-demo-v1");
+    window.dispatchEvent(new Event("opspulse-demo-reset"));
     setChanges({});
     setCreated({});
     setReset(false);
     setSelected(null);
-    setNotice("Sample data reset for both workspaces.");
+    setNotice("Sample data reset for this workspace.");
   }
   const groupNames = workspace
     ? Array.from(new Set(menus[workspace].map((m) => m.group)))
     : [];
   const kind = menu?.definition.kind;
+  const productionActivity =
+    workspace === "q-commerce" &&
+    Boolean(menu?.href.match(/^\/(si-handover|store-ops)(\?|\/report|$)/));
+  function activityHref(target: string) {
+    const route = new URL(target, "https://demo.invalid");
+    const m = menus[workspace].find((m) => {
+      const u = new URL(m.href, "https://demo.invalid");
+      return (
+        u.pathname === route.pathname &&
+        (u.searchParams.get("tab") || "shift") ===
+          (route.searchParams.get("tab") || "shift")
+      );
+    });
+    if (!m) return demoLink(workspace, menu?.id);
+    const out = new URL(demoLink(workspace, m.id), "https://demo.invalid");
+    for (const [key, value] of route.searchParams)
+      out.searchParams.set(key, value);
+    return out.pathname + out.search;
+  }
+  function activityNavigate(target: string) {
+    window.history.pushState({}, "", activityHref(target));
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    window.scrollTo(0, 0);
+  }
   const commonProps = {
     menu: menu!,
     row: selected!,
@@ -276,244 +314,92 @@ export function DemoWorkspace({
   };
   if (!initialized)
     return <main className={s.loading}>Opening the OpsPulse demo…</main>;
-  if (!workspace)
-    return (
-      <main className={s.landing}>
-        <div className={s.landingHeader}>
-          <Brand />
-          <span className={s.demoPill}>Interactive demo</span>
-        </div>
-        <section className={s.welcome}>
-          <span className={s.eyebrow}>ONE PLATFORM · TWO OPERATING VIEWS</span>
-          <h1>
-            Explore your
-            <br />
-            next operating view.
-          </h1>
-          <p>
-            Walk through OpsPulse with sample locations, people and daily
-            operations.
-          </p>
-        </section>
-        <div className={s.choices}>
-          {(["last-mile", "q-commerce"] as Workspace[]).map((w, i) => (
-            <a
-              key={w}
-              href={demoLink(w)}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(w);
-              }}
-              className={s.choice}
-            >
-              {i === 0 ? <Truck size={30} /> : <Store size={30} />}
-              <span className={s.eyebrow}>
-                {i === 0 ? "LAST MILE" : "Q-COMMERCE · DARK STORE"}
-              </span>
-              <h2>
-                {i === 0
-                  ? "Every station. One view."
-                  : "Every shift. In control."}
-              </h2>
-              <p>
-                {i === 0
-                  ? "Delivery performance, workforce, COD, fleet and cost per shipment."
-                  : "Shift reporting, handovers, store audits, reviews and cost per unit."}
-              </p>
-              <div className={s.choiceMetrics}>
-                <span>
-                  <b>3</b> sample {i === 0 ? "stations" : "stores"}
-                </span>
-                <span>
-                  <b>{menus[w].length}</b> populated menu views
-                </span>
-              </div>
-              <strong>
-                Explore {i === 0 ? "Last Mile" : "Q-commerce"}{" "}
-                <ArrowRight size={18} />
-              </strong>
-            </a>
-          ))}
-        </div>
-        <footer className={s.landingFooter}>
-          <ShieldCheck size={18} />
-          <span>
-            Fictional data. No sign-in. Actions stay in your browser session.
-            <br />
-            No live users, payments, messages or operational records are
-            created.
-          </span>
-        </footer>
-      </main>
-    );
+  const navItems = catalog.map((item) => ({
+    ...item,
+    href: item.href
+      ? demoLink(
+          workspace,
+          menus[workspace].find((m) => m.href === item.href)?.id,
+        )
+      : undefined,
+    children: item.children?.map((child) => ({
+      ...child,
+      href: child.href
+        ? demoLink(
+            workspace,
+            menus[workspace].find((m) => m.href === child.href)?.id,
+          )
+        : undefined,
+    })),
+  }));
+  const topActions = (
+    <>
+      <span className="scope-label">3 sample locations</span>
+      <span className={s.demoPill}>Demo operations lead</span>
+    </>
+  );
   return (
-    <div className={s.app}>
-      {mobile ? (
-        <button
-          className={s.scrim}
-          aria-label="Close navigation"
-          onClick={() => setMobile(false)}
-        />
-      ) : null}
-      <aside
-        className={`${s.sidebar} ${mobile ? s.sidebarOpen : ""}`}
-        aria-label="Demo navigation"
-      >
-        <div className={s.brandRow}>
-          <Brand />
-          <button
-            className={s.mobileOnly}
-            aria-label="Close menu"
-            onClick={() => setMobile(false)}
-          >
-            <X size={20} />
-          </button>
-        </div>
-        <div className={s.workspaceSwitch}>
-          {(["last-mile", "q-commerce"] as Workspace[]).map((w) => (
-            <a
-              key={w}
-              href={demoLink(w)}
-              aria-current={workspace === w ? "page" : undefined}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(w);
-              }}
-            >
-              {w === "last-mile" ? <Truck size={17} /> : <Store size={17} />}
-              <span>{w === "last-mile" ? "Last Mile" : "Q-commerce"}</span>
-            </a>
-          ))}
-        </div>
-        <button
-          className={s.searchToggle}
-          onClick={() => setShowSearch(!showSearch)}
-          aria-expanded={showSearch}
-        >
-          <Search size={15} /> Search menus
-        </button>
-        {showSearch ? (
-          <input
-            className={s.navSearch}
-            autoFocus
-            aria-label="Search demo menus"
-            placeholder="Find a menu…"
-            value={navSearch}
-            onChange={(e) => setNavSearch(e.target.value)}
-          />
-        ) : null}
-        <nav className={s.nav}>
-          {groupNames.map((group) => {
-            const children = menus[workspace].filter(
-              (m) =>
-                m.group === group &&
-                `${group} ${m.label}`
-                  .toLowerCase()
-                  .includes(navSearch.toLowerCase()),
-            );
-            if (!children.length) return null;
-            const Icon = Icons[group] || Activity;
-            const isGroup = children.length > 1 || children[0].label !== group;
-            const active = menu?.group === group;
-            const isOpen = Boolean(navSearch) || expanded.includes(group);
-            return (
-              <div key={group} className={s.navGroup}>
-                {isGroup ? (
-                  <>
-                    <button
-                      className={`${s.groupButton} ${active ? s.groupActive : ""}`}
-                      onClick={() =>
-                        setExpanded((old) =>
-                          old.includes(group)
-                            ? old.filter((g) => g !== group)
-                            : [...old, group],
-                        )
-                      }
-                      aria-expanded={isOpen}
-                    >
-                      <Icon size={17} />
-                      <span>{group}</span>
-                      {isOpen ? (
-                        <ChevronDown size={14} />
-                      ) : (
-                        <ChevronRight size={14} />
-                      )}
-                    </button>
-                    {isOpen ? (
-                      <div className={s.subnav}>
-                        {children.map((m) => (
-                          <a
-                            key={m.id}
-                            href={demoLink(workspace, m.id)}
-                            aria-current={
-                              menu?.id === m.id ? "page" : undefined
-                            }
-                            onClick={(e) => {
-                              e.preventDefault();
-                              navigate(workspace, m);
-                            }}
-                          >
-                            {m.label}
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <a
-                    className={s.singleNav}
-                    href={demoLink(workspace, children[0].id)}
-                    aria-current={
-                      menu?.id === children[0].id ? "page" : undefined
-                    }
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate(workspace, children[0]);
-                    }}
-                  >
-                    <Icon size={17} />
-                    <span>{group}</span>
-                  </a>
-                )}
+    <div
+      onClickCapture={(event) => {
+        const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>(
+          "a[href]",
+        );
+        if (
+          !anchor?.closest(".sidebar") ||
+          !anchor.getAttribute("href")?.startsWith(`/demo/`)
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        const target = new URL(anchor.href);
+        navigate(
+          workspace,
+          menus[workspace].find(
+            (m) => m.id === target.searchParams.get("screen"),
+          ),
+        );
+      }}
+    >
+      <AppShellFrame
+        key={menu?.id}
+        opsDesignPreview
+        trackEvents={false}
+        pageTitle={menu?.label}
+        desktopActions={topActions}
+        mobileActions={<span className={s.demoPill}>Demo</span>}
+        mobileBrand={<OpsPulseBrand />}
+        sidebar={
+          <aside className="sidebar">
+            <OpsMenuClose />
+            <div className="brand">
+              <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />
+              <OpsPulseBrand />
+            </div>
+            <div className="ops-workspace-switcher">
+              <strong>
+                {workspace === "last-mile" ? "Last Mile" : "Dark Store"}
+              </strong>
+            </div>
+            <OpsDesignNavigation
+              items={navItems}
+              active={menu?.label || "Command Center"}
+            />
+            <div className="sidebar-user ops-sidebar-user">
+              <div className="avatar">D</div>
+              <div>
+                <strong>Demo operations lead</strong>
+                <small>Sample profile</small>
               </div>
-            );
-          })}
-        </nav>
-        <div className={s.sidebarFooter}>
-          <span className={s.avatar}>D</span>
-          <div>
-            <strong>Demo operations lead</strong>
-            <small>Sample profile · 3 locations</small>
-          </div>
-        </div>
-        <button className={s.resetButton} onClick={() => setReset(true)}>
-          <RotateCcw size={15} /> Reset sample data
-        </button>
-      </aside>
-      <div className={s.mainWrap}>
-        <header className={s.topbar}>
-          <button
-            className={s.mobileOnly}
-            aria-label="Open menu"
-            onClick={() => setMobile(true)}
-          >
-            <Menu size={21} />
-          </button>
-          <span className={s.breadcrumb}>
-            OpsPulse <span>/</span> {menu?.label}
-          </span>
-          <button
-            aria-label="About this demo"
-            className={s.helpButton}
-            onClick={() => setHelp(true)}
-          >
-            <HelpCircle size={16} />
-            <span>About this demo</span>
-          </button>
-        </header>
+              <button className="link-button" onClick={() => setReset(true)}>
+                Reset sample data
+              </button>
+            </div>
+          </aside>
+        }
+      >
         <div className={s.demoBanner}>
           <span>
-            <b>DEMO</b> Fictional sample data · {demoDate}
+            <b>DEMO</b> Fictional sample data · changes stay in this browser
           </span>
           <button
             onClick={() => {
@@ -536,26 +422,28 @@ export function DemoWorkspace({
             Copy demo link
           </button>
         </div>
-        <main className={s.content}>
-          <header className={s.pageHeader}>
-            <div>
-              <span className={s.eyebrow}>
-                {workspace === "q-commerce"
-                  ? "Q-COMMERCE · DARK STORE"
-                  : "LAST MILE"}{" "}
-                · SAMPLE WORKSPACE
-              </span>
-              <h1 ref={heading} tabIndex={-1}>
-                {menu?.label}
-              </h1>
-              <p>{menu?.definition.description}</p>
-            </div>
-            {kind !== "dashboard" ? (
-              <button className={s.secondary} onClick={exportCsv}>
-                <ArrowDownToLine size={16} /> Export sample CSV
-              </button>
-            ) : null}
-          </header>
+        <div className={productionActivity ? undefined : s.content}>
+          {!productionActivity && (
+            <header className={s.pageHeader}>
+              <div>
+                <span className={s.eyebrow}>
+                  {workspace === "q-commerce"
+                    ? "Q-COMMERCE · DARK STORE"
+                    : "LAST MILE"}{" "}
+                  · SAMPLE WORKSPACE
+                </span>
+                <h1 ref={heading} tabIndex={-1}>
+                  {menu?.label}
+                </h1>
+                <p>{menu?.definition.description}</p>
+              </div>
+              {kind !== "dashboard" ? (
+                <button className={s.secondary} onClick={exportCsv}>
+                  <ArrowDownToLine size={16} /> Export sample CSV
+                </button>
+              ) : null}
+            </header>
+          )}
           {notice ? (
             <div role="status" className={s.notice}>
               <CheckCircle2 size={17} />
@@ -568,7 +456,13 @@ export function DemoWorkspace({
               </button>
             </div>
           ) : null}
-          {kind === "dashboard" ? (
+          {productionActivity ? (
+            <ProductionActivities
+              route={activityRoute || menu!.href}
+              href={activityHref}
+              navigate={activityNavigate}
+            />
+          ) : kind === "dashboard" ? (
             <Dashboard
               workspace={workspace}
               go={goHref}
@@ -795,8 +689,8 @@ export function DemoWorkspace({
               </section>
             </>
           )}
-        </main>
-      </div>
+        </div>
+      </AppShellFrame>
       {selected ? <RecordDialog {...commonProps} /> : null}
       {creating ? (
         <CreateDialog
@@ -824,7 +718,7 @@ export function DemoWorkspace({
               fictional.
             </p>
             <ul>
-              <li>Browse both workspaces and their current menus.</li>
+              <li>Browse this workspace and their current menus.</li>
               <li>Open records, use filters and try sample workflows.</li>
               <li>
                 Actions stay in this browser tab’s session; they never change
@@ -842,7 +736,7 @@ export function DemoWorkspace({
       {reset ? (
         <Dialog title="Reset the demo?" onClose={() => setReset(false)}>
           <p>
-            This clears your sample changes in both workspaces. Live OpsPulse is
+            This clears your sample changes in this workspace. Live OpsPulse is
             unaffected.
           </p>
           <div className={s.dialogActions}>

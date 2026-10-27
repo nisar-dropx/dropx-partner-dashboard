@@ -1,8 +1,8 @@
 "use client";
 import { ChecklistSummaryActions } from "./checklist-summary-actions";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { OpsScreenLink as Link, useOpsScreenRouter as useRouter, useOpsScreenRuntime } from "@/components/ops-screen-runtime";
+
 import { useMemo, useState, useTransition } from "react";
 import {
   CLOCK_OUT_MODES,
@@ -33,14 +33,7 @@ import {
   type WorkspaceView,
 } from "@/lib/ops-pulse/si-handover/model";
 import { enrichChecklistRows } from "@/lib/ops-pulse/si-handover/report";
-import {
-  acceptHandover,
-  deleteDraftChecklist,
-  rejectHandover,
-  saveAnswers,
-  startShift,
-  submitHandover,
-} from "./actions";
+import * as liveActions from "./actions";
 import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
 import { ActivitiesHub } from "./activities-hub";
 import { PickerHeadcountAssist } from "./picker-headcount-assist";
@@ -352,6 +345,8 @@ function TaskCard({
 }
 
 export function SiHandoverWorkspace(props: Props) {
+  const demo = useOpsScreenRuntime();
+  const { startShift, saveAnswers, submitHandover, acceptHandover, rejectHandover, deleteDraftChecklist } = demo?.shiftActions || liveActions;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState(props.error || "");

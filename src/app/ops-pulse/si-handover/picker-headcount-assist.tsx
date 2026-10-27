@@ -1,4 +1,5 @@
 "use client";
+import { useOpsScreenRequest, useOpsScreenRuntime } from "@/components/ops-screen-runtime";
 
 import { useEffect, useRef, useState } from "react";
 import type { TaskAnswer } from "@/lib/ops-pulse/si-handover/model";
@@ -31,6 +32,8 @@ export function PickerHeadcountAssist({
   setAnswer: (a: TaskAnswer) => void;
   disabled: boolean;
 }) {
+  const request = useOpsScreenRequest();
+  const demo = useOpsScreenRuntime();
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -57,7 +60,7 @@ export function PickerHeadcountAssist({
     setBusy(true);
     setMessage("");
     try {
-      const r = await fetch(
+      const r = await request(
         `/api/ops-pulse/si-handover/picker-headcount?checklistId=${encodeURIComponent(checklistId)}`,
       );
       const body = (await r.json()) as Snapshot & { error?: string };

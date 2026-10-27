@@ -821,7 +821,7 @@ export const checklistTasks = [
   "Handover summary prepared",
 ];
 export function demoLink(workspace: Workspace, screen?: string) {
-  return `/demo?workspace=${workspace}${screen ? `&screen=${encodeURIComponent(screen)}` : ""}`;
+  return `/demo/${workspace === "last-mile" ? "last-mile" : "dark-store"}${screen ? `?screen=${encodeURIComponent(screen)}` : ""}`;
 }
 export function csvText(columns: string[], rows: string[][]) {
   const quote = (s: string) =>

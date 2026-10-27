@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useOpsScreenRouter as useRouter } from "@/components/ops-screen-runtime";
 import {
   useEffect,
   useId,

@@ -1,8 +1,8 @@
 "use client";
 import { ChecklistSummaryActions } from "../si-handover/checklist-summary-actions";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { OpsScreenLink as Link, useOpsScreenRouter as useRouter, useOpsScreenRuntime } from "@/components/ops-screen-runtime";
+
 import { useMemo, useState, useTransition } from "react";
 import {
   proofKindHint,
@@ -32,12 +32,7 @@ import {
 } from "@/lib/ops-pulse/store-ops/model";
 import { OpsConfirmDialog } from "@/components/ops-confirm-dialog";
 import { ActivitiesHub } from "../si-handover/activities-hub";
-import {
-  deleteDraft,
-  saveAnswers,
-  startDay,
-  submitDay,
-} from "./actions";
+import * as liveActions from "./actions";
 import styles from "../si-handover/si-handover.module.css";
 
 type Store = {
@@ -221,6 +216,8 @@ function TaskCard({
 }
 
 export function StoreOpsWorkspace(props: Props) {
+  const demo = useOpsScreenRuntime();
+  const { startDay, saveAnswers, submitDay, deleteDraft } = demo?.storeActions || liveActions;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState(props.error || "");

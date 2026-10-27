@@ -181,6 +181,10 @@ export async function middleware(request: NextRequest) {
     demo.headers.set("Referrer-Policy", "no-referrer");
     demo.headers.set("Cache-Control", "no-store");
     demo.headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'self'; frame-ancestors 'none'");
+    // Next's local development runtime uses eval. Production keeps the strict policy above.
+    if (process.env.NODE_ENV === "development" && /^(localhost|127\.0\.0\.1)(:|$)/.test(request.headers.get("host") || "")) {
+      demo.headers.set("Content-Security-Policy", demo.headers.get("Content-Security-Policy")!.replace("script-src 'self' 'unsafe-inline'", "script-src 'self' 'unsafe-inline' 'unsafe-eval'"));
+    }
     return demo;
   }
   // Workspace selection only changes a view preference, with the preview user's

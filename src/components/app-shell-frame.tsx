@@ -15,12 +15,13 @@ type AppShellFrameProps = {
   sidebar: ReactNode;
   opsDesignPreview?: boolean;
   pageTitle?: string;
+  trackEvents?: boolean;
 };
 
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle, trackEvents = true }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // OpsPulse always uses the new shell, including server render and storage-restricted browsers.
   const modern = opsDesignPreview;
@@ -107,7 +108,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
       if (modern && (target.closest("[data-close-ops-menu]") || target.closest(".sidebar a[href]"))) setSidebarOpen(false);
     }}>
       {modern && <a className="ops-skip-link" href="#ops-page-content">Skip to content</a>}
-      <EventLogTracker />
+      {trackEvents && <EventLogTracker />}
       <header className="mobile-topbar">
         <button
           type="button"
