@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {kilometreRate,isKilometreField} from '../../../../src/lib/workforce-route-distance.ts';
 import {ownRouteFuel} from './own-route-fuel.ts';
+import {ownLossRecoveryEstimate} from './own-loss-recovery.ts';
 import {createRequire} from 'node:module';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
@@ -72,7 +73,7 @@ test('invalid amounts, history, states and unsupported dates cannot produce an e
 
 function database(respond){
  const calls=[];
- return {calls,from(table){const query={table,operations:[]};calls.push(query);
+ return {calls,rpc:async()=>({data:[],error:null}),from(table){const query={table,operations:[]};calls.push(query);
   const chain={};for(const method of ['select','eq','is','neq','in','gte','lte','or','order','range'])chain[method]=(...args)=>{query.operations.push([method,...args]);return chain;};
   chain.maybeSingle=()=>{query.operations.push(['maybeSingle']);return Promise.resolve(respond(query));};
   chain.then=(resolve,reject)=>Promise.resolve(respond(query)).then(resolve,reject);return chain;
@@ -138,6 +139,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,
   '../../../../../../src/lib/workforce-route-distance-data':{loadRouteDistanceContext:async()=>routeContext},
   '../../../../../../src/lib/workforce-route-distance':{kilometreRate,isKilometreField},
   '@/lib/own-route-fuel':{ownRouteFuel},
+  '@/lib/own-loss-recovery':{ownLossRecoveryEstimate},
   '@/lib/workforce-payment-mapping':{paymentMappingForDay:resolveMapping},
   '@/lib/workforce-payment-period':{workforcePaymentMonth:()=>({from})},
   'next/server':{NextResponse:{json:(body,init)=>new Response(JSON.stringify(body),{...init,headers:{'Content-Type':'application/json',...init?.headers}})}},
@@ -181,7 +183,7 @@ test('route reconciles adjustments without provider mappings and preserves state
  const response=await earningsRoute(db)(request()),body=await response.json();
  assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');
  assert.equal(response.headers.get('vary'),'Cookie');assert.equal(body.earnings.length,0);
- assert.deepEqual(body.summary,{workDays:0,baseAmount:0,additions:200,grossAmount:200,incentiveAmount:0,deductionAmount:25,netAmount:175});
+ assert.deepEqual(body.summary,{workDays:0,baseAmount:0,additions:200,grossAmount:200,incentiveAmount:0,deductionAmount:25,netAmount:175,lossRecoveryAmount:0,lossRecoveryDeferred:0});
  assert.equal(body.adjustments.summary.pendingCount,1);
  assert.equal(db.calls.some(q=>['workforce_payroll_items','payment_requests'].includes(q.table)),false);
 });
@@ -262,7 +264,7 @@ test('route reconciles daily incentives and adjustments separately without leaki
  const campaign={id:'campaign',company_id:'company',name:'Approved reward',provider_id:'provider',station_id:'station',designation_id:'DA',metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:45,rate_value:12,flat_amount:0,maximum_amount:null,effective_from:from,effective_to:to,status:'active',approved_at:'2026-08-31T00:00:00Z',owner_note:'PRIVATE'};
  const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:q.table==='workforce_incentive_campaigns'?[campaign]:q.table==='workforce_adjustments'?[row(),row({id:'deduction',adjustment_type:'deduction',amount:25})]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
- assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155});
+ assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155,lossRecoveryAmount:0,lossRecoveryDeferred:0});
  assert.equal(body.earnings.reduce((sum,e)=>sum+e.grossAmount,0),980);assert.equal(body.earnings.flatMap(e=>e.daily).reduce((sum,e)=>sum+e.amount,0),980);
  assert.equal(body.incentives.amount,180);assert.equal(body.incentives.campaigns[0].workDays,1);assert.equal(JSON.stringify(body).includes('PRIVATE'),false);
  const currentIndiaDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -337,4 +339,13 @@ test('earnings combines road kilometres with delivery pay exactly once on the sa
  assert.equal(body.routeFuel[0].amount,125.11);
  assert.equal(body.earnings[0].daily[0].production.length,2);
  assert.doesNotThrow(()=>reconcileOwnProduction(body.earnings,body.summary));
+});
+
+test('earnings uses the selected payroll month and includes only own recovery once',async()=>{
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='workforce_adjustments'?[row()]:[],error:null}));
+ const due={recovery_key:'2026-08|shipment|workforce:person',month:'2026-08',case_key:'shipment',report:'nl',worker_id:'person',amount:50,deduction_month:'2026-09',label:'Shipment recovery',cap_percent:50};
+ db.rpc=async(name,args)=>{assert.equal(name,'nl_loss_recovery_due');assert.deepEqual(args,{p_company:'company',p_salary_month:'2026-09',p_target:'workforce'});return{data:[due,due,{...due,worker_id:'other',recovery_key:'other'}],error:null}};
+ const response=await earningsRoute(db)(request()),body=await response.json();assert.equal(response.status,200,JSON.stringify(body));assert.equal(body.summary.lossRecoveryAmount,50);assert.equal(body.summary.deductionAmount,50);assert.equal(body.summary.netAmount,150);
+ db.rpc=async()=>({data:null,error:{message:'PRIVATE DATABASE ERROR'}});
+ const failed=await earningsRoute(db)(request());assert.equal(failed.status,400);assert.doesNotMatch(JSON.stringify(await failed.json()),/PRIVATE DATABASE/);
 });
