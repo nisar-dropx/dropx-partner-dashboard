@@ -53,10 +53,11 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
   const groupPage = usePaged(grouped,25,`${status}|${query}|${station}|${group}`);
   const paged = usePaged(shown, 25, `${status}|${query}|${station}`);
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: lines.length, open: filterLedger(lines, { status: "open" }).length };
-    for (const l of lines) c[l.status] = (c[l.status] ?? 0) + 1;
+    const scoped = filterLedger(lines, {station,query}).filter(l=>group!=="cases"||!drillRefs||drillRefs.includes(`${l.month}|${l.case_key}|${l.employee_ref}`));
+    const c: Record<string, number> = { all: scoped.length, open: filterLedger(scoped, { status: "open" }).length };
+    for (const l of scoped) c[l.status] = (c[l.status] ?? 0) + 1;
     return c;
-  }, [lines]);
+  }, [lines,station,query,group,drillRefs]);
 
   function download() {
     const columns = ["Loss month", "Case", "Report", "Station", "Employee ID", "Name", "Method", "Instalments", "Monthly", "Assigned", "Deducted", "In payroll (not reviewed)", "Written off", "Outstanding", "First salary month", "Last deducted in", "Exit date", "Cap override", "Status", "Write-off reason", "Written off by"];
@@ -75,7 +76,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
         <div>
           <span>Assigned to people</span>
           <strong>{money(all.assigned)}</strong>
-          <small>{all.people.toLocaleString("en-IN")} people · {lines.length.toLocaleString("en-IN")} plan lines</small>
+          <small>{all.people.toLocaleString("en-IN")} people · {shown.length.toLocaleString("en-IN")} plan lines</small>
         </div>
         <div>
           <span>Deducted in payroll</span>
