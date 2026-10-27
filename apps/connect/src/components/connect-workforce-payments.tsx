@@ -21,7 +21,7 @@ import monthStyles from './payout-month-control.module.css';
 import styles from './connect-workforce-payments.module.css';
 
 type Daily=OwnProductionDay&{production:Array<{label:string;unit?:string;count:number;rate:number;amount:number}>};
-type EarningsData={month:string;routeFuel?:DailyRouteFuel[];summary:{workDays:number;grossAmount:number;netAmount:number;baseAmount:number;incentiveAmount:number;additions:number;deductionAmount:number};adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary;earnings:Array<{id:string;location:string;paymentMethod:string;daily:Daily[]}>};
+type EarningsData={month:string;routeFuel?:DailyRouteFuel[];summary:{workDays:number;grossAmount:number;netAmount:number;baseAmount:number;incentiveAmount:number;additions:number;deductionAmount:number;lossRecoveryAmount?:number;lossRecoveryDeferred?:number};adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary;earnings:Array<{id:string;location:string;paymentMethod:string;daily:Daily[]}>};
 type Tab='earnings'|'statements'|'advances'|'rate-card';
 const money=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
 const date=(d:string)=>new Date(`${d}T00:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
@@ -82,6 +82,7 @@ function WorkforcePayments({account}:{account:AppAccount}){
     <button type="button" aria-label="Next earnings and payout month" disabled={month>=currentPayoutMonth()||(tab==='statements'&&payoutLocked)||loading} onClick={()=>setMonth(m=>shiftPayoutMonth(m,1))}><ChevronRight/></button>
    </div></div>:null}
   </div>
+  {earningsAllowed ? <ConnectLossRecoveries accountId={account.id} profileType={account.profileType}/> : null}
   <nav aria-label="Payment section" className={`dx-workforce-tabs ${styles.tabs}`}>
    {earningsAllowed?<button className={tab==='earnings'?'active':''} onClick={()=>changeTab('earnings')}><IndianRupee/>Live earnings</button>:null}
    {earningsAllowed?<button className={tab==='statements'?'active':''} onClick={()=>changeTab('statements')}><ReceiptText/>Payouts</button>:null}
@@ -93,7 +94,7 @@ function WorkforcePayments({account}:{account:AppAccount}){
   {tab==='earnings'&&earningsAllowed?<>
    {loading||(!error&&calculated?.month!==month)?<div className="dx-loader"><span/><small>Loading saved earnings…</small></div>:error?<div role="alert" className="dx-alert error">{error}<button onClick={()=>void load(true)}>Retry</button></div>:calculated?<>
     <section className="dx-workforce-payment-hero"><span><small>{payoutMonthLongLabel(month)}</small><strong>{money(calculated.summary.netAmount)}</strong><em>{pending?'Known earnings · fuel pending':'Estimated live earnings'}</em></span><button onClick={()=>changeTab('rate-card')}>View rate card <ChevronRight/></button></section>
-    <p className={styles.note}>Base pay and allowances {money(calculated.summary.baseAmount)} · Incentives {money(calculated.summary.incentiveAmount)} · Adjustments {money(calculated.summary.additions-calculated.summary.deductionAmount)}</p>
+    <p className={styles.note}>Base pay and allowances {money(calculated.summary.baseAmount)} · Incentives {money(calculated.summary.incentiveAmount)} · Adjustments {money(calculated.summary.additions-calculated.summary.deductionAmount+(calculated.summary.lossRecoveryAmount||0))} · Loss recovery {money(calculated.summary.lossRecoveryAmount||0)}</p>
     <section className="dx-workforce-payment-stats"><article><CalendarDays/><span><strong>{calculated.summary.workDays}</strong><small>Eligible work days</small></span></article>{fuels.length?<><article><Route/><span><strong>{fuels.filter(f=>f.status==='ready').reduce((n,f)=>n+(f.km??0),0).toLocaleString('en-IN',{maximumFractionDigits:2})} km</strong><small>Recorded fuel distance</small></span></article><article><IndianRupee/><span><strong>{money(fuels.reduce((n,f)=>n+(f.amount??0),0))}</strong><small>Known KM fuel allowance</small></span></article></>:<article><Route/><span><strong>{daily.reduce((n,d)=>n+d.deliveries,0)}</strong><small>Recorded deliveries</small></span></article>}</section>
     <ConnectPayAdjustments ledger={calculated.adjustments}/><ConnectPayIncentives incentives={calculated.incentives}/>
     <section className={`dx-workforce-ledger ${styles.ledger}`}><header><h2>Daily earnings</h2><button type="button" onClick={()=>void load(true)} aria-label="Refresh earnings"><RefreshCw/></button></header>
@@ -112,7 +113,7 @@ function WorkforcePayments({account}:{account:AppAccount}){
     </section>
    </>:null}
   </>:null}
-  {earningsAllowed && tab==='earnings' ? <ConnectLossRecoveries accountId={account.id} profileType={account.profileType}/> : null}
+
   {tab==='rate-card'&&rateCardAllowed?<section className={styles.rateSection}>
    <header><div><small>YOUR AGREED RATES</small><h2>My rate card</h2><p>Salary, activity pay and allowances assigned to you.</p></div><button type="button" aria-label="Refresh rate card" disabled={referenceLoading} onClick={()=>void loadReference()}><RefreshCw/></button></header>
    {referenceLoading?<p role="status">Loading your assigned rates…</p>:referenceError?<p role="alert">{referenceError}<button onClick={()=>void loadReference()}>Retry</button></p>:reference?<>

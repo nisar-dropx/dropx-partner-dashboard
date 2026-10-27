@@ -65,6 +65,7 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
         <button type="button" aria-label="Refresh salary" disabled={loading} onClick={() => setAttempt(value => value + 1)}><RefreshCw size={18}/></button>
       </div>
     </header>
+    <ConnectLossRecoveries accountId={account.id} profileType={account.profileType} />
     <aside className={styles.notice}><Info size={20}/><div><strong>This is not your final salary.</strong><p>Final salary details will appear in your payslip under Documents once published. This is only an interim view.</p></div></aside>
     {loading ? <div className={styles.empty} role="status">Loading salary…</div> : error ? <div className={styles.empty} role="alert"><p>{error}</p><button onClick={() => setAttempt(value => value + 1)}>Retry</button></div> : !salary ? <div className={styles.empty}><WalletCards/><h2>No salary calculation yet</h2><p>Your breakup will appear when a salary payment is prepared.</p></div> : <>
       <div className={styles.summary}>
@@ -104,7 +105,7 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
       {salary.attendance ? <div className={styles.card}><details key={`attendance-${salary.id}`}><summary><span>Days used in payroll <b>{salary.attendance.payable} / {salary.attendance.expected}</b></span><ChevronRight size={18}/></summary><PayrollDays attendance={salary.attendance}/><p className={styles.helper}>Calculation: {date(salary.calculatedFrom)} – {date(salary.calculatedThrough)}. Attendance corrections appear here after payroll is recalculated.</p>{onAttendance ? <button className={styles.textButton} onClick={onAttendance}>Review attendance <ChevronRight size={16}/></button> : null}</details></div> : null}
       <div className={styles.card}><details open key={`history-${salary.id}`}><summary>Payment history <ChevronRight size={18}/></summary>{salary.history.length ? <ul className={styles.history}>{salary.history.map(row => <li key={row.id}><div><strong>{money(row.amount)}</strong><span className={row.status === "paid" ? styles.paid : styles.pending}>{paymentLabels[row.status] ?? "Under review"}</span></div><small>Value date {date(row.date)} · {row.utr ? `UTR ${row.utr}` : `Reference ${row.reference}`}</small></li>)}</ul> : <p className={styles.helper}>No bank-confirmed payment recorded.</p>}</details></div>
     </>}
-    <ConnectLossRecoveries accountId={account.id} profileType={account.profileType} />
+
     <button className={styles.documents} onClick={onDocuments}><Files size={20}/><span><strong>Final payslip</strong><small>{salary?.documentId ? "Published · View in Documents" : "Available in Documents once published"}</small></span><ChevronRight size={20}/></button>
   </section>;
 }

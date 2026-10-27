@@ -138,6 +138,8 @@ export async function approveLossRecovery(input: {
     "approve",
     plan.data?.proposed_by ?? null,
   );
+  const questions = await supabaseAdmin!.from("nl_loss_clarifications").select("id").eq("company_id",ctx.scope.company).eq("month",input.month).eq("case_key",ctx.caseKey).in("status",["submitted","returned"]).limit(1);
+  if(questions.error || questions.data?.length) throw Error("Resolve the associate question in Exception approvals before reapproving recovery.");
   const { data, error } = await supabaseAdmin!.rpc("nl_loss_recovery_approve", {
     p_company: ctx.scope.company,
     p_month: input.month,

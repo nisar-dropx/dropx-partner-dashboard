@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {ownLossRecoveryEstimate} from './own-loss-recovery.ts';
+const line={recovery_key:'sep|shipment|workforce:da',month:'2026-09',case_key:'shipment',report:'nl',worker_id:'da',employee_code:'D1',amount:1912,deduction_month:'2026-10',label:'NL loss',cap_percent:50};
+test('own approved due line reduces estimate exactly once; other people excluded',()=>{const r=ownLossRecoveryEstimate('da',15729,0,[line,line,{...line,worker_id:'other',recovery_key:'other'}]);assert.equal(r.lossRecoveryAmount,1912);assert.equal(r.deductionAmount,1912);assert.equal(r.netAmount,13817);});
+test('cap and net-pay limits defer whole lines, and paused/non-due plans add nothing',()=>{assert.equal(ownLossRecoveryEstimate('da',3000,0,[line]).lossRecoveryAmount,0);assert.equal(ownLossRecoveryEstimate('da',3000,0,[line]).lossRecoveryDeferred,1912);assert.equal(ownLossRecoveryEstimate('da',15729,100,[]).netAmount,15629);});

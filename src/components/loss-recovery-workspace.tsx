@@ -4,6 +4,7 @@ import {useSearchParams} from 'next/navigation';
 import type { NlCase, LossSettings, RecoveryOutcome } from '@/lib/ops-pulse/nl-loss-policy';
 import type { LedgerLine } from '@/lib/ops-pulse/nl-recovery-ledger-view';
 import { indiaMonth, recoveryQueueState, RECOVERY_QUEUE_LABELS } from '@/lib/ops-pulse/loss-recovery-queue-policy';
+import { LossClarificationInbox } from "./loss-clarification-inbox";
 import { RecoveryForm } from './nl-loss-cases';
 import { TrackingDetailModal } from './tracking-detail-modal';
 import { ListPager, usePaged } from './list-pager';
@@ -11,7 +12,7 @@ import styles from './nl-loss.module.css';
 const money=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(n);
 export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canRecovered=false,canApprove,approvals=false}:{rows:NlCase[];lines:LedgerLine[];outcomes:RecoveryOutcome[];settings:LossSettings|null;canEdit:boolean;canRecovered?:boolean;canApprove:boolean;approvals?:boolean}) {
  const params=useSearchParams();
- const [period,setPeriod]=useState(indiaMonth()),[filter,setFilter]=useState(approvals?'approval':'open'),[query,setQuery]=useState(params.get('case')||''),[station,setStation]=useState(''),[active,setActive]=useState(''),[tracking,setTracking]=useState<{id:string;station:string}|null>(null);
+ const [period,setPeriod]=useState(indiaMonth()),[filter,setFilter]=useState(approvals||params.get('case')?'open':'pending_update'),[query,setQuery]=useState(params.get('case')||''),[station,setStation]=useState(''),[active,setActive]=useState(''),[tracking,setTracking]=useState<{id:string;station:string}|null>(null);
  const data=useMemo(()=>{
   const byCase=new Map<string,LedgerLine[]>(); for(const l of lines){const k=`${l.month}|${l.case_key}`;byCase.set(k,[...(byCase.get(k)||[]),l]);}
   return rows.map(row=>({row,...recoveryQueueState(row,byCase.get(`${row.month}|${row.case_key}`)||[],period)}));
@@ -22,23 +23,24 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
   if(r?.cap_override) return 'Salary cap override';
   if(r?.recovery_mode==='installments') return 'Split across payrolls';
   if(r?.deduction_timing==='next_month') return 'Deferred recovery';
-  if(r?.approval_status==='needs_review'||row.lifecycle_status==='needs_review') return 'Source changed';
+  if(r?.approval_status==='needs_review'||row.lifecycle_status==='needs_review') return 'Review required';
   return r?.approval_note || r?.outcome_label || 'Eligibility / correction review';
  };
- const shown=useMemo(()=>data.filter(x=>(!approvals || x.status==='approval')&&(!station||x.row.station_code===station)&&(filter==='all'||filter==='open'?!['recovered','written_off','source_cleared'].includes(x.status)||filter==='all':x.status===filter)&&[x.row.case_key,x.row.station_code,x.row.details.tid,...(x.row.recovery?.allocations.map(a=>`${a.full_name} ${a.employee_code}`)||[])].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.outstanding-a.outstanding),[data,station,filter,query,approvals]);
+ const shown=useMemo(()=>data.filter(x=>(!approvals || ['approval','review'].includes(x.status))&&(!station||x.row.station_code===station)&&(filter==='pending_update'?['update','review','returned'].includes(x.status):filter==='all'||filter==='open'?!['recovered','written_off','source_cleared'].includes(x.status)||filter==='all':x.status===filter)&&[x.row.case_key,x.row.station_code,x.row.details.tid,...(x.row.recovery?.allocations.map(a=>`${a.full_name} ${a.employee_code}`)||[])].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.outstanding-a.outstanding),[data,station,filter,query,approvals]);
  const paged=usePaged(shown,25,`${period}|${filter}|${station}|${query}`);
- const scoped=data.filter(x=>!station||x.row.station_code===station);
+ const scoped=shown;
  return <>
-  {approvals ? <div className={styles.toolbar} style={{padding:'8px 0'}}><strong>{scoped.filter(x=>x.status==='approval').length} pending exceptions</strong><span>· {money(scoped.filter(x=>x.status==='approval').reduce((sum,x)=>sum+x.outstanding,0))}</span><a href="/team-ops/losses/ledger">Recovery review ↗</a></div> : <div className={styles.metrics}>
-   <div><span>Outstanding</span><strong>{money(scoped.reduce((s,x)=>s+x.outstanding,0))}</strong><small>All loss months · current verified balance</small></div>
+  {approvals && canApprove ? <LossClarificationInbox/> : null}
+  {approvals ? <div className={styles.toolbar} style={{padding:'8px 0'}}><strong>{scoped.filter(x=>['approval','review'].includes(x.status)).length} pending exceptions</strong><span>· {money(scoped.filter(x=>['approval','review'].includes(x.status)).reduce((sum,x)=>sum+x.outstanding,0))}</span><a href="/team-ops/losses/recovery">Recovery review ↗</a></div> : <div className={styles.metrics}>
+   <div><span>Outstanding</span><strong>{money(scoped.reduce((s,x)=>s+x.outstanding,0))}</strong><small>Matching shipments · verified balance</small></div>
    <div><span>Carried forward</span><strong>{money(scoped.filter(x=>x.status==='carried').reduce((s,x)=>s+x.outstanding,0))}</strong><small>Unpaid scheduled recovery remains due</small></div>
-   <div><span>Awaiting approval</span><strong>{scoped.filter(x=>x.status==='approval').length}</strong><small>Not final until independently approved</small></div>
+   <div><span>Awaiting approval</span><strong>{scoped.filter(x=>['approval','review'].includes(x.status)).length}</strong><small>Not final until independently approved</small></div>
   </div>}
   <section className={styles.panel}>
    <div className={styles.panelHead}><div><h2>{approvals?'Exception approvals':'Recovery queue'}</h2><small>{approvals?'Departures · deferred recovery · instalments · verification':'Unpaid balances carry forward. Expand a case to update recovery.'}</small></div></div>
    <div className={styles.toolbar} style={{padding:12}}>
     {!approvals ? <><label>Collection month <input aria-label="Collection month" type="month" min={indiaMonth()} value={period} onChange={e=>setPeriod(e.target.value||indiaMonth())}/></label>
-    <select aria-label="Recovery workflow status" value={filter} onChange={e=>setFilter(e.target.value)}><option value="open">All outstanding</option>{Object.entries(RECOVERY_QUEUE_LABELS).map(([k,v])=><option key={k} value={k}>{v} · {scoped.filter(x=>x.status===k).length}</option>)}<option value="all">All cases</option></select></> : null}
+    <select aria-label="Recovery workflow status" value={filter} onChange={e=>setFilter(e.target.value)}><option value="pending_update">Pending recovery update</option><option value="open">All outstanding</option>{Object.entries(RECOVERY_QUEUE_LABELS).map(([k,v])=><option key={k} value={k}>{v} · {data.filter(x=>(!station||x.row.station_code===station)&&x.status===k).length}</option>)}<option value="all">All cases</option></select></> : null}
     <select aria-label="Recovery station" value={station} onChange={e=>setStation(e.target.value)}><option value="">All my stations</option>{[...new Set(rows.map(r=>r.station_code))].sort().map(s=><option key={s}>{s}</option>)}</select>
     <input aria-label="Search recovery queue" placeholder="TID, person or station" value={query} onChange={e=>setQuery(e.target.value)}/>
    </div>

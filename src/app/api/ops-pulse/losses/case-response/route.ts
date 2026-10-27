@@ -132,7 +132,7 @@ export async function POST(request: Request) {
     const b = await request.json();
     if (!b || typeof b !== "object" || Array.isArray(b))
       return reply({ error: "Invalid request." }, 400);
-    if (b.action === "bulk_activate") {
+    if (b.action === "bulk_activate" || b.action === "bulk_update") {
       const auth = await getAuthorization();
       if (
         !auth ||
@@ -167,6 +167,9 @@ export async function POST(request: Request) {
             },
             400,
           );
+        const action = b.action === "bulk_activate" ? "activate" : row.action;
+        if (!["activate","revoke"].includes(action)) return reply({error:"Choose Enable or Disable for each shipment."},400);
+        if (action === "revoke" && (typeof row.note !== "string" || row.note.trim().length < 10 || row.note.length > 4000)) return reply({error:"Disabling requires a reason (10–4000 characters)."},400);
         const key = `${row.month}|${row.case_key}`;
         if (seen.has(key))
           return reply(
@@ -178,7 +181,7 @@ export async function POST(request: Request) {
       const results = [];
       for (const row of b.rows) {
         try {
-          const window = await transition({ ...row, action: "activate" });
+          const window = await transition({ ...row, action: b.action === "bulk_activate" ? "activate" : row.action });
           results.push({
             month: row.month,
             case_key: row.case_key,

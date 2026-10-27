@@ -1199,3 +1199,20 @@
 @media (max-width: 600px) { .departedFields { grid-template-columns: 1fr; } .trackingLink { font-size: 12px; } }
 
 .caseSummary { padding: 14px 12px; }
+
+/* Recovery editing stays compact without shrinking touch targets. */
+.recoveryForm{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px!important}
+.recoveryForm>div,.recoveryForm>p,.recoveryForm>details{grid-column:1/-1}
+.recoveryForm .allocation{padding:10px;margin:0}
+.recoveryForm .allocation>.toolbar{display:grid;grid-template-columns:1fr 1fr 1.4fr;align-items:end;gap:8px}
+.recoveryForm .methods{display:flex;gap:8px;margin:8px 0}
+.recoveryForm .method{display:flex;align-items:center;gap:6px;padding:8px 12px;min-height:36px;flex:0 1 auto}
+.recoveryForm .method strong{font-size:12px}
+.recoveryForm .person{padding:8px;gap:8px}
+.recoveryForm .hint{font-size:11px;margin:4px 0}
+.finalMetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin:10px 0}
+.finalMetrics>div{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:4px}
+.finalMetrics span{grid-column:1/-1;font-size:11px;color:#64748b;font-weight:600}
+.finalMetrics strong{font-size:20px;color:#172033}
+.finalMetrics small{align-self:center;font-size:12px;color:#475569}
+@media(max-width:640px){.recoveryForm{grid-template-columns:1fr}.recoveryForm .allocation>.toolbar{grid-template-columns:1fr}.recoveryForm input,.recoveryForm select,.recoveryForm button,.recoveryForm .method{min-height:44px}.finalMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}}

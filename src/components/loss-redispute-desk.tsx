@@ -29,10 +29,11 @@ export function LossRedisputeDesk({
 }) {
   const router = useRouter();
   const [bulk, setBulk] = useState<
-      { month: string; case_key: string; version: number; station: string }[]
+      { month: string; case_key: string; version: number; station: string; action: "activate" | "revoke"; note: string }[]
     >([]),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
+  const [revoking,setRevoking] = useState<RedisputeWindow|null>(null), [revokeNote,setRevokeNote] = useState("");
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("open");
   const byKey = useMemo(
@@ -71,12 +72,14 @@ export function LossRedisputeDesk({
     XLSX.utils.book_append_sheet(
       book,
       XLSX.utils.aoa_to_sheet([
-        ["Loss month", "Shipment ID", "Station"],
-        ["YYYY-MM", "Enter exact shipment ID", "Station code"],
+        ["Loss month", "Shipment ID", "Station", "Action", "Reason"],
       ]),
-      "Activate redisputes",
+      "Redisputes",
     );
-    XLSX.writeFile(book, "redispute-activation-template.xlsx");
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([
+      ["Field", "Instructions"], ["Loss month", "YYYY-MM"], ["Shipment ID", "Exact Shipment ID; format as text"], ["Station", "Station code"], ["Action", "Enable or Disable"], ["Reason", "Required for Disable: at least 10 characters. History is retained."], ["Limit", "100 shipments. Review the preview before applying."]
+    ]), "Instructions");
+    XLSX.writeFile(book, "redispute-enable-disable-template.xlsx");
   }
   async function upload(file: File) {
     setMessage("");
@@ -117,13 +120,17 @@ export function LossRedisputeDesk({
         const w = windows.find(
           (w) => w.month === r.month && w.case_key === r.case_key,
         );
-        if (w?.enabled)
-          throw Error(`Row ${i + 2}: redispute is already active.`);
+        const value = String(item["Action"] || "").trim().toLowerCase();
+        if (!["enable","disable"].includes(value)) throw Error(`Row ${i+2}: choose Enable or Disable.`);
+        const action = value === "enable" ? "activate" as const : "revoke" as const;
+        const note = String(item["Reason"] || "").trim();
+        if (action === "revoke" && (note.length < 10 || note.length > 4000)) throw Error(`Row ${i+2}: give a disable reason (10–4000 characters).`);
+        if ((action === "activate") === !!w?.enabled) throw Error(`Row ${i+2}: redispute is already ${w?.enabled ? "enabled" : "disabled"}.`);
         parsed.push({
           month: r.month,
           case_key: r.case_key,
           version: w?.version || 0,
-          station,
+          station, action, note,
         });
       }
       setBulk(parsed);
@@ -132,7 +139,7 @@ export function LossRedisputeDesk({
     }
   }
   async function activate(
-    input: { month: string; case_key: string; version: number }[],
+    input: { month: string; case_key: string; version: number; action?: "activate" | "revoke"; note?: string }[],
   ) {
     if (!canActivate) return;
     setBusy(true);
@@ -141,15 +148,15 @@ export function LossRedisputeDesk({
       const res = await fetch("/api/ops-pulse/losses/case-response", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "bulk_activate", rows: input }),
+        body: JSON.stringify({ action: "bulk_update", rows: input.map(r=>({...r,action:r.action || "activate"})) }),
       });
       const body = await res.json();
       if (!res.ok) throw Error(body.error);
       const failed = body.results.filter((r: { ok: boolean }) => !r.ok);
       setMessage(
-        `${body.results.length - failed.length} activated.${failed.length ? " " + failed.map((r: { case_key: string; error: string }) => `${r.case_key}: ${r.error}`).join("; ") : ""}`,
+        `${body.results.length - failed.length} updated.${failed.length ? " " + failed.map((r: { case_key: string; error: string }) => `${r.case_key}: ${r.error}`).join("; ") : ""}`,
       );
-      setBulk([]);
+      setBulk([]); setRevoking(null); setRevokeNote("");
       router.refresh();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Unable to activate.");
@@ -187,6 +194,7 @@ export function LossRedisputeDesk({
               ["returned", "Needs response"],
               ["won", "Won · recovery stopped"],
               ["lost", "Lost · continue recovery"],
+              ["cancelled", "Disabled / revoked"],
               ["closed", "Closed"],
               ["all", "All cases"],
             ].map(([v, l]) => (
@@ -217,7 +225,7 @@ export function LossRedisputeDesk({
             />
           </label>
         </div>
-        <small>Up to 100 shipments · activates evidence collection only</small>
+        <small>Enable or disable · up to 100 shipments</small>
       </div>
       {message ? (
         <p role="status" className={styles.notice}>
@@ -229,7 +237,7 @@ export function LossRedisputeDesk({
           <summary>Review {bulk.length} shipments</summary>
           {bulk.map((r) => (
             <p key={`${r.month}|${r.case_key}`}>
-              {r.station} · {r.case_key} · {r.month}
+              {r.station} · {r.case_key} · {r.month} · {r.action === "revoke" ? "Disable" : "Enable"}
             </p>
           ))}
           <button
@@ -237,7 +245,7 @@ export function LossRedisputeDesk({
             disabled={busy || !canActivate}
             onClick={() => void activate(bulk)}
           >
-            Activate {bulk.length} redisputes
+            Apply {bulk.length} updates
           </button>
         </details>
       ) : null}
@@ -278,6 +286,7 @@ export function LossRedisputeDesk({
           ))}
         </details>
       ) : null}
+      {revoking ? <section className={styles.allocation} aria-label="Disable redispute"><strong>Disable · {revoking.case_key}</strong><p className={styles.hint}>Closes the response window and resumes eligible recovery. History stays available.</p><div className={styles.toolbar}><input aria-label="Disable reason" value={revokeNote} maxLength={4000} placeholder="Reason for disabling" onChange={e=>setRevokeNote(e.target.value)}/><button className={styles.primary} disabled={busy || revokeNote.trim().length<10} onClick={()=>void activate([{...revoking,action:"revoke",note:revokeNote.trim()}])}>Disable redispute</button><button className={styles.button} disabled={busy} onClick={()=>setRevoking(null)}>Cancel</button></div></section> : null}
       <div className={styles.tableWrap}>
         <table className={styles.ledgerTable}>
           <thead>
@@ -287,6 +296,7 @@ export function LossRedisputeDesk({
               <th>Status</th>
               <th>Follow-up</th>
               <th>Last update</th>
+              {canActivate ? <th>Action</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -327,6 +337,7 @@ export function LossRedisputeDesk({
                       })}
                     </small>
                   </td>
+                  {canActivate ? <td>{w.enabled ? <button className={styles.button} disabled={busy} onClick={()=>{setRevoking(w);setRevokeNote("");}}>Disable</button> : <span>Disabled</span>}</td> : null}
                 </tr>
               );
             })}

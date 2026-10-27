@@ -1,6 +1,6 @@
 /** Recovery outcomes cannot turn an unpaid loss into an unowned exception. */
 export function recoveryActionAllowed(o: { code: string; allocation_required: boolean; dispute_fields_enabled?: boolean }) {
-  return !o.dispute_fields_enabled && (o.allocation_required || o.code === "already_recovered" || o.code === "responsible_left");
+  return o.code !== "already_recovered" && !o.dispute_fields_enabled && (o.allocation_required || o.code === "responsible_left");
 }
 
 export type LossRole = { readOnly?: boolean; isMasterOwner: boolean; roleCode: string | null; effectiveRoleCodes?: string[]; designationName?: string | null };
