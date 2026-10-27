@@ -412,12 +412,12 @@ Departed/inactive people, next-month timing, instalments, cap overrides and rece
 The Recovery review groups scoped allocations by station, person or saved designation. Assigned, actually deducted, draft-payroll and outstanding amounts remain separate; pending review is a subset of outstanding, not an additional charge. Redisputes and Station claims remain under More. Actions and timing remain configured in Loss Recovery Master.
 
 
-## Directory, payroll month and redispute release — prepared 27 October 2026
+## Directory, payroll month and redispute release — live 27 October 2026
 
-**Release status: not applied to production.** These changes require the two migrations below,
-OpsPulse/One deployment, and the companion HRMS contractor payroll change. Live database and browser
-verification remain blocked by the unavailable authenticated connection. Do not merge for automatic
-production deployment until the database preflight and coordinated release are ready.
+**Release status: live.** Both migrations below were applied individually and verified in production.
+OpsPulse and One production builds were promoted; the companion HRMS contractor payroll change
+(PR45, main commit `70fa29cc`) is production READY. OpsPulse/One changes are merged in PR398
+(main commit `76806fc9`). No production financial test records were created.
 
 - `20261027203000_loss_people_payroll_month.sql`: canonical station People + Workforce directory,
   contractors, current CM/AOM reporting chain, configurable ceiling/exclusions in Loss Recovery Master;
@@ -446,8 +446,12 @@ production deployment until the database preflight and coordinated release are r
 
 Validation: full `test:loss-recovery-payroll` suite, including both migrations applied twice in PGlite,
 API role/bulk/scope tests, lifecycle and payroll gate tests, own-account One tests and reporting tests.
-Targeted OpsPulse and One TypeScript checks pass. Live visual checks and production schema verification
-are still required. The HRMS companion uses the existing payroll fitting/cap rules for contractor runs.
+Targeted OpsPulse and One TypeScript checks and production builds pass. Live verification confirmed
+KLZA has 58 eligible names including People roles and its cluster manager, September losses select
+October payroll, NL Final totals and the month/person Recovery report render correctly, and Redisputes
+exposes single activation and the bulk template. The fifth/sixth-day IST boundary, migration source hashes
+and old/new RPC grants were verified. The HRMS companion uses existing fitting/cap rules for contractors;
+its 11 payroll tests, TypeScript and release-integrity checks passed.
 
 Release order: inspect live schema and migration history; prepare successful builds for OpsPulse, One
 and HRMS; apply each migration individually with the existing runbook; promote the coordinated builds;
