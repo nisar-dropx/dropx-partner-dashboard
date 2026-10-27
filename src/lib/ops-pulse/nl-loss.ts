@@ -1,3 +1,4 @@
+import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
 import { mayActivateRedispute } from "./loss-recovery-controls";
 import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
@@ -111,6 +112,7 @@ export type LossStation = Awaited<
 >["stations"][number];
 
 type MetaRow = {
+  case_key: string;
   month: string;
   period: string | null;
   station_code: string;
@@ -207,7 +209,7 @@ export async function loadRecoveryView(
   let metaQuery = supabaseAdmin
     .from("nl_loss_month_cases")
     .select(
-      "month,period:details->>period,station_code,amount,source_status,status:details->>case_status,stage:details->extra->>current_sla_stage,source_present,reason:details->>category,last_seen_at,in_initial:details->>in_initial,in_final:details->>in_final",
+      "case_key,month,period:details->>period,station_code,amount,source_status,status:details->>case_status,stage:details->extra->>current_sla_stage,source_present,reason:details->>category,last_seen_at,in_initial:details->>in_initial,in_final:details->>in_final",
     )
     .eq("company_id", company)
     .in("station_code", codes.length ? codes : ["__NONE__"]);
@@ -270,11 +272,15 @@ export async function loadRecoveryView(
       lossFilterMatches(station, r.station_code) &&
       lossFilterMatches(reason, r.reason || "Unspecified"),
   );
+  const overviewPlans=await readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations").eq("company_id",company).in("month",[...new Set(filtered.map(r=>r.month))].length?[...new Set(filtered.map(r=>r.month))]:["__NONE__"]).order("month").order("case_key"));
+  if(overviewPlans.error) throw Error("Recovery update totals could not be loaded.");
+  const overviewByKey=new Map((overviewPlans.data||[]).map(p=>[`${p.month}|${p.case_key}`,p]));
   const totals = matchingStations
     .map((s) => {
       const rows = filtered.filter((r) => r.station_code === s.source_code);
       return {
         ...s,
+        ...finalRecoverySummary(rows.map(r=>({...r,recoverable:true,updated:recoveryDetailsUpdated(r,overviewByKey.get(`${r.month}|${r.case_key}`),slp)}))),
         count: rows.length,
         amount: rows.reduce((v, r) => v + Number(r.amount || 0), 0),
       };

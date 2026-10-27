@@ -19,18 +19,26 @@ export async function loadRecoveryPayables(
   policy: RecoveryPolicy,
   policyUpdated: string,
   selectedRefs?: string[],
+  payrollMonth?: string,
 ) {
   const db = supabaseAdmin!;
-  const current = deductionMonth("current_month")!;
+  let current = payrollMonth;
+  if (!current) {
+    const c = await db.from("nl_loss_month_cases").select("report,final_seen_at").eq("company_id",company).eq("month",caseMonth).eq("case_key",caseKey).single();
+    if(c.error) throw Error("Recovery case could not be loaded.");
+    const m=await db.rpc("nl_recovery_deduction_month",{p_report:c.data.report,p_case_month:caseMonth,p_assigned_at:new Date().toISOString(),p_final_seen_at:c.data.final_seen_at,p_timing:"current_month",p_cutoff_day:policy.payroll_cutoff_day||5});
+    if(m.error || !m.data) throw Error("Recovery payroll month could not be determined.");
+    current=String(m.data);
+  }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(current)) throw Error("Choose a valid payroll month.");
   const startDate = new Date(`${current}-01T00:00:00Z`);
-  startDate.setUTCMonth(startDate.getUTCMonth() - policy.salary_month_offset);
   const month = startDate.toISOString().slice(0, 7);
   const start = `${month}-01`;
   const endDate = new Date(startDate);
   endDate.setUTCMonth(endDate.getUTCMonth() + 1);
   endDate.setUTCDate(0);
   const end = endDate.toISOString().slice(0, 10);
-  const directory = await db.rpc("station_audit_employee_directory", {
+  const directory = await db.rpc("loss_recovery_people", {
     p_company: company,
     p_station: station,
   });
@@ -39,10 +47,11 @@ export async function loadRecoveryPayables(
   const employeeIds = people
     .filter((p) => p.ref.startsWith("employee:"))
     .map((p) => p.ref.slice(9));
+  const contractorIds = people.filter(p => p.ref.startsWith("contractor:")).map(p => p.ref.slice(11));
   const workforceIds = people
     .filter((p) => p.ref.startsWith("workforce:"))
     .map((p) => p.ref.slice(10));
-  const [employees, workforce, payroll, existing] = await Promise.all([
+  const [employees, contractors, workforce, payroll, existing] = await Promise.all([
     employeeIds.length
       ? db
           .from("employees")
@@ -50,6 +59,7 @@ export async function loadRecoveryPayables(
           .eq("company_id", company)
           .in("id", employeeIds)
       : { data: [], error: null },
+    contractorIds.length ? db.from("contractors").select("id,date_of_join,last_working_date,created_at,is_active").eq("company_id",company).in("id",contractorIds) : {data:[],error:null},
     workforceIds.length
       ? db
           .from("workforce")
@@ -59,16 +69,16 @@ export async function loadRecoveryPayables(
           .eq("company_id", company)
           .in("id", workforceIds)
       : { data: [], error: null },
-    employeeIds.length
+    employeeIds.length + contractorIds.length
       ? readAllRows(
           db
             .from("hr_payroll_run_people")
             .select(
-              "worker_id,gross_pay,net_pay,adjusted_net_pay,is_adjusted,calculation_status,hr_payroll_runs!inner(status,period_start,period_end,updated_at),hr_payroll_run_items(code,amount)",
+              "worker_type,worker_id,gross_pay,net_pay,adjusted_net_pay,is_adjusted,calculation_status,hr_payroll_runs!inner(status,period_start,period_end,updated_at),hr_payroll_run_items(code,amount)",
             )
             .eq("company_id", company)
-            .eq("worker_type", "employee")
-            .in("worker_id", employeeIds)
+            .in("worker_type", ["employee","contractor"])
+            .in("worker_id", [...employeeIds,...contractorIds])
             .eq("hr_payroll_runs.period_start", start)
             .eq("hr_payroll_runs.period_end", end)
             .order("id"),
@@ -84,7 +94,7 @@ export async function loadRecoveryPayables(
         .order("case_key"),
     ),
   ]);
-  if (employees.error || workforce.error || payroll.error || existing.error)
+  if (employees.error || contractors.error || workforce.error || payroll.error || existing.error)
     throw Error(
       "Employee eligibility or payable salary could not be verified.",
     );
@@ -105,6 +115,7 @@ export async function loadRecoveryPayables(
     ...(employees.data || []).map(
       (e) => [`employee:${e.id}`, e] as [string, any],
     ),
+    ...(contractors.data || []).map(e => [`contractor:${e.id}`,e] as [string,any]),
     ...(workforce.data || []).map(
       (w) => [`workforce:${w.id}`, w] as [string, any],
     ),
@@ -116,10 +127,9 @@ export async function loadRecoveryPayables(
     if (!record) continue;
     const duplicate =
       person.ref.startsWith("workforce:") &&
-      record.source_profile_type === "employee" &&
-      employeeIds.includes(record.source_profile_id);
+      ((record.source_profile_type === "employee" && employeeIds.includes(record.source_profile_id)) || (record.source_profile_type === "contractor" && contractorIds.includes(record.source_profile_id)));
     const employeePay = (payroll.data || [])
-      .filter((p: any) => p.worker_id === person.ref.slice(9))
+      .filter((p: any) => `${p.worker_type}:${p.worker_id}` === person.ref)
       .sort((a: any, b: any) =>
         String(b.hr_payroll_runs?.updated_at).localeCompare(
           String(a.hr_payroll_runs?.updated_at),
@@ -131,8 +141,8 @@ export async function loadRecoveryPayables(
     let source =
       payouts.error && person.ref.startsWith("workforce:")
         ? "Review Dashboard payout configuration"
-        : "Previous-month salary payable unavailable";
-    if (person.ref.startsWith("employee:")) {
+        : "Selected payroll month payable unavailable";
+    if (!person.ref.startsWith("workforce:")) {
       const run = Array.isArray(employeePay?.hr_payroll_runs)
         ? employeePay.hr_payroll_runs[0]
         : employeePay?.hr_payroll_runs;

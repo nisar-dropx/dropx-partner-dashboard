@@ -1,3 +1,5 @@
+import { LossDebitReview } from "@/components/loss-debit-review";
+import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
 import { mayViewLossApprovals } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
 import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
@@ -67,7 +69,7 @@ const primaryTabs: LossTab[] = [
  {key:"approvals",label:"Exception approvals",href:"/team-ops/losses/approvals"},
  {key:"redisputes",label:"Redisputes",href:"/team-ops/losses/redisputes"},
  {key:"claims",label:"Station claims",href:"/team-ops/losses/claims"},
- {key:"ledger",label:"Recovery review",href:"/team-ops/losses/ledger"},
+ {key:"ledger",label:"Balances",href:"/team-ops/losses/ledger"},
 ];
 
 export default async function LossesSectionPage({
@@ -80,16 +82,17 @@ export default async function LossesSectionPage({
   const auth = await requirePagePermission("ops_losses", "access");
   const restricted = mayViewLossApprovals(auth);
   const tabs = primaryTabs.filter(t => !["approvals","redisputes"].includes(t.key) || restricted);
-  if (["recovery","approvals","redisputes"].includes(params.section)) {
-    if (params.section !== "recovery" && !restricted) notFound();
+  if(params.section === "recovery") return <main className={styles.workspace}><LossHeader title="Recovery" intro="Actual payroll debits by station and person. Open a person for monthly history and shipment details." tabs={tabs} active="recovery"/><LossDebitReview rows={await loadLossDebits(auth)}/><p className={styles.hint}><a href="/team-ops/losses/recovery-updates">Pending recovery updates →</a></p></main>;
+  if (["recovery-updates","approvals","redisputes"].includes(params.section)) {
+    if (params.section !== "recovery-updates" && !restricted) notFound();
     const [view, claimView] = await Promise.all([loadRecoveryWorkspace(auth, params.section === "redisputes"), params.section === "approvals" ? loadStationClaims(auth) : Promise.resolve(null)]);
     if (params.section === "redisputes") {
       const result = await readAllRows(supabaseAdmin!.from("nl_case_response_windows").select("*").eq("company_id",auth.companyId).order("updated_at",{ascending:false}).order("month").order("case_key"));
       if(result.error) throw Error("Redisputes could not be loaded.");
       const scope = new Set(view.rows.map(r=>`${r.month}|${r.case_key}`));
-      return <main className={styles.workspace}><LossHeader title="Redisputes" intro="Restricted case activation, LSC tickets and vendor follow-up." tabs={tabs} active="redisputes"/><LossRedisputeDesk rows={view.rows} windows={(result.data||[]).filter(w=>scope.has(`${w.month}|${w.case_key}`))}/></main>;
+      return <main className={styles.workspace}><LossHeader title="Redisputes" intro="Restricted case activation, LSC tickets and vendor follow-up." tabs={tabs} active="redisputes"/><LossRedisputeDesk canActivate={view.canApprove} rows={view.rows} windows={(result.data||[]).filter(w=>scope.has(`${w.month}|${w.case_key}`))}/></main>;
     }
-    return <main className={styles.workspace}><LossHeader title={params.section==="approvals"?"Exception approvals":"Recovery"} intro="Full current-payroll recovery goes directly to payroll. Departures, deferrals and instalments need approval." tabs={tabs} active={params.section}/>{claimView?.claims.some(c=>c.actions.includes("approve"))?<p className={styles.notice}><a href="/team-ops/losses/claims">{claimView.claims.filter(c=>c.actions.includes("approve")).length} station claims also await your final approval →</a></p>:null}<LossRecoveryWorkspace {...view} approvals={params.section==="approvals"}/></main>;
+    return <main className={styles.workspace}><LossHeader title={params.section==="approvals"?"Exception approvals":"Recovery"} intro="Full current-payroll recovery goes directly to payroll. Departures, deferrals and instalments need approval." tabs={tabs} active={params.section==="recovery-updates"?"recovery":params.section}/>{claimView?.claims.some(c=>c.actions.includes("approve"))?<p className={styles.notice}><a href="/team-ops/losses/claims">{claimView.claims.filter(c=>c.actions.includes("approve")).length} station claims also await your final approval →</a></p>:null}<LossRecoveryWorkspace {...view} approvals={params.section==="approvals"}/></main>;
   }
   if (params.section === "claims") {
     try {

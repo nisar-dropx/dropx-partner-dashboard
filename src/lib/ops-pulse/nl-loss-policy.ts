@@ -36,6 +36,8 @@ export type RecoveryPerson = {
   installments?: { n: number; amount: number }[];
 };
 export type RecoveryPolicy = {
+  directory_ceiling_designations?: string[];
+  directory_excluded_designations?: string[];
   active_only: boolean;
   previous_month_active_only: boolean;
   salary_cap_enabled: boolean;
@@ -50,7 +52,7 @@ export type RecoveryPolicy = {
   attachment_max_count: number;
   attachment_max_mb: number;
   cctv_public_confirmation: boolean;
-  /** Settled before this day of the month → the previous month's salary (default 7). */
+  /** Settled on or before this day of the month → the previous month's salary (default 5, inclusive). */
   payroll_cutoff_day?: number;
   /** First salary month that carries Ops loss recoveries (YYYY-MM). */
   payroll_start_month?: string;
@@ -83,6 +85,7 @@ export type LossSettings = {
 export type RecoveryMode = "full" | "installments";
 export type InstallmentBasis = "months" | "amount";
 export type RecoveryPlan = {
+  deduction_month?: string;
   mode: RecoveryMode;
   basis?: InstallmentBasis;
   value?: string;
@@ -114,6 +117,7 @@ export type Recovery = {
   updated_at: string;
 };
 export type NlCase = {
+  redispute?: { enabled: boolean; workflow_status: string; recovery_month: string | null } | null;
   source_final_nonrecoverable?: boolean;
   lifecycle_status?: string;
   lifecycle_version?: number;

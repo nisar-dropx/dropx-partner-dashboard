@@ -17,9 +17,7 @@ function db() {
 }
 
 function recoveryRef(profileType: string, accountId: string) {
-  return profileType === "workforce"
-    ? `workforce:${accountId}`
-    : `employee:${accountId}`;
+  return `${profileType === "workforce" ? "workforce" : profileType === "contractor" ? "contractor" : "employee"}:${accountId}`;
 }
 
 async function boundAccount(accountId: string, profileType: string) {
@@ -95,6 +93,9 @@ export async function GET(request: Request) {
         r.employee_ref === ref && (!requestedMonth || r.month === requestedMonth)
         && (!requestedCase || r.case_key === requestedCase),
     );
+    const debitRows = await client.rpc("nl_recovery_debits", {p_company:company,p_ref:ref});
+    if(debitRows.error) throw new Error("Your deduction history could not be loaded. Please retry.");
+    const ownDebits=(debitRows.data ?? []).filter((r: {employee_ref:string})=>r.employee_ref===ref);
     const recoveries = [];
     for (const row of rows) {
       const caseRow = await client
@@ -113,11 +114,11 @@ export async function GET(request: Request) {
         .eq("month", row.month)
         .eq("case_key", row.case_key)
         .maybeSingle();
-      // Only SLP-approved plans are payroll-due; hide proposals until locked.
+      // A person may see their assigned proposal, clearly distinguished from a confirmed debit.
       if (caseRow.error) throw new Error("Unable to load the loss case. Please retry.");
       if (plan.error) throw new Error("Unable to load the recovery plan. Please retry.");
       // Retain payroll history even if a later source change pauses the remaining plan.
-      if (!plan.data || (plan.data.approval_status !== "approved" && (Number(row.deducted) || 0) <= 0 && (Number(row.in_payroll) || 0) <= 0)) continue;
+      if (!plan.data) continue;
       const details = (caseRow.data?.details ?? {}) as Record<string, unknown>;
       const share = myAllocation(plan.data?.allocations, ref);
       recoveries.push({
@@ -152,13 +153,14 @@ export async function GET(request: Request) {
         waived: Number(row.waived) || 0,
         lastDeductedMonth: row.last_deducted_in ?? null,
         outstanding: Number(row.outstanding),
-        status: row.status,
+        status: row.status?.startsWith("redispute_") ? row.status : plan.data.approval_status !== "approved" ? "awaiting_approval" : row.status,
         lifecycleStatus: caseRow.data?.lifecycle_status ?? null,
-        scheduledFromMonth: plan.data?.deduction_month ?? row.first_salary_month,
+        scheduledFromMonth: row.first_salary_month ?? plan.data?.deduction_month,
         capOverride: Boolean(row.cap_override || plan.data?.cap_override),
         finalSettlement: row.status === "exit_balance",
         approvalStatus: plan.data?.approval_status ?? null,
         outcomeLabel: plan.data?.outcome_label ?? row.outcome_label ?? null,
+        deductions: ownDebits.filter((d: {loss_month:string;case_key:string})=>d.loss_month===row.month && d.case_key===row.case_key).map((d: {recovery_key:string;payroll_month:string;amount:number;is_deducted:boolean})=>({key:d.recovery_key,month:d.payroll_month,amount:Number(d.amount),confirmed:d.is_deducted})),
       });
     }
     return NextResponse.json(

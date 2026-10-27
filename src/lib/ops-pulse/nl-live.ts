@@ -1,3 +1,4 @@
+import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
 import { mayActivateRedispute } from "./loss-recovery-controls";
 import "server-only";
 import { hasFinalLossOutcome } from "./loss-recovery-controls";
@@ -161,12 +162,16 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
       lossFilterMatches(station, r.station_code) &&
       lossFilterMatches(reason, r.reason || "Unspecified"),
   );
+  const finalPlans=stageView==='final' && month ? await readAllRows(db.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations").eq("company_id",company).eq("month",month).order("case_key")) : {data:[],error:null};
+  if(finalPlans.error) throw Error("Recovery update totals could not be loaded.");
+  const finalPlanByKey=new Map((finalPlans.data||[]).map(p=>[p.case_key,p]));
   const tally = (rows: typeof filtered) => {
     const by = (keys: PhaseKey[]) => rows.filter((r) => keys.includes(r.phase));
     const sum = (list: typeof rows) =>
       list.reduce((v, r) => v + Number(r.amount || 0), 0);
     const mine = by(["action", "respond"]);
     return {
+      ...finalRecoverySummary(rows.map(r=>({...r,recoverable:isRecoverable(r.source_status,recoveryContext.settings?.recoverable_statuses??[]),updated:recoveryDetailsUpdated(r,finalPlanByKey.get(r.case_key))}))),
       count: rows.length,
       amount: sum(rows),
       pending: mine.length,

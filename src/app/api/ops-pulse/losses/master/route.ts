@@ -71,7 +71,7 @@ export async function POST(request: Request) {
           "cctv_public_confirmation",
         ].some((k) => typeof policy[k] !== "boolean") ||
         !Number.isInteger(policy.salary_month_offset) ||
-        policy.salary_month_offset < 1 ||
+        policy.salary_month_offset < 0 ||
         policy.salary_month_offset > 12 ||
         !Number.isFinite(policy.salary_cap_percent) ||
         policy.salary_cap_percent <= 0 ||
@@ -93,6 +93,8 @@ export async function POST(request: Request) {
           "people_calculation_statuses",
           "workforce_payout_statuses",
           "eligible_designations",
+          "directory_ceiling_designations",
+          "directory_excluded_designations",
           "attachment_types",
         ].some(
           (k) =>

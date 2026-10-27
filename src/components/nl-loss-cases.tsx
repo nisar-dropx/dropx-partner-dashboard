@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { FleetMultiSelect } from "./fleet-multi-select";
+import "./loss-list-controls.css";
 import { useRouter } from "next/navigation";
 import {
   type NlCase,
@@ -101,7 +103,7 @@ export function NlLossCases({
     const columns = [
       "Month",
       "Station",
-      "TID",
+      "Shipment ID",
       "Loss reason",
       "Sub reason",
       "Amazon decision",
@@ -181,7 +183,7 @@ export function NlLossCases({
           <select aria-label="Sort recovery cases" value={sort} onChange={e=>setSort(e.target.value)}>{LOSS_SORTS.filter(o=>o.value!=="cases_desc").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <input
             aria-label="Search recovery cases"
-            placeholder="Search TID, person or reason"
+            placeholder="Search Shipment ID, person or reason"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -288,6 +290,7 @@ export function RecoveryForm({
     ),
     [remarks, setRemarks] = useState(old?.remarks || "");
   const [plan, setPlan] = useState<RecoveryPlan>({
+    deduction_month: old?.deduction_month || "",
     mode: old?.recovery_mode || "full",
     basis: old?.installment_basis || "months",
     value:
@@ -371,9 +374,12 @@ export function RecoveryForm({
     })();
     return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
   }, [row.month, row.case_key, retry]);
+  const option = outcomes.find((o) => o.code === outcome);
+  const deductionPeriod = plan.deduction_month || deductionMonths[option?.deduction_timing || "current_month"];
+  const [designationFilter,setDesignationFilter] = useState("");
   const selectedKey = [...selected].sort().join(",");
   useEffect(() => {
-    if (!directoryReady || !selectedKey) return;
+    if (!directoryReady || !selectedKey || !deductionPeriod) return;
     const controller = new AbortController();
     setSalaryLoading(true);
     setSalaryError("");
@@ -382,7 +388,7 @@ export function RecoveryForm({
       setSalaryLoading(false);
       controller.abort();
     }, 45000);
-    const params = new URLSearchParams({ month: row.month, case: row.case_key });
+    const params = new URLSearchParams({ month: row.month, case: row.case_key, payroll_month: deductionPeriod });
     selectedKey.split(",").forEach(ref => params.append("person", ref));
     fetch(`/api/ops-pulse/losses/recovery?${params}`, { signal: controller.signal, cache: "no-store" })
       .then(async res => { const j = await res.json(); if (!res.ok) throw Error(j.error); return j; })
@@ -395,8 +401,7 @@ export function RecoveryForm({
       .catch(e => { if (!controller.signal.aborted) setSalaryError(e.message || "Salary check failed. Reload to retry."); })
       .finally(() => { clearTimeout(timeout); if (!controller.signal.aborted) setSalaryLoading(false); });
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [directoryReady, selectedKey, row.month, row.case_key, retry]);
-  const option = outcomes.find((o) => o.code === outcome);
+  }, [directoryReady, selectedKey, row.month, row.case_key, retry, deductionPeriod]);
   // A restricted plan (e.g. "Already recovered") can only be changed by people who may set it.
   const savedOutcome =
     recovery && !recovery.is_deleted
@@ -423,13 +428,6 @@ export function RecoveryForm({
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
-  const deductionPeriod =
-    recovery &&
-    !recovery.is_deleted &&
-    recovery.deduction_timing === option?.deduction_timing &&
-    recovery.deduction_month
-      ? recovery.deduction_month
-      : deductionMonths[option?.deduction_timing || "none"];
   const validation = outcome === "responsible_left" ? departedPersonError(details, remarks) : !option?.is_active || !recoveryActionAllowed(option)
     ? "Select an active recovery action."
     : option.allocation_required
@@ -520,9 +518,10 @@ export function RecoveryForm({
           allocations: option?.allocation_required ? splits : [],
           plan: option?.allocation_required
             ? plan.mode === "installments"
-              ? plan
+              ? {...plan,deduction_month:deductionPeriod}
               : {
                   mode: "full",
+                  deduction_month: deductionPeriod,
                   cap_override: plan.cap_override,
                   cap_override_reason: plan.cap_override_reason,
                 }
@@ -747,6 +746,7 @@ export function RecoveryForm({
                 value={outcome}
                 onChange={(e) => {
                   setOutcome(e.target.value);
+                  setPlan(p=>({...p,deduction_month:undefined}));
                   setSuccess("");
                 }}
                 required
@@ -778,10 +778,11 @@ export function RecoveryForm({
               <label>Recovery owner &amp; next step<textarea required rows={2} maxLength={1000} placeholder="Who will follow up, by when, and how will the balance be recovered?" value={details.follow_up || ""} onChange={e => setDetails({ ...details, follow_up: e.target.value })} /></label>
               <small>Departure does not close the loss. The full balance remains outstanding.</small>
             </div> : null}
+            {option?.allocation_required ? <label>Recovery payroll month<input type="month" value={deductionPeriod || ""} min={deductionMonths.current_month} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}/><small>Previous payroll stays open through day {policy?.payroll_cutoff_day || 5}. A later month requires approval.</small></label> : null}
             {option?.allocation_required && deductionPeriod ? (
               <p className={styles.notice}>
                 <strong>
-                  Deducted from {monthLabel(deductionPeriod)} salary
+                  Recovery from {monthLabel(deductionPeriod)} payroll
                 </strong>
                 <br />
                 {awaitingFinal
@@ -809,14 +810,8 @@ export function RecoveryForm({
                       ) : null}
                     </select>
                   </label>
-                  <label>
-                    Find station employee
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Name, employee ID or designation"
-                    />
-                  </label>
+                  <label>Designation<select value={designationFilter} onChange={e=>setDesignationFilter(e.target.value)}><option value="">All designations</option>{[...new Set(people.map(p=>p.designation))].sort().map(d=><option key={d}>{d}</option>)}</select></label>
+                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={ids=>setSelected(ids)}/></div>
                 </div>
                 <div
                   className={styles.methods}
@@ -901,9 +896,9 @@ export function RecoveryForm({
                 </p>
                 {salaryLoading && selected.length > 0 ? <p role="status" className={styles.hint}>Checking salary limits for selected people…</p> : null}
                 {salaryError ? <p role="alert" className={styles.error}>{salaryError}</p> : null}
-                {!search.trim() && !selected.length ? <p className={styles.hint}>Search by name or employee ID to assign responsibility.</p> : null}
+                {!search.trim() && !selected.length ? <p className={styles.hint}>Open Select names to choose station staff, DAs or mapped managers through AOM.</p> : null}
                 <div className={styles.people}>
-                  {available.filter(p => selected.includes(p.ref) || search.trim().length >= 2).slice(0, 30).map((p) => (
+                  {available.filter(p => selected.includes(p.ref)).map((p) => (
                     <div className={styles.person} key={p.ref}>
                       <label>
                         <input
@@ -933,7 +928,7 @@ export function RecoveryForm({
                             >
                               {p.recovery_limit == null
                                 ? "Salary payable unavailable · review payroll / mapping"
-                                : `${p.salary_month ? monthLabel(p.salary_month) : "Last month"}: take-home ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
+                                : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payroll"}: take-home ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) &&

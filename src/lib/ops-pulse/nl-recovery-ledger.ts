@@ -34,7 +34,7 @@ export async function loadRecoveryLedger(auth: AuthorizationContext, fromMonth?:
     .map((l) => ({
       ...l,
       designation: designations.get(`${l.month}|${l.case_key}|${l.employee_ref}`) || null,
-      status: (Number(l.outstanding)>0 && ["none","proposed","returned","needs_review"].includes(approval.get(`${l.month}|${l.case_key}`) || "")
+      status: (!l.status.startsWith("redispute_") && Number(l.outstanding)>0 && ["none","proposed","returned","needs_review"].includes(approval.get(`${l.month}|${l.case_key}`) || "")
         ? approval.get(`${l.month}|${l.case_key}`)==="returned" ? "returned" : approval.get(`${l.month}|${l.case_key}`)==="needs_review" ? "needs_review" : "awaiting_approval" : l.status) as LedgerStatus,
       total: Number(l.total),
       deducted: Number(l.deducted),
