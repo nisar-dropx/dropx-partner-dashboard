@@ -64,10 +64,10 @@ const sections: Record<
 const primaryTabs: LossTab[] = [
  {key:"nl",label:"Disputes & outcomes",href:"/team-ops/losses/nl"},
  {key:"recovery",label:"Recovery",href:"/team-ops/losses/recovery"},
- {key:"approvals",label:"Approvals",href:"/team-ops/losses/approvals"},
+ {key:"approvals",label:"Exception approvals",href:"/team-ops/losses/approvals"},
  {key:"redisputes",label:"Redisputes",href:"/team-ops/losses/redisputes"},
  {key:"claims",label:"Station claims",href:"/team-ops/losses/claims"},
- {key:"ledger",label:"Collections",href:"/team-ops/losses/ledger"},
+ {key:"ledger",label:"Recovery review",href:"/team-ops/losses/ledger"},
 ];
 
 export default async function LossesSectionPage({
@@ -89,7 +89,7 @@ export default async function LossesSectionPage({
       const scope = new Set(view.rows.map(r=>`${r.month}|${r.case_key}`));
       return <main className={styles.workspace}><LossHeader title="Redisputes" intro="Restricted case activation, LSC tickets and vendor follow-up." tabs={tabs} active="redisputes"/><LossRedisputeDesk rows={view.rows} windows={(result.data||[]).filter(w=>scope.has(`${w.month}|${w.case_key}`))}/></main>;
     }
-    return <main className={styles.workspace}><LossHeader title={params.section==="approvals"?"Final approvals":"Recovery"} intro="Station updates become final only after independent approval. Unpaid balances carry forward." tabs={tabs} active={params.section}/>{claimView?.claims.some(c=>c.actions.includes("approve"))?<p className={styles.notice}><a href="/team-ops/losses/claims">{claimView.claims.filter(c=>c.actions.includes("approve")).length} station claims also await your final approval →</a></p>:null}<LossRecoveryWorkspace {...view} approvals={params.section==="approvals"}/></main>;
+    return <main className={styles.workspace}><LossHeader title={params.section==="approvals"?"Exception approvals":"Recovery"} intro="Full current-payroll recovery goes directly to payroll. Departures, deferrals and instalments need approval." tabs={tabs} active={params.section}/>{claimView?.claims.some(c=>c.actions.includes("approve"))?<p className={styles.notice}><a href="/team-ops/losses/claims">{claimView.claims.filter(c=>c.actions.includes("approve")).length} station claims also await your final approval →</a></p>:null}<LossRecoveryWorkspace {...view} approvals={params.section==="approvals"}/></main>;
   }
   if (params.section === "claims") {
     try {
@@ -118,7 +118,7 @@ export default async function LossesSectionPage({
         <main className={styles.workspace}>
           <LossHeader
             eyebrow="Team Ops · Losses"
-            title="Collections"
+            title="Recovery review"
             intro="Verified payroll deductions, outstanding balances and write-offs. Plans remain open until collected."
             tabs={tabs}
             active="ledger"

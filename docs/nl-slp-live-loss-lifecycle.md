@@ -291,3 +291,13 @@ This section supersedes the earlier station/cluster-only proposal and Master-per
 Migration: `20261026203000_loss_recovery_product_lifecycle.sql`, applied individually after testing twice. Shared HRMS and Workforce due contracts and keys are unchanged. Validation includes role/API denial, no self-approval, return/resubmit, receipt validation, no-salary carry-forward, deferred full recovery, source drift, immutable history and stale TT updates.
 
 The user explicitly approved enabling existing `OPERATIONS_FINMGR`, `OPERATIONS_MANAGING_PARTNER` and `OPERATIONS_NATIONAL_HEAD` roles for Losses view/edit. The migration changes only these page permissions, preserving memberships, location scopes and existing add rights.
+
+## Exception-only approvals — 27 October 2026 (supersedes universal approval)
+
+Full allocation in the Master outcome's `current_month` timing, full debit mode, and no cap override becomes payroll-eligible automatically after the existing source, station directory, current payable, full-allocation and payroll-lock validations. This is eligibility for the next applicable payroll calculation, not an immediate salary transfer. The normal payroll cutoff still determines the deduction month.
+
+Departed/inactive people, next-month timing, instalments, cap overrides and receipt verification require independent approval. Source changes and returned corrections also require approval; repeated saves cannot bypass that review. SLP Manager, National Head, Finance Manager, General Manager and the existing Managing Partner role can approve within their page permissions and location scope. Proposers cannot approve their own exceptions.
+
+`20261027183000_loss_exception_approval.sql` patches the atomic writer. Automatic decisions have a null human approver and an explicit system label. Existing decisions are preserved; saving a routine proposal with refreshed eligibility applies the new rule. Production preflight found two approved plans and no pending proposals. No payroll history, published payout or recovery key is rewritten.
+
+The Recovery review groups scoped allocations by station, person or saved designation. Assigned, actually deducted, draft-payroll and outstanding amounts remain separate; pending review is a subset of outstanding, not an additional charge. Redisputes and Station claims remain under More. Actions and timing remain configured in Loss Recovery Master.

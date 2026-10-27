@@ -17,7 +17,7 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH']){
   auth={...base,roleCode};await assertLifecycleAction(auth,'S','propose');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve'),/Only SLP Manager/);
  }
- for(const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER']){
+ for(const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_GM','GENERAL_MANAGER']){
   auth={...base,roleCode};await assertLifecycleAction(auth,'S','approve','someone-else');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve','actor'),/another authorised/);
  }
  await assert.rejects(()=>assertLifecycleAction({...base,readOnly:true},'S','propose'),/edit access/);
@@ -30,5 +30,5 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  assert.equal((await post({action:'tracking',tt_url:'javascript:alert(1)'})).status,403);
  assert.equal((await post({action:'tracking',case_key:'outside'})).status,403);
  auth={...base,roleCode:'OPERATIONS_SLPM',readOnly:true};assert.equal((await post({action:'activate'})).status,403);
- console.log('PASS actual approval guards and redispute API: station proposals, exactly four final roles, no self-approval, read-only, cross-origin, unsafe URL and station-scope denial.');
+ console.log('PASS actual approval guards and redispute API: station proposals, authorised final roles including GM, no self-approval, read-only, cross-origin, unsafe URL and station-scope denial.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

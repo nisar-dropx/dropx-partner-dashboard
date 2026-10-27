@@ -10,6 +10,7 @@ export type LedgerLine = {
   employee_ref: string;
   employee_code: string | null;
   full_name: string | null;
+  designation?: string | null;
   recovery_mode: "full" | "installments";
   installment_count: number | null;
   monthly_amount: number;
@@ -71,6 +72,23 @@ export function filterLedger(lines: LedgerLine[], filter: { status?: string; que
     (l) =>
       (!filter.status || filter.status === "all" || (filter.status === "open" ? l.outstanding > 0 && l.status !== "written_off" : l.status === filter.status)) &&
       (!filter.station || l.station_code === filter.station) &&
-      (!q || [l.employee_code, l.full_name, l.case_key, l.station_code].join(" ").toLowerCase().includes(q)),
+      (!q || [l.employee_code, l.full_name, l.case_key, l.station_code, l.designation].join(" ").toLowerCase().includes(q)),
   );
+}
+
+/** Group only scoped ledger lines; a shared case counts once, money stays per allocation. */
+export function groupRecoveryReview(lines: LedgerLine[], by: 'station' | 'person' | 'designation') {
+  const groups = new Map<string, { key:string; label:string; detail:string; cases:Set<string>; people:Set<string>; lineKeys:Set<string>; assigned:number; deducted:number; draft:number; outstanding:number; pending:number }>();
+  for (const l of lines) {
+    const designation = l.designation || 'Not recorded';
+    const key = by === 'station' ? l.station_code : by === 'person' ? `${l.station_code}|${l.employee_ref}` : `${l.station_code}|${designation}`;
+    const g = groups.get(key) || { key, label:by==='station'?l.station_code:by==='person'?(l.full_name||l.employee_code||l.employee_ref):designation,
+      detail:by==='station'?'':by==='person'?`${l.station_code} · ${l.employee_code||''} · ${designation}`:l.station_code,
+      cases:new Set<string>(),people:new Set<string>(),lineKeys:new Set<string>(),assigned:0,deducted:0,draft:0,outstanding:0,pending:0 };
+    g.cases.add(`${l.month}|${l.case_key}`); g.people.add(l.employee_ref); g.lineKeys.add(`${l.month}|${l.case_key}|${l.employee_ref}`);
+    g.assigned+=Number(l.total)||0; g.deducted+=Number(l.deducted)||0; g.draft+=Number(l.in_payroll)||0; g.outstanding+=Number(l.outstanding)||0;
+    if(['awaiting_approval','returned','needs_review'].includes(l.status)) g.pending+=Number(l.outstanding)||0;
+    groups.set(key,g);
+  }
+  return [...groups.values()].map(g=>({...g,cases:g.cases.size,people:g.people.size,lineKeys:[...g.lineKeys],station:g.key.split('|')[0],assigned:r2(g.assigned),deducted:r2(g.deducted),draft:r2(g.draft),outstanding:r2(g.outstanding),pending:r2(g.pending)})).sort((a,b)=>b.outstanding-a.outstanding||a.label.localeCompare(b.label));
 }

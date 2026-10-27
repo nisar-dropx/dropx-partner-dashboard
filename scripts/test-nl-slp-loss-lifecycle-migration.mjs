@@ -287,5 +287,49 @@ eq('TT win never reopens a verified received payment',(await one(`select approva
 eq('TT history saved',(await one(`select count(*)::int n from nl_case_response_events where action='tracking' and case_key='LEFT1'`)).n,2);
 eq('New migration does not rewrite actual payroll history',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
 
+// Exception-only routing: fresh eligibility and every existing money guard still apply.
+const exceptionSql=readFileSync("supabase/migrations/20261027183000_loss_exception_approval.sql","utf8");
+await db.exec(exceptionSql); await db.exec(exceptionSql);
+await db.exec(`insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+ ('${C}','nl','2026-09','AUTO-E','BLR1',100,'Recoverable'),('${C}','nl','2026-09','AUTO-W','BLR1',100,'Recoverable'),
+ ('${C}','nl','2026-09','DEFER','BLR1',100,'Recoverable'),('${C}','nl','2026-09','REVIEW','BLR1',100,'Recoverable');
+ insert into nl_recovery_outcomes(company_id,code,label,allocation_required,deduction_timing) values('${C}','next','Next payroll',true,'next_month');
+ update nl_recovery_payables set checked_at=now();`);
+const full=(key,ref,code='deduct',version=0)=>`select save_nl_recovery('${C}','2026-09','${key}',${version},'${code}','custom','[{"employee_ref":"${ref}","amount":"100"}]','Full loss allocated','${CM}','Station','{}','{"mode":"full"}')`;
+await db.query(full('AUTO-E',`employee:${E1}`));
+await db.query(full('AUTO-W',`workforce:${W1}`));
+for(const [key,kind] of [['AUTO-E','hrms'],['AUTO-W','workforce']]) {
+ const r=await one(`select * from nl_loss_recoveries where case_key='${key}'`);
+ eq(`${kind} full recovery automatically eligible`,r.approval_status,'approved');
+ eq(`${kind} does not forge a human approver`,r.approved_by,null);
+ eq(`${kind} system decision labelled`,r.approved_by_name,'Automatic · full recovery');
+ eq(`${kind} available to payroll`,(await db.query(`select * from nl_loss_recovery_due('${C}','${r.deduction_month}','${kind}') where case_key='${key}'`)).rows.length,1);
+}
+await db.query(full('DEFER',`employee:${E1}`,'next'));
+eq('Next-month recovery needs approval',(await one(`select approval_status s from nl_loss_recoveries where case_key='DEFER'`)).s,'proposed');
+await db.exec(`update nl_loss_month_cases set lifecycle_status='needs_review' where case_key='REVIEW'`);
+await db.query(full('REVIEW',`employee:${E1}`));
+await db.query(full('REVIEW',`employee:${E1}`,'deduct',1));
+eq('Source review cannot bypass approval by choosing full',(await one(`select approval_status s from nl_loss_recoveries where case_key='REVIEW'`)).s,'proposed');
+await db.query(`select save_nl_recovery('${C}','2026-09','PLAN3',3,'deduct','custom','${alloc3}','Still three instalments','${CM}','Station','{}','{"mode":"installments","basis":"months","value":"3"}')`);
+eq('Instalments still need independent approval',(await one(`select approval_status s from nl_loss_recoveries where case_key='PLAN3'`)).s,'proposed');
+await mustReject('Exception proposer cannot self approve',`select nl_loss_recovery_approve('${C}','2026-09','DEFER',1,'${CM}','Station')`);
+await db.query(`select nl_loss_recovery_approve('${C}','2026-09','DEFER',1,'${SLP}','SLP')`);
+eq('Independent exception approval works',(await one(`select approval_status s from nl_loss_recoveries where case_key='DEFER'`)).s,'approved');
+await db.exec(`update nl_loss_month_cases set lifecycle_status='returned_to_station' where case_key='AUTO-E';update nl_loss_recoveries set approval_status='returned' where case_key='AUTO-E'`);
+await db.query(full('AUTO-E',`employee:${E1}`,'deduct',1));
+await db.query(full('AUTO-E',`employee:${E1}`,'deduct',2));
+eq('Returned routine recovery requires independent confirmation',(await one(`select approval_status s from nl_loss_recoveries where case_key='AUTO-E'`)).s,'proposed');
+
+await db.exec(`insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+ ('${C}','nl','2026-09','EXIT-FULL','BLR1',100,'Recoverable'),('${C}','nl','2026-09','CAP-FULL','BLR1',100,'Recoverable');
+ update workforce set last_working_date=(now() at time zone 'Asia/Kolkata')::date where id='${W1}';`);
+await db.query(full('EXIT-FULL',`workforce:${W1}`));
+eq('Full recovery for a departed person needs approval',(await one(`select approval_status s from nl_loss_recoveries where case_key='EXIT-FULL'`)).s,'proposed');
+await db.query(`select save_nl_recovery('${C}','2026-09','CAP-FULL',0,'deduct','custom','[{"employee_ref":"employee:${E1}","amount":"100"}]','Full loss with override','${CM}','Station','{}','{"mode":"full","cap_override":true,"cap_override_reason":"Explicit salary cap exception"}')`);
+eq('Full debit with cap override needs approval',(await one(`select approval_status s from nl_loss_recoveries where case_key='CAP-FULL'`)).s,'proposed');
+await mustReject('Automatic routing never permits a partial allocation',full('CAP-FULL',`employee:${E1}`,'deduct',1).replace('"amount":"100"','"amount":"50"'));
+eq('Actual past payroll remains unchanged',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

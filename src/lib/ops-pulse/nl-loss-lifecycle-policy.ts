@@ -25,7 +25,7 @@ export const LIFECYCLE_LABELS: Record<LifecycleStatus, string> = {
   imported: "Imported",
   station_dispute_or_clarification_window: "Station dispute / clarification",
   cluster_validation_pending: "Awaiting cluster validation",
-  slp_final_confirmation_pending: "Awaiting SLP confirmation",
+  slp_final_confirmation_pending: "Awaiting exception approval",
   recovery_approved_scheduled: "Recovery approved · scheduled",
   recovery_in_progress: "Recovery in progress",
   recovered: "Recovered",
