@@ -400,3 +400,13 @@ separate from this manual report and must be reviewed before enabling broad deli
 - Workforce published deduction presentation groups losses by recovery key rather than merging all losses under one code. New raw snapshot lines retain the key too; old worksheet snapshots already contain it. Keys are never derived from an unverified name.
 - `scheduledFromMonth` is the eligibility start, not a promise of the next payroll month. Unpaid/outstanding includes provisional draft deductions until payroll confirmation.
 - Regression: `node scripts/test-connect-loss-recoveries.cjs`, the loss payroll suite, and Connect's `published-payout-breakdown.test.mjs` / `interim-salary.test.mjs`.
+
+## Exception-only approvals — 27 October 2026 (supersedes universal approval)
+
+Full allocation in the Master outcome's `current_month` timing, full debit mode, and no cap override becomes payroll-eligible automatically after the existing source, station directory, current payable, full-allocation and payroll-lock validations. This is eligibility for the next applicable payroll calculation, not an immediate salary transfer. The normal payroll cutoff still determines the deduction month.
+
+Departed/inactive people, next-month timing, instalments, cap overrides and receipt verification require independent approval. Source changes and returned corrections also require approval; repeated saves cannot bypass that review. SLP Manager, National Head, Finance Manager, General Manager and the existing Managing Partner role can approve within their page permissions and location scope. Proposers cannot approve their own exceptions.
+
+`20261027183000_loss_exception_approval.sql` patches the atomic writer. Automatic decisions have a null human approver and an explicit system label. Existing decisions are preserved; saving a routine proposal with refreshed eligibility applies the new rule. Production preflight found two approved plans and no pending proposals. No payroll history, published payout or recovery key is rewritten.
+
+The Recovery review groups scoped allocations by station, person or saved designation. Assigned, actually deducted, draft-payroll and outstanding amounts remain separate; pending review is a subset of outstanding, not an additional charge. Redisputes and Station claims remain under More. Actions and timing remain configured in Loss Recovery Master.

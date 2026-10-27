@@ -7,11 +7,12 @@ export type LossTab = { key: string; label: string; href: string };
 export function LossTabs({ tabs, active }: { tabs: LossTab[]; active: string }) {
   return (
     <nav className={styles.tabs} aria-label="Loss reports">
-      {tabs.map((t) => (
+      {tabs.filter(t => !["redisputes", "claims"].includes(t.key)).map((t) => (
         <Link key={t.key} href={t.href} prefetch={false} className={`${styles.tab} ${t.key === active ? styles.activeTab : ""}`} aria-current={t.key === active ? "page" : undefined}>
           {t.label}
         </Link>
       ))}
+      {tabs.some(t => ["redisputes", "claims"].includes(t.key)) ? <details className={styles.more}><summary className={`${styles.tab} ${["redisputes", "claims"].includes(active) ? styles.activeTab : ""}`}>{tabs.find(t => t.key === active && ["redisputes", "claims"].includes(t.key))?.label || "More"}</summary><div>{tabs.filter(t => ["redisputes", "claims"].includes(t.key)).map(t => <Link key={t.key} href={t.href} prefetch={false} className={styles.tab} aria-current={active===t.key ? "page" : undefined}>{t.label}</Link>)}</div></details> : null}
     </nav>
   );
 }

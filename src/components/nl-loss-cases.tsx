@@ -543,7 +543,7 @@ export function RecoveryForm({
         },
         ...h,
       ]);
-      setSuccess("Update submitted for final approval. It remains pending until another authorised approver confirms it.");
+      setSuccess(j.recovery.approval_status === "approved" ? "Saved for payroll. The full recovery will be included in the applicable payroll calculation." : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -632,7 +632,7 @@ export function RecoveryForm({
       {(recovery as { approval_status?: string } | null)?.approval_status ===
       "proposed" ? (
         <p className={styles.notice}>
-          Update awaiting final approval. Collection is not final until independently confirmed.
+          Exception awaiting approval. Payroll is paused until independently confirmed.
           {canApprove && mayApproveCase ? (
             <>
               {" "}
@@ -787,7 +787,7 @@ export function RecoveryForm({
                 {awaitingFinal
                   ? "SLP Initial is a report only. Assign employees once this case is in the SLP Final file. "
                   : null}
-                Allocate the full amount. Salary limits and approval apply.
+                Allocate the full amount. Full current-payroll recovery is automatic; exceptions need approval.
               </p>
             ) : null}
             {option?.allocation_required ? (
@@ -1182,7 +1182,7 @@ export function RecoveryForm({
                   ? "Saving…"
                   : recovery && !recovery.is_deleted
                     ? "Update recovery"
-                    : "Submit for approval"}
+                    : "Save recovery"}
               </button>
             ) : (
               <p className={styles.hint}>

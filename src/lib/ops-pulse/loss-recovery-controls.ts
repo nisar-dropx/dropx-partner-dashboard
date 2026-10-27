@@ -4,10 +4,10 @@ export function recoveryActionAllowed(o: { code: string; allocation_required: bo
 }
 
 export type LossRole = { readOnly?: boolean; isMasterOwner: boolean; roleCode: string | null; effectiveRoleCodes?: string[]; designationName?: string | null };
-/** Only the four business-designated roles; a broad Master permission is insufficient. */
+/** Only the business-designated roles; a broad Master permission is insufficient. */
 export function mayViewLossApprovals(auth: LossRole) {
   if (auth.isMasterOwner) return true;
-  const allowed = new Set(["SLPM", "NH", "FINMGR", "MANAGING_PARTNER", "MP", "SLP_MANAGER", "NATIONAL_HEAD", "FINANCE_MANAGER"]);
+  const allowed = new Set(["SLPM", "NH", "FINMGR", "MANAGING_PARTNER", "MP", "SLP_MANAGER", "NATIONAL_HEAD", "FINANCE_MANAGER", "GM", "GENERAL_MANAGER"]);
   return [auth.roleCode, ...(auth.effectiveRoleCodes ?? []), auth.designationName].some(value => {
     const code = String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
     return allowed.has(code) || allowed.has(code.replace(/^(OPERATIONS|FINANCE)_/, ""));

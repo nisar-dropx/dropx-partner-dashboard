@@ -22,13 +22,18 @@ export async function loadRecoveryLedger(auth: AuthorizationContext, fromMonth?:
       return { ready: false as const, lines: [] as LedgerLine[], totals: ledgerTotals([]), canWriteOff: false };
     throw Error("The recovery ledger could not be loaded.");
   }
-  const plans=await readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,approval_status").eq("company_id",company).eq("is_deleted",false).order("month").order("case_key"));
+  const plans=await readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,approval_status,allocations").eq("company_id",company).eq("is_deleted",false).order("month").order("case_key"));
   if(plans.error) throw Error("Collection approval states could not be loaded.");
   const approval=new Map((plans.data||[]).map(p=>[`${p.month}|${p.case_key}`,p.approval_status]));
+  const designations = new Map<string,string>();
+  for(const p of plans.data || []) for(const a of (Array.isArray(p.allocations)?p.allocations:[]) as {ref?:string;designation?:string}[]) {
+    if(a.ref && a.designation) designations.set(`${p.month}|${p.case_key}|${a.ref}`,a.designation);
+  }
   const lines = ((result.data ?? []) as LedgerLine[])
     .filter((l) => allowed.has(String(l.station_code ?? "").trim().toUpperCase()))
     .map((l) => ({
       ...l,
+      designation: designations.get(`${l.month}|${l.case_key}|${l.employee_ref}`) || null,
       status: (Number(l.outstanding)>0 && ["none","proposed","returned","needs_review"].includes(approval.get(`${l.month}|${l.case_key}`) || "")
         ? approval.get(`${l.month}|${l.case_key}`)==="returned" ? "returned" : approval.get(`${l.month}|${l.case_key}`)==="needs_review" ? "needs_review" : "awaiting_approval" : l.status) as LedgerStatus,
       total: Number(l.total),

@@ -12,3 +12,7 @@
 .tab:hover { color: #2b3b52; background: #fff; }
 .activeTab { background: #fff; color: #cf5a24; box-shadow: 0 1px 3px #1c2b401f; }
 @media (max-width: 640px) { .titleBlock p { white-space: normal; } .search { flex-basis: 100%; } .titleRow { min-height: 0; } }
+
+.more summary { cursor: pointer; }
+.more[open] { flex-shrink: 0; }
+.more > div { display: flex; flex-wrap: wrap; }

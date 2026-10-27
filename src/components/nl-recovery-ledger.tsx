@@ -5,6 +5,7 @@ import {
   LEDGER_STATUS,
   filterLedger,
   ledgerTotals,
+  groupRecoveryReview,
   recoveredPercent,
   type LedgerLine,
 } from "@/lib/ops-pulse/nl-recovery-ledger-view";
@@ -39,13 +40,17 @@ const FILTERS = [
 
 export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; canWriteOff: boolean }) {
   const router = useRouter();
-  const [status, setStatus] = useState<string>(lines.some((l) => l.status === "exit_balance") ? "exit_balance" : "open");
+  const [status, setStatus] = useState<string>("all");
+  const [group, setGroup] = useState<'station'|'person'|'designation'|'cases'>('station');
+  const [drillRefs,setDrillRefs]=useState<string[]|null>(null);
   const [query, setQuery] = useState("");
   const [station, setStation] = useState("");
   const [writing, setWriting] = useState<LedgerLine | null>(null);
   const stations = useMemo(() => [...new Set(lines.map((l) => l.station_code))].sort(), [lines]);
-  const shown = useMemo(() => filterLedger(lines, { status, query, station }), [lines, status, query, station]);
-  const all = useMemo(() => ledgerTotals(lines), [lines]);
+  const shown = useMemo(() => filterLedger(lines, { status, query, station }).filter(l=>group!=='cases'||!drillRefs||drillRefs.includes(`${l.month}|${l.case_key}|${l.employee_ref}`)), [lines, status, query, station, group, drillRefs]);
+  const all = useMemo(() => ledgerTotals(shown), [shown]);
+  const grouped = useMemo(() => groupRecoveryReview(shown, group==='cases'?'station':group),[shown,group]);
+  const groupPage = usePaged(grouped,25,`${status}|${query}|${station}|${group}`);
   const paged = usePaged(shown, 25, `${status}|${query}|${station}`);
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: lines.length, open: filterLedger(lines, { status: "open" }).length };
@@ -92,13 +97,13 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
       <section className={styles.panel}>
         <div className={styles.panelHead}>
           <div>
-            <h2>Collections</h2>
-            <p>One line per person per loss: what was assigned, what payroll deducted and what is still due.</p>
+            <h2>Recovery review</h2>
+            <p>Assigned amounts, actual deductions and pending balances. Draft payroll is not yet deducted.</p>
           </div>
           <div className={styles.toolbar}>
             <input aria-label="Search the ledger" placeholder="Employee, name, case or station" value={query} onChange={(e) => setQuery(e.target.value)} />
             {stations.length > 1 ? (
-              <select aria-label="Station" value={station} onChange={(e) => setStation(e.target.value)}>
+              <select aria-label="Station" value={station} onChange={(e) => {setStation(e.target.value);setDrillRefs(null);}}>
                 <option value="">All stations</option>
                 {stations.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -106,19 +111,15 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
             <button className={styles.button} onClick={download} disabled={!shown.length}>Download CSV</button>
           </div>
         </div>
-        <div className={styles.chips} role="tablist" aria-label="Ledger status">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              role="tab"
-              aria-selected={status === f.key}
-              className={status === f.key ? `${styles.chip} ${styles.activeChip}` : styles.chip}
-              onClick={() => setStatus(f.key)}
-            >
-              {f.label} <span className={styles.ledgerCount}>{counts[f.key] ?? 0}</span>
-            </button>
-          ))}
+        <div className={styles.toolbar} style={{padding:'8px 12px'}}>
+          <select aria-label="Group recovery review" value={group} onChange={e=>{setGroup(e.target.value as typeof group);setDrillRefs(null);}}><option value="station">By station</option><option value="person">By person</option><option value="designation">By designation</option><option value="cases">Individual cases</option></select>
+          <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}>{FILTERS.map(f=><option key={f.key} value={f.key}>{f.label} · {counts[f.key]||0}</option>)}</select>
+          {drillRefs ? <button className={styles.button} onClick={()=>setDrillRefs(null)}>Clear drill-down</button> : null}
         </div>
+        {group!=='cases' ? <div className={styles.tableWrap}><table className={styles.ledgerTable}>
+          <thead><tr><th>{group==='station'?'Station':group==='person'?'Person':'Designation'}</th><th>Cases / people</th><th>Assigned</th><th>Deducted</th><th>Draft payroll</th><th>Outstanding</th><th>Pending review</th><th /></tr></thead>
+          <tbody>{groupPage.rows.map(g=><tr key={g.key}><td><strong>{g.label}</strong><small>{g.detail}</small></td><td>{g.cases} / {g.people}</td><td>{money(g.assigned)}</td><td>{money(g.deducted)}</td><td>{money(g.draft)}</td><td><strong>{money(g.outstanding)}</strong></td><td>{money(g.pending)}</td><td><button className={styles.button} onClick={()=>{setStation(g.station);setDrillRefs(g.lineKeys);setGroup('cases');}}>View cases</button></td></tr>)}</tbody>
+        </table>{!grouped.length?<p className={styles.empty}>No recovery lines match these filters.</p>:null}<ListPager page={groupPage.page} pages={groupPage.pages} size={groupPage.size} total={groupPage.total} onPage={groupPage.setPage} onSize={groupPage.setSize} label="groups"/></div> : <>
         {shown.length ? (
           <div className={styles.tableWrap}>
             <table className={styles.ledgerTable}>
@@ -142,7 +143,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                     <tr key={lineKey(l)}>
                       <td>
                         <strong>{l.full_name || "Unnamed"}</strong>
-                        <small>{l.employee_code || l.employee_ref} · {l.station_code}</small>
+                        <small>{l.employee_code || l.employee_ref} · {l.station_code} · {l.designation || "Designation not recorded"}</small>
                       </td>
                       <td>
                         <a href={`/team-ops/losses/recovery?case=${encodeURIComponent(l.case_key)}`}>{caseLabel(l)}</a>
@@ -193,6 +194,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
             {lines.length ? "No recovery lines match these filters." : "No recovery has been assigned to anyone yet. Plans saved in NL Loss and SLP Final appear here."}
           </p>
         )}
+        </>}
         <p className={styles.hint}>
           Recurring debits take one instalment each payroll; a month that cannot carry it moves the rest on. When a person
           exits, every remaining instalment is due in their final settlement. What it cannot recover shows here as an exit
