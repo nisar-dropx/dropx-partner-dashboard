@@ -1,7 +1,7 @@
 "use client";
 
 import { HardDrive, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ensureMarshSessionAction,
   getMarshSessionStatus,
@@ -15,6 +15,13 @@ import styles from "./marsh-insurance-panel.module.css";
 type Props = {
   canEdit: boolean;
   initial: MarshSessionView;
+};
+
+type LiveEvent = {
+  id: string;
+  at: string;
+  tone: "info" | "warn" | "good" | "danger";
+  text: string;
 };
 
 function statusTone(status: string) {
@@ -50,26 +57,95 @@ function cookieLabel(session: MarshSessionView) {
   return `${minutes} min old`;
 }
 
+function describeStatus(view: MarshSessionView): { tone: LiveEvent["tone"]; text: string } {
+  switch (view.status) {
+    case "connecting":
+      return { tone: "info", text: "Connecting to Marsh identity… submitting encrypted credentials." };
+    case "otp_required":
+      return { tone: "warn", text: "OTP required — check the Marsh email inbox and enter the code below." };
+    case "active":
+      return { tone: "good", text: "Session active. Cookie stored for enroll, terminate, and ecard sync." };
+    case "failed":
+      return { tone: "danger", text: view.lastError || "Marsh login failed." };
+    case "expired":
+      return { tone: "danger", text: "Session expired — connect again." };
+    default:
+      return { tone: "info", text: `Status: ${statusLabel(view.status)}` };
+  }
+}
+
 export function MarshInsurancePanel({ canEdit, initial }: Props) {
   const [session, setSession] = useState(initial);
   const [otp, setOtp] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [events, setEvents] = useState<LiveEvent[]>([]);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const lastStampRef = useRef("");
 
-  const refreshViaEvents = useCallback(() => {
-    const timer = window.setInterval(() => {
-      void getMarshSessionStatus()
-        .then((json) => setSession((prev) => mergeSession(prev, json)))
-        .catch(() => undefined);
-    }, 2500);
-    return () => window.clearInterval(timer);
+  const pushEvent = useCallback((tone: LiveEvent["tone"], text: string) => {
+    setEvents((prev) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        at: new Date().toLocaleTimeString(),
+        tone,
+        text,
+      },
+      ...prev,
+    ].slice(0, 12));
   }, []);
 
+  const stopEvents = useCallback(() => {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+  }, []);
+
+  const applyView = useCallback(
+    (view: MarshSessionView, announce = true) => {
+      setSession((prev) => mergeSession(prev, view));
+      const stamp = `${view.status}:${view.updatedAt}:${view.lastError}:${view.challengeId}`;
+      if (announce && stamp !== lastStampRef.current) {
+        lastStampRef.current = stamp;
+        const desc = describeStatus(view);
+        pushEvent(desc.tone, desc.text);
+      }
+      if (["active", "failed", "expired", "otp_required"].includes(view.status)) {
+        stopEvents();
+      }
+    },
+    [pushEvent, stopEvents],
+  );
+
+  const startEventStream = useCallback(() => {
+    stopEvents();
+    const source = new EventSource("/api/settings/marsh/session-events");
+    eventSourceRef.current = source;
+    source.addEventListener("status", (event) => {
+      try {
+        applyView(JSON.parse((event as MessageEvent).data) as MarshSessionView);
+      } catch {
+        /* ignore malformed frames */
+      }
+    });
+    source.addEventListener("end", () => stopEvents());
+    source.onerror = () => {
+      // Fall back to polling if the stream drops.
+      stopEvents();
+    };
+  }, [applyView, stopEvents]);
+
+  useEffect(() => () => stopEvents(), [stopEvents]);
+
   useEffect(() => {
-    if (!["connecting", "otp_required"].includes(session.status)) return;
-    return refreshViaEvents();
-  }, [session.status, refreshViaEvents]);
+    if (!["connecting", "otp_required"].includes(session.status) || eventSourceRef.current) return;
+    const timer = window.setInterval(() => {
+      void getMarshSessionStatus()
+        .then((json) => applyView(json))
+        .catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [session.status, applyView]);
 
   async function run(
     action: () => Promise<MarshSessionView | { ok: boolean; error?: string }>,
@@ -81,7 +157,7 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
     try {
       const result = await action();
       if ("status" in result) {
-        setSession((prev) => mergeSession(prev, result as MarshSessionView));
+        applyView(result as MarshSessionView);
         const failed =
           ("ok" in result && result.ok === false) ||
           ["failed", "expired"].includes(String(result.status));
@@ -92,11 +168,48 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
       }
       if ("error" in result && result.error) {
         setError(String(result.error));
+        pushEvent("danger", String(result.error));
         return;
       }
       setMessage(okMessage);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      const text = err instanceof Error ? err.message : "Request failed";
+      setError(text);
+      pushEvent("danger", text);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function connectMarsh() {
+    setError(null);
+    setMessage(null);
+    setPending(true);
+    setSession((prev) => ({ ...prev, status: "connecting", lastError: null }));
+    lastStampRef.current = "";
+    pushEvent("info", "Connect Marsh clicked — opening live status stream.");
+    startEventStream();
+    try {
+      const result = await startMarshLogin();
+      applyView(result);
+      const failed =
+        ("ok" in result && result.ok === false) ||
+        ["failed", "expired"].includes(String(result.status));
+      if (failed) {
+        setError(result.lastError || "Marsh login failed.");
+        return;
+      }
+      if (result.status === "otp_required") {
+        setMessage("Login reached email OTP — enter the code from Marsh.");
+      } else if (result.status === "active") {
+        setMessage("Marsh session is active.");
+      }
+    } catch (err: unknown) {
+      const text = err instanceof Error ? err.message : "Request failed";
+      setError(text);
+      pushEvent("danger", text);
+      setSession((prev) => ({ ...prev, status: "failed", lastError: text }));
+      stopEvents();
     } finally {
       setPending(false);
     }
@@ -111,7 +224,15 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
         <article className={`metric-card ${metricTone(session.status)}`}>
           <span>Session</span>
           <strong style={{ textTransform: "capitalize" }}>{statusLabel(session.status)}</strong>
-          <small>{sessionReady ? "Ready for enroll jobs" : needsOtp ? "Enter the email OTP below" : "Connect to start"}</small>
+          <small>
+            {sessionReady
+              ? "Ready for enroll jobs"
+              : needsOtp
+                ? "Enter the email OTP below"
+                : session.status === "connecting"
+                  ? "Talking to Marsh…"
+                  : "Connect to start"}
+          </small>
         </article>
         <article className={`metric-card ${session.credentialsConfigured ? styles.metricGood : styles.metricDanger}`}>
           <span>Credentials</span>
@@ -179,6 +300,23 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
             </article>
           </div>
 
+          {events.length ? (
+            <div className={styles.eventLog}>
+              <header>
+                <strong>Live status</strong>
+                <span>data events from the worker session stream</span>
+              </header>
+              <ul>
+                {events.map((event) => (
+                  <li key={event.id} data-tone={event.tone}>
+                    <time>{event.at}</time>
+                    <span>{event.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {needsOtp ? (
             <div className={styles.otpCard}>
               <header>
@@ -219,11 +357,11 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
             <button
               className="button primary"
               disabled={!canEdit || pending || !session.credentialsConfigured}
-              onClick={() => void run(() => startMarshLogin(), "Login started — check OTP if prompted.")}
+              onClick={() => void connectMarsh()}
               type="button"
             >
               <KeyRound size={16} aria-hidden="true" />
-              {sessionReady ? "Re-login" : pending && session.status === "connecting" ? "Connecting…" : "Connect Marsh"}
+              {sessionReady ? "Re-login" : pending || session.status === "connecting" ? "Connecting…" : "Connect Marsh"}
             </button>
             <button
               className="button secondary"
@@ -241,12 +379,19 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
                 setError(null);
                 setMessage(null);
                 setPending(true);
+                pushEvent("info", "Syncing Marsh ecards to Drive…");
                 void syncMarshEcardsAction()
                   .then((result) => {
                     if (!result.ok) throw new Error(result.error || "Ecard sync failed");
-                    setMessage(`Uploaded ${result.uploaded} card file(s); skipped ${result.skipped}.`);
+                    const text = `Uploaded ${result.uploaded} card file(s); skipped ${result.skipped}.`;
+                    setMessage(text);
+                    pushEvent("good", text);
                   })
-                  .catch((err: unknown) => setError(err instanceof Error ? err.message : "Ecard sync failed"))
+                  .catch((err: unknown) => {
+                    const text = err instanceof Error ? err.message : "Ecard sync failed";
+                    setError(text);
+                    pushEvent("danger", text);
+                  })
                   .finally(() => setPending(false));
               }}
               type="button"
