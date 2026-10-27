@@ -1,5 +1,5 @@
 /**
- * Live NL/SLP loss case workflow. Money still moves only after SLP approval via payroll/payouts.
+ * Live NL/SLP loss case workflow. Money moves through payroll/payouts; exception plans require independent approval.
  * Approver identity is enforced in the app; the database enforces the state machine and no self-approve.
  */
 export const LIFECYCLE_STATUSES = [
