@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
 type Tab = 'queue' | 'catalog' | 'tally' | 'automation';
 
@@ -129,6 +129,134 @@ function StatusChip({ status, approval }: { status: string; approval: string }) 
 
 function runIdOf(status: RunStatus | null | undefined) {
   return status?.runId || status?.id || '';
+}
+
+function pdfUrl(draftInvoiceNumber: string) {
+  return `/api/finance/amazon-invoices/pdf?draftInvoiceNumber=${encodeURIComponent(draftInvoiceNumber)}`;
+}
+
+function PdfPreviewModal({ row, onClose }: { row: CatalogRow; onClose: () => void }) {
+  const shellRef = useRef<HTMLElement | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [fullscreen, setFullscreen] = useState(false);
+  const title = row.invoiceNumber || row.draftInvoiceNumber;
+  const fileName = `${(row.invoiceNumber || row.draftInvoiceNumber).replace(/[^\w.-]+/g, '_')}.pdf`;
+
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setError('');
+    setBlobUrl(null);
+    fetch(pdfUrl(row.draftInvoiceNumber), { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || `PDF failed (${response.status})`);
+        }
+        return response.blob();
+      })
+      .then((blob) => {
+        if (revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch((err) => {
+        if (!revoked) setError(err instanceof Error ? err.message : 'Unable to load PDF.');
+      })
+      .finally(() => {
+        if (!revoked) setLoading(false);
+      });
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [row.draftInvoiceNumber]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    const onFs = () => setFullscreen(Boolean(document.fullscreenElement));
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onFs);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    };
+  }, [onClose]);
+
+  const toggleFullscreen = async () => {
+    const node = shellRef.current;
+    if (!node) return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await node.requestFullscreen();
+    } catch {
+      setError('Fullscreen is not available in this browser.');
+    }
+  };
+
+  const download = () => {
+    if (!blobUrl) return;
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  return (
+    <div className="fp-modal-backdrop ai-pdf-backdrop" onClick={onClose} role="presentation">
+      <section
+        ref={shellRef}
+        className={`fp-modal ai-pdf-modal${fullscreen ? ' ai-pdf-fullscreen' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Invoice PDF ${title}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="ai-pdf-head">
+          <div>
+            <p className="fp-eyebrow">INVOICE PDF</p>
+            <h2>{title}</h2>
+            <p className="ai-muted">
+              {row.station || '—'}
+              {row.portalYmd ? ` · ${row.portalYmd}` : ''}
+              {row.amountPaise ? ` · ${money(row.amountPaise)}` : row.amountText ? ` · ${row.amountText}` : ''}
+            </p>
+          </div>
+          <div className="fp-actions ai-pdf-actions">
+            <button type="button" disabled={!blobUrl} onClick={download}>
+              Download
+            </button>
+            <button type="button" disabled={!blobUrl} onClick={() => void toggleFullscreen()}>
+              {fullscreen ? 'Exit full screen' : 'Full screen'}
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="ai-pdf-stage">
+          {loading && <p className="ai-muted ai-pdf-status">Loading PDF from Amazon…</p>}
+          {error && (
+            <p className="fp-warning" role="alert">
+              {error}
+            </p>
+          )}
+          {blobUrl && !error && (
+            <iframe title={`PDF ${title}`} src={`${blobUrl}#toolbar=1&navpanes=0`} className="ai-pdf-frame" />
+          )}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function defaultRange() {
@@ -557,6 +685,7 @@ function CatalogPanel({
   const [syncFrom, setSyncFrom] = useState(defaults.from);
   const [syncTo, setSyncTo] = useState(defaults.to);
   const [reloadToken, setReloadToken] = useState(0);
+  const [pdfRow, setPdfRow] = useState<CatalogRow | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -621,16 +750,9 @@ function CatalogPanel({
         .catch((err) => setNotice(err instanceof Error ? err.message : 'Catalog sync failed.'));
     });
 
-  const openPdf = (row: CatalogRow) => {
-    window.open(
-      `/api/finance/amazon-invoices/pdf?draftInvoiceNumber=${encodeURIComponent(row.draftInvoiceNumber)}`,
-      '_blank',
-      'noopener,noreferrer',
-    );
-  };
-
   return (
     <section className="fp-panel">
+      {pdfRow && <PdfPreviewModal row={pdfRow} onClose={() => setPdfRow(null)} />}
       <div className="ai-card-head">
         <div>
           <h2>Invoice catalog</h2>
@@ -758,7 +880,7 @@ function CatalogPanel({
                   </td>
                   <td>{row.paymentDate || '—'}</td>
                   <td>
-                    <button type="button" onClick={() => openPdf(row)}>
+                    <button type="button" onClick={() => setPdfRow(row)}>
                       Open
                     </button>
                   </td>

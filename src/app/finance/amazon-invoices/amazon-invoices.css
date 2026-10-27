@@ -59,3 +59,18 @@
   .ai-kpis{grid-template-columns:1fr}
   .ai-card-head{flex-direction:column}
 }
+
+.ai-pdf-backdrop{z-index:1200}
+.ai-pdf-modal{width:min(1100px,96vw);max-height:92vh;display:flex;flex-direction:column;padding:16px 16px 12px;gap:10px}
+.ai-pdf-modal.ai-pdf-fullscreen,.ai-pdf-modal:fullscreen{width:100vw;max-width:none;height:100vh;max-height:none;border-radius:0;padding:12px}
+.ai-pdf-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.ai-pdf-head h2{font-size:18px;margin:2px 0 4px}
+.ai-pdf-actions{flex-wrap:wrap}
+.ai-pdf-stage{flex:1;min-height:0;display:flex;flex-direction:column;background:#eef3f6;border:1px solid var(--fp-line,#dce5ea);border-radius:10px;overflow:hidden}
+.ai-pdf-frame{flex:1;width:100%;min-height:min(70vh,760px);border:0;background:#525659}
+.ai-pdf-modal:fullscreen .ai-pdf-frame,.ai-pdf-modal.ai-pdf-fullscreen .ai-pdf-frame{min-height:0;height:100%}
+.ai-pdf-status{padding:24px;margin:0}
+@media(max-width:700px){
+  .ai-pdf-head{flex-direction:column}
+  .ai-pdf-frame{min-height:55vh}
+}
