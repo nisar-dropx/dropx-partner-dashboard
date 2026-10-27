@@ -14,21 +14,21 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
 (async()=>{
  const {assertLifecycleAction}=load('src/lib/ops-pulse/nl-loss-lifecycle.ts');
  const base={companyId:'C',userId:'actor',roleCode:'OPERATIONS_SI',isMasterOwner:false,readOnly:false};
- for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH']){
+ for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_GM','GENERAL_MANAGER']){
   auth={...base,roleCode};await assertLifecycleAction(auth,'S','propose');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve'),/Only SLP Manager/);
  }
- for(const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_GM','GENERAL_MANAGER']){
+ for(const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_MP']){
   auth={...base,roleCode};await assertLifecycleAction(auth,'S','approve','someone-else');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve','actor'),/another authorised/);
  }
  await assert.rejects(()=>assertLifecycleAction({...base,readOnly:true},'S','propose'),/edit access/);
  const api=load('src/app/api/ops-pulse/losses/case-response/route.ts');
  const post=(body,origin='https://ops.dropxlogistics.com')=>api.POST(new Request('https://ops.dropxlogistics.com/api/ops-pulse/losses/case-response',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({month:'2026-09',case_key:'T1',version:1,note:'Detailed response for review',...body})}));
- for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH']){auth={...base,roleCode};for(const action of ['activate','revoke','vendor_response','tracking'])assert.equal((await post({action})).status,403);}
+ for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_GM','GENERAL_MANAGER']){auth={...base,roleCode};for(const action of ['activate','revoke','vendor_response','tracking'])assert.equal((await post({action})).status,403);}
  assert.equal(rpcCalls,0,'Denied roles cannot invoke a transition');
  auth={...base,roleCode:'OPERATIONS_SLPM'};assert.equal((await post({action:'tracking',tt_reference:'TT-123',followup_status:'filed',followup_on:'2026-11-01'})).status,200);
  assert.equal((await post({action:'activate'},'https://evil.example')).status,403);
  assert.equal((await post({action:'tracking',tt_url:'javascript:alert(1)'})).status,403);
  assert.equal((await post({action:'tracking',case_key:'outside'})).status,403);
  auth={...base,roleCode:'OPERATIONS_SLPM',readOnly:true};assert.equal((await post({action:'activate'})).status,403);
- console.log('PASS actual approval guards and redispute API: station proposals, authorised final roles including GM, no self-approval, read-only, cross-origin, unsafe URL and station-scope denial.');
+ console.log('PASS actual approval guards and redispute API: station proposals, authorised final roles including Managing Partner; GM denied, no self-approval, read-only, cross-origin, unsafe URL and station-scope denial.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
