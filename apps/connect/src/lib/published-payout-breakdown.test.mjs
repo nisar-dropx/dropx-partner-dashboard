@@ -103,7 +103,8 @@ test("payout disputes stay with Workforce and the associate view has no conversa
 
   assert.match(route, /body\.operation\s*!==\s*["']create["']/);
   assert.doesNotMatch(route, /workforce_reply_payout_dispute|ownOpenDispute/);
-  assert.doesNotMatch(loader, /workforce_payout_dispute_events/);
+  assert.match(loader, /workforce_payout_dispute_events/);
+  assert.match(loader, /associatePayoutDispute\([\s\S]*eventsByDispute/);
 });
 
 test("associate payout disputes show approvals, correction progress and final payment context", () => {
