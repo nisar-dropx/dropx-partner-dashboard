@@ -193,6 +193,10 @@ function loadWorkforceLifecycleActions(currentProfile) {
         return "company-id";
       }
     },
+    "@/lib/lifecycle-automation": {
+      async enqueueActivationAutomation() {},
+      async enqueueOffboardAutomation() {}
+    },
     "@/lib/supabase-admin": {
       supabaseAdmin: {
         from() {
