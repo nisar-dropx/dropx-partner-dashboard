@@ -167,7 +167,7 @@ export function NlLossReport({
           {copy.decision} · Source refreshed {time(v.monthLastSeen)}
         </span>
       </div>
-      <LossFinalMetrics summary={v.totals.reduce((a,t)=>({count:a.count+t.count,amount:a.amount+t.amount,updated:a.updated+t.updated,updatedAmount:a.updatedAmount+t.updatedAmount,pendingUpdate:a.pendingUpdate+t.pendingUpdate,pendingUpdateAmount:a.pendingUpdateAmount+t.pendingUpdateAmount}),{count:0,amount:0,updated:0,updatedAmount:0,pendingUpdate:0,pendingUpdateAmount:0})}/>
+      {!v.station ? <LossFinalMetrics summary={v.totals.reduce((a,t)=>({count:a.count+t.count,amount:a.amount+t.amount,updated:a.updated+t.updated,updatedAmount:a.updatedAmount+t.updatedAmount,pendingUpdate:a.pendingUpdate+t.pendingUpdate,pendingUpdateAmount:a.pendingUpdateAmount+t.pendingUpdateAmount}),{count:0,amount:0,updated:0,updatedAmount:0,pendingUpdate:0,pendingUpdateAmount:0})}/> : null}
       <p className={styles.hint}>Updated means recovery details saved. Actual deductions are shown by payroll month in Recovery.</p>
       {v.totals.length ? (
         <LossWorkbook

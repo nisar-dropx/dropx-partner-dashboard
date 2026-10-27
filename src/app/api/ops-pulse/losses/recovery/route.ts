@@ -99,8 +99,8 @@ export async function GET(request: Request) {
       people,
       can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && !responseWindow.data?.enabled && responseWindow.data?.workflow_status !== "won",
       can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
-      can_recovered: mayMarkAlreadyRecovered(auth) && hasPermission(auth, "ops_losses", "edit"),
-      can_response: !!responseWindow.data?.enabled || mayActivateRedispute(auth),
+      can_recovered: false,
+      can_response: !!responseWindow.data?.enabled,
       history: history.data ?? [],
     });
   } catch (e) {

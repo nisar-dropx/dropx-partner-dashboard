@@ -162,7 +162,7 @@ export function NlLiveReport({
             </div>
             </> : null}
           </div>
-          {isFinal ? <><LossFinalMetrics summary={s}/><p className={styles.hint}>Updated means recovery details saved; deductions appear in Recovery by payroll month.</p></> : null}
+          {isFinal && !v.station ? <LossFinalMetrics summary={s}/> : null}
           {!isFinal && v.canDesk && v.deskQueue ? (
             <div className={styles.workbook}>
               <div>

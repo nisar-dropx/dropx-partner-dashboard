@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { RecoveryDetail, type Recovery } from "./connect-loss-recovery-detail";
 
 const money = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { ConnectDialog } from "./connect-dialog";
+import styles from "./connect-loss-recoveries.module.css";
 const monthLabel = (value: string) => value;
 
 export function ConnectLossRecoveries({
@@ -13,6 +15,7 @@ export function ConnectLossRecoveries({
   accountId: string;
   profileType: string;
 }) {
+  const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Recovery[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -79,13 +82,9 @@ export function ConnectLossRecoveries({
   if (!rows.length && !error) return null;
 
   return (
-    <section className="dx-loss-recoveries" aria-label="Loss recoveries on your pay">
-      <header>
-        <h2>Loss recoveries</h2>
-        <p>
-          Your assigned recoveries and deduction history. Open a case to see its value, your share and the remaining balance.
-        </p>
-      </header>
+    <section className={styles.summary} aria-label="Loss recoveries on your pay">
+      <button type="button" className={styles.trigger} onClick={()=>setOpen(true)} aria-haspopup="dialog"><span>Loss recovery <small>{error ? "Unable to load · tap to retry" : `${rows.length} shipment${rows.length===1?"":"s"} · outstanding`}</small></span><strong>{error ? "—" : money(rows.reduce((sum,r)=>sum+r.outstanding,0))} <span aria-hidden>›</span></strong></button>
+      {open ? <ConnectDialog title="Loss recovery" eyebrow="Your assigned shipments" onClose={()=>setOpen(false)} className={styles.dialog}>
       {error ? (
         <p role="alert">
           {error}{" "}
@@ -94,7 +93,7 @@ export function ConnectLossRecoveries({
           </button>
         </p>
       ) : null}
-      <ul>
+      <ul className={styles.list}>
         {rows.map((row) => {
           const key = `${row.month}:${row.caseKey}`;
           return (
@@ -114,14 +113,15 @@ export function ConnectLossRecoveries({
                 {money(row.outstanding)}
                 {row.inPayroll > 0 ? ` · In draft payroll ${money(row.inPayroll)}` : ""}
               </p>
-              <div className="dx-loss-recoveries-actions">
+              {row.clarifications?.length ? <details><summary>Questions &amp; replies · {row.clarifications.length}</summary>{row.clarifications.map((q,i)=><div key={i}><p><b>You:</b> {q.note}</p>{q.decision_note?<p><b>{q.decided_by_name||"Loss review team"}:</b> {q.decision_note}</p>:<small>Awaiting loss review team · recovery paused</small>}</div>)}</details>:null}
+              <div className={styles.actions}>
                 <button type="button" onClick={() => setDetail(row)}>
                   View details
                 </button>
                 {active === key ? (
                   <div>
                     <label>
-                      Clarification note
+                      Ask the loss review team
                       <textarea
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
@@ -129,8 +129,9 @@ export function ConnectLossRecoveries({
                         maxLength={4000}
                       />
                     </label>
+                    <small>Reviewed by SLP / Finance / National Head / Managing Partner. Your recovery pauses for review; the reply appears here.</small>
                     <button type="button" disabled={busy} onClick={() => void submitClarification(row)}>
-                      Submit clarification
+                      Send for review
                     </button>
                     <button type="button" disabled={busy} onClick={() => setActive(null)}>
                       Cancel
@@ -146,6 +147,7 @@ export function ConnectLossRecoveries({
           );
         })}
       </ul>
+      </ConnectDialog> : null}
       {detail ? <RecoveryDetail detail={detail} onClose={() => setDetail(null)}/> : null}
     </section>
   );

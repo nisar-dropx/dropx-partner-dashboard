@@ -20,9 +20,9 @@ export function LossFinalMetrics({
   };
 }) {
   return (
-    <div className={styles.metrics}>
+    <div className={styles.finalMetrics}>
       <div>
-        <span>Total shipments</span>
+        <span>Filtered shipments</span>
         <strong>{s.count.toLocaleString("en-IN")}</strong>
         <small>{money(s.amount)}</small>
       </div>

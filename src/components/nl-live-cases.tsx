@@ -19,6 +19,8 @@ import { RecoveryForm } from "./nl-loss-cases";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
+import { recoveryDetailsUpdated, finalRecoverySummary } from "@/lib/ops-pulse/loss-final-summary";
+import { LossFinalMetrics } from "./loss-final-metrics";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -36,6 +38,8 @@ const when = (s: string) =>
     minute: "2-digit",
   });
 const FILTERS = [
+  { key: "pending_updates", label: "Pending update", phases: null },
+  { key: "updated", label: "Updated", phases: null },
   { key: "recoverable", label: "Recoverable", phases: null },
   { key: "nonrecoverable", label: "Non-recoverable", phases: null },
   { key: "not_disputed", label: "Not disputed", phases: null },
@@ -98,7 +102,7 @@ export function NlLiveCases({
   const [sort, setSort] = useState("value_desc");
   const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [filter, setFilter] = useState(
-    initialPhase === "all" ? "" : initialPhase && FILTERS.some((f) => f.key === initialPhase) ? initialPhase : stageView === "final" ? "recoverable" : "",
+    initialPhase === "all" ? "" : initialPhase && FILTERS.some((f) => f.key === initialPhase) ? initialPhase : stageView === "final" ? "pending_updates" : "",
   );
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
@@ -107,13 +111,14 @@ export function NlLiveCases({
     () => cases.map((c) => ({ c, phase: phaseOf(c) })),
     [cases],
   );
-  const counts = (key: string) => withPhase.filter(x => lossStatusMatches(key, x.c.recoverable, x.phase.key)).length;
+  const matchesStatus = (key: string, c: LiveCase, phase: string) => key === "pending_updates" ? c.recoverable && !recoveryDetailsUpdated(c,c.recovery) : key === "updated" ? c.recoverable && recoveryDetailsUpdated(c,c.recovery) : lossStatusMatches(key,c.recoverable,phase);
+  const counts = (key: string) => withPhase.filter(x => matchesStatus(key, x.c, x.phase.key)).length;
   const shown = useMemo(() => {
     const phases = FILTERS.find((f) => f.key === filter)?.phases ?? null;
     const q = query.trim().toLowerCase();
     return withPhase.filter(
       ({ c, phase }) =>
-        lossStatusMatches(filter, c.recoverable, phase.key) &&
+        matchesStatus(filter, c, phase.key) &&
         (!q ||
           [
             c.details.tid,
@@ -163,6 +168,7 @@ export function NlLiveCases({
   }
   return (
     <section className={styles.panel}>
+      {stageView === "final" ? <LossFinalMetrics summary={finalRecoverySummary(shown.map(({c})=>({amount:c.amount,recoverable:c.recoverable,updated:recoveryDetailsUpdated(c,c.recovery)})))}/> : null}
       <TrackingDetailModal trackingId={tracking?.id ?? null} stationHint={tracking?.station} onClose={() => setTracking(null)} />
       <div className={styles.panelHead}>
         <div>
@@ -176,7 +182,7 @@ export function NlLiveCases({
           <select aria-label="Sort live cases" value={sort} onChange={e=>{setSort(e.target.value);setPage(0);}}>{LOSS_SORTS.filter(o=>o.value!=="cases_desc").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <input
             aria-label="Search live cases"
-            placeholder="Search TID or reason"
+            placeholder="Search Shipment ID or reason"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -189,7 +195,7 @@ export function NlLiveCases({
         </div>
       </div>
       <div className={styles.chips} role="tablist" aria-label="Case status">
-        {FILTERS.filter(f => stageView === "final" ? !["todo", "amazon", "not_disputed", "sla_missed"].includes(f.key) : !["recoverable", "nonrecoverable"].includes(f.key)).map((f) => (
+        {FILTERS.filter(f => stageView === "final" ? !["todo", "amazon", "not_disputed", "sla_missed"].includes(f.key) : !["pending_updates", "updated", "recoverable", "nonrecoverable"].includes(f.key)).map((f) => (
           <button
             key={f.key || "all"}
             role="tab"
@@ -231,7 +237,7 @@ export function NlLiveCases({
                       {phase.label}
                     </span>
                     {stageView === "final" && ["not_disputed", "sla_missed"].includes(c.details.case_status || "") ? <span className={styles.hint}>{c.details.case_status?.replaceAll("_", " ")}</span> : null}
-                    {c.recoverable ? <span className={styles.pending}>{recoveryNeedsReview(c) ? "Recovery review needed" : recoveryPending(c.recovery) ? "Recovery outstanding" : "Recovery plan recorded"}</span> : null}
+                    {c.recoverable ? <span className={styles.pending}>{recoveryNeedsReview(c) ? "Recovery review needed" : !recoveryDetailsUpdated(c,c.recovery) ? "Pending recovery update" : "Recovery details updated"}</span> : null}
                     {c.request &&
                     !filedInCloak(c.request, likeOf(c)) &&
                     (requestSent(c.request, c.details.extra?.current_sla_stage) ||

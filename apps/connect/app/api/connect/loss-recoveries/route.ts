@@ -96,6 +96,8 @@ export async function GET(request: Request) {
     const debitRows = await client.rpc("nl_recovery_debits", {p_company:company,p_ref:ref});
     if(debitRows.error) throw new Error("Your deduction history could not be loaded. Please retry.");
     const ownDebits=(debitRows.data ?? []).filter((r: {employee_ref:string})=>r.employee_ref===ref);
+    const questions = await client.from("nl_loss_clarifications").select("month,case_key,note,status,decision_note,decided_by_name,created_at").eq("company_id",company).eq("employee_ref",ref).order("created_at",{ascending:false}).limit(500);
+    if(questions.error)throw Error("Your recovery questions could not be loaded.");
     const recoveries = [];
     for (const row of rows) {
       const caseRow = await client
@@ -122,6 +124,7 @@ export async function GET(request: Request) {
       const details = (caseRow.data?.details ?? {}) as Record<string, unknown>;
       const share = myAllocation(plan.data?.allocations, ref);
       recoveries.push({
+        clarifications: (questions.data||[]).filter(q=>q.month===row.month && q.case_key===row.case_key),
         month: row.month,
         caseKey: row.case_key,
         tid: tidFromCase(row.case_key, details),
@@ -193,7 +196,7 @@ export async function POST(request: Request) {
     const month = String(body.month || "");
     const caseKey = String(body.caseKey || "");
     const note = String(body.note || "").trim();
-    if (!month || !caseKey || note.length < 10) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !caseKey || note.length < 10 || note.length > 4000) {
       return NextResponse.json({ error: "Case, month and a note (10+ characters) are required." }, { status: 400 });
     }
     const ref = recoveryRef(profileType, accountId);

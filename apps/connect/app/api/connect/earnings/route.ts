@@ -1,3 +1,4 @@
+import {ownLossRecoveryEstimate} from "@/lib/own-loss-recovery";
 import { loadRouteDistanceContext } from '../../../../../../src/lib/workforce-route-distance-data';
 import { kilometreRate, isKilometreField } from '../../../../../../src/lib/workforce-route-distance';
 import { ownRouteFuel } from '@/lib/own-route-fuel';
@@ -224,7 +225,9 @@ export async function GET(request: Request) {
     // a separate historical record, never added again and never treated as outstanding dues.
     summary.additions=adjustments.summary.additions;
     summary.grossAmount=Math.round((summary.baseAmount+incentives.summary.amount+summary.additions)*100)/100;
-    const deductionAmount=adjustments.summary.deductions,netAmount=Math.round((summary.grossAmount-deductionAmount)*100)/100;
-    return NextResponse.json({ month, earnings, routeFuel, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
+    const due = workforce?.id ? await db().rpc("nl_loss_recovery_due",{p_company:account.companyId,p_salary_month:month,p_target:"workforce"}) : {data:[],error:null};
+    if(due.error)throw new Error("Your loss deductions could not be verified. Please retry.");
+    const {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due.data||[]);
+    return NextResponse.json({ month, earnings, routeFuel, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load earnings." }, { status: 400,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"} }); }
 }

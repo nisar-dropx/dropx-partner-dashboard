@@ -22,6 +22,8 @@ import {
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { recoveryActionAllowed, departedPersonError, receivedRecoveryError } from "@/lib/ops-pulse/loss-recovery-controls";
+import { recoveryDetailsUpdated, finalRecoverySummary } from "@/lib/ops-pulse/loss-final-summary";
+import { LossFinalMetrics } from "./loss-final-metrics";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
@@ -74,14 +76,14 @@ export function NlLossCases({
 }) {
   const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [sort, setSort] = useState("value_desc");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState("pending");
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
     [active, setActive] = useState<string | null>(null);
   const shown = useMemo(
     () =>
       sortLossRows(cases.filter((c) =>
-        (status !== "pending" || recoveryPending(c.recovery)) &&
+        (status === "all" || (status === "updated") === recoveryDetailsUpdated(c,c.recovery,c.report === "slp")) &&
         [
           c.station_code,
           ...(c.recovery?.allocations.map(p => `${p.full_name} ${p.employee_code}`) || []),
@@ -168,6 +170,7 @@ export function NlLossCases({
   }
   return (
     <section className={styles.panel}>
+      <LossFinalMetrics summary={finalRecoverySummary(shown.map(c=>({amount:c.amount,recoverable:true,updated:recoveryDetailsUpdated(c,c.recovery,c.report==="slp")})))}/>
       <TrackingDetailModal trackingId={tracking?.id ?? null} stationHint={tracking?.station} onClose={() => setTracking(null)} />
       <div className={styles.panelHead}>
         <div>
@@ -179,7 +182,7 @@ export function NlLossCases({
           </p>
         </div>
         <div className={styles.toolbar}>
-          <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All recovery cases</option><option value="pending">Recovery update pending</option></select>
+          <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}><option value="pending">Pending update</option><option value="updated">Updated</option><option value="all">All recovery cases</option></select>
           <select aria-label="Sort recovery cases" value={sort} onChange={e=>setSort(e.target.value)}>{LOSS_SORTS.filter(o=>o.value!=="cases_desc").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <input
             aria-label="Search recovery cases"
@@ -422,9 +425,6 @@ export function RecoveryForm({
       : undefined;
   const locked = !!savedOutcome?.restricted && !canRecovered;
   const canEdit = mayEdit && canPropose && !locked;
-  const quick = canRecovered
-    ? outcomes.find((o) => o.restricted && o.is_active && o.code !== outcome)
-    : undefined;
   const splits =
     mode === "equal"
       ? splitRecovery(row.amount, selected)
@@ -657,8 +657,7 @@ export function RecoveryForm({
           save the correct allocation again.
         </p>
       ) : null}
-      {(recovery as { approval_status?: string } | null)?.approval_status ===
-      "proposed" ? (
+      {["proposed","needs_review"].includes(recovery?.approval_status || "") ? (
         <p className={styles.notice}>
           Exception awaiting approval. Payroll is paused until independently confirmed.
           {canApprove && mayApproveCase ? (
@@ -709,7 +708,7 @@ export function RecoveryForm({
         </p>
       ) : null}
       {recovery?.approval_status === "returned" || row.lifecycle_status === "returned_to_station" ? <p className={styles.notice}>Returned for update: {recovery?.approval_note || row.lifecycle_note}. Correct the details and submit again.</p> : null}
-      {canApprove && recovery && ["proposed", "approved", "needs_review"].includes(recovery.approval_status || "") && !["recovered", "written_off", "not_recoverable"].includes(row.lifecycle_status || "") ? <details className={styles.compactDetails}><summary>Return for correction</summary>
+      {canApprove && mayApproveCase && recovery && ["proposed", "needs_review"].includes(recovery.approval_status || "") && !["recovered", "written_off", "not_recoverable"].includes(row.lifecycle_status || "") ? <details className={styles.compactDetails}><summary>Return for correction</summary>
         <textarea aria-label="Reason for return" value={returnNote} onChange={e => setReturnNote(e.target.value)} minLength={10} maxLength={2000} rows={2} placeholder="What must the station correct?" />
         <button className={styles.button} disabled={busy || returnNote.trim().length < 10} onClick={async () => {
           if (!recovery) return;
@@ -747,27 +746,9 @@ export function RecoveryForm({
         <p role="status">Loading recovery…</p>
       ) : (
         <form onSubmit={save}>
-          {canEdit && quick ? (
-            <div className={styles.quick}>
-              <span>
-                Recovery already received?
-              </span>
-              <button
-                type="button"
-                className={styles.button}
-                disabled={busy}
-                onClick={() => {
-                  setOutcome(quick.code);
-                  setSuccess("");
-                }}
-              >
-                {quick.label}
-              </button>
-            </div>
-          ) : null}
           <fieldset
             disabled={!canEdit || busy || uploading || !directoryReady}
-            className={styles.fieldset}
+            className={`${styles.fieldset} ${styles.recoveryForm}`}
           >
             <label>
               Recovery action
@@ -808,18 +789,6 @@ export function RecoveryForm({
               <small>Departure does not close the loss. The full balance remains outstanding.</small>
             </div> : null}
             {option?.allocation_required ? <label>Recovery payroll month<input type="month" value={deductionPeriod || ""} min={deductionMonths.current_month} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}/><small>Previous payroll stays open through day {policy?.payroll_cutoff_day || 5}. A later month requires approval.</small></label> : null}
-            {option?.allocation_required && deductionPeriod ? (
-              <p className={styles.notice}>
-                <strong>
-                  Recovery from {monthLabel(deductionPeriod)} payroll
-                </strong>
-                <br />
-                {awaitingFinal
-                  ? "SLP Initial is a report only. Assign employees once this case is in the SLP Final file. "
-                  : null}
-                Allocate the full amount. Full current-payroll recovery is automatic; exceptions need approval.
-              </p>
-            ) : null}
             {option?.allocation_required ? (
               <div className={styles.allocation}>
                 <div className={styles.toolbar}>
@@ -864,7 +833,7 @@ export function RecoveryForm({
                       onChange={() => setPlan({ ...plan, mode: "full" })}
                     />
                     <strong>Full debit</strong>
-                    <small>Each person&apos;s whole share in one salary.</small>
+
                   </label>
                   <label className={styles.method}>
                     <input
@@ -876,9 +845,7 @@ export function RecoveryForm({
                       }
                     />
                     <strong>Recurring debit</strong>
-                    <small>
-                      Spread across salaries, one instalment each payroll.
-                    </small>
+
                   </label>
                 </div>
                 {plan.mode === "installments" ? (
@@ -922,17 +889,15 @@ export function RecoveryForm({
                     </label>
                   </div>
                 ) : null}
-                <p className={styles.hint}>
-                  Eligible station DAs, People staff and Station Manager and
-                  below, using the rules in Master. Cluster / City / Area
-                  managers are not debit targets.
+                <details className={styles.compactDetails}><summary>Recovery rules</summary><p className={styles.hint}>
+                  Eligible station DAs and People staff, using the current debit-scope rules in Master.
                   {capEnabled
                     ? ` Loss recoveries take at most ${capPercent}% of a person's take-home in one month; a recurring debit counts one instalment.`
                     : ""}
                   {plan.mode === "installments"
                     ? " A missed month moves the remaining instalments on. If a person exits, the balance is recovered in their final settlement."
                     : ""}
-                </p>
+                </p></details>
                 {salaryLoading && selected.length > 0 ? <p role="status" className={styles.hint}>Checking salary limits for selected people…</p> : null}
                 {salaryError ? <p role="alert" className={styles.failure}>{salaryError}</p> : null}
                 {!search.trim() && !selected.length ? <p className={styles.hint}>Open Select names to choose Station Manager and below (station staff and DAs).</p> : null}

@@ -45,6 +45,11 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  for(const rows of [[],[null],[{month:'bad',case_key:'T1',version:0}],Array(101).fill({month:'2026-09',case_key:'T1',version:0}),Array(2).fill({month:'2026-09',case_key:'T1',version:0})]){
   const before=rpcCalls;assert.equal((await post({action:'bulk_activate',rows})).status,400);assert.equal(rpcCalls,before,'Invalid bulk input causes no partial writes');
  }
+ auth={...base,roleCode:'OPERATIONS_SLPM'};
+ const beforeBulk=rpcCalls;
+ const mixed=await post({action:'bulk_update',rows:[{month:'2026-09',case_key:'T1',version:1,action:'activate'},{month:'2026-09',case_key:'T2',version:1,action:'revoke',note:'Enabled by mistake, revoke'}]});assert.equal(mixed.status,200);assert.equal(rpcCalls,beforeBulk+2);
+ const beforeInvalid=rpcCalls;assert.equal((await post({action:'bulk_update',rows:[{month:'2026-09',case_key:'T1',version:1,action:'activate'},{month:'2026-09',case_key:'T2',version:1,action:'revoke',note:''}]})).status,400);assert.equal(rpcCalls,beforeInvalid);
+ auth={...base,roleCode:'OPERATIONS_CLM'};assert.equal((await post({action:'bulk_update',rows:[{month:'2026-09',case_key:'T1',version:1,action:'revoke',note:'Disable this shipment now'}]})).status,403);
  auth={...base,roleCode:'OPERATIONS_SLPM',denied:true};assert.equal((await post({action:'bulk_activate',rows:[{month:'2026-09',case_key:'T1',version:0}]})).status,403);
  auth={...base,roleCode:'OPERATIONS_SLPM',readOnly:true};assert.equal((await post({action:'activate'})).status,403);
  console.log('PASS actual approval guards and redispute API: station proposals, authorised final roles including Managing Partner; GM denied, no self-approval, read-only, cross-origin, unsafe URL and station-scope denial.');
