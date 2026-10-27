@@ -373,12 +373,12 @@ eq('Real debit records stay in actual payroll month',(await db.query(`select pay
 
 // Reporting chains include station staff and their CM/AOM, never the next senior role.
 const uid=n=>`10000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
-for(const [i,code,name] of [[1,'SSA','Station Associate'],[2,'CLM','Cluster Manager'],[3,'AOM','Area Operations Manager'],[4,'NH','National Head']]){
+for(const [i,code,name] of [[1,'SSA','Station Associate'],[2,'CLM','Cluster Manager'],[3,'AOM','Area Operations Manager'],[4,'NH','National Head'],[5,'HLM','Head Operations- Last Mile']]){
  await db.exec(`insert into designations values('${uid(i)}','${C}','${code}','${name}');
- insert into employees(id,company_id,employee_code,full_name,location_id) values('${uid(10+i)}','${C}','P${i}','Person ${name}',${i===1?`'${S}'`:'null'});
+ insert into employees(id,company_id,employee_code,full_name,location_id) values('${uid(10+i)}','${C}','P${i}','Person ${name}',${i===1||i===5?`'${S}'`:'null'});
  insert into hr_people values('${uid(20+i)}','${C}','Person ${name}','active');
  insert into hr_engagements values('${uid(30+i)}','${C}','${uid(20+i)}','${uid(10+i)}',null,'P${i}','2020-01-01',null,'active');
- insert into hr_work_assignments values('${uid(40+i)}','${C}','${uid(30+i)}',${i===1?`'${S}'`:'null'},'${uid(i)}',null,true,'2020-01-01',null);`);
+ insert into hr_work_assignments values('${uid(40+i)}','${C}','${uid(30+i)}',${i===1||i===5?`'${S}'`:'null'},'${uid(i)}',null,true,'2020-01-01',null);`);
  if(i>1)await db.exec(`insert into hr_reporting_relationships values('${C}','${uid(39+i)}','${uid(40+i)}',true,'solid_line','2020-01-01',null)`);
 }
 const names=(await db.query(`select designation from loss_recovery_people('${C}','${S}')`)).rows.map(r=>r.designation);
@@ -386,6 +386,7 @@ eq('Station People name is available',names.includes('Station Associate'),true);
 eq('Mapped cluster manager is included',names.includes('Cluster Manager'),true);
 eq('AOM ceiling is included',names.includes('Area Operations Manager'),true);
 eq('National Head above ceiling excluded',names.includes('National Head'),false);
+eq('Station-mapped operations head above ceiling excluded',names.includes('Head Operations- Last Mile'),false);
 await db.exec(`insert into workforce(id,company_id,dropx_id,full_name,location_id,source_profile_type,source_profile_id) values('${uid(90)}','${C}','MIRROR','Duplicate person','${S}','employee','${uid(11)}')`);
 eq('People workforce mirror deduplicated',(await db.query(`select ref from loss_recovery_people('${C}','${S}') where ref='workforce:${uid(90)}'`)).rows.length,0);
 const redisputeSql=readFileSync("supabase/migrations/20261027210000_loss_redispute_review.sql","utf8");

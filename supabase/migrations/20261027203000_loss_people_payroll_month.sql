@@ -4,7 +4,7 @@ begin;
 update nl_loss_sources set recovery_policy=recovery_policy||jsonb_build_object(
  'payroll_cutoff_day',5,'salary_month_offset',0,
  'directory_ceiling_designations',coalesce(recovery_policy->'directory_ceiling_designations','["AOM"]'::jsonb),
- 'directory_excluded_designations',coalesce(recovery_policy->'directory_excluded_designations','["NH","BH","RH","RM","ZH","GM","FINMGR","SLPM","MP","MANAGING_PARTNER","OWNER"]'::jsonb))
+ 'directory_excluded_designations',coalesce(recovery_policy->'directory_excluded_designations','["NH","BH","HLM","HRM","RH","RM","ZH","GM","FINMGR","SLPM","MP","MANAGING_PARTNER","OWNER"]'::jsonb))
 where not (recovery_policy ? 'directory_ceiling_designations');
 
 create or replace function loss_recovery_people(p_company uuid,p_station uuid)
