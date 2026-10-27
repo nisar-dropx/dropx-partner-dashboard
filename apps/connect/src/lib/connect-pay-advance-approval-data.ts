@@ -14,14 +14,15 @@ export async function listConnectPayAdvanceApprovals(account: ConnectAccount): P
   if (steps.error) throw new Error(steps.error.message);
   if (!steps.data?.length) return [];
   const requests = await db().from("hr_pay_advance_requests")
-    .select("id,request_number,worker_name,worker_code,requested_amount,approved_amount,recovery_mode,requested_installments,approved_installments,reason,needed_by")
+    .select("id,request_number,worker_name,worker_code,requested_amount,approved_amount,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by")
     .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map(step => step.request_id));
   if (requests.error) throw new Error(requests.error.message);
   return (requests.data ?? []).map(row => {
     const step = steps.data.find(item => item.request_id === row.id)!;
     return { id: step.id, requestId: row.id, requestNumber: row.request_number, workerName: row.worker_name,
       workerCode: row.worker_code ?? "", stepName: step.step_name, stepType: step.step_type, requestedAmount: Number(row.requested_amount),
-      approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount), recoveryMode: row.recovery_mode,
+      approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
+      maxEligibleAmount: Number(row.max_eligible_amount_snapshot ?? row.requested_amount), recoveryMode: row.recovery_mode,
       installments: row.approved_installments ?? row.requested_installments, reason: row.reason, neededBy: row.needed_by };
   });
 }
@@ -44,12 +45,19 @@ export async function decideConnectPayAdvanceApproval(account: ConnectAccount, r
   const step = pending.data;
   if (!step) throw new Error("This pay advance is not assigned to you or is no longer pending.");
   let terms: ReturnType<typeof payAdvanceFinanceTerms> | null = null;
-  if (step.step_type === "finance" && decision.decision === "approved") {
-    const request = await db().from("hr_pay_advance_requests").select("requested_amount")
+  if (decision.decision === "approved") {
+    const request = await db().from("hr_pay_advance_requests").select("requested_amount,max_eligible_amount_snapshot,requested_installments")
       .eq("company_id", account.companyId).eq("id", requestId).eq("status", "pending").maybeSingle();
     if (request.error) throw new Error(request.error.message);
     if (!request.data) throw new Error("This pay advance is no longer pending.");
-    terms = payAdvanceFinanceTerms(amount, installments, Number(request.data.requested_amount));
+    const decisionMaximum = step.step_type === "finance"
+      ? Number(request.data.max_eligible_amount_snapshot ?? request.data.requested_amount)
+      : Number(request.data.requested_amount);
+    terms = payAdvanceFinanceTerms(
+      amount,
+      step.step_type === "finance" ? installments : request.data.requested_installments,
+      decisionMaximum
+    );
   }
   const result = await db().rpc("hr_decide_pay_advance_step", {
     p_company_id: account.companyId, p_request_id: requestId, p_actor_user_id: step.approver_user_id,

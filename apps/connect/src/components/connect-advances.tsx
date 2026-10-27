@@ -15,6 +15,16 @@ type AdvanceRequest = {
   requested_at: string;
   updated_at: string;
   canWithdraw?: boolean;
+  maxEligibleAmount?: number | null;
+  outstandingPay?: number | null;
+  steps?: Array<{ stepName: string; status: string; note?: string | null }>;
+};
+
+type AdvanceCapacity = {
+  outstandingPay: number;
+  committedAdvance: number;
+  eligibilityPercent: number;
+  maxEligibleAmount: number;
 };
 
 function money(value: number | null | undefined) {
@@ -37,6 +47,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
   const workforce = account.workspace === "workforce";
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
   const [eligibleForAdvance, setEligibleForAdvance] = useState<boolean | null>(null);
+  const [capacity, setCapacity] = useState<AdvanceCapacity>({ outstandingPay: 0, committedAdvance: 0, eligibilityPercent: 25, maxEligibleAmount: 0 });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -60,6 +71,12 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
       }
       setRows(payload.requests ?? []);
       setEligibleForAdvance(payload.account?.eligibleForAdvance === true);
+      setCapacity({
+        outstandingPay: Number(payload.account?.outstandingPay ?? 0),
+        committedAdvance: Number(payload.account?.committedAdvance ?? 0),
+        eligibilityPercent: Number(payload.account?.eligibilityPercent ?? 25),
+        maxEligibleAmount: Number(payload.account?.maxEligibleAmount ?? 0)
+      });
     } catch (reason) {
       setEligibleForAdvance(null);
       setError(reason instanceof Error ? reason.message : "Unable to load advance requests.");
@@ -148,7 +165,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
             <p>{workforce ? "Request and track payment advances." : "Request and track salary advances."}</p>
           </span>
         </div>
-        <button disabled={!eligibleForAdvance || loading} onClick={() => setShowForm(true)} type="button">
+        <button disabled={!eligibleForAdvance || loading || capacity.maxEligibleAmount < 500} onClick={() => setShowForm(true)} type="button">
           <Plus />
           New request
         </button>
@@ -158,6 +175,16 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
       {notice ? <div className="dx-alert success">{notice}</div> : null}
       {!loading && !error && eligibleForAdvance === false ? (
         <div className="dx-alert info">Advance requests are available only when Profile status is Active.</div>
+      ) : null}
+      {!loading && !error && eligibleForAdvance ? (
+        <div className="dx-advance-capacity" aria-label="Advance eligibility">
+          <div><small>Outstanding pay</small><strong>{money(capacity.outstandingPay)}</strong></div>
+          <div><small>Maximum request · {capacity.eligibilityPercent}%</small><strong>{money(capacity.maxEligibleAmount)}</strong></div>
+          {capacity.committedAdvance > 0 ? <div><small>Already committed</small><strong>{money(capacity.committedAdvance)}</strong></div> : null}
+        </div>
+      ) : null}
+      {!loading && !error && eligibleForAdvance && capacity.maxEligibleAmount < 500 ? (
+        <div className="dx-alert info">No request is available right now. The minimum is ₹500 and the limit is based on 25% of unpaid and accrued pay.</div>
       ) : null}
 
       {loading ? (
@@ -193,6 +220,12 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
                   <dd>{formatWhen(row.updated_at)}</dd>
                 </div>
               </dl>
+              {row.steps?.length ? <ol className="dx-advance-journey">
+                {row.steps.map((step, index) => <li className={step.status} key={`${step.stepName}:${index}`}>
+                  <span>{index + 1}</span>
+                  <div><strong>{step.stepName}</strong><small>{label(step.status)}</small>{step.note ? <p>{step.note}</p> : null}</div>
+                </li>)}
+              </ol> : null}
               {row.canWithdraw !== false && ["submitted", "in_review"].includes(row.status) ? (
                 <button
                   className="dx-advance-withdraw"
@@ -231,7 +264,8 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
               <input
                 autoFocus
                 inputMode="decimal"
-                min="1"
+                min="500"
+                max={capacity.maxEligibleAmount}
                 onChange={(event) => setAmount(event.target.value)}
                 placeholder="0.00"
                 required
@@ -244,7 +278,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
               Purpose
               <textarea
                 maxLength={500}
-                minLength={3}
+                minLength={10}
                 onChange={(event) => setPurpose(event.target.value)}
                 placeholder="Why do you need this advance?"
                 required
@@ -254,7 +288,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
             </label>
             <div className="dx-advance-modal-actions">
               <button className="ghost" disabled={saving} onClick={closeForm} type="button">Cancel</button>
-              <button className="submit" disabled={saving || purpose.trim().length < 3 || !amount} type="submit">
+              <button className="submit" disabled={saving || purpose.trim().length < 10 || !amount || Number(amount) > capacity.maxEligibleAmount} type="submit">
                 {saving ? "Submitting…" : "Submit request"}
               </button>
             </div>

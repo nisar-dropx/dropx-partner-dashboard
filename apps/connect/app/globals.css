@@ -14526,6 +14526,25 @@ html.native-app .dx-app-install {
   gap: 12px;
 }
 
+.dx-advance-capacity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.dx-advance-capacity > div {
+  display: grid;
+  gap: 4px;
+  padding: 13px 14px;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #fff, #fff8f3);
+}
+
+.dx-advance-capacity small { color: #667085; font-size: 10px; }
+.dx-advance-capacity strong { color: #172033; font-size: 16px; }
+
 .dx-advance-list article {
   padding: 16px;
 }
@@ -14574,6 +14593,42 @@ html.native-app .dx-app-install {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+
+.dx-advance-journey {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid #f0ede8;
+  list-style: none;
+}
+
+.dx-advance-journey li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.dx-advance-journey li > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff4db;
+  color: #9a5b00;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.dx-advance-journey li.approved > span { background: #e8f8ef; color: #087443; }
+.dx-advance-journey li.rejected > span,
+.dx-advance-journey li.returned > span { background: #fff0f0; color: #b42318; }
+.dx-advance-journey li > div { display: grid; gap: 2px; }
+.dx-advance-journey strong { font-size: 12px; }
+.dx-advance-journey small { color: #667085; font-size: 10px; }
+.dx-advance-journey p { margin: 3px 0 0 !important; color: #475467 !important; font-size: 11px !important; }
 
 .dx-advance-empty {
   min-height: 280px;

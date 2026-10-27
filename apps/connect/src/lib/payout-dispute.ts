@@ -60,6 +60,11 @@ export type AssociatePayoutDispute = {
     paidAmountPaise: number | null;
     additionalBalancePaise: number | null;
   };
+  timeline: Array<{
+    label: string;
+    comment: string;
+    createdAt: string;
+  }>;
 };
 
 const areaByValue = new Map(PAYOUT_DISPUTE_AREAS.map((area) => [area.value, area]));
@@ -165,6 +170,7 @@ export function associatePayoutDispute(
   originalPublication?: unknown,
   processedPublication?: unknown,
   payoutPayment?: { status?: unknown; date?: unknown; reference?: unknown } | null,
+  eventValues: unknown[] = [],
 ): AssociatePayoutDispute {
   const dispute = disputeValue && typeof disputeValue === "object"
     ? disputeValue as Record<string, any>
@@ -213,6 +219,21 @@ export function associatePayoutDispute(
     || paymentReference !== null
     || paidAmountPaise !== null
     || additionalBalancePaise !== null;
+  const timeline = eventValues.flatMap((eventValue) => {
+    const event = eventValue && typeof eventValue === "object" ? eventValue as Record<string, any> : {};
+    const eventType = String(event.event_type ?? "").trim().toLowerCase();
+    const finance = /process|payment|disburs/.test(eventType)
+      || /processor|processing|payment/i.test(String(event.message ?? ""));
+    const actorName = cleanText(event.actor_name);
+    let comment = cleanText(event.message) ?? "Status updated.";
+    if (finance && actorName) comment = comment.replaceAll(actorName, "Finance");
+    if (finance) comment = comment.replace(/claimed by [^.]+/i, "claimed by Finance");
+    const label = finance ? "Finance"
+      : /final/.test(eventType) ? "Final review"
+        : /initial|propose|review/.test(eventType) ? "Initial review"
+          : event.portal === "one" ? "Submitted" : "Update";
+    return [{ label, comment, createdAt: String(event.created_at ?? "") }];
+  });
 
   return {
     id: String(dispute.id ?? ""),
@@ -246,6 +267,7 @@ export function associatePayoutDispute(
       paidAmountPaise,
       additionalBalancePaise,
     } : null,
+    timeline,
   };
 }
 

@@ -1746,22 +1746,24 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               <dl className="dx-approval-facts">
                 <div><dt>Requested amount</dt><dd>{money(approval.requestedAmount)}</dd></div>
                 {approval.approvedAmount != null ? <div><dt>Amount from previous review</dt><dd>{money(approval.approvedAmount)}</dd></div> : null}
+                <div><dt>Maximum eligible</dt><dd>{money(approval.maxEligibleAmount)}</dd></div>
                 <div><dt>Recovery</dt><dd>{statusLabel(approval.recoveryMode)}{approval.recoveryMode === "installments" ? ` · ${approval.installments} installments` : ""}</dd></div>
                 {approval.neededBy ? <div><dt>Needed by</dt><dd>{displayDate(approval.neededBy)}</dd></div> : null}
                 <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
               </dl>
-              {approval.stepType === "finance" ? <div className="dx-approval-finance-terms">
+              <div className="dx-approval-finance-terms">
                 <label className="dx-approval-note-field">Approved amount
-                  <input aria-label="Approved amount" type="number" min="0.01" step="0.01" max={approval.requestedAmount}
+                  <input aria-label="Approved amount" type="number" min="0.01" step="0.01"
+                    max={approval.stepType === "finance" ? approval.maxEligibleAmount : approval.requestedAmount}
                     value={payAdvanceTerms[approval.id]?.amount ?? approval.approvedAmount ?? approval.requestedAmount}
                     onChange={event => setPayAdvanceTerms(current => ({ ...current, [approval.id]: { amount: event.target.value, installments: current[approval.id]?.installments ?? String(approval.installments) } }))} />
                 </label>
-                <label className="dx-approval-note-field">Recovery installments
+                {approval.stepType === "finance" ? <label className="dx-approval-note-field">Recovery installments
                   <input aria-label="Recovery installments" type="number" min="1" max="12" step="1"
                     value={payAdvanceTerms[approval.id]?.installments ?? approval.installments}
                     onChange={event => setPayAdvanceTerms(current => ({ ...current, [approval.id]: { amount: current[approval.id]?.amount ?? String(approval.approvedAmount ?? approval.requestedAmount), installments: event.target.value } }))} />
-                </label>
-              </div> : null}
+                </label> : null}
+              </div>
               <ApprovalNote id={approval.id} notes={notes} onChange={value => setNote(approval.id, value)} placeholder="Add a reason when rejecting" />
               {payAdvanceError ? <p className="dx-error" role="alert">{payAdvanceError}</p> : null}
               <ApprovalToolbar saving={saving}
