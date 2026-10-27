@@ -1,10 +1,18 @@
-import { recoveryActionAllowed, departedPersonError, receivedRecoveryError, mayActivateRedispute } from "@/lib/ops-pulse/loss-recovery-controls";
+import {
+  recoveryActionAllowed,
+  departedPersonError,
+  receivedRecoveryError,
+  mayActivateRedispute,
+  mayMarkAlreadyRecovered,
+  filterLossRecoveryDebitPeople,
+} from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
 import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { hasPermission } from "@/lib/authorization";
 import { readAllRows } from "@/lib/supabase-pagination";
+import type { RecoveryPerson } from "@/lib/ops-pulse/nl-loss-policy";
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 /** A plan saved with a restricted outcome can only be replaced or removed by people who may set it. */
@@ -63,7 +71,7 @@ export async function GET(request: Request) {
       directoryOnly
         ? supabaseAdmin!.rpc("loss_recovery_people", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
             if (error) throw Error("Station employees could not be loaded.");
-            return data ?? [];
+            return filterLossRecoveryDebitPeople((data ?? []) as RecoveryPerson[]);
           })
         : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined, requestedPayrollMonth),
       readAllRows(
@@ -91,6 +99,7 @@ export async function GET(request: Request) {
       people,
       can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && !responseWindow.data?.enabled && responseWindow.data?.workflow_status !== "won",
       can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
+      can_recovered: mayMarkAlreadyRecovered(auth) && hasPermission(auth, "ops_losses", "edit"),
       can_response: !!responseWindow.data?.enabled || mayActivateRedispute(auth),
       history: history.data ?? [],
     });
@@ -134,6 +143,8 @@ export async function POST(request: Request) {
     if (!outcome.data || !recoveryActionAllowed(outcome.data)) return reply({ error: "Use a recovery plan or record the responsible person. Redisputes are managed in Case response." }, 400);
     await assertLifecycleAction(auth, station.id, "propose");
     if (body.outcome === "already_recovered") {
+      if (!mayMarkAlreadyRecovered(auth) || !hasPermission(auth, "ops_losses", "edit"))
+        return reply({ error: "Only Cluster Manager and above can mark a case as already recovered." }, 403);
       const error = receivedRecoveryError(body.recovery_details ?? {}, Number(amount));
       if (error) return reply({ error }, 400);
     }
@@ -142,14 +153,16 @@ export async function POST(request: Request) {
       if (error) return reply({ error }, 400);
     }
     if (
-      outcome.data?.restricted && body.outcome !== "already_recovered" &&
+      outcome.data?.restricted &&
+      body.outcome !== "already_recovered" &&
+      !mayMarkAlreadyRecovered(auth) &&
       !hasPermission(auth, "ops_loss_recovered", "edit")
     )
       return reply(
         { error: `You do not have access to mark a case as “${outcome.data.label}”.` },
         403,
       );
-    if (!hasPermission(auth, "ops_loss_recovered", "edit") && !mayActivateRedispute(auth)) {
+    if (!mayMarkAlreadyRecovered(auth) && !hasPermission(auth, "ops_loss_recovered", "edit") && !mayActivateRedispute(auth)) {
       const locked = await lockedPlan(scope.company, body.month, caseKey);
       if (locked)
         return reply({ error: `This case is marked “${locked}”. Only people with that access can change it.` }, 403);
@@ -255,7 +268,7 @@ export async function DELETE(request: Request) {
       return reply({ error: "Invalid recovery version." }, 400);
     // Station users may dispute/clarify only — clearing a plan is Cluster/SLP.
     await assertLifecycleAction(auth, station.id, "propose");
-    if (!hasPermission(auth, "ops_loss_recovered", "edit") && !mayActivateRedispute(auth)) {
+    if (!mayMarkAlreadyRecovered(auth) && !hasPermission(auth, "ops_loss_recovered", "edit") && !mayActivateRedispute(auth)) {
       const locked = await lockedPlan(scope.company, b.month, caseKey);
       if (locked)
         return reply({ error: `This case is marked “${locked}”. Only people with that access can remove it.` }, 403);

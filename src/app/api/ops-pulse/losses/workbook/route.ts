@@ -1,4 +1,8 @@
-import { recoveryActionAllowed } from "@/lib/ops-pulse/loss-recovery-controls";
+import {
+  recoveryActionAllowed,
+  mayMarkAlreadyRecovered,
+  filterLossRecoveryDebitPeople,
+} from "@/lib/ops-pulse/loss-recovery-controls";
 import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -85,12 +89,12 @@ export async function GET(request: Request) {
     // Same directory the recovery form uses; salary limits are verified when the file is uploaded.
     const directories = await Promise.all(
       view.totals.map(async (s) => {
-        const people = await supabaseAdmin!.rpc("station_audit_employee_directory", {
+        const people = await supabaseAdmin!.rpc("loss_recovery_people", {
           p_company: requireCompanyId(auth),
           p_station: s.id,
         });
         if (people.error) throw Error("Station employees could not be loaded.");
-        return ((people.data ?? []) as RecoveryPerson[])
+        return filterLossRecoveryDebitPeople((people.data ?? []) as RecoveryPerson[])
           .filter(
             (p) =>
               p.employee_code?.trim() &&
@@ -256,7 +260,7 @@ export async function POST(request: Request) {
       return reply({ error: "Loss Recovery Master could not be loaded. Please retry." }, 500);
     const settings = settingsResult.data as LossSettings;
     const outcomes = (outcomesResult.data ?? []) as RecoveryOutcome[];
-    const canRecovered = hasPermission(auth, "ops_loss_recovered", "edit");
+    const canRecovered = mayMarkAlreadyRecovered(auth) && hasPermission(auth, "ops_losses", "edit");
     const wantSlp = kind !== "nl";
 
     const refs = filled.map(({ row }) => parseCaseRef(cell(row, "Case ref")));

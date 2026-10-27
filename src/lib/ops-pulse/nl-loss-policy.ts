@@ -274,20 +274,23 @@ export function allocationError(
     )
   )
     return "Every selected employee must have a valid station employee ID.";
-  if (
-    splits.some(
-      (s) =>
-        !Number.isFinite(s.amount) ||
-        s.amount <= 0 ||
-        Math.abs(s.amount * 100 - Math.round(s.amount * 100)) > 0.000001,
-    )
-  )
-    return "Enter a positive amount with at most two decimal places for every employee.";
-  if (
-    splits.reduce((sum, s) => sum + Math.round(s.amount * 100), 0) !==
-    Math.round(amount * 100)
-  )
-    return "Allocate the full loss amount. Partial recovery is not allowed.";
+  const invalidAmounts = splits.filter(
+    (s) =>
+      !Number.isFinite(s.amount) ||
+      s.amount <= 0 ||
+      Math.abs(s.amount * 100 - Math.round(s.amount * 100)) > 0.000001,
+  );
+  if (invalidAmounts.length) {
+    const codes = invalidAmounts
+      .map((s) => people.find((p) => p.ref === s.employee_ref)?.employee_code)
+      .filter(Boolean);
+    return codes.length
+      ? `Enter the recovery amount for ${codes.join(", ")} in the Amount (₹) field on the right (positive, at most two decimals).`
+      : "Enter a positive recovery amount with at most two decimal places for every selected person.";
+  }
+  const allocated = splits.reduce((sum, s) => sum + Math.round(s.amount * 100), 0);
+  if (allocated !== Math.round(amount * 100))
+    return `Allocated amounts total ₹${(allocated / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}; assign the full loss of ₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Partial recovery is not allowed.`;
   const override = !!plan.cap_override;
   if (override) {
     const reason = String(plan.cap_override_reason ?? "").trim();

@@ -1,6 +1,5 @@
 import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
-import { mayActivateRedispute } from "./loss-recovery-controls";
-import { hasFinalLossOutcome } from "./loss-recovery-controls";
+import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -361,8 +360,8 @@ export async function loadRecoveryView(
     checked,
     failure,
     canEdit,
-    // Restricted outcomes ("Already recovered") need their own permission on top of edit access.
-    canRecovered: canEdit,
+    // “Already recovered” is Cluster Manager and above only — never station/location actors.
+    canRecovered: canEdit && mayMarkAlreadyRecovered(auth),
     canMaster: hasPermission(auth, "ops_loss_master", "access"),
     canApprove: mayActivateRedispute(auth) && hasPermission(auth, "ops_losses", "edit"),
     canRefresh:

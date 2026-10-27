@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { readAllRows } from '@/lib/supabase-pagination';
 import { nlStationScope, lossContext } from './nl-loss';
 import { loadRecoveryLedger } from './nl-recovery-ledger';
-import { hasFinalLossOutcome, mayActivateRedispute } from './loss-recovery-controls';
+import { hasFinalLossOutcome, mayActivateRedispute, mayMarkAlreadyRecovered } from './loss-recovery-controls';
 import { isRecoverable, type NlCase, type Recovery } from './nl-loss-policy';
 export async function loadRecoveryWorkspace(auth: AuthorizationContext, includeAllCases = false) {
  const {company,stations}=await nlStationScope(auth), codes=stations.map(s=>s.source_code);
@@ -26,5 +26,6 @@ export async function loadRecoveryWorkspace(auth: AuthorizationContext, includeA
   if(c.report==='slp') return !!c.final_seen_at;
   return isRecoverable(c.source_status,context.settings?.recoverable_statuses||[]) && hasFinalLossOutcome(true,c.source_status,c.details?.case_status,c.details?.extra?.current_sla_stage);
  }).map(c=>({...c,redispute:responseByKey.get(`${c.month}|${c.case_key}`)||null,source_final_nonrecoverable:c.report==="nl" && /^non[ -]?recoverable/i.test(c.source_status) && hasFinalLossOutcome(false,c.source_status,c.details?.case_status,c.details?.extra?.current_sla_stage),amount:Number(c.amount),recovery:byKey.get(`${c.month}|${c.case_key}`)||null})) as NlCase[];
- return {rows,lines:ledger.lines,outcomes:context.outcomes,settings:context.settings,canEdit:!auth.readOnly&&hasPermission(auth,'ops_losses','edit'),canApprove:mayActivateRedispute(auth)&&hasPermission(auth,'ops_losses','edit')};
+ const canEdit=!auth.readOnly&&hasPermission(auth,'ops_losses','edit');
+ return {rows,lines:ledger.lines,outcomes:context.outcomes,settings:context.settings,canEdit,canRecovered:canEdit&&mayMarkAlreadyRecovered(auth),canApprove:mayActivateRedispute(auth)&&hasPermission(auth,'ops_losses','edit')};
 }

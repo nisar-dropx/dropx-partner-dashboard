@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { StationClaimsDesk } from "@/components/station-claims-desk";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { mayMarkAlreadyRecovered } from "@/lib/ops-pulse/loss-recovery-controls";
 import { canRaiseClaims, loadStationClaims } from "@/lib/ops-pulse/station-claims";
 import styles from "@/components/nl-loss.module.css";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export default async function WorkforceLosses() {
     content = view.ready ? (
       <StationClaimsDesk claims={view.claims} cases={view.cases} outcomes={view.outcomes} settings={view.settings}
         stations={view.stations.map((s) => ({ id: s.id, station_code: s.station_code }))}
-        canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit && hasPermission(auth, "ops_loss_recovered", "edit")} />
+        canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit && mayMarkAlreadyRecovered(auth)} />
     ) : <p className={styles.notice}>Station claims become available once the latest database update is applied.</p>;
   } catch (e) {
     content = <p role="alert">{e instanceof Error ? e.message : "Station claims could not be loaded."}</p>;

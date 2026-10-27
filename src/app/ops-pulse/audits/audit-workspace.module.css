@@ -304,6 +304,17 @@
   color: #275a96;
   font-size: 13px;
 }
+.failure {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #f0b4b0;
+  background: #fff1f0;
+  color: #9b1c1c;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.55;
+}
 .timeline {
   display: grid;
   gap: 9px;

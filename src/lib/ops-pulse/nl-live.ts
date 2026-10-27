@@ -1,7 +1,6 @@
 import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
-import { mayActivateRedispute } from "./loss-recovery-controls";
+import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
-import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import {
   getAuthorization,
   hasPermission,
@@ -244,7 +243,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     sort: filters.sort || "value_desc",
     outcomes: recoveryContext.outcomes,
     settings: recoveryContext.settings,
-    canRecovered: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
+    canRecovered: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && mayMarkAlreadyRecovered(auth),
     summary: tally(filtered),
     cases,
     deskQueue: (requests.data ?? []).filter(

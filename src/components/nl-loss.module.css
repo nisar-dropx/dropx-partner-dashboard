@@ -346,19 +346,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   padding: 12px;
   border-bottom: 1px solid #edf0f5;
   font-size: 13px;
+  background: #fcfdff;
 }
-.person > label {
+.person > label:not(.personAmount) {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1;
+  min-width: 0;
   cursor: pointer;
 }
-.person span {
+.person > label:not(.personAmount) > span {
   display: grid;
   gap: 4px;
 }
@@ -367,20 +369,101 @@
   font-weight: 400;
   line-height: 1.5;
 }
-.person > input {
-  width: 120px !important;
+.personAmount {
+  display: grid;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-width: 148px;
+  margin: 0;
+  color: #3d516b;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: default;
+}
+.personAmount > span:first-child {
+  display: block;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5a6b82;
+}
+.amountWrap {
+  position: relative;
+  display: block;
+}
+.amountWrap::before {
+  content: "₹";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  color: #3d516b;
+  font-weight: 800;
+  font-size: 14px;
+  pointer-events: none;
+}
+.personAmount input,
+.workspace .personAmount input {
+  width: 148px !important;
+  min-height: 42px;
+  padding: 10px 12px 10px 28px !important;
+  border: 1.5px solid #7f93ad !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  box-shadow: inset 0 0 0 1px #eef3f8;
+  color: #1c2940 !important;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.personAmount input:focus,
+.workspace .personAmount input:focus {
+  outline: 2px solid #ed4821;
+  outline-offset: 1px;
+  border-color: #ed4821 !important;
+  background: #fffaf7 !important;
+}
+.personShare {
+  min-width: 108px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #1c2940;
 }
 .splitTotal {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding-top: 14px;
+  padding: 12px 0 4px;
   font-size: 13px;
+}
+.balanceGap {
+  color: #9b1c1c;
+  font-weight: 750;
+}
+.balanceOk {
+  color: #1f6b3a;
+  font-weight: 700;
 }
 .error {
   color: #b83232;
   font-size: 13px;
+}
+.failure {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #f0b4b0;
+  background: #fff1f0;
+  color: #9b1c1c;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+.failure .button {
+  justify-self: start;
 }
 .history {
   font-size: 12px;

@@ -126,24 +126,31 @@ const formHasFeedback = (data: FormData) => {
 function useAction() {
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
+  const [failed, setFailed] = useState(false);
   const run = (action: () => Promise<Result>) =>
     (async () => {
       if (pending) return;
       setPending(true);
       try {
         const result = await action();
-        setNotice(result.message);
+        setFailed(!result.ok);
+        setNotice(
+          result.ok
+            ? result.message
+            : `Could not submit. ${result.message}`,
+        );
       } catch (error) {
+        setFailed(true);
         setNotice(
           error instanceof Error
-            ? error.message
-            : "Unable to save. Please try again.",
+            ? `Could not submit. ${error.message}`
+            : "Could not submit. Please try again.",
         );
       } finally {
         setPending(false);
       }
     })();
-  return { pending, notice, run };
+  return { pending, notice, failed, run };
 }
 type ShipmentDraft = {
   trackingId: string;
@@ -1272,7 +1279,12 @@ export function AuditDetail({
                     {draftUploading ? "Saving files…" : "Save draft"}
                   </button>
                   {submit.notice ? (
-                    <span className={styles.notice}>{submit.notice}</span>
+                    <span
+                      role={submit.failed ? "alert" : "status"}
+                      className={submit.failed ? styles.failure : styles.notice}
+                    >
+                      {submit.notice}
+                    </span>
                   ) : null}
                 </div>
                 {draftNotice ? (

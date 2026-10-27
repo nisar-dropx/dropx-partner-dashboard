@@ -330,6 +330,19 @@ export function RecoveryForm({
         old?.allocations.map((p) => [p.ref, String(p.amount)]) || [],
       ),
     );
+  /** Custom split: keep amount fields for selected people; fill a sole person with the full loss. */
+  function selectPeople(ids: string[]) {
+    setSelected(ids);
+    setAmounts((prev) => {
+      const next: Record<string, string> = {};
+      for (const ref of ids) next[ref] = prev[ref] ?? "";
+      if (mode === "custom" && ids.length === 1) {
+        const ref = ids[0]!;
+        if (!next[ref] || Number(next[ref]) <= 0) next[ref] = String(row.amount);
+      }
+      return next;
+    });
+  }
   // Opened cases load only their station directory and history; no company-wide people payload.
   const [retry, setRetry] = useState(0);
   const [directoryReady, setDirectoryReady] = useState(false);
@@ -499,7 +512,23 @@ export function RecoveryForm({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (cannotSave || uploading) {
-      setError(receiptError || validation || "Complete all required details before saving.");
+      setError(
+        receiptError ||
+          validation ||
+          (reasonError
+            ? "Complete the required re-dispute reason or detailing before saving."
+            : "") ||
+          (option?.remarks_required && remarks.trim().length < 5
+            ? "Enter remarks (at least 5 characters) before saving."
+            : "") ||
+          (option?.allocation_required && salaryLoading
+            ? "Wait for salary limits to finish loading, then save."
+            : "") ||
+          (option?.allocation_required && salaryError
+            ? salaryError
+            : "") ||
+          "Complete all required recovery details before saving.",
+      );
       return;
     }
     setError("");
@@ -691,8 +720,8 @@ export function RecoveryForm({
         }}>Return update</button>
       </details> : null}
       {error ? (
-        <p role="alert" className={styles.error}>
-          {error}{" "}
+        <p role="alert" className={styles.failure}>
+          <strong>Could not save recovery.</strong> {error}{" "}
           <button
             type="button"
             className={styles.button}
@@ -798,9 +827,18 @@ export function RecoveryForm({
                     Split method
                     <select
                       value={mode}
-                      onChange={(e) =>
-                        setMode(e.target.value as "equal" | "custom")
-                      }
+                      onChange={(e) => {
+                        const next = e.target.value as "equal" | "custom";
+                        setMode(next);
+                        if (next === "custom" && selected.length === 1) {
+                          const ref = selected[0]!;
+                          setAmounts((a) =>
+                            !a[ref] || Number(a[ref]) <= 0
+                              ? { ...a, [ref]: String(row.amount) }
+                              : a,
+                          );
+                        }
+                      }}
                     >
                       {settings?.allow_equal_split ? (
                         <option value="equal">Split equally</option>
@@ -811,7 +849,7 @@ export function RecoveryForm({
                     </select>
                   </label>
                   <label>Designation<select value={designationFilter} onChange={e=>setDesignationFilter(e.target.value)}><option value="">All designations</option>{[...new Set(people.map(p=>p.designation))].sort().map(d=><option key={d}>{d}</option>)}</select></label>
-                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={ids=>setSelected(ids)}/></div>
+                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={selectPeople}/></div>
                 </div>
                 <div
                   className={styles.methods}
@@ -885,8 +923,9 @@ export function RecoveryForm({
                   </div>
                 ) : null}
                 <p className={styles.hint}>
-                  Eligible station DAs, People staff and mapped managers, using
-                  the rules in Master.
+                  Eligible station DAs, People staff and Station Manager and
+                  below, using the rules in Master. Cluster / City / Area
+                  managers are not debit targets.
                   {capEnabled
                     ? ` Loss recoveries take at most ${capPercent}% of a person's take-home in one month; a recurring debit counts one instalment.`
                     : ""}
@@ -895,8 +934,8 @@ export function RecoveryForm({
                     : ""}
                 </p>
                 {salaryLoading && selected.length > 0 ? <p role="status" className={styles.hint}>Checking salary limits for selected people…</p> : null}
-                {salaryError ? <p role="alert" className={styles.error}>{salaryError}</p> : null}
-                {!search.trim() && !selected.length ? <p className={styles.hint}>Open Select names to choose station staff, DAs or mapped managers through AOM.</p> : null}
+                {salaryError ? <p role="alert" className={styles.failure}>{salaryError}</p> : null}
+                {!search.trim() && !selected.length ? <p className={styles.hint}>Open Select names to choose Station Manager and below (station staff and DAs).</p> : null}
                 <div className={styles.people}>
                   {available.filter(p => selected.includes(p.ref)).map((p) => (
                     <div className={styles.person} key={p.ref}>
@@ -905,10 +944,10 @@ export function RecoveryForm({
                           type="checkbox"
                           checked={selected.includes(p.ref)}
                           onChange={(e) =>
-                            setSelected((ids) =>
+                            selectPeople(
                               e.target.checked
-                                ? [...ids, p.ref]
-                                : ids.filter((id) => id !== p.ref),
+                                ? [...selected, p.ref]
+                                : selected.filter((id) => id !== p.ref),
                             )
                           }
                         />
@@ -948,27 +987,33 @@ export function RecoveryForm({
                       </label>
                       {selected.includes(p.ref) ? (
                         mode === "custom" ? (
-                          <input
-                            aria-label={`Amount for ${p.employee_code}`}
-                            inputMode="decimal"
-                            type="number"
-                            min="0.01"
-                            max={
-                              capEnabled && plan.mode === "full"
-                                ? (limitOf(p) ?? 0)
-                                : undefined
-                            }
-                            step="0.01"
-                            value={amounts[p.ref] || ""}
-                            onChange={(e) =>
-                              setAmounts((a) => ({
-                                ...a,
-                                [p.ref]: e.target.value,
-                              }))
-                            }
-                          />
+                          <label className={styles.personAmount}>
+                            <span>Amount (₹)</span>
+                            <span className={styles.amountWrap}>
+                              <input
+                                aria-label={`Recovery amount in rupees for ${p.employee_code}`}
+                                inputMode="decimal"
+                                type="number"
+                                min="0.01"
+                                max={
+                                  capEnabled && plan.mode === "full"
+                                    ? (limitOf(p) ?? undefined)
+                                    : undefined
+                                }
+                                step="0.01"
+                                placeholder="0.00"
+                                value={amounts[p.ref] || ""}
+                                onChange={(e) =>
+                                  setAmounts((a) => ({
+                                    ...a,
+                                    [p.ref]: e.target.value,
+                                  }))
+                                }
+                              />
+                            </span>
+                          </label>
                         ) : (
-                          <strong>
+                          <strong className={styles.personShare}>
                             {money(
                               splits.find((s) => s.employee_ref === p.ref)
                                 ?.amount || 0,
@@ -980,13 +1025,13 @@ export function RecoveryForm({
                   ))}
                 </div>
                 {!people.length ? (
-                  <p>
-                    No employees with IDs are linked to this station. Update
-                    People or Workforce mapping first.
+                  <p role="alert" className={styles.failure}>
+                    No Station Manager-or-below employees with IDs are linked to
+                    this station. Update People or Workforce mapping first.
                   </p>
                 ) : null}
                 {validation && selected.length ? (
-                  <p role="alert" className={styles.error}>
+                  <p role="alert" className={styles.failure}>
                     {validation}
                   </p>
                 ) : null}
@@ -1028,10 +1073,12 @@ export function RecoveryForm({
                     Allocated {money(total)} / {money(row.amount)}
                   </strong>
                   {Math.round(total * 100) !== Math.round(row.amount * 100) ? (
-                    <span className={styles.error}>
-                      Balance {money(row.amount - total)}
+                    <span className={styles.balanceGap}>
+                      Still to allocate {money(row.amount - total)}
                     </span>
-                  ) : null}
+                  ) : (
+                    <span className={styles.balanceOk}>Full amount allocated</span>
+                  )}
                 </div>
               </div>
             ) : null}

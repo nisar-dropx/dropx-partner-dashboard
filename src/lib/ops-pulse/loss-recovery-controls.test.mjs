@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { recoveryActionAllowed, mayActivateRedispute, departedPersonError, defaultLossFilter, hasFinalLossOutcome, lossStatusMatches } from './loss-recovery-controls.ts';
+import {
+  recoveryActionAllowed,
+  mayActivateRedispute,
+  mayMarkAlreadyRecovered,
+  isLossRecoveryManagerialTarget,
+  filterLossRecoveryDebitPeople,
+  departedPersonError,
+  defaultLossFilter,
+  hasFinalLossOutcome,
+  lossStatusMatches,
+} from './loss-recovery-controls.ts';
 import { casePhase } from './nl-dispute-policy.ts';
 test('only accountable recovery actions remain', () => {
   for (const code of ['post_dispute','da_left','utr_left','non_recoverable']) assert.equal(recoveryActionAllowed({code,allocation_required:false}),false);
@@ -13,6 +23,34 @@ test('leadership activation excludes ground and cluster managers, including read
   for (const roleCode of ['OPERATIONS_CM','OPERATIONS_CLM','OPERATIONS_TL','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_RH','OPERATIONS_GM','GENERAL_MANAGER','GM',null]) assert.equal(mayActivateRedispute({...auth,roleCode}),false);
   for (const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','FINANCE_MANAGER','FINANCE_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_MP']) assert.equal(mayActivateRedispute({...auth,roleCode}),true,roleCode);
   assert.equal(mayActivateRedispute({...auth,isMasterOwner:true,readOnly:true}),false);
+});
+test('already recovered is cluster and above only', () => {
+  const base = { isMasterOwner: false, roleCode: null, readOnly: false };
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_TL' }), false);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_SSA' }), false);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, designationName: 'Station Manager' }), false);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_CLM' }), true);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_CM' }), true);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_AOM' }), true);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, designationName: 'Cluster Manager' }), true);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_SLPM' }), true);
+  assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_CLM', readOnly: true }), false);
+});
+test('debit targets exclude cluster city and area managers', () => {
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Cluster Manager' }), true);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'City Manager' }), true);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Area Operations Manager' }), true);
+  assert.equal(isLossRecoveryManagerialTarget({ designationCode: 'CLM', designation: 'Cluster Manager' }), true);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Station Manager' }), false);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Team Lead' }), false);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Delivery Associate' }), false);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Station Support Associate' }), false);
+  const kept = filterLossRecoveryDebitPeople([
+    { ref: '1', designation: 'Cluster Manager' },
+    { ref: '2', designation: 'Station Manager' },
+    { ref: '3', designation: 'Delivery Associate' },
+  ]);
+  assert.deepEqual(kept.map((p) => p.ref), ['2', '3']);
 });
 test('departed person needs identity and accountable follow-up', () => {
   assert.ok(departedPersonError({},'Person resigned'));

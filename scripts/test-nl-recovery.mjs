@@ -392,8 +392,12 @@ assert.match(
   /Partial recovery/,
 );
 assert.match(
+  allocationError(1000, [{ employee_ref: "p1", amount: 0 }], pp, true),
+  /Enter the recovery amount for EMP1/,
+);
+assert.match(
   allocationError(1000, [{ employee_ref: "p1", amount: 1000 }], pp, true),
-  /exceeds salary payable/,
+  /more than the .*salary limit of ₹900/,
 );
 assert.equal(
   allocationError(900, [{ employee_ref: "p1", amount: 900 }], pp, true),

@@ -1,11 +1,10 @@
 import { LossDebitReview } from "@/components/loss-debit-review";
 import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
-import { mayViewLossApprovals } from "@/lib/ops-pulse/loss-recovery-controls";
+import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
 import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
 import { LossRedisputeDesk } from "@/components/loss-redispute-desk";
 import { readAllRows } from "@/lib/supabase-pagination";
-import { defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { notFound, redirect } from "next/navigation";
 import { OpsLossReport, type LossTab } from "@/components/ops-loss-report";
 import { requirePagePermission } from "@/lib/authorization";
@@ -104,7 +103,7 @@ export default async function LossesSectionPage({
           {view.ready ? (
             <StationClaimsDesk claims={view.claims} cases={view.cases} outcomes={view.outcomes} settings={view.settings}
               stations={view.stations.map((s) => ({ id: s.id, station_code: s.station_code }))}
-              canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit} />
+              canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit && mayMarkAlreadyRecovered(auth)} />
           ) : (
             <p className={styles.notice}>Station claims become available once the station loss claims update is applied to the database.</p>
           )}

@@ -78,6 +78,18 @@ Cluster Managers propose; they cannot approve their own proposal.
 - A plan whose source amount or status changed waits for review in Losses and is not deducted.
 - Written-off lines (`nl_recovery_waivers`) are never due again.
 
+**Debit directory scope:** Recovery people are Station Manager and below only
+(`directory_ceiling_designations = ["STM"]`, plus `CM` / `CLM` / `AOM` and higher in
+`directory_excluded_designations`). Location / station actors never see Cluster, City or Area
+manager salaries. App code mirrors this with `filterLossRecoveryDebitPeople` /
+`isLossRecoveryManagerialTarget` so a blocked person cannot be selected or saved even before the
+policy migration is applied. Employees and contractors take payable from People (HRMS)
+`hr_payroll_run_people` only; workforce takes payable from Dashboard payout worksheets only.
+
+**Already recovered:** `mayMarkAlreadyRecovered` — Cluster Manager / City Manager / AOM and above
+(or SLP / NH / Finance / MP redispute roles). Station and under-managers with Losses edit do **not**
+see or set the “Already recovered” outcome.
+
 **Salary cap:** `recovery_policy.salary_cap_percent` (50) of take-home, applied twice:
 
 1. When saving, against last month's payable, on the **monthly** amount. The payable comes from

@@ -4,11 +4,14 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import {
-  deductionMonth,
   eligibleRecoveryEmployment,
   type RecoveryPerson,
   type RecoveryPolicy,
 } from "./nl-loss-policy";
+import {
+  filterLossRecoveryDebitPeople,
+  isLossRecoveryManagerialTarget,
+} from "./loss-recovery-controls";
 
 export async function loadRecoveryPayables(
   auth: AuthorizationContext,
@@ -43,7 +46,25 @@ export async function loadRecoveryPayables(
     p_station: station,
   });
   if (directory.error) throw Error("Station employees could not be loaded.");
-  const people = ((directory.data || []) as RecoveryPerson[]).filter(p => !selectedRefs || selectedRefs.includes(p.ref));
+  // Debit targets are Station Manager and below only — never Cluster / City / AOM salaries.
+  const people = filterLossRecoveryDebitPeople(
+    ((directory.data || []) as RecoveryPerson[]).filter(
+      (p) => !selectedRefs || selectedRefs.includes(p.ref),
+    ),
+  );
+  if (selectedRefs?.length) {
+    const blocked = selectedRefs.filter(
+      (ref) =>
+        !people.some((p) => p.ref === ref) &&
+        ((directory.data || []) as RecoveryPerson[]).some(
+          (p) => p.ref === ref && isLossRecoveryManagerialTarget(p),
+        ),
+    );
+    if (blocked.length)
+      throw Error(
+        "Recovery can only be allocated to Station Manager and below. Cluster, City and Area managers cannot be selected.",
+      );
+  }
   const employeeIds = people
     .filter((p) => p.ref.startsWith("employee:"))
     .map((p) => p.ref.slice(9));
@@ -138,11 +159,13 @@ export async function loadRecoveryPayables(
     const eligible = !duplicate && eligibleRecoveryEmployment(record,start,end,policy,!!employeePay) && (!policy.eligible_designations.length || policy.eligible_designations.some(d => d.toLowerCase() === person.designation.toLowerCase()));
     let payable: number | null = null;
     let gross: number | null = null;
-    let source =
-      payouts.error && person.ref.startsWith("workforce:")
+    // Employees/contractors use People (HRMS) payroll only; workforce uses payout worksheets only.
+    let source = person.ref.startsWith("workforce:")
+      ? payouts.error
         ? "Review Dashboard payout configuration"
-        : "Selected payroll month payable unavailable";
-    if (!person.ref.startsWith("workforce:")) {
+        : "Workforce payout unavailable · complete mapping or publish the payout first"
+      : "People payroll unavailable · complete the HRMS run or payout mapping first";
+    if (person.ref.startsWith("employee:") || person.ref.startsWith("contractor:")) {
       const run = Array.isArray(employeePay?.hr_payroll_runs)
         ? employeePay.hr_payroll_runs[0]
         : employeePay?.hr_payroll_runs;
@@ -169,8 +192,10 @@ export async function loadRecoveryPayables(
         );
         gross = Number.isFinite(Number(employeePay.gross_pay)) ? Math.round(Number(employeePay.gross_pay) * 100) / 100 : null;
         source = `People payroll · ${employeePay.calculation_status}`;
+      } else if (employeePay) {
+        source = `People payroll · ${employeePay.calculation_status || run?.status || "not ready"}`;
       }
-    } else {
+    } else if (person.ref.startsWith("workforce:")) {
       const rows = payouts.rows.filter(
         (p) => p.dropxId === person.employee_code,
       );
