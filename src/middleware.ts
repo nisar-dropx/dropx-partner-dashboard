@@ -5,6 +5,7 @@ import { timeoutFetch } from "@/lib/timeout-fetch";
 import { TimeoutError, withTimeout } from "@/lib/with-timeout";
 import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
 import { providerMappingPageCodeForHost } from "@/lib/provider-mapping-host";
+import { isOpsDemoRequest } from "@/lib/ops-pulse/demo/surface";
 
 const AUTH_TIMEOUT_MS = 5000;
 const AUTH_CLAIMS_TIMEOUT_MS = 3000;
@@ -172,6 +173,16 @@ function unavailableSessionResponse() {
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname || "/";
+  // Only this exact read-only page is public. It uses synthetic browser-local state;
+  // no demo cookie or query parameter can bypass authentication on any other route.
+  if (isOpsDemoRequest(request.headers.get("host") || "", path, request.method)) {
+    const demo = NextResponse.next();
+    demo.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    demo.headers.set("Referrer-Policy", "no-referrer");
+    demo.headers.set("Cache-Control", "no-store");
+    demo.headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'self'; frame-ancestors 'none'");
+    return demo;
+  }
   // Workspace selection only changes a view preference, with the preview user's
   // authorized locations rechecked by the endpoint; it cannot change business data.
   if (request.cookies.get("dropx_portal_preview_v1")?.value && !["GET", "HEAD", "OPTIONS"].includes(request.method) && path !== "/api/owner-preview" && path !== "/api/ops-pulse/workspace") {
