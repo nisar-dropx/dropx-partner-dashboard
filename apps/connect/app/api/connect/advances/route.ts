@@ -60,6 +60,7 @@ export function PATCH(request: Request) { return mutate(request, "PATCH"); }
 function ownerReviewStatus(status: string) {
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
+  if (status === "returned") return "returned";
   if (status === "cancelled" || status === "closed") return "skipped";
   return "pending";
 }
@@ -67,7 +68,7 @@ function ownerReviewStatus(status: string) {
 export async function GET(request: Request) {
   try {
     const account = await accountFromRequest(new URL(request.url));
-    const workerType = account.profileType === "employee" || account.profileType === "contractor"
+    const workerType = account.profileType === "employee" || account.profileType === "contractor" || account.profileType === "workforce"
       ? account.profileType
       : null;
 
@@ -82,6 +83,7 @@ export async function GET(request: Request) {
     }
 
     let eligibleForAdvance = false;
+    let capacity = { outstandingPay: 0, committedAdvance: 0, eligibilityPercent: 25, maxEligibleAmount: 0, breakdown: [] };
     if (account.profileType !== "user" && account.pageAccess.includes("advances")) {
       const response = await advanceService(request, "GET");
       const payload = await response.json();
@@ -90,11 +92,18 @@ export async function GET(request: Request) {
         throw new Error("Unable to verify advance eligibility. Please retry shortly.");
       }
       eligibleForAdvance = payload.account.eligibleForAdvance;
+      capacity = {
+        outstandingPay: Number(payload.account.outstandingPay ?? 0),
+        committedAdvance: Number(payload.account.committedAdvance ?? 0),
+        eligibilityPercent: Number(payload.account.eligibilityPercent ?? 25),
+        maxEligibleAmount: Number(payload.account.maxEligibleAmount ?? 0),
+        breakdown: Array.isArray(payload.account.breakdown) ? payload.account.breakdown : []
+      };
     }
 
     const payrollResult = workerType
       ? await db().from("hr_pay_advance_requests")
-        .select("id,request_number,requested_amount,approved_amount,reason,status,requested_at,decision_note,recovery_mode,requested_installments")
+        .select("id,request_number,requested_amount,approved_amount,outstanding_pay_snapshot,eligibility_percent_snapshot,max_eligible_amount_snapshot,reason,status,requested_at,updated_at,decision_note,recovery_mode,requested_installments,external_source,external_reference")
         .eq("company_id", account.companyId)
         .eq("worker_type", workerType)
         .eq("worker_id", account.id)
@@ -120,8 +129,10 @@ export async function GET(request: Request) {
       throw error;
     });
 
+    const linkedPaymentIds = new Set(payrollRows.filter((row) => row.external_source === "payment_advance_requests")
+      .map((row) => String(row.external_reference ?? "")).filter(Boolean));
     const requests = [
-      ...(paymentResult.data ?? []).map((row) => ({
+      ...(paymentResult.data ?? []).filter((row) => !linkedPaymentIds.has(String(row.id))).map((row) => ({
         id: row.id,
         source: "ops",
         purpose: row.purpose,
@@ -148,25 +159,30 @@ export async function GET(request: Request) {
         approved_amount: row.approved_amount,
         decision_comment: row.decision_note,
         requested_at: row.requested_at,
-        updated_at: row.requested_at,
+        updated_at: row.updated_at ?? row.requested_at,
         canWithdraw: false,
         title: row.request_number || row.reason || "Pay advance",
         amount: Number(row.requested_amount),
         approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
+        outstandingPay: row.outstanding_pay_snapshot == null ? null : Number(row.outstanding_pay_snapshot),
+        eligibilityPercent: Number(row.eligibility_percent_snapshot ?? 25),
+        maxEligibleAmount: Number(row.max_eligible_amount_snapshot ?? row.requested_amount),
         status: row.status,
         requestedAt: row.requested_at,
         note: row.decision_note,
         recovery: row.recovery_mode,
         installments: row.requested_installments,
         steps: (journeys.get(row.id) ?? []).map((step: ApprovalJourneyStep) => ({
-          stepName: step.actorName ? `${step.actorName} · ${step.label}` : step.label,
+          stepName: step.label.toLowerCase().includes("finance")
+            ? `Finance · ${step.label}`
+            : step.actorName ? `${step.actorName} · ${step.label}` : step.label,
           status: step.status,
           note: step.note
         }))
       }))
     ];
 
-    return NextResponse.json({ account: { eligibleForAdvance }, requests }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ account: { eligibleForAdvance, ...capacity }, requests }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load advances.") }, { status: 400 });
   }

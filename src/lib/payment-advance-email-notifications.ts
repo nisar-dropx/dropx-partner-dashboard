@@ -2,7 +2,7 @@ import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { approvalEmailCard } from "@/lib/approval-email-card";
 
-const PAYMENT_APPROVALS_URL = "https://people.dropxlogistics.com/pay-advances";
+const PAYMENT_APPROVALS_URL = "https://one.dropxlogistics.com/approvals?section=pay-advances";
 
 export type PaymentAdvanceEmailResult =
   | { sent: true; cc: string[]; to: string[] }
@@ -54,7 +54,8 @@ async function currentApproverEmails(companyId: string, paymentRequestId: string
 
 async function requesterEmail(companyId: string, request: AdvanceRequestRow) {
   if (!supabaseAdmin) return null;
-  const table = request.profile_type === "employee" ? "employees" : "contractors";
+  const table = request.profile_type === "employee" ? "employees"
+    : request.profile_type === "workforce" ? "workforce" : "contractors";
   const result = await supabaseAdmin.from(table).select("email").eq("company_id", companyId).eq("id", request.account_id).maybeSingle();
   const email = String(result.data?.email ?? "").trim().toLowerCase();
   return email.includes("@") ? email : null;
@@ -109,7 +110,7 @@ function buildSubjectBody(request: AdvanceRequestRow, companyName: string, kind:
       "Find the advance request assigned to you.",
       "Review the amount and purpose, then Approve, Return or Reject."
     ] : [],
-    footer: kind === "reminder" ? "Reminders are sent every 90 minutes until this request is approved or rejected." : undefined
+    footer: kind === "reminder" ? "Reminders are sent every 90 minutes while your action is required. Approving, returning or rejecting the request stops reminders for your step." : undefined
   });
 
   return { subject, body, html };
@@ -164,7 +165,7 @@ export async function sendPaymentAdvanceRequestNotification(companyId: string, r
     if (!request) return skipped("Advance request not found.");
     const to = await currentApproverEmails(companyId, requestId);
     const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "submitted");
-    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: request.status === "submitted" });
+    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: ["submitted", "in_review"].includes(request.status) });
   } catch (error) {
     console.error("Advance request submission email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request submission email failed.");

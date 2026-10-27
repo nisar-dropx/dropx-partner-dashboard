@@ -219,6 +219,15 @@ export async function loadAssociatePayouts(
     rows(db.from("workforce_payout_disputes").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id")),
     loadPayoutMappingRevisionState(db, company, worker),
   ]);
+  const disputeIds = disputes.map((row) => row.id).filter(Boolean);
+  const eventResult = disputeIds.length
+    ? await db.from("workforce_payout_dispute_events")
+      .select("id,dispute_id,actor_name,portal,message,event_type,created_at")
+      .eq("company_id", company).in("dispute_id", disputeIds).order("created_at").order("id")
+    : { data: [], error: null };
+  if (eventResult.error && !/does not exist|schema cache/i.test(eventResult.error.message)) throw new Error(eventResult.error.message);
+  const eventsByDispute = new Map<string, Row[]>();
+  for (const event of eventResult.data ?? []) eventsByDispute.set(event.dispute_id, [...(eventsByDispute.get(event.dispute_id) ?? []), event]);
   const runIds = [...new Set(publications.map((row) => row.payroll_run_id).filter(Boolean))];
   const runs: Row[] = [];
   for (let index = 0; index < runIds.length; index += 100) {
@@ -271,6 +280,8 @@ export async function loadAssociatePayouts(
           dispute,
           publicationById.get(dispute.publication_id),
           publicationById.get(dispute.processed_publication_id),
+          null,
+          eventsByDispute.get(dispute.id) ?? [],
         )),
       payoutSlipAvailable: false,
       snapshot,
@@ -328,6 +339,7 @@ export async function loadAssociatePayouts(
           publicationById.get(dispute.publication_id),
           publicationById.get(dispute.processed_publication_id),
           final ? { status, date: paymentDate, reference: paymentReference } : null,
+          eventsByDispute.get(dispute.id) ?? [],
         )),
       payoutSlipAvailable: true,
       snapshot: publication?.snapshot ?? null,

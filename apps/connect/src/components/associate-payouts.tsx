@@ -347,6 +347,13 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
               <DisputeProgress dispute={dispute} />
               <DisputeCorrection dispute={dispute} />
               {dispute.resolution ? <section className={styles.disputeDecision} aria-label="Final dispute decision"><small>Final decision</small><p>{dispute.resolution}</p></section> : null}
+              {dispute.timeline.length ? <section className={styles.disputeTimeline} aria-label="Dispute comments">
+                <small>Updates and comments</small>
+                <ol>{dispute.timeline.map((event, index) => <li key={`${event.createdAt}:${index}`}>
+                  <div><strong>{event.label}</strong><time>{event.createdAt ? `${localTime(event.createdAt)} IST` : ""}</time></div>
+                  <p>{event.comment}</p>
+                </li>)}</ol>
+              </section> : null}
               <DisputePayment dispute={dispute} />
             </article>;
           })}

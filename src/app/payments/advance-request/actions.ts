@@ -33,6 +33,18 @@ async function decideAdvanceRequest(formData: FormData, decision: "approved" | "
     finish({ error: "Enter a valid approved amount." });
   }
 
+  const managed = await supabaseAdmin!.from("hr_pay_advance_requests").select("id")
+    .eq("company_id", companyId)
+    .eq("external_source", "payment_advance_requests")
+    .eq("external_reference", requestId)
+    .maybeSingle();
+  if (managed.error && !/does not exist|schema cache/i.test(managed.error.message)) {
+    finish({ error: managed.error.message });
+  }
+  if (managed.data) {
+    finish({ error: "This request uses the Cluster Manager → Finance workflow. Review it in the DropX One Approval Inbox." });
+  }
+
   const result = await supabaseAdmin!
     .from("payment_advance_requests")
     .update({

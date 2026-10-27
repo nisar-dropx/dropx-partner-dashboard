@@ -96,6 +96,7 @@ export default async function AdvanceRequestPage({
     : "pending";
 
   let requests: AdvanceRequestRow[] = [];
+  const managedRequestIds = new Set<string>();
   let error: string | null = null;
   if (!supabaseAdmin) {
     error = "Supabase service role key is not configured.";
@@ -110,6 +111,16 @@ export default async function AdvanceRequestPage({
     const result = await query;
     requests = (result.data ?? []) as AdvanceRequestRow[];
     error = result.error?.message ?? null;
+    if (!error && requests.length) {
+      const managed = await supabaseAdmin.from("hr_pay_advance_requests")
+        .select("external_reference")
+        .eq("company_id", companyId)
+        .eq("external_source", "payment_advance_requests")
+        .in("external_reference", requests.map((request) => request.id));
+      if (!managed.error) {
+        for (const row of managed.data ?? []) if (row.external_reference) managedRequestIds.add(String(row.external_reference));
+      }
+    }
   }
   const exactDesignations = await loadExactDesignations(companyId, requests);
 
@@ -139,7 +150,9 @@ export default async function AdvanceRequestPage({
             <td>{request.station_code || "-"}</td><td>Rs {Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td><td>{request.purpose}</td>
             <td><StatusPill status={statusLabel(request.status)} /></td><td>{formatDashboardDateTime(request.requested_at)}</td>
             {openStatuses.has(request.status) ? <>
-              <td colSpan={3} className="advance-request-inline-cell"><AdvanceRequestInlineActions requestId={request.id} requestedAmount={Number(request.amount)} requesterLabel={request.requester_name || request.account_code || "request"} /></td>
+              <td colSpan={3} className="advance-request-inline-cell">{managedRequestIds.has(request.id)
+                ? <a className="button compact" href="https://one.dropxlogistics.com/approvals?section=pay-advances">Open approval inbox</a>
+                : <AdvanceRequestInlineActions requestId={request.id} requestedAmount={Number(request.amount)} requesterLabel={request.requester_name || request.account_code || "request"} />}</td>
             </> : <><td>{request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td><td>{request.decision_comment || "-"}</td><td>-</td></>}
           </tr>) : <tr><td className="empty-cell" colSpan={10}>No advance requests found.</td></tr>}</tbody>
         </table></div>

@@ -644,6 +644,35 @@
   font-weight: 650;
 }
 
+.disputeTimeline {
+  border-color: #d9e2f0;
+  background: #f8fafc;
+}
+
+.disputeTimeline ol {
+  display: grid;
+  gap: 10px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.disputeTimeline li {
+  padding: 10px 11px;
+  border-left: 3px solid #6b7fa4;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.disputeTimeline li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.disputeTimeline time { color: #68758a; font-size: 10px; }
+.disputeTimeline li p { margin: 5px 0 0; font-size: 12px; }
+
 .disputePayment > div {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

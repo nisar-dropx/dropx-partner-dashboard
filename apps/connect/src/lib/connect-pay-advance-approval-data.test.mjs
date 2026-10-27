@@ -9,7 +9,7 @@ function fixture() {
     hr_pay_advance_steps:[{id:'step-a',company_id:'company-a',request_id:'request-a',approver_user_id:'actor-a',status:'pending',step_name:'Reporting manager'},
       {id:'step-b',company_id:'company-b',request_id:'request-b',approver_user_id:'actor-a',status:'pending'},
       {id:'step-c',company_id:'company-a',request_id:'request-c',approver_user_id:'other-actor',status:'pending'}],
-    hr_pay_advance_requests:[{id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_name:'Test Person',requested_amount:2000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'}] };
+    hr_pay_advance_requests:[{id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_name:'Test Person',requested_amount:2000,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'}] };
   const db = { from(table) {
     let rows = state[table] ?? [];
     const query = {select(){return query},eq(key,value){rows=rows.filter(row=>row[key]===value);return query},in(key,values){rows=rows.filter(row=>values.includes(row[key]));return query},order(){return query},limit(n){rows=rows.slice(0,n);return query},
@@ -30,8 +30,8 @@ test('pay advances are scoped to the authenticated company and pending assigned 
   assert.equal(rows[0].requestedAmount,2000);
   for(const id of ['request-b','request-c','unknown']) await assert.rejects(f.decideConnectPayAdvanceApproval(account,id,'approved',''),/assigned/);
   assert.equal(f.state.rpcCalls.length,0);
-  await f.decideConnectPayAdvanceApproval(account,'request-a','approved','Reviewed');
-  assert.deepEqual(f.state.rpcCalls[0],{name:'hr_decide_pay_advance_step',args:{p_company_id:'company-a',p_request_id:'request-a',p_actor_user_id:'actor-a',p_decision:'approved',p_note:'Reviewed',p_approved_amount:null,p_approved_installments:null}});
+  await f.decideConnectPayAdvanceApproval(account,'request-a','approved','Reviewed',1500,1);
+  assert.deepEqual(f.state.rpcCalls[0],{name:'hr_decide_pay_advance_step',args:{p_company_id:'company-a',p_request_id:'request-a',p_actor_user_id:'actor-a',p_decision:'approved',p_note:'Reviewed',p_approved_amount:1500,p_approved_installments:1}});
 });
 test('removed assignment and database failures never call the decision RPC',async()=>{
   const f=fixture(); f.state.hr_pay_advance_steps[0].status='approved';
@@ -46,11 +46,17 @@ test('unlinked accounts have no pay-advance approvals',async()=>{
   await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved',''),/not assigned/);
 });
 
-test('Finance approval validates amounts and installments before recording the decision',async()=>{
+test('Finance approval may adjust above the request but never above the eligibility cap',async()=>{
   const f=fixture(); f.state.hr_pay_advance_steps[0].step_type='finance';
-  for(const [amount,installments] of [[null,1],[2001,1],[-1,1],[1500,0],[1500,13],[1500,1.5]]) await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved','',amount,installments));
+  for(const [amount,installments] of [[null,1],[3001,1],[-1,1],[1500,0],[1500,13],[1500,1.5]]) await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved','',amount,installments));
   assert.equal(f.state.rpcCalls.length,0);
-  await f.decideConnectPayAdvanceApproval(account,'request-a','approved','',1500,2);
-  assert.equal(f.state.rpcCalls[0].args.p_approved_amount,1500);
+  await f.decideConnectPayAdvanceApproval(account,'request-a','approved','',2500,2);
+  assert.equal(f.state.rpcCalls[0].args.p_approved_amount,2500);
   assert.equal(f.state.rpcCalls[0].args.p_approved_installments,2);
+});
+test('operational manager may reduce but cannot increase the requested amount',async()=>{
+  const f=fixture(); f.state.hr_pay_advance_steps[0].step_type='manager';
+  await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved','',2001,1),/25% outstanding-pay limit/);
+  await f.decideConnectPayAdvanceApproval(account,'request-a','approved','',1500,1);
+  assert.equal(f.state.rpcCalls[0].args.p_approved_amount,1500);
 });

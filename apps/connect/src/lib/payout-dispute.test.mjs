@@ -175,3 +175,21 @@ test("derives before and after totals from linked publications and hides unappro
   assert.equal(legacy.workflow.label, "Previous decision recorded");
   assert.equal(legacy.correction, null);
 });
+
+test("shows decision comments but masks Finance personnel names", () => {
+  const view = associatePayoutDispute({
+    id: "dispute-5",
+    status: "processing",
+  }, null, null, null, [{
+    event_type: "processing_claimed",
+    actor_name: "Named Finance Person",
+    message: "Claimed by Named Finance Person. UTR verification is pending.",
+    created_at: "2026-10-04T10:00:00Z",
+  }]);
+  assert.deepEqual(view.timeline, [{
+    label: "Finance",
+    comment: "claimed by Finance. UTR verification is pending.",
+    createdAt: "2026-10-04T10:00:00Z",
+  }]);
+  assert.doesNotMatch(JSON.stringify(view.timeline), /Named Finance Person/);
+});
