@@ -222,7 +222,8 @@ function roleText(value: string) {
 
 /**
  * Delivery associates and similar field roles. Key custodians for Security /
- * keys & CCTV are UTR station staff (SSA, TL, SM…), not DA / DSA.
+ * keys & CCTV are UTR station staff (SSA, TL, SM…), including contractors on
+ * the station People map — not DA / DSA / Wish Master workforce.
  */
 export function isAuditDeliveryAssociate(person: AuditEmployee) {
   if (person.ref.startsWith("employee:")) return false;
@@ -234,6 +235,12 @@ export function isAuditDeliveryAssociate(person: AuditEmployee) {
   )
     return false;
   if (person.ref.startsWith("workforce:")) return true;
+  // Independent contractors without a UTR role above stay out of the key list.
+  if (person.ref.startsWith("contractor:")) {
+    return /\b(DA|DSA|DELIVERY ASSOCIATE|DELIVERY SUPPORT|SPOT DA|HELPER|WISH MASTER|FIELD ASSOCIATE)\b/.test(
+      designation,
+    );
+  }
   return /\b(DA|DSA|DELIVERY ASSOCIATE|DELIVERY SUPPORT|SPOT DA|HELPER)\b/.test(
     designation,
   );

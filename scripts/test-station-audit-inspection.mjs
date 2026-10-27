@@ -48,13 +48,15 @@ await db.exec(`create role anon;create role authenticated;create role service_ro
  create table user_roles(id uuid,company_id uuid,code text,is_active boolean,location_access_mode text);
  create table company_product_memberships(company_id uuid,user_id uuid,role_id uuid,is_active boolean,product_code text,has_all_location_access boolean,location_scope_ids uuid[]);
  create table employees(id uuid,company_id uuid,employee_code text,full_name text,location_id uuid,designation_id uuid,is_active boolean,deleted_at timestamptz);
+ create table contractors(id uuid,company_id uuid,dropx_id text,full_name text,location_id uuid,designation text,is_active boolean,deleted_at timestamptz);
  create table designations(id uuid,company_id uuid,name text);
  create table workforce(id uuid,company_id uuid,dropx_id text,full_name text,location_id uuid,designation text,is_active boolean,deleted_at timestamptz);
- create table hr_engagements(id uuid,company_id uuid,employee_id uuid,person_id uuid,start_date date,end_date date);
+ create table hr_engagements(id uuid,company_id uuid,employee_id uuid,contractor_id uuid,person_id uuid,start_date date,end_date date);
  create table hr_work_assignments(id uuid,company_id uuid,engagement_id uuid,location_id uuid,effective_from date,effective_to date);
  create table station_responsibility_assignments(company_id uuid,station_id uuid,assignment_id uuid,assignee_user_id uuid,effective_from timestamptz,effective_to timestamptz);
  create table hr_user_person_links(company_id uuid,person_id uuid,user_id uuid,status text);
  insert into employees values('${emp}','${company}','E001','Station TL','${station}',null,true,null),('${manager}','${company}','E002','Cluster manager','${otherStation}',null,true,null);
+ insert into contractors values('${id(10)}','${company}','D0743','Mihir SSA','${station}','Station Support Associate',true,null);
  insert into workforce values('${workforce}','${company}','DA001','Associate','${station}','DA',true,null);
  insert into profiles values('${actor}','${company}','E002','Manager','manager@example.test',true,true);
  insert into station_responsibility_assignments values('${company}','${station}',null,'${actor}',now()-interval '1 day',null);`);
@@ -62,11 +64,18 @@ const initial=fs.readFileSync('supabase/migrations/20261001010000_ops_station_au
 await db.exec(`insert into ops_audit_types(id,company_id,code,name,cadence_unit,required_count,scheduling_config) values('${type}','${company}','physical_station','Physical','monthly',2,'{"period_slots":[{"code":"first_half","start_day":1,"end_day":15},{"code":"second_half","start_day":16,"end_day":31}]}');
  insert into ops_audit_checklist_sections(company_id,audit_type_id,code,name) values('${company}','${type}','safety_hygiene','Hygiene'),('${company}','${type}','operations','Operations');`);
 await db.exec(`insert into ops_audit_checklist_items(company_id,audit_type_id,section_id,code,label,response_type,response_options,is_active) select company_id,audit_type_id,id,'legacy_amount','Legacy amount','amount','[]'::jsonb,false from ops_audit_checklist_sections where code='operations';`);
-for(const name of ['20261005144751_station_audit_rescheduling.sql','20261005155255_station_audit_personal_tracker.sql','20261005172541_audit_hygiene_photos.sql','20261005173417_audit_shipment_reconciliation.sql','20261005181921_physical_audit_scoring.sql'])await db.exec(fs.readFileSync(`supabase/migrations/${name}`,'utf8'));
+for(const name of ['20261005144751_station_audit_rescheduling.sql','20261005155255_station_audit_personal_tracker.sql','20261005172541_audit_hygiene_photos.sql','20261005173417_audit_shipment_reconciliation.sql','20261005181921_physical_audit_scoring.sql','20261027120000_station_audit_directory_contractors.sql'])await db.exec(fs.readFileSync(`supabase/migrations/${name}`,'utf8'));
 assert.deepEqual((await db.query("select response_options from ops_audit_checklist_items where code='legacy_amount'")).rows[0].response_options,[], 'legacy amount checks retain empty options');
-assert.equal((await db.query('select count(*) n from station_audit_employee_directory($1,$2)',[company,station])).rows[0].n,3,'base TL, workforce and mapped cluster manager');
+assert.equal((await db.query('select count(*) n from station_audit_employee_directory($1,$2)',[company,station])).rows[0].n,4,'base TL, contractor SSA, workforce and mapped cluster manager');
+assert.equal((await db.query("select count(*) n from station_audit_employee_directory($1,$2) where ref like 'contractor:%'",[company,station])).rows[0].n,1,'station-mapped contractor SSA is listed');
 assert.equal((await db.query('select count(*) n from station_audit_employee_directory($1,$2)',[id(99),station])).rows[0].n,0,'company isolation');
 assert.equal((await db.query('select count(*) n from station_audit_employee_directory($1,$2)',[company,otherStation])).rows[0].n,1,'only one employee at other station');
+const custodians=auditKeyCustodianPeople([
+  {ref:'contractor:1',employee_code:'D0743',full_name:'Mihir SSA',designation:'Station Support Associate',is_active:true},
+  {ref:'workforce:1',employee_code:'DA001',full_name:'Associate',designation:'DA',is_active:true},
+  {ref:'employee:aom',employee_code:'D0785',full_name:'Visiting AOM',designation:'Area Operations Manager',is_active:true},
+]);
+assert.deepEqual(custodians.map(p=>p.employee_code),['D0743','D0785'],'contractor SSA joins employee UTR roles; DA stays out');
 await db.query(`insert into ops_station_audits(id,company_id,audit_number,audit_type_id,location_id,scheduled_for,cycle_key,period_slot,assigned_to,assignment_verified,status_code,started_at) values($1,$2,'TEST',$3,$4,'2099-10-05T04:00Z','2099-10','first_half',$5,true,'in_progress',now())`,[audit,company,type,station,actor]);
 const row=async()=>(await db.query('select * from ops_station_audits where id=$1',[audit])).rows[0];
 const patch={status_code:'awaiting_station_response',station_response_status:'requested',shipment_reconciliation:{expected:['TID123','TID456'],scanned:['TID123','TID789']},system_shipment_count:2,physical_shipment_count:2,shipment_missing_count:1,shipment_excess_count:1};
