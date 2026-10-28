@@ -17,6 +17,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { loadLossReport, type LossReportKind } from "@/lib/ops-pulse/loss-reports";
 import {
   loadRecoveryView,
+  lossClusterScope,
   lossSchemaReady,
   type NlFilters,
   type RecoveryKind,
@@ -198,9 +199,22 @@ export default async function LossesSectionPage({
     redirect(qs ? `/team-ops/losses/${target}?${qs}` : `/team-ops/losses/${target}`);
   }
   if (params.section === "summary") {
-    const [workspace, ledger] = await Promise.all([loadRecoveryWorkspace(auth, true), loadRecoveryLedger(auth)]);
+    const [workspace, ledger, scope] = await Promise.all([
+      loadRecoveryWorkspace(auth, true),
+      loadRecoveryLedger(auth),
+      lossClusterScope(auth),
+    ]);
     return <main className={styles.workspace}><LossHeader title="Loss summary" intro="Station-wise confirmed recoverable NL and SLP cases, updates and recovery." tabs={tabs} active="summary"/>
-      <LossSummary facts={lossFacts(workspace.rows, ledger.lines, workspace.settings?.recoverable_statuses || [])} ledgerReady={ledger.ready}/></main>;
+      <LossSummary
+        facts={lossFacts(workspace.rows, ledger.lines, workspace.settings?.recoverable_statuses || [])}
+        ledgerReady={ledger.ready}
+        stations={scope.stations.map((station) => ({
+          station: station.source_code,
+          clusterKeys: station.clusterKeys,
+          region: String(station.region || "").trim() || "unmapped",
+        }))}
+        clusterOptions={scope.clusterOptions}
+      /></main>;
   }
   const section = sections[params.section];
   if (!section) notFound();
