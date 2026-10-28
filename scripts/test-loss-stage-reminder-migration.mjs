@@ -7,4 +7,7 @@ assert.equal((await db.query('select count(*)::int as n from portal_notification
 for(const [day,event,expected] of [['2026-11-05','loss_reminder_recovery_morning','2026-10'],['2026-11-20','loss_reminder_recovery_afternoon','2026-11'],['2027-01-01','loss_reminder_recovery_morning','2026-12'],['2026-11-05','now_review_digest','2026-11']]){
  await db.exec('delete from portal_digest_deliveries');await db.query('insert into portal_digest_deliveries values($1,$2,$3)',['00000000-0000-0000-0000-000000000001',day,event]);assert.equal((await db.query("select portal_finish_digest('00000000-0000-0000-0000-000000000001','','','') as month")).rows[0].month,expected);
 }
+const timing=readFileSync('supabase/migrations/20261028192000_loss_reminder_timing.sql','utf8');await db.exec(timing);await db.exec(timing);
+const controls=(await db.query('select event_key,state,config from portal_notification_controls')).rows;
+for(const c of controls){assert.equal(c.config.schedule_time,c.event_key.endsWith('_morning')?'11:00':'16:00');assert.equal(c.state,'disabled');assert.deepEqual(c.config.additional_recipient_emails,['jamsheer@dropxlogistics.com']);}
 await db.close();console.log('PASS thread migration idempotency, six disabled controls and month boundaries');

@@ -473,7 +473,7 @@ that migration. Do not use a blanket database push.
 
 ### Stage reminders and recurring amount rules (28 October 2026)
 
-- Loss reminders run at 10:00 / 15:00 IST through the existing five-minute notification cron.
+- Loss reminders run at 11:00 / 16:00 IST through the existing five-minute notification cron.
   Recovery-update reminders run 20th–next 5th; initial NL dispute reminders 7th–11th;
   station responses to Amazon 11th–20th. Source stage determines the actual action; calendar
   windows do not change Amazon deadlines. Submitted current-stage responses are excluded.
