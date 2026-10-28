@@ -845,6 +845,7 @@ export type ProviderFirstSourceMember = {
   workDate?: string;
   shipmentMonths?: string[];
   outboundMonths?: string[];
+  outboundDates?: string[];
 };
 
 export function isScientificProviderMemberId(value: string) {
@@ -946,7 +947,8 @@ export function canonicalizeProviderFirstMembers<T extends ProviderFirstSourceMe
       canonicalExactMembers[position] = {
         ...exact,
         ...(member.shipmentMonths ? { shipmentMonths: [...new Set([...(exact.shipmentMonths ?? []), ...member.shipmentMonths])] } : {}),
-        ...(member.outboundMonths ? { outboundMonths: [...new Set([...(exact.outboundMonths ?? []), ...member.outboundMonths])] } : {})
+        ...(member.outboundMonths ? { outboundMonths: [...new Set([...(exact.outboundMonths ?? []), ...member.outboundMonths])] } : {}),
+        ...(member.outboundDates ? { outboundDates: [...new Set([...(exact.outboundDates ?? []), ...member.outboundDates])] } : {})
       };
       return false;
     });

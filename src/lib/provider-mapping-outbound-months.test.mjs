@@ -69,14 +69,17 @@ test('database months retain full history, exclude non-outbound counts, and enfo
     const amazonOnlyMembers = await call(['00000000-0000-0000-0000-000000000001']);
     assert.deepEqual(amazonOnlyMembers, expectedScopedMembers, 'The optimized query must preserve every source field and month');
     await db.exec(await readFile(new URL('../../supabase/migrations/20261019100000_provider_mapping_flipkart_months.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../../supabase/migrations/20261028193000_provider_mapping_activity_dates.sql', import.meta.url), 'utf8'));
     const members = await call(['00000000-0000-0000-0000-000000000001']);
     assert.equal(members.length, 6);
     const member = members.find((m) => m.provider_employee_id === 'MEMBER');
     assert.equal(member.provider_employee_name, 'Latest name');
     assert.deepEqual(member.outbound_months, ['2026-10', '2026-09']);
+    assert.deepEqual(member.outbound_dates, ['2026-09-01', '2026-10-01']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'return-only').outbound_months, []);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'return-only').shipment_months, ['2026-08']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'flipkart-member').outbound_months, ['2026-09']);
+    assert.deepEqual(members.find((m) => m.provider_employee_id === 'flipkart-member').outbound_dates, ['2026-09-16']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'flipkart-return').outbound_months, ['2026-09']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'flipkart-return').shipment_months, ['2026-09']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'other-client').shipment_months, []);

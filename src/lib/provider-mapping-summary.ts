@@ -3,12 +3,15 @@ export type ProviderMappingSummaryStatus =
   | "unmapped"
   | "identity_missing"
   | "payment_missing"
+  | "partial_coverage"
   | "source_missing";
 
 export type ProviderMappingSummaryStationInput = {
   id: string;
   code: string;
   name?: string | null;
+  cluster?: string | null;
+  region?: string | null;
 };
 
 export type ProviderMappingSummarySourceInput = {
@@ -16,6 +19,8 @@ export type ProviderMappingSummarySourceInput = {
   providerMemberName?: string | null;
   stationCode: string;
   workDate?: string | null;
+  outboundMonths?: string[] | null;
+  outboundDates?: string[] | null;
 };
 
 export type ProviderMappingSummaryMappingInput = {
@@ -27,6 +32,8 @@ export type ProviderMappingSummaryMappingInput = {
   paymentValues?: Record<string, unknown> | null;
   productionThresholdReady?: boolean;
   effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  status?: string | null;
   updatedAt?: string | null;
 };
 
@@ -53,12 +60,16 @@ export type ProviderMappingSummaryDetail = {
   status: ProviderMappingSummaryStatus;
   issues: string[];
   lastSeen: string;
+  coverageLabel: string;
+  coveragePercent: number;
 };
 
 export type ProviderMappingSummaryStation = {
   stationId: string;
   stationCode: string;
   stationName: string;
+  cluster: string;
+  region: string;
   total: number;
   mapped: number;
   ready: number;
@@ -86,6 +97,62 @@ function sourceIsNewer(left: ProviderMappingSummarySourceInput, right: ProviderM
   return text(left.workDate).localeCompare(text(right.workDate)) > 0;
 }
 
+function validMonth(value: string) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function validDate(value: string) {
+  return /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value);
+}
+
+function monthBounds(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const days = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return {start: `${month}-01`, end: `${month}-${String(days).padStart(2, "0")}`};
+}
+
+function canonicalMapping(mapping: ProviderMappingSummaryMappingInput) {
+  const status = text(mapping.status || (mapping.effectiveTo ? "closed" : "active")).toLowerCase();
+  return status !== "cancelled" && status !== "removed" && status !== "deleted";
+}
+
+function mappingCoversDate(mapping: ProviderMappingSummaryMappingInput, date: string) {
+  const from = text(mapping.effectiveFrom);
+  const to = text(mapping.effectiveTo);
+  return canonicalMapping(mapping) && (!from || from <= date) && (!to || to >= date);
+}
+
+function mappingIntersectsMonths(mapping: ProviderMappingSummaryMappingInput, months: string[]) {
+  if (!canonicalMapping(mapping)) return false;
+  if (!months.length) return true;
+  const from = text(mapping.effectiveFrom);
+  const to = text(mapping.effectiveTo);
+  return months.some(month => {
+    const bounds = monthBounds(month);
+    return (!from || from <= bounds.end) && (!to || to >= bounds.start);
+  });
+}
+
+function datesWithinMonths(dates: string[] | null | undefined, months: string[]) {
+  const selected = new Set(months);
+  return [...new Set((dates ?? []).map(text).filter(date => validDate(date) && (!selected.size || selected.has(date.slice(0, 7)))))].sort();
+}
+
+function daysCoveredInMonths(mappings: ProviderMappingSummaryMappingInput[], months: string[]) {
+  const days = new Set<string>();
+  for (const month of months) {
+    const {start, end} = monthBounds(month);
+    const cursor = new Date(`${start}T00:00:00.000Z`);
+    const last = new Date(`${end}T00:00:00.000Z`);
+    while (cursor <= last) {
+      const date = cursor.toISOString().slice(0, 10);
+      if (mappings.some(mapping => mappingCoversDate(mapping, date))) days.add(date);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
+  return days.size;
+}
+
 function configuredValue(value: unknown) {
   if (value === null || value === undefined || value === "") return false;
   const numeric = Number(value);
@@ -97,14 +164,17 @@ export function buildProviderMappingSummary({
   sourceMembers,
   mappings,
   workers,
-  methods
+  methods,
+  selectedMonths = []
 }: {
   stations: ProviderMappingSummaryStationInput[];
   sourceMembers: ProviderMappingSummarySourceInput[];
   mappings: ProviderMappingSummaryMappingInput[];
   workers: ProviderMappingSummaryWorkerInput[];
   methods: ProviderMappingSummaryMethodInput[];
+  selectedMonths?: string[];
 }) {
+  const months = [...new Set(selectedMonths.map(text).filter(validMonth))].sort();
   const stationById = new Map(stations.map(station => [station.id, station]));
   const stationByCode = new Map(stations.map(station => [text(station.code).toUpperCase(), station]));
   const workerById = new Map(workers.map(worker => [worker.id, worker]));
@@ -113,27 +183,47 @@ export function buildProviderMappingSummary({
   for (const source of sourceMembers) {
     const station = stationByCode.get(text(source.stationCode).toUpperCase());
     const providerMemberId = text(source.providerMemberId);
-    if (!station || !providerMemberId) continue;
+    const sourceMonths = [...new Set([...(source.outboundMonths ?? []).map(text).filter(validMonth), ...(source.outboundDates ?? []).map(value => text(value).slice(0, 7)).filter(validMonth)])];
+    if (!station || !providerMemberId || (months.length && !sourceMonths.some(month => months.includes(month)))) continue;
     const key = memberKey(station.id, providerMemberId);
     const existing = sourceByKey.get(key);
-    if (!existing || sourceIsNewer(source, existing)) sourceByKey.set(key, source);
+    if (!existing) sourceByKey.set(key, source);
+    else {
+      const newest = sourceIsNewer(source, existing) ? source : existing;
+      sourceByKey.set(key, {
+        ...newest,
+        outboundMonths: [...new Set([...(existing.outboundMonths ?? []), ...(source.outboundMonths ?? [])])],
+        outboundDates: [...new Set([...(existing.outboundDates ?? []), ...(source.outboundDates ?? [])])]
+      });
+    }
   }
 
-  const mappingByKey = new Map<string, ProviderMappingSummaryMappingInput>();
+  const mappingsByKey = new Map<string, ProviderMappingSummaryMappingInput[]>();
   for (const mapping of mappings) {
-    if (!stationById.has(mapping.stationId) || !text(mapping.providerMemberId)) continue;
+    if (!stationById.has(mapping.stationId) || !text(mapping.providerMemberId) || !mappingIntersectsMonths(mapping, months)) continue;
     const key = memberKey(mapping.stationId, mapping.providerMemberId);
-    const existing = mappingByKey.get(key);
-    if (!existing || mappingIsNewer(mapping, existing)) mappingByKey.set(key, mapping);
+    const existing = mappingsByKey.get(key) ?? [];
+    existing.push(mapping);
+    mappingsByKey.set(key, existing);
   }
 
   const detailsByStation = new Map(stations.map(station => [station.id, [] as ProviderMappingSummaryDetail[]]));
-  const keys = new Set([...sourceByKey.keys(), ...mappingByKey.keys()]);
+  const keys = new Set([...sourceByKey.keys(), ...mappingsByKey.keys()]);
   for (const key of keys) {
     const separator = key.indexOf("\u0000");
     const stationId = key.slice(0, separator);
     const source = sourceByKey.get(key);
-    const mapping = mappingByKey.get(key);
+    const mappingPeriods = [...(mappingsByKey.get(key) ?? [])].sort((left, right) => {
+      if (mappingIsNewer(left, right)) return -1;
+      if (mappingIsNewer(right, left)) return 1;
+      return 0;
+    });
+    const requiredDates = datesWithinMonths(source?.outboundDates, months);
+    const coveredRequiredDates = requiredDates.filter(date => mappingPeriods.some(mapping => mappingCoversDate(mapping, date)));
+    const relevantPeriods = requiredDates.length
+      ? [...new Set(requiredDates.map(date => mappingPeriods.find(mapping => mappingCoversDate(mapping, date))).filter(Boolean))] as ProviderMappingSummaryMappingInput[]
+      : mappingPeriods.slice(0, 1);
+    const mapping = relevantPeriods[0] ?? mappingPeriods[0];
     const memberId = text(source?.providerMemberId || mapping?.providerMemberId);
     const worker = mapping?.workforceId ? workerById.get(mapping.workforceId) : undefined;
     const method = mapping?.paymentMethodId ? methodById.get(mapping.paymentMethodId) : undefined;
@@ -141,22 +231,41 @@ export function buildProviderMappingSummary({
 
     if (!source) issues.push("No recent source activity");
     if (!mapping) issues.push("Mapping missing");
+    if (mapping && requiredDates.length && coveredRequiredDates.length < requiredDates.length) {
+      issues.push(`Mapping covers ${coveredRequiredDates.length} of ${requiredDates.length} active days`);
+    }
     if (mapping && !mapping.workforceId) issues.push("DropX ID missing");
     if (mapping?.workforceId && !worker) issues.push("Workforce record missing");
     if (worker && !text(worker.dropxId)) issues.push("DropX ID missing");
     if (mapping && !mapping.paymentMethodId) issues.push("Payment method missing");
     if (mapping?.paymentMethodId && !method) issues.push("Payment method unavailable");
-    if (mapping && method) {
-      const missingComponents = method.componentCodes.filter(code => !configuredValue(mapping.paymentValues?.[code]));
-      if (missingComponents.length) issues.push(`${missingComponents.length} payment value${missingComponents.length === 1 ? "" : "s"} missing`);
-      if (method.productionThresholdRequired && !mapping.productionThresholdReady) issues.push("Production threshold missing");
+    for (const period of relevantPeriods.length ? relevantPeriods : mapping ? [mapping] : []) {
+      const periodMethod = period.paymentMethodId ? methodById.get(period.paymentMethodId) : undefined;
+      if (period && !period.paymentMethodId) issues.push("Payment method missing");
+      if (period.paymentMethodId && !periodMethod) issues.push("Payment method unavailable");
+      if (periodMethod) {
+        const missingComponents = periodMethod.componentCodes.filter(code => !configuredValue(period.paymentValues?.[code]));
+        if (missingComponents.length) issues.push(`${missingComponents.length} payment value${missingComponents.length === 1 ? "" : "s"} missing`);
+        if (periodMethod.productionThresholdRequired && !period.productionThresholdReady) issues.push("Production threshold missing");
+      }
     }
 
     let status: ProviderMappingSummaryStatus = "ready";
     if (!mapping) status = "unmapped";
     else if (!mapping.workforceId || !worker || !text(worker.dropxId)) status = "identity_missing";
     else if (issues.some(issue => issue.includes("Payment") || issue.includes("payment") || issue.includes("threshold"))) status = "payment_missing";
+    else if (requiredDates.length && coveredRequiredDates.length < requiredDates.length) status = "partial_coverage";
     else if (!source) status = "source_missing";
+
+    const calendarCoverageDays = months.length ? daysCoveredInMonths(mappingPeriods, months) : 0;
+    const coverageLabel = requiredDates.length
+      ? `${coveredRequiredDates.length}/${requiredDates.length} active day${requiredDates.length === 1 ? "" : "s"}`
+      : months.length && mappingPeriods.length
+        ? `${calendarCoverageDays} mapped day${calendarCoverageDays === 1 ? "" : "s"}`
+        : mappingPeriods.length ? "Mapping period saved" : "No mapped days";
+    const coveragePercent = requiredDates.length
+      ? Math.round((coveredRequiredDates.length / requiredDates.length) * 100)
+      : mappingPeriods.length ? 100 : 0;
 
     detailsByStation.get(stationId)?.push({
       key,
@@ -166,8 +275,10 @@ export function buildProviderMappingSummary({
       dropxName: text(worker?.fullName),
       paymentMethod: text(method?.name),
       status,
-      issues,
-      lastSeen: text(source?.workDate)
+      issues: [...new Set(issues)],
+      lastSeen: requiredDates.at(-1) ?? text(source?.workDate),
+      coverageLabel,
+      coveragePercent
     });
   }
 
@@ -184,6 +295,8 @@ export function buildProviderMappingSummary({
       stationId: station.id,
       stationCode: station.code,
       stationName: text(station.name),
+      cluster: text(station.cluster) || "Unassigned",
+      region: text(station.region) || "Unassigned",
       total: details.length,
       mapped,
       ready,
