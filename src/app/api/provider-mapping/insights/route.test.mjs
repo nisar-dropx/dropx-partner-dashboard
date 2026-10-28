@@ -36,7 +36,7 @@ test('read-only calculation binds company, station, saved identity and report da
  assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');
  assert.equal(data.deliveries,10);assert.equal(data.cost,500);assert.equal(data.cps,50);assert.deepEqual(data.people,['Example · EX1']);
  assert.ok(route.queries.every(q=>q.filters.some(([key,value])=>key==='company_id'&&value==='company')));
- const [company,scope,from,to,options]=route.calculations[0];assert.equal(company,'company');assert.equal(scope.hasAllLocationAccess,false);assert.deepEqual(scope.locationScopeIds,[station]);assert.equal(from,'2026-10-01');assert.equal(to,'2026-10-02');assert.deepEqual(options,{workforceIds:['worker'],includeLossRecoveries:false,providerCostSegmentsOnly:true});
+ const [company,scope,from,to,options]=route.calculations[0];assert.equal(company,'company');assert.equal(scope.hasAllLocationAccess,false);assert.deepEqual(scope.locationScopeIds,[station]);assert.equal(from,'2026-10-01');assert.equal(to,'2026-10-02');assert.deepEqual(options,{workforceIds:['worker'],includeLossRecoveries:false,providerCostSegmentsOnly:true,providerDailyCostBasis:'delivery_days'});
  assert.ok(!JSON.stringify(data).includes('Other'));
 });
 test('source failure does not return false empty or zero figures',async()=>{

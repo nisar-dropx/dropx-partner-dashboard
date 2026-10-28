@@ -53,7 +53,7 @@ export async function GET(request: Request) {
       ]);
       if (byId.error || bySource.error) throw new Error('People unavailable');
       const workforceIds = [...new Set([...(byId.data ?? []), ...(bySource.data ?? [])].map(row => row.id))];
-      const calculated = await loadWorkforcePayoutRows(auth.companyId, {...auth, hasAllLocationAccess: false, locationScopeIds: [stationId]}, period.from, latest, {workforceIds, includeLossRecoveries: false, providerCostSegmentsOnly: true});
+      const calculated = await loadWorkforcePayoutRows(auth.companyId, {...auth, hasAllLocationAccess: false, locationScopeIds: [stationId]}, period.from, latest, {workforceIds, includeLossRecoveries: false, providerCostSegmentsOnly: true, providerDailyCostBasis: 'delivery_days'});
       const mappingIds = new Set(mappings.map(row => row.id));
       payRows = calculated.rows.filter(row => mappingIds.has(row.id) && row.locationId === stationId && row.providerMemberId === memberId);
       if (calculated.error) costError = 'Pay calculation needs review. Open the payout worksheet for details.';

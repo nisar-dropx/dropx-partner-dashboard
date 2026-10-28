@@ -17,6 +17,31 @@ import {
   workforcePaymentMonthIsFinalized
 } from "./workforce-payment-policy.ts";
 
+test("CPS daily estimate uses delivery days without changing default payroll attendance", () => {
+  const fields = [{ component_code: "FIXED_PAY_PER_DAY", component_type: "amount", pay_schedule: "per_day", calculation_source: "attendance_eligibility" }];
+  const values = { FIXED_PAY_PER_DAY: 1000 };
+  const estimate = count => directPayForDay(values, fields, "2026-10-27", null, {dailyDeliveryCount: count});
+  assert.equal(estimate(27).total, 1000);
+  assert.equal(estimate(27).lines[0].count, 1);
+  assert.equal(estimate(0).total, 0);
+  assert.equal(directPayForDay(values, fields, "2026-10-27", null).total, 0);
+  const absent = {punch_date: "2026-10-27", status: "A"};
+  assert.equal(directPayForDay(values, fields, "2026-10-27", absent, {dailyDeliveryCount: 27}).total, 1000);
+  const uploaded = {dailyDeliveryCount: 27, attendanceInput: {basis: "days", quantity: 20}};
+  assert.equal(directPayForDay(values, fields, "2026-10-27", null, uploaded).total, 1000);
+  assert.equal(directPayForDay({}, fields, "2026-10-27", null, {dailyDeliveryCount: 27}).missing, true);
+});
+
+test("CPS delivery days do not invent hourly time or monthly attendance", () => {
+  const fields = [
+    {component_code: "MONTHLY", component_type: "amount", pay_schedule: "per_month", calculation_source: "attendance_eligibility"},
+    {component_code: "HOURLY", component_type: "amount", pay_schedule: "per_hour", calculation_source: "attendance_eligibility"}
+  ];
+  const values = {MONTHLY: 31000, HOURLY: 100};
+  const payroll = directPayForDay(values, fields, "2026-10-27", null);
+  assert.deepEqual(directPayForDay(values, fields, "2026-10-27", null, {dailyDeliveryCount: 27}), payroll);
+});
+
 test("direct pay handles monthly, present-day and hourly amounts", () => {
   const result = directPayForDay({ MONTHLY: 31000, DAILY: 500, HOURLY: 100 }, [
     { component_code: "MONTHLY", component_type: "amount", pay_schedule: "per_month" },

@@ -2,7 +2,7 @@
 export type InsightPayRow = {
   id: string; name: string; dropxId: string; paymentMethod: string;
   paymentDetailsAvailable: boolean; status: string;
-  dailyBreakdown: { date: string; baseAmount: number; attendanceSource: string; attendanceRange?: unknown }[];
+  dailyBreakdown: { date: string; baseAmount: number; attendanceSource: string; attendanceRange?: unknown; lines?: {code: string; label: string; schedule?: string; count: number; rate: number; amount: number}[] }[];
 };
 export type InsightShipment = { work_date: string; total_delivery: number | string | null; amazon_delivery?: number | string | null; swa_delivery?: number | string | null };
 export type ProviderMappingInsights = ReturnType<typeof buildProviderMappingInsights>;
@@ -49,10 +49,18 @@ export function buildProviderMappingInsights(input: {
   const missingPay = days.some(day => (day.deliveries ?? 0) > 0 && day.cost == null);
   const cost = !costIssue && latestReport && !missingPay ? round(days.reduce((sum, day) => sum + (day.cost ?? 0), 0)) : null;
   const hasAdhoc = days.some(day => day.note.startsWith('Paid ad hoc'));
+  const breakdown = new Map<string, {label: string; schedule: string; count: number; rate: number; amount: number}>();
+  for (const source of byDate.values()) for (const day of source) for (const line of day.lines ?? []) {
+    const key = JSON.stringify([line.code, line.schedule, line.rate]);
+    const entry = breakdown.get(key) ?? {label: line.label, schedule: line.schedule ?? 'per_unit', count: 0, rate: line.rate, amount: 0};
+    entry.count += line.count; entry.amount += line.amount;
+    breakdown.set(key, entry);
+  }
   return { from: input.from, to: input.to, latestReport, deliveries, cost,
     cps: cost != null && deliveries > 0 && !hasAdhoc ? round(cost / deliveries) : null,
     costIssue: costIssue || (missingPay ? 'Some delivery days have no saved pay mapping.' : hasAdhoc ? 'Ad hoc payments are separate; combined CPS is unavailable.' : null),
     methods: [...new Set(input.payRows.map(row => row.paymentMethod).filter(Boolean))],
     people: [...new Set(input.payRows.map(row => [row.name, row.dropxId].filter(Boolean).join(' · ')))],
+    paymentBreakdown: [...breakdown.values()].map(line => ({...line, count: round(line.count), amount: round(line.amount)})),
     days: days.reverse() };
 }
