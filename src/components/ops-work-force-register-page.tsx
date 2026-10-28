@@ -3,13 +3,13 @@ import { OpsWorkforcePeople } from "@/components/ops-workforce-people";
 import { OpsWorkforceNavigation } from "@/components/ops-workforce-navigation";
 import { OpsBetaVerification } from "@/components/ops-beta-verification";
 export type WorkForceRegisterSearchParams = {
-  section?: string; status?: string; edit?: string; view?: string; error?: string; notice?: string;
+  section?: string; profile?: string; ids?: string; status?: string; edit?: string; view?: string; error?: string; notice?: string;
   full_name?: string; mobile_country_code?: string; mobile?: string; email?: string;
   date_of_join?: string; reported_on?: string; location_id?: string; designation?: string;
 };
 export function OpsWorkforceRegisterPage({ searchParams = {} }: { searchParams?: WorkForceRegisterSearchParams }) {
   if (searchParams.section === "bgc") return <OpsBetaVerification status={searchParams.status} />;
-  if (searchParams.section === "register" && !searchParams.edit && !searchParams.view) return <OpsWorkforcePeople />;
+  if (searchParams.section === "register" && !searchParams.edit && !searchParams.view) return <OpsWorkforcePeople profile={searchParams.profile} ids={searchParams.ids} />;
   return <FieldExecutivePageContent
     activeLabel="Workforce Register" pageCode="delivery_associates" pageTitle="Workforce Register"
     pageSubtitle="Invite associates and follow their registration progress."

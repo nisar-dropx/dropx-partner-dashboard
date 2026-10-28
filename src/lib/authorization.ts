@@ -1,3 +1,4 @@
+import { inheritsMappingSummaryAccess } from "./mapping-summary-access";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
@@ -421,6 +422,7 @@ export function hasPermission(
   if (pageCode === "request_tracker") return (action === "access" || action === "view") && isCompanyOwner(authorization);
   if (authorization.readOnly && (action === "add" || action === "edit")) return false;
   if (isCompanyOwner(authorization)) return true;
+  if (inheritsMappingSummaryAccess(authorization.permissions, pageCode, action)) return true;
   const permission = authorization.permissions[pageCode] ?? noPermission;
   if (action === "access") return permission.canView || permission.canAdd || permission.canEdit;
   if (action === "add") return permission.canAdd;

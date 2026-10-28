@@ -23,6 +23,7 @@ export type AllPeopleRow = {
   provider: string;
   designation: string;
   status: string;
+  registrationStatus?: string | null;
   viewHref?: string;
   editHref?: string;
   canEdit: boolean;
