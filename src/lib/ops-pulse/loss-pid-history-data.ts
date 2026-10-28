@@ -1,7 +1,7 @@
 import 'server-only';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { readAllRows } from '@/lib/supabase-pagination';
-import { pidEvent, sortPidEvents, type PidEvent } from './loss-pid-history';
+import { meaningfulPidEvents, pidEvent, type PidEvent } from './loss-pid-history';
 
 /** Callers supply cases already checked against their company and station scope. No retention cutoff. */
 export async function loadPidHistory(company: string, cases: {month:string;case_key:string}[]) {
@@ -17,7 +17,7 @@ export async function loadPidHistory(company: string, cases: {month:string;case_
     const results = await Promise.all(tables.map(async ([source,table]) => {
       const result = await readAllRows(supabaseAdmin!.from(table).select('*').eq('company_id',company)
         .in('case_key',keys.slice(i,i+100)).order('created_at',{ascending:false}).order('id'));
-      if (result.error) throw Error(`${source} history could not be loaded. Retry after the PID history migration is installed.`);
+      if (result.error) throw Error(`${source} history could not be loaded. Retry after the tracking-history migration is installed.`);
       return (result.data || []).filter(e=>allowed.has(`${e.month}|${e.case_key}`)).map(e=>pidEvent(source,e));
     }));
     events.push(...results.flat());
@@ -37,5 +37,5 @@ export async function loadPidHistory(company: string, cases: {month:string;case_
       }
     }
   }
-  return sortPidEvents(events);
+  return meaningfulPidEvents(events);
 }
