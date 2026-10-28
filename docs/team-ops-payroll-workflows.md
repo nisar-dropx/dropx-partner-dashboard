@@ -491,7 +491,7 @@ that migration. Do not use a blanket database push.
   plans obey the resulting schedule length. A database trigger validates new/changed
   schedules. Existing schedules, approval transitions, recovery keys and payroll obligations
   remain unchanged. Recurring plans still require exception approval.
-- Migrations: `20261028180000_loss_installment_amount_rules.sql` and
-  `20261028181000_loss_stage_reminders.sql`. Apply individually and record versions.
+- Migrations: `20261028190000_loss_installment_amount_rules.sql` and
+  `20261028191000_loss_stage_reminders.sql`. Apply individually and record versions.
 - Validation: `pnpm run test:loss-stage-reminders`; boundary cases also live in
   `src/lib/ops-pulse/nl-loss-installments.test.mjs`.

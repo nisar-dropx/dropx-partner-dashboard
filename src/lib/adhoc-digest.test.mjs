@@ -10,7 +10,7 @@ function compile(path, mocks = {}) {
   const code = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }
   }).outputText;
-  new Function("require", "exports", "module", code)(name => name in mocks ? mocks[name] : name === "./digest-thread-policy" ? compile("./digest-thread-policy.ts") : require(name), module.exports, module);
+  new Function("require", "exports", "module", code)(name => name in mocks ? mocks[name] : name.startsWith(".") ? compile(new URL(name + ".ts", new URL(path, import.meta.url))) : require(name), module.exports, module);
   return module.exports;
 }
 const scope = compile("./adhoc-digest-scope.ts");
