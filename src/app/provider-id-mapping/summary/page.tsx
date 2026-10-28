@@ -19,8 +19,11 @@ import {readAllRows} from "@/lib/supabase-pagination";
 import {supabaseAdmin} from "@/lib/supabase-admin";
 import {loadPeopleOperationalHierarchy} from "@/lib/people-operational-hierarchy";
 import {nlPeopleClusters} from "@/lib/ops-pulse/nl-loss-clusters";
+import {PeopleOwnershipRefresh} from "@/components/people-ownership-refresh";
+import {includeMappingSummaryStation} from "@/lib/provider-mapping-summary-scope";
+import type {WorkforceStation} from "@/lib/workforce-register-policy";
 
-type StationRow = {id:string;station_code:string;station_name:string|null;region:string|null};
+type StationRow = WorkforceStation & {station_code:string;station_name:string|null;region:string|null;is_ho:boolean|null};
 type SourceRow = {provider_employee_id:unknown;provider_employee_name:unknown;station_code:unknown;work_date:unknown;outbound_months:unknown;outbound_dates:unknown};
 type MappingRow = {id:string;station_id:string|null;provider_member_id:string;workforce_id:string|null;payment_method_id:string|null;payment_values:Record<string,unknown>|null;production_threshold_config:unknown;effective_from:string;effective_to:string|null;status:string;updated_at:string};
 type WorkerRow = {id:string;dropx_id:string|null;full_name:string|null;onboarding_status:string|null};
@@ -43,14 +46,16 @@ export default async function ProviderMappingSummaryPage() {
   </AppShell>;
 
   const [stationResult, sourceResult, mappingResult, workerResult, methodResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id,station_code,station_name,region").eq("company_id",companyId).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,region,is_ho,providers(name),location_models(code,name)").eq("company_id",companyId).order("station_code"),
     supabaseAdmin.rpc("ops_cps_mapping_members",{p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id,station_id,provider_member_id,workforce_id,payment_method_id,payment_values,production_threshold_config,effective_from,effective_to,status,updated_at").eq("company_id",companyId).order("effective_from",{ascending:false}).order("updated_at",{ascending:false})),
     readAllRows(supabaseAdmin.from("workforce").select("id,dropx_id,full_name,onboarding_status").eq("company_id",companyId).is("deleted_at",null)),
     supabaseAdmin.from("payment_methods").select("id,name,production_threshold_config,payment_method_components(component_code,is_active)").eq("company_id",companyId)
   ]);
   const loadError = stationResult.error || sourceResult.error || mappingResult.error || workerResult.error || methodResult.error;
-  const stations = ((stationResult.data ?? []) as StationRow[]).filter(station => allowed(station.id));
+  const stations = ((stationResult.data ?? []) as StationRow[]).filter(station => allowed(station.id) && includeMappingSummaryStation(station));
+  const includedStationIds = new Set(stations.map(station => station.id));
+  const includedStationCodes = new Set(stations.map(station => station.station_code.trim().toUpperCase()));
   // People is the only live ownership source. A station uses its current CLM
   // when present and falls back to its current AOM when no CLM is mapped.
   // This page is force-dynamic, so People changes are reflected on the next load.
@@ -58,9 +63,9 @@ export default async function ProviderMappingSummaryPage() {
   const peopleOwners = hierarchy.error ? null : nlPeopleClusters(stations,hierarchy.byLocation);
   if (hierarchy.error) console.error("[provider-mapping-summary] People ownership unavailable",{companyId,error:hierarchy.error});
   const stationCodeById = new Map(stations.map(station => [station.id,station.station_code]));
-  const allMappings = ((mappingResult.data ?? []) as MappingRow[]).filter(mapping => allowed(mapping.station_id));
+  const allMappings = ((mappingResult.data ?? []) as MappingRow[]).filter(mapping => mapping.station_id && includedStationIds.has(mapping.station_id));
   const protectedSourceKeys = new Set(allMappings.map(mapping => providerSourceMemberKey(stationCodeById.get(String(mapping.station_id ?? "")) ?? "*",mapping.provider_member_id)));
-  const sourceMembers = canonicalizeProviderFirstMembers(((sourceResult.data ?? []) as SourceRow[]).map(source => ({
+  const sourceMembers = canonicalizeProviderFirstMembers(((sourceResult.data ?? []) as SourceRow[]).filter(source => includedStationCodes.has(String(source.station_code ?? "").trim().toUpperCase())).map(source => ({
     providerMemberId:String(source.provider_employee_id??"").trim(),
     providerMemberName:String(source.provider_employee_name??"").trim(),
     stationCode:String(source.station_code??"").trim(),
@@ -84,6 +89,7 @@ export default async function ProviderMappingSummaryPage() {
     code:station.station_code,
     name:station.station_name,
     cluster:peopleOwners?.byStation.get(station.id)?.cluster??"People ownership unavailable",
+    clusterKeys:peopleOwners?.byStation.get(station.id)?.clusterKeys??[],
     region:station.region
   }));
   const summaryMappings = allMappings.filter(mapping=>mapping.station_id).map(mapping=>({
@@ -110,9 +116,11 @@ export default async function ProviderMappingSummaryPage() {
       {canOpenMapping?<Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>:null}
       <Link className="active" href="/provider-id-mapping/summary">Mapping summary</Link>
     </nav>
+    <PeopleOwnershipRefresh />
     {hierarchy.error?<section className="panel message-panel error"><div className="panel-body"><strong>People ownership unavailable</strong><p className="subtle">The mapping figures are available, but manager names are not being replaced with station master text. Reload after People is available.</p></div></section>:null}
     {loadError?<section className="panel message-panel error"><div className="panel-body"><strong>Unable to load mapping summary</strong><p className="subtle">{loadError.message}</p></div></section>:<ProviderMappingSummary
       canOpenMapping={canOpenMapping}
+      managerOptions={peopleOwners?.options ?? []}
       canOpenWorkforce={hasPermission(authorization,"delivery_associates","access")}
       workforcePath={mappingPageCode === "ops_provider_mapping" ? "/work-force-register" : "/workforce"}
       availableMonths={availableMonths}

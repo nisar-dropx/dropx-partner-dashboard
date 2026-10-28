@@ -12,6 +12,7 @@ export type ProviderMappingSummaryStationInput = {
   code: string;
   name?: string | null;
   cluster?: string | null;
+  clusterKeys?: string[];
   region?: string | null;
 };
 
@@ -74,6 +75,7 @@ export type ProviderMappingSummaryStation = {
   stationCode: string;
   stationName: string;
   cluster: string;
+  clusterKeys: string[];
   region: string;
   total: number;
   mapped: number;
@@ -306,6 +308,7 @@ export function buildProviderMappingSummary({
     return {
       stationId: station.id,
       stationCode: station.code,
+      clusterKeys: station.clusterKeys ?? [],
       stationName: text(station.name),
       cluster: text(station.cluster) || "Unassigned",
       region: text(station.region) || "Unassigned",
