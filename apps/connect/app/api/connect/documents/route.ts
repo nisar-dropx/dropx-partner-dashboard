@@ -152,7 +152,7 @@ export async function GET(request: Request) {
         subtitle: "Offboarding document", fileName: row.file_name,
         publishedAt: row.generated_at, expiresOn: null, downloadUrl: query("exit", row.id)
       })),
-      // Served straight from Google Drive (the file is shared by link), never through this server.
+      // Proxied through this server (Drive OAuth on the workforce worker) so the in-app viewer works.
       ...insuranceRows.map((row) => {
         const policyType = String(row.policy_type || "GMC").toUpperCase();
         const label =
@@ -169,12 +169,26 @@ export async function GET(request: Request) {
             row.membership_no ? `Membership ${row.membership_no}` : null,
             row.insurer_name && row.insurer_name !== label ? row.insurer_name : null
           ].filter(Boolean).join(" · ") || "Company group insurance",
-          fileName: row.file_name || `${policyType.toLowerCase()}-card.pdf`, mimeType: row.mime_type || null,
+          fileName: row.file_name || `${policyType.toLowerCase()}-card.pdf`, mimeType: row.mime_type || "application/pdf",
           publishedAt: row.source_updated_at, expiresOn: row.valid_to,
-          downloadUrl: `https://drive.google.com/uc?export=download&id=${encodeURIComponent(row.drive_file_id)}`,
-          external: true
+          downloadUrl: query("insurance", row.id)
         };
-      })
+      }),
+      // Letterpad listing Self + registered dependents for the Marsh cover.
+      ...(insuranceRows.length
+        ? [{
+            id: "cover-letterpad",
+            kind: "insurance" as const,
+            category: "group medical",
+            title: "Cover letterpad",
+            subtitle: "Self and registered family members under Marsh group insurance",
+            fileName: "cover-letterpad.pdf",
+            mimeType: "application/pdf",
+            publishedAt: insuranceRows[0].source_updated_at,
+            expiresOn: null as string | null,
+            downloadUrl: `/api/connect/documents/cover/letterpad?${new URLSearchParams({ accountId: account.id, profileType })}`
+          }]
+        : [])
     ].sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
 
     return NextResponse.json({

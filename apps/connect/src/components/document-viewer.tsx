@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, LoaderCircle, X } from "lucide-react";
+import { Download, LoaderCircle, Maximize2, Minimize2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { downloadDocument, loadDocument, type StoredDocument } from "../lib/document-store";
 
@@ -38,6 +38,7 @@ export function DocumentViewer({ document, title, note, onClose }: { document: S
   const [imageUrl, setImageUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,13 +84,18 @@ export function DocumentViewer({ document, title, note, onClose }: { document: S
   }
 
   return (
-    <div aria-labelledby="dx-document-viewer-title" className="dx-document-viewer">
+    <div aria-labelledby="dx-document-viewer-title" className={`dx-document-viewer${expanded ? " is-fullscreen" : ""}`}>
       <header>
         <button aria-label="Back to documents" className="close" onClick={onClose} type="button"><X />Back</button>
         <strong id="dx-document-viewer-title">{title}</strong>
-        <button disabled={saving} onClick={() => void save()} type="button">
-          {saving ? <LoaderCircle /> : <Download />}Download
-        </button>
+        <span className="dx-document-viewer-actions">
+          <button type="button" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? <Minimize2 /> : <Maximize2 />}{expanded ? "Exit full screen" : "Full screen"}
+          </button>
+          <button disabled={saving} onClick={() => void save()} type="button">
+            {saving ? <LoaderCircle /> : <Download />}Download
+          </button>
+        </span>
       </header>
       {note ? <p className="dx-pay-may-change">{note}</p> : null}
       {notice ? <p className="dx-document-viewer-notice">{notice}</p> : null}

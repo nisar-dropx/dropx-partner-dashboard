@@ -63,8 +63,8 @@ function guessMimeType(document: StoredDocument, reported?: string | null) {
 
 /** True when this document can be shown inside the app's viewer here. */
 export function canViewInApp(document: StoredDocument) {
-  // A browser can't read Google Drive files directly (Drive blocks cross-site reads), so on the
-  // web an insurance card opens in a new tab instead.
+  // Insurance cards are proxied through /api/connect/documents/insurance/… (same-origin), so the
+  // in-app viewer works on web and native. Only leave `external` for rare third-party links.
   return Boolean(nativeDocuments()) || !document.external;
 }
 

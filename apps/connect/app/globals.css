@@ -9627,6 +9627,22 @@ body {
   overflow: hidden;
 }
 
+.dx-document-viewer.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  border-radius: 0;
+  border: 0;
+  background: #fff;
+}
+
+.dx-document-viewer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+}
+
 .dx-document-viewer header {
   position: sticky;
   top: 0;
@@ -9686,6 +9702,10 @@ body {
   max-height: calc(100dvh - 250px);
   padding: 12px;
   -webkit-overflow-scrolling: touch;
+}
+
+.dx-document-viewer.is-fullscreen .dx-document-viewer-body {
+  max-height: none;
 }
 
 .dx-document-viewer-body img,
