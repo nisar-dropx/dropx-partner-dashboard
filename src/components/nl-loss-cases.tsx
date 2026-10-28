@@ -20,6 +20,7 @@ import {
   type RecoveryDetails,
   type RecoveryPlan,
 } from "@/lib/ops-pulse/nl-loss-policy";
+import { eligibleInstallmentCounts } from "@/lib/ops-pulse/loss-exceptions";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { recoveryActionAllowed, departedPersonError, receivedRecoveryError } from "@/lib/ops-pulse/loss-recovery-controls";
@@ -258,12 +259,10 @@ export function RecoveryForm({
       old?.installment_value != null
         ? String(Number(old.installment_value))
         : "3",
-    cap_override: !!old?.cap_override,
-    cap_override_reason: old?.cap_override_reason || "",
   });
   const policy = settings?.recovery_policy;
-  const capEnabled = !!policy?.salary_cap_enabled;
-  const capPercent = Number(policy?.salary_cap_percent) || 100;
+  const capEnabled = true;
+  const capPercent = 100;
   const maxInstallments = Number(policy?.max_installments) || 24;
   const [details, setDetails] = useState<RecoveryDetails>(
     old?.recovery_details || {},
@@ -309,6 +308,7 @@ export function RecoveryForm({
   const [canPropose, setCanPropose] = useState(false);
   const [mayApproveCase,setMayApproveCase]=useState(false);
   const [canResponse, setCanResponse] = useState(false);
+  const [exceptionOptions,setExceptionOptions] = useState<{installments:boolean;next_month:string|null}>({installments:false,next_month:null});
   const [returnNote, setReturnNote] = useState("");
   useEffect(() => {
     const controller = new AbortController();
@@ -335,6 +335,7 @@ export function RecoveryForm({
         setPeople(j.people);
         setCanPropose(j.can_propose === true);
         setCanResponse(j.can_response === true);
+        setExceptionOptions(j.exception_options || {installments:false,next_month:null});
         setMayApproveCase(j.can_approve === true);
         setDirectoryReady(true);
       } catch (e) {
@@ -388,6 +389,8 @@ export function RecoveryForm({
           employee_ref,
           amount: Number(amounts[employee_ref] || 0),
         }));
+  const installmentCounts = eligibleInstallmentCounts(splits.length ? splits.map(s=>s.amount) : [row.amount], policy);
+  const recurringEnabled = exceptionOptions.installments || old?.recovery_mode === "installments" && old?.approval_status === "approved";
   const total =
     splits.reduce((n, r) => n + Math.round(r.amount * 100), 0) / 100;
   const available = people.filter(
@@ -412,7 +415,7 @@ export function RecoveryForm({
         )
       : "";
   const limitOf = (p: RecoveryPerson) =>
-    plan.cap_override ? p.override_limit : p.recovery_limit;
+    p.recovery_limit;
   const reasonError =
     option?.dispute_fields_enabled &&
     ((option.reason_required && (details.reason || "").trim().length < 5) ||
@@ -508,8 +511,6 @@ export function RecoveryForm({
               : {
                   mode: "full",
                   deduction_month: deductionPeriod,
-                  cap_override: plan.cap_override,
-                  cap_override_reason: plan.cap_override_reason,
                 }
             : { mode: "full" },
           remarks,
@@ -695,7 +696,7 @@ export function RecoveryForm({
                 value={outcome}
                 onChange={(e) => {
                   setOutcome(e.target.value);
-                  setPlan(p=>({...p,deduction_month:undefined}));
+                  setPlan(p=>({...p,deduction_month:outcomes.find(o=>o.code===e.target.value)?.deduction_timing==="next_month" ? exceptionOptions.next_month || undefined : deductionMonths.current_month}));
                   setSuccess("");
                 }}
                 required
@@ -704,7 +705,7 @@ export function RecoveryForm({
                 {outcomes
                   .filter(
                     (o) =>
-                      (o.is_active && recoveryActionAllowed(o) && !o.restricted) ||
+                      (o.is_active && recoveryActionAllowed(o) && !o.restricted && (o.deduction_timing !== "next_month" || !!exceptionOptions.next_month)) ||
                       o.code === outcome,
                   )
                   .map((o) => (
@@ -727,7 +728,7 @@ export function RecoveryForm({
               <label>Recovery owner &amp; next step<textarea required rows={2} maxLength={1000} placeholder="Who will follow up, by when, and how will the balance be recovered?" value={details.follow_up || ""} onChange={e => setDetails({ ...details, follow_up: e.target.value })} /></label>
               <small>Departure does not close the loss. The full balance remains outstanding.</small>
             </div> : null}
-            {option?.allocation_required ? <label>Recovery payroll month<input type="month" value={deductionPeriod || ""} min={deductionMonths.current_month} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}/><small>Previous payroll stays open through day {policy?.payroll_cutoff_day || 5}. A later month requires approval.</small></label> : null}
+            {option?.allocation_required ? <label>Recovery payroll month<select value={deductionPeriod || ""} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}>{[...new Set([deductionMonths.current_month, exceptionOptions.next_month, old?.deduction_month].filter(Boolean))].sort().map(m=><option key={m} value={m!}>{monthLabel(m!)}{m===exceptionOptions.next_month ? ' · enabled exception' : m===deductionMonths.current_month ? ' · current payroll' : ' · existing schedule'}</option>)}</select><small>Previous payroll stays open through day {policy?.payroll_cutoff_day || 5}. A later payroll is available only when enabled for this TID in Exceptions.</small></label> : null}
             {option?.allocation_required ? (
               <div className={styles.allocation}>
                 <div className={styles.toolbar}>
@@ -774,65 +775,33 @@ export function RecoveryForm({
                     <strong>Full debit</strong>
 
                   </label>
-                  <label className={styles.method}>
+                  {recurringEnabled ? <label className={styles.method}>
                     <input
                       type="radio"
+                      disabled={!installmentCounts.length && old?.recovery_mode !== "installments"}
                       name={`method-${row.case_key}`}
                       checked={plan.mode === "installments"}
                       onChange={() =>
-                        setPlan({ ...plan, mode: "installments" })
+                        setPlan({ ...plan, mode: "installments", basis:"months", value:String(installmentCounts[0] || 2) })
                       }
                     />
                     <strong>Recurring debit</strong>
 
-                  </label>
+                  </label> : null}
                 </div>
-                {plan.mode === "installments" ? (
-                  <div className={styles.planRow}>
-                    <label>
-                      Instalments by
-                      <select
-                        value={plan.basis}
-                        onChange={(e) =>
-                          setPlan({
-                            ...plan,
-                            basis: e.target.value as RecoveryPlan["basis"],
-                            value: e.target.value === "months" ? "3" : "",
-                          })
-                        }
-                      >
-                        <option value="months">Number of months</option>
-                        <option value="amount">Fixed amount per month</option>
-                      </select>
-                    </label>
-                    <label>
-                      {plan.basis === "months"
-                        ? `Months (2–${maxInstallments})`
-                        : "Amount per month (₹)"}
-                      <input
-                        type="number"
-                        inputMode={
-                          plan.basis === "months" ? "numeric" : "decimal"
-                        }
-                        min={plan.basis === "months" ? 2 : 1}
-                        max={
-                          plan.basis === "months" ? maxInstallments : undefined
-                        }
-                        step={plan.basis === "months" ? 1 : 0.01}
-                        value={plan.value}
-                        onChange={(e) =>
-                          setPlan({ ...plan, value: e.target.value })
-                        }
-                        placeholder={plan.basis === "months" ? "3" : "500"}
-                      />
-                    </label>
-                  </div>
-                ) : null}
-                {plan.mode === "installments" && policy?.installment_thresholds_enabled ? <small className={styles.hint}>Per person: 2 months above {money(Number(policy.installment_two_month_min))}; 3 above {money(Number(policy.installment_three_month_min))}; each extra month adds {money(Number(policy.installment_extra_month_step))}. Approval required.</small> : null}
+                {recurringEnabled && !installmentCounts.length ? <p className={styles.hint}>The selected recovery shares do not qualify for recurring debit under the amount rules. Use Full debit.</p> : null}
+                {plan.mode === 'installments' ? <div className={styles.planRow}>
+                  <label>Calculate each person's schedule by<select value={plan.basis} onChange={e=>setPlan({...plan,basis:e.target.value as RecoveryPlan['basis'],value:e.target.value==='months'?String(installmentCounts[0]||''):''})}><option value="months">Equal split over payroll months</option><option value="amount">Fixed amount per person per month</option></select></label>
+                  <label>{plan.basis==='months'?'Number of monthly deductions':'Monthly amount per person (₹)'}
+                    {plan.basis==='months'?<select value={plan.value} onChange={e=>setPlan({...plan,value:e.target.value})}><option value="">Choose eligible months</option>{[...new Set([...installmentCounts,...(old?.recovery_mode==='installments' && old.installment_basis==='months'?[Number(old.installment_value)]:[])])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n} monthly deductions{!installmentCounts.includes(n)?' · existing schedule':''}</option>)}</select>:<input type="number" min="1" step="0.01" value={plan.value} onChange={e=>setPlan({...plan,value:e.target.value})} placeholder="Monthly deduction per person"/>}
+                  </label>
+                  <p className={styles.hint}>{plan.basis==='months'?'Each person’s allocated share is divided equally; any rounding paise are added to the first deductions.':'This amount is deducted from each selected person every payroll month. The final deduction is the remaining balance.'} Review each person's amounts and final payroll below. Missed payrolls move the remaining deductions forward.</p>
+                </div>:null}
+                {plan.mode === 'installments' && policy?.installment_thresholds_enabled ? <small className={styles.hint}>Per person: 2 months above {money(Number(policy.installment_two_month_min))}; 3 above {money(Number(policy.installment_three_month_min))}; each extra month requires another {money(Number(policy.installment_extra_month_step))}. The enabled exception and salary limits are checked on save.</small>:null}
                 <details className={styles.compactDetails}><summary>Recovery rules</summary><p className={styles.hint}>
                   Eligible station DAs and People staff, using the current debit-scope rules in Master.
                   {capEnabled
-                    ? ` Loss recoveries take at most ${capPercent}% of a person's take-home in one month; a recurring debit counts one instalment.`
+                    ? ` Recovery uses available pay after other recoveries; unpaid lines carry forward.`
                     : ""}
                   {plan.mode === "installments"
                     ? " A missed month moves the remaining instalments on. If a person exits, the balance is recovered in their final settlement."
@@ -876,7 +845,7 @@ export function RecoveryForm({
                                   : "Salary eligibility verified securely · amount hidden"
                                 : p.recovery_limit == null
                                   ? "Payout payable unavailable · review payout / mapping"
-                                  : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
+                                  : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · available for recovery ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) &&
@@ -943,37 +912,6 @@ export function RecoveryForm({
                   <p role="alert" className={styles.failure}>
                     {validation}
                   </p>
-                ) : null}
-                {capEnabled ? (
-                  <div className={styles.override}>
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        checked={!!plan.cap_override}
-                        onChange={(e) =>
-                          setPlan({ ...plan, cap_override: e.target.checked })
-                        }
-                      />
-                      Recover beyond the {capPercent}% salary cap (verified securely on save)
-                    </label>
-                    {plan.cap_override ? (
-                      <label>
-                        Reason for the override (required, kept in history)
-                        <textarea
-                          rows={2}
-                          maxLength={500}
-                          value={plan.cap_override_reason}
-                          onChange={(e) =>
-                            setPlan({
-                              ...plan,
-                              cap_override_reason: e.target.value,
-                            })
-                          }
-                          placeholder="e.g. Approved by the Ops Head on 16 Oct; the person agreed in writing."
-                        />
-                      </label>
-                    ) : null}
-                  </div>
                 ) : null}
                 <div className={styles.splitTotal}>
                   <span>{selected.length} people selected</span>
@@ -1176,6 +1114,7 @@ function SchedulePreview({
   const last = schedule[schedule.length - 1];
   return (
     <span className={styles.schedule} aria-label={label}>
+      <strong>{schedule.length} deduction{schedule.length === 1 ? "" : "s"} · total {money(amount)} · final {money(last)}</strong>
       {schedule.length <= 6 ? (
         schedule.map((value, i) => (
           <span key={i}>

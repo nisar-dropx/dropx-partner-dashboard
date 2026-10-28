@@ -82,11 +82,12 @@ export function NlRecoveryMaster({
                 recovery_policy: {
                   ...settings.recovery_policy,
                   salary_month_offset: 0,
+                  salary_cap_enabled: true,
+                  salary_cap_percent: 100,
                   ...Object.fromEntries(
                     [
                       "active_only",
                       "previous_month_active_only",
-                      "salary_cap_enabled",
                       "reserve_other_recoveries",
                       "cctv_public_confirmation",
                       "installment_thresholds_enabled",
@@ -99,7 +100,6 @@ export function NlRecoveryMaster({
                       "installment_three_month_min",
                       "installment_extra_month_step",
                       "payroll_cutoff_day",
-                      "salary_cap_percent",
                       "attachment_max_count",
                       "attachment_max_mb",
                     ].map((k) => [k, Number(f.get(k))]),
@@ -172,7 +172,7 @@ export function NlRecoveryMaster({
                 />
                 Enable individual amounts
               </label>
-              <h3>Employee eligibility & salary cap</h3>
+              <h3>Employee eligibility & available pay</h3>
               {(
                 [
                   ["active_only", "Show only currently active employees"],
@@ -180,7 +180,6 @@ export function NlRecoveryMaster({
                     "previous_month_active_only",
                     "Require employment during the reference salary month",
                   ],
-                  ["salary_cap_enabled", "Cap recovery at salary payable"],
                   [
                     "reserve_other_recoveries",
                     "Subtract recovery already allocated to other cases",
@@ -208,12 +207,6 @@ export function NlRecoveryMaster({
                       "Previous payroll update cutoff (inclusive day)",
                       1,
                       28,
-                    ],
-                    [
-                      "salary_cap_percent",
-                      "Maximum recovery as % of payable salary",
-                      1,
-                      100,
                     ],
                     [
                       "attachment_max_count",

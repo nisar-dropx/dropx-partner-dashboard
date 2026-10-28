@@ -495,3 +495,44 @@ that migration. Do not use a blanket database push.
   `20261028191000_loss_stage_reminders.sql`. Apply individually and record versions.
 - Validation: `pnpm run test:loss-stage-reminders`; boundary cases also live in
   `src/lib/ops-pulse/nl-loss-installments.test.mjs`.
+
+### Proactive TID exceptions (28 October 2026)
+
+- Exceptions replaces the separate approvals and redispute navigation. Only SLP Manager,
+  Finance Manager, Managing Partner and National Head can see/manage it, with existing
+  station scope and read-only checks. Master ownership alone does not confer access.
+- Single or bulk TIDs can enable Redispute, Deduct next month and Recurring debit, with a
+  required reason. Redispute uses the existing versioned response state machine; the other
+  options use `nl_loss_exception_set` and append-only `nl_loss_exception_events`.
+- Next-month grants pin the next applicable payroll month. Both types bind to source amount
+  and status. Changed sources require re-enablement. The canonical recovery writer enforces
+  grants atomically under its existing company lock. An enabled option does not itself debit pay.
+- Enabled, otherwise eligible plans go directly to payroll. Departures, cap overrides, returned
+  cases and changed sources retain independent review. Existing approved schedules remain
+  valid after disabling an option; new/changed schedules require the option again.
+- Recurring choices derive from each person's share and configured thresholds. The form
+  explains equal monthly splits versus a fixed per-person amount, shows each deduction,
+  the total and final deduction. Redispute review contains only station-submitted evidence.
+- Apply `20261028220000_loss_exception_options.sql` individually with the coordinated app
+  release and record the version. The HRMS due-line contract and recovery keys are unchanged.
+- Validate with `pnpm run test:loss-recovery-payroll`; the lifecycle database fixture applies
+  the migration twice and checks denied saves, enable/revoke, preserved payroll and audit history.
+
+## Available-pay recovery — 28 October 2026 (supersedes percentage caps)
+
+Recovery uses available pay after other allocated recoveries. The 50% salary cap,
+override checkbox/reason, Master percentage setting and percentage-based approval
+condition no longer apply to new saves. Server and database checks always verify
+payable salary. Workforce and HRMS payroll fit whole due lines within remaining
+take-home; a line that does not fit stays due for a later eligible payroll. No partial
+line deduction, recovery-key change or rewrite of completed payroll is introduced.
+Legacy override fields remain as audit metadata. Existing decisions remain recorded;
+the migration does not automatically approve old pending plans.
+
+Apply `20261028233017_loss_available_pay.sql` individually after
+`20261028220000_loss_exception_options.sql` and the PID history migration. Record the
+version, never run a blanket push. It is safe to apply twice and normalizes future
+policy writes to available-pay validation. Due RPCs retain their shape and return 100
+percent for compatibility. Release the Dashboard and companion HRMS payroll changes
+together. Tests cover >50% saves, available-pay reservations, legacy client fields,
+carry-forward, paid-history preservation and the existing redispute gates.

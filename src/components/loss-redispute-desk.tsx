@@ -1,11 +1,14 @@
 "use client";
-import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LossPidTimeline } from "./loss-pid-timeline";
+import { useMemo, useState } from "react";
+import { hasStationSubmission } from "@/lib/ops-pulse/loss-exceptions";
 import type { NlCase } from "@/lib/ops-pulse/nl-loss-policy";
 import { ListPager, usePaged } from "./list-pager";
-import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 export type RedisputeWindow = {
+  submitted_by?: string | null;
+  response_details?: Record<string, string>;
   version: number;
   workflow_status?: string;
   recovery_month?: string;
@@ -29,13 +32,20 @@ export function LossRedisputeDesk({
   canActivate: boolean;
 }) {
   const router = useRouter();
-  const [bulk, setBulk] = useState<
-      { month: string; case_key: string; version: number; station: string; action: "activate" | "revoke"; note: string }[]
-    >([]),
-    [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
-  const [revoking,setRevoking] = useState<RedisputeWindow|null>(null), [revokeNote,setRevokeNote] = useState("Enabled by mistake");
-  const [historyCase, setHistoryCase] = useState<RedisputeWindow|null>(null);
+  const [revoking,setRevoking] = useState<RedisputeWindow|null>(null);
+  const [revokeNote,setRevokeNote] = useState("Enabled by mistake");
+  const [historyCase,setHistoryCase] = useState<RedisputeWindow|null>(null);
+  const [busy,setBusy] = useState(false), [message,setMessage] = useState("");
+  async function remove() {
+    if (!revoking) return;
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/ops-pulse/losses/case-response", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({month:revoking.month,case_key:revoking.case_key,version:revoking.version,action:"revoke",note:revokeNote})});
+      const data = await res.json(); if (!res.ok) throw Error(data.error || "Unable to remove redispute.");
+      setRevoking(null); setMessage("Redispute removed. History retained."); router.refresh();
+    } catch(e) { setMessage(e instanceof Error ? e.message : "Unable to remove redispute."); }
+    finally { setBusy(false); }
+  }
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("open");
   const byKey = useMemo(
@@ -44,7 +54,7 @@ export function LossRedisputeDesk({
   );
   const shown = windows.filter(
     (w) =>
-      (status === "all" ||
+      hasStationSubmission(w) && (status === "all" ||
         (status === "open" && w.enabled) ||
         w.workflow_status === status ||
         w.followup_status === status) &&
@@ -58,120 +68,13 @@ export function LossRedisputeDesk({
         .includes(query.toLowerCase()),
   );
   const paged = usePaged(shown, 25, `${status}|${query}`);
-  const matches =
-    query.trim().length >= 6
-      ? rows
-          .filter((r) =>
-            [r.case_key, r.details.tid].join(" ").includes(query.trim()),
-          )
-          .slice(0, 20)
-      : [];
-  const href = (month: string, key: string) =>
-    `/team-ops/losses/vendor-response?${new URLSearchParams({ month, case: key })}`;
-  async function template() {
-    const XLSX = await import("xlsx");
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      book,
-      XLSX.utils.aoa_to_sheet([
-        ["Loss month", "Shipment ID", "Station", "Action", "Reason"],
-      ]),
-      "Redisputes",
-    );
-    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([
-      ["Field", "Instructions"], ["Loss month", "YYYY-MM"], ["Shipment ID", "Exact Shipment ID; format as text"], ["Station", "Station code"], ["Action", "Enable or Disable"], ["Reason", "Required for Disable: at least 10 characters. History is retained."], ["Limit", "100 shipments. Review the preview before applying."]
-    ]), "Instructions");
-    XLSX.writeFile(book, "redispute-enable-disable-template.xlsx");
-  }
-  async function upload(file: File) {
-    setMessage("");
-    setBulk([]);
-    try {
-      if (file.size > 2 * 1024 * 1024)
-        throw Error("Use a workbook smaller than 2 MB.");
-      const XLSX = await import("xlsx");
-      const book = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const input = XLSX.utils.sheet_to_json<Record<string, string>>(
-        book.Sheets[book.SheetNames[0]],
-        { raw: false },
-      );
-      if (!input.length || input.length > 100)
-        throw Error("Provide 1–100 shipments.");
-      const parsed = [];
-      const seen = new Set<string>();
-      for (const [i, item] of input.entries()) {
-        const month = String(item["Loss month"] || "").trim(),
-          id = String(item["Shipment ID"] || "").trim(),
-          station = String(item["Station"] || "")
-            .trim()
-            .toUpperCase();
-        const matches = rows.filter(
-          (r) =>
-            r.month === month &&
-            (r.details.tid === id || r.case_key === id) &&
-            r.station_code === station,
-        );
-        if (matches.length !== 1)
-          throw Error(
-            `Row ${i + 2}: shipment not found uniquely in your permitted stations.`,
-          );
-        const r = matches[0],
-          key = `${r.month}|${r.case_key}`;
-        if (seen.has(key)) throw Error(`Row ${i + 2}: duplicate shipment.`);
-        seen.add(key);
-        const w = windows.find(
-          (w) => w.month === r.month && w.case_key === r.case_key,
-        );
-        const value = String(item["Action"] || "").trim().toLowerCase();
-        if (!["enable","disable"].includes(value)) throw Error(`Row ${i+2}: choose Enable or Disable.`);
-        const action = value === "enable" ? "activate" as const : "revoke" as const;
-        const note = String(item["Reason"] || "").trim();
-        if (action === "revoke" && (note.length < 10 || note.length > 4000)) throw Error(`Row ${i+2}: give a disable reason (10–4000 characters).`);
-        if ((action === "activate") === !!w?.enabled) throw Error(`Row ${i+2}: redispute is already ${w?.enabled ? "enabled" : "disabled"}.`);
-        parsed.push({
-          month: r.month,
-          case_key: r.case_key,
-          version: w?.version || 0,
-          station, action, note,
-        });
-      }
-      setBulk(parsed);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Unable to read workbook.");
-    }
-  }
-  async function activate(
-    input: { month: string; case_key: string; version: number; action?: "activate" | "revoke"; note?: string }[],
-  ) {
-    if (!canActivate) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const res = await fetch("/api/ops-pulse/losses/case-response", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "bulk_update", rows: input.map(r=>({...r,action:r.action || "activate"})) }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw Error(body.error);
-      const failed = body.results.filter((r: { ok: boolean }) => !r.ok);
-      setMessage(
-        `${body.results.length - failed.length} updated.${failed.length ? " " + failed.map((r: { case_key: string; error: string }) => `${r.case_key}: ${r.error}`).join("; ") : ""}`,
-      );
-      setBulk([]); if (!failed.length) setRevoking(null);
-      router.refresh();
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Unable to activate.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const href = (month: string, key: string) => '/team-ops/losses/vendor-response?' + new URLSearchParams({month,case:key});
   return (
     <section className={styles.panel}>
       <div className={styles.panelHead}>
         <div>
-          <h2>Redispute follow-up</h2>
-          <small>Activate → station evidence → review → vendor outcome.</small>
+          <h2>Redispute submissions</h2>
+          <small>Only station-submitted evidence appears here. Review details, ticket and vendor outcome.</small>
         </div>
         <div className={styles.toolbar}>
           <input
@@ -187,7 +90,6 @@ export function LossRedisputeDesk({
           >
             {[
               ["open", "Active cases"],
-              ["awaiting_station", "Station evidence needed"],
               ["awaiting_review", "Awaiting review"],
               ["approved", "Approved for post-dispute"],
               ["preparing", "Preparing"],
@@ -207,93 +109,13 @@ export function LossRedisputeDesk({
           </select>
         </div>
       </div>
-      <div className={styles.panelHead}>
-        <div className={styles.toolbar}>
-          <button className={styles.button} onClick={() => void template()}>
-            Download template
-          </button>
-          <label className={styles.button}>
-            Upload shipments
-            <input
-              type="file"
-              accept=".xlsx,.csv"
-              disabled={busy || !canActivate}
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void upload(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-        <small>Enable or disable · up to 100 shipments</small>
-      </div>
-      {message ? (
-        <p role="status" className={styles.notice}>
-          {message}
-        </p>
-      ) : null}
-      {bulk.length ? (
-        <details open className={styles.compactDetails}>
-          <summary>Review {bulk.length} shipments</summary>
-          {bulk.map((r) => (
-            <p key={`${r.month}|${r.case_key}`}>
-              {r.station} · {r.case_key} · {r.month} · {r.action === "revoke" ? "Disable" : "Enable"}
-            </p>
-          ))}
-          <button
-            className={styles.primary}
-            disabled={busy || !canActivate}
-            onClick={() => void activate(bulk)}
-          >
-            Apply {bulk.length} updates
-          </button>
-        </details>
-      ) : null}
-      {matches.length ? (
-        <details open className={styles.compactDetails}>
-          <summary>Matching loss cases</summary>
-          {matches.map((r) => (
-            <p key={`${r.month}|${r.case_key}`}>
-              <a href={href(r.month, r.case_key)}>
-                {r.station_code} · {r.details.tid || r.case_key} · {r.month} →
-                Open case
-              </a>{" "}
-              {!windows.some(
-                (w) =>
-                  w.month === r.month && w.case_key === r.case_key && w.enabled,
-              ) ? (
-                <button
-                  className={styles.button}
-                  disabled={busy || !canActivate}
-                  onClick={() =>
-                    void activate([
-                      {
-                        month: r.month,
-                        case_key: r.case_key,
-                        version:
-                          windows.find(
-                            (w) =>
-                              w.month === r.month && w.case_key === r.case_key,
-                          )?.version || 0,
-                      },
-                    ])
-                  }
-                >
-                  Activate
-                </button>
-              ) : null}
-            </p>
-          ))}
-        </details>
-      ) : null}
-      {revoking ? <section className={styles.redisputeRemove} aria-label="Remove redispute">
-        <strong>Remove redispute · {revoking.case_key}</strong>
-        <select aria-label="Removal reason" value={revokeNote} disabled={busy} onChange={e=>setRevokeNote(e.target.value)}>
-          {['Enabled by mistake','Continue with recovery','Duplicate redispute','No longer required'].map(reason=><option key={reason}>{reason}</option>)}
+      {message ? <p role="status">{message}</p> : null}
+      {revoking ? <section className={styles.revokeCompact}>
+        <strong>Remove · {revoking.case_key}</strong>
+        <select aria-label="Reason for removing redispute" value={revokeNote} onChange={e=>setRevokeNote(e.target.value)}>
+          {["Enabled by mistake","Continue with recovery","Duplicate redispute","No longer required"].map(n=><option key={n}>{n}</option>)}
         </select>
-        <button className={styles.primary} disabled={busy} onClick={()=>void activate([{...revoking,action:"revoke",note:revokeNote}])}>{busy?'Removing…':'Remove redispute'}</button>
+        <button className={styles.primary} disabled={busy} onClick={()=>void remove()}>{busy ? "Removing…" : "Remove redispute"}</button>
         <button className={styles.button} disabled={busy} onClick={()=>setRevoking(null)}>Keep redispute</button>
         <small>Closes the response window; eligible recovery resumes. History is retained.</small>
       </section> : null}
@@ -306,7 +128,7 @@ export function LossRedisputeDesk({
               <th>Status</th>
               <th>Follow-up</th>
               <th>Last update</th>
-              <th>Actions</th>
+              <th>Station reason</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -347,18 +169,18 @@ export function LossRedisputeDesk({
                       })}
                     </small>
                   </td>
-                  <td><button className={styles.button} onClick={()=>setHistoryCase(w)}>History</button> {canActivate && w.enabled ? <button className={styles.button} disabled={busy} onClick={()=>{setRevoking(w);setRevokeNote("Enabled by mistake");}}>Remove</button> : !w.enabled ? <span>Disabled</span> : null}</td>
+                  <td>{w.response_details?.reason || "—"}</td>
+                  <td><button className={styles.button} onClick={()=>setHistoryCase(w)}>History</button> {canActivate && w.enabled ? <button className={styles.button} disabled={busy} onClick={()=>{setRevoking(w);setRevokeNote("Enabled by mistake");}}>Remove</button> : null}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      {historyCase ? <section className={styles.detail}><button className={styles.button} onClick={()=>setHistoryCase(null)}>Close history · {historyCase.case_key}</button><LossPidTimeline key={`${historyCase.month}|${historyCase.case_key}`} month={historyCase.month} caseKey={historyCase.case_key} revision={windows.find(w=>w.month===historyCase.month && w.case_key===historyCase.case_key)?.version || historyCase.version} initiallyOpen/></section> : null}
+      {historyCase ? <LossPidTimeline key={`${historyCase.month}|${historyCase.case_key}`} month={historyCase.month} caseKey={historyCase.case_key} revision={windows.find(w=>w.month===historyCase.month && w.case_key===historyCase.case_key)?.updated_at} initiallyOpen /> : null}
       {!shown.length ? (
         <p className={styles.empty}>
-          No redisputes match. Search a final Shipment ID to activate its
-          response window.
+          No station submissions match. Enabled TIDs appear here after the station submits evidence.
         </p>
       ) : null}
       <ListPager

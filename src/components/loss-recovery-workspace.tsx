@@ -22,7 +22,7 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
  const exceptionReason=(row:NlCase)=>{const r=row.recovery;
   if(r?.outcome_code==='responsible_left') return 'Person left';
   if(r?.outcome_code==='already_recovered') return 'Verify receipt';
-  if(r?.cap_override) return 'Salary cap override';
+  if(r?.cap_override) return 'Legacy approval review';
   if(r?.recovery_mode==='installments') return 'Split across payrolls';
   if(r?.deduction_timing==='next_month') return 'Deferred recovery';
   if(r?.approval_status==='needs_review'||row.lifecycle_status==='needs_review') return 'Review required';
@@ -39,7 +39,7 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
    <div><span>Awaiting approval</span><strong>{scoped.filter(x=>isRecoveryApprovalRequest(x.row,x.status)).length}</strong><small>Not final until independently approved</small></div>
   </div>}
   <section className={styles.panel}>
-   <div className={styles.panelHead}><div><h2>{approvals?'Exception approvals':'Recovery queue'}</h2><small>{approvals?'Departures · deferred recovery · instalments · verification':'Unpaid balances carry forward. Expand a case to update recovery.'}</small></div></div>
+   <div className={styles.panelHead}><div><h2>{approvals?'Review required':'Recovery queue'}</h2><small>{approvals?'Departures · source changes · earlier requests · verification':'Unpaid balances carry forward. Expand a case to update recovery.'}</small></div></div>
    <div className={styles.toolbar} style={{padding:12}}>
     {!approvals ? <><label>Collection month <input aria-label="Collection month" type="month" min={indiaMonth()} value={period} onChange={e=>setPeriod(e.target.value||indiaMonth())}/></label>
     <select aria-label="Recovery workflow status" value={filter} onChange={e=>setFilter(e.target.value)}><option value="pending_update">Pending recovery update</option><option value="open">All outstanding</option>{Object.entries(RECOVERY_QUEUE_LABELS).map(([k,v])=><option key={k} value={k}>{v} · {data.filter(x=>(!station||x.row.station_code===station)&&x.status===k).length}</option>)}<option value="all">All cases</option></select></> : null}

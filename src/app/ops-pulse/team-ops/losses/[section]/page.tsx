@@ -8,6 +8,7 @@ import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
 import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
 import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
+import { LossExceptionsDesk } from "@/components/loss-exceptions-desk";
 import { LossRedisputeDesk } from "@/components/loss-redispute-desk";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { notFound, redirect } from "next/navigation";
@@ -70,8 +71,7 @@ const sections: Record<
 const primaryTabs: LossTab[] = [
  {key:"nl",label:"Disputes & outcomes",href:"/team-ops/losses/nl"},
  {key:"recovery",label:"Recovery",href:"/team-ops/losses/recovery"},
- {key:"approvals",label:"Exception approvals",href:"/team-ops/losses/approvals"},
- {key:"redisputes",label:"Redisputes",href:"/team-ops/losses/redisputes"},
+ {key:"exceptions",label:"Exceptions",href:"/team-ops/losses/exceptions"},
  {key:"claims",label:"Station claims",href:"/team-ops/losses/claims"},
  {key:"ledger",label:"Balances",href:"/team-ops/losses/ledger"},
 ];
@@ -85,7 +85,7 @@ export default async function LossesSectionPage({
 }) {
   const auth = await requirePagePermission("ops_losses", "access");
   const restricted = mayViewLossApprovals(auth);
-  const tabs = primaryTabs.filter(t => !["approvals","redisputes"].includes(t.key) || restricted);
+  const tabs = primaryTabs.filter(t => t.key !== "exceptions" || restricted);
   if (params.section === "recovery") {
     const payroll = searchParams.view === "payroll";
     const view = payroll ? null : await loadRecoveryWorkspace(auth);
@@ -98,16 +98,30 @@ export default async function LossesSectionPage({
       {payroll ? <LossDebitReview rows={await loadLossDebits(auth)}/> : view ? <LossRecoveryUpdates rows={recoveryUpdates(view.rows, view.lines, view.settings?.recoverable_statuses || [], indiaMonth())}/> : null}
     </main>;
   }
-  if (["recovery-updates","approvals","redisputes"].includes(params.section)) {
-    if (params.section !== "recovery-updates" && !restricted) notFound();
-    const [view, claimView] = await Promise.all([loadRecoveryWorkspace(auth, params.section === "redisputes"), params.section === "approvals" ? loadStationClaims(auth) : Promise.resolve(null)]);
-    if (params.section === "redisputes") {
-      const result = await readAllRows(supabaseAdmin!.from("nl_case_response_windows").select("*").eq("company_id",auth.companyId).order("updated_at",{ascending:false}).order("month").order("case_key"));
-      if(result.error) throw Error("Redisputes could not be loaded.");
-      const scope = new Set(view.rows.map(r=>`${r.month}|${r.case_key}`));
-      return <main className={styles.workspace}><LossHeader title="Redisputes" intro="Restricted case activation, LSC tickets and vendor follow-up." tabs={tabs} active="redisputes"/><LossRedisputeDesk canActivate={view.canApprove} rows={view.rows} windows={(result.data||[]).filter(w=>scope.has(`${w.month}|${w.case_key}`))}/></main>;
-    }
-    return <main className={styles.workspace}><LossHeader title={params.section==="approvals"?"Exception approvals":"Recovery"} intro="Full current-payroll recovery goes directly to payroll. Departures, deferrals and instalments need approval." tabs={tabs} active={params.section==="recovery-updates"?"recovery":params.section}/>{claimView?.claims.some(c=>c.actions.includes("approve"))?<p className={styles.notice}><a href="/team-ops/losses/claims">{claimView.claims.filter(c=>c.actions.includes("approve")).length} station claims also await your final approval →</a></p>:null}<LossRecoveryWorkspace {...view} approvals={params.section==="approvals"}/></main>;
+  if (["approvals","redisputes"].includes(params.section)) {
+    if (!restricted) notFound();
+    redirect('/team-ops/losses/exceptions?view=' + (params.section==='redisputes'?'redisputes':'review'));
+  }
+  if (params.section === 'exceptions') {
+    if (!restricted) notFound();
+    const selected = searchParams.view === 'redisputes' ? 'redisputes' : searchParams.view === 'review' ? 'review' : 'enable';
+    const view = await loadRecoveryWorkspace(auth, selected !== 'review');
+    const [windows, grants] = await Promise.all([
+      readAllRows(supabaseAdmin!.from('nl_case_response_windows').select('*').eq('company_id',auth.companyId).order('updated_at',{ascending:false}).order('month').order('case_key')),
+      readAllRows(supabaseAdmin!.from('nl_loss_exception_options').select('*').eq('company_id',auth.companyId).order('month').order('case_key').order('kind')),
+    ]);
+    if (windows.error || grants.error) throw Error('Exceptions could not be loaded. Retry after the exception update is available.');
+    const scope=new Set(view.rows.map(r=>r.month+'|'+r.case_key));
+    const scopedWindows=(windows.data||[]).filter(w=>scope.has(w.month+'|'+w.case_key));
+    return <main className={styles.workspace}>
+      <LossHeader title="Exceptions" intro="SLP Manager, Finance Manager, Managing Partner and National Head can enable TID options and review station submissions within their permitted stations." tabs={tabs} active="exceptions"/>
+      <nav className={styles.toolbar} aria-label="Exception views" style={{justifyContent:'flex-start'}}>{[['enable','Enable exceptions'],['redisputes','Redispute submissions'],['review','Review required']].map(([key,label])=><a key={key} className={selected===key?styles.primary:styles.button} href={'/team-ops/losses/exceptions?view='+key} aria-current={selected===key?'page':undefined}>{label}</a>)}</nav>
+      {selected==='redisputes'?<LossRedisputeDesk rows={view.rows} windows={scopedWindows} canActivate={view.canApprove}/> : selected==='review'?<LossRecoveryWorkspace {...view} approvals/> : <LossExceptionsDesk rows={view.rows} grants={(grants.data||[]).filter(g=>scope.has(g.month+'|'+g.case_key))} windows={scopedWindows} canEdit={view.canApprove} recoverableStatuses={view.settings?.recoverable_statuses||[]}/>}
+    </main>;
+  }
+  if (params.section === 'recovery-updates') {
+    const view=await loadRecoveryWorkspace(auth);
+    return <main className={styles.workspace}><LossHeader title="Recovery" intro="Save recovery against the current payroll, or choose an exception enabled for this TID." tabs={tabs} active="recovery"/><LossRecoveryWorkspace {...view}/></main>;
   }
   if (params.section === "claims") {
     try {
@@ -185,7 +199,7 @@ export default async function LossesSectionPage({
   }
   if (params.section === "summary") {
     const [workspace, ledger] = await Promise.all([loadRecoveryWorkspace(auth, true), loadRecoveryLedger(auth)]);
-    return <main className={styles.workspace}><LossHeader title="Loss summary" intro="Station-wise NL and SLP values, updates and actual recovery." tabs={tabs} active="summary"/>
+    return <main className={styles.workspace}><LossHeader title="Loss summary" intro="Station-wise confirmed recoverable NL and SLP cases, updates and recovery." tabs={tabs} active="summary"/>
       <LossSummary facts={lossFacts(workspace.rows, ledger.lines, workspace.settings?.recoverable_statuses || [])} ledgerReady={ledger.ready}/></main>;
   }
   const section = sections[params.section];

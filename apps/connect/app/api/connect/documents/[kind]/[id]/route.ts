@@ -44,7 +44,7 @@ async function livePayDocumentSettings(companyId: string, companyName: string): 
 export async function GET(request: Request, { params }: { params: { kind: string; id: string } }) {
   try {
     if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
-    if (!/^[0-9a-f-]{36}$/i.test(params.id) || !["pay", "issued", "exit"].includes(params.kind)) return Response.json({ error: "Document is invalid." }, { status: 400 });
+    if (!/^[0-9a-f-]{36}$/i.test(params.id) || !["pay", "issued", "exit", "insurance"].includes(params.kind)) return Response.json({ error: "Document is invalid." }, { status: 400 });
     const url = new URL(request.url);
     const accountId = clean(url.searchParams.get("accountId"));
     const profileType = clean(url.searchParams.get("profileType"));
@@ -121,6 +121,31 @@ export async function GET(request: Request, { params }: { params: { kind: string
         "Cache-Control": "private, no-store",
         "Content-Disposition": `attachment; filename="${safeDownloadName(result.data.file_name)}"`,
         "Content-Type": result.data.mime_type || "application/octet-stream",
+        "X-Content-Type-Options": "nosniff"
+      }});
+    }
+
+    if (params.kind === "insurance") {
+      const result = await supabaseAdmin.from("connect_insurance_cards")
+        .select("drive_file_id,file_name,mime_type")
+        .eq("company_id", account.companyId).eq("profile_type", profileType).eq("profile_id", account.id)
+        .eq("id", params.id).maybeSingle();
+      if (result.error) throw new Error(result.error.message);
+      if (!result.data?.drive_file_id) return Response.json({ error: "Insurance card was not found." }, { status: 404 });
+      const base = process.env.WORKFORCE_AMAZON_WORKER_URL?.trim().replace(/\/$/, "") || process.env.WORKFORCE_WORKER_URL?.trim().replace(/\/$/, "");
+      const key = process.env.WORKFORCE_AMAZON_WORKER_KEY?.trim() || process.env.WORKFORCE_WORKER_ADMIN_KEY?.trim() || process.env.ADMIN_API_KEY?.trim();
+      if (!base || !key) throw new Error("Insurance file service is not configured.");
+      const drive = await fetch(`${base}/api/admin/marsh/drive/${encodeURIComponent(result.data.drive_file_id)}`, {
+        headers: { "x-admin-key": key },
+        cache: "no-store",
+        signal: AbortSignal.timeout(60_000)
+      });
+      if (!drive.ok) throw new Error("Unable to open the insurance card.");
+      const bytes = await drive.arrayBuffer();
+      return new Response(bytes, { headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": `inline; filename="${safeDownloadName(result.data.file_name || "insurance-card.pdf")}"`,
+        "Content-Type": result.data.mime_type || drive.headers.get("content-type") || "application/pdf",
         "X-Content-Type-Options": "nosniff"
       }});
     }

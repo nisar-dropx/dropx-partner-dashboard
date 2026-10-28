@@ -441,5 +441,53 @@ await db.query(rd(10,'revoke',{note:'No longer required'}));
 eq('Can remove after source change',(await one(`select enabled,workflow_status from nl_case_response_windows where case_key='CONTRACTOR'`)),{enabled:false,workflow_status:'cancelled'});
 eq('Removal retained in history',(await one(`select count(*)::int n from nl_case_response_events where case_key='CONTRACTOR' and action='revoke'`)).n,1);
 await mustReject('Cannot erase source history',`update nl_loss_source_events set actor_name='Changed'`);
+// Proactive exceptions: grants gate new schedules atomically; ordinary plans and past payroll stay unchanged.
+const optionSql=readFileSync('supabase/migrations/20261028220000_loss_exception_options.sql','utf8');
+await db.exec(optionSql); await db.exec(optionSql);
+const grant=(key,kind,enabled=true,version=0)=>
+  "select nl_loss_exception_set('"+C+"','2026-09','"+key+"','"+kind+"',"+enabled+","+version+",'Verified exception for this shipment','"+SLP+"','SLP Manager')";
+await db.exec("insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values ('"+C+"','nl','2026-09','OPT','BLR1',100,'Recoverable'),('"+C+"','nl','2026-09','OPT-NEXT','BLR1',100,'Recoverable'),('"+C+"','nl','2026-09','OPT-INITIAL','BLR1',100,'Recoverable'); update nl_loss_month_cases set details='{\"extra\":{\"current_sla_stage\":\"NL2\"},\"case_status\":\"pending\"}' where case_key='OPT-INITIAL'; update nl_recovery_payables set checked_at=now();");
+const recurring=(version=0,value='2')=>full('OPT','employee:'+E1,'deduct',version).replace('"mode":"full"','"mode":"installments","basis":"months","value":"'+value+'"');
+await mustReject('Recurring save without enabled option is denied',recurring());
+await mustReject('Deferral without enabled option is denied',full('OPT-NEXT','employee:'+E1,'next'));
+await mustReject('Initial case cannot receive an exception',grant('OPT-INITIAL','installments'));
+await db.query(grant('OPT','installments'));
+await mustReject('Stale grant version cannot overwrite',grant('OPT','installments',false));
+await db.query(recurring());
+eq('Enabled recurring needs no second approval',(await one("select approval_status s from nl_loss_recoveries where case_key='OPT'")).s,'approved');
+await db.query(grant('OPT','installments',false,1));
+await db.query(recurring(1));
+eq('Revocation preserves an existing approved schedule',(await one("select approval_status s from nl_loss_recoveries where case_key='OPT'")).s,'approved');
+await mustReject('Revocation prevents changing the schedule',recurring(2,'3'));
+await db.query(grant('OPT-NEXT','next_month'));
+await db.query(full('OPT-NEXT','employee:'+E1,'next'));
+eq('Enabled next month needs no second approval',(await one("select approval_status s from nl_loss_recoveries where case_key='OPT-NEXT'")).s,'approved');
+eq('Grant pins the next applicable payroll',(await one("select deduction_month m from nl_loss_exception_options where case_key='OPT-NEXT'")).m,future);
+await db.exec("update nl_loss_month_cases set amount=101 where case_key='OPT-NEXT'");
+eq('Source amount changes invalidate the grant',(await one("select nl_loss_exception_allowed('"+C+"','2026-09','OPT-NEXT','next_month','"+future+"') allowed")).allowed,false);
+eq('Grant events retain every successful change',(await one("select count(*)::int n from nl_loss_exception_events")).n,3);
+eq('Authenticated client cannot call grant writer',(await one("select has_function_privilege('authenticated','nl_loss_exception_set(uuid,text,text,text,boolean,integer,text,uuid,text)','execute') allowed")).allowed,false);
+eq('Actual payroll lines are unchanged by exception grants',(await db.query("select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='"+PERSON+"'")).rows,afterClarify);
+
+// Available-pay policy: migration is idempotent and legacy percentages cannot return.
+const availablePaySql=readFileSync('supabase/migrations/20261028233017_loss_available_pay.sql','utf8');
+const priorPlans=(await db.query(`select case_key,cap_override,cap_override_reason from nl_loss_recoveries order by case_key`)).rows;
+await db.exec(availablePaySql); await db.exec(availablePaySql);
+eq('Migration preserves historical override records',(await db.query(`select case_key,cap_override,cap_override_reason from nl_loss_recoveries order by case_key`)).rows,priorPlans);
+await db.exec(`update nl_loss_sources set recovery_policy=recovery_policy||'{"salary_cap_enabled":false,"salary_cap_percent":50,"reserve_other_recoveries":true}'::jsonb;
+update nl_recovery_payables set policy_updated_at=(select updated_at from nl_loss_sources),checked_at=now(),payable=1000,gross=1200;
+insert into employees(id,company_id,employee_code,full_name,location_id) values('00000000-0000-0000-0000-0000000000e9','${C}','PAY9','Available Pay','${S}');
+insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at)
+select '${C}','employee:00000000-0000-0000-0000-0000000000e9',salary_month,true,1000,1200,'test',(select updated_at from nl_loss_sources) from nl_recovery_payables limit 1;
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+('${C}','nl','2026-09','PAY-80','BLR1',800,'Recoverable'),('${C}','nl','2026-09','PAY-REST','BLR1',201,'Recoverable');`);
+eq('Old settings cannot restore percentage limits',(await one(`select recovery_policy->>'salary_cap_enabled' enabled,recovery_policy->>'salary_cap_percent' percent from nl_loss_sources`)),{enabled:'true',percent:'100'});
+const paySave=key=>full(key,'employee:00000000-0000-0000-0000-0000000000e9').replace('"amount":"100"',`"amount":"${key==='PAY-80'?800:201}"`).replace('"mode":"full"','"mode":"full","cap_override":true,"cap_override_reason":"x"');
+await db.query(paySave('PAY-80'));
+eq('80 percent saves without override approval',(await one(`select approval_status,cap_override from nl_loss_recoveries where case_key='PAY-80'`)),{approval_status:'approved',cap_override:false});
+await mustReject('Other plans reserve available pay',paySave('PAY-REST'));
+eq('Due RPC sends 100 percent to older payroll clients',String((await one(`select cap_percent from nl_loss_recovery_due('${C}',(select deduction_month from nl_loss_recoveries where case_key='PAY-80'),'hrms') where case_key='PAY-80'`)).cap_percent),'100');
+eq('Migration never changes paid history',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

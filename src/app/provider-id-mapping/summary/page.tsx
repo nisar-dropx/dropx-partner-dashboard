@@ -11,17 +11,15 @@ import {
 } from "@/lib/provider-mapping-access";
 import {
   canonicalizeProviderFirstMembers,
-  providerFirstMappingIsCurrentOrScheduled,
   providerSourceMemberKey
 } from "@/lib/provider-first-mapping-view";
 import {parseProductionThresholdConfig} from "@/lib/production-threshold-config";
 import {parseProductionThresholdSnapshot} from "@/lib/production-threshold-snapshot";
-import {buildProviderMappingSummary} from "@/lib/provider-mapping-summary";
 import {readAllRows} from "@/lib/supabase-pagination";
 import {supabaseAdmin} from "@/lib/supabase-admin";
 
-type StationRow = {id:string;station_code:string;station_name:string|null};
-type SourceRow = {provider_employee_id:unknown;provider_employee_name:unknown;station_code:unknown;work_date:unknown};
+type StationRow = {id:string;station_code:string;station_name:string|null;cluster:string|null;region:string|null};
+type SourceRow = {provider_employee_id:unknown;provider_employee_name:unknown;station_code:unknown;work_date:unknown;outbound_months:unknown;outbound_dates:unknown};
 type MappingRow = {id:string;station_id:string|null;provider_member_id:string;workforce_id:string|null;payment_method_id:string|null;payment_values:Record<string,unknown>|null;production_threshold_config:unknown;effective_from:string;effective_to:string|null;status:string;updated_at:string};
 type WorkerRow = {id:string;dropx_id:string|null;full_name:string|null};
 type MethodRow = {id:string;name:string;production_threshold_config:unknown;payment_method_components:Array<{component_code:string;is_active:boolean}>|null};
@@ -43,7 +41,7 @@ export default async function ProviderMappingSummaryPage() {
   </AppShell>;
 
   const [stationResult, sourceResult, mappingResult, workerResult, methodResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id,station_code,station_name").eq("company_id",companyId).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,cluster,region").eq("company_id",companyId).order("station_code"),
     supabaseAdmin.rpc("ops_cps_mapping_members",{p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id,station_id,provider_member_id,workforce_id,payment_method_id,payment_values,production_threshold_config,effective_from,effective_to,status,updated_at").eq("company_id",companyId).order("effective_from",{ascending:false}).order("updated_at",{ascending:false})),
     readAllRows(supabaseAdmin.from("workforce").select("id,dropx_id,full_name").eq("company_id",companyId).is("deleted_at",null)),
@@ -58,7 +56,9 @@ export default async function ProviderMappingSummaryPage() {
     providerMemberId:String(source.provider_employee_id??"").trim(),
     providerMemberName:String(source.provider_employee_name??"").trim(),
     stationCode:String(source.station_code??"").trim(),
-    workDate:String(source.work_date??"").trim()
+    workDate:String(source.work_date??"").trim(),
+    outboundMonths:Array.isArray(source.outbound_months)?source.outbound_months.map(value=>String(value)):[],
+    outboundDates:Array.isArray(source.outbound_dates)?source.outbound_dates.map(value=>String(value)):[]
   })),protectedSourceKeys);
   const methods = ((methodResult.data ?? []) as MethodRow[]).map(method => ({
     id:method.id,
@@ -68,10 +68,13 @@ export default async function ProviderMappingSummaryPage() {
   }));
   const methodById = new Map(methods.map(method=>[method.id,method]));
   const today = dashboardDateInputValue();
-  const summary = buildProviderMappingSummary({
-    stations:stations.map(station=>({id:station.id,code:station.station_code,name:station.station_name})),
-    sourceMembers,
-    mappings:allMappings.filter(mapping=>mapping.station_id&&providerFirstMappingIsCurrentOrScheduled({status:mapping.status,effectiveTo:mapping.effective_to},today)).map(mapping=>({
+  const initialMonth = today.slice(0,7);
+  const availableMonths = [...new Set([initialMonth,...sourceMembers.flatMap(source=>source.outboundMonths??[])])]
+    .filter(month=>/^\d{4}-(0[1-9]|1[0-2])$/.test(month)).sort().reverse();
+  const summaryStations = stations.map(station=>({
+    id:station.id,code:station.station_code,name:station.station_name,cluster:station.cluster,region:station.region
+  }));
+  const summaryMappings = allMappings.filter(mapping=>mapping.station_id).map(mapping=>({
       id:mapping.id,
       stationId:String(mapping.station_id),
       providerMemberId:mapping.provider_member_id,
@@ -80,11 +83,11 @@ export default async function ProviderMappingSummaryPage() {
       paymentValues:mapping.payment_values,
       productionThresholdReady:!methodById.get(String(mapping.payment_method_id??""))?.productionThresholdRequired||Boolean(parseProductionThresholdSnapshot(mapping.production_threshold_config)),
       effectiveFrom:mapping.effective_from,
+      effectiveTo:mapping.effective_to,
+      status:mapping.status,
       updatedAt:mapping.updated_at
-    })),
-    workers:((workerResult.data??[]) as WorkerRow[]).map(worker=>({id:worker.id,dropxId:worker.dropx_id,fullName:worker.full_name})),
-    methods
-  });
+    }));
+  const summaryWorkers = ((workerResult.data??[]) as WorkerRow[]).map(worker=>({id:worker.id,dropxId:worker.dropx_id,fullName:worker.full_name}));
   const canOpenMapping = hasPermission(authorization,mappingPageCode,"access");
 
   return <AppShell active="Mapping Summary" pageCode={pageCode}>
@@ -94,6 +97,14 @@ export default async function ProviderMappingSummaryPage() {
       {canOpenMapping?<Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>:null}
       <Link className="active" href="/provider-id-mapping/summary">Mapping summary</Link>
     </nav>
-    {loadError?<section className="panel message-panel error"><div className="panel-body"><strong>Unable to load mapping summary</strong><p className="subtle">{loadError.message}</p></div></section>:<ProviderMappingSummary stations={summary}/>} 
+    {loadError?<section className="panel message-panel error"><div className="panel-body"><strong>Unable to load mapping summary</strong><p className="subtle">{loadError.message}</p></div></section>:<ProviderMappingSummary
+      availableMonths={availableMonths}
+      initialMonth={initialMonth}
+      mappings={summaryMappings}
+      methods={methods}
+      sourceMembers={sourceMembers}
+      stations={summaryStations}
+      workers={summaryWorkers}
+    />}
   </AppShell>;
 }

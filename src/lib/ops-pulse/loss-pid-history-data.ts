@@ -11,7 +11,7 @@ export async function loadPidHistory(company: string, cases: {month:string;case_
   const tables = [
     ['Source','nl_loss_source_events'], ['Recovery','nl_loss_recovery_events'],
     ['Workflow','nl_loss_lifecycle_events'], ['Dispute','nl_dispute_request_events'],
-    ['Redispute','nl_case_response_events'],
+    ['Redispute','nl_case_response_events'], ['Exception','nl_loss_exception_events'],
   ];
   for (let i=0;i<keys.length;i+=100) {
     const results = await Promise.all(tables.map(async ([source,table]) => {

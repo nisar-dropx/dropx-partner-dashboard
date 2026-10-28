@@ -55,3 +55,25 @@ test("newest source and mapping records win deterministically", () => {
   assert.equal(rows[0].details[0].providerMemberName,"Latest");
   assert.equal(rows[0].details[0].status,"ready");
 });
+
+test("one-day mappings cover only matching provider activity dates", () => {
+  const sourceMembers = [{
+    stationCode:"QLDA",providerMemberId:"A1",providerMemberName:"Daily Person",workDate:"2026-10-03",
+    outboundMonths:["2026-10"],outboundDates:["2026-10-01","2026-10-02","2026-10-03"]
+  }];
+  const partial = buildProviderMappingSummary({stations:[stations[0]],methods,workers,sourceMembers,selectedMonths:["2026-10"],mappings:[
+    {id:"one-day",stationId:"qlda",providerMemberId:"A1",workforceId:"worker-ready",paymentMethodId:"mg",paymentValues:{MG_PER_DAY:800},effectiveFrom:"2026-10-02",effectiveTo:"2026-10-02",status:"closed"}
+  ]});
+  assert.equal(partial[0].details[0].status,"partial_coverage");
+  assert.equal(partial[0].details[0].coverageLabel,"1/3 active days");
+  assert.equal(partial[0].ready,0);
+  assert.equal(partial[0].dataIssues,1);
+
+  const exact = buildProviderMappingSummary({stations:[stations[0]],methods,workers,sourceMembers:[{
+    ...sourceMembers[0],outboundDates:["2026-10-02"]
+  }],selectedMonths:["2026-10"],mappings:[
+    {id:"one-day",stationId:"qlda",providerMemberId:"A1",workforceId:"worker-ready",paymentMethodId:"mg",paymentValues:{MG_PER_DAY:800},effectiveFrom:"2026-10-02",effectiveTo:"2026-10-02",status:"closed"}
+  ]});
+  assert.equal(exact[0].details[0].status,"ready");
+  assert.equal(exact[0].details[0].coverageLabel,"1/1 active day");
+});

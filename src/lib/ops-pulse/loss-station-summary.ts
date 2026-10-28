@@ -58,6 +58,11 @@ export function lossFacts(rows: SourceCase[], lines: LedgerLine[], accepted: str
   return [...unique.values()];
 }
 
+/** Summary covers confirmed recoverable cases, including fully settled cases. */
+export function recoverableLossFacts(rows: LossFact[]): LossFact[] {
+  return rows.filter(row => row.stage === "final" && row.recoverable);
+}
+
 export const LOSS_SUMMARY_STATUSES = [
   ["all", "All statuses"], ["pending_update", "Pending update"], ["updated", "Details updated"],
   ["station", "Waiting on station"], ["amazon", "Awaiting Amazon / final"],

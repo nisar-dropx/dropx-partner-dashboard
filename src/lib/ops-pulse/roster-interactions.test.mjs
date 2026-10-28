@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findRosterWeekOffCapBreach } from './roster-interactions.ts';
+import { findRosterWeekOffCapBreach, isPastRosterWeek, rosterMonthMinWeekStart, rosterMonthMaxWeekStart } from './roster-interactions.ts';
+
+test('month week floor is the Monday on or before the 1st', () => {
+  assert.equal(rosterMonthMinWeekStart('2026-10-28'), '2026-09-28');
+  assert.equal(rosterMonthMaxWeekStart('2026-10-28'), '2026-10-26');
+  assert.equal(isPastRosterWeek('2026-09-28', '2026-10-26'), true);
+  assert.equal(isPastRosterWeek('2026-10-26', '2026-10-26'), false);
+});
 
 const joseph = 'contractor:d0905';
 const shift = (id = 'SHIFT_09_00') => ({ dayType: 'working', shiftId: id, notes: null });

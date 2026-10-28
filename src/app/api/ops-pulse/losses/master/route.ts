@@ -60,7 +60,7 @@ export async function POST(request: Request) {
           },
           400,
         );
-      const policy = b.recovery_policy;
+      const policy = b.recovery_policy && { ...b.recovery_policy, salary_cap_enabled: true, salary_cap_percent: 100 };
       if (
         !policy ||
         typeof policy.installment_thresholds_enabled !== "boolean" ||
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
         )
       )
         return reply(
-          { error: "Enter valid employee, salary cap and evidence rules." },
+          { error: "Enter valid employee, available pay and evidence rules." },
           400,
         );
       result = await supabaseAdmin

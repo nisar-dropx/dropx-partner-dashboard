@@ -33,7 +33,10 @@ data={stations:[{id:'a',company_id:'co',station_code:'ERSE',station_name:'Statio
  data.nl_loss_month_cases.pop();
  v=await loadRecoveryView(auth,'nl',{cluster:'aom:aom1',station:'SPBE'});assert.equal(v.cases.length,1);assert.equal(v.cases[0].station_code,'SPBE');
  const {loadRecoveryPayables}=load('src/lib/ops-pulse/nl-recovery-payables.ts');data.workforce=[{id:'w1',company_id:'co',is_active:true,date_of_join:'2020-01-01'}];data.nl_loss_recoveries=[];
- const people=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25');assert.deepEqual(payoutCalls[0][4],{workforceIds:['w1'],includeLossRecoveries:false});assert.equal(payoutCalls[0][1].hasAllLocationAccess,true,'All-location pay for selected people remains included');assert.equal(people[0].recovery_limit,5000);assert.equal(people[0].salary_gross,12000);assert.equal(people[0].salary_month,'2026-10');assert.equal(payoutCalls[0][2],'2026-10-01');
+ const people=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25');assert.deepEqual(payoutCalls[0][4],{workforceIds:['w1'],includeLossRecoveries:false});assert.equal(payoutCalls[0][1].hasAllLocationAccess,true,'All-location pay for selected people remains included');assert.equal(people[0].recovery_limit,10000);assert.equal(people[0].salary_gross,12000);assert.equal(people[0].salary_month,'2026-10');assert.equal(payoutCalls[0][2],'2026-10-01');
+ data.nl_loss_recoveries=[{company_id:'co',month:'2026-09',case_key:'OTHER',is_deleted:false,allocations:[{ref:'workforce:w1',salary_month:'2026-10',amount:3000}]}];
+ const reserved=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',{...policy,salary_cap_enabled:false},'2026-10-25');
+ assert.equal(reserved[0].recovery_limit,7000,'Legacy disabled policy still verifies pay and reserves other recoveries');
  payoutCalls.length=0;await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25',[]);assert.equal(payoutCalls.length,0,'No salary calculation for unselected employees');
- console.log('PASS actual loss loaders: scoped multi-station/cluster/reason filters, recoverable NL plans, non-recoverable exclusion, SLP Final, scoped salary calculation retaining cap.');
+ console.log('PASS actual loss loaders: scoped multi-station/cluster/reason filters, recoverable NL plans, non-recoverable exclusion, SLP Final, scoped salary calculation using full available pay.');
 })().catch(e=>{console.error(e);process.exitCode=1});

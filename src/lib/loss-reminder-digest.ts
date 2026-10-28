@@ -4,7 +4,7 @@ import type {DigestBuilder} from './portal-digest-delivery';
 import {readAllRows} from './supabase-pagination';
 import {loadPeopleOperationalHierarchy} from './people-operational-hierarchy';
 import {nlPeopleClusters} from './ops-pulse/nl-loss-clusters';
-import {lossReminderStage,lossReminderInWindow,selectLossReminderRows,type ReminderStation,type ReminderCase,type ReminderPlan,type ReminderRequest,type ReminderRedispute} from './loss-reminder-policy';
+import {lossReminderStage,lossReminderScheduleTime,lossReminderInWindow,selectLossReminderRows,type ReminderStation,type ReminderCase,type ReminderPlan,type ReminderRequest,type ReminderRedispute} from './loss-reminder-policy';
 import {renderLossReminder} from './loss-reminder-render';
 
 type Recipient={email:string;name:string;stationIds:string[]};
@@ -63,7 +63,7 @@ export const buildLossReminderDigest:DigestBuilder=async(db,control,date)=>{
  const messages=scope.recipients.flatMap(recipient=>{
   const scopedRows=rows.filter(r=>recipient.stationIds.includes(r.stationId));
   if(!scopedRows.some(r=>r.pending))return [];
-  const r=renderLossReminder({stage,event:control.event_key,date,rows:scopedRows,checkedAt:data.checkedAt,warnings:data.warnings});
+  const r=renderLossReminder({stage,event:control.event_key,date,scheduledTime:lossReminderScheduleTime(control.event_key,date,control.config),rows:scopedRows,checkedAt:data.checkedAt,warnings:data.warnings});
   return [{email:recipient.email,name:recipient.name,subject:r.subject,html:r.html,text:r.text,attachments:[r.attachment],scope:{stationIds:r.stationIds,stage,reportDate:date,count:r.pending}}];
  });
  return {checkedAt:data.checkedAt,messages};

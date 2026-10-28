@@ -55,6 +55,10 @@ export async function GET(request: Request) {
     const directoryOnly = url.searchParams.get("directory") === "1";
     const responseWindow = await supabaseAdmin!.from("nl_case_response_windows").select("enabled,workflow_status,recovery_month").eq("company_id", scope.company).eq("month", month).eq("case_key", caseKey).maybeSingle();
     if(responseWindow.error) throw Error("Redispute status could not be loaded.");
+    const grants = await supabaseAdmin!.from('nl_loss_exception_options').select('kind,enabled,deduction_month,source_amount,source_status').eq('company_id',scope.company).eq('month',month).eq('case_key',caseKey);
+    if (grants.error) throw Error('Exception options could not be loaded. Reload and retry.');
+    const allowed = await Promise.all(['next_month','installments'].map(kind=>supabaseAdmin!.rpc('nl_loss_exception_allowed',{p_company:scope.company,p_month:month,p_case:caseKey,p_kind:kind,p_payroll:grants.data?.find(g=>g.kind===kind)?.deduction_month || null})));
+    if (allowed.some(r=>r.error)) throw Error('Exception options could not be verified.');
     // The salary month payroll deducts a plan saved now in, from the same rule the database applies.
     const salaryMonth = async (timing: "current_month" | "next_month") => {
       const r = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {
@@ -95,6 +99,7 @@ export async function GET(request: Request) {
     return reply({
       case_key: caseKey,
       amount,
+      exception_options: { installments: allowed[1].data === true, next_month: allowed[0].data === true ? grants.data?.find(g=>g.kind==='next_month')?.deduction_month : null },
       deduction_months: {
         current_month: currentMonth,
         next_month: nextMonth,
@@ -200,30 +205,14 @@ export async function POST(request: Request) {
     }
     if (JSON.stringify(body.recovery_details || {}).length > 20000)
       return reply({ error: "Re-dispute details are too long." }, 400);
-    // Full or recurring debit; the database validates the schedule and the salary cap.
+    // Full or recurring debit; the database validates the schedule and available pay.
     const rawPlan = body.plan && typeof body.plan === "object" ? body.plan : {};
     const plan = {
       deduction_month: typeof rawPlan.deduction_month === "string" ? rawPlan.deduction_month : undefined,
       mode: rawPlan.mode === "installments" ? "installments" : "full",
       basis: rawPlan.basis === "months" || rawPlan.basis === "amount" ? rawPlan.basis : null,
       value: rawPlan.value == null ? null : String(rawPlan.value).trim().slice(0, 20),
-      cap_override: rawPlan.cap_override === true,
-      cap_override_reason:
-        typeof rawPlan.cap_override_reason === "string" ? rawPlan.cap_override_reason.slice(0, 500) : null,
     };
-    // Recovering beyond the salary cap is a Master-level decision, like the cap itself.
-    if (plan.cap_override && !hasPermission(auth, "ops_loss_master", "edit")) {
-      const saved = await supabaseAdmin!
-        .from("nl_loss_recoveries")
-        .select("cap_override,is_deleted")
-        .eq("company_id", scope.company)
-        .eq("month", body.month)
-        .eq("case_key", caseKey)
-        .maybeSingle();
-      // Keeping an override someone with access already recorded is allowed; adding one is not.
-      if (!saved.data?.cap_override || saved.data.is_deleted)
-        return reply({ error: "Only people with Loss Recovery Master edit access can recover beyond the salary cap." }, 403);
-    }
     const result = await supabaseAdmin!.rpc("save_nl_recovery", {
       p_company: scope.company,
       p_month: body.month,
