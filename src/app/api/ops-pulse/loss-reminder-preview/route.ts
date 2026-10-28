@@ -16,7 +16,8 @@ export async function GET(request:Request){
   if(control.error)throw Error('Reminder settings unavailable.');
   const scope=await loadLossReminderScope(db,company,control.data.config);
   const stations=scope.stations.filter(s=>auth.hasAllLocationAccess||auth.locationScopeIds.includes(s.id));
-  const data=await loadLossReminderData(db,company,stations),date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
+  const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
+  const data=await loadLossReminderData(db,company,stations,date);
   const rows=selectLossReminderRows(stage,data.input);
   const mail=renderLossReminder({stage,event,date,rows,checkedAt:data.checkedAt,warnings:data.warnings});
   if(url.searchParams.get('format')==='xlsx')return new Response(new Uint8Array(Buffer.from(mail.attachment.content,'base64')),{headers:{'Content-Type':mail.attachment.contentType,'Content-Disposition':`attachment; filename="${mail.attachment.filename}"`,'Cache-Control':'no-store'}});
