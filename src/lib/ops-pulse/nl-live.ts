@@ -137,7 +137,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
   const allowed = new Set(matchingStations.map((s) => s.source_code));
   const station = lossFilterValue(lossFilterValues(filters.station).filter(v => allowed.has(v)));
   // Opens the case list on a status group: todo (waiting on station), amazon or decided.
-  const phase = ["todo", "amazon", "decided", "recoverable", "nonrecoverable", "all"].includes(filters.phase ?? "")
+  const phase = ["todo", "amazon", "decided", "recoverable", "nonrecoverable", "pending_updates", "updated", "all"].includes(filters.phase ?? "")
     ? filters.phase!
     : "";
   const monthRows = all
@@ -161,7 +161,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
       lossFilterMatches(station, r.station_code) &&
       lossFilterMatches(reason, r.reason || "Unspecified"),
   );
-  const finalPlans=stageView==='final' && month ? await readAllRows(db.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations").eq("company_id",company).eq("month",month).order("case_key")) : {data:[],error:null};
+  const finalPlans=stageView==='final' && month ? await readAllRows(db.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations,updated_at").eq("company_id",company).eq("month",month).order("case_key")) : {data:[],error:null};
   if(finalPlans.error) throw Error("Recovery update totals could not be loaded.");
   const finalPlanByKey=new Map((finalPlans.data||[]).map(p=>[p.case_key,p]));
   const tally = (rows: typeof filtered) => {
@@ -239,6 +239,10 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     phase,
     station,
     stations: matchingStations,
+    overviewRows: filtered.map(r => ({ ...r, report: "nl", source_present: true,
+      source_updated_at: r.last_seen_at, source_file: "", amount: Number(r.amount || 0),
+      details: { case_status: r.status, category: r.reason, extra: { current_sla_stage: r.stage } },
+      recovery: finalPlanByKey.get(r.case_key) || null })) as NlCase[],
     totals: sortLossRows(totals, filters.sort),
     sort: filters.sort || "value_desc",
     outcomes: recoveryContext.outcomes,

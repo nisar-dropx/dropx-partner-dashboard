@@ -1,4 +1,5 @@
 "use client";
+import { LossCaseRow, LossCaseColumns } from "./loss-case-row";
 import { useEffect, useMemo, useState } from "react";
 import { FleetMultiSelect } from "./fleet-multi-select";
 import "./loss-list-controls.css";
@@ -22,8 +23,7 @@ import {
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { recoveryActionAllowed, departedPersonError, receivedRecoveryError } from "@/lib/ops-pulse/loss-recovery-controls";
-import { recoveryDetailsUpdated, finalRecoverySummary } from "@/lib/ops-pulse/loss-final-summary";
-import { LossFinalMetrics } from "./loss-final-metrics";
+import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
@@ -63,6 +63,7 @@ export function NlLossCases({
   canRecovered = false,
   canApprove = false,
   showPeriod = false,
+  initialStatus = "pending",
 }: {
   cases: NlCase[];
   outcomes: RecoveryOutcome[];
@@ -73,10 +74,11 @@ export function NlLossCases({
   /** SLP / Loss Recovery Master may final-approve a proposed plan. */
   canApprove?: boolean;
   showPeriod?: boolean;
+  initialStatus?: string;
 }) {
   const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [sort, setSort] = useState("value_desc");
-  const [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState(initialStatus === "updated" ? "updated" : ["all", "recoverable"].includes(initialStatus) ? "all" : "pending");
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
     [active, setActive] = useState<string | null>(null);
@@ -170,7 +172,6 @@ export function NlLossCases({
   }
   return (
     <section className={styles.panel}>
-      <LossFinalMetrics summary={finalRecoverySummary(shown.map(c=>({amount:c.amount,recoverable:true,updated:recoveryDetailsUpdated(c,c.recovery,c.report==="slp")})))}/>
       <TrackingDetailModal trackingId={tracking?.id ?? null} stationHint={tracking?.station} onClose={() => setTracking(null)} />
       <div className={styles.panelHead}>
         <div>
@@ -198,53 +199,15 @@ export function NlLossCases({
           </button>
         </div>
       </div>
+      <LossCaseColumns/>
       <div className={styles.cases}>
         {current.map((c) => (
           <article key={`${c.month}:${c.case_key}`} className={styles.case}>
-              {c.details.tid && !c.details.tid_approximate ? <button type="button" className={styles.trackingLink} onClick={() => setTracking({ id: c.details.tid!, station: c.station_code })} aria-label={`Track ${c.details.tid} in SCC`}>{c.station_code} · {c.details.tid} ↗</button> : null}
-            <button
-              className={styles.caseSummary}
-              aria-expanded={active === `${c.month}:${c.case_key}`}
-              onClick={() =>
-                setActive(active === `${c.month}:${c.case_key}` ? null : `${c.month}:${c.case_key}`)
-              }
-            >
-              <div>
-                <strong style={c.details.tid && !c.details.tid_approximate ? { visibility: "hidden" } : undefined}>
-                  {c.details.tid_approximate ? "≈ " : ""}
-                  {c.station_code} · {c.details.tid || c.case_key}
-                </strong>
-                <span>
-                  {showPeriod ? `${c.details.period || c.month} · ` : ""}
-                  {c.details.category || "Unspecified reason"}
-                  {c.details.sub_category ? ` · ${c.details.sub_category}` : ""}
-                </span>
-                {c.report === "slp" &&
-                c.details.final_published &&
-                !c.details.in_final ? (
-                  <span className={styles.pending}>
-                    Not in the Final file · confirm before recovering
-                  </span>
-                ) : null}
-              </div>
-              <div>
-                <strong>{money(c.amount)}</strong>
-                <span
-                  className={
-                    !recoveryPending(c.recovery)
-                      ? styles.done
-                      : styles.pending
-                  }
-                >
-                  {recoveryNeedsReview(c)
-                    ? "Recovery review needed"
-                    : c.recovery && !c.recovery.is_deleted
-                      ? c.recovery.outcome_label
-                      : "Assign recovery person"}
-                </span>
-              </div>
-              <span aria-hidden>{active === `${c.month}:${c.case_key}` ? "−" : "+"}</span>
-            </button>
+            <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
+              reason={[showPeriod?c.details.period||c.month:"",c.details.category||"Unspecified reason",c.details.sub_category].filter(Boolean).join(" · ")}
+              value={money(c.amount)} date={c.recovery?.updated_at} open={active === c.month+":"+c.case_key}
+              onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.month+":"+c.case_key?null:c.month+":"+c.case_key)}
+              status={<span className={recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?styles.done:styles.pending}>{recoveryNeedsReview(c)?"Review needed":recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?"Details updated":"Pending update"}{c.recovery&&!c.recovery.is_deleted?" · "+c.recovery.outcome_label:""}</span>}/>
             {active === `${c.month}:${c.case_key}` ? (
               <RecoveryForm
                 row={c}

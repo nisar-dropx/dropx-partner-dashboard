@@ -16,3 +16,5 @@
 .more summary { cursor: pointer; }
 .more[open] { flex-shrink: 0; }
 .more > div { display: flex; flex-wrap: wrap; }
+
+.header{gap:7px}.titleRow{min-height:0;gap:10px}.titleBlock h1{font-size:22px;margin:3px 0}.titleBlock p{font-size:12px}.tabs{padding:3px;border-radius:8px}.tab{padding:6px 11px;border-radius:6px}
