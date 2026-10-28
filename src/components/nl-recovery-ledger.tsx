@@ -147,7 +147,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                         <small>{l.employee_code || l.employee_ref} · {l.station_code} · {l.designation || "Designation not recorded"}</small>
                       </td>
                       <td>
-                        <a href={`/team-ops/losses/recovery?case=${encodeURIComponent(l.case_key)}`}>{caseLabel(l)}</a>
+                        <a href={`/team-ops/losses/recovery-updates?case=${encodeURIComponent(l.case_key)}&month=${encodeURIComponent(l.month)}`}>{caseLabel(l)}</a>
                         <small>{l.outcome_label}{l.updated_by_name ? ` · by ${l.updated_by_name}` : ""}</small>
                       </td>
                       <td>

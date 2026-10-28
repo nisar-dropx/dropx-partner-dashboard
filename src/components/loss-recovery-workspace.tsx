@@ -12,7 +12,8 @@ import styles from './nl-loss.module.css';
 const money=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(n);
 export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canRecovered=false,canApprove,approvals=false}:{rows:NlCase[];lines:LedgerLine[];outcomes:RecoveryOutcome[];settings:LossSettings|null;canEdit:boolean;canRecovered?:boolean;canApprove:boolean;approvals?:boolean}) {
  const params=useSearchParams();
- const [period,setPeriod]=useState(indiaMonth()),[filter,setFilter]=useState(approvals||params.get('case')?'open':'pending_update'),[query,setQuery]=useState(params.get('case')||''),[station,setStation]=useState(''),[active,setActive]=useState(''),[tracking,setTracking]=useState<{id:string;station:string}|null>(null);
+ const caseQuery=params.get('case'), caseMonth=params.get('month');
+ const [period,setPeriod]=useState(indiaMonth()),[filter,setFilter]=useState(caseQuery?'all':approvals?'open':'pending_update'),[query,setQuery]=useState(caseQuery||''),[station,setStation]=useState(''),[active,setActive]=useState(caseQuery&&caseMonth?`${caseMonth}|${caseQuery}`:''),[tracking,setTracking]=useState<{id:string;station:string}|null>(null);
  const data=useMemo(()=>{
   const byCase=new Map<string,LedgerLine[]>(); for(const l of lines){const k=`${l.month}|${l.case_key}`;byCase.set(k,[...(byCase.get(k)||[]),l]);}
   return rows.map(row=>({row,...recoveryQueueState(row,byCase.get(`${row.month}|${row.case_key}`)||[],period)}));
@@ -26,7 +27,7 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
   if(r?.approval_status==='needs_review'||row.lifecycle_status==='needs_review') return 'Review required';
   return r?.approval_note || r?.outcome_label || 'Eligibility / correction review';
  };
- const shown=useMemo(()=>data.filter(x=>(!approvals || isRecoveryApprovalRequest(x.row,x.status))&&(!station||x.row.station_code===station)&&(filter==='pending_update'?['update','review','returned'].includes(x.status):filter==='all'||filter==='open'?!['recovered','written_off','source_cleared'].includes(x.status)||filter==='all':x.status===filter)&&[x.row.case_key,x.row.station_code,x.row.details.tid,...(x.row.recovery?.allocations.map(a=>`${a.full_name} ${a.employee_code}`)||[])].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.outstanding-a.outstanding),[data,station,filter,query,approvals]);
+ const shown=useMemo(()=>data.filter(x=>(!approvals || isRecoveryApprovalRequest(x.row,x.status))&&(!station||x.row.station_code===station)&&(!caseQuery||query!==caseQuery||!caseMonth||x.row.month===caseMonth)&&(filter==='pending_update'?['update','review','returned'].includes(x.status):filter==='all'||filter==='open'?!['recovered','written_off','source_cleared'].includes(x.status)||filter==='all':x.status===filter)&&[x.row.case_key,x.row.station_code,x.row.details.tid,...(x.row.recovery?.allocations.map(a=>`${a.full_name} ${a.employee_code}`)||[])].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>b.outstanding-a.outstanding),[data,station,filter,query,approvals,caseQuery,caseMonth]);
  const paged=usePaged(shown,25,`${period}|${filter}|${station}|${query}`);
  const scoped=shown;
  return <>
