@@ -115,7 +115,10 @@ export async function GET(request: Request) {
     ]);
     if (pay.error || issued.error || exit.error || types.error || requests.error) throw new Error(pay.error?.message ?? issued.error?.message ?? exit.error?.message ?? types.error?.message ?? requests.error?.message ?? "Unable to load documents.");
     // Insurance cards are optional: a missing table (migration not run yet) must not break Documents.
-    const insuranceRows = insurance.error ? [] : insurance.data ?? [];
+    // DropX One Documents shows Group Medical (GMC) ecards only — GPA and cover letter stay in People.
+    const insuranceRows = (insurance.error ? [] : insurance.data ?? []).filter(
+      (row) => String(row.policy_type || "GMC").toUpperCase() === "GMC"
+    );
 
     const requestIds = (requests.data ?? []).map((row) => row.id);
     const [messagesResult, attachmentsResult] = await Promise.all([
@@ -154,41 +157,20 @@ export async function GET(request: Request) {
       })),
       // Proxied through this server (Drive OAuth on the workforce worker) so the in-app viewer works.
       ...insuranceRows.map((row) => {
-        const policyType = String(row.policy_type || "GMC").toUpperCase();
-        const label =
-          policyType === "GPA"
-            ? "Group Personal Accident"
-            : policyType === "GMC"
-              ? "Group Medical"
-              : row.insurer_name || "Insurance";
+        const label = "Group Medical";
         return {
-          id: row.id, kind: "insurance", category: policyType === "GPA" ? "group personal accident" : "group medical",
+          id: row.id, kind: "insurance", category: "group medical",
           title: label,
           subtitle: [
             row.policy_number ? `Policy ${row.policy_number}` : null,
             row.membership_no ? `Membership ${row.membership_no}` : null,
             row.insurer_name && row.insurer_name !== label ? row.insurer_name : null
-          ].filter(Boolean).join(" · ") || "Company group insurance",
-          fileName: row.file_name || `${policyType.toLowerCase()}-card.pdf`, mimeType: row.mime_type || "application/pdf",
+          ].filter(Boolean).join(" · ") || "Company group medical cover",
+          fileName: row.file_name || "gmc-card.pdf", mimeType: row.mime_type || "application/pdf",
           publishedAt: row.source_updated_at, expiresOn: row.valid_to,
           downloadUrl: query("insurance", row.id)
         };
-      }),
-      // Official DropX letterpad confirming Self + registered dependents on Marsh cover.
-      ...(insuranceRows.length
-        ? [{
-            id: "cover-letterpad",
-            kind: "insurance" as const,
-            category: "group insurance cover",
-            title: "Group insurance cover letter",
-            subtitle: "Self and registered family members — DropX letterpad",
-            fileName: "group-insurance-cover.pdf",
-            mimeType: "application/pdf",
-            publishedAt: insuranceRows[0].source_updated_at,
-            expiresOn: null as string | null,
-            downloadUrl: `/api/connect/documents/cover/letterpad?${new URLSearchParams({ accountId: account.id, profileType })}`
-          }]
-        : [])
+      })
     ].sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
 
     return NextResponse.json({
