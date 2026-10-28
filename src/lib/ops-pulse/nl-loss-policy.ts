@@ -62,6 +62,10 @@ export type RecoveryPolicy = {
   payroll_start_month?: string;
   /** Most instalments a recurring debit may have (default 24). */
   max_installments?: number;
+  installment_thresholds_enabled?: boolean;
+  installment_two_month_min?: number;
+  installment_three_month_min?: number;
+  installment_extra_month_step?: number;
 };
 export type RecoveryAttachment = { id: string; file_name: string };
 export type RecoveryDetails = {
@@ -260,6 +264,15 @@ export function installmentSchedule(
   return { schedule: Array.from({ length: count }, (_, i) => Math.min(per, total - i * per) / 100), error: "" };
 }
 
+/** Amount thresholds are exclusive and apply to each person's share. */
+export function installmentThresholdError(amount: number, count: number, policy?: Partial<RecoveryPolicy>) {
+  if (!policy?.installment_thresholds_enabled || count <= 1) return "";
+  const threshold = count === 2 ? Number(policy.installment_two_month_min) : Number(policy.installment_three_month_min) + (count - 3) * Number(policy.installment_extra_month_step);
+  if (!Number.isFinite(threshold) || threshold <= 0) return "Recurring recovery rules are incomplete. Contact the Recovery Master administrator.";
+  return Math.round(amount * 100) <= Math.round(threshold * 100)
+    ? `${count} months requires a recovery share above ₹${threshold.toLocaleString("en-IN")}. Choose fewer months or Full debit.` : "";
+}
+
 export function allocationError(
   amount: number,
   splits: { employee_ref: string; amount: number }[],
@@ -268,6 +281,7 @@ export function allocationError(
   plan: RecoveryPlan = { mode: "full" },
   maxInstallments = 24,
   capPercent = 100,
+  policy?: Partial<RecoveryPolicy>,
 ) {
   if (!splits.length)
     return "Select the employees responsible for the full amount.";
@@ -305,6 +319,8 @@ export function allocationError(
     const person = people.find((p) => p.ref === split.employee_ref)!;
     const { schedule, error } = installmentSchedule(split.amount, plan, maxInstallments);
     if (error) return `${person.employee_code}: ${error}`;
+    const thresholdError = installmentThresholdError(split.amount, schedule.length, policy);
+    if (thresholdError) return `${person.employee_code}: ${thresholdError}`;
     const monthly = Math.round((schedule[0] ?? 0) * 100);
     // People-profile payroll figures are deliberately absent from the browser.
     // The database performs the authoritative cap and gross-pay checks on save.

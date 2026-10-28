@@ -63,6 +63,10 @@ export async function POST(request: Request) {
       const policy = b.recovery_policy;
       if (
         !policy ||
+        typeof policy.installment_thresholds_enabled !== "boolean" ||
+        !Number.isInteger(policy.max_installments) || policy.max_installments < 2 || policy.max_installments > 60 ||
+        ["installment_two_month_min", "installment_three_month_min", "installment_extra_month_step"].some(k => !Number.isInteger(policy[k]) || policy[k] <= 0 || policy[k] > 10000000) ||
+        policy.installment_three_month_min <= policy.installment_two_month_min ||
         [
           "active_only",
           "previous_month_active_only",

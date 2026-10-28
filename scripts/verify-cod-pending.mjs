@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import ts from 'typescript';
+import path from 'node:path';
 const require=createRequire(import.meta.url);
-function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??(n==='./digest-thread-policy'?compile('src/lib/digest-thread-policy.ts'):require(n)),exports);return exports;}
+function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??(n.startsWith('.')?compile(path.resolve(path.dirname(file),n+'.ts')):require(n)),exports);return exports;}
 const policy=compile('src/lib/ops-pulse/cod-pending.ts'),ageing=compile('src/lib/ops-pulse/cod-ageing.ts'),streakPolicy=compile('src/lib/ops-pulse/cod-no-update-streak.ts');
 const station={is_active:true,id:'s1',station_code:'NLRC',station_name:'Station one',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
 const other={...station,id:'s2',station_code:'GNTI'};

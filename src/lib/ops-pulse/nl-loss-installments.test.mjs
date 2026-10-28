@@ -50,3 +50,21 @@ test("People salary amounts remain server-side while the browser can still submi
   const restricted = person({ pay_detail_access: "restricted", recovery_limit: undefined, override_limit: undefined, salary_gross: undefined });
   assert.equal(allocationError(1200, split(1200), [restricted], true, { mode: "full" }, 24, 50), "");
 });
+
+const thresholds = { installment_thresholds_enabled: true, installment_two_month_min: 7000, installment_three_month_min: 10000, installment_extra_month_step: 5000 };
+const unrestrictedPerson = person({salary_gross: undefined});
+const check = (amount, months, policy=thresholds) => allocationError(amount, split(amount), [unrestrictedPerson], false, {mode:'installments',basis:'months',value:String(months)},24,50,policy);
+test('exclusive per-person recurring amount thresholds, including additional months', () => {
+ for (const [amount, months] of [[7000,2],[10000,3],[15000,4],[20000,5]]) {
+   assert.match(check(amount,months), /requires a recovery share above/);
+   assert.equal(check(amount+0.01,months),'');
+ }
+ assert.equal(check(10000,2),'');
+ assert.equal(check(1_000,2,{...thresholds,installment_thresholds_enabled:false}),'');
+ assert.match(check(9000,2,{...thresholds,installment_two_month_min:9500}), /9,500/);
+});
+test('monthly amount cannot bypass threshold and shipment total does not qualify a smaller share', () => {
+ assert.match(allocationError(7000,split(7000),[unrestrictedPerson],false,{mode:'installments',basis:'amount',value:'3500'},24,50,thresholds), /above ₹7,000/);
+ const people=[unrestrictedPerson,{...unrestrictedPerson,ref:'employee:2',employee_code:'D0002'}];
+ assert.match(allocationError(14000,[{employee_ref:'employee:1',amount:7000},{employee_ref:'employee:2',amount:7000}],people,false,{mode:'installments',basis:'months',value:'2'},24,50,thresholds), /D0001/);
+});

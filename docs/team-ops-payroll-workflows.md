@@ -470,3 +470,28 @@ and HRMS; apply each migration individually with the existing runbook; promote t
 verify read-only station directories and role visibility. Do not create financial test records in production.
 The redispute migration revokes the old mutation RPCs, so avoid leaving the old app serving writes after
 that migration. Do not use a blanket database push.
+
+### Stage reminders and recurring amount rules (28 October 2026)
+
+- Loss reminders run at 11:00 / 16:00 IST through the existing five-minute notification cron.
+  Recovery-update reminders run 20th–next 5th; initial NL dispute reminders 7th–11th;
+  station responses to Amazon 11th–20th. Source stage determines the actual action; calendar
+  windows do not change Amazon deadlines. Submitted current-stage responses are excluded.
+- Each recipient gets only their active Ops membership scope. Station, Cluster/AOM, SLP,
+  National Head, Finance and Control Tower roles plus configured Jamsheer receive the stage
+  summary if they have pending shipments. Access is rechecked before delivery. Excel has the
+  same scope. Completed recovery plans awaiting approval are not missing updates.
+- Each stage has one thread; recovery uses the cycle beginning on the 20th, including replies
+  on the following 1st–5th. Each edition keeps an independent reservation and message ID.
+- Settings → Notifications controls both editions for each stage. New controls are seeded
+  disabled; enable only after deployment and production preview verification. Old daily digest
+  remains disabled for the main company to prevent redundant mail.
+- Recovery Master now configures exclusive per-person thresholds: >₹7,000 for 2 months,
+  >₹10,000 for 3 months, +₹5,000 for each additional month. Both months and monthly-amount
+  plans obey the resulting schedule length. A database trigger validates new/changed
+  schedules. Existing schedules, approval transitions, recovery keys and payroll obligations
+  remain unchanged. Recurring plans still require exception approval.
+- Migrations: `20261028190000_loss_installment_amount_rules.sql` and
+  `20261028191000_loss_stage_reminders.sql`. Apply individually and record versions.
+- Validation: `pnpm run test:loss-stage-reminders`; boundary cases also live in
+  `src/lib/ops-pulse/nl-loss-installments.test.mjs`.

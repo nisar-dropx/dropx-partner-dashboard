@@ -1,3 +1,4 @@
+import {lossReminderStage,lossReminderInWindow,lossReminderThreadMonth,lossReminderThreadEvent} from './loss-reminder-policy';
 import {digestThreadEvents} from './digest-thread-policy';
 import "server-only";
 import {createClient, type SupabaseClient} from "@supabase/supabase-js";
@@ -43,6 +44,8 @@ export function dueReportDate(control:DigestControl,now=new Date()) {
  date.setUTCDate(date.getUTCDate()+offset);
  const result=date.toISOString().slice(0,10);
  if(result<String(control.config.first_report_date||""))return null;
+ const stage=lossReminderStage(control.event_key);
+ if(stage&&!lossReminderInWindow(stage,result))return null;
  const last=String(control.config.last_report_date||"");
  return last&&result>last?null:result;
 }
@@ -75,6 +78,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
  const nowScopes = new Map<string, Promise<Awaited<ReturnType<typeof import("./amazon-now-digest").loadNowMailScope>>>>();
  const codScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadCodMailRecipients>>>>();
  const registrationScopes=new Map<string,Promise<RegistrationSnapshot>>();
+ const lossScopes=new Map<string,Promise<Awaited<ReturnType<typeof import('./loss-reminder-digest').loadLossReminderScope>>>>();
  const deadline=Date.now()+180_000;
  let attempted=0,retryLater=false;
  const attemptedIds=new Set<string>();
@@ -98,7 +102,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
      db.from("profiles").select("id").eq("company_id",delivery.company_id).eq("is_active",true).ilike("email",delivery.recipient_email).limit(1),
-     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).eq("report_month",delivery.report_date.slice(0,7)).order("last_sent_at",{ascending:false}).limit(1).maybeSingle()
+     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).eq("report_month",lossReminderThreadMonth(delivery.event_key,delivery.report_date)).order("last_sent_at",{ascending:false}).limit(1).maybeSingle()
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
@@ -185,17 +189,29 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      }else if(!recipient||!Array.isArray(keys)||!keys.length||keys.some((key:string)=>!recipient.profileKeys.includes(key)))throw Error('Registration completed or manager routing changed; saved reminder held for the next fresh run.');
      registrationRecipientVerified=true;
     }
+    if(lossReminderStage(delivery.event_key)){
+     const control=controlResult.data as DigestControl;
+     if(dueReportDate(control)!==delivery.report_date)throw Error('Loss reminder delivery window ended; stale edition held.');
+     const {loadLossReminderScope}=await import('./loss-reminder-digest');
+     if(!lossScopes.has(delivery.company_id))lossScopes.set(delivery.company_id,loadLossReminderScope(db,delivery.company_id,control.config));
+     const scope=(await lossScopes.get(delivery.company_id))!;
+     const recipient=scope.recipients.find(r=>r.email===delivery.recipient_email);
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw Error('Loss reminder scope could not be verified.');
+     const ids=saved.data?.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw Error('Loss recipient access changed; saved edition held.');
+    }
     if(!digestEnabled(controlResult.data as DigestControl)||!smtpResult.data.is_enabled||!profileResult.data?.length) {
      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"Notification disabled or recipient no longer active.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
      if(skipped.error)throw new Error(skipped.error.message);summary.skipped++;return;
     }
-    const smtp=smtpResult.data,thread=threadResult.data,month=delivery.report_date.slice(0,7);
+    const smtp=smtpResult.data,thread=threadResult.data,month=lossReminderThreadMonth(delivery.event_key,delivery.report_date);
     if(!smtp.smtp_host||!smtp.smtp_from||!smtp.smtp_pass)throw new Error("Company SMTP is incomplete");
     const domain=String((controlResult.data as DigestControl).config.email_domain||"");
     if(!domain||(!registrationRecipientVerified&&!delivery.recipient_email.endsWith("@"+domain))||!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(delivery.recipient_email))throw new Error("Recipient is outside configured company email domain or is invalid");
-    const threadEventKey=manualCod?'cod_pending_evening':delivery.event_key.startsWith('id_mapping_')?'id_mapping_morning':delivery.event_key;
+    const threadEventKey=manualCod?'cod_pending_evening':delivery.event_key.startsWith('id_mapping_')?'id_mapping_morning':lossReminderThreadEvent(delivery.event_key);
     const key=digestThreadKey(delivery.company_id,portal,threadEventKey,delivery.recipient_email,month);
-    const messageId="<portal-digest-"+key.slice(0,32)+"-"+delivery.report_date+(manualCod?"-manual-"+delivery.id.replace(/[^a-zA-Z0-9]/g,'').slice(0,12):"")+"@"+domain+">";
+    const messageId="<portal-digest-"+key.slice(0,32)+"-"+delivery.report_date+(lossReminderStage(delivery.event_key)?"-"+delivery.event_key.split("_").at(-1):"")+(manualCod?"-manual-"+delivery.id.replace(/[^a-zA-Z0-9]/g,'').slice(0,12):"")+"@"+domain+">";
     const root=thread?.root_message_id||messageId,subject=thread?.subject||delivery.subject;
     const prepared=await db.from("portal_digest_deliveries").update({thread_key:key,message_id:messageId,root_message_id:root,in_reply_to:thread?.last_message_id||null,subject}).eq("id",delivery.id).eq("status","sending");
     if(prepared.error)throw new Error(prepared.error.message);

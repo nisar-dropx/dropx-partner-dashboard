@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-function compile(path,deps){const ex={};new Function('require','exports',ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText)(id=>{if(id in deps)return deps[id];throw Error(id);},ex);return ex;}
+import path from 'node:path';
+function compile(file,deps){const ex={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText)(id=>{if(id in deps)return deps[id];if(id.startsWith('.'))return compile(path.resolve(path.dirname(file),id+'.ts'),{});throw Error(id);},ex);return ex;}
 let failure='',finishFailure=false,active=0,peak=0,sends=0,claims=[];
 const rows=Array.from({length:7},(_,i)=>({id:String(i),company_id:'c',event_key:'review_digest',report_date:'2026-10-08',recipient_email:`u${i}@example.com`,subject:'Fixture',html:'Fixture',body:'Fixture',status:'pending'}));
 const control={state:'enabled',config:{delivery_ready:true,email_domain:'example.com'}};

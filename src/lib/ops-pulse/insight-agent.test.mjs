@@ -72,7 +72,7 @@ test('morning and evening continue the existing monthly Dark Store conversation'
  const {digestThreadEvents}=await import('../digest-thread-policy.ts');
  assert.deepEqual(digestThreadEvents('now_insight_morning'),digestThreadEvents('now_insight_evening'));
  assert.ok(digestThreadEvents('now_insight_morning').includes('now_review_digest'));
- const source=fs.readFileSync('src/lib/portal-digest-delivery.ts','utf8');assert.match(source,/eq\("report_month",delivery.report_date.slice\(0,7\)\)/);assert.match(source,/references:thread/);assert.match(source,/Insight recipient scope changed/);
+ const source=fs.readFileSync('src/lib/portal-digest-delivery.ts','utf8');assert.match(source,/eq\("report_month",lossReminderThreadMonth\(delivery.event_key,delivery.report_date\)\)/);assert.match(source,/references:thread/);assert.match(source,/Insight recipient scope changed/);
 });
 test('enabling insight schedules atomically replaces legacy schedules with valid bulk row keys',()=>{
  const {insightControlUpdates}=load('insight-control-updates');
