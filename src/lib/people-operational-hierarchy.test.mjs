@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveManagerChainForPersonIds, resolvePeopleOperationalHierarchy } from "./people-operational-hierarchy-core.ts";
+import { peopleOperationalRoleFamily, resolveManagerChainForPersonIds, resolvePeopleOperationalHierarchy } from "./people-operational-hierarchy-core.ts";
 
 const assignment = (id, personId, displayName, locationId, designationCode, designationName) => ({
   id,
@@ -11,6 +11,12 @@ const assignment = (id, personId, displayName, locationId, designationCode, desi
   designationCode,
   designationName,
   positionTitle: designationName
+});
+
+test("People code CM is City Manager, not Cluster Manager", () => {
+  assert.equal(peopleOperationalRoleFamily(assignment("clm", "p1", "Cluster", "HO", "CLM", "Cluster Manager")), "cluster_manager");
+  assert.equal(peopleOperationalRoleFamily(assignment("cm", "p2", "City", "HO", "CM", "City Manager")), "higher_authority");
+  assert.equal(peopleOperationalRoleFamily(assignment("ctm", "p3", "City", "HO", "CTM", "City Manager")), "higher_authority");
 });
 
 test("derives cluster manager and direct national-head fallback from People", () => {

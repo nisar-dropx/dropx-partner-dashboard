@@ -5,11 +5,14 @@ import ts from 'typescript';
 import { payAdvanceApprovalPayContext, payAdvanceDecision, payAdvanceFinanceTerms } from './connect-pay-advance-approval.ts';
 
 function fixture() {
-  const state = { actors:['actor-a'], rpcCalls:[], error:null,
-    hr_pay_advance_steps:[{id:'step-a',company_id:'company-a',request_id:'request-a',approver_user_id:'actor-a',status:'pending',step_name:'Reporting manager'},
-      {id:'step-b',company_id:'company-b',request_id:'request-b',approver_user_id:'actor-a',status:'pending'},
-      {id:'step-c',company_id:'company-a',request_id:'request-c',approver_user_id:'other-actor',status:'pending'}],
-    hr_pay_advance_requests:[{id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_type:'workforce',worker_name:'Test Person',requested_amount:2000,outstanding_pay_snapshot:12000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'}] };
+  const state = { actors:['actor-a'], visible:['actor-a'], rpcCalls:[], error:null,
+    hr_pay_advance_steps:[{id:'step-a',company_id:'company-a',request_id:'request-a',approver_user_id:'actor-a',status:'pending',step_name:'Reporting manager',step_type:'manager'},
+      {id:'step-b',company_id:'company-b',request_id:'request-b',approver_user_id:'actor-a',status:'pending',step_name:'Reporting manager',step_type:'manager'},
+      {id:'step-c',company_id:'company-a',request_id:'request-c',approver_user_id:'other-actor',status:'pending',step_name:'Reporting manager',step_type:'manager'}],
+    hr_pay_advance_requests:[
+      {id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_type:'workforce',worker_name:'Test Person',worker_code:'W1',requested_amount:2000,outstanding_pay_snapshot:12000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'},
+      {id:'request-c',company_id:'company-a',status:'pending',request_number:'ADV003',worker_type:'employee',worker_name:'Team Member',worker_code:'E1',requested_amount:1000,outstanding_pay_snapshot:8000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:2000,recovery_mode:'one_time',requested_installments:1,reason:'Team advance'}
+    ] };
   const db = { from(table) {
     let rows = state[table] ?? [];
     const query = {select(){return query},eq(key,value){rows=rows.filter(row=>row[key]===value);return query},in(key,values){rows=rows.filter(row=>values.includes(row[key]));return query},order(){return query},limit(n){rows=rows.slice(0,n);return query},
@@ -18,7 +21,18 @@ function fixture() {
   }, async rpc(name,args){state.rpcCalls.push({name,args});return {data:'pending',error:state.error}} };
   const mod={exports:{}};
   const source=ts.transpileModule(fs.readFileSync(new URL('./connect-pay-advance-approval-data.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const mocks={'server-only':{},'./connect-approver-identity':{resolveConnectActorUserIds:async()=>state.actors,resolveConnectVisibleApproverUserIds:async()=>state.actors,adoptPendingStepForHigherManager:async()=>{}},'./connect-pay-advance-approval':{payAdvanceApprovalPayContext,payAdvanceDecision,payAdvanceFinanceTerms},'./supabase-admin':{supabaseAdmin:db}};
+  const mocks={'server-only':{},'./connect-approver-identity':{
+    resolveConnectActorUserIds:async()=>state.actors,
+    resolveConnectVisibleApproverUserIds:async()=>state.visible,
+    adoptPendingStepForHigherManager:async({parentId})=>{
+      const step=(state.hr_pay_advance_steps??[]).find(row=>row.request_id===parentId&&row.status==='pending');
+      if(!step||!state.actors.length) return;
+      if(state.actors.includes(step.approver_user_id)) return;
+      if(!(state.visible??[]).includes(step.approver_user_id)) return;
+      step.approver_user_id=state.actors[0];
+      state.adopted=true;
+    }
+  },'./connect-pay-advance-approval':{payAdvanceApprovalPayContext,payAdvanceDecision,payAdvanceFinanceTerms},'./supabase-admin':{supabaseAdmin:db}};
   new Function('require','module','exports',source)(id=>{assert.ok(id in mocks,id);return mocks[id]},mod,mod.exports);
   return {state,...mod.exports};
 }
@@ -71,4 +85,16 @@ test('operational manager may reduce but cannot increase the requested amount',a
   await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved','',2001,1),/25% outstanding-pay limit/);
   await f.decideConnectPayAdvanceApproval(account,'request-a','approved','',1500,1);
   assert.equal(f.state.rpcCalls[0].args.p_approved_amount,1500);
+});
+
+test('team advances waiting with reportees appear only in All-team and stay actionable',async()=>{
+  const f=fixture();
+  f.state.visible=['actor-a','other-actor'];
+  assert.deepEqual((await f.listConnectPayAdvanceApprovals(account)).map(row=>row.requestId),['request-a']);
+  const oversight=await f.listConnectPayAdvanceOversight(account);
+  assert.deepEqual(oversight.map(row=>row.requestId),['request-c']);
+  await f.decideConnectPayAdvanceApproval(account,'request-c','returned','Talk to CM');
+  assert.equal(f.state.adopted,true);
+  assert.equal(f.state.rpcCalls[0].args.p_request_id,'request-c');
+  assert.equal(f.state.rpcCalls[0].args.p_decision,'returned');
 });

@@ -69,7 +69,9 @@ test('NH / Owner / FSD keep Proxy and Skip when portal role is view-only',()=>{
 });
 test('role classification includes TL, location mail accounts and People PGM',()=>{
   assert.equal(reviewRole('OPERATIONS_LOCATION'), 'station');assert.equal(reviewRole('TL Team Lead'),'station');assert.equal(reviewRole('PGM Program Manager'),'program');assert.equal(reviewRole('PROGRAM_HEAD'),'program');
-  assert.equal(reviewRole('CM'),'cluster');assert.equal(reviewRole('AM'),'aom');
+  assert.equal(reviewRole('CLM'),'cluster');assert.equal(reviewRole('AM'),'aom');
+  // People code CM is City Manager — not Cluster Manager.
+  assert.equal(reviewRole('CM'),'city');assert.equal(reviewRole('CM City Manager'),'city');
   assert.equal(reviewRole('NH National Head'),'national');assert.equal(reviewRole('FSD Full Stack Developer'),'tech');
   assert.equal(reviewRole('Shift Incharge'),'shift');assert.equal(reviewRole('Store Manager'),'store');
   assert.equal(reviewRole('City Manager'),'city');assert.equal(reviewRole('RM Regional Manager'),'regional');

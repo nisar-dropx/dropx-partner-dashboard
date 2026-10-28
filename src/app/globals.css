@@ -22,6 +22,64 @@
   --radius: 7px;
 }
 
+/* ID Mapping summary: dense station health with an in-page detail drawer. */
+.mapping-summary-workspace { display: grid; gap: 14px; }
+.mapping-summary-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.mapping-summary-cards article { min-height: 88px; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.04); }
+.mapping-summary-cards article span { display: block; color: #64748b; font-size: 10px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.mapping-summary-cards article strong { display: block; margin-top: 7px; color: #172033; font-size: 24px; line-height: 1; }
+.mapping-summary-cards article small { display: block; margin-top: 7px; color: #64748b; font-size: 10px; }
+.mapping-summary-cards article.is-positive { border-color: #bbf7d0; background: #f0fdf4; }
+.mapping-summary-cards article.is-negative { border-color: #fecaca; background: #fff1f2; }
+.mapping-summary-cards article.is-warning { border-color: #fde68a; background: #fffbeb; }
+.mapping-summary-panel { overflow: hidden; }
+.mapping-summary-toolbar { align-items: end; display: flex; gap: 16px; justify-content: space-between; }
+.mapping-summary-filters { display: grid; grid-template-columns: minmax(190px, 280px) 160px; gap: 8px; }
+.mapping-summary-filters .field { min-height: 36px; padding: 7px 10px; }
+.mapping-summary-table-wrap { max-height: calc(100vh - 390px); }
+.mapping-summary-table { border-collapse: collapse; width: 100%; }
+.mapping-summary-table th { position: sticky; top: 0; z-index: 1; padding: 9px 12px; background: #f8fafc; color: #64748b; font-size: 9px; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+.mapping-summary-table td { border-top: 1px solid #edf1f5; padding: 9px 12px; color: #334155; font-size: 11px; vertical-align: middle; }
+.mapping-summary-table tr.needs-attention:hover { background: #fffaf5; }
+.mapping-summary-table tr.is-complete:hover { background: #f6fef8; }
+.mapping-summary-table td:first-child strong { display: block; color: #172033; font-size: 12px; }
+.mapping-summary-table td:first-child small { display: block; max-width: 190px; overflow: hidden; color: #64748b; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.mapping-count { display: inline-grid; min-width: 26px; height: 24px; place-items: center; border-radius: 7px; font-weight: 850; }
+.mapping-count.positive { background: #dcfce7; color: #166534; }
+.mapping-count.negative { background: #fee2e2; color: #b91c1c; }
+.mapping-count.warning { background: #fef3c7; color: #92400e; }
+.mapping-count.muted { background: #f1f5f9; color: #64748b; }
+.mapping-completion { align-items: center; display: flex; gap: 8px; min-width: 110px; }
+.mapping-completion > span { display: block; width: 68px; height: 6px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+.mapping-completion i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#f97316,#22c55e); }
+.mapping-completion strong { min-width: 32px; color: #475569; font-size: 10px; }
+.mapping-summary-empty { padding: 30px !important; text-align: center; color: #64748b !important; }
+.mapping-summary-footer { align-items: center; display: flex; justify-content: space-between; padding: 9px 12px; border-top: 1px solid #edf1f5; color: #64748b; font-size: 9px; }
+.mapping-summary-overlay { position: fixed; inset: 0; z-index: 90; display: flex; justify-content: flex-end; background: rgba(15,23,42,.34); backdrop-filter: blur(2px); }
+.mapping-summary-drawer { width: min(860px, 92vw); height: 100%; overflow: hidden; background: #fff; box-shadow: -20px 0 50px rgba(15,23,42,.18); }
+.mapping-summary-drawer > header { align-items: center; display: flex; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(135deg,#17233a,#293652); color: #fff; }
+.mapping-summary-drawer header p { margin: 0 0 4px; color: #fb923c; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.mapping-summary-drawer header h2 { margin: 0; font-size: 18px; }
+.mapping-summary-drawer header span { color: #cbd5e1; font-size: 10px; }
+.mapping-summary-drawer header button { width: 34px; height: 34px; border: 1px solid rgba(255,255,255,.25); border-radius: 9px; background: rgba(255,255,255,.08); color: #fff; font-size: 22px; cursor: pointer; }
+.mapping-summary-detail-table { max-height: calc(100vh - 92px); }
+.mapping-summary-detail-table table { border-collapse: collapse; width: 100%; }
+.mapping-summary-detail-table th { position: sticky; top: 0; padding: 10px 12px; background: #f8fafc; color: #64748b; font-size: 9px; text-align: left; text-transform: uppercase; }
+.mapping-summary-detail-table td { padding: 11px 12px; border-top: 1px solid #edf1f5; color: #334155; font-size: 10px; vertical-align: top; }
+.mapping-summary-detail-table td strong,.mapping-summary-detail-table td small { display: block; }
+.mapping-summary-detail-table td small { margin-top: 3px; color: #64748b; }
+.mapping-status { display: inline-flex; padding: 5px 7px; border-radius: 999px; font-size: 9px; font-weight: 850; white-space: nowrap; }
+.mapping-status.ready { background: #dcfce7; color: #166534; }
+.mapping-status.unmapped,.mapping-status.identity_missing { background: #fee2e2; color: #b91c1c; }
+.mapping-status.payment_missing,.mapping-status.source_missing { background: #fef3c7; color: #92400e; }
+.mapping-issues { max-width: 220px; color: #9a3412 !important; line-height: 1.45; }
+@media (max-width: 900px) {
+  .mapping-summary-cards { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .mapping-summary-toolbar { align-items: stretch; flex-direction: column; }
+  .mapping-summary-filters { grid-template-columns: 1fr; }
+  .mapping-summary-table-wrap { max-height: none; }
+}
+
 .biometric-profile-card {
   display: grid;
   gap: 12px;

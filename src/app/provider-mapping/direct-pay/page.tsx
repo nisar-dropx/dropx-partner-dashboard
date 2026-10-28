@@ -8,7 +8,7 @@ import {
 import { PageHead } from "@/components/page-head";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { canEditProviderMappings, currentProviderMappingPageCode, currentProviderMappingSummaryPageCode } from "@/lib/provider-mapping-access";
 import { isDashboardPaymentSettingsDirectPayEntry } from "@/lib/provider-mapping-host";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -119,6 +119,7 @@ export default async function DirectPaymentAllocationsPage({
     ? hasPermission(authorization, "payment_settings", "edit")
     : canEditProviderMappings(authorization);
   const flash = loadFlash();
+  const canViewSummary = !paymentSettingsEntry && hasPermission(authorization, currentProviderMappingSummaryPageCode(), "access");
 
   if (!supabaseAdmin) {
     return <AppShell active={paymentSettingsEntry ? "Settings" : "ID Mapping"} pageCode={accessPageCode}>
@@ -294,6 +295,7 @@ export default async function DirectPaymentAllocationsPage({
       <nav aria-label="ID mapping views" className="performance-tabs">
         <Link href="/provider-id-mapping">Provider member first</Link>
         <Link className="active" href="/provider-mapping/direct-pay">Direct pay allocations</Link>
+        {canViewSummary ? <Link href="/provider-id-mapping/summary">Mapping summary</Link> : null}
       </nav>
       <nav aria-label="Direct pay allocation categories" className="performance-tabs">
         <Link className={audience === "workforce" ? "active" : undefined} href="/provider-mapping/direct-pay">Workforce</Link>

@@ -15,7 +15,7 @@ const icons: Record<string, LucideIcon> = {
   ops_notification_settings: Settings2, master_data: ListTree, users: ShieldCheck,
   store_audits: ClipboardCheck, ops_rostering: CalendarDays, ops_report_bot: Activity,
   cpu_overview: BarChart3, service_network: MapPin, edd_dashboard: Truck,
-  delivery_associates: Users, ops_provider_mapping: UserRoundSearch,
+  delivery_associates: Users, ops_provider_mapping: UserRoundSearch, ops_provider_mapping_summary: BarChart3,
   ops_workforce_payouts: WalletCards, ops_workforce_advances: WalletCards, fleet_da_mapping: Truck,
 };
 const administration = new Set(["ops_notification_settings", "master_data", "users"]);

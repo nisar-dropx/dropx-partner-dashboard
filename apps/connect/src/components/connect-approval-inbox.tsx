@@ -636,6 +636,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [preRequestApprovals, setPreRequestApprovals] = useState<PreRequestApproval[]>([]);
   const [payAdvanceApprovals, setPayAdvanceApprovals] = useState<PayAdvanceApproval[]>([]);
+  const [payAdvanceOversight, setPayAdvanceOversight] = useState<PayAdvanceApproval[]>([]);
   const [paymentApprovals, setPaymentApprovals] = useState<PaymentApproval[]>([]);
   const [payAdvanceError, setPayAdvanceError] = useState("");
   const [payAdvanceTerms, setPayAdvanceTerms] = useState<Record<string, { amount: string; installments: string }>>({});
@@ -726,6 +727,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       setExitApprovals(leavePayload.exitApprovals ?? []);
       setExitWithdrawalApprovals(leavePayload.exitWithdrawalApprovals ?? []);
       setPayAdvanceApprovals(leavePayload.payAdvanceApprovals ?? []);
+      setPayAdvanceOversight(leavePayload.payAdvanceOversight ?? []);
       setPaymentApprovals(leavePayload.paymentApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
@@ -1736,13 +1738,53 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             eyebrow={`${approval.requestNumber} · ${approval.stepName}`} name={approval.workerName}
             meta={approval.workerCode || "Pay advance"} saving={saving}
             onReview={() => { setPayAdvanceError(""); setActiveKey(`pay-advance:${approval.id}`); }} />)}
-          {!payAdvanceApprovals.length ? <div className="dx-empty"><Clock3 /><strong>No pay advances waiting</strong><small>No pay advance approval steps are assigned to you right now.</small></div> : null}
+          {payAdvanceOversight.length ? <section className="dx-expense-oversight">
+            <header>
+              <span>
+                <strong>All team · pay advances</strong>
+                <small>Waiting with a manager below you. You can still review and decide here — these do not appear in your assigned list.</small>
+              </span>
+              <em>{payAdvanceOversight.length} pending</em>
+            </header>
+            <div>
+              {payAdvanceOversight.map((approval) => (
+                <ApprovalRow
+                  key={`pay-oversight-${approval.id}`}
+                  badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>}
+                  eyebrow={`${approval.requestNumber} · Team · ${approval.stepName}`}
+                  meta={approval.workerCode || "Pay advance"}
+                  name={approval.workerName}
+                  saving={saving}
+                  onReview={() => { setPayAdvanceError(""); setActiveKey(`pay-advance-team:${approval.id}`); }}
+                />
+              ))}
+            </div>
+          </section> : null}
+          {!payAdvanceApprovals.length && !payAdvanceOversight.length ? (
+            <div className="dx-empty"><Clock3 /><strong>No pay advances waiting</strong><small>No pay advance approval steps are assigned to you right now.</small></div>
+          ) : null}
           {(() => {
-            const approval = payAdvanceApprovals.find(item => activeKey === `pay-advance:${item.id}`);
+            const assigned = activeKey?.startsWith("pay-advance:")
+              ? payAdvanceApprovals.find((item) => activeKey === `pay-advance:${item.id}`)
+              : null;
+            const team = activeKey?.startsWith("pay-advance-team:")
+              ? payAdvanceOversight.find((item) => activeKey === `pay-advance-team:${item.id}`)
+              : null;
+            const approval = assigned ?? team;
             if (!approval) return null;
+            const fromTeam = Boolean(team);
             return <ApprovalModal onClose={closeModal} title={approval.workerName}>
-              <ApprovalHead eyebrow={`Pay advance · ${approval.stepName}`} name={approval.workerName}
-                meta={`${approval.requestNumber} · ${approval.workerCode}`} badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>} />
+              <ApprovalHead
+                eyebrow={fromTeam ? `All team · ${approval.stepName}` : `Pay advance · ${approval.stepName}`}
+                name={approval.workerName}
+                meta={`${approval.requestNumber} · ${approval.workerCode}`}
+                badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>}
+              />
+              {fromTeam ? (
+                <p className="subtle" style={{ marginTop: 0 }}>
+                  Assigned to a manager on your reporting line. Acting here takes over that step.
+                </p>
+              ) : null}
               <dl className="dx-approval-facts">
                 <div><dt>Requested amount</dt><dd>{money(approval.requestedAmount)}</dd></div>
                 {approval.approvedAmount != null ? <div><dt>Amount from previous review</dt><dd>{money(approval.approvedAmount)}</dd></div> : null}

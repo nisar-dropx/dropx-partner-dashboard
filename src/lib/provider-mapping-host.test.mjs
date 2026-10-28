@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isDashboardPaymentSettingsDirectPayEntry,
-  providerMappingPageCodeForHost
+  providerMappingPageCodeForHost,
+  providerMappingSummaryPageCodeForHost
 } from "./provider-mapping-host.ts";
 import {
   providerFirstLocationIsAllowed,
@@ -15,6 +16,12 @@ test("provider mapping uses isolated Dashboard and Ops permissions", () => {
   assert.equal(providerMappingPageCodeForHost("dropx-partner-dashboard-abc-dropx1.vercel.app"), "provider_mapping");
   assert.equal(providerMappingPageCodeForHost("ops.dropxlogistics.com"), "ops_provider_mapping");
   assert.equal(providerMappingPageCodeForHost("ops-source-abc.vercel.app"), "ops_provider_mapping");
+});
+
+test("mapping summary has an independent page permission on each supported host", () => {
+  assert.equal(providerMappingSummaryPageCodeForHost("dashboard.dropxlogistics.com"), "provider_mapping_summary");
+  assert.equal(providerMappingSummaryPageCodeForHost("ops.dropxlogistics.com"), "ops_provider_mapping_summary");
+  assert.equal(providerMappingSummaryPageCodeForHost("people.dropxlogistics.com"), null);
 });
 
 test("provider mapping is denied on every other application surface", () => {
