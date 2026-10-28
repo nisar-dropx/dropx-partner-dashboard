@@ -129,7 +129,7 @@ export function LossCaseResponse({
     follow = ["approved", "with_vendor"].includes(state),
     canRespond = ["awaiting_station", "returned", "legacy"].includes(state);
   const actions = !data?.window.enabled
-    ? ["activate"]
+    ? []
     : data.canActivate
       ? [
           ...(review ? ["approve", "return"] : []),
@@ -155,7 +155,7 @@ export function LossCaseResponse({
       className={styles.workspace}
       style={{ maxWidth: 1000, margin: "0 auto" }}
     >
-      <a href="/team-ops/losses/redisputes">← Redisputes</a>
+      <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute submissions" : "Recovery"}</a>
       <h1>Shipment redispute</h1>
       {error ? (
         <p role="alert" className={styles.error}>

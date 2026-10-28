@@ -55,6 +55,10 @@ export async function GET(request: Request) {
     const directoryOnly = url.searchParams.get("directory") === "1";
     const responseWindow = await supabaseAdmin!.from("nl_case_response_windows").select("enabled,workflow_status,recovery_month").eq("company_id", scope.company).eq("month", month).eq("case_key", caseKey).maybeSingle();
     if(responseWindow.error) throw Error("Redispute status could not be loaded.");
+    const grants = await supabaseAdmin!.from('nl_loss_exception_options').select('kind,enabled,deduction_month,source_amount,source_status').eq('company_id',scope.company).eq('month',month).eq('case_key',caseKey);
+    if (grants.error) throw Error('Exception options could not be loaded. Reload and retry.');
+    const allowed = await Promise.all(['next_month','installments'].map(kind=>supabaseAdmin!.rpc('nl_loss_exception_allowed',{p_company:scope.company,p_month:month,p_case:caseKey,p_kind:kind,p_payroll:grants.data?.find(g=>g.kind===kind)?.deduction_month || null})));
+    if (allowed.some(r=>r.error)) throw Error('Exception options could not be verified.');
     // The salary month payroll deducts a plan saved now in, from the same rule the database applies.
     const salaryMonth = async (timing: "current_month" | "next_month") => {
       const r = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {
@@ -95,6 +99,7 @@ export async function GET(request: Request) {
     return reply({
       case_key: caseKey,
       amount,
+      exception_options: { installments: allowed[1].data === true, next_month: allowed[0].data === true ? grants.data?.find(g=>g.kind==='next_month')?.deduction_month : null },
       deduction_months: {
         current_month: currentMonth,
         next_month: nextMonth,

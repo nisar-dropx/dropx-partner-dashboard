@@ -416,5 +416,34 @@ await db.query(rd(8,'won',{note:'Vendor accepted the final evidence',tt_referenc
 eq('Successful redispute stops future payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${future}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
 await mustReject('Successful redispute cannot be restarted by a recovery edit',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
 eq('Winning stops outstanding without inventing a deduction',(await one(`select status,outstanding::text,deducted::text from nl_recovery_ledger('${C}',null,'contractor:${CT}') where case_key='CONTRACTOR'`)),{status:'redispute_won',outstanding:'0',deducted:'0'});
+
+// Proactive exceptions: grants gate new schedules atomically; ordinary plans and past payroll stay unchanged.
+const optionSql=readFileSync('supabase/migrations/20261028220000_loss_exception_options.sql','utf8');
+await db.exec(optionSql); await db.exec(optionSql);
+const grant=(key,kind,enabled=true,version=0)=>
+  "select nl_loss_exception_set('"+C+"','2026-09','"+key+"','"+kind+"',"+enabled+","+version+",'Verified exception for this shipment','"+SLP+"','SLP Manager')";
+await db.exec("insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values ('"+C+"','nl','2026-09','OPT','BLR1',100,'Recoverable'),('"+C+"','nl','2026-09','OPT-NEXT','BLR1',100,'Recoverable'),('"+C+"','nl','2026-09','OPT-INITIAL','BLR1',100,'Recoverable'); update nl_loss_month_cases set details='{\"extra\":{\"current_sla_stage\":\"NL2\"},\"case_status\":\"pending\"}' where case_key='OPT-INITIAL'; update nl_recovery_payables set checked_at=now();");
+const recurring=(version=0,value='2')=>full('OPT','employee:'+E1,'deduct',version).replace('"mode":"full"','"mode":"installments","basis":"months","value":"'+value+'"');
+await mustReject('Recurring save without enabled option is denied',recurring());
+await mustReject('Deferral without enabled option is denied',full('OPT-NEXT','employee:'+E1,'next'));
+await mustReject('Initial case cannot receive an exception',grant('OPT-INITIAL','installments'));
+await db.query(grant('OPT','installments'));
+await mustReject('Stale grant version cannot overwrite',grant('OPT','installments',false));
+await db.query(recurring());
+eq('Enabled recurring needs no second approval',(await one("select approval_status s from nl_loss_recoveries where case_key='OPT'")).s,'approved');
+await db.query(grant('OPT','installments',false,1));
+await db.query(recurring(1));
+eq('Revocation preserves an existing approved schedule',(await one("select approval_status s from nl_loss_recoveries where case_key='OPT'")).s,'approved');
+await mustReject('Revocation prevents changing the schedule',recurring(2,'3'));
+await db.query(grant('OPT-NEXT','next_month'));
+await db.query(full('OPT-NEXT','employee:'+E1,'next'));
+eq('Enabled next month needs no second approval',(await one("select approval_status s from nl_loss_recoveries where case_key='OPT-NEXT'")).s,'approved');
+eq('Grant pins the next applicable payroll',(await one("select deduction_month m from nl_loss_exception_options where case_key='OPT-NEXT'")).m,future);
+await db.exec("update nl_loss_month_cases set amount=101 where case_key='OPT-NEXT'");
+eq('Source amount changes invalidate the grant',(await one("select nl_loss_exception_allowed('"+C+"','2026-09','OPT-NEXT','next_month','"+future+"') allowed")).allowed,false);
+eq('Grant events retain every successful change',(await one("select count(*)::int n from nl_loss_exception_events")).n,3);
+eq('Authenticated client cannot call grant writer',(await one("select has_function_privilege('authenticated','nl_loss_exception_set(uuid,text,text,text,boolean,integer,text,uuid,text)','execute') allowed")).allowed,false);
+eq('Actual payroll lines are unchanged by exception grants',(await db.query("select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='"+PERSON+"'")).rows,afterClarify);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
