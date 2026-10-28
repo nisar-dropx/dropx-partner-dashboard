@@ -1,10 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildProviderMappingInsights as build, insightPeriod} from './provider-mapping-insights.ts';
+import {directPayForDay} from './direct-workforce-pay.ts';
 const day = (date, baseAmount, extra = {}) => ({date, baseAmount, attendanceSource: 'Roster', ...extra});
 const pay = (days, extra = {}) => ({id:'mapping', name:'Example', dropxId:'ABC1', paymentMethod:'Monthly fixed / MG', paymentDetailsAvailable:true, status:'Ready for review', dailyBreakdown:days, ...extra});
 const shipment = (date, count) => ({work_date:date,total_delivery:count});
 const input = {from:'2026-10-01',to:'2026-10-28'};
+
+test('saved daily rate and 548 deliveries across 16 imported days produce transparent CPS', () => {
+ const counts=[28,34,37,30,30,48,42,45,37,28,25,27,33,35,42,27];
+ const shipments=counts.map((count,index)=>shipment(`2026-10-${index+12}`,count));
+ const days=Array.from({length:27},(_,index)=>{
+  const date=`2026-10-${String(index+1).padStart(2,'0')}`;
+  const count=shipments.find(row=>row.work_date===date)?.total_delivery??0;
+  const result=directPayForDay({FIXED_PAY_PER_DAY:1000},[{component_code:'FIXED_PAY_PER_DAY',label:'Fixed pay per day',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'}],date,null,{dailyDeliveryCount:count});
+  return day(date,result.total,{lines:result.lines});
+ });
+ const result=build({...input,shipments,payRows:[pay(days)]});
+ assert.equal(result.deliveries,548);assert.equal(result.cost,16000);assert.equal(result.cps,29.2);
+ assert.equal(result.days[0].cps,37.04);
+ assert.deepEqual(result.paymentBreakdown,[{label:'Fixed pay per day',schedule:'per_day',rate:1000,count:16,amount:16000}]);
+});
 test('MTD bounds, historical month and invalid/future months', () => {
  assert.deepEqual(insightPeriod('2026-10','2026-10-28'),{from:'2026-10-01',to:'2026-10-28'});
  assert.deepEqual(insightPeriod('2024-02','2026-10-28'),{from:'2024-02-01',to:'2024-02-29'});
