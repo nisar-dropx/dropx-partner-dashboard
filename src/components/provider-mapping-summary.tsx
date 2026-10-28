@@ -204,7 +204,7 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
           })}{!filtered.length ? <tr><td className="mapping-summary-empty" colSpan={10}>No stations match the selected filters.</td></tr> : null}</tbody>
         </table>
       </div>
-      <div className="mapping-summary-footer"><span>{filtered.length} of {monthly.length} stations</span><span>One-day mappings count only on their exact effective date.</span></div>
+      <div className="mapping-summary-footer"><span>{filtered.length} of {monthly.length} stations</span><span>{selectedMonths.length ? "Only IDs with outbound activity in the selected month(s) are counted. Inactive saved mappings are excluded." : "One-day mappings count only on their exact effective date."}</span></div>
     </div>
 
     {selection ? <section className="panel mapping-summary-inline-detail" ref={detailPanel} tabIndex={-1} aria-label="Mapping count details">

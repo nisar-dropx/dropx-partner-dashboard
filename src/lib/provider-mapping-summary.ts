@@ -217,7 +217,14 @@ export function buildProviderMappingSummary({
   }
 
   const detailsByStation = new Map(stations.map(station => [station.id, [] as ProviderMappingSummaryDetail[]]));
-  const keys = new Set([...sourceByKey.keys(), ...mappingsByKey.keys()]);
+  // A month-filtered summary is activity-grained: only provider IDs with
+  // outbound activity in the selected month(s) belong in that month. Saved
+  // mappings remain available to evaluate those IDs, but a mapping with no
+  // selected-month activity must not become a false "source missing" issue.
+  const keys = new Set(sourceByKey.keys());
+  if (!months.length) {
+    for (const key of mappingsByKey.keys()) keys.add(key);
+  }
   for (const key of keys) {
     const separator = key.indexOf("\u0000");
     const stationId = key.slice(0, separator);

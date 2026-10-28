@@ -44,6 +44,25 @@ test("saved-only mappings are visible as source-data issues and empty stations r
   assert.deepEqual(providerMappingSummaryTotals(rows), {stations:2,total:1,mapped:1,ready:0,unmapped:0,dataIssues:1,completionPercent:0,profileCompleted:0,profilePending:0,profileReview:0,profileUnknown:1});
 });
 
+test("a selected month excludes saved mappings without activity in that month", () => {
+  const rows = buildProviderMappingSummary({
+    stations: [stations[0]], methods, workers, selectedMonths: ["2026-10"],
+    sourceMembers: [{
+      stationCode: "QLDA", providerMemberId: "OCT-ACTIVE", providerMemberName: "Ready Person",
+      workDate: "2026-10-27", outboundMonths: ["2026-10"], outboundDates: ["2026-10-27"]
+    }],
+    mappings: [
+      {id: "active", stationId: "qlda", providerMemberId: "OCT-ACTIVE", workforceId: "worker-ready", paymentMethodId: "mg", paymentValues: {MG_PER_DAY: 800}, effectiveFrom: "2026-10-01"},
+      {id: "inactive", stationId: "qlda", providerMemberId: "PRIOR-MONTH", workforceId: "worker-ready", paymentMethodId: "mg", paymentValues: {MG_PER_DAY: 800}, effectiveFrom: "2026-09-01"}
+    ]
+  });
+
+  assert.equal(rows[0].total, 1);
+  assert.equal(rows[0].ready, 1);
+  assert.equal(rows[0].dataIssues, 0);
+  assert.deepEqual(rows[0].details.map(detail => detail.providerMemberId), ["OCT-ACTIVE"]);
+});
+
 test("newest source and mapping records win deterministically", () => {
   const rows = buildProviderMappingSummary({stations:[stations[0]], methods, workers, sourceMembers:[
     {stationCode:"QLDA",providerMemberId:"A1",providerMemberName:"Old",workDate:"2026-10-01"},
