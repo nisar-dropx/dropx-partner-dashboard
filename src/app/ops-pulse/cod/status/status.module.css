@@ -29,3 +29,5 @@
 :global(.ops-modern) .filters,:global(.ops-modern) .tableSection,:global(.ops-modern) .summary button{box-shadow:var(--ops-shadow)}
 :global(.ops-modern) .filterMenu{border-radius:11px;box-shadow:var(--ops-shadow)}
 :global(.ops-modern) .teamDialog{border-radius:13px}
+
+.exportControl{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}.exportButton,.viewbar .exportButton{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 10px;min-height:34px;border:1px solid #ccd7e5;border-radius:7px;background:#fff;color:#274563;font-size:12px;font-weight:650;cursor:pointer}.exportButton:disabled{opacity:.55;cursor:default}.exportControl [role=alert]{font-size:11px;color:#b42332}.detailActions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}.detailActions .close{float:none;padding:7px 0}@media(max-width:550px){.detailActions{justify-content:space-between}.exportButton,.viewbar .exportButton{min-height:40px}}
