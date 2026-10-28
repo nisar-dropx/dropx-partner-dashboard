@@ -199,7 +199,7 @@ export async function middleware(request: NextRequest) {
   const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
   const isLegacyProviderMappingIndex = path === "/provider-mapping" || path === "/provider-mapping/provider-first";
-  const isProviderMappingPath = path === "/provider-id-mapping" || path === "/provider-mapping" || path.startsWith("/provider-mapping/");
+  const isProviderMappingPath = path === "/provider-id-mapping" || path.startsWith("/provider-id-mapping/") || path === "/provider-mapping" || path.startsWith("/provider-mapping/");
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/") ||
     isProviderMappingPath;

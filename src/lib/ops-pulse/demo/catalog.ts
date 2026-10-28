@@ -256,7 +256,7 @@ define(
   "Review profile",
 );
 define(
-  ["/provider-id-mapping", "/fleet/da-mapping"],
+  ["/provider-id-mapping", "/provider-id-mapping/summary", "/fleet/da-mapping"],
   "mapping",
   "Map a sample identifier to a person or vehicle with effective dates.",
   ["Provider / vehicle ID", "Person", "Effective from", "Payment / assignment"],
