@@ -11,6 +11,7 @@ export type MarshEcardSyncProgress = {
   remaining: number | null;
   cursor: number;
   jobId: number | null;
+  downloadPath?: string | null;
   detail: string;
   updatedAt: string | null;
 };
