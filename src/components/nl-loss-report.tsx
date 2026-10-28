@@ -1,5 +1,7 @@
-import { LossFinalMetrics } from "./loss-final-metrics";
-import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
+import { LossStationTable } from "./loss-station-table";
+import { OpsLossCases } from "./ops-loss-cases";
+import type { LossFact } from "@/lib/ops-pulse/loss-station-summary";
+import { LossMultiFilter } from "./loss-list-controls";
 import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
 import Link from "next/link";
 import { NlLossRefresh } from "./nl-loss-refresh";
@@ -29,22 +31,22 @@ const time = (s: string | null | undefined) =>
     : "Not checked";
 
 /** NL has two data sets in Cloak: the month still in dispute, and the months Amazon has closed. */
-export function NlViewSwitch({ active }: { active: "live" | "historic" }) {
+export function NlViewSwitch({ active, source = "nl" }: { active: "live" | "historic"; source?: "nl" | "slp" }) {
   const views = [
     { key: "live", label: "Initial · pending", hint: "Awaiting a final decision" },
     { key: "historic", label: "Final · recovery", hint: "Confirmed outcomes and recovery" },
   ] as const;
   return (
-    <nav className={styles.viewSwitch} aria-label="Cloak data set">
+    <nav className={styles.viewSwitch} aria-label={`${source.toUpperCase()} stage`}>
       {views.map((v) => (
         <Link
           key={v.key}
-          href={`${LOSSES_PATH}/nl?view=${v.key}`}
+          href={`${LOSSES_PATH}/${source}?view=${v.key === "live" ? "initial" : "final"}`}
           className={active === v.key ? styles.activeView : undefined}
           aria-current={active === v.key ? "page" : undefined}
         >
           <strong>{v.label}</strong>
-          <small>{v.hint}</small>
+
         </Link>
       ))}
     </nav>
@@ -95,12 +97,13 @@ const COPY = {
 
 export function NlLossReport({
   view: v,
-  tabs,
+  tabs, facts, ledgerReady,
 }: {
   view: NlView;
-  tabs: LossTab[];
+  tabs: LossTab[]; facts: LossFact[]; ledgerReady: boolean;
 }) {
   const copy = COPY[v.kind];
+  const initial = v.kind === "slp_initial";
   const base = `${LOSSES_PATH}/${copy.key}`;
   const params = (station: string) => {
     const q = new URLSearchParams();
@@ -120,12 +123,12 @@ export function NlLossReport({
     <main className={styles.workspace}>
       <LossHeader
         eyebrow={copy.eyebrow}
-        title={copy.title}
-        intro={copy.intro}
+        title={v.kind === "nl" ? copy.title : "SLP loss"}
+        intro={initial ? "Awaiting a final SLP outcome. Recovery is assigned after Final." : copy.intro}
         tabs={tabs}
         active={copy.key}
       />
-      {v.kind === "nl" ? <NlViewSwitch active="historic" /> : null}
+      <NlViewSwitch active={initial ? "live" : "historic"} source={v.kind === "nl" ? "nl" : "slp"} />
       <div className={styles.context}>
         <span>Latest check: {time(v.checked)}</span>
         {v.canRefresh ? <NlLossRefresh /> : null}
@@ -160,80 +163,27 @@ export function NlLossReport({
           Reset
         </Link>
       </form>
-      <p className={styles.context}>Cluster assignments use current active People records, including for earlier loss months.</p>
+
       <div className={styles.monthLine}>
         <h2>{periodLabel}</h2>
         <span>
           {copy.decision} · Source refreshed {time(v.monthLastSeen)}
         </span>
       </div>
-      {!v.station ? <LossFinalMetrics summary={v.totals.reduce((a,t)=>({count:a.count+t.count,amount:a.amount+t.amount,updated:a.updated+t.updated,updatedAmount:a.updatedAmount+t.updatedAmount,pendingUpdate:a.pendingUpdate+t.pendingUpdate,pendingUpdateAmount:a.pendingUpdateAmount+t.pendingUpdateAmount}),{count:0,amount:0,updated:0,updatedAmount:0,pendingUpdate:0,pendingUpdateAmount:0})}/> : null}
-      <p className={styles.hint}>Updated means recovery details saved. Actual deductions are shown by payroll month in Recovery.</p>
-      {v.totals.length ? (
-        <LossWorkbook
-          kind={v.kind}
-          query={workbookQuery.toString()}
-          canUpload={v.canEdit}
-          scope={
-            v.station
-              ? `stations ${lossFilterValues(v.station).join(", ")}`
-              : `${v.totals.length} station${v.totals.length === 1 ? "" : "s"} in your scope`
-          }
-        />
-      ) : null}
+      {!ledgerReady && !initial ? <p className={styles.notice}>Payroll collections are unavailable; recovery amounts are incomplete.</p> : null}
+      <LossStationTable facts={facts} title={initial ? "Station initial overview" : "Station recovery overview"} initial={initial} href={href(v.station)}/>
+      {!initial && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind={v.kind} query={workbookQuery.toString()} canUpload={v.canEdit} scope={v.station || "your stations"}/></details> : null}
       {v.station ? (
         <div className={styles.context}>
           <Link href={href("")}>← All station totals</Link>
           <span>Stations {lossFilterValues(v.station).join(", ")}</span>
         </div>
-      ) : (
-        <section className={styles.panel}>
-          <div className={styles.panelHead}>
-            <h2>Station recovery overview</h2>
-            <LossTableSort value={v.sort} />
-          </div>
-          <div className={styles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Station</th>
-                  <th>Current cluster · People</th>
-                  <th>Total shipments / value</th><th>Updated / value</th><th>Pending / value</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {v.totals.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      <strong>{s.station_code}</strong>
-                      <small>{s.station_name}</small>
-                    </td>
-                    <td>{s.cluster}</td>
-                    <td>{s.count}<small>{money(s.amount)}</small></td><td>{s.updated}<small>{money(s.updatedAmount)}</small></td><td>{s.pendingUpdate}<small>{money(s.pendingUpdateAmount)}</small></td>
-                    <td>
-                      <Link
-                        className={styles.button}
-                        href={href(s.source_code)}
-                      >
-                        Review cases →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!v.totals.length ? (
-            <p className={styles.empty}>
-              No recoverable cases match these filters.
-            </p>
-          ) : null}
-        </section>
-      )}
-      {v.station ? (
+      ) : null}
+      {v.station && initial ? <OpsLossCases report="slp" station={v.station} stationName={null} closeHref={href("")} fileLabel="slp-initial" showPeriod rows={v.cases.map(c=>({case_key:c.case_key,tid:c.details.tid || null,tid_approximate:!!c.details.tid_approximate,station_code:c.station_code,amount:c.amount,case_status:c.source_status,category:c.details.category||null,sub_category:c.details.sub_category||null,impact_date:c.details.impact_date||null,closed_date:c.details.closed_date||null,da_name:c.details.da_name||null,remarks:c.details.remarks||null,period:c.details.period||c.month,extra:c.details.extra||{}}))}/> : null}
+      {v.station && !initial ? (
         <NlLossCases
-          key={[v.kind, v.month, v.station, v.reason].join(":")}
+          key={[v.kind, v.month, v.station, v.reason, v.phase].join(":")}
+          initialStatus={v.phase}
           cases={v.cases}
           outcomes={v.outcomes}
           settings={v.settings}
@@ -243,7 +193,7 @@ export function NlLossReport({
           showPeriod={v.month === ALL_PERIODS || lossFilterValues(v.month).length > 1}
         />
       ) : null}
-      <p className={styles.footer}>{copy.footer}</p>
+      <p className={styles.footer}>{initial ? "Initial is a report only. Confirmed SLP cases move to Final for recovery." : copy.footer}</p>
     </main>
   );
 }
