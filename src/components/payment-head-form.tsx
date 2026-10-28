@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { SearchableSelectOption } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { DEFAULT_PAYMENT_FILE_GROUPS, PAYMENT_FILE_GROUPS, normalizePaymentFileGroups } from "@/lib/payment-file-types";
+import { isPeopleApprovedPaymentHead, peopleApprovedPaymentHeadMessage } from "@/lib/people-approved-payment-heads";
 import { ALL_PAYMENT_MODES, PAYMENT_MODES, type PaymentMode } from "@/lib/payment-modes";
 
 type Question = {
@@ -303,6 +304,8 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
   const [questions, setQuestions] = useState<Question[]>(() => initialQuestionsWithStages(initialHead?.questions));
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [requestExpenseApproval, setRequestExpenseApproval] = useState(initialHead?.request_expense_approval ?? false);
+  const [headCode, setHeadCode] = useState(initialHead?.code ?? "");
+  const peopleApproved = isPeopleApprovedPaymentHead(headCode);
 
   function updateQuestion(index: number, patch: Partial<Question>) {
     setQuestions((current) => current.map((question, questionIndex) => questionIndex === index ? { ...question, ...patch } : question));
@@ -507,7 +510,14 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
         <div className="form-grid three">
         <label>
           Payment Head Code
-          <input className="field uppercase-input" name="code" defaultValue={initialHead?.code ?? ""} placeholder="FUEL_ADVANCE" required />
+          <input
+            className="field uppercase-input"
+            name="code"
+            defaultValue={initialHead?.code ?? ""}
+            onChange={(event) => setHeadCode(event.target.value)}
+            placeholder="FUEL_ADVANCE"
+            required
+          />
         </label>
         <label>
           Payment Head Name
@@ -522,10 +532,18 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
       <section className="payment-head-form-section">
         <div className="payment-head-form-section-heading">
           <h3>Approval workflow</h3>
-          <p>Set the roles for each stage of the request lifecycle.</p>
+          <p>{peopleApproved ? "People / DropX One owns approval for this head; Payments only processes the payout." : "Set the roles for each stage of the request lifecycle."}</p>
         </div>
+        {peopleApproved ? (
+          <p className="subtle" style={{ marginBottom: 12 }}>{peopleApprovedPaymentHeadMessage(headCode)}</p>
+        ) : null}
         <div className="form-grid three">
-        {initialHead ? (
+        {peopleApproved ? (
+          <>
+            <input name="initial_approval_role_ids" type="hidden" value="[]" />
+            <input name="final_approval_role_ids" type="hidden" value="[]" />
+          </>
+        ) : initialHead ? (
           <div className="span-2 form-field-block">
             <input
               name="initial_approval_role_ids"

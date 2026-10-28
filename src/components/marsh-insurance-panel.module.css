@@ -236,6 +236,44 @@
   background: #fef2f2;
 }
 
+.eventLog li[data-tone="running"] {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.eventLog[data-live="syncing"] {
+  border-color: #93c5fd;
+  background: #f0f7ff;
+}
+
+.eventLog[data-live="syncing"] header strong {
+  color: #1d4ed8;
+}
+
+.eventLogLiveDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.55);
+  animation: marshLivePulse 1.4s ease-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes marshLivePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
 .scopeList {
   display: grid;
   gap: 10px;
