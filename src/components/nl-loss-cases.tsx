@@ -201,7 +201,7 @@ export function NlLossCases({
           <article key={`${c.month}:${c.case_key}`} className={styles.case}>
             <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
               reason={[showPeriod?c.details.period||c.month:"",c.details.category||"Unspecified reason",c.details.sub_category].filter(Boolean).join(" · ")}
-              value={money(c.amount)} date={c.recovery?.updated_at} open={active === c.month+":"+c.case_key}
+              value={money(c.amount)} date={c.recovery?.updated_at} updatedBy={c.recovery?.updated_by_name} historyCase={{month:c.month,caseKey:c.case_key}} open={active === c.month+":"+c.case_key}
               onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.month+":"+c.case_key?null:c.month+":"+c.case_key)}
               status={<span className={recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?styles.done:styles.pending}>{recoveryNeedsReview(c)?"Review needed":recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?"Details updated":"Pending update"}{c.recovery&&!c.recovery.is_deleted?" · "+c.recovery.outcome_label:""}</span>}/>
             {active === `${c.month}:${c.case_key}` ? (

@@ -35,7 +35,7 @@ export function CapacityDistanceSync({ stations, defaultDate, minDate, maxDate }
     <form className={styles.sync} onSubmit={sync} aria-label="Sync distance from Amazon">
       <div className={styles.syncText}>
         <strong>Sync from Amazon</strong>
-        <span>Distances update automatically every morning at 5:00 IST. Sync a station-day now if routes changed.</span>
+        <span>Distances update automatically several times a day (from 5:00 IST). Sync a station-day now if routes changed.</span>
       </div>
       <label>
         Station
