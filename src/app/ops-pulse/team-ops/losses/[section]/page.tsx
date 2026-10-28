@@ -1,6 +1,9 @@
 import { LossSummary } from "@/components/loss-station-table";
 import { lossFacts } from "@/lib/ops-pulse/loss-station-summary";
 import { LossDebitReview } from "@/components/loss-debit-review";
+import { LossRecoveryUpdates } from "@/components/loss-recovery-updates";
+import { recoveryUpdates } from "@/lib/ops-pulse/loss-recovery-updates";
+import { indiaMonth } from "@/lib/ops-pulse/loss-recovery-queue-policy";
 import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
 import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
@@ -83,7 +86,18 @@ export default async function LossesSectionPage({
   const auth = await requirePagePermission("ops_losses", "access");
   const restricted = mayViewLossApprovals(auth);
   const tabs = primaryTabs.filter(t => !["approvals","redisputes"].includes(t.key) || restricted);
-  if(params.section === "recovery") return <main className={styles.workspace}><LossHeader title="Recovery" intro="Actual payroll debits by station and person. Open a person for monthly history and shipment details." tabs={tabs} active="recovery"/><LossDebitReview rows={await loadLossDebits(auth)}/><p className={styles.hint}><a href="/team-ops/losses/recovery-updates">Pending recovery updates →</a></p></main>;
+  if (params.section === "recovery") {
+    const payroll = searchParams.view === "payroll";
+    const view = payroll ? null : await loadRecoveryWorkspace(auth);
+    return <main className={styles.workspace}>
+      <LossHeader title="Recovery" intro="Saved recovery updates till date, pending collections and confirmed recoveries. Ongoing initial cases remain in Disputes & outcomes." tabs={tabs} active="recovery"/>
+      <nav className={styles.toolbar} style={{ justifyContent: "flex-start" }} aria-label="Recovery views">
+        <a className={!payroll ? styles.primary : styles.button} aria-current={!payroll ? "page" : undefined} href="/team-ops/losses/recovery">Saved recovery updates</a>
+        <a className={payroll ? styles.primary : styles.button} aria-current={payroll ? "page" : undefined} href="/team-ops/losses/recovery?view=payroll">Payroll deductions</a>
+      </nav>
+      {payroll ? <LossDebitReview rows={await loadLossDebits(auth)}/> : view ? <LossRecoveryUpdates rows={recoveryUpdates(view.rows, view.lines, view.settings?.recoverable_statuses || [], indiaMonth())}/> : null}
+    </main>;
+  }
   if (["recovery-updates","approvals","redisputes"].includes(params.section)) {
     if (params.section !== "recovery-updates" && !restricted) notFound();
     const [view, claimView] = await Promise.all([loadRecoveryWorkspace(auth, params.section === "redisputes"), params.section === "approvals" ? loadStationClaims(auth) : Promise.resolve(null)]);

@@ -180,7 +180,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
         {!groups.length && (
           <p className={styles.empty}>
             No deductions recorded for this payroll month and selection.
-            Open Pending recovery updates to review assignments.
+            {' '}<a href="/team-ops/losses/recovery">View saved recovery updates and pending collections →</a>
           </p>
         )}
       </section>
