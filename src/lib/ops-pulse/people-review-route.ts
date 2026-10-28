@@ -40,9 +40,9 @@ const darkStoreFloorRole = (p: ReviewPerson) =>
   /\b(LOCATION|TL|ATL|SSA|TEAM LEAD|TEAM LEADER|STATION SUPPORT ASSOCIATE|PICKER)\b/.test(roleText(p))
   && !darkStoreReviewRole(p);
 
-/** CM / AOM / NH — Last Mile operational preference (same tokens as reviewRole). */
+/** CLM / AOM / NH — Last Mile operational preference (same tokens as reviewRole). */
 const lastMileOperationalRole = (p: ReviewPerson) =>
-  /\b(CLM|CM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(roleText(p))
+  /\b(CLM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(roleText(p))
   || /\b(AOM|AM|AREA OPERATIONS? MANAGER|AREA MANAGER)\b/.test(roleText(p))
   || nationalHeadRole(p);
 
@@ -54,6 +54,8 @@ const lastMileOperationalRole = (p: ReviewPerson) =>
 export function darkStoreReviewRole(p: Pick<ReviewPerson, "code" | "role">) {
   const text = roleText(p as ReviewPerson);
   if (/\b(CITY MANAGER|CITY HEAD|CTM)\b/.test(text)) return true;
+  // People code CM = City Manager (not Cluster Manager / CLM).
+  if (/\bCM\b/.test(text) && !/\b(CLM|CLUSTER)\b/.test(text)) return true;
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(text)) return true;
   return false;
 }

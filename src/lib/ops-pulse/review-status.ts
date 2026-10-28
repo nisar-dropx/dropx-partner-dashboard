@@ -136,12 +136,14 @@ export function reviewStatusDates(from: string, to: string) {
 
 function statusReviewRole(value: string | null | undefined) {
   const role = ` ${String(value ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ")} `;
-  if (/\b(CLM|CM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(role)) return "cluster";
+  if (/\b(CITY MANAGER|CTM)\b/.test(role)) return "city";
+  // People code CM = City Manager (not Cluster Manager / CLM).
+  if (/\bCM\b/.test(role) && !/\b(CLM|CLUSTER)\b/.test(role)) return "city";
+  if (/\b(CLM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(role)) return "cluster";
   if (/\b(AOM|AM|AREA OPERATIONS? MANAGER|AREA MANAGER)\b/.test(role)) return "aom";
   if (/\b(SHIFT INCHARGE|SHIFT IN CHARGE|SIC)\b/.test(role)) return "si";
   if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(role)) return "sm";
   if (/\bSM\b/.test(role) && !/\b(STM|STATION MANAGER)\b/.test(role)) return "sm";
-  if (/\b(CITY MANAGER|CTM)\b/.test(role)) return "city";
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(role)) return "regional";
   if (/\b(NH|NATIONAL HEAD)\b/.test(role)) return "national";
   return "other";

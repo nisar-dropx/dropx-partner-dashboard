@@ -1,38 +1,87 @@
 import "server-only";
 import type { ConnectAccount } from "./connect-auth";
-import { adoptPendingStepForHigherManager, resolveConnectActorUserIds, resolveConnectVisibleApproverUserIds } from "./connect-approver-identity";
+import {
+  adoptPendingStepForHigherManager,
+  resolveConnectActorUserIds,
+  resolveConnectVisibleApproverUserIds
+} from "./connect-approver-identity";
 import { payAdvanceApprovalPayContext, payAdvanceDecision, payAdvanceFinanceTerms, type PayAdvanceApproval } from "./connect-pay-advance-approval";
 import { supabaseAdmin } from "./supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 
+function mapPayAdvanceRows(
+  steps: Array<{ id: string; request_id: string; step_name: string; step_type: string }>,
+  requests: Array<Record<string, unknown>>
+): PayAdvanceApproval[] {
+  return requests.map((row) => {
+    const step = steps.find((item) => item.request_id === row.id)!;
+    const pay = payAdvanceApprovalPayContext(row.worker_type, row.requested_amount, row.outstanding_pay_snapshot,
+      row.eligibility_percent_snapshot, row.max_eligible_amount_snapshot);
+    return {
+      id: step.id,
+      requestId: String(row.id),
+      requestNumber: String(row.request_number),
+      workerName: String(row.worker_name),
+      workerCode: String(row.worker_code ?? ""),
+      stepName: step.step_name,
+      stepType: step.step_type,
+      requestedAmount: Number(row.requested_amount),
+      approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
+      ...pay,
+      recoveryMode: String(row.recovery_mode),
+      installments: Number(row.approved_installments ?? row.requested_installments),
+      reason: String(row.reason),
+      neededBy: row.needed_by == null ? null : String(row.needed_by)
+    };
+  });
+}
+
+const REQUEST_SELECT = "id,request_number,worker_type,worker_name,worker_code,requested_amount,approved_amount,outstanding_pay_snapshot,eligibility_percent_snapshot,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by";
+
+/** Only steps assigned to this login — not subordinates' queues. */
 export async function listConnectPayAdvanceApprovals(account: ConnectAccount): Promise<PayAdvanceApproval[]> {
-  const actorIds = await resolveConnectVisibleApproverUserIds(account);
+  const actorIds = await resolveConnectActorUserIds(account);
   if (!actorIds.length) return [];
   const steps = await db().from("hr_pay_advance_steps").select("id,request_id,step_name,step_type")
     .eq("company_id", account.companyId).in("approver_user_id", actorIds).eq("status", "pending").order("created_at");
   if (steps.error) throw new Error(steps.error.message);
   if (!steps.data?.length) return [];
   const requests = await db().from("hr_pay_advance_requests")
-    .select("id,request_number,worker_type,worker_name,worker_code,requested_amount,approved_amount,outstanding_pay_snapshot,eligibility_percent_snapshot,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by")
-    .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map(step => step.request_id));
+    .select(REQUEST_SELECT)
+    .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map((step) => step.request_id));
   if (requests.error) throw new Error(requests.error.message);
-  return (requests.data ?? []).map(row => {
-    const step = steps.data.find(item => item.request_id === row.id)!;
-    const pay = payAdvanceApprovalPayContext(row.worker_type, row.requested_amount, row.outstanding_pay_snapshot,
-      row.eligibility_percent_snapshot, row.max_eligible_amount_snapshot);
-    return { id: step.id, requestId: row.id, requestNumber: row.request_number, workerName: row.worker_name,
-      workerCode: row.worker_code ?? "", stepName: step.step_name, stepType: step.step_type, requestedAmount: Number(row.requested_amount),
-      approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
-      ...pay, recoveryMode: row.recovery_mode,
-      installments: row.approved_installments ?? row.requested_installments, reason: row.reason, neededBy: row.needed_by };
-  });
+  return mapPayAdvanceRows(steps.data, requests.data ?? []);
+}
+
+/**
+ * Pending advances assigned to people below this manager on the reporting line.
+ * Shown only under All team (not the assigned list), but still actionable.
+ */
+export async function listConnectPayAdvanceOversight(account: ConnectAccount): Promise<PayAdvanceApproval[]> {
+  const [selfIds, visibleIds] = await Promise.all([
+    resolveConnectActorUserIds(account),
+    resolveConnectVisibleApproverUserIds(account)
+  ]);
+  const self = new Set(selfIds);
+  const below = visibleIds.filter((id) => !self.has(id));
+  if (!below.length) return [];
+  const steps = await db().from("hr_pay_advance_steps").select("id,request_id,step_name,step_type")
+    .eq("company_id", account.companyId).in("approver_user_id", below).eq("status", "pending").order("created_at");
+  if (steps.error) throw new Error(steps.error.message);
+  if (!steps.data?.length) return [];
+  const requests = await db().from("hr_pay_advance_requests")
+    .select(REQUEST_SELECT)
+    .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map((step) => step.request_id));
+  if (requests.error) throw new Error(requests.error.message);
+  return mapPayAdvanceRows(steps.data, requests.data ?? []);
 }
 
 export async function decideConnectPayAdvanceApproval(account: ConnectAccount, requestId: string, action: unknown, note: unknown, amount?: unknown, installments?: unknown) {
   const decision = payAdvanceDecision(action, note);
   const actorIds = await resolveConnectActorUserIds(account);
   if (!actorIds.length) throw new Error("This pay advance is not assigned to your account.");
+  // Higher managers may act from All team: adopt the subordinate's pending step first.
   await adoptPendingStepForHigherManager({
     companyId: account.companyId,
     actorUserId: actorIds[0],

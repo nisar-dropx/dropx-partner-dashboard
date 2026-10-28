@@ -56,9 +56,22 @@ export function isClusterManagerDesignation(designation: DesignationLabel | null
   if (!designation) return false;
   const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
   const name = designation.name.toLowerCase().replaceAll("-", " ");
+  // Code CM is City Manager in People — never treat it as Cluster Manager.
   return code === "CLM"
     || code === "CLUSTER_MANAGER"
-    || name.includes("cluster manager");
+    || name.includes("cluster manager")
+    || name.includes("cluster head");
+}
+
+export function isCityManagerDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  if (isClusterManagerDesignation(designation)) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase().replaceAll("-", " ");
+  return code === "CM"
+    || code === "CTM"
+    || code === "CITY_MANAGER"
+    || name.includes("city manager");
 }
 
 export function isWfhHardBlockedDesignation(designation: DesignationLabel | null | undefined) {

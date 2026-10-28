@@ -72,7 +72,8 @@ export async function loadRegistrationPendency(db:SupabaseClient,company:string,
     const peopleIds=[...new Set(chain.map(p=>p.personId))];
     if(peopleIds.length===1)return {personId:peopleIds[0],...emailForPerson(peopleIds[0])};
     // Explicit station scope only, not blanket account access. Never guess from names.
-    for(const codes of [["OPERATIONS_CLM","OPERATIONS_CM"],["OPERATIONS_AOM"]]){
+    // Cluster Manager portal role is OPERATIONS_CLM. OPERATIONS_CM is City Manager — not cluster.
+    for(const codes of [["OPERATIONS_CLM"],["OPERATIONS_AOM"]]){
       const users=memberships.filter(m=>codes.includes(roleById.get(m.role_id)||"")&&m.location_scope_ids?.includes(stationId)).map(m=>m.user_id);
       const ids=[...new Set(links.filter(l=>users.includes(l.user_id)&&activePeople.has(l.person_id)).map(l=>l.person_id))];
       if(ids.length>1)return null;

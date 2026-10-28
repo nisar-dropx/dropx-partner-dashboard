@@ -9,7 +9,7 @@ import { decideConnectBusinessTripApproval, decideConnectBusinessTripHrApproval,
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
-import { listConnectPayAdvanceApprovals, decideConnectPayAdvanceApproval } from "../../../../src/lib/connect-pay-advance-approval-data";
+import { listConnectPayAdvanceApprovals, listConnectPayAdvanceOversight, decideConnectPayAdvanceApproval } from "../../../../src/lib/connect-pay-advance-approval-data";
 import { listConnectPaymentApprovals } from "../../../../src/lib/connect-payment-approvals";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -91,7 +91,7 @@ export async function GET(request: Request) {
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
     const approverUserIds = await resolveConnectVisibleApproverUserIds(account);
-    const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals, paymentApprovals] = await Promise.all([
+    const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals, payAdvanceOversight, paymentApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
         ? listConnectWfhApprovals({
@@ -119,6 +119,7 @@ export async function GET(request: Request) {
       listConnectExitApprovals(account),
       listConnectExitWithdrawalApprovals(account),
       listConnectPayAdvanceApprovals(account),
+      listConnectPayAdvanceOversight(account),
       listConnectPaymentApprovals(account.companyId, approverUserIds)
     ]);
     return NextResponse.json({
@@ -137,6 +138,7 @@ export async function GET(request: Request) {
       exitApprovals,
       exitWithdrawalApprovals,
       payAdvanceApprovals,
+      payAdvanceOversight,
       paymentApprovals
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

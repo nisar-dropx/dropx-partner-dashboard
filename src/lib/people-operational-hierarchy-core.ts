@@ -62,12 +62,20 @@ export function peopleOperationalRoleFamily(assignment: PeopleHierarchyAssignmen
     hasRoleToken(role, "AREA OPERATIONS MANAGER") ||
     hasRoleToken(role, "AREA OPERATION MANAGER")
   ) return "aom";
+  // Cluster Manager is CLM only. Code CM is City Manager in People — do not
+  // treat bare CM as cluster (that collision routed City Managers as CLMs).
   if (
     code === "CLM" ||
-    code === "CM" ||
+    code === "CLUSTER_MANAGER" ||
     hasRoleToken(role, "CLUSTER MANAGER") ||
     hasRoleToken(role, "CLUSTER HEAD")
   ) return "cluster_manager";
+  if (
+    code === "CM" ||
+    code === "CTM" ||
+    code === "CITY_MANAGER" ||
+    hasRoleToken(role, "CITY MANAGER")
+  ) return "higher_authority";
   if (
     ["RM", "RH", "ZH", "BH", "NH", "OWNER", "MANAGING_PARTNER"].includes(code) ||
     hasRoleToken(role, "REGIONAL MANAGER") ||

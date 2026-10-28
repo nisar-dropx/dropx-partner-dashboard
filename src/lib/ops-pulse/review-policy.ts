@@ -7,9 +7,10 @@ export function reviewRole(value: string | null | undefined) {
   if (/\b(STORE MANAGER|SENIOR STORE MANAGER|SRSM)\b/.test(role)) return "store";
   if (/\bSM\b/.test(role) && !/\b(STM|STATION MANAGER)\b/.test(role)) return "store";
   if (/\b(CITY MANAGER|CTM)\b/.test(role)) return "city";
+  // People code CM = City Manager. Do not treat bare CM as Cluster Manager (CLM).
+  if (/\bCM\b/.test(role) && !/\b(CLM|CLUSTER)\b/.test(role)) return "city";
   if (/\b(RM|REGIONAL MANAGER|REGIONAL HEAD)\b/.test(role)) return "regional";
-  // CM / CLM are used interchangeably in People designations for cluster managers.
-  if (/\b(CLM|CM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(role)) return "cluster";
+  if (/\b(CLM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(role)) return "cluster";
   if (/\b(AOM|AM|AREA OPERATIONS? MANAGER|AREA MANAGER)\b/.test(role)) return "aom";
   if (/\b(NH|NATIONAL HEAD)\b/.test(role)) return "national";
   if (/\b(TECH|FSD|FULL STACK DEVELOPER)\b/.test(role)) return "tech";

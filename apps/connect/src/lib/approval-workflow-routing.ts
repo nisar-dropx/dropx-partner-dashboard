@@ -342,7 +342,8 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     if (level === 2 && !route.level_2_required) continue;
     // Older SSA routes placed TL at L1 and CM at L2. CM now owns L1;
     // do not turn the duplicate CM seat into an extra fallback approval.
-    if (level === 2 && ssaManager && ["CLM", "CM", "TL", "ATL"].includes(
+    // Code CM is City Manager in People — Cluster Manager is CLM only.
+    if (level === 2 && ssaManager && ["CLM", "TL", "ATL"].includes(
       String(designationById.get(route.level_2_designation_id ?? "")?.code ?? "").toUpperCase()
     )) continue;
     if (level === 3 && (deferredFinalStep || !route.hr_final_required)) continue;
