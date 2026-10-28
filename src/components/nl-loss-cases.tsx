@@ -540,7 +540,7 @@ export function RecoveryForm({
         },
         ...h,
       ]);
-      setSuccess(j.recovery.approval_status === "approved" ? "Saved for payroll. The scheduled deduction will be included in the applicable payroll calculation, subject to payroll limits." : "Review required. Payroll stays paused until another authorised reviewer confirms the case.");
+      setSuccess(j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. No separate approval is needed for a routine recovery.") : "Review required for this exception. Payroll stays paused until the exception is resolved.");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -584,7 +584,7 @@ export function RecoveryForm({
         },
         ...h,
       ]);
-      setSuccess("Plan removed. History is preserved.");
+      setSuccess(`Plan removed. History is preserved.${j.payroll_sync?.message ? " " + j.payroll_sync.message : ""}`);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not remove plan.");

@@ -4,6 +4,7 @@ import {
   filterLossRecoveryDebitPeople,
 } from "@/lib/ops-pulse/loss-recovery-controls";
 import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
+import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -379,9 +380,11 @@ export async function POST(request: Request) {
       }
     }
     const count = (status: Result["status"]) => results.filter((r) => r.status === status).length;
+    const payroll_sync = count("saved") ? await refreshLossPayroll(company) : undefined;
     return reply({
       summary: { saved: count("saved"), unchanged: count("unchanged"), failed: count("error"), skipped: grid.length - 1 - filled.length },
       results,
+      payroll_sync,
     });
   } catch (e) {
     return reply(

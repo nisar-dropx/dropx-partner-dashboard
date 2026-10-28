@@ -1,5 +1,19 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Live payroll refresh — 28 October 2026
+
+Routine recovery saves require no separate approval. Individual saves/removals and bulk workbook
+updates notify People through `/api/internal/loss-payroll-refresh` with a company-scoped,
+purpose-bound, one-minute HMAC. People uses its existing payroll calculation engine for changed
+open runs and compares run, due-line and bank-state versions before committing. Closed payroll and
+issued/paid figures stay protected. A failed refresh is shown as pending without failing the saved
+recovery. An open editable People payroll page retries automatically every 30 seconds.
+
+Release dependency: apply HRMS migration `20261028233000_loss_payroll_live_refresh.sql` individually
+and deploy People before this relay. The station recovery table shows draft payroll separately;
+draft amounts remain included in pending recovery until payroll confirms the deduction.
+Workforce's monthly payout loader already reads `nl_loss_recovery_due` on each calculation.
+
 A guide for developers and AI agents working on loss recovery, station loss claims, salary holds,
 offboarding money checks, payout disputes, payout cross-checks, the COD cash position, the delivery
 scorecard and training written answers. It explains how each piece works, where the code and database
