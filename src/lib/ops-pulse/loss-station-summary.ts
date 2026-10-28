@@ -10,6 +10,13 @@ export type LossFact = {
   waitingStation: boolean; waitingAmazon: boolean; recovered: number; waived: number; draft: number;
   remaining: number; updatedAt: string; sourceAt: string;
 };
+export type LossSummaryStationDimension = {
+  station: string;
+  clusterKeys: string[];
+  region: string;
+};
+export type LossFactSort = "amount" | "station" | "count" | "pending" | "remaining" | "recovered" | "updatedAt";
+export type LossFactSortDirection = "asc" | "desc";
 type SourceCase = NlCase & { final_seen_at?: string | null; last_seen_at?: string };
 const cents = (n: unknown) => Math.round((Number(n) || 0) * 100);
 const keyOf = (r: { report?: string; month: string; case_key: string; station_code: string }) =>
@@ -79,6 +86,20 @@ export function filterLossFacts(rows: LossFact[], filter: { station?: string; pe
       (filter.status === "outstanding" && r.remaining > 0) || (filter.status === "nonrecoverable" && r.stage === "final" && !r.recoverable)
     ));
 }
+
+/** Apply current People ownership and station-region dimensions after the case-level filters. */
+export function filterLossFactsByOwnership(
+  rows: LossFact[],
+  stations: LossSummaryStationDimension[],
+  filter: { cluster?: string; region?: string },
+) {
+  if (!filter.cluster && !filter.region) return rows;
+  const allowed = new Set(stations.filter((station) => (
+    (!filter.cluster || station.clusterKeys.includes(filter.cluster)) &&
+    (!filter.region || station.region === filter.region)
+  )).map((station) => station.station));
+  return rows.filter((row) => allowed.has(row.station));
+}
 export function totalLossFacts(rows: LossFact[]) {
   const amount = (pick: (r: LossFact) => number) => rows.reduce((n,r) => n + cents(pick(r)), 0) / 100;
   const group = (predicate: (r: LossFact) => boolean) => {
@@ -92,9 +113,18 @@ export function totalLossFacts(rows: LossFact[]) {
     nonrecoverable: group(r=>r.stage==="final"&&!r.recoverable),
     updatedAt: rows.map(r=>r.updatedAt).sort().at(-1)||"", sourceAt: rows.map(r=>r.sourceAt).sort().at(-1)||"" };
 }
-export function groupLossFacts(rows: LossFact[], sort = "amount") {
+export function groupLossFacts(
+  rows: LossFact[],
+  sort: LossFactSort = "amount",
+  direction: LossFactSortDirection = sort === "station" ? "asc" : "desc",
+) {
   const groups = [...new Set(rows.map(r=>r.station))].map(station=>({ station, ...totalLossFacts(rows.filter(r=>r.station===station)) }));
-  return groups.sort((a,b)=> sort==="station" ? a.station.localeCompare(b.station) :
-    sort==="updatedAt" ? b.updatedAt.localeCompare(a.updatedAt)||a.station.localeCompare(b.station) :
-    (sort==="count" ? b.count-a.count : sort==="recovered" ? b.recovered-a.recovered : sort==="remaining" ? b.remaining-a.remaining : sort==="pending" ? b.pending.amount-a.pending.amount : b.amount-a.amount) || a.station.localeCompare(b.station));
+  const factor = direction === "asc" ? 1 : -1;
+  return groups.sort((a,b) => {
+    if (sort === "station") return factor * a.station.localeCompare(b.station);
+    if (sort === "updatedAt") return factor * a.updatedAt.localeCompare(b.updatedAt) || a.station.localeCompare(b.station);
+    const left = sort === "count" ? a.count : sort === "recovered" ? a.recovered : sort === "remaining" ? a.remaining : sort === "pending" ? a.pending.amount : a.amount;
+    const right = sort === "count" ? b.count : sort === "recovered" ? b.recovered : sort === "remaining" ? b.remaining : sort === "pending" ? b.pending.amount : b.amount;
+    return factor * (left - right) || a.station.localeCompare(b.station);
+  });
 }
