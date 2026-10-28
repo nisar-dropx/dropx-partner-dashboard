@@ -47,7 +47,7 @@
     "test:ops-design": "node --experimental-strip-types --test src/lib/ops-pulse/design-navigation.test.mjs src/components/ops-design-shell.test.mjs src/components/ops-compact-workspaces.test.mjs src/components/ops-permission-matrix.test.mjs src/components/ops-ai-chat.test.mjs",
     "verify:ops-app": "node scripts/verify-opspulse-app.mjs && node --test scripts/test-opspulse-service-worker.mjs src/components/ops-app-install.test.mjs",
     "test:ops-client-demo": "node scripts/test-ops-client-demo.mjs",
-    "test:loss-stage-reminders": "node scripts/test-loss-stage-reminders.cjs && node scripts/test-loss-stage-reminder-migration.mjs && node scripts/test-loss-installment-amount-rules.mjs"
+    "test:loss-stage-reminders": "node scripts/test-loss-stage-reminders.cjs && node scripts/test-loss-reminder-scope.cjs && node scripts/test-loss-stage-reminder-migration.mjs && node scripts/test-loss-installment-amount-rules.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",
