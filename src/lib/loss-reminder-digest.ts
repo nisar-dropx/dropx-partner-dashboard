@@ -12,7 +12,7 @@ export async function loadLossReminderScope(db:SupabaseClient,company:string,con
  const [stationResult,aliases,memberships,roles]=await Promise.all([
   readAllRows(db.from('stations').select('id,station_code,station_name').eq('company_id',company).order('id')),
   readAllRows(db.from('cod_station_settings').select('location_id,portal_station_code').eq('company_id',company).order('location_id')),
-  readAllRows(db.from('company_product_memberships').select('user_id,role_id,location_scope_ids,has_all_location_access,profiles!inner(id,email,full_name,is_active)').eq('company_id',company).eq('product_code','operations').eq('is_active',true).order('user_id')),
+  readAllRows(db.from('company_product_memberships').select('user_id,role_id,location_scope_ids,has_all_location_access,profiles!company_product_memberships_user_id_fkey!inner(id,email,full_name,is_active)').eq('company_id',company).eq('product_code','operations').eq('is_active',true).order('user_id')),
   db.from('user_roles').select('id,code').eq('company_id',company).eq('is_active',true),
  ]);
  if([stationResult,aliases,memberships,roles].some(r=>r.error))throw Error('Loss reminder recipient scope could not be loaded completely.');
