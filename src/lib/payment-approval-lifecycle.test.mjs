@@ -171,3 +171,32 @@ test('the action queue includes fallback and leave cover but excludes another ap
   const trackingAuth={...auth,permissions:{payment_approvals:{canView:true,canEdit:true}}};
   assert.deepEqual(requests.filter(r=>canOverseePayment(trackingAuth,r)).map(r=>r.id),['normal','fallback','another-person-same-role','earlier-stage']);
 });
+
+for (const privilege of [{roleCode:'OWNER',isMasterOwner:false},{roleCode:'FINANCE_MANAGER',isMasterOwner:true}]) {
+  test(`${privilege.roleCode} owner access does not make other approvers' requests personal assignments`,async()=>{
+    const db=database({stations:[{company_id:'co',id:'NLRE',location_model_id:'EDSP'}]});
+    const gateCalls=[];
+    const {getPaymentApprovalEligibility,getPaymentApprovalActionEligibility}=compile('./payment-approval-scope.ts',{
+      '@/lib/supabase-admin':{supabaseAdmin:db},
+      '@/lib/payment-stage-policy':stage,
+      '@/lib/payment-initial-approval-gate':{initialApprovalReadyIds:async(_c,ids)=>{gateCalls.push(ids);return new Set(ids.filter(id=>id!=='missing-initial-approval'));}},
+      '@/lib/payment-reporting-hierarchy':{loadPaymentReportingHierarchy:async()=>{throw Error('Personal inbox must not load reporting hierarchy');}}
+    });
+    const auth={userId:'finance',effectiveRoleIds:['finance-role'],hasAllLocationAccess:false,locationScopeIds:['NLRE'],...privilege};
+    const request=(id,user,role='finance-role',location='NLRE')=>({id,location_id:location,location_model_id:'EDSP',requested_by:'station',current_approver_user_id:user,current_approver_role_id:role});
+    const requests=[
+      request('assigned','finance'),
+      request('leave-cover','finance','cm'),
+      request('role-pool',null),
+      request('other-person-same-role','other-finance'),
+      request('earlier-stage','cluster','cm'),
+      request('unassigned-other-role',null,'cm'),
+      request('outside-location','finance','finance-role','OTHER'),
+      request('missing-initial-approval','finance')
+    ];
+    assert.deepEqual([...await getPaymentApprovalEligibility('co',auth,requests)],['assigned','leave-cover','role-pool']);
+    assert.deepEqual(gateCalls,[['assigned','leave-cover','role-pool','missing-initial-approval']]);
+    // Owner takeover authority remains available through Entire team and server actions.
+    assert.deepEqual([...await getPaymentApprovalActionEligibility('co',auth,requests)],requests.map(r=>r.id));
+  });
+}
