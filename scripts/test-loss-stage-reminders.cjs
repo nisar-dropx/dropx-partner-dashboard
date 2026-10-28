@@ -26,6 +26,16 @@ const separateBook=XLSX.read(Buffer.from(separate.attachment.content,'base64'));
 assert.deepEqual(separateBook.SheetNames,['Station summary','NL pending','SLP pending']);
 assert.equal(separateBook.Sheets['SLP pending'].F2.v,1200);
 assert.equal(p.lossReminderEdition('loss_reminder_recovery_morning'),'11:00 a.m.');assert.equal(p.lossReminderEdition('loss_reminder_recovery_afternoon'),'4:00 p.m.');
+const once={schedule_time:'16:00',one_time_schedule:{date:'2026-10-28',time:'17:00'}};
+assert.equal(p.lossReminderScheduleTime('loss_reminder_recovery_afternoon','2026-10-28',once),'17:00');
+assert.equal(p.lossReminderScheduleTime('loss_reminder_recovery_afternoon','2026-10-29',once),'16:00');
+assert.equal(p.lossReminderScheduleTime('cod_pending_evening','2026-10-28',once),'16:00');
+const deliveryModule={exports:{}};
+new Function('require','module','exports',ts.transpileModule(fs.readFileSync('src/lib/portal-digest-delivery.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id==='./loss-reminder-policy'?p:{},deliveryModule,deliveryModule.exports);
+const onceControl={company_id:'sample',portal:'ops',event_key:'loss_reminder_recovery_afternoon',state:'enabled',paused_until:null,config:{...once,delivery_ready:true,timezone:'Asia/Kolkata',delivery_window_minutes:60,day_offset:0,first_report_date:'2026-10-28'}};
+for(const [at,expected] of [['2026-10-28T10:30:00Z',null],['2026-10-28T11:29:59Z',null],['2026-10-28T11:30:00Z','2026-10-28'],['2026-10-28T12:31:00Z',null],['2026-10-29T10:29:59Z',null],['2026-10-29T10:30:00Z','2026-10-29']])assert.equal(deliveryModule.exports.dueReportDate(onceControl,new Date(at)),expected,at);
+const fivePm=render({stage:'recovery',event:'loss_reminder_recovery_afternoon',date:'2026-10-28',scheduledTime:'17:00',rows,checkedAt:c.last_seen_at});
+assert.match(fivePm.html,/5:00 p.m./);assert.match(fivePm.text,/5:00 p.m./);assert.equal(fivePm.subject,mail.subject);
 if(process.argv.includes('--samples')){
  fs.mkdirSync('output/loss-reminders',{recursive:true});
  for(const stage of p.LOSS_REMINDER_STAGES){

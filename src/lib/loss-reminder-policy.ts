@@ -27,7 +27,17 @@ export function lossReminderThreadMonth(event:string,date:string){
  return date.slice(0,7);
 }
 export const lossReminderThreadEvent=(event:string)=>lossReminderStage(event)?`loss_reminder_${lossReminderStage(event)}_morning`:event;
-export const lossReminderEdition=(event:string)=>event.endsWith('_afternoon')?'4:00 p.m.':'11:00 a.m.';
+export function lossReminderScheduleTime(event:string,date:string,config:Record<string,unknown>){
+ const once=config.one_time_schedule as {date?:string;time?:string}|undefined;
+ return String(lossReminderStage(event)&&once?.date===date?once.time:config.schedule_time||'');
+}
+export function lossReminderEdition(event:string,time?:string){
+ if(time&&/^([01]\d|2[0-3]):[0-5]\d$/.test(time)){
+  const [hour,minute]=time.split(':').map(Number);
+  return `${hour%12||12}:${String(minute).padStart(2,'0')} ${hour>=12?'p.m.':'a.m.'}`;
+ }
+ return event.endsWith('_afternoon')?'4:00 p.m.':'11:00 a.m.';
+}
 export type ReminderStation={id:string;station_code:string;source_code:string;station_name:string;cluster:string};
 export type ReminderCase={month:string;case_key:string;station_code:string;report:string;amount:number|null;source_present:boolean;source_status:string|null;data_source:string;final_seen_at:string|null;lifecycle_status:string;last_seen_at:string;source_updated_at:string|null;details:{tid?:string;period?:string;in_final?:boolean;case_status?:string;extra?:Record<string,string>}};
 export type ReminderPlan={month:string;case_key:string;is_deleted?:boolean;approval_status:string;source_amount:number;source_status:string|null;outcome_code:string;recovery_details?:Record<string,unknown>;allocations:unknown[]};

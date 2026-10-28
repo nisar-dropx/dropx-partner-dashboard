@@ -1,4 +1,4 @@
-import {lossReminderStage,lossReminderInWindow,lossReminderThreadMonth,lossReminderThreadEvent} from './loss-reminder-policy';
+import {lossReminderStage,lossReminderInWindow,lossReminderThreadMonth,lossReminderThreadEvent,lossReminderScheduleTime} from './loss-reminder-policy';
 import {digestThreadEvents} from './digest-thread-policy';
 import "server-only";
 import {createClient, type SupabaseClient} from "@supabase/supabase-js";
@@ -35,9 +35,10 @@ export function dueReportDate(control:DigestControl,now=new Date()) {
  if(!digestEnabled(control,now))return null;
  const timezone=String(control.config.timezone||"Asia/Kolkata");
  const parts=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(now).map(p=>[p.type,p.value]));
- if(!/^\d{2}:\d{2}$/.test(String(control.config.schedule_time))||parts.hour+":"+parts.minute<String(control.config.schedule_time))return null;
+ const schedule=lossReminderScheduleTime(control.event_key,`${parts.year}-${parts.month}-${parts.day}`,control.config);
+ if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule)||parts.hour+":"+parts.minute<schedule)return null;
  const window=Number(control.config.delivery_window_minutes);
- if(Number.isFinite(window)&&window>0){const [h,m]=String(control.config.schedule_time).split(":").map(Number);if(Number(parts.hour)*60+Number(parts.minute)>h*60+m+window)return null;}
+ if(Number.isFinite(window)&&window>0){const [h,m]=schedule.split(":").map(Number);if(Number(parts.hour)*60+Number(parts.minute)>h*60+m+window)return null;}
  const offset=Number(control.config.day_offset);
  if(!Number.isInteger(offset)||offset>0||offset < -7)throw new Error("Invalid report-day offset");
  const date=new Date(parts.year+"-"+parts.month+"-"+parts.day+"T12:00:00Z");
