@@ -216,7 +216,7 @@ export function NlLiveCases({
           return (
             <article key={c.case_key} className={styles.case}>
               <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
-                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at}
+                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at} updatedBy={c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name} historyCase={stageView === "final" ? {month:c.month,caseKey:c.case_key} : undefined}
                 open={active === c.case_key} onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.case_key?null:c.case_key)}
                 status={<><span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{c.recoverable ? <span className={!recoveryDetailsUpdated(c,c.recovery)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!recoveryDetailsUpdated(c,c.recovery)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
               {active === c.case_key ? (
