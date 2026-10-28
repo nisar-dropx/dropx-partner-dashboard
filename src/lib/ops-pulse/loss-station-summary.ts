@@ -7,7 +7,7 @@ import type { LedgerLine } from "./nl-recovery-ledger-view";
 export type LossFact = {
   key: string; station: string; report: "nl" | "slp"; period: string; month: string;
   stage: "initial" | "final"; amount: number; updated: boolean; recoverable: boolean;
-  waitingStation: boolean; waitingAmazon: boolean; recovered: number; waived: number;
+  waitingStation: boolean; waitingAmazon: boolean; recovered: number; waived: number; draft: number;
   remaining: number; updatedAt: string; sourceAt: string;
 };
 type SourceCase = NlCase & { final_seen_at?: string | null; last_seen_at?: string };
@@ -17,13 +17,14 @@ const keyOf = (r: { report?: string; month: string; case_key: string; station_co
 
 /** One fact per source case, never one per payroll allocation. Draft payroll is not recovered. */
 export function lossFacts(rows: SourceCase[], lines: LedgerLine[], accepted: string[]): LossFact[] {
-  const collections = new Map<string, { paid: number; waived: number; stopped: boolean }>();
+  const collections = new Map<string, { paid: number; waived: number; draft: number; stopped: boolean }>();
   const seenLines = new Set<string>();
   for (const line of lines) {
     const key = keyOf(line), allocation = `${key}|${line.employee_ref}`;
     if (seenLines.has(allocation)) continue;
     seenLines.add(allocation);
-    const sum = collections.get(key) || { paid: 0, waived: 0, stopped: false };
+    const sum = collections.get(key) || { paid: 0, waived: 0, draft: 0, stopped: false };
+    sum.draft += Math.max(0, cents(line.in_payroll));
     sum.paid += cents(line.deducted); sum.waived += cents(line.waived); sum.stopped ||= line.status === "redispute_won";
     collections.set(key, sum);
   }
@@ -49,7 +50,7 @@ export function lossFacts(rows: SourceCase[], lines: LedgerLine[], accepted: str
       stage: final ? "final" : "initial", amount: amount / 100, updated, recoverable: final && recoverable && !stopped,
       waitingStation: !final && report === "nl" && ["action", "respond"].includes(phase.key),
       waitingAmazon: !final && (report === "slp" || phase.key === "amazon"),
-      recovered: paid / 100, waived: waived / 100,
+      recovered: paid / 100, waived: waived / 100, draft: (collection?.draft || 0) / 100,
       remaining: final && recoverable && !stopped ? Math.max(0, amount - paid - waived) / 100 : 0,
       updatedAt: row.recovery && !row.recovery.is_deleted ? row.recovery.updated_at || "" : "",
       sourceAt: row.last_seen_at || row.source_updated_at || "",
@@ -84,7 +85,7 @@ export function totalLossFacts(rows: LossFact[]) {
     const selected = rows.filter(predicate);
     return { count: selected.length, amount: selected.reduce((n,r) => n + cents(r.amount), 0) / 100 };
   };
-  return { count: rows.length, amount: amount(r=>r.amount), recovered: amount(r=>r.recovered), remaining: amount(r=>r.remaining), waived: amount(r=>r.waived),
+  return { count: rows.length, amount: amount(r=>r.amount), recovered: amount(r=>r.recovered), remaining: amount(r=>r.remaining), waived: amount(r=>r.waived), draft: amount(r=>r.draft), draftCount: rows.filter(r=>r.draft>0).length,
     recoveredCount: rows.filter(r=>r.recovered>0).length, remainingCount: rows.filter(r=>r.remaining>0).length,
     updated: group(r=>r.updated), pending: group(r=>r.recoverable&&!r.updated),
     stationPending: group(r=>r.waitingStation), amazon: group(r=>r.waitingAmazon),

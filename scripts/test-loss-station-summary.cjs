@@ -16,6 +16,9 @@ const payroll=[line('split','a',20),line('split','b',30,{in_payroll:50}),line('s
 let facts=lossFacts([...cases,cases[0]],payroll,['Recoverable']);
 assert.equal(facts.length,6,'one case per report/month/station identity');
 assert.equal(facts.find(r=>r.key.endsWith('|split')).recovered,50,'sum employees once; ignore draft payroll');
+assert.equal(facts.find(r=>r.key.endsWith('|split')).draft,50,'draft deductions appear separately');
+assert.equal(totalLossFacts(facts).draftCount,1,'split allocations count as one draft TID');
+assert.equal(totalLossFacts(facts).draft,50,'duplicate allocations do not inflate draft deductions');
 assert.equal(facts.find(r=>r.key.endsWith('|unassigned')).remaining,60,'include unplanned recovery; subtract waiver');
 assert.equal(facts.find(r=>r.key.endsWith('|initial')).remaining,0,'initial is not debt');
 assert.equal(facts.find(r=>r.key.endsWith('|slp')).stage,'final','SLP initial+final is one final case');
