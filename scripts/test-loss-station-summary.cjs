@@ -35,3 +35,5 @@ facts=lossFacts([row('precision',0.3)],[line('precision','a',0.1),line('precisio
 facts=lossFacts([row('missing',100,{source_present:false,recovery:plan(100)}),row('won',100,{redispute:{workflow_status:'won'}})],[],['Recoverable']);assert.equal(facts.length,2);assert.equal(facts[0].remaining,100,'missing source with debt stays in summary');assert.equal(facts[1].remaining,0,'redispute win stops recovery without fabricating a collection');assert.equal(facts[1].recovered,0);
 console.log('PASS loss summary: scoped filters, distinct TIDs, split allocations, draft payroll, receipts, waivers, unplanned debt, initial/final and penny rounding.');
 
+
+assert.equal(lossFacts([row("period",1,{details:{period:"9",case_status:"resolved"}})],[],["Recoverable"])[0].period,"2026-09","NL uses its canonical month, not the raw source month number");

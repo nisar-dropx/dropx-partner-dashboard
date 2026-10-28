@@ -45,7 +45,7 @@ export function lossFacts(rows: SourceCase[], lines: LedgerLine[], accepted: str
     const paid = Math.max(0, collection?.paid || 0, receipt);
     const waived = Math.max(0, collection?.waived || 0);
     unique.set(keyOf(row), {
-      key: keyOf(row), station: row.station_code, report, period: row.details.period || row.month, month: row.month,
+      key: keyOf(row), station: row.station_code, report, period: report === "nl" ? row.month : row.details.period || row.month, month: row.month,
       stage: final ? "final" : "initial", amount: amount / 100, updated, recoverable: final && recoverable && !stopped,
       waitingStation: !final && report === "nl" && ["action", "respond"].includes(phase.key),
       waitingAmazon: !final && (report === "slp" || phase.key === "amazon"),
