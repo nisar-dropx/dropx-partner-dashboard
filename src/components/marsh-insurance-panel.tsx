@@ -158,21 +158,40 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
       const result = await action();
       if ("status" in result) {
         applyView(result as MarshSessionView);
+        if (result.status === "active") {
+          setMessage(okMessage);
+          return;
+        }
         const failed =
           ("ok" in result && result.ok === false) ||
           ["failed", "expired"].includes(String(result.status));
         if (failed) {
-          setError(result.lastError || "Marsh session action failed.");
+          const text = result.error || result.lastError || "Marsh session action failed.";
+          setError(text);
+          pushEvent("danger", text);
           return;
         }
       }
       if ("error" in result && result.error) {
+        // Recover if the worker already activated the session while the UI refresh failed.
+        const latest = await getMarshSessionStatus().catch(() => null);
+        if (latest?.status === "active") {
+          applyView(latest);
+          setMessage(okMessage);
+          return;
+        }
         setError(String(result.error));
         pushEvent("danger", String(result.error));
         return;
       }
       setMessage(okMessage);
     } catch (err: unknown) {
+      const latest = await getMarshSessionStatus().catch(() => null);
+      if (latest?.status === "active") {
+        applyView(latest);
+        setMessage(okMessage);
+        return;
+      }
       const text = err instanceof Error ? err.message : "Request failed";
       setError(text);
       pushEvent("danger", text);
