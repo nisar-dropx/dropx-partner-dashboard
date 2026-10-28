@@ -17,7 +17,7 @@ import {
   rosterMonday,
   rosterPlanLocationIds
 } from "@/lib/ops-pulse/rostering";
-import { nextRosterOccurrenceOnOrAfter } from "@/lib/ops-pulse/roster-interactions";
+import { nextRosterOccurrenceOnOrAfter, rosterMonthMinWeekStart } from "@/lib/ops-pulse/roster-interactions";
 import { isRosterChangePastDeadline, rosterChangeDeadlineMessage } from "@/lib/roster-change-deadline";
 import {
   expandRosterPatternDates,
@@ -80,6 +80,11 @@ function validDate(value: string) {
 
 function rosterCutoffMessage(hour: number) {
   return `${rosterChangeDeadlineMessage(hour)} Past and locked dates cannot be edited.`;
+}
+
+/** Ops workspace treats null planning_channel as Ops (legacy rows). */
+function isOpsPlanningChannel(value: string | null | undefined) {
+  return value == null || value === "ops";
 }
 
 /** Same lock window as grid save — import must not bypass it. Tomorrow stays editable until today's configured deadline hour. */
@@ -416,26 +421,26 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
     const start = requestedStart < currentWeek ? currentWeek : requestedStart;
     const end = addRosterDays(start, 6);
 
-    const open = await db().from("hr_roster_plans")
-      .select("id,status,period_start,period_end,roster_kind,location_id,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+    const openResult = await db().from("hr_roster_plans")
+      .select("id,status,period_start,period_end,roster_kind,location_id,planning_channel,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
       .eq("location_id", locationId)
       .in("roster_kind", ["dated", "recurring_weekly"])
-      .eq("planning_channel", "ops")
       .in("status", ["draft", "returned", "pending_approval"])
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (open.error) throw new Error(open.error.message);
+      .limit(20);
+    if (openResult.error) throw new Error(openResult.error.message);
+    const open = (openResult.data ?? []).find((plan) => isOpsPlanningChannel(plan.planning_channel)) ?? null;
 
-    if (open.data?.status === "pending_approval") {
-      await archiveOpsRosterApprovalRound(companyId, open.data.id);
-      const cleared = await db().from("hr_roster_approval_steps").delete().eq("company_id", companyId).eq("plan_id", open.data.id);
+    if (open?.status === "pending_approval") {
+      await archiveOpsRosterApprovalRound(companyId, open.id);
+      const cleared = await db().from("hr_roster_approval_steps").delete().eq("company_id", companyId).eq("plan_id", open.id);
       if (cleared.error) throw new Error(cleared.error.message);
       const now = new Date().toISOString();
       const recalled = await db().from("hr_roster_plans")
         .update({
           status: "returned",
+          planning_channel: "ops",
           approver_user_id: null,
           decided_at: null,
           decision_note: null,
@@ -443,17 +448,17 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
           updated_at: now
         })
         .eq("company_id", companyId)
-        .eq("id", open.data.id)
+        .eq("id", open.id)
         .eq("status", "pending_approval")
         .select("id,period_start,period_end,roster_kind,location_id")
         .maybeSingle();
       if (recalled.error) throw new Error(recalled.error.message);
       if (!recalled.data) throw new Error("This roster is no longer awaiting approval.");
-      // Recalling keeps the plan's OWN already-defined period — it must not be realigned
-      // to whatever future week the viewer's browser happened to be scrolled to.
+      // Recalling keeps the plan's OWN already-defined period and submitted entries —
+      // do not reseed from the approved baseline (that wiped the planner's draft).
       const recallStart = recalled.data.period_start ?? start;
       const recallEnd = recalled.data.period_end ?? addRosterDays(recallStart, 6);
-      const aligned = await realignOpsDatedDraft(companyId, authorization, recalled.data, recallStart, recallEnd, true);
+      const aligned = await realignOpsDatedDraft(companyId, authorization, recalled.data, recallStart, recallEnd, false);
       refreshRosterViews();
       return {
         ok: true,
@@ -467,20 +472,21 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
       };
     }
 
-    if (open.data) {
+    if (open) {
+      const needsRealign = open.period_start !== start || open.period_end !== end || open.roster_kind === "recurring_weekly";
       const aligned = await realignOpsDatedDraft(
         companyId,
         authorization,
-        open.data,
-        start,
-        end,
-        open.data.period_start !== start || open.data.period_end !== end || open.data.roster_kind === "recurring_weekly"
+        open,
+        needsRealign ? start : (open.period_start ?? start),
+        needsRealign ? end : (open.period_end ?? end),
+        needsRealign
       );
       return {
         ok: true,
         planId: aligned.id,
-        periodStart: start,
-        periodEnd: end,
+        periodStart: aligned.period_start,
+        periodEnd: aligned.period_end,
         rosterKind: "dated",
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
         message: "The open roster change is ready.",
@@ -548,9 +554,11 @@ export async function loadOpsRosterWeekReadOnly(locationId: string, weekStart: s
     const authorization = await requirePagePermission("ops_rostering", "access");
     const companyId = requireCompanyId(authorization);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart ?? ""))) throw new Error("Choose a valid week.");
-    const currentWeek = rosterMonday(indiaToday());
+    const today = indiaToday();
+    const minWeek = rosterMonthMinWeekStart(today);
     const requested = rosterMonday(weekStart);
-    const start = requested < currentWeek ? currentWeek : requested;
+    // Past weeks in the current month are view-only; never open earlier than the month floor.
+    const start = requested < minWeek ? minWeek : requested;
     const end = addRosterDays(start, 6);
     // collectApprovedWeekEntries checks the station is inside this user's location access.
     const entries = await collectApprovedWeekEntries(companyId, authorization, locationId, start, end);
@@ -673,22 +681,27 @@ async function materializeOpsDraftFromApproved(
   // current week's 7 days. Never anchor earlier than the current week.
   const requestedStart = viewWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(viewWeekStart) ? rosterMonday(viewWeekStart) : currentWeek;
   const anchorStart = requestedStart < currentWeek ? currentWeek : requestedStart;
-  const existingOps = await db().from("hr_roster_plans")
-    .select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
+  const existingOpsResult = await db().from("hr_roster_plans")
+    .select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id,planning_channel,hr_roster_plan_locations(location_id)")
     .eq("company_id", companyId)
     .eq("location_id", approved.location_id)
     .in("roster_kind", ["dated", "recurring_weekly"])
-    .eq("planning_channel", "ops")
     .in("status", ["draft", "returned"])
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existingOps.error) throw new Error(existingOps.error.message);
-  if (existingOps.data) {
-    if (existingOps.data.roster_kind === "dated") return existingOps.data;
+    .limit(20);
+  if (existingOpsResult.error) throw new Error(existingOpsResult.error.message);
+  const existingOps = (existingOpsResult.data ?? []).find((plan) => isOpsPlanningChannel(plan.planning_channel)) ?? null;
+  if (existingOps) {
     const end = addRosterDays(anchorStart, 6);
-    await realignOpsDatedDraft(companyId, authorization, existingOps.data, anchorStart, end, true);
-    return loadPlan(companyId, authorization, existingOps.data.id);
+    const needsRealign = existingOps.roster_kind !== "dated"
+      || existingOps.period_start !== anchorStart
+      || existingOps.period_end !== end;
+    if (needsRealign) {
+      await realignOpsDatedDraft(companyId, authorization, existingOps, anchorStart, end, true);
+    } else if (existingOps.planning_channel == null) {
+      await db().from("hr_roster_plans").update({ planning_channel: "ops", updated_by: authorization.userId, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", existingOps.id);
+    }
+    return loadPlan(companyId, authorization, existingOps.id);
   }
 
   const station = await authorisedStation(companyId, authorization, approved.location_id);
@@ -865,19 +878,23 @@ export async function cancelOpsRosterDraft(planId: string): Promise<ActionResult
     }
     const channel = await db().from("hr_roster_plans").select("planning_channel").eq("company_id", companyId).eq("id", planId).maybeSingle();
     if (channel.error) throw new Error(channel.error.message);
-    if (channel.data?.planning_channel !== "ops") {
+    if (!isOpsPlanningChannel(channel.data?.planning_channel)) {
       return { ok: false, message: "This roster was not drafted in Ops, so it cannot be cancelled here." };
+    }
+    if (channel.data?.planning_channel == null) {
+      await db().from("hr_roster_plans").update({ planning_channel: "ops" }).eq("company_id", companyId).eq("id", planId);
     }
     const removed = await db().from("hr_roster_plans")
       .delete()
       .eq("company_id", companyId)
       .eq("id", planId)
-      .eq("planning_channel", "ops")
       .in("status", ["draft", "returned"])
-      .select("id")
+      .select("id,planning_channel")
       .maybeSingle();
     if (removed.error) throw new Error(removed.error.message);
-    if (!removed.data) return { ok: false, message: "This draft is no longer available to cancel." };
+    if (!removed.data || !isOpsPlanningChannel(removed.data.planning_channel)) {
+      return { ok: false, message: "This draft is no longer available to cancel." };
+    }
     refreshRosterViews();
     return { ok: true, message: "Draft cancelled. The approved roster is unchanged." };
   } catch (error) {
@@ -1302,4 +1319,113 @@ export async function decideOpsRoster(input: { planId: string; stepId: string; d
 
 export async function canEditOpsRoster(authorization: AuthorizationContext) {
   return hasPermission(authorization, "ops_rostering", "edit") && (await loadOpsRosterCapabilities(authorization)).canPlan;
+}
+
+export type OpsRosterApprovalPreviewCell = {
+  date: string;
+  dayType: "working" | "weekly_off" | "blank";
+  shiftCode: string | null;
+  shiftLabel: string | null;
+  shiftColor: string | null;
+};
+
+export type OpsRosterApprovalPreviewPerson = {
+  workerType: "employee" | "contractor";
+  workerId: string;
+  name: string;
+  code: string;
+  designation: string;
+  days: OpsRosterApprovalPreviewCell[];
+};
+
+export type OpsRosterApprovalPreview = {
+  planId: string;
+  stationCode: string;
+  periodStart: string;
+  periodEnd: string;
+  revisionNo: number;
+  dates: string[];
+  people: OpsRosterApprovalPreviewPerson[];
+};
+
+export async function loadOpsRosterApprovalPreview(planId: string): Promise<{ ok: true; preview: OpsRosterApprovalPreview } | { ok: false; message: string }> {
+  try {
+    const authorization = await requirePagePermission("ops_rostering", "access");
+    const companyId = requireCompanyId(authorization);
+    if (!planId) throw new Error("Choose a roster to view.");
+    const plan = await db().from("hr_roster_plans")
+      .select("id,location_id,period_start,period_end,revision_no,status,roster_kind,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id)")
+      .eq("company_id", companyId)
+      .eq("id", planId)
+      .maybeSingle();
+    if (plan.error) throw new Error(plan.error.message);
+    if (!plan.data?.location_id || !plan.data.period_start || !plan.data.period_end) throw new Error("That roster could not be found.");
+    if (!canUseRosterLocation(authorization, plan.data.location_id)) throw new Error("That station is outside your access.");
+    const [stationResult, shiftResult] = await Promise.all([
+      db().from("stations").select("id,station_code,station_name").eq("company_id", companyId).eq("id", plan.data.location_id).maybeSingle(),
+      db().from("hr_shifts").select("id,code,name,start_time,end_time,color").eq("company_id", companyId).eq("is_active", true)
+    ]);
+    if (stationResult.error || shiftResult.error) throw new Error(stationResult.error?.message ?? shiftResult.error?.message ?? "Roster preview could not be loaded.");
+    if (!stationResult.data) throw new Error("That station could not be found.");
+    const manpower = await loadOpsStationManpower(companyId, [{
+      id: stationResult.data.id,
+      station_code: stationResult.data.station_code,
+      station_name: stationResult.data.station_name
+    }], indiaToday());
+    const shifts = new Map((shiftResult.data ?? []).map((shift) => [shift.id, shift]));
+    const dates: string[] = [];
+    for (let cursor = plan.data.period_start; cursor <= plan.data.period_end; cursor = addRosterDays(cursor, 1)) dates.push(cursor);
+    const entries = plan.data.hr_roster_entries ?? [];
+    const byPerson = new Map<string, typeof entries>();
+    for (const entry of entries) {
+      const key = `${entry.worker_type}:${entry.worker_id}`;
+      byPerson.set(key, [...(byPerson.get(key) ?? []), entry]);
+    }
+    const peopleKeys = [...new Set([
+      ...manpower.people.map((person) => `${person.workerType}:${person.id}`),
+      ...byPerson.keys()
+    ])];
+    const people: OpsRosterApprovalPreviewPerson[] = peopleKeys.map((key) => {
+      const [workerType, workerId] = key.split(":") as ["employee" | "contractor", string];
+      const person = manpower.people.find((row) => row.workerType === workerType && row.id === workerId);
+      const personEntries = byPerson.get(key) ?? [];
+      const byDate = new Map(personEntries.map((entry) => [entry.roster_date, entry]));
+      return {
+        workerType,
+        workerId,
+        name: person?.name ?? (workerType === "employee" ? "Former employee" : "Former contractor"),
+        code: person?.code ?? "",
+        designation: person?.designation ?? "",
+        days: dates.map((date) => {
+          const entry = byDate.get(date);
+          if (!entry) return { date, dayType: "blank" as const, shiftCode: null, shiftLabel: null, shiftColor: null };
+          if (entry.day_type === "weekly_off") return { date, dayType: "weekly_off" as const, shiftCode: null, shiftLabel: "Week Off", shiftColor: null };
+          const shift = entry.shift_id ? shifts.get(entry.shift_id) : null;
+          const start = shift?.start_time?.slice(0, 5) ?? "";
+          const end = shift?.end_time?.slice(0, 5) ?? "";
+          return {
+            date,
+            dayType: "working" as const,
+            shiftCode: shift?.code ?? null,
+            shiftLabel: shift ? (start && end ? `${start}–${end}` : shift.name || shift.code) : "Shift",
+            shiftColor: shift?.color ?? null
+          };
+        })
+      };
+    }).sort((left, right) => left.name.localeCompare(right.name) || left.code.localeCompare(right.code));
+    return {
+      ok: true,
+      preview: {
+        planId: plan.data.id,
+        stationCode: stationResult.data?.station_code ?? "Station",
+        periodStart: plan.data.period_start,
+        periodEnd: plan.data.period_end,
+        revisionNo: Number(plan.data.revision_no ?? 1),
+        dates,
+        people
+      }
+    };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The roster could not be loaded." };
+  }
 }

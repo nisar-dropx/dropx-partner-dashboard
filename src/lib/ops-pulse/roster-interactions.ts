@@ -55,6 +55,23 @@ export function rosterMonthMaxWeekStart(today: string) {
   return rosterMondayOnOrBefore(rosterMonthEnd(today));
 }
 
+/**
+ * Earliest week Monday that may be opened in the station roster week view.
+ * Includes every Monday whose week intersects the current calendar month (typically 4–5 weeks).
+ */
+export function rosterMonthMinWeekStart(today: string) {
+  if (!validIsoDate(today)) throw new Error("A valid roster date is required.");
+  const [year, month] = today.split("-").map(Number);
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  return rosterMondayOnOrBefore(monthStart);
+}
+
+/** True when the week Monday is strictly before the current week (past weeks are view-only). */
+export function isPastRosterWeek(weekStart: string, currentWeekStart: string) {
+  if (![weekStart, currentWeekStart].every(validIsoDate)) throw new Error("A valid roster week is required.");
+  return weekStart < currentWeekStart;
+}
+
 /** Week dates for the planner, dropping any day that falls after the current month. */
 export function rosterWeekInCurrentMonth(weekStart: string, today: string) {
   const monthEnd = rosterMonthEnd(today);

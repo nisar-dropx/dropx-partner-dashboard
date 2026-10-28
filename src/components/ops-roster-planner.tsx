@@ -24,6 +24,7 @@ import {
   decodeRosterDragPayload,
   findRosterWeekOffCapBreach,
   encodeRosterDragPayload,
+  isPastRosterWeek,
   moveIsoDate,
   nextRosterOccurrenceOnOrAfter,
   recurringTemplateDate,
@@ -31,6 +32,7 @@ import {
   rosterCoverage,
   rosterMonthEnd,
   rosterMonthMaxWeekStart,
+  rosterMonthMinWeekStart,
   rosterWeek,
   rosterWeekInCurrentMonth,
   type RosterAssignmentValue,
@@ -99,13 +101,11 @@ function initialAssignments(entries: Array<OpsRosterEntry | PreparedEntry>) {
 }
 /**
  * Identity of "what the server's plan looks like," for recognizing an action's own
- * expected result regardless of how many render passes it takes to arrive. Deliberately
- * limited to fields every action result reliably knows (id/period/kind) — status and
- * revisionNo are excluded because action results don't always carry them precisely, and
- * guessing wrong there would reintroduce exactly the kind of mismatch this replaces.
+ * expected result regardless of how many render passes it takes to arrive. Includes
+ * status so pending → returned (recall) refreshes entries instead of skipping the reset.
  */
-function planShape(source: { id?: string | null; periodStart?: string | null; periodEnd?: string | null; rosterKind?: string | null } | null) {
-  return JSON.stringify([source?.id ?? null, source?.periodStart ?? null, source?.periodEnd ?? null, source?.rosterKind ?? null]);
+function planShape(source: { id?: string | null; periodStart?: string | null; periodEnd?: string | null; rosterKind?: string | null; status?: string | null } | null) {
+  return JSON.stringify([source?.id ?? null, source?.periodStart ?? null, source?.periodEnd ?? null, source?.rosterKind ?? null, source?.status ?? null]);
 }
 
 export function OpsRosterPlanner({
@@ -220,10 +220,12 @@ export function OpsRosterPlanner({
 
   const isRecurring = liveRecurring;
   const monthEnd = useMemo(() => rosterMonthEnd(today), [today]);
+  const minWeekStart = useMemo(() => rosterMonthMinWeekStart(today), [today]);
+  const viewingPastWeek = useMemo(() => isPastRosterWeek(weekStart, initialWeekStart), [initialWeekStart, weekStart]);
   const dates = useMemo(() => {
-    if (isRecurring) return rosterWeekInCurrentMonth(weekStart, today);
+    if (isRecurring || isPeekedWeek || viewingPastWeek) return rosterWeekInCurrentMonth(weekStart, today);
     return rosterWeek(weekStart).filter((date) => date >= templateStart && date <= livePeriodEnd && date <= monthEnd);
-  }, [isRecurring, livePeriodEnd, monthEnd, templateStart, today, weekStart]);
+  }, [isPeekedWeek, isRecurring, livePeriodEnd, monthEnd, templateStart, today, viewingPastWeek, weekStart]);
   const maxWeekStart = useMemo(() => rosterMonthMaxWeekStart(today), [today]);
   const holidayByDate = useMemo(() => new Map(holidays.map((holiday) => [holiday.calendarDate, holiday])), [holidays]);
   const shiftById = useMemo(() => new Map(shifts.map((shift) => [shift.id, shift])), [shifts]);
@@ -251,7 +253,12 @@ export function OpsRosterPlanner({
     return { expected, ready, missing: Math.max(0, expected - ready) };
   }, [assignments, isRecurring, livePeriodEnd, people, templateStart]);
   const activeShift = activeTool?.kind === "shift" ? shiftById.get(activeTool.shiftId) : null;
-  const interactionAllowed = (editingEnabled || canStart) && !isPreparing;
+  const interactionAllowed = (editingEnabled || canStart) && !isPreparing && !viewingPastWeek;
+  const openDraftCancellable = Boolean(
+    activePlanId
+    && canStart
+    && (editingEnabled || (plan && ["draft", "returned"].includes(plan.status)))
+  );
   const cutoffMessage = rosterChangeDeadlineMessage(changeDeadlineHour);
 
   const lockReason = useCallback((date: string, _payload?: RosterDragPayload | null, _fallback?: RosterAssignmentValue) => {
@@ -344,12 +351,12 @@ export function OpsRosterPlanner({
     if (weekStart > maxWeekStart) setWeekStart(maxWeekStart);
   }, [maxWeekStart, weekStart]);
 
-  // Mirror of the upper-bound clamp above: the view must never sit below the plan's own
-  // dated period start (non-recurring case only — a recurring baseline has no such
-  // floor). Self-heals regardless of which code path last set weekStart or templateStart.
+  // Mirror of the upper-bound clamp above: while editing a dated draft, the view must
+  // never sit below the plan's own period start. Past-week peeks are exempt (read-only).
   useEffect(() => {
-    if (!isRecurring && weekStart < templateStart) setWeekStart(templateStart);
-  }, [isRecurring, templateStart, weekStart]);
+    if (isRecurring || viewingPastWeek || isPeekedWeek) return;
+    if (weekStart < templateStart) setWeekStart(templateStart);
+  }, [isPeekedWeek, isRecurring, templateStart, viewingPastWeek, weekStart]);
 
   // Shared core: prepare (or re-anchor) the editable dated draft to `targetWeekStart` and
   // apply the result to local state. Used both to START editing (ensureEditing, anchored
@@ -425,7 +432,13 @@ export function OpsRosterPlanner({
     // long as this branch never persists a row. Skipping the refresh here removes that
     // failure mode entirely: local state is already the complete, correct picture.
     if (result.persisted) {
-      expectedPlanShapeRef.current = planShape({ id: result.planId, periodStart: preparedPeriodStart, periodEnd: preparedPeriodEnd, rosterKind: result.rosterKind ?? "dated" });
+      expectedPlanShapeRef.current = planShape({
+        id: result.planId,
+        periodStart: preparedPeriodStart,
+        periodEnd: preparedPeriodEnd,
+        rosterKind: result.rosterKind ?? "dated",
+        status: plan?.status === "pending_approval" ? "returned" : (plan?.status === "returned" ? "returned" : "draft")
+      });
       router.refresh();
     }
     return true;
@@ -464,6 +477,10 @@ export function OpsRosterPlanner({
     // in quick succession before the first prepare completes — share the one in-flight
     // call instead of firing prepareOpsRoster twice and racing two refreshes.
     if (ensureEditingPromiseRef.current) return ensureEditingPromiseRef.current;
+    if (viewingPastWeek) {
+      setMessage({ tone: "error", text: "Past weeks are view only. Move to this week or a future week to edit." });
+      return false;
+    }
     if (!canStart) {
       setMessage({
         tone: "error",
@@ -481,7 +498,7 @@ export function OpsRosterPlanner({
     } finally {
       ensureEditingPromiseRef.current = null;
     }
-  }, [applyPreparedWeek, canStart, plan?.status, weekStart]);
+  }, [applyPreparedWeek, canStart, plan?.status, viewingPastWeek, weekStart]);
 
   const bulkWeekMonday = useMemo(() => mondayOf(bulkWeekStart || today), [bulkWeekStart, today]);
   const bulkWeekSunday = useMemo(() => moveIsoDate(bulkWeekMonday, 6), [bulkWeekMonday]);
@@ -705,6 +722,10 @@ export function OpsRosterPlanner({
   function save() {
     const planId = activePlanIdRef.current;
     if (!planId || !dirtyKeys.size) return;
+    if (viewingPastWeek) {
+      setMessage({ tone: "error", text: "Past weeks are view only and cannot be saved." });
+      return;
+    }
     const changes = [...dirtyKeys].map((key) => {
       const [workerTypeValue, workerId, date] = key.split(":");
       const assignment = assignments.get(key);
@@ -717,21 +738,27 @@ export function OpsRosterPlanner({
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
       if (result.ok) {
         setDirtyKeys(new Set());
-        if (result.planId && result.planId !== planId) {
-          activePlanIdRef.current = result.planId;
-          setActivePlanId(result.planId);
-          preparedPlanIdRef.current = result.planId;
-        }
-        if (preparedPlanIdRef.current) {
-          expectedPlanShapeRef.current = planShape({
-            id: result.planId ?? planId,
-            periodStart: result.periodStart ?? templateStart,
-            periodEnd: result.periodEnd ?? livePeriodEnd,
-            rosterKind: result.rosterKind ?? "dated"
-          });
-          router.replace(`/rostering?station=${encodeURIComponent(stationCode)}`);
-          router.refresh();
-        }
+        const nextPlanId = result.planId ?? planId;
+        activePlanIdRef.current = nextPlanId;
+        setActivePlanId(nextPlanId);
+        preparedPlanIdRef.current = nextPlanId;
+        const nextStart = result.periodStart ?? templateStart;
+        const nextEnd = result.periodEnd ?? livePeriodEnd;
+        templateStartRef.current = nextStart;
+        setTemplateStart(nextStart);
+        setLivePeriodEnd(nextEnd);
+        setLiveRecurring(false);
+        setWeekStart(nextStart);
+        setIsPeekedWeek(false);
+        expectedPlanShapeRef.current = planShape({
+          id: nextPlanId,
+          periodStart: nextStart,
+          periodEnd: nextEnd,
+          rosterKind: result.rosterKind ?? "dated",
+          status: plan?.status === "returned" ? "returned" : "draft"
+        });
+        router.replace(`/rostering?station=${encodeURIComponent(stationCode)}`);
+        router.refresh();
       }
     });
   }
@@ -776,22 +803,10 @@ export function OpsRosterPlanner({
     });
   }
 
-  // Ops roster edits only ever apply to upcoming days, so the floor for navigation is
-  // the current week (initialWeekStart) — never earlier. Forward is always available;
-  // Back only appears once the user has actually navigated away from the current week,
-  // so they have a way to return to where they started without overshooting into the
-  // past.
-  //
-  // A freshly-prepared dated draft only ever spans one 7-day window (Monday–Sunday), so
-  // once editing is active there's nothing to navigate to WITHIN that window — moving to
-  // an adjacent week means re-anchoring the draft to that week (applyPreparedWeek), which
-  // reseeds its entries from the approved baseline and discards whatever is in the
-  // window being left. Unsaved changes must be saved first — silently discarding a
-  // planner's in-progress work when they click Next/Back would be worse than blocking
-  // the click with a clear message.
-  // A dated roster covers one week, so the weeks after it are not in the plan the page
-  // loaded. Moving there shows that week's approved roster read-only - nothing is
-  // recalled or drafted until the planner actually edits.
+  // Navigation covers every Monday in the current calendar month (typically 4–5 weeks).
+  // Weeks before the current week are always view-only peeks. While a dated draft is
+  // open, moving to another upcoming week re-anchors the draft; past weeks require
+  // cancelling or finishing the draft first.
   function showPeekedWeek(result: PeekedWeek, targetWeekStart: string) {
     const periodStart = result.periodStart ?? targetWeekStart;
     const peekedAssignments = initialAssignments(result.entries ?? []);
@@ -879,27 +894,28 @@ export function OpsRosterPlanner({
   }
 
   async function moveWeekBack() {
+    const next = moveIsoDate(weekStart, -7);
+    const target = next < minWeekStart ? minWeekStart : next;
+    if (target === weekStart) return;
     if (editingEnabled && !isRecurring) {
       if (dirtyKeys.size) {
         setMessage({ tone: "error", text: "Save your changes before moving to the previous week." });
         return;
       }
       if (isPreparing) return;
-      const next = moveIsoDate(weekStart, -7);
-      const target = next < initialWeekStart ? initialWeekStart : next;
-      if (target === weekStart) return;
+      if (target < initialWeekStart) {
+        setMessage({ tone: "error", text: "Past weeks are view only. Cancel or submit this draft before browsing earlier weeks." });
+        return;
+      }
       await applyPreparedWeek(target);
       setSelectedDates(new Set());
       return;
     }
-    const next = moveIsoDate(weekStart, -7);
-    const target = next < initialWeekStart ? initialWeekStart : next;
-    if (isPeekedWeek) {
-      if (target === weekStart) return;
+    if (target < initialWeekStart || isPeekedWeek || (!isRecurring && (target < templateStart || target > livePeriodEnd))) {
       const planStart = plan?.periodStart ?? blankPeriodStart;
       const planEnd = plan?.periodEnd ?? moveIsoDate(planStart, 6);
       const planRecurring = plan?.status === "approved" && plan?.rosterKind === "recurring_weekly";
-      if (planRecurring || (target >= planStart && target <= planEnd)) restorePlanView(target);
+      if (!isPastRosterWeek(target, initialWeekStart) && (planRecurring || (target >= planStart && target <= planEnd))) restorePlanView(target);
       else await peekWeek(target);
       setSelectedDates(new Set());
       return;
@@ -1025,12 +1041,13 @@ export function OpsRosterPlanner({
         <p>{heroDetail}</p>
       </div>
       <div className={styles.heroActions}>
-        {canStart && !editingEnabled ? (
+        {canStart && !editingEnabled && !viewingPastWeek ? (
           <button className="button primary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing}>
             <PencilLine size={14} />
             {isPreparing ? (pendingRecall ? "Recalling…" : "Preparing…") : pendingRecall ? "Recall & edit" : plan ? "Edit roster" : "Start roster"}
           </button>
         ) : null}
+        {viewingPastWeek ? <span className={styles.status}>Past week · view only</span> : null}
         <div className={styles.stats}>
           <span><UsersRound size={15} /><strong>{people.length}</strong><small>active people</small></span>
           <span><CalendarDays size={15} /><strong>{submissionCoverage.ready}</strong><small>days assigned</small></span>
@@ -1041,8 +1058,8 @@ export function OpsRosterPlanner({
 
     <div className={styles.toolbar}>
       <div className={styles.weekNavigation}>
-        {weekStart > initialWeekStart ? <button type="button" aria-label="Back to current week" onClick={() => void moveWeekBack()} disabled={isPreparing || isLoadingWeek}><ChevronLeft size={16} /></button> : null}
-        <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong></span>
+        {weekStart > minWeekStart ? <button type="button" aria-label="Previous week" onClick={() => void moveWeekBack()} disabled={isPreparing || isLoadingWeek}><ChevronLeft size={16} /></button> : null}
+        <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong>{viewingPastWeek ? <small> · view only</small> : null}</span>
         <button type="button" aria-label="Next week" onClick={() => void moveWeekForward()} disabled={isPreparing || isLoadingWeek || (isRecurring || editingEnabled ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > maxWeekStart)}><ChevronRight size={16} /></button>
       </div>
       <label className={styles.search}><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, ID or designation" /></label>
@@ -1090,7 +1107,8 @@ export function OpsRosterPlanner({
     </div>
 
     <div className={styles.legend}><span><i className={styles.workingLegend} /> Working shift</span><span><i className={styles.offLegend} /> Week off</span><span><i className={styles.holidayLegend} /> Holiday</span><span><i className={styles.dirtyLegend} /> Unsaved change</span>{dirtyKeys.size ? <strong><Check size={13} /> Review and save {dirtyKeys.size} changes</strong> : editingEnabled ? <strong>No unsaved changes</strong> : <strong>Saved roster pattern</strong>}</div>
-    {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><span className={styles.approvalActions}><button type="button" className="button secondary compact" onClick={cancelDraft} disabled={isSaving}>Cancel draft</button><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button></span></footer> : null}
+    {!dates.length ? <div className="message-panel" role="status"><strong>No days in this week view.</strong> {openDraftCancellable ? "Cancel the open draft to restore the approved roster, or move to a week inside the draft period." : "Move to another week in this month."}</div> : null}
+    {openDraftCancellable ? <footer className={styles.approvalLine}><span><strong>{!editingEnabled ? "Open draft on this station" : dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{!editingEnabled ? "Cancel restores the approved roster. Use Edit / Recall to continue changing this draft." : dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><span className={styles.approvalActions}><button type="button" className="button secondary compact" onClick={cancelDraft} disabled={isSaving}>Cancel draft</button>{editingEnabled ? <button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving || viewingPastWeek)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button> : null}</span></footer> : null}
     {canUseExcel ? <section className={styles.excelPanel} aria-label="Station Excel upload">
       <div className={styles.excelHead}>
         <span className={styles.excelIcon} aria-hidden="true"><Upload size={16} /></span>

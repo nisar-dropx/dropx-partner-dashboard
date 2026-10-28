@@ -736,7 +736,16 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
     ...(historyContractors.data ?? []).map((person): OpsRosterPerson => ({ id: person.id, workerType: "contractor", code: person.dropx_id ?? "", name: person.full_name, designation: "", locationId: location.id }))
   ];
   const isOpsChannel = (plan: OpsRosterPlan) => plan.planningChannel === "ops" || plan.planningChannel == null;
-  const openPlan = plans.find((plan) => ["draft", "returned", "pending_approval"].includes(plan.status) && isOpsChannel(plan)) ?? null;
+  const openPlans = plans.filter((plan) => ["draft", "returned", "pending_approval"].includes(plan.status) && isOpsChannel(plan));
+  // Prefer an open plan whose dated window covers today (or the current week Monday);
+  // otherwise the newest open Ops plan. Always beat approved baselines so recalled /
+  // returned drafts stay visible until cancelled or approved.
+  const currentWeek = rosterMonday(today);
+  const openPlan = openPlans.find((plan) =>
+    plan.periodStart && plan.periodEnd
+    && plan.periodStart <= currentWeek
+    && currentWeek <= plan.periodEnd
+  ) ?? openPlans[0] ?? null;
   // A one-off approved "dated" plan for the current week (e.g. a specific override
   // like "HO · 2026-09-21 → 2026-09-27, APPROVED DATE-SCOPED ROSTER") takes priority
   // over the recurring weekly baseline for that same week — matching HRMS's own
