@@ -199,7 +199,7 @@ export default async function LossesSectionPage({
   }
   if (params.section === "summary") {
     const [workspace, ledger] = await Promise.all([loadRecoveryWorkspace(auth, true), loadRecoveryLedger(auth)]);
-    return <main className={styles.workspace}><LossHeader title="Loss summary" intro="Station-wise NL and SLP values, updates and actual recovery." tabs={tabs} active="summary"/>
+    return <main className={styles.workspace}><LossHeader title="Loss summary" intro="Station-wise confirmed recoverable NL and SLP cases, updates and recovery." tabs={tabs} active="summary"/>
       <LossSummary facts={lossFacts(workspace.rows, ledger.lines, workspace.settings?.recoverable_statuses || [])} ledgerReady={ledger.ready}/></main>;
   }
   const section = sections[params.section];
