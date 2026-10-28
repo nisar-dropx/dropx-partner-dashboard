@@ -10,6 +10,13 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+type PersonRow = {
+  full_name?: string | null;
+  pan_number?: string | null;
+  employee_code?: string | null;
+  dropx_id?: string | null;
+};
+
 export async function GET(request: Request) {
   try {
     if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
@@ -21,21 +28,36 @@ export async function GET(request: Request) {
     }
     const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 
-    const table =
-      profileType === "employee" ? "employees" : profileType === "contractor" ? "contractors" : "workforce";
-    const person = await supabaseAdmin
-      .from(table)
-      .select(
-        profileType === "employee"
-          ? "full_name,pan_number,employee_code"
-          : profileType === "contractor"
-            ? "full_name,pan_number,dropx_id"
-            : "full_name,pan_number"
-      )
-      .eq("company_id", account.companyId)
-      .eq("id", account.id)
-      .maybeSingle();
-    if (person.error || !person.data) throw new Error("Profile was not found.");
+    let personData: PersonRow | null = null;
+    if (profileType === "employee") {
+      const person = await supabaseAdmin
+        .from("employees")
+        .select("full_name,pan_number,employee_code")
+        .eq("company_id", account.companyId)
+        .eq("id", account.id)
+        .maybeSingle();
+      if (person.error) throw new Error(person.error.message);
+      personData = person.data;
+    } else if (profileType === "contractor") {
+      const person = await supabaseAdmin
+        .from("contractors")
+        .select("full_name,pan_number,dropx_id")
+        .eq("company_id", account.companyId)
+        .eq("id", account.id)
+        .maybeSingle();
+      if (person.error) throw new Error(person.error.message);
+      personData = person.data;
+    } else {
+      const person = await supabaseAdmin
+        .from("workforce")
+        .select("full_name,pan_number")
+        .eq("company_id", account.companyId)
+        .eq("id", account.id)
+        .maybeSingle();
+      if (person.error) throw new Error(person.error.message);
+      personData = person.data;
+    }
+    if (!personData) throw new Error("Profile was not found.");
 
     const [members, cards] = await Promise.all([
       supabaseAdmin
@@ -55,17 +77,17 @@ export async function GET(request: Request) {
     ]);
 
     const gmc = (cards.data ?? []).find((row) => String(row.policy_type).toUpperCase() === "GMC") ?? (cards.data ?? [])[0];
-    const primaryName = String(person.data.full_name || "Associate");
+    const primaryName = String(personData.full_name || "Associate");
     const workerCode =
       profileType === "employee"
-        ? String((person.data as { employee_code?: string | null }).employee_code || "")
+        ? String(personData.employee_code || "")
         : profileType === "contractor"
-          ? String((person.data as { dropx_id?: string | null }).dropx_id || "")
+          ? String(personData.dropx_id || "")
           : null;
     const rows = members.error ? [] : members.data ?? [];
     const bytes = await createInsuranceCoverLetterpadPdf({
       primaryName,
-      pan: String(person.data.pan_number || ""),
+      pan: String(personData.pan_number || ""),
       workerCode: workerCode || null,
       policyNumber: gmc?.policy_number ?? null,
       insurerName: gmc?.insurer_name ?? "Marsh / Qover",
