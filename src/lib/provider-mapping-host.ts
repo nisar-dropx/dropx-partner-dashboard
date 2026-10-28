@@ -1,4 +1,5 @@
 export type ProviderMappingPageCode = "provider_mapping" | "ops_provider_mapping";
+export type ProviderMappingSummaryPageCode = "provider_mapping_summary" | "ops_provider_mapping_summary";
 
 function normalizedHost(value: string | null | undefined) {
   const host = String(value ?? "").trim().toLowerCase();
@@ -20,6 +21,13 @@ export function providerMappingPageCodeForHost(value: string | null | undefined)
   ) {
     return "provider_mapping";
   }
+  return null;
+}
+
+export function providerMappingSummaryPageCodeForHost(value: string | null | undefined): ProviderMappingSummaryPageCode | null {
+  const pageCode = providerMappingPageCodeForHost(value);
+  if (pageCode === "ops_provider_mapping") return "ops_provider_mapping_summary";
+  if (pageCode === "provider_mapping") return "provider_mapping_summary";
   return null;
 }
 

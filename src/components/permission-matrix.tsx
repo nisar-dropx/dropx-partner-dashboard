@@ -38,7 +38,7 @@ const dashboardGroups: PermissionGroup[] = [
     matches: (page) => workforceCategoryCodes.has(page.code) || page.code.startsWith("workforce_category_")
   },
   { key: "executive_id_onboarding", label: "Executive ID Onboarding", codes: ["executive_id_onboarding"] },
-  { key: "provider_mapping", label: "ID Mapping", codes: ["provider_mapping"] },
+  { key: "provider_mapping", label: "ID Mapping", codes: ["provider_mapping", "provider_mapping_summary"] },
   { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
   { key: "imports", label: "Report Imports", codes: ["imports"] },
   { key: "inbox", label: "Inbox", codes: ["inbox"] },

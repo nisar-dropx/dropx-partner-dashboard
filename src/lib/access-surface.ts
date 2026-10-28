@@ -31,6 +31,7 @@ export const opsAccessPageCodes = [
   "ops_loss_master",
 
   "ops_provider_mapping",
+  "ops_provider_mapping_summary",
   "ops_rostering",
   "daily_submission",
   "ops_report_bot",

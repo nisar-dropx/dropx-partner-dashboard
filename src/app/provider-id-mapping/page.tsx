@@ -6,13 +6,13 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type ProviderFirstWorker } from "@/components/provider-first-mapping-worksheet";
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingForOutboundMonth, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
-import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { canEditProviderMappings, currentProviderMappingPageCode, currentProviderMappingSummaryPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
@@ -40,6 +40,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const canEdit = canEditProviderMappings(authorization);
+  const canViewSummary = hasPermission(authorization, currentProviderMappingSummaryPageCode(), "access");
   const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
   const scope = new Set(authorization.locationScopeIds);
   const allowed = (id: string | null) => allLocations || Boolean(id && scope.has(id));
@@ -265,7 +266,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
   return <AppShell active="ID Mapping" pageCode={pageCode}>
     <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
-    <nav className="performance-tabs" aria-label="ID mapping views"><Link className="active" href="/provider-id-mapping">Provider member first</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link></nav>
+    <nav className="performance-tabs" aria-label="ID mapping views"><Link className="active" href="/provider-id-mapping">Provider member first</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>{canViewSummary?<Link href="/provider-id-mapping/summary">Mapping summary</Link>:null}</nav>
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
