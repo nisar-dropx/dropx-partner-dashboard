@@ -8,6 +8,7 @@ import { LossClarificationInbox } from "./loss-clarification-inbox";
 import { RecoveryForm } from './nl-loss-cases';
 import { TrackingDetailModal } from './tracking-detail-modal';
 import { ListPager, usePaged } from './list-pager';
+import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from './nl-loss.module.css';
 const money=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(n);
 export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canRecovered=false,canApprove,approvals=false}:{rows:NlCase[];lines:LedgerLine[];outcomes:RecoveryOutcome[];settings:LossSettings|null;canEdit:boolean;canRecovered?:boolean;canApprove:boolean;approvals?:boolean}) {
@@ -21,7 +22,7 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
  const exceptionReason=(row:NlCase)=>{const r=row.recovery;
   if(r?.outcome_code==='responsible_left') return 'Person left';
   if(r?.outcome_code==='already_recovered') return 'Verify receipt';
-  if(r?.cap_override) return 'Salary cap override';
+  if(r?.cap_override) return 'Legacy approval review';
   if(r?.recovery_mode==='installments') return 'Split across payrolls';
   if(r?.deduction_timing==='next_month') return 'Deferred recovery';
   if(r?.approval_status==='needs_review'||row.lifecycle_status==='needs_review') return 'Review required';
@@ -48,6 +49,7 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
    {paged.rows.map(x=>{const k=`${x.row.month}|${x.row.case_key}`;return <article key={k} className={styles.case}>
     <div className={styles.panelHead} style={{padding:'10px 12px'}}><div><button className={styles.button} onClick={()=>setTracking({id:x.row.details.tid||x.row.case_key,station:x.row.station_code})}>{x.row.station_code} · {x.row.details.tid||x.row.case_key} ↗</button><small> {x.row.report?.toUpperCase()} · loss {x.row.month} · {approvals?exceptionReason(x.row):RECOVERY_QUEUE_LABELS[x.status]}</small></div><div><strong>{money(x.outstanding)}</strong> <button className={styles.button} aria-expanded={active===k} onClick={()=>setActive(active===k?'':k)}>{active===k?'Close':'Review'}</button></div></div>
     {active===k?<div className={styles.detail}><p className={styles.hint}>Loss {money(x.row.amount)} · payroll recovered {money(x.deducted)}{x.waived?` · written off ${money(x.waived)}`:''}{x.nextDue?` · due from ${x.nextDue}`:''}. A missed salary month carries the unpaid instalment forward.</p>
+      {x.row.source_final_nonrecoverable || x.row.source_present===false ? <LossPidTimeline month={x.row.month} caseKey={x.row.case_key}/> : null}
       {x.row.source_final_nonrecoverable?<p className={styles.notice}>Source confirms non-recoverable. No further recovery is due.{x.deducted>0?" Review previous deductions with Finance; history has not been reversed.":""}</p>:x.row.source_present===false?<p role="alert">Source case unavailable. Balance retained for review; edits are paused.</p>:<RecoveryForm key={`${k}:${x.row.recovery?.version||0}:${x.row.lifecycle_version||0}`} row={x.row} outcomes={outcomes} settings={settings} canEdit={canEdit} canRecovered={canRecovered} canApprove={canApprove}/>}</div>:null}
    </article>})}
    {!shown.length?<p className={styles.empty}>No cases match this queue.</p>:null}

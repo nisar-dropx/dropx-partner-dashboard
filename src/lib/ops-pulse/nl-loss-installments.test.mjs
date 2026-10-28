@@ -25,16 +25,14 @@ test("amount basis ends with the remainder and respects the maximum", () => {
   assert.match(installmentSchedule(1000, { mode: "installments" , value: "3" }).error, /number of months or by amount/);
 });
 
-const person = (extra = {}) => ({ ref: "employee:1", employee_code: "D0001", full_name: "A", designation: "IC", is_active: true, recovery_limit: 500, override_limit: 1000, salary_gross: 1500, ...extra });
+const person = (extra = {}) => ({ ref: "employee:1", employee_code: "D0001", full_name: "A", designation: "IC", is_active: true, recovery_limit: 1000, override_limit: 1000, salary_gross: 1500, ...extra });
 const split = (amount) => [{ employee_ref: "employee:1", amount }];
 
-test("the cap applies to the monthly amount, an override to take-home", () => {
-  assert.match(allocationError(1200, split(1200), [person()], true, { mode: "full" }, 24, 50), /₹1,200 for D0001 is more than the 50% salary limit of ₹500.*cap override/);
-  assert.equal(allocationError(1200, split(1200), [person()], true, { mode: "installments", basis: "months", value: "3" }, 24, 50), "");
-  assert.match(allocationError(1200, split(1200), [person()], true, { mode: "full", cap_override: true, cap_override_reason: "short" }), /reason for recovering beyond/);
-  assert.match(allocationError(1200, split(1200), [person()], true, { mode: "full", cap_override: true, cap_override_reason: "Approved by finance head" }), /take-home salary limit of ₹1,000/);
-  assert.equal(allocationError(900, split(900), [person()], true, { mode: "full", cap_override: true, cap_override_reason: "Approved by finance head" }), "");
-  assert.match(allocationError(900, split(900), [person({ recovery_limit: null })], true), /Salary payable is unavailable/);
+test("available pay applies to monthly recovery without an override", () => {
+  assert.match(allocationError(1200, split(1200), [person()], true, { mode: "full" }, 24, 50), /more than the available pay of ₹1,000/);
+  assert.equal(allocationError(900, split(900), [person()], true, { mode: "full" }, 24, 50), "");
+  assert.equal(allocationError(900, split(900), [person()], true, { mode: "full", cap_override: true, cap_override_reason: "short" }), "");
+  assert.equal(allocationError(1200, split(1200), [person()], true, { mode: "installments", basis: "months", value: "3" }), "");
 });
 
 test("the monthly amount never passes gross pay, even with the cap off", () => {

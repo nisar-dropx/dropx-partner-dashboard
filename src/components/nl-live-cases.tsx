@@ -21,6 +21,7 @@ import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
+import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -216,7 +217,7 @@ export function NlLiveCases({
           return (
             <article key={c.case_key} className={styles.case}>
               <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
-                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at} updatedBy={c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name} historyCase={stageView === "final" ? {month:c.month,caseKey:c.case_key} : undefined}
+                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at} updatedBy={c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name} historyCase={{month:c.month,caseKey:c.case_key}}
                 open={active === c.case_key} onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.case_key?null:c.case_key)}
                 status={<><span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{c.recoverable ? <span className={!recoveryDetailsUpdated(c,c.recovery)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!recoveryDetailsUpdated(c,c.recovery)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
               {active === c.case_key ? (
@@ -230,6 +231,7 @@ export function NlLiveCases({
                   canDesk={canDesk}
                 /> : null}
                 </details>
+                {!(stageView === "final" && c.recoverable) ? <LossPidTimeline month={c.month} caseKey={c.case_key}/> : null}
                 {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canApprove} /> : null}
                 </>
               ) : null}

@@ -1,4 +1,6 @@
 "use client";
+import { useRouter } from "next/navigation";
+import { LossPidTimeline } from "./loss-pid-timeline";
 import { useMemo, useState } from "react";
 import { hasStationSubmission } from "@/lib/ops-pulse/loss-exceptions";
 import type { NlCase } from "@/lib/ops-pulse/nl-loss-policy";
@@ -29,6 +31,21 @@ export function LossRedisputeDesk({
   windows: RedisputeWindow[];
   canActivate: boolean;
 }) {
+  const router = useRouter();
+  const [revoking,setRevoking] = useState<RedisputeWindow|null>(null);
+  const [revokeNote,setRevokeNote] = useState("Enabled by mistake");
+  const [historyCase,setHistoryCase] = useState<RedisputeWindow|null>(null);
+  const [busy,setBusy] = useState(false), [message,setMessage] = useState("");
+  async function remove() {
+    if (!revoking) return;
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/ops-pulse/losses/case-response", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({month:revoking.month,case_key:revoking.case_key,version:revoking.version,action:"revoke",note:revokeNote})});
+      const data = await res.json(); if (!res.ok) throw Error(data.error || "Unable to remove redispute.");
+      setRevoking(null); setMessage("Redispute removed. History retained."); router.refresh();
+    } catch(e) { setMessage(e instanceof Error ? e.message : "Unable to remove redispute."); }
+    finally { setBusy(false); }
+  }
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("open");
   const byKey = useMemo(
@@ -92,6 +109,16 @@ export function LossRedisputeDesk({
           </select>
         </div>
       </div>
+      {message ? <p role="status">{message}</p> : null}
+      {revoking ? <section className={styles.redisputeRemove}>
+        <strong>Remove · {revoking.case_key}</strong>
+        <select aria-label="Reason for removing redispute" value={revokeNote} onChange={e=>setRevokeNote(e.target.value)}>
+          {["Enabled by mistake","Continue with recovery","Duplicate redispute","No longer required"].map(n=><option key={n}>{n}</option>)}
+        </select>
+        <button className={styles.primary} disabled={busy} onClick={()=>void remove()}>{busy ? "Removing…" : "Remove redispute"}</button>
+        <button className={styles.button} disabled={busy} onClick={()=>setRevoking(null)}>Keep redispute</button>
+        <small>Closes the response window; eligible recovery resumes. History is retained.</small>
+      </section> : null}
       <div className={styles.tableWrap}>
         <table className={styles.ledgerTable}>
           <thead>
@@ -101,7 +128,7 @@ export function LossRedisputeDesk({
               <th>Status</th>
               <th>Follow-up</th>
               <th>Last update</th>
-              <th>Station reason</th>
+              <th>Station reason</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -137,18 +164,20 @@ export function LossRedisputeDesk({
                   <td>
                     {w.updated_by_name}
                     <small>
-                      {new Date(w.updated_at).toLocaleDateString("en-IN", {
+                      {new Date(w.updated_at).toLocaleString("en-IN", {
                         timeZone: "Asia/Kolkata",
                       })}
                     </small>
                   </td>
                   <td>{w.response_details?.reason || "—"}</td>
+                  <td><button className={styles.button} onClick={()=>setHistoryCase(w)}>History</button> {canActivate && w.enabled ? <button className={styles.button} disabled={busy} onClick={()=>{setRevoking(w);setRevokeNote("Enabled by mistake");}}>Remove</button> : null}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {historyCase ? <LossPidTimeline key={`${historyCase.month}|${historyCase.case_key}`} month={historyCase.month} caseKey={historyCase.case_key} revision={windows.find(w=>w.month===historyCase.month && w.case_key===historyCase.case_key)?.updated_at} initiallyOpen /> : null}
       {!shown.length ? (
         <p className={styles.empty}>
           No station submissions match. Enabled TIDs appear here after the station submits evidence.

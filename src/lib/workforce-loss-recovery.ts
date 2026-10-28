@@ -20,9 +20,9 @@ export type WorkforceLossRecoveryLine = {
   label: string;
   installment_no?: number | null;
   installment_count?: number | null;
-  /** A recorded cap override or an exit's final settlement: may use the whole net payout. */
+  /** Legacy audit metadata; all recoveries use available pay. */
   cap_exempt?: boolean | null;
-  /** Share of the net payout all capped loss recoveries of one month may take (Loss Recovery Master). */
+  /** Legacy API field; percentage limits no longer affect payroll. */
   cap_percent?: number | string | null;
   final_settlement?: boolean | null;
 };
@@ -48,15 +48,9 @@ export function workforceLossRecoveryMonth(fromDate: string, toDate: string) {
   return toDate === last ? `${match[1]}-${match[2]}` : null;
 }
 
-function capShare(lines: WorkforceLossRecoveryLine[]) {
-  const value = Number(lines.find((line) => line.cap_percent != null)?.cap_percent);
-  return Number.isFinite(value) && value > 0 ? Math.min(100, value) : 100;
-}
-
 /**
  * Adds each worker's due lines to that worker's largest payout row, whole lines only and only while
- * they fit, oldest salary month first. Capped lines together take at most cap_percent of the net
- * amount; a cap override or a final settlement may use the rest. Mutates the rows in place.
+ * they fit in available pay, oldest salary month first. Unpaid lines carry forward. Mutates the rows in place.
  */
 export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: Row[], lines: WorkforceLossRecoveryLine[]) {
   const byWorker = new Map<string, WorkforceLossRecoveryLine[]>();
@@ -75,13 +69,11 @@ export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: 
     const ordered = [...workerLines].sort((a, b) =>
       String(a.deduction_month ?? "").localeCompare(String(b.deduction_month ?? "")) || a.recovery_key.localeCompare(b.recovery_key));
     if (!target) { carried.push(...ordered); continue; }
-    let capLeft = rounded(Math.max(0, target.netAmount) * capShare(workerLines) / 100);
     for (const line of ordered) {
       const amount = rounded(Number(line.amount) || 0);
       if (amount <= 0) continue;
       if (appliedKeys.has(line.recovery_key)) continue;
-      if (amount > rounded(target.netAmount) || (!line.cap_exempt && amount > capLeft)) { carried.push(line); continue; }
-      if (!line.cap_exempt) capLeft = rounded(capLeft - amount);
+      if (amount > rounded(target.netAmount)) { carried.push(line); continue; }
       target.deductionBreakdown = [...target.deductionBreakdown, { code: LOSS_RECOVERY_CODE, label: `Loss recovery · ${line.label}`, amount, recoveryKey: line.recovery_key }];
       appliedKeys.add(line.recovery_key);
       target.deductions = rounded(target.deductions + amount);

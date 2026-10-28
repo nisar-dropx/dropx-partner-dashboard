@@ -20,6 +20,10 @@ export const WORKBOOK_COLUMNS = [
   "Detailing",
   "CCTV link",
   "CCTV link is public (Yes/No)",
+  "Last updated at (IST)",
+  "Last updated by",
+  "Last update source",
+  "History updates",
 ] as const;
 export type WorkbookColumn = (typeof WORKBOOK_COLUMNS)[number];
 export const WORKBOOK_FILL_FROM = WORKBOOK_COLUMNS.indexOf("Recovery action");

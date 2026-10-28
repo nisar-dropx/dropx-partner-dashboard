@@ -25,7 +25,7 @@ export type RecoveryPerson = {
   salary_month?: string;
   salary_payable?: number | null;
   recovery_limit?: number | null;
-  /** Monthly room when a cap override is recorded: the whole take-home less other recoveries. */
+  /** Legacy alias of recovery_limit: available take-home less other recoveries. */
   override_limit?: number | null;
   salary_gross?: number | null;
   /** Monthly amount other plans already take from this person's salary month. */
@@ -281,7 +281,7 @@ export function allocationError(
   capEnabled = false,
   plan: RecoveryPlan = { mode: "full" },
   maxInstallments = 24,
-  capPercent = 100,
+  _legacyCapPercent = 100,
   policy?: Partial<RecoveryPolicy>,
 ) {
   if (!splits.length)
@@ -310,12 +310,6 @@ export function allocationError(
   const allocated = splits.reduce((sum, s) => sum + Math.round(s.amount * 100), 0);
   if (allocated !== Math.round(amount * 100))
     return `Allocated amounts total ₹${(allocated / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}; assign the full loss of ₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Partial recovery is not allowed.`;
-  const override = !!plan.cap_override;
-  if (override) {
-    const reason = String(plan.cap_override_reason ?? "").trim();
-    if (reason.length < 10 || reason.length > 500)
-      return "Give a reason for recovering beyond the salary cap (10–500 characters).";
-  }
   for (const split of splits) {
     const person = people.find((p) => p.ref === split.employee_ref)!;
     const { schedule, error } = installmentSchedule(split.amount, plan, maxInstallments);
@@ -327,11 +321,11 @@ export function allocationError(
     // The database performs the authoritative cap and gross-pay checks on save.
     const privatePeoplePay = person.pay_detail_access === "restricted";
     if (capEnabled && !privatePeoplePay) {
-      const limit = override ? person.override_limit : person.recovery_limit;
+      const limit = person.recovery_limit;
       if (limit == null)
         return `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
       if (monthly > Math.round(limit * 100))
-        return `The monthly recovery of ₹${(monthly / 100).toLocaleString("en-IN")} for ${person.employee_code} is more than the ${override ? "take-home" : `${capPercent}%`} salary limit of ₹${limit.toLocaleString("en-IN")}. ${override ? "Spread it over more instalments." : "Spread it over more instalments, or record a cap override."}`;
+        return `The monthly recovery of ₹${(monthly / 100).toLocaleString("en-IN")} for ${person.employee_code} is more than the available pay of ₹${limit.toLocaleString("en-IN")}. Spread it over more instalments.`;
     }
     if (!privatePeoplePay && person.salary_gross != null && monthly > Math.round(person.salary_gross * 100))
       return `The monthly recovery for ${person.employee_code} is more than their gross pay of ₹${person.salary_gross.toLocaleString("en-IN")}.`;

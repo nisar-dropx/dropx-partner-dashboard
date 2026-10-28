@@ -1,3 +1,5 @@
+import { loadPidHistory } from "@/lib/ops-pulse/loss-pid-history-data";
+import { historyColumns, historyRows } from "@/lib/ops-pulse/loss-pid-history";
 import {
   recoveryActionAllowed,
   mayMarkAlreadyRecovered,
@@ -111,9 +113,17 @@ export async function GET(request: Request) {
     const outcomes = view.outcomes.filter(
       (o) => o.is_active && recoveryActionAllowed(o) && !["responsible_left", "already_recovered"].includes(o.code) && (!o.restricted || view.canRecovered),
     );
+    const pidHistory = await loadPidHistory(requireCompanyId(auth), view.cases);
+    const latest = new Map<string, (typeof pidHistory)[number]>(), historyCounts = new Map<string,number>();
+    for (const e of pidHistory) { const k = `${e.month}|${e.case_key}`; if (e.action !== "Source baseline" && !latest.has(k)) latest.set(k,e); historyCounts.set(k,(historyCounts.get(k)||0)+1); }
     const caseRows = view.cases.map((c) => {
+      const identity = `${c.month}|${c.case_key}`, last = latest.get(identity);
       const r = c.recovery && !c.recovery.is_deleted ? c.recovery : null;
       const row: Record<WorkbookColumn, string | number> = {
+        "Last updated at (IST)": last ? new Date(last.at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour12:false}) : c.source_updated_at ? new Date(c.source_updated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour12:false}) : "",
+        "Last updated by": last?.actor || "Source sync · editor not recorded",
+        "Last update source": last?.source || "Source",
+        "History updates": historyCounts.get(identity) || 0,
         "Case ref": caseRef(c.month, c.case_key),
         Version: c.recovery?.version ?? 0,
         Month: c.month,
@@ -144,6 +154,8 @@ export async function GET(request: Request) {
       XLSX.utils.book_append_sheet(book, ws, name);
     };
     sheet(WORKBOOK_SHEET, [[...WORKBOOK_COLUMNS], ...caseRows], [34, 8, 9, 11, 9, 16, 26, 26, 24, 12, 22, 24, 30, 36, 28, 36, 30, 16]);
+    const auditRows=historyRows(pidHistory,new Map(view.cases.map(c=>[`${c.month}|${c.case_key}`,c.details.tid||c.case_key])));
+    for(let start=0;start<Math.max(1,auditRows.length);start+=50000) sheet(start ? `PID history ${start/50000+1}` : "PID history",[historyColumns,...auditRows.slice(start,start+50000)],[20,12,28,10,24,28,14,24,40,24,50,50]);
     sheet(
       "Recovery actions",
       [

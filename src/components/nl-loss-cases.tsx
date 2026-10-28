@@ -25,6 +25,7 @@ import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { recoveryActionAllowed, departedPersonError, receivedRecoveryError } from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
+import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 import { ListPager, usePaged } from "./list-pager";
 const money = (n: number) =>
@@ -50,12 +51,6 @@ function planSummary(r: Recovery) {
     ? `Recurring debit · ${Number(r.installment_value)} months`
     : `Recurring debit · ${money(Number(r.installment_value))} a month`;
 }
-type History = {
-  id: string;
-  actor_name: string;
-  created_at: string;
-  after_value: Recovery;
-};
 export function NlLossCases({
   cases,
   outcomes,
@@ -264,12 +259,10 @@ export function RecoveryForm({
       old?.installment_value != null
         ? String(Number(old.installment_value))
         : "3",
-    cap_override: !!old?.cap_override,
-    cap_override_reason: old?.cap_override_reason || "",
   });
   const policy = settings?.recovery_policy;
-  const capEnabled = !!policy?.salary_cap_enabled;
-  const capPercent = Number(policy?.salary_cap_percent) || 100;
+  const capEnabled = true;
+  const capPercent = 100;
   const maxInstallments = Number(policy?.max_installments) || 24;
   const [details, setDetails] = useState<RecoveryDetails>(
     old?.recovery_details || {},
@@ -283,7 +276,6 @@ export function RecoveryForm({
   const [salaryError, setSalaryError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [people, setPeople] = useState<RecoveryPerson[]>([]),
-    [history, setHistory] = useState<History[]>([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
@@ -345,7 +337,6 @@ export function RecoveryForm({
         setCanResponse(j.can_response === true);
         setExceptionOptions(j.exception_options || {installments:false,next_month:null});
         setMayApproveCase(j.can_approve === true);
-        setHistory(j.history);
         setDirectoryReady(true);
       } catch (e) {
         if (!disposed) setError(controller.signal.aborted ? "Station salary checks took too long. Reload to retry; no recovery has been changed." : e instanceof Error ? e.message : "Could not load recovery.");
@@ -424,7 +415,7 @@ export function RecoveryForm({
         )
       : "";
   const limitOf = (p: RecoveryPerson) =>
-    plan.cap_override ? p.override_limit : p.recovery_limit;
+    p.recovery_limit;
   const reasonError =
     option?.dispute_fields_enabled &&
     ((option.reason_required && (details.reason || "").trim().length < 5) ||
@@ -520,8 +511,6 @@ export function RecoveryForm({
               : {
                   mode: "full",
                   deduction_month: deductionPeriod,
-                  cap_override: plan.cap_override,
-                  cap_override_reason: plan.cap_override_reason,
                 }
             : { mode: "full" },
           remarks,
@@ -531,16 +520,7 @@ export function RecoveryForm({
       const j = await res.json();
       if (!res.ok) throw Error(j.error);
       setRecovery(j.recovery);
-      setHistory((h) => [
-        {
-          id: String(Date.now()),
-          actor_name: j.recovery.updated_by_name,
-          created_at: j.recovery.updated_at,
-          after_value: j.recovery,
-        },
-        ...h,
-      ]);
-      setSuccess(j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. No separate approval is needed for a routine recovery.") : "Review required for this exception. Payroll stays paused until the exception is resolved.");
+      setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. The full recovery will be included in the applicable payroll calculation.") : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -575,15 +555,6 @@ export function RecoveryForm({
       setAmounts({});
       setRemarks("");
       setDetails({});
-      setHistory((h) => [
-        {
-          id: String(Date.now()),
-          actor_name: j.recovery.updated_by_name,
-          created_at: j.recovery.updated_at,
-          after_value: j.recovery,
-        },
-        ...h,
-      ]);
       setSuccess(`Plan removed. History is preserved.${j.payroll_sync?.message ? " " + j.payroll_sync.message : ""}`);
       router.refresh();
     } catch (e) {
@@ -594,7 +565,7 @@ export function RecoveryForm({
   }
   return (
     <div className={styles.detail}>
-      {canResponse ? <label className={styles.notice}>Recovery action<select aria-label="Enabled recovery action" defaultValue="" onChange={e=>{if(e.target.value==='redispute')router.push('/team-ops/losses/vendor-response?'+new URLSearchParams({month:row.month,case:row.case_key}));}}><option value="">Choose an enabled action</option><option value="redispute">Redispute — submit station evidence</option></select><small>Enabled for this TID. Add the reason, detailed explanation, LSC ticket and evidence link. Payroll recovery is paused while the redispute is open.</small></label> : null}
+      {canResponse ? <p className={styles.redisputeHint}>Redispute active · payroll paused. You can update the recovery plan. <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}`}>Manage / remove redispute ↗</a></p> : null}
       <details className={styles.compactDetails}><summary>Source details · {row.month}</summary>
       <div className={styles.sourceGrid}>
         <div>
@@ -830,7 +801,7 @@ export function RecoveryForm({
                 <details className={styles.compactDetails}><summary>Recovery rules</summary><p className={styles.hint}>
                   Eligible station DAs and People staff, using the current debit-scope rules in Master.
                   {capEnabled
-                    ? ` Loss recoveries take at most ${capPercent}% of a person's take-home in one month; a recurring debit counts one instalment.`
+                    ? ` Recovery uses available pay after other recoveries; unpaid lines carry forward.`
                     : ""}
                   {plan.mode === "installments"
                     ? " A missed month moves the remaining instalments on. If a person exits, the balance is recovered in their final settlement."
@@ -874,7 +845,7 @@ export function RecoveryForm({
                                   : "Salary eligibility verified securely · amount hidden"
                                 : p.recovery_limit == null
                                   ? "Payout payable unavailable · review payout / mapping"
-                                  : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
+                                  : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · available for recovery ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) &&
@@ -941,37 +912,6 @@ export function RecoveryForm({
                   <p role="alert" className={styles.failure}>
                     {validation}
                   </p>
-                ) : null}
-                {capEnabled ? (
-                  <div className={styles.override}>
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        checked={!!plan.cap_override}
-                        onChange={(e) =>
-                          setPlan({ ...plan, cap_override: e.target.checked })
-                        }
-                      />
-                      Recover beyond the {capPercent}% salary cap (verified securely on save)
-                    </label>
-                    {plan.cap_override ? (
-                      <label>
-                        Reason for the override (required, kept in history)
-                        <textarea
-                          rows={2}
-                          maxLength={500}
-                          value={plan.cap_override_reason}
-                          onChange={(e) =>
-                            setPlan({
-                              ...plan,
-                              cap_override_reason: e.target.value,
-                            })
-                          }
-                          placeholder="e.g. Approved by the Ops Head on 16 Oct; the person agreed in writing."
-                        />
-                      </label>
-                    ) : null}
-                  </div>
                 ) : null}
                 <div className={styles.splitTotal}>
                   <span>{selected.length} people selected</span>
@@ -1114,7 +1054,7 @@ export function RecoveryForm({
               Remarks {option?.remarks_required ? "(required)" : "(optional)"}
               <textarea
                 maxLength={2000}
-                rows={3}
+                rows={1}
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
                 required={option?.remarks_required}
@@ -1136,7 +1076,7 @@ export function RecoveryForm({
               <p className={styles.hint}>
                 {locked
                   ? "This plan is locked."
-                  : "Read-only access. A cluster manager with Losses edit access can update this plan."}
+                  : "Losses edit access is required to update this plan."}
               </p>
             )}
             {canEdit && recovery && !recovery.is_deleted ? (
@@ -1152,82 +1092,7 @@ export function RecoveryForm({
           </fieldset>
         </form>
       )}
-      {history.length ? (
-        <details className={styles.history}>
-          <summary>
-            Recovery history · {history.length} update
-            {history.length === 1 ? "" : "s"}
-          </summary>
-          {history.map((h) => (
-            <div key={h.id}>
-              <strong>
-                {h.after_value.is_deleted
-                  ? "Plan removed"
-                  : h.after_value.outcome_label}{" "}
-                · {h.actor_name}
-              </strong>
-              <small>
-                {new Date(h.created_at).toLocaleString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                })}
-              </small>
-              {h.after_value.deduction_month ? (
-                <p>
-                  {h.after_value.recovery_mode === "installments"
-                    ? "First salary month"
-                    : "Salary month"}
-                  : {monthLabel(h.after_value.deduction_month)} ·{" "}
-                  {planSummary(h.after_value)}
-                </p>
-              ) : null}
-              {h.after_value.cap_override ? (
-                <p>
-                  <strong>Salary cap override:</strong>{" "}
-                  {h.after_value.cap_override_reason}
-                </p>
-              ) : null}
-              <p>{h.after_value.remarks}</p>
-              {h.after_value.recovery_details?.reason ? (
-                <p>
-                  <strong>Reason:</strong>{" "}
-                  {h.after_value.recovery_details.reason}
-                </p>
-              ) : null}
-              {h.after_value.recovery_details?.details ? (
-                <p>
-                  <strong>Detailing:</strong>{" "}
-                  {h.after_value.recovery_details.details}
-                </p>
-              ) : null}
-              {h.after_value.recovery_details?.attachments?.map((a) => (
-                <p key={a.id}>
-                  <a href={attachmentUrl(a.id)}>{a.file_name}</a>
-                </p>
-              ))}
-              {h.after_value.recovery_details?.cctv_url ? (
-                <p>
-                  <a
-                    href={h.after_value.recovery_details.cctv_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    CCTV recording
-                  </a>
-                </p>
-              ) : null}
-              {h.after_value.allocations.map((p) => (
-                <span key={p.ref}>
-                  {p.full_name} ({p.employee_code}) — {money(p.amount)}
-                  {p.installments?.length
-                    ? ` · ${p.installments.length} × ${money(p.monthly_amount ?? p.installments[0].amount)}`
-                    : ""}
-                  <br />
-                </span>
-              ))}
-            </div>
-          ))}
-        </details>
-      ) : null}
+      <LossPidTimeline month={row.month} caseKey={row.case_key} revision={recovery?.version || 0}/>
     </div>
   );
 }

@@ -122,7 +122,7 @@ export async function loadRecoveryPayables(
   // Calculate all-location pay only for this station’s directory, preserving cross-station salary totals.
   // Capacity is pay before Ops loss recoveries: every plan for this month is subtracted as "reserved" below.
   const payouts =
-    workforceIds.length && policy.salary_cap_enabled
+    workforceIds.length
       ? await loadWorkforcePayoutRows(
           company,
           { ...auth, hasAllLocationAccess: true },
@@ -225,11 +225,11 @@ export async function loadRecoveryPayables(
           // A recurring debit reserves one instalment a month, a full debit its whole share.
           .reduce((sum: number, a: any) => sum + Number(a.monthly_amount ?? a.amount), 0)
       : 0;
-    const limitAt = (percent: number) =>
+    const availablePay = () =>
       payable == null
         ? null
-        : Math.max(0, Math.round(((payable * percent) / 100 - reserved) * 100) / 100);
-    const limit = limitAt(policy.salary_cap_percent);
+        : Math.max(0, Math.round((payable - reserved) * 100) / 100);
+    const limit = availablePay();
     checks.push({
       company_id: company,
       employee_ref: person.ref,
@@ -248,7 +248,7 @@ export async function loadRecoveryPayables(
         salary_payable: payable,
         salary_gross: gross,
         recovery_limit: limit,
-        override_limit: limitAt(100),
+        override_limit: limit,
         reserved,
         salary_source: source,
       });

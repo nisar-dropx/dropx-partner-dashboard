@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   const results=[];
   for (const r of body.rows) {
    try {
-    const ctx=await recoveryContext(r.month,r.case_key,true,!r.enabled);
+    const ctx=await recoveryContext(r.month,r.case_key,true,!r.enabled,!r.enabled && r.kind==='redispute');
     if (!mayActivateRedispute(ctx.auth)) throw Error('Exception access denied.');
     if (r.enabled && ctx.report==='slp' && !ctx.finalSeenAt) throw Error('Wait for the SLP Final file before enabling exceptions.');
     const common={p_company:ctx.scope.company,p_month:r.month,p_case:ctx.caseKey,p_version:r.version,p_actor:ctx.auth.userId,p_name:ctx.auth.fullName||ctx.auth.email||'OpsPulse user'};

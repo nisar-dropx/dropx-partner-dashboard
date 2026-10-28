@@ -417,6 +417,30 @@ eq('Successful redispute stops future payroll',(await db.query(`select * from nl
 await mustReject('Successful redispute cannot be restarted by a recovery edit',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
 eq('Winning stops outstanding without inventing a deduction',(await one(`select status,outstanding::text,deducted::text from nl_recovery_ledger('${C}',null,'contractor:${CT}') where case_key='CONTRACTOR'`)),{status:'redispute_won',outstanding:'0',deducted:'0'});
 
+// PID timeline + editable plans retain all redispute payroll gates.
+const pidMigration=readFileSync('supabase/migrations/20261028174523_loss_pid_history_controls.sql','utf8');
+await db.exec(pidMigration); await db.exec(pidMigration);
+eq('Baseline once per case',(await one(`select count(*)::int n from nl_loss_source_events where case_key='CONTRACTOR'`)).n,1);
+await db.query(`update nl_loss_month_cases set last_seen_at=now(),source_updated_at=now() where case_key='CONTRACTOR'`);
+eq('Refresh timestamps do not create fake changes',(await one(`select count(*)::int n from nl_loss_source_events where case_key='CONTRACTOR'`)).n,1);
+await db.query(`update nl_loss_month_cases set details=details||'{"remarks":"Changed in source"}'::jsonb where case_key='CONTRACTOR'`);
+eq('Source update retained',(await one(`select count(*)::int n from nl_loss_source_events where case_key='CONTRACTOR'`)).n,2);
+await mustReject('Source audit immutable',`delete from nl_loss_source_events where case_key='CONTRACTOR'`);
+eq('No browser role access',(await one(`select has_table_privilege('authenticated','nl_loss_source_events','select') x`)).x,false);
+await mustReject('Won remains protected after migration',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
+await db.query(rd(9,'activate'));
+const livePlan=(await one(`select version from nl_loss_recoveries where case_key='CONTRACTOR'`));
+const editable=full('CONTRACTOR',`contractor:${CT}`,'deduct',livePlan.version);
+// This case previously lost with a future recovery month; reset test fixture to a fresh active case.
+await db.query(`update nl_case_response_windows set recovery_month=null where case_key='CONTRACTOR'`);
+await db.query(editable);
+eq('Edited active plan still cannot reach payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${future}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
+await mustReject('Stale removal rejected',rd(9,'revoke',{note:'Enabled by mistake'}));
+await db.query(`update nl_loss_month_cases set source_status='Non-recoverable',source_present=false where case_key='CONTRACTOR'`);
+await db.query(rd(10,'revoke',{note:'No longer required'}));
+eq('Can remove after source change',(await one(`select enabled,workflow_status from nl_case_response_windows where case_key='CONTRACTOR'`)),{enabled:false,workflow_status:'cancelled'});
+eq('Removal retained in history',(await one(`select count(*)::int n from nl_case_response_events where case_key='CONTRACTOR' and action='revoke'`)).n,1);
+await mustReject('Cannot erase source history',`update nl_loss_source_events set actor_name='Changed'`);
 // Proactive exceptions: grants gate new schedules atomically; ordinary plans and past payroll stay unchanged.
 const optionSql=readFileSync('supabase/migrations/20261028220000_loss_exception_options.sql','utf8');
 await db.exec(optionSql); await db.exec(optionSql);
@@ -444,6 +468,26 @@ eq('Source amount changes invalidate the grant',(await one("select nl_loss_excep
 eq('Grant events retain every successful change',(await one("select count(*)::int n from nl_loss_exception_events")).n,3);
 eq('Authenticated client cannot call grant writer',(await one("select has_function_privilege('authenticated','nl_loss_exception_set(uuid,text,text,text,boolean,integer,text,uuid,text)','execute') allowed")).allowed,false);
 eq('Actual payroll lines are unchanged by exception grants',(await db.query("select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='"+PERSON+"'")).rows,afterClarify);
+
+// Available-pay policy: migration is idempotent and legacy percentages cannot return.
+const availablePaySql=readFileSync('supabase/migrations/20261028233017_loss_available_pay.sql','utf8');
+const priorPlans=(await db.query(`select case_key,cap_override,cap_override_reason from nl_loss_recoveries order by case_key`)).rows;
+await db.exec(availablePaySql); await db.exec(availablePaySql);
+eq('Migration preserves historical override records',(await db.query(`select case_key,cap_override,cap_override_reason from nl_loss_recoveries order by case_key`)).rows,priorPlans);
+await db.exec(`update nl_loss_sources set recovery_policy=recovery_policy||'{"salary_cap_enabled":false,"salary_cap_percent":50,"reserve_other_recoveries":true}'::jsonb;
+update nl_recovery_payables set policy_updated_at=(select updated_at from nl_loss_sources),checked_at=now(),payable=1000,gross=1200;
+insert into employees(id,company_id,employee_code,full_name,location_id) values('00000000-0000-0000-0000-0000000000e9','${C}','PAY9','Available Pay','${S}');
+insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at)
+select '${C}','employee:00000000-0000-0000-0000-0000000000e9',salary_month,true,1000,1200,'test',(select updated_at from nl_loss_sources) from nl_recovery_payables limit 1;
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+('${C}','nl','2026-09','PAY-80','BLR1',800,'Recoverable'),('${C}','nl','2026-09','PAY-REST','BLR1',201,'Recoverable');`);
+eq('Old settings cannot restore percentage limits',(await one(`select recovery_policy->>'salary_cap_enabled' enabled,recovery_policy->>'salary_cap_percent' percent from nl_loss_sources`)),{enabled:'true',percent:'100'});
+const paySave=key=>full(key,'employee:00000000-0000-0000-0000-0000000000e9').replace('"amount":"100"',`"amount":"${key==='PAY-80'?800:201}"`).replace('"mode":"full"','"mode":"full","cap_override":true,"cap_override_reason":"x"');
+await db.query(paySave('PAY-80'));
+eq('80 percent saves without override approval',(await one(`select approval_status,cap_override from nl_loss_recoveries where case_key='PAY-80'`)),{approval_status:'approved',cap_override:false});
+await mustReject('Other plans reserve available pay',paySave('PAY-REST'));
+eq('Due RPC sends 100 percent to older payroll clients',String((await one(`select cap_percent from nl_loss_recovery_due('${C}',(select deduction_month from nl_loss_recoveries where case_key='PAY-80'),'hrms') where case_key='PAY-80'`)).cap_percent),'100');
+eq('Migration never changes paid history',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
 
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

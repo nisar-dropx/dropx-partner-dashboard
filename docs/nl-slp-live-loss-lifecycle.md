@@ -301,3 +301,33 @@ Departed/inactive people, next-month timing, instalments, cap overrides and rece
 `20261027183000_loss_exception_approval.sql` patches the atomic writer. Automatic decisions have a null human approver and an explicit system label. Existing decisions are preserved; saving a routine proposal with refreshed eligibility applies the new rule. Production preflight found two approved plans and no pending proposals. No payroll history, published payout or recovery key is rewritten.
 
 The Recovery review groups scoped allocations by station, person or saved designation. Assigned, actually deducted, draft-payroll and outstanding amounts remain separate; pending review is a subset of outstanding, not an additional charge. Redisputes and Station claims remain under More. Actions and timing remain configured in Loss Recovery Master.
+
+
+## PID history and redispute controls — 28 October 2026
+
+An active redispute permits authorised recovery-plan edits, while the existing database due gate keeps payroll paused. A won outcome still blocks recovery edits. Removing a redispute uses a short reason picker, preserves its audit trail and resumes only otherwise eligible recovery. Removal remains available when an imported source becomes non-recoverable or unavailable; company, station, role and version checks still apply.
+
+The on-demand PID timeline combines source imports/changes, recovery edits, lifecycle decisions, disputes, redisputes, clarification events and linked station-claim events across all accessible months. Events show actor, IST time and before/after values. Excel adds last-update metadata and a PID history sheet; individual timelines can export their full history. Salary values remain redacted. Missing history sources fail visibly instead of silently exporting partial history.
+
+Apply `20261028174523_loss_pid_history_controls.sql` individually before releasing this app change. The migration has an immutable source-event table and trigger; unchanged refresh timestamps produce no events. Existing cases receive a clearly labelled baseline, never fabricated earlier activity. External feeds do not supply their human editor, so these events explicitly identify source sync and the missing source editor. Existing workflow audit records retain their named actors. No retention window is applied to the timeline or export.
+
+Validation: the lifecycle PGlite suite applies this migration twice and checks source history immutability, timestamp-only refreshes, active-plan editing without payroll deductions, stale removal, and removal after source drift. PID tests cover 1,201 exported events, paging beyond 500 rows, cross-month history, station/company isolation, failed-source completeness and private salary redaction. Shared HRMS/Workforce due shapes and recovery keys are unchanged.
+
+## Available-pay recovery — 28 October 2026 (supersedes percentage caps)
+
+Recovery uses available pay after other allocated recoveries. The 50% salary cap,
+override checkbox/reason, Master percentage setting and percentage-based approval
+condition no longer apply to new saves. Server and database checks always verify
+payable salary. Workforce and HRMS payroll fit whole due lines within remaining
+take-home; a line that does not fit stays due for a later eligible payroll. No partial
+line deduction, recovery-key change or rewrite of completed payroll is introduced.
+Legacy override fields remain as audit metadata. Existing decisions remain recorded;
+the migration does not automatically approve old pending plans.
+
+Apply `20261028233017_loss_available_pay.sql` individually after
+`20261028220000_loss_exception_options.sql` and the PID history migration. Record the
+version, never run a blanket push. It is safe to apply twice and normalizes future
+policy writes to available-pay validation. Due RPCs retain their shape and return 100
+percent for compatibility. Release the Dashboard and companion HRMS payroll changes
+together. Tests cover >50% saves, available-pay reservations, legacy client fields,
+carry-forward, paid-history preservation and the existing redispute gates.

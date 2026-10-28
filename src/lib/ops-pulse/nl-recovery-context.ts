@@ -9,6 +9,7 @@ export async function recoveryContext(
   key: string,
   edit: boolean,
   allowPending = false,
+  allowUnavailable = false,
 ) {
   const auth = await getAuthorization();
   if (
@@ -55,10 +56,10 @@ export async function recoveryContext(
   if (
     row.error ||
     !station ||
-    !row.data?.source_present ||
+    (!allowUnavailable && !row.data?.source_present) ||
     // SLP recovery files only list amounts Amazon is recovering.
     // Station claims are recoverable once their cluster manager approved them.
-    (row.data.report === "station" && row.data.source_status !== "Approved") ||
+    (!allowUnavailable && row.data.report === "station" && row.data.source_status !== "Approved") ||
     (row.data.report === "nl" && !allowPending &&
       !isRecoverable(
         row.data.source_status,
