@@ -8,6 +8,7 @@ const routing = read("src/lib/approval-workflow-routing.ts");
 const reviews = read("src/lib/ops-pulse/performance-review.ts");
 const locationMaster = read("src/app/master/location/page.tsx");
 const scopeSync = read("supabase/migrations/20261024170000_sync_people_station_routing.sql");
+const preserveCompanyReporting = read("supabase/migrations/20261028193000_ops_reconcile_preserve_company_reporting.sql");
 
 const checks = [
   [loader.includes('from("hr_work_assignments")') && loader.includes('from("hr_reporting_relationships")'), "operational hierarchy loads People assignments and solid-line reporting relationships"],
@@ -18,6 +19,7 @@ const checks = [
   [locationMaster.includes("loadPeopleOperationalHierarchy"), "location master presents the People hierarchy"],
   [loader.includes("options.includeStationResponsibilities !== false"), "current hierarchy views include People station responsibilities by default"],
   [scopeSync.includes("reconcile_people_operational_routing") && scopeSync.includes("trg_sync_people_operational_routing_from_scope"), "People managed-location changes reconcile station ownership and reporting chains"],
+  [preserveCompanyReporting.includes("Do not touch People reporting relationships") && !preserveCompanyReporting.includes("'RM', 'RH', 'ZH', 'BH', 'NH'"), "Ops station reconcile no longer clears company org-chart managers (RM/BH/NH)"],
   [scopeSync.includes("trg_delete_membership_scopes_from_person") && scopeSync.includes("trg_delete_people_operational_routing_from_scope"), "People scope removal revokes generated portal access and stale operational routing"],
   [scopeSync.includes("company_product_memberships") && scopeSync.includes("'designation_policy', 'google_workspace', 'person_override'"), "People-generated Finance, OpsPulse, Recruit and Workforce memberships inherit People station scope"],
   [scopeSync.includes("reconcile_legacy_profile_reporting_manager") && scopeSync.includes("reports_to_user_id = v_manager_user_id"), "legacy Recruit and notification reporting mirrors the current People reporting chain"],
