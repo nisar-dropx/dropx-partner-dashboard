@@ -4,7 +4,7 @@ import type {DigestBuilder} from './portal-digest-delivery';
 import {readAllRows} from './supabase-pagination';
 import {loadPeopleOperationalHierarchy} from './people-operational-hierarchy';
 import {nlPeopleClusters} from './ops-pulse/nl-loss-clusters';
-import {lossReminderStage,lossReminderScheduleTime,lossReminderInWindow,selectLossReminderRows,type ReminderStation,type ReminderCase,type ReminderPlan,type ReminderRequest,type ReminderRedispute} from './loss-reminder-policy';
+import {lossReminderMonths,lossReminderThreadMonth,lossReminderStage,lossReminderScheduleTime,lossReminderInWindow,selectLossReminderRows,type ReminderStation,type ReminderCase,type ReminderPlan,type ReminderRequest,type ReminderRedispute} from './loss-reminder-policy';
 import {renderLossReminder} from './loss-reminder-render';
 
 type Recipient={email:string;name:string;stationIds:string[]};
@@ -36,10 +36,10 @@ export async function loadLossReminderScope(db:SupabaseClient,company:string,con
  }
  return {stations,recipients:[...recipients.values()]};
 }
-export async function loadLossReminderData(db:SupabaseClient,company:string,stations:ReminderStation[]){
+export async function loadLossReminderData(db:SupabaseClient,company:string,stations:ReminderStation[],date:string){
  const checkedAt=new Date().toISOString();
  const [cases,plans,requests,redisputes,settings,...runs]=await Promise.all([
-  readAllRows(db.from('nl_loss_month_cases').select('month,case_key,report,station_code,amount,source_present,source_status,data_source,final_seen_at,lifecycle_status,last_seen_at,source_updated_at,details').eq('company_id',company).in('report',['nl','slp']).order('month').order('case_key')),
+  readAllRows(db.from('nl_loss_month_cases').select('month,case_key,report,station_code,amount,source_present,source_status,data_source,final_seen_at,lifecycle_status,last_seen_at,source_updated_at,details').eq('company_id',company).in('report',['nl','slp']).in('month',[...new Set([...lossReminderMonths(date),lossReminderMonths(lossReminderThreadMonth('loss_reminder_recovery_morning',date)+'-20')[0]])]).order('month').order('case_key')),
   readAllRows(db.from('nl_loss_recoveries').select('month,case_key,is_deleted,approval_status,source_amount,source_status,outcome_code,recovery_details,allocations').eq('company_id',company).eq('is_deleted',false).order('month').order('case_key')),
   readAllRows(db.from('nl_dispute_requests').select('month,case_key,status,source_stage').eq('company_id',company).order('month').order('case_key')),
   readAllRows(db.from('nl_case_response_windows').select('month,case_key,enabled,workflow_status').eq('company_id',company).order('month').order('case_key')),
@@ -52,13 +52,13 @@ export async function loadLossReminderData(db:SupabaseClient,company:string,stat
  const scoped=new Set(stations.map(s=>s.source_code));
  const records=(cases.data||[]) as ReminderCase[];
  if(records.some(c=>scoped.has(c.station_code)&&c.source_present&&(c.amount===null||!Number.isFinite(Number(c.amount)))))throw Error('A loss amount is missing. Resolve source data before sending totals.');
- return {checkedAt,warnings,input:{stations,cases:records,plans:(plans.data||[]) as ReminderPlan[],requests:(requests.data||[]) as ReminderRequest[],redisputes:(redisputes.data||[]) as ReminderRedispute[],recoverableStatuses:settings.data?.recoverable_statuses||[]}};
+ return {checkedAt,warnings,input:{date,stations,cases:records,plans:(plans.data||[]) as ReminderPlan[],requests:(requests.data||[]) as ReminderRequest[],redisputes:(redisputes.data||[]) as ReminderRedispute[],recoverableStatuses:settings.data?.recoverable_statuses||[]}};
 }
 export const buildLossReminderDigest:DigestBuilder=async(db,control,date)=>{
  const stage=lossReminderStage(control.event_key);
  if(!stage||!lossReminderInWindow(stage,date))return {checkedAt:new Date().toISOString(),messages:[]};
  const scope=await loadLossReminderScope(db,control.company_id,control.config);
- const data=await loadLossReminderData(db,control.company_id,scope.stations);
+ const data=await loadLossReminderData(db,control.company_id,scope.stations,date);
  const rows=selectLossReminderRows(stage,data.input);
  const messages=scope.recipients.flatMap(recipient=>{
   const scopedRows=rows.filter(r=>recipient.stationIds.includes(r.stationId));

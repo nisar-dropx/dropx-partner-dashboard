@@ -26,6 +26,29 @@ export function lossReminderThreadMonth(event:string,date:string){
  }
  return date.slice(0,7);
 }
+/** Report-date calendar months, independent of the monthly email thread or payroll month. */
+export function lossReminderMonths(date:string){
+ const current=date.slice(0,7),previous=new Date(current+'-01T12:00:00Z');
+ previous.setUTCMonth(previous.getUTCMonth()-1);
+ return [previous.toISOString().slice(0,7),current];
+}
+/** NL recovery follows the previous loss month of the 20th–5th recovery cycle. */
+export function lossReminderIncludesMonth(stage:LossReminderStage,date:string,report:string,month:string){
+ if(stage==='recovery'&&report==='nl'){
+  const cycle=lossReminderThreadMonth('loss_reminder_recovery_morning',date);
+  return month===lossReminderMonths(cycle+'-20')[0];
+ }
+ return lossReminderMonths(date).includes(month);
+}
+export function lossReminderPeriodLabel(stage:LossReminderStage,date:string){
+ const label=(month:string)=>new Date(month+'-01T12:00:00Z').toLocaleDateString('en-IN',{month:'short',year:'numeric',timeZone:'Asia/Kolkata'});
+ const months=lossReminderMonths(date);
+ if(stage==='recovery'){
+  const cycle=lossReminderThreadMonth('loss_reminder_recovery_morning',date);
+  return 'NL: '+label(lossReminderMonths(cycle+'-20')[0])+' · SLP: '+months.map(label).join(' – ');
+ }
+ return 'Loss months: '+months.map(label).join(' – ');
+}
 export const lossReminderThreadEvent=(event:string)=>lossReminderStage(event)?`loss_reminder_${lossReminderStage(event)}_morning`:event;
 export function lossReminderScheduleTime(event:string,date:string,config:Record<string,unknown>){
  const once=config.one_time_schedule as {date?:string;time?:string}|undefined;
@@ -45,10 +68,11 @@ export type ReminderRequest={month:string;case_key:string;status:'draft'|'submit
 export type ReminderRedispute={month:string;case_key:string;enabled:boolean;workflow_status:string};
 export type ReminderRow={stationId:string;station:string;stationName:string;owner:string;shipmentId:string;caseKey:string;month:string;report:string;amount:number;pending:boolean;status:string;updatedAt:string|null;link:string};
 const key=(r:{month:string;case_key:string})=>JSON.stringify([r.month,r.case_key]);
-export function selectLossReminderRows(stage:LossReminderStage,input:{stations:ReminderStation[];cases:ReminderCase[];plans:ReminderPlan[];requests:ReminderRequest[];redisputes:ReminderRedispute[];recoverableStatuses:string[]}) {
+export function selectLossReminderRows(stage:LossReminderStage,input:{date:string;stations:ReminderStation[];cases:ReminderCase[];plans:ReminderPlan[];requests:ReminderRequest[];redisputes:ReminderRedispute[];recoverableStatuses:string[]}) {
  const stations=new Map(input.stations.map(s=>[s.source_code,s])),plans=new Map(input.plans.map(p=>[key(p),p])),requests=new Map(input.requests.map(p=>[key(p),p])),redisputes=new Map(input.redisputes.map(p=>[key(p),p]));
  const result:ReminderRow[]=[];
  for(const c of input.cases){
+  if(!lossReminderIncludesMonth(stage,input.date,c.report,c.month))continue;
   const s=stations.get(c.station_code);if(!s||!c.source_present||c.amount===null||!Number.isFinite(Number(c.amount))||Number(c.amount)<=0)continue;
   const phase=casePhase({case_status:c.details?.case_status,nl_status:c.source_status,extra:c.details?.extra});
   let pending=true,status='Pending update';
