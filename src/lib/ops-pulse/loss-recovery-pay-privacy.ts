@@ -62,7 +62,7 @@ export function privacySafeRecoveryError(messageValue: unknown, includesPeoplePr
     return "Salary eligibility is unavailable for the selected People profile. Complete payroll or mapping and retry.";
   }
   if (/(more than|exceed|limit)/i.test(message)) {
-    return "The selected monthly recovery exceeds the permitted salary limit. Spread it over more instalments or use an authorised override.";
+    return "The selected monthly recovery exceeds available pay. Spread it over more instalments.";
   }
   return "Salary eligibility for the selected People profile could not be verified.";
 }

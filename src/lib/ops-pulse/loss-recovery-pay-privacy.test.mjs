@@ -43,7 +43,8 @@ test("recovery history redacts People pay but keeps operational schedule data", 
 test("People salary validation errors never disclose monetary values", () => {
   const exposed = "The monthly recovery of ₹12,000 for D1 is more than the 25% salary limit of ₹10,000.";
   const safe = privacySafeRecoveryError(exposed, true);
-  assert.match(safe, /exceeds the permitted salary limit/);
+  assert.match(safe, /exceeds available pay/);
+  assert.doesNotMatch(safe, /override/);
   assert.doesNotMatch(safe, /₹|12,000|10,000|25%/);
   assert.equal(privacySafeRecoveryError(exposed, false), exposed);
 });

@@ -110,7 +110,7 @@ export function LossRedisputeDesk({
         </div>
       </div>
       {message ? <p role="status">{message}</p> : null}
-      {revoking ? <section className={styles.revokeCompact}>
+      {revoking ? <section className={styles.redisputeRemove}>
         <strong>Remove · {revoking.case_key}</strong>
         <select aria-label="Reason for removing redispute" value={revokeNote} onChange={e=>setRevokeNote(e.target.value)}>
           {["Enabled by mistake","Continue with recovery","Duplicate redispute","No longer required"].map(n=><option key={n}>{n}</option>)}
