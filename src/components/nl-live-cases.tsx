@@ -1,4 +1,5 @@
 "use client";
+import { LossCaseRow, LossCaseColumns } from "./loss-case-row";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -19,8 +20,7 @@ import { RecoveryForm } from "./nl-loss-cases";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
-import { recoveryDetailsUpdated, finalRecoverySummary } from "@/lib/ops-pulse/loss-final-summary";
-import { LossFinalMetrics } from "./loss-final-metrics";
+import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -168,7 +168,6 @@ export function NlLiveCases({
   }
   return (
     <section className={styles.panel}>
-      {stageView === "final" ? <LossFinalMetrics summary={finalRecoverySummary(shown.map(({c})=>({amount:c.amount,recoverable:c.recoverable,updated:recoveryDetailsUpdated(c,c.recovery)})))}/> : null}
       <TrackingDetailModal trackingId={tracking?.id ?? null} stationHint={tracking?.station} onClose={() => setTracking(null)} />
       <div className={styles.panelHead}>
         <div>
@@ -211,46 +210,15 @@ export function NlLiveCases({
           </button>
         ))}
       </div>
+      <LossCaseColumns/>
       <div className={styles.cases}>
         {current.map(({ c, phase }) => {
           return (
             <article key={c.case_key} className={styles.case}>
-              {c.details.tid && !c.details.tid_approximate ? <button type="button" className={styles.trackingLink} onClick={() => setTracking({ id: c.details.tid!, station: c.station_code })} aria-label={`Track ${c.details.tid} in SCC`}>{c.station_code} · {c.details.tid} ↗</button> : null}
-              <button
-                className={styles.caseSummary}
-                aria-expanded={active === c.case_key}
-                onClick={() => setActive(active === c.case_key ? null : c.case_key)}
-              >
-                <div>
-                  <strong style={c.details.tid && !c.details.tid_approximate ? { visibility: "hidden" } : undefined}>{c.station_code} · {c.details.tid || c.case_key}</strong>
-                  <span>
-                    {c.details.category || "Unspecified reason"}
-                    {c.details.sub_category && c.details.sub_category !== c.details.category
-                      ? ` · ${c.details.sub_category}`
-                      : ""}
-                  </span>
-                </div>
-                <div>
-                  <strong>{money(c.amount)}</strong>
-                  <span className={styles.badges}>
-                    <span className={`${styles.badge} ${styles[phase.tone]}`}>
-                      {phase.label}
-                    </span>
-                    {stageView === "final" && ["not_disputed", "sla_missed"].includes(c.details.case_status || "") ? <span className={styles.hint}>{c.details.case_status?.replaceAll("_", " ")}</span> : null}
-                    {c.recoverable ? <span className={styles.pending}>{recoveryNeedsReview(c) ? "Recovery review needed" : !recoveryDetailsUpdated(c,c.recovery) ? "Pending recovery update" : "Recovery details updated"}</span> : null}
-                    {c.request &&
-                    !filedInCloak(c.request, likeOf(c)) &&
-                    (requestSent(c.request, c.details.extra?.current_sla_stage) ||
-                      c.request.status === "draft" ||
-                      c.request.status === "returned") ? (
-                      <span className={`${styles.badge} ${styles[REQUEST_STATUS[c.request.status].tone]}`}>
-                        {REQUEST_STATUS[c.request.status].label}
-                      </span>
-                    ) : null}
-                  </span>
-                </div>
-                <span aria-hidden>{active === c.case_key ? "−" : "+"}</span>
-              </button>
+              <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
+                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at}
+                open={active === c.case_key} onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.case_key?null:c.case_key)}
+                status={<><span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{c.recoverable ? <span className={!recoveryDetailsUpdated(c,c.recovery)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!recoveryDetailsUpdated(c,c.recovery)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
               {active === c.case_key ? (
                 <>
 

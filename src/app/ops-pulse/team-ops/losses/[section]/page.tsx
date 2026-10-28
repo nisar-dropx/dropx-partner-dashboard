@@ -1,3 +1,5 @@
+import { LossSummary } from "@/components/loss-station-table";
+import { lossFacts } from "@/lib/ops-pulse/loss-station-summary";
 import { LossDebitReview } from "@/components/loss-debit-review";
 import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
 import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
@@ -152,8 +154,8 @@ export default async function LossesSectionPage({
     }
     const caseKey = q.get("case") || "";
     const month = q.get("month") || "";
-    let target: "slp-initial" | "slp-final" = "slp-final";
-    if (auth.companyId && caseKey && month && supabaseAdmin) {
+    let target: "slp-initial" | "slp-final" = searchParams.view === "initial" ? "slp-initial" : "slp-final";
+    if (!searchParams.view && auth.companyId && caseKey && month && supabaseAdmin) {
       const row = await supabaseAdmin
         .from("nl_loss_month_cases")
         .select("final_seen_at")
@@ -167,6 +169,11 @@ export default async function LossesSectionPage({
     const qs = q.toString();
     redirect(qs ? `/team-ops/losses/${target}?${qs}` : `/team-ops/losses/${target}`);
   }
+  if (params.section === "summary") {
+    const [workspace, ledger] = await Promise.all([loadRecoveryWorkspace(auth, true), loadRecoveryLedger(auth)]);
+    return <main className={styles.workspace}><LossHeader title="Loss summary" intro="Station-wise NL and SLP values, updates and actual recovery." tabs={tabs} active="summary"/>
+      <LossSummary facts={lossFacts(workspace.rows, ledger.lines, workspace.settings?.recoverable_statuses || [])} ledgerReady={ledger.ready}/></main>;
+  }
   const section = sections[params.section];
   if (!section) notFound();
   try {
@@ -174,16 +181,13 @@ export default async function LossesSectionPage({
       const stageView = searchParams.view === "historic" || searchParams.view === "final"
         ? "final" : searchParams.view === "live" || searchParams.view === "initial"
           ? "initial" : defaultLossFilter() === "recoverable" ? "final" : "initial";
-      return <NlLiveReport view={await loadNlLive(auth, searchParams, stageView)} tabs={tabs} />;
+      const [view, ledger] = await Promise.all([loadNlLive(auth, searchParams, stageView), loadRecoveryLedger(auth)]);
+      return <NlLiveReport view={view} facts={lossFacts(view.overviewRows, ledger.lines, view.settings?.recoverable_statuses || [])} ledgerReady={ledger.ready} tabs={tabs} />;
     }
-    // Potential loss and SLP Initial are read-only reports; SLP is assigned for recovery on SLP Final only.
-    if (section.report === "slp_final" && (await lossSchemaReady()))
-      return (
-        <NlLossReport
-          view={await loadRecoveryView(auth, section.report, searchParams)}
-          tabs={tabs}
-        />
-      );
+    if ((section.report === "slp_final" || section.report === "slp_initial") && (await lossSchemaReady())) {
+      const [view, ledger] = await Promise.all([loadRecoveryView(auth, section.report, searchParams), loadRecoveryLedger(auth)]);
+      return <NlLossReport view={view} facts={lossFacts(view.overviewRows, ledger.lines, view.settings?.recoverable_statuses || [])} ledgerReady={ledger.ready} tabs={tabs}/>;
+    }
     // Read-only listing: potential loss and SLP Initial always; SLP Final until the recovery ledger migration is applied.
     return (
       <OpsLossReport

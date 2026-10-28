@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NlViewSwitch } from "./nl-loss-report";
 import styles from "@/components/ops-loss-report.module.css";
 import { OpsLossCases } from "@/components/ops-loss-cases";
 import { ALL_SNAPSHOTS, type LossReportView } from "@/lib/ops-pulse/loss-reports";
@@ -40,6 +41,7 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
 
   return <div className={styles.workspace}>
     <LossHeader title={title} intro={intro} tabs={tabs} active={activeTab} />
+    {activeTab.startsWith("slp-") ? <NlViewSwitch source="slp" active={activeTab === "slp-initial" ? "live" : "historic"}/> : null}
 
     {run ? <div className={styles.context}>
       <span>Source <strong>{view.periods.length > 1 ? `${view.periods.length} Amazon files` : (run.source_file ?? "Amazon report").trim()}</strong></span>

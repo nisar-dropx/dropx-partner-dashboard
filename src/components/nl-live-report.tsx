@@ -1,6 +1,7 @@
-import { LossFinalMetrics } from "./loss-final-metrics";
+import { LossStationTable } from "./loss-station-table";
+import type { LossFact } from "@/lib/ops-pulse/loss-station-summary";
 import { LossWorkbook } from "./loss-workbook";
-import { LossMultiFilter, LossTableSort } from "./loss-list-controls";
+import { LossMultiFilter } from "./loss-list-controls";
 import { lossFilterValues } from "@/lib/ops-pulse/loss-list-controls";
 import Link from "next/link";
 import type { LossTab } from "@/components/ops-loss-report";
@@ -36,10 +37,10 @@ const left = (days: number) =>
 /** The month Cloak is still deciding: where the window stands, and what each station still owes. */
 export function NlLiveReport({
   view: v,
-  tabs,
+  tabs, facts, ledgerReady,
 }: {
   view: NlLiveView;
-  tabs: LossTab[];
+  tabs: LossTab[]; facts: LossFact[]; ledgerReady: boolean;
 }) {
   const isFinal = v.stageView === "final";
   const viewKey = isFinal ? "historic" : "live";
@@ -56,7 +57,6 @@ export function NlLiveReport({
     if (phase) q.set("phase", phase);
     return `${base}?${q}`;
   };
-  const s = v.summary;
   const current = v.stage.stage;
   const stationOwes = current === "eDSP1" || current === "eDSP2";
   return (
@@ -143,26 +143,6 @@ export function NlLiveReport({
             </ol>
           </section>
           </details> : null}
-          <div className={`${styles.metrics} ${styles.metrics4}`}>
-            {!isFinal ? <>
-            <div>
-              <span>Waiting on stations</span>
-              <strong>{s.pending.toLocaleString("en-IN")}</strong>
-              <small>
-                {money(s.pendingAmount)} ·{" "}
-                {s.unsent
-                  ? `${s.unsent.toLocaleString("en-IN")} not yet sent to the Cloak desk`
-                  : "all sent to the Cloak desk"}
-              </small>
-            </div>
-            <div>
-              <span>With Amazon</span>
-              <strong>{s.withAmazon.toLocaleString("en-IN")}</strong>
-              <small>{money(s.withAmazonAmount)} under review</small>
-            </div>
-            </> : null}
-          </div>
-          {isFinal && !v.station ? <LossFinalMetrics summary={s}/> : null}
           {!isFinal && v.canDesk && v.deskQueue ? (
             <div className={styles.workbook}>
               <div>
@@ -208,6 +188,8 @@ export function NlLiveReport({
             </Link>
           </form>
           {isFinal && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind="nl" query={new URLSearchParams({ kind: "nl", month: v.month, station: v.station || "", cluster: v.cluster || "", reason: v.reason || "" }).toString()} canUpload={v.canDispute} scope={v.station ? `stations ${v.station}` : "your stations"} /></details> : null}
+          {!ledgerReady && isFinal ? <p className={styles.notice}>Payroll collections are unavailable; recovery amounts are incomplete.</p> : null}
+          <LossStationTable facts={facts} title={isFinal ? "Station recovery updates" : "Station dispute overview"} initial={!isFinal} href={href({})}/>
           {v.station ? (
             <>
               <div className={styles.context}>
@@ -231,81 +213,7 @@ export function NlLiveReport({
                 canRecovered={v.canRecovered}
               />
             </>
-          ) : (
-            <section className={styles.panel}>
-              <div className={styles.panelHead}>
-                <h2>{isFinal ? "Station recovery updates" : "Station dispute overview"}</h2>
-                <LossTableSort value={v.sort} />
-              </div>
-              <div className={styles.tableWrap}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Station</th>
-                      <th>Current cluster · People</th>
-                      <th>{isFinal ? "Total shipments / value" : "Raised"}</th>
-                      {!isFinal ? <><th>Waiting on station</th><th>With Amazon</th></> : null}
-                      {isFinal ? <><th>Updated / value</th><th>Pending / value</th><th>Non-recoverable</th></> : <><th>Saved</th><th>Recoverable</th></>}
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {v.totals.map((t) => (
-                      <tr key={t.id}>
-                        <td>
-                          <strong>{t.station_code}</strong>
-                          <small>{t.station_name}</small>
-                        </td>
-                        <td>{t.cluster}</td>
-                        <td>
-                          {t.count}
-                          <small>{money(t.amount)}</small>
-                        </td>
-                        {!isFinal ? <>
-                        <td>
-                          {t.pending ? (
-                            <span className={`${styles.badge} ${styles.warn}`}>
-                              {t.pending} · {money(t.pendingAmount)}
-                            </span>
-                          ) : (
-                            <span className={`${styles.badge} ${styles.good}`}>
-                              None
-                            </span>
-                          )}
-                          {t.pending ? (
-                            <small>
-                              {t.unsent
-                                ? `${t.unsent} not sent to desk`
-                                : "all sent to desk"}
-                            </small>
-                          ) : null}
-                        </td>
-                        <td>{t.withAmazon}</td>
-                        </> : null}
-                        {isFinal ? <><td>{t.updated}<small>{money(t.updatedAmount)}</small></td><td>{t.pendingUpdate}<small>{money(t.pendingUpdateAmount)}</small></td><td>{t.nonrecoverable}<small>{money(t.nonrecoverableAmount)}</small></td></> : <><td>{t.saved ? money(t.savedAmount) : "—"}</td><td>{t.recoverable ? money(t.recoverableAmount) : "—"}</td></>}
-                        <td>
-                          <Link
-                            className={t.pending ? styles.primary : styles.button}
-                            href={href({
-                              station: t.source_code,
-                              phase: t.pending ? "todo" : "",
-                            })}
-                          >
-                            {t.pending ? "Review & dispute →" : "View cases →"}
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {!v.totals.length ? (
-                <p className={styles.empty}>
-                  No live cases match these filters.
-                </p>
-              ) : null}
-            </section>
-          )}
+          ) : null}
           <p className={styles.footer}>
             Cases refresh from Cloak every hour. Confirmed outcomes appear in Final; pending decisions stay in Initial.
           </p>

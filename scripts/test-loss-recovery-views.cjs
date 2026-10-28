@@ -26,6 +26,11 @@ data={stations:[{id:'a',company_id:'co',station_code:'ERSE',station_name:'Statio
  data.nl_loss_month_cases.pop();
  v=await loadRecoveryView(auth,'nl',{station:'["ERSE","SPBE"]',reason:'Ageing'});assert.equal(v.cases.length,2);assert.equal(v.totals.reduce((s,t)=>s+t.amount,0),35000);
  v=await loadRecoveryView(auth,'slp_final',{station:'SPBE',period:'Aug-Sep'});assert.equal(v.cases.length,1);assert.equal(v.cases[0].amount,8200);
+ assert.ok(v.overviewRows.every(c=>c.station_code==='SPBE'));
+ const initialSlp={...row('slp:open','SPBE',500,'slp','SLP Initial'),in_initial:'true',in_final:'false',details:{period:'Aug-Sep',in_initial:true,in_final:false}};
+ data.nl_loss_month_cases.push(initialSlp);
+ v=await loadRecoveryView(auth,'slp_initial',{station:'SPBE',period:'Aug-Sep'});assert.deepEqual(v.cases.map(c=>c.case_key),['slp:open']);assert.deepEqual(v.overviewRows.map(c=>c.case_key),['slp:open']);
+ data.nl_loss_month_cases.pop();
  v=await loadRecoveryView(auth,'nl',{cluster:'aom:aom1',station:'SPBE'});assert.equal(v.cases.length,1);assert.equal(v.cases[0].station_code,'SPBE');
  const {loadRecoveryPayables}=load('src/lib/ops-pulse/nl-recovery-payables.ts');data.workforce=[{id:'w1',company_id:'co',is_active:true,date_of_join:'2020-01-01'}];data.nl_loss_recoveries=[];
  const people=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25');assert.deepEqual(payoutCalls[0][4],{workforceIds:['w1'],includeLossRecoveries:false});assert.equal(payoutCalls[0][1].hasAllLocationAccess,true,'All-location pay for selected people remains included');assert.equal(people[0].recovery_limit,5000);assert.equal(people[0].salary_gross,12000);assert.equal(people[0].salary_month,'2026-10');assert.equal(payoutCalls[0][2],'2026-10-01');

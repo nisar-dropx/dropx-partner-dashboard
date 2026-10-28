@@ -29,8 +29,8 @@ export function LossHeader({ eyebrow = "Team Ops · Losses", title, intro, tabs,
         </div>
         <div className={styles.search}><LossTidSearch /></div>
       </div>
-      <LossTabs tabs={tabs} active={["slp-initial","slp-final","potential"].includes(active)?"nl":active} />
-      {["nl","slp-initial","slp-final","potential"].includes(active)?<nav className={styles.tabs} aria-label="Loss sources">{[["nl","NL"],["slp-initial","SLP Initial"],["slp-final","SLP Final"],["potential","At risk"]].map(([key,label])=><Link key={key} prefetch={false} className={`${styles.tab} ${active===key?styles.activeTab:""}`} href={`/team-ops/losses/${key}`}>{label}</Link>)}</nav>:null}
+      <LossTabs tabs={tabs} active={["slp","slp-initial","slp-final","potential","summary"].includes(active)?"nl":active} />
+      {["nl","slp","slp-initial","slp-final","potential","summary"].includes(active)?<nav className={styles.tabs} aria-label="Loss sources">{[["nl","NL"],["slp","SLP"],["summary","Summary"]].map(([key,label])=><Link key={key} prefetch={false} className={`${styles.tab} ${(active===key || key==="slp"&&active.startsWith("slp-"))?styles.activeTab:""}`} aria-current={(active===key || key==="slp"&&active.startsWith("slp-"))?"page":undefined} href={`/team-ops/losses/${key}`}>{label}</Link>)}</nav>:null}
     </header>
   );
 }

@@ -222,7 +222,7 @@ export async function loadRecoveryView(
   const { settings, outcomes, checked, failure } = context;
   const accepted = settings?.recoverable_statuses ?? [];
   const inStage = (r: { in_initial?: unknown; in_final?: unknown }) =>
-    String(kind === "slp_initial" ? r.in_initial : r.in_final) === "true";
+    String(kind === "slp_initial" ? r.in_initial : r.in_final) === "true" && (kind !== "slp_initial" || String(r.in_final) !== "true");
   const all = ((meta.data ?? []) as MetaRow[]).filter((r) =>
     slp ? inStage(r) : hasFinalLossOutcome(isRecoverable(r.source_status, accepted), r.source_status, r.status, r.stage),
   );
@@ -271,7 +271,7 @@ export async function loadRecoveryView(
       lossFilterMatches(station, r.station_code) &&
       lossFilterMatches(reason, r.reason || "Unspecified"),
   );
-  const overviewPlans=await readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations").eq("company_id",company).in("month",[...new Set(filtered.map(r=>r.month))].length?[...new Set(filtered.map(r=>r.month))]:["__NONE__"]).order("month").order("case_key"));
+  const overviewPlans=await readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations,updated_at").eq("company_id",company).in("month",[...new Set(filtered.map(r=>r.month))].length?[...new Set(filtered.map(r=>r.month))]:["__NONE__"]).order("month").order("case_key"));
   if(overviewPlans.error) throw Error("Recovery update totals could not be loaded.");
   const overviewByKey=new Map((overviewPlans.data||[]).map(p=>[`${p.month}|${p.case_key}`,p]));
   const totals = matchingStations
@@ -353,8 +353,14 @@ export async function loadRecoveryView(
     reasons,
     station,
     stations: matchingStations,
+    overviewRows: filtered.map(r => ({ ...r, report: slp ? "slp" : "nl",
+      source_updated_at: r.last_seen_at, source_file: "", amount: Number(r.amount || 0),
+      details: { period: r.period || r.month, case_status: r.status, category: r.reason,
+        in_initial: String(r.in_initial) === "true", in_final: String(r.in_final) === "true",
+        extra: { current_sla_stage: r.stage } }, recovery: overviewByKey.get(r.month + "|" + r.case_key) || null })) as NlCase[],
     totals: sortLossRows(totals, filters.sort),
     sort: filters.sort || "value_desc",
+    phase: filters.phase || "pending_updates",
     cases,
     outcomes,
     checked,
