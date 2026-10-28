@@ -66,7 +66,7 @@ async function transition(b: Record<string, any>) {
     String(b.month || ""),
     String(b.case_key || ""),
     true,
-    true,
+    b.action !== "activate",
   );
   if (
     ![
