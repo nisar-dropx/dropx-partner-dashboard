@@ -33,7 +33,7 @@ const isWorkCycle = (document: DocumentRow) => /work\s*_?cycle/i.test(document.c
 const isInsurance = (document: DocumentRow) =>
   document.kind === "insurance" ||
   (document.kind === "issued" && document.category === "insurance card") ||
-  /group medical|group personal accident|insurance/i.test(document.category);
+  /group medical|group personal accident|group insurance cover|insurance/i.test(document.category);
 
 type RequestType = {
   id: string;
@@ -114,7 +114,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
   const [viewing, setViewing] = useState<DocumentRow | null>(null);
   const [downloadingId, setDownloadingId] = useState("");
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
-  const listCacheKey = `dropx_documents:v4:${account.profileType}:${account.id}`;
+  const listCacheKey = `dropx_documents:v5:${account.profileType}:${account.id}`;
 
   const load = useCallback(async (background = false, force = false) => {
     if (!background) setLoading(true);

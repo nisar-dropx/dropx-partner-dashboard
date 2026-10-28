@@ -174,15 +174,15 @@ export async function GET(request: Request) {
           downloadUrl: query("insurance", row.id)
         };
       }),
-      // Letterpad listing Self + registered dependents for the Marsh cover.
+      // Official DropX letterpad confirming Self + registered dependents on Marsh cover.
       ...(insuranceRows.length
         ? [{
             id: "cover-letterpad",
             kind: "insurance" as const,
-            category: "group medical",
-            title: "Cover letterpad",
-            subtitle: "Self and registered family members under Marsh group insurance",
-            fileName: "cover-letterpad.pdf",
+            category: "group insurance cover",
+            title: "Group insurance cover letter",
+            subtitle: "Self and registered family members — DropX letterpad",
+            fileName: "group-insurance-cover.pdf",
             mimeType: "application/pdf",
             publishedAt: insuranceRows[0].source_updated_at,
             expiresOn: null as string | null,

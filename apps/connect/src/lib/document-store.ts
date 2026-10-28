@@ -76,8 +76,11 @@ export async function loadDocument(document: StoredDocument) {
     const stored = await native.readCachedDocument({ key });
     return { bytes: base64ToBytes(stored.data), mimeType: guessMimeType(document, stored.mimeType) };
   }
-  const response = await fetch(document.downloadUrl);
-  if (!response.ok) throw new Error("Document is unavailable.");
+  const response = await fetch(document.downloadUrl, { cache: "no-store" });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error || "Document is unavailable.");
+  }
   return {
     bytes: new Uint8Array(await response.arrayBuffer()),
     mimeType: guessMimeType(document, response.headers.get("content-type")?.split(";")[0])

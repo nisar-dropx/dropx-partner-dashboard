@@ -5,6 +5,7 @@ import { userFacingError } from "@/lib/user-facing-error";
 import { renderConnectExitDocumentPdf } from "../../../../../../src/lib/connect-exit-document";
 import { buildPayDocumentInput, payDocumentSettingsFromSnapshot, type PayDocumentSettings } from "../../../../../../src/lib/hrms-pay-document-input";
 import { createPayDocumentPdf } from "../../../../../../src/lib/hrms-pay-document-pdf";
+import { downloadMarshInsuranceFile } from "@/lib/marsh-drive";
 import { supabaseAdmin } from "../../../../../../src/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -132,20 +133,11 @@ export async function GET(request: Request, { params }: { params: { kind: string
         .eq("id", params.id).maybeSingle();
       if (result.error) throw new Error(result.error.message);
       if (!result.data?.drive_file_id) return Response.json({ error: "Insurance card was not found." }, { status: 404 });
-      const base = process.env.WORKFORCE_AMAZON_WORKER_URL?.trim().replace(/\/$/, "") || process.env.WORKFORCE_WORKER_URL?.trim().replace(/\/$/, "");
-      const key = process.env.WORKFORCE_AMAZON_WORKER_KEY?.trim() || process.env.WORKFORCE_WORKER_ADMIN_KEY?.trim() || process.env.ADMIN_API_KEY?.trim();
-      if (!base || !key) throw new Error("Insurance file service is not configured.");
-      const drive = await fetch(`${base}/api/admin/marsh/drive/${encodeURIComponent(result.data.drive_file_id)}`, {
-        headers: { "x-admin-key": key },
-        cache: "no-store",
-        signal: AbortSignal.timeout(60_000)
-      });
-      if (!drive.ok) throw new Error("Unable to open the insurance card.");
-      const bytes = await drive.arrayBuffer();
-      return new Response(bytes, { headers: {
+      const file = await downloadMarshInsuranceFile(result.data.drive_file_id);
+      return new Response(file.bytes, { headers: {
         "Cache-Control": "private, no-store",
-        "Content-Disposition": `inline; filename="${safeDownloadName(result.data.file_name || "insurance-card.pdf")}"`,
-        "Content-Type": result.data.mime_type || drive.headers.get("content-type") || "application/pdf",
+        "Content-Disposition": `inline; filename="${safeDownloadName(result.data.file_name || file.fileName || "insurance-card.pdf")}"`,
+        "Content-Type": result.data.mime_type || file.mimeType || "application/pdf",
         "X-Content-Type-Options": "nosniff"
       }});
     }

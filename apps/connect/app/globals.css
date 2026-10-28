@@ -9564,7 +9564,7 @@ body {
 
 .dx-documents-head-actions > button,
 .dx-document-list > article > button,
-.dx-document-viewer header > button {
+.dx-document-viewer header button {
   display: inline-flex;
   min-height: 40px;
   gap: 8px;
@@ -9581,13 +9581,13 @@ body {
 
 .dx-documents-head-actions > button:disabled,
 .dx-document-list > article > button:disabled,
-.dx-document-viewer header > button:disabled {
+.dx-document-viewer header button:disabled {
   opacity: .45;
 }
 
 .dx-documents-head-actions svg,
 .dx-document-list > article > button svg,
-.dx-document-viewer header svg {
+.dx-document-viewer header button svg {
   width: 16px;
   height: 16px;
 }
@@ -9598,6 +9598,12 @@ body {
   color: var(--one-ink);
   border: 1px solid rgba(25, 34, 59, .12);
   background: #fff;
+}
+
+.dx-document-viewer-actions > button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 11px;
 }
 
 .dx-document-list > article.is-openable {
