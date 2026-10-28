@@ -49,6 +49,7 @@ assert.equal(people.canPreviewPortalUsers(false, null, { code: "CLM", active: tr
 assert.equal(people.canPreviewPortalUsers(false, "TECH"), false);
 let actor = "owner", selected = null, revoked = false;
 const mocks = {
+  "./mapping-summary-access": moduleAt("src/lib/mapping-summary-access.ts", {}),
   "@/lib/with-timeout": moduleAt("src/lib/with-timeout.ts", {}),
   "next/navigation": { redirect: (url) => { throw new Error(url); } },
   "next/cache": { unstable_cache: fn => fn },
