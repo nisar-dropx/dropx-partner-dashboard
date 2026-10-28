@@ -14,7 +14,7 @@ const statusLabel: Record<ProviderMappingSummaryStatus, string> = {
 
 export function ProviderMappingSummary({stations}: {stations: ProviderMappingSummaryStation[]}) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("attention");
+  const [status, setStatus] = useState("all");
   const [selectedId, setSelectedId] = useState("");
   const totals = useMemo(() => providerMappingSummaryTotals(stations), [stations]);
   const filtered = useMemo(() => {
