@@ -21,6 +21,7 @@ import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
+import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 
 const money = (n: number) =>
@@ -230,6 +231,7 @@ export function NlLiveCases({
                   canDesk={canDesk}
                 /> : null}
                 </details>
+                {!(stageView === "final" && c.recoverable) ? <LossPidTimeline month={c.month} caseKey={c.case_key}/> : null}
                 {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canApprove} /> : null}
                 </>
               ) : null}

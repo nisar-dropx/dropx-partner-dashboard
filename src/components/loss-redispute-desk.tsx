@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { NlCase } from "@/lib/ops-pulse/nl-loss-policy";
 import { ListPager, usePaged } from "./list-pager";
+import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 export type RedisputeWindow = {
   version: number;
@@ -33,7 +34,8 @@ export function LossRedisputeDesk({
     >([]),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
-  const [revoking,setRevoking] = useState<RedisputeWindow|null>(null), [revokeNote,setRevokeNote] = useState("");
+  const [revoking,setRevoking] = useState<RedisputeWindow|null>(null), [revokeNote,setRevokeNote] = useState("Enabled by mistake");
+  const [historyCase, setHistoryCase] = useState<RedisputeWindow|null>(null);
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("open");
   const byKey = useMemo(
@@ -156,7 +158,7 @@ export function LossRedisputeDesk({
       setMessage(
         `${body.results.length - failed.length} updated.${failed.length ? " " + failed.map((r: { case_key: string; error: string }) => `${r.case_key}: ${r.error}`).join("; ") : ""}`,
       );
-      setBulk([]); setRevoking(null); setRevokeNote("");
+      setBulk([]); if (!failed.length) setRevoking(null);
       router.refresh();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Unable to activate.");
@@ -286,7 +288,15 @@ export function LossRedisputeDesk({
           ))}
         </details>
       ) : null}
-      {revoking ? <section className={styles.allocation} aria-label="Disable redispute"><strong>Disable · {revoking.case_key}</strong><p className={styles.hint}>Closes the response window and resumes eligible recovery. History stays available.</p><div className={styles.toolbar}><input aria-label="Disable reason" value={revokeNote} maxLength={4000} placeholder="Reason for disabling" onChange={e=>setRevokeNote(e.target.value)}/><button className={styles.primary} disabled={busy || revokeNote.trim().length<10} onClick={()=>void activate([{...revoking,action:"revoke",note:revokeNote.trim()}])}>Disable redispute</button><button className={styles.button} disabled={busy} onClick={()=>setRevoking(null)}>Cancel</button></div></section> : null}
+      {revoking ? <section className={styles.redisputeRemove} aria-label="Remove redispute">
+        <strong>Remove redispute · {revoking.case_key}</strong>
+        <select aria-label="Removal reason" value={revokeNote} disabled={busy} onChange={e=>setRevokeNote(e.target.value)}>
+          {['Enabled by mistake','Continue with recovery','Duplicate redispute','No longer required'].map(reason=><option key={reason}>{reason}</option>)}
+        </select>
+        <button className={styles.primary} disabled={busy} onClick={()=>void activate([{...revoking,action:"revoke",note:revokeNote}])}>{busy?'Removing…':'Remove redispute'}</button>
+        <button className={styles.button} disabled={busy} onClick={()=>setRevoking(null)}>Keep redispute</button>
+        <small>Closes the response window; eligible recovery resumes. History is retained.</small>
+      </section> : null}
       <div className={styles.tableWrap}>
         <table className={styles.ledgerTable}>
           <thead>
@@ -296,7 +306,7 @@ export function LossRedisputeDesk({
               <th>Status</th>
               <th>Follow-up</th>
               <th>Last update</th>
-              {canActivate ? <th>Action</th> : null}
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -332,18 +342,19 @@ export function LossRedisputeDesk({
                   <td>
                     {w.updated_by_name}
                     <small>
-                      {new Date(w.updated_at).toLocaleDateString("en-IN", {
+                      {new Date(w.updated_at).toLocaleString("en-IN", {
                         timeZone: "Asia/Kolkata",
                       })}
                     </small>
                   </td>
-                  {canActivate ? <td>{w.enabled ? <button className={styles.button} disabled={busy} onClick={()=>{setRevoking(w);setRevokeNote("");}}>Disable</button> : <span>Disabled</span>}</td> : null}
+                  <td><button className={styles.button} onClick={()=>setHistoryCase(w)}>History</button> {canActivate && w.enabled ? <button className={styles.button} disabled={busy} onClick={()=>{setRevoking(w);setRevokeNote("Enabled by mistake");}}>Remove</button> : !w.enabled ? <span>Disabled</span> : null}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {historyCase ? <section className={styles.detail}><button className={styles.button} onClick={()=>setHistoryCase(null)}>Close history · {historyCase.case_key}</button><LossPidTimeline key={`${historyCase.month}|${historyCase.case_key}`} month={historyCase.month} caseKey={historyCase.case_key} revision={windows.find(w=>w.month===historyCase.month && w.case_key===historyCase.case_key)?.version || historyCase.version} initiallyOpen/></section> : null}
       {!shown.length ? (
         <p className={styles.empty}>
           No redisputes match. Search a final Shipment ID to activate its

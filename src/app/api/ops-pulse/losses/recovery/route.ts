@@ -102,7 +102,7 @@ export async function GET(request: Request) {
       // SLP is deducted only once its Final file is in; the month above is provisional until then.
       awaiting_final: report === "slp" && !finalSeenAt,
       people: people.map(recoveryPersonPayDisclosure),
-      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && !responseWindow.data?.enabled && responseWindow.data?.workflow_status !== "won",
+      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && responseWindow.data?.workflow_status !== "won",
       can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
       can_recovered: false,
       can_response: !!responseWindow.data?.enabled,
@@ -177,7 +177,7 @@ export async function POST(request: Request) {
     }
     const responseWindow = await supabaseAdmin!.from("nl_case_response_windows").select("enabled,workflow_status,recovery_month").eq("company_id",scope.company).eq("month",body.month).eq("case_key",caseKey).maybeSingle();
     if(responseWindow.error) throw Error("Redispute status could not be loaded.");
-    if(responseWindow.data?.enabled || responseWindow.data?.workflow_status === "won")return reply({error:"Recovery is paused or stopped by redispute. Open the redispute details for this shipment."},409);
+    if(responseWindow.data?.workflow_status === "won")return reply({error:"Recovery is paused or stopped by redispute. Open the redispute details for this shipment."},409);
     if (outcome.data?.allocation_required && !body.plan?.deduction_month) {
       const resolved = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {p_report:report,p_case_month:body.month,p_assigned_at:new Date().toISOString(),p_final_seen_at:finalSeenAt,p_timing:outcome.data.deduction_timing,p_cutoff_day:settings!.recovery_policy.payroll_cutoff_day || 5});
       if(resolved.error || !resolved.data) throw Error("Payroll month could not be resolved.");

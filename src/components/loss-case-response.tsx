@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
+import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 type Data = {
   window: {
@@ -148,7 +149,7 @@ export function LossCaseResponse({
     tracking: "Update post-dispute ticket",
     won: "Final outcome · won",
     lost: "Final outcome · unsuccessful",
-    revoke: "Cancel redispute",
+    revoke: "Remove redispute",
   };
   return (
     <main
@@ -157,6 +158,7 @@ export function LossCaseResponse({
     >
       <a href="/team-ops/losses/redisputes">← Redisputes</a>
       <h1>Shipment redispute</h1>
+      <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>
       {error ? (
         <p role="alert" className={styles.error}>
           {error}
@@ -233,7 +235,7 @@ export function LossCaseResponse({
                     Next action
                     <select
                       value={action}
-                      onChange={(e) => setAction(e.target.value)}
+                      onChange={(e) => {setAction(e.target.value);if(e.target.value === "revoke")setNote("Enabled by mistake");}}
                     >
                       {actions.map((a) => (
                         <option key={a} value={a}>
@@ -329,7 +331,7 @@ export function LossCaseResponse({
                     Enable this exceptional shipment. The station then supplies
                     its reason, ticket and evidence for review.
                   </p>
-                ) : (
+                ) : action === "revoke" ? <label>Removal reason<select value={note} onChange={e=>setNote(e.target.value)}>{['Enabled by mistake','Continue with recovery','Duplicate redispute','No longer required'].map(reason=><option key={reason}>{reason}</option>)}</select><small>Eligible recovery resumes; the full history stays available.</small></label> : (
                   <label>
                     {action === "response"
                       ? "Supporting details"

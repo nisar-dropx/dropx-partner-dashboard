@@ -416,5 +416,30 @@ await db.query(rd(8,'won',{note:'Vendor accepted the final evidence',tt_referenc
 eq('Successful redispute stops future payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${future}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
 await mustReject('Successful redispute cannot be restarted by a recovery edit',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
 eq('Winning stops outstanding without inventing a deduction',(await one(`select status,outstanding::text,deducted::text from nl_recovery_ledger('${C}',null,'contractor:${CT}') where case_key='CONTRACTOR'`)),{status:'redispute_won',outstanding:'0',deducted:'0'});
+
+// PID timeline + editable plans retain all redispute payroll gates.
+const pidMigration=readFileSync('supabase/migrations/20261028174523_loss_pid_history_controls.sql','utf8');
+await db.exec(pidMigration); await db.exec(pidMigration);
+eq('Baseline once per case',(await one(`select count(*)::int n from nl_loss_source_events where case_key='CONTRACTOR'`)).n,1);
+await db.query(`update nl_loss_month_cases set last_seen_at=now(),source_updated_at=now() where case_key='CONTRACTOR'`);
+eq('Refresh timestamps do not create fake changes',(await one(`select count(*)::int n from nl_loss_source_events where case_key='CONTRACTOR'`)).n,1);
+await db.query(`update nl_loss_month_cases set details=details||'{"remarks":"Changed in source"}'::jsonb where case_key='CONTRACTOR'`);
+eq('Source update retained',(await one(`select count(*)::int n from nl_loss_source_events where case_key='CONTRACTOR'`)).n,2);
+await mustReject('Source audit immutable',`delete from nl_loss_source_events where case_key='CONTRACTOR'`);
+eq('No browser role access',(await one(`select has_table_privilege('authenticated','nl_loss_source_events','select') x`)).x,false);
+await mustReject('Won remains protected after migration',full('CONTRACTOR',`contractor:${CT}`,'deduct',contractorPlan.version));
+await db.query(rd(9,'activate'));
+const livePlan=(await one(`select version from nl_loss_recoveries where case_key='CONTRACTOR'`));
+const editable=full('CONTRACTOR',`contractor:${CT}`,'deduct',livePlan.version);
+// This case previously lost with a future recovery month; reset test fixture to a fresh active case.
+await db.query(`update nl_case_response_windows set recovery_month=null where case_key='CONTRACTOR'`);
+await db.query(editable);
+eq('Edited active plan still cannot reach payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','${future}','hrms') where case_key='CONTRACTOR'`)).rows.length,0);
+await mustReject('Stale removal rejected',rd(9,'revoke',{note:'Enabled by mistake'}));
+await db.query(`update nl_loss_month_cases set source_status='Non-recoverable',source_present=false where case_key='CONTRACTOR'`);
+await db.query(rd(10,'revoke',{note:'No longer required'}));
+eq('Can remove after source change',(await one(`select enabled,workflow_status from nl_case_response_windows where case_key='CONTRACTOR'`)),{enabled:false,workflow_status:'cancelled'});
+eq('Removal retained in history',(await one(`select count(*)::int n from nl_case_response_events where case_key='CONTRACTOR' and action='revoke'`)).n,1);
+await mustReject('Cannot erase source history',`update nl_loss_source_events set actor_name='Changed'`);
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

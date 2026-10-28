@@ -108,8 +108,7 @@ export function LossWorkbook({
       <div>
         <strong>Work in Excel</strong>
         <span>
-          Download the cases for {scope} with the allowed recovery actions and
-          station employees, fill it in, then upload it here.
+          {scope} · cases, actions, employees &amp; PID history
         </span>
       </div>
       <div className={styles.toolbar}>
