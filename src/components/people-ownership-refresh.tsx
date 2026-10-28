@@ -27,11 +27,5 @@ export function PeopleOwnershipRefresh({paused = false}: {paused?: boolean}) {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [paused, router]);
-  return <div className="subtle" style={{display:"flex",alignItems:"center",gap:10,fontSize:11,margin:"8px 0"}}>
-    <span>Managers from People · {paused ? "refresh paused while editing" : "updates every 30 seconds"}</span>
-    <button type="button" className="button secondary compact" disabled={paused || pending} onClick={() => {
-      lastRefresh.current = Date.now();
-      startTransition(() => router.refresh());
-    }}>{pending ? "Refreshing…" : "Refresh"}</button>
-  </div>;
+  return null;
 }
