@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
+import { isPeopleApprovedPaymentHead, peopleApprovedPaymentHeadMessage } from "@/lib/people-approved-payment-heads";
 import { roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -43,6 +44,9 @@ export async function saveApprovalSteps(formData: FormData) {
     .eq("id", paymentHeadId)
     .maybeSingle();
   if (headResult.error || !headResult.data) throw new Error("Payment head was not found.");
+  if (isPeopleApprovedPaymentHead(headResult.data.code) && steps.length) {
+    throw new Error(peopleApprovedPaymentHeadMessage(headResult.data.code));
+  }
 
   const roleIds = Array.from(new Set(steps.flatMap((step) => step.candidates.map((candidate) => candidate.role_id))));
   if (roleIds.length) {

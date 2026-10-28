@@ -3,6 +3,7 @@ import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { isPeopleApprovedPaymentHead } from "@/lib/people-approved-payment-heads";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 
 type PaymentHeadRow = {
@@ -71,12 +72,17 @@ export default async function PaymentApprovalsSettingsPage() {
             <tbody>
               {heads.length ? heads.map((head) => {
                 const stepCount = stepCounts.get(head.id) ?? 0;
+                const peopleApproved = isPeopleApprovedPaymentHead(head.code);
                 return (
                   <tr key={head.id}>
                     <td><strong>{head.name}</strong>{head.is_active ? null : <><br /><span className="subtle">Inactive</span></>}</td>
                     <td>{head.code}</td>
-                    <td>{stepCount ? `${stepCount} step${stepCount === 1 ? "" : "s"} configured` : "Not configured yet - falls back to legacy roles"}</td>
-                    <td><PendingLink className="button secondary compact" href={`/settings/payment-approvals/${head.id}`}>Configure</PendingLink></td>
+                    <td>{peopleApproved
+                      ? "Approved in People — no payment steps"
+                      : stepCount
+                        ? `${stepCount} step${stepCount === 1 ? "" : "s"} configured`
+                        : "Not configured yet - falls back to legacy roles"}</td>
+                    <td><PendingLink className="button secondary compact" href={`/settings/payment-approvals/${head.id}`}>{peopleApproved ? "View" : "Configure"}</PendingLink></td>
                   </tr>
                 );
               }) : (

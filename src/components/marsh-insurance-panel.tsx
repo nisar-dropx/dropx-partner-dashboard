@@ -8,6 +8,7 @@ import {
   startMarshLogin,
   submitMarshOtp,
   syncMarshEcardsAction,
+  type MarshEcardSyncProgress,
   type MarshSessionView,
 } from "@/app/settings/marsh-actions";
 import styles from "./marsh-insurance-panel.module.css";
@@ -20,9 +21,25 @@ type Props = {
 type LiveEvent = {
   id: string;
   at: string;
-  tone: "info" | "warn" | "good" | "danger";
+  tone: "info" | "warn" | "good" | "danger" | "running";
   text: string;
 };
+
+function formatEcardProgress(progress: MarshEcardSyncProgress): string {
+  if (progress.detail?.trim()) return progress.detail.trim();
+  if (!progress.pending) {
+    return `Uploaded ${progress.uploaded} card file(s); skipped ${progress.skipped}.`;
+  }
+  if (progress.phase === "export") {
+    return `Running ecard export${progress.jobId ? ` job ${progress.jobId}` : ""} — waiting for zip…`;
+  }
+  const totalHint =
+    progress.remaining != null ? progress.uploaded + progress.remaining : null;
+  if (totalHint != null) {
+    return `Running sync… ${progress.uploaded}/${totalHint} uploaded (${progress.remaining} left)`;
+  }
+  return `Running sync… ${progress.uploaded} uploaded so far`;
+}
 
 function statusTone(status: string) {
   if (status === "active") return "good";
@@ -43,10 +60,21 @@ function metricTone(status: string) {
 }
 
 function mergeSession(prev: MarshSessionView, next: MarshSessionView): MarshSessionView {
+  if (next.softFailure) {
+    return {
+      ...prev,
+      lastError: next.lastError ?? prev.lastError,
+      credentialsConfigured: prev.credentialsConfigured || next.credentialsConfigured,
+      driveConfigured: prev.driveConfigured ?? next.driveConfigured,
+      ecardSync: next.ecardSync ?? prev.ecardSync,
+    };
+  }
   return {
     ...prev,
     ...next,
+    credentialsConfigured: next.credentialsConfigured || prev.credentialsConfigured,
     driveConfigured: next.driveConfigured ?? prev.driveConfigured,
+    ecardSync: next.ecardSync !== undefined ? next.ecardSync : prev.ecardSync,
   };
 }
 
@@ -80,9 +108,13 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [syncRunning, setSyncRunning] = useState(Boolean(initial.ecardSync?.pending));
   const [events, setEvents] = useState<LiveEvent[]>([]);
+  const [streamAlive, setStreamAlive] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const ecardSourceRef = useRef<EventSource | null>(null);
   const lastStampRef = useRef("");
+  const lastEcardStampRef = useRef("");
 
   const pushEvent = useCallback((tone: LiveEvent["tone"], text: string) => {
     setEvents((prev) => [
@@ -93,17 +125,99 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
         text,
       },
       ...prev,
-    ].slice(0, 12));
+    ].slice(0, 16));
   }, []);
 
   const stopEvents = useCallback(() => {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
+    setStreamAlive(false);
   }, []);
+
+  const stopEcardEvents = useCallback(() => {
+    ecardSourceRef.current?.close();
+    ecardSourceRef.current = null;
+  }, []);
+
+  const applyEcardProgress = useCallback(
+    (progress: MarshEcardSyncProgress | null | undefined) => {
+      if (!progress) return;
+      // Ignore idle SSE placeholders from the worker (not a real completion).
+      const idlePlaceholder =
+        !progress.pending &&
+        !progress.uploaded &&
+        !progress.cursor &&
+        /no ecard sync in progress/i.test(progress.detail || "");
+      if (idlePlaceholder) return;
+
+      const stamp = `${progress.pending}:${progress.uploaded}:${progress.cursor}:${progress.remaining}:${progress.detail}`;
+      if (stamp === lastEcardStampRef.current) return;
+      lastEcardStampRef.current = stamp;
+      setSession((prev) => ({ ...prev, ecardSync: progress }));
+      if (progress.pending) {
+        setSyncRunning(true);
+        const text = formatEcardProgress(progress);
+        pushEvent("running", text);
+        setMessage(text);
+        setError(null);
+        return;
+      }
+      setSyncRunning(false);
+      const text = formatEcardProgress(progress);
+      pushEvent("good", text);
+      setMessage(text);
+      stopEcardEvents();
+    },
+    [pushEvent, stopEcardEvents],
+  );
+
+  const startEcardEventStream = useCallback(() => {
+    stopEcardEvents();
+    const source = new EventSource("/api/settings/marsh/ecard-events");
+    ecardSourceRef.current = source;
+    source.addEventListener("ecard_sync", (event) => {
+      try {
+        applyEcardProgress(JSON.parse((event as MessageEvent).data) as MarshEcardSyncProgress);
+      } catch {
+        /* ignore malformed frames */
+      }
+    });
+    source.addEventListener("end", () => {
+      stopEcardEvents();
+      setSyncRunning((running) => {
+        if (running) {
+          void getMarshSessionStatus()
+            .then((json) => {
+              if (json.ecardSync) applyEcardProgress(json.ecardSync);
+              else setSyncRunning(false);
+            })
+            .catch(() => setSyncRunning(false));
+        }
+        return running;
+      });
+    });
+    source.onerror = () => {
+      stopEcardEvents();
+      pushEvent("warn", "Ecard live stream dropped — sync may still be running on the worker.");
+      void getMarshSessionStatus()
+        .then((json) => {
+          if (json.ecardSync?.pending) applyEcardProgress(json.ecardSync);
+          else setSyncRunning(false);
+        })
+        .catch(() => setSyncRunning(false));
+    };
+  }, [applyEcardProgress, pushEvent, stopEcardEvents]);
 
   const applyView = useCallback(
     (view: MarshSessionView, announce = true) => {
+      if (view.softFailure) {
+        setSession((prev) => mergeSession(prev, view));
+        const text = view.error || view.lastError;
+        if (announce && text) pushEvent("danger", text);
+        return;
+      }
       setSession((prev) => mergeSession(prev, view));
+      if (view.ecardSync) applyEcardProgress(view.ecardSync);
       const stamp = `${view.status}:${view.updatedAt}:${view.lastError}:${view.challengeId}`;
       if (announce && stamp !== lastStampRef.current) {
         lastStampRef.current = stamp;
@@ -114,13 +228,14 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
         stopEvents();
       }
     },
-    [pushEvent, stopEvents],
+    [applyEcardProgress, pushEvent, stopEvents],
   );
 
   const startEventStream = useCallback(() => {
     stopEvents();
     const source = new EventSource("/api/settings/marsh/session-events");
     eventSourceRef.current = source;
+    setStreamAlive(true);
     source.addEventListener("status", (event) => {
       try {
         applyView(JSON.parse((event as MessageEvent).data) as MarshSessionView);
@@ -130,22 +245,37 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
     });
     source.addEventListener("end", () => stopEvents());
     source.onerror = () => {
-      // Fall back to polling if the stream drops.
       stopEvents();
+      pushEvent("warn", "Live stream dropped — polling session status…");
     };
-  }, [applyView, stopEvents]);
+  }, [applyView, pushEvent, stopEvents]);
 
-  useEffect(() => () => stopEvents(), [stopEvents]);
+  useEffect(
+    () => () => {
+      stopEvents();
+      stopEcardEvents();
+    },
+    [stopEvents, stopEcardEvents],
+  );
 
   useEffect(() => {
-    if (!["connecting", "otp_required"].includes(session.status) || eventSourceRef.current) return;
+    if (initial.ecardSync?.pending) {
+      pushEvent("running", formatEcardProgress(initial.ecardSync));
+      startEcardEventStream();
+    }
+    // Only on mount — pick up an in-flight cron/waitUntil sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!["connecting", "otp_required"].includes(session.status) || streamAlive) return;
     const timer = window.setInterval(() => {
       void getMarshSessionStatus()
-        .then((json) => applyView(json))
+        .then((json) => applyView(json, false))
         .catch(() => undefined);
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [session.status, applyView]);
+  }, [session.status, streamAlive, applyView]);
 
   async function run(
     action: () => Promise<MarshSessionView | { ok: boolean; error?: string }>,
@@ -212,10 +342,19 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
       const result = await startMarshLogin();
       applyView(result);
       const failed =
+        result.softFailure ||
         ("ok" in result && result.ok === false) ||
         ["failed", "expired"].includes(String(result.status));
       if (failed) {
-        setError(result.lastError || "Marsh login failed.");
+        setError(result.lastError || result.error || "Marsh login failed.");
+        if (result.softFailure) {
+          setSession((prev) => ({
+            ...prev,
+            status: "failed",
+            lastError: result.lastError || result.error || prev.lastError,
+          }));
+          stopEvents();
+        }
         return;
       }
       if (result.status === "otp_required") {
@@ -283,8 +422,8 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
         </div>
       ) : null}
       {message ? (
-        <div className="alert success">
-          <strong>Done</strong>
+        <div className={`alert ${pending || syncRunning ? "" : "success"}`}>
+          <strong>{pending || syncRunning ? "Running" : "Done"}</strong>
           <span>{message}</span>
         </div>
       ) : null}
@@ -320,10 +459,23 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
           </div>
 
           {events.length ? (
-            <div className={styles.eventLog}>
+            <div className={styles.eventLog} data-live={syncRunning || pending ? "syncing" : undefined}>
               <header>
-                <strong>Live status</strong>
-                <span>data events from the worker session stream</span>
+                <strong>
+                  {syncRunning || pending ? (
+                    <>
+                      <span className={styles.eventLogLiveDot} aria-hidden="true" />
+                      Live status · syncing
+                    </>
+                  ) : (
+                    "Live status"
+                  )}
+                </strong>
+                <span>
+                  {syncRunning || pending
+                    ? "running ecard batches from the worker"
+                    : "data events from the worker session stream"}
+                </span>
               </header>
               <ul>
                 {events.map((event) => (
@@ -396,27 +548,91 @@ export function MarshInsurancePanel({ canEdit, initial }: Props) {
               disabled={!canEdit || pending || !sessionReady}
               onClick={() => {
                 setError(null);
-                setMessage(null);
+                setMessage("Starting ecard sync…");
                 setPending(true);
-                pushEvent("info", "Syncing Marsh ecards to Drive…");
-                void syncMarshEcardsAction()
-                  .then((result) => {
-                    if (!result.ok) throw new Error(result.error || "Ecard sync failed");
-                    const text = `Uploaded ${result.uploaded} card file(s); skipped ${result.skipped}.`;
-                    setMessage(text);
-                    pushEvent("good", text);
-                  })
-                  .catch((err: unknown) => {
+                setSyncRunning(true);
+                pushEvent("running", "Running ecard sync to Drive…");
+                startEcardEventStream();
+                void (async () => {
+                  let state: {
+                    jobId?: number | null;
+                    downloadPath?: string | null;
+                    cursor?: number;
+                    uploaded?: number;
+                    skipped?: number;
+                  } = {};
+                  try {
+                    for (let step = 0; step < 200; step++) {
+                      const result = await syncMarshEcardsAction(state);
+                      if (!result.ok && !result.pending) {
+                        throw new Error(result.error || "Ecard sync failed");
+                      }
+                      state = {
+                        jobId: result.jobId,
+                        downloadPath: result.downloadPath,
+                        cursor: result.cursor ?? 0,
+                        uploaded: result.uploaded,
+                        skipped: result.skipped,
+                      };
+                      if (result.pending) {
+                        applyEcardProgress({
+                          pending: true,
+                          phase: result.phase === "export" ? "export" : "process",
+                          uploaded: result.uploaded,
+                          skipped: result.skipped,
+                          remaining: result.remaining ?? null,
+                          cursor: result.cursor ?? 0,
+                          jobId: result.jobId ?? null,
+                          detail: result.detail || formatEcardProgress({
+                            pending: true,
+                            phase: result.phase === "export" ? "export" : "process",
+                            uploaded: result.uploaded,
+                            skipped: result.skipped,
+                            remaining: result.remaining ?? null,
+                            cursor: result.cursor ?? 0,
+                            jobId: result.jobId ?? null,
+                            detail: "",
+                            updatedAt: null,
+                          }),
+                          updatedAt: new Date().toISOString(),
+                        });
+                        await new Promise((r) => window.setTimeout(r, result.phase === "export" ? 4000 : 400));
+                        continue;
+                      }
+                      applyEcardProgress({
+                        pending: false,
+                        phase: "done",
+                        uploaded: result.uploaded,
+                        skipped: result.skipped,
+                        remaining: 0,
+                        cursor: result.cursor ?? 0,
+                        jobId: result.jobId ?? null,
+                        detail: `Uploaded ${result.uploaded} card file(s); skipped ${result.skipped}.${
+                          result.detail ? ` ${result.detail}` : ""
+                        }`,
+                        updatedAt: new Date().toISOString(),
+                      });
+                      return;
+                    }
+                    throw new Error(
+                      `Ecard sync still running (${state.uploaded ?? 0} uploaded) — click Sync again to continue.`,
+                    );
+                  } catch (err: unknown) {
                     const text = err instanceof Error ? err.message : "Ecard sync failed";
                     setError(text);
                     pushEvent("danger", text);
-                  })
-                  .finally(() => setPending(false));
+                    setMessage(null);
+                    setSyncRunning(false);
+                    stopEcardEvents();
+                  } finally {
+                    setPending(false);
+                  }
+                })();
               }}
               type="button"
             >
               <HardDrive size={16} aria-hidden="true" />
-              Sync ecards → Drive
+              {syncRunning || pending ? "Syncing…" : "Sync ecards → Drive"}
             </button>
           </div>
           {!canEdit ? <p className={styles.hint}>You have view-only access to Settings. Ask an editor to connect Marsh.</p> : null}

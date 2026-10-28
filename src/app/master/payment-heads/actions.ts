@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { serializePaymentFileGroups } from "@/lib/payment-file-types";
+import { isPeopleApprovedPaymentHead } from "@/lib/people-approved-payment-heads";
 import { normalizePaymentModes } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -140,10 +141,15 @@ async function createPaymentHeadUnsafe(formData: FormData) {
   const requestExpenseApproval = formData.get("request_expense_approval") === "yes";
   const expenseApprovalThreshold = parseOptionalAmount(formData.get("expense_approval_threshold"), "Threshold Limit");
   const questions = parseQuestions(formData);
+  const peopleApproved = isPeopleApprovedPaymentHead(code);
   if (initialApprovalRoleIds.length) {
     await validateRoleIds(initialApprovalRoleIds, companyId, "Initial Approver Role");
   }
-  await validateRoleIds(finalApprovalRoleIds, companyId, "Final Approval User Role");
+  if (finalApprovalRoleIds.length) {
+    await validateRoleIds(finalApprovalRoleIds, companyId, "Final Approval User Role");
+  } else if (!peopleApproved) {
+    throw new Error("Final Approval User Role is required.");
+  }
   await validateRoleIds(paymentProcessRoleIds, companyId, "Payment Process User Role");
   if (initialApprovalRoleIds.some((roleId) => finalApprovalRoleIds.includes(roleId))) {
     throw new Error("Initial and final approver roles must be different.");
@@ -160,7 +166,7 @@ async function createPaymentHeadUnsafe(formData: FormData) {
       external_id: externalId,
       initial_approval_role_id: initialApprovalRoleIds[0] ?? null,
       initial_approval_role_ids: initialApprovalRoleIds,
-      final_approval_role_id: finalApprovalRoleIds[0],
+      final_approval_role_id: finalApprovalRoleIds[0] ?? null,
       final_approval_role_ids: finalApprovalRoleIds,
       payment_process_role_ids: paymentProcessRoleIds,
       supported_payment_modes: supportedPaymentModes,
@@ -173,25 +179,29 @@ async function createPaymentHeadUnsafe(formData: FormData) {
     .single();
   if (error) throw new Error(error.message);
 
-  const approvalSteps = [
-    ...(initialApprovalRoleIds.length ? [{
-      candidates: initialApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "station" })),
-      is_required: true
-    }] : []),
-    {
-      candidates: finalApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "company" })),
-      is_required: true
-    }
-  ];
-  const { error: approvalStepsError } = await supabaseAdmin.from("payment_head_approval_steps").insert(
-    approvalSteps.map((step, index) => withCompany({
-      payment_head_id: head.id,
-      step_order: index + 1,
-      candidates: step.candidates,
-      is_required: step.is_required
-    }, companyId))
-  );
-  if (approvalStepsError) throw new Error(approvalStepsError.message);
+  const approvalSteps = peopleApproved
+    ? []
+    : [
+      ...(initialApprovalRoleIds.length ? [{
+        candidates: initialApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "station" })),
+        is_required: true
+      }] : []),
+      ...(finalApprovalRoleIds.length ? [{
+        candidates: finalApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "company" })),
+        is_required: true
+      }] : [])
+    ];
+  if (approvalSteps.length) {
+    const { error: approvalStepsError } = await supabaseAdmin.from("payment_head_approval_steps").insert(
+      approvalSteps.map((step, index) => withCompany({
+        payment_head_id: head.id,
+        step_order: index + 1,
+        candidates: step.candidates,
+        is_required: step.is_required
+      }, companyId))
+    );
+    if (approvalStepsError) throw new Error(approvalStepsError.message);
+  }
 
   if (questions.length) {
     const { error: questionError } = await supabaseAdmin.from("payment_head_questions").insert(
@@ -237,9 +247,15 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
   if (initialApprovalRoleIds.length) {
     await validateRoleIds(initialApprovalRoleIds, companyId, "Initial Approver Role");
   }
-  await validateRoleIds(finalApprovalRoleIds, companyId, "Final Approval User Role");
+  // Approval roles are managed from Payment Approval Steps. People-sourced heads
+  // (salary advance, employee reimbursement) intentionally have none — they land
+  // in Payments already approved. Empty final roles on update must not block
+  // edits to external ID, process roles, or payment options.
+  if (finalApprovalRoleIds.length) {
+    await validateRoleIds(finalApprovalRoleIds, companyId, "Final Approval User Role");
+  }
   await validateRoleIds(paymentProcessRoleIds, companyId, "Payment Process User Role");
-  if (initialApprovalRoleIds.some((roleId) => finalApprovalRoleIds.includes(roleId))) {
+  if (finalApprovalRoleIds.length && initialApprovalRoleIds.some((roleId) => finalApprovalRoleIds.includes(roleId))) {
     throw new Error("Initial and final approver roles must be different.");
   }
   if ([...initialApprovalRoleIds, ...finalApprovalRoleIds].some((roleId) => paymentProcessRoleIds.includes(roleId))) {
@@ -254,7 +270,7 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
       external_id: externalId,
       initial_approval_role_id: initialApprovalRoleIds[0] ?? null,
       initial_approval_role_ids: initialApprovalRoleIds,
-      final_approval_role_id: finalApprovalRoleIds[0],
+      final_approval_role_id: finalApprovalRoleIds[0] ?? null,
       final_approval_role_ids: finalApprovalRoleIds,
       payment_process_role_ids: paymentProcessRoleIds,
       supported_payment_modes: supportedPaymentModes,

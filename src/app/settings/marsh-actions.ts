@@ -1,7 +1,19 @@
 "use server";
 
 import { requirePagePermissionOrThrow } from "@/lib/authorization";
-import { callWorkforceAmazonWorker, workforceAmazonWorkerConfig } from "@/lib/workforce-amazon-worker";
+import { workforceAmazonWorkerConfig } from "@/lib/workforce-amazon-worker";
+
+export type MarshEcardSyncProgress = {
+  pending: boolean;
+  phase: "export" | "process" | "done";
+  uploaded: number;
+  skipped: number;
+  remaining: number | null;
+  cursor: number;
+  jobId: number | null;
+  detail: string;
+  updatedAt: string | null;
+};
 
 export type MarshSessionView = {
   ok?: boolean;
@@ -14,7 +26,11 @@ export type MarshSessionView = {
   cookiePresent: boolean;
   cookieAgeSeconds: number | null;
   driveConfigured?: boolean;
+  /** Live ecard Drive sync progress from the worker (null when idle). */
+  ecardSync?: MarshEcardSyncProgress | null;
   error?: string;
+  /** True when this payload is only an action failure overlay and must not wipe live session fields. */
+  softFailure?: boolean;
 };
 
 function actionError(error: unknown): MarshSessionView {
@@ -24,13 +40,13 @@ function actionError(error: unknown): MarshSessionView {
       : typeof error === "string"
         ? error
         : "Marsh request failed";
-  // Next.js digests production Server Component failures into this opaque string.
   const friendly =
     /Server Components render|digest property/i.test(message)
       ? "Marsh action interrupted while refreshing the page. Check session status and try again."
       : message;
   return {
-    credentialsConfigured: false,
+    softFailure: true,
+    credentialsConfigured: true,
     status: "failed",
     challengeId: null,
     lastError: friendly,
@@ -38,7 +54,7 @@ function actionError(error: unknown): MarshSessionView {
     uploadedAt: null,
     cookiePresent: false,
     cookieAgeSeconds: null,
-    driveConfigured: false,
+    driveConfigured: undefined,
     ok: false,
     error: friendly,
   };
@@ -113,7 +129,6 @@ export async function submitMarshOtp(challengeId: string, otp: string) {
       90_000,
     );
   } catch (error) {
-    // OTP may have succeeded on the worker even if the UI refresh failed — return status when possible.
     try {
       const latest = await callMarsh<MarshSessionView>("/api/admin/marsh/session/status", undefined, 15_000);
       if (latest.status === "active") return { ...latest, ok: true };
@@ -121,6 +136,7 @@ export async function submitMarshOtp(challengeId: string, otp: string) {
         return {
           ...latest,
           ok: false,
+          softFailure: latest.status === "otp_required",
           error: latest.lastError || actionError(error).error,
         };
       }
@@ -144,19 +160,54 @@ export async function ensureMarshSessionAction() {
   }
 }
 
-export async function syncMarshEcardsAction() {
+export type MarshEcardSyncState = {
+  ok: boolean;
+  uploaded: number;
+  skipped: number;
+  pending?: boolean;
+  phase?: "export" | "process" | "done";
+  jobId?: number | null;
+  downloadPath?: string | null;
+  cursor?: number;
+  remaining?: number;
+  error?: string;
+  detail?: string;
+};
+
+export async function syncMarshEcardsAction(state?: {
+  jobId?: number | null;
+  downloadPath?: string | null;
+  cursor?: number;
+  uploaded?: number;
+  skipped?: number;
+}): Promise<MarshEcardSyncState> {
   try {
     await requirePagePermissionOrThrow("app_settings", "edit");
-    return await callMarsh<{ ok: boolean; uploaded: number; skipped: number; error?: string }>(
+    // One worker step per action. The Settings UI loops on pending; the worker
+    // also waitUntil-drains and resumes from saved cursor on empty {}. Nested
+    // server loops race waitUntil and can rewind the cursor.
+    return await callMarsh<MarshEcardSyncState>(
       "/api/admin/marsh/ecards/sync",
-      { method: "POST", body: "{}" },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          jobId: state?.jobId ?? null,
+          downloadPath: state?.downloadPath ?? null,
+          cursor: state?.cursor ?? 0,
+          uploaded: state?.uploaded ?? 0,
+          skipped: state?.skipped ?? 0,
+        }),
+      },
       120_000,
     );
   } catch (error) {
     return {
       ok: false,
-      uploaded: 0,
-      skipped: 0,
+      uploaded: state?.uploaded ?? 0,
+      skipped: state?.skipped ?? 0,
+      jobId: state?.jobId ?? null,
+      downloadPath: state?.downloadPath ?? null,
+      cursor: state?.cursor ?? 0,
       error: actionError(error).error,
     };
   }
