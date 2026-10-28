@@ -105,7 +105,7 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
   const openDetails=(metric:string,stationId="")=>{setDetailQuery("");setSelection({metric,stationId});};
   useEffect(()=>{if(selection){detailPanel.current?.scrollIntoView({block:"nearest",behavior:"smooth"});detailPanel.current?.focus({preventScroll:true});}},[selection]);
   const [selectedStations, setSelectedStations] = useState<string[]>([]);
-  const [selectedClusters, setSelectedClusters] = useState<string[]>([]);
+  const [selectedOwners, setSelectedOwners] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedMonths, setSelectedMonths] = useState<string[]>([initialMonth]);
 
@@ -115,14 +115,14 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
   const stationOptions = useMemo(() => monthly.map(station => ({
     value: station.stationId, label: station.stationCode, meta: station.stationName || "Name unavailable"
   })).sort((left, right) => left.label.localeCompare(right.label)), [monthly]);
-  const clusterOptions = useMemo(() => [...new Set(stations.map(station => String(station.cluster || "Unassigned").trim() || "Unassigned"))]
+  const ownerOptions = useMemo(() => [...new Set(stations.map(station => String(station.cluster || "Not mapped in People").trim() || "Not mapped in People"))]
     .sort().map(value => ({value, label: value})), [stations]);
   const regionOptions = useMemo(() => [...new Set(stations.map(station => String(station.region || "Unassigned").trim() || "Unassigned"))]
     .sort().map(value => ({value, label: value})), [stations]);
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
     const stationSet = new Set(selectedStations);
-    const clusterSet = new Set(selectedClusters);
+    const ownerSet = new Set(selectedOwners);
     const regionSet = new Set(selectedRegions);
     return monthly.filter(station => {
       const issueCount = station.unmapped + station.dataIssues + station.profilePending + station.profileReview + station.profileUnknown;
@@ -130,10 +130,10 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
       const queryMatch = !term || `${station.stationCode} ${station.stationName} ${station.cluster} ${station.region}`.toLowerCase().includes(term);
       return statusMatch && queryMatch
         && (!stationSet.size || stationSet.has(station.stationId))
-        && (!clusterSet.size || clusterSet.has(station.cluster))
+        && (!ownerSet.size || ownerSet.has(station.cluster))
         && (!regionSet.size || regionSet.has(station.region));
     });
-  }, [monthly, query, selectedClusters, selectedRegions, selectedStations, status]);
+  }, [monthly, query, selectedOwners, selectedRegions, selectedStations, status]);
   const totals = useMemo(() => providerMappingSummaryTotals(filtered), [filtered]);
   const detailStations=filtered.filter(s=>!selection?.stationId || s.stationId===selection.stationId);
   const detailRows=detailStations.flatMap(station=>station.details.map(detail=>({...detail,stationId:station.stationId,stationCode:station.stationCode})));
@@ -152,11 +152,11 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
   return <section className="mapping-summary-workspace">
     <div className="mapping-summary-filterbar" aria-label="Mapping summary filters">
       <CompactMultiSelect allLabel="All stations" label="Station" options={stationOptions} selected={selectedStations} onChange={setSelectedStations} />
-      <CompactMultiSelect allLabel="All clusters" label="Cluster" options={clusterOptions} selected={selectedClusters} onChange={setSelectedClusters} />
+      <CompactMultiSelect allLabel="All managers" label="Manager" options={ownerOptions} selected={selectedOwners} onChange={setSelectedOwners} />
       <CompactMultiSelect allLabel="All regions" label="Region" options={regionOptions} selected={selectedRegions} onChange={setSelectedRegions} />
       <CompactMultiSelect allLabel="All available months" label="Month" options={monthOptions} selected={selectedMonths} onChange={setSelectedMonths} />
       <button className="button secondary compact mapping-summary-clear" type="button" onClick={() => {
-        setSelectedStations([]); setSelectedClusters([]); setSelectedRegions([]); setSelectedMonths([initialMonth]); setStatus("all"); setQuery(""); setSelection(null);
+        setSelectedStations([]); setSelectedOwners([]); setSelectedRegions([]); setSelectedMonths([initialMonth]); setStatus("all"); setQuery(""); setSelection(null);
       }}>Reset</button>
     </div>
 
@@ -173,7 +173,7 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
       <div className="panel-head mapping-summary-toolbar">
         <div><h2>Station mapping summary</h2><p className="subtle">Mapping periods are checked against actual provider activity in {activeMonthLabel}.</p></div>
         <div className="mapping-summary-filters">
-          <input aria-label="Find station" className="field" placeholder="Station, cluster or region" type="search" value={query} onChange={event => setQuery(event.target.value)} />
+          <input aria-label="Find station" className="field" placeholder="Station, manager or region" type="search" value={query} onChange={event => setQuery(event.target.value)} />
           <select aria-label="Summary status" className="field" value={status} onChange={event => setStatus(event.target.value)}>
             <option value="attention">Needs attention</option><option value="complete">Complete</option><option value="all">All stations</option>
           </select>
@@ -181,7 +181,7 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
       </div>
       <div className="table-wrap mapping-summary-table-wrap">
         <table className="mapping-summary-table">
-          <thead><tr><th>Station</th><th>Cluster / region</th><th>Total IDs</th><th>Mapped</th><th>Ready</th><th>Mapping missing</th><th>Data issues</th><th>Profiles · associates</th><th>Mapping coverage</th><th>Details</th></tr></thead>
+          <thead><tr><th>Station</th><th>People owner / region</th><th>Total IDs</th><th>Mapped</th><th>Ready</th><th>Mapping missing</th><th>Data issues</th><th>Profiles · associates</th><th>Mapping coverage</th><th>Details</th></tr></thead>
           <tbody>{filtered.map(station => {
             const needsAttention = station.unmapped + station.dataIssues > 0;
             return <tr key={station.stationId} className={needsAttention ? "needs-attention" : "is-complete"}>
