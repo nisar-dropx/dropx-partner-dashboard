@@ -1,3 +1,4 @@
+import { mappingProfileState, type MappingProfileState } from "./mapping-profile-status.ts";
 export type ProviderMappingSummaryStatus =
   | "ready"
   | "unmapped"
@@ -41,6 +42,7 @@ export type ProviderMappingSummaryWorkerInput = {
   id: string;
   dropxId?: string | null;
   fullName?: string | null;
+  onboardingStatus?: string | null;
 };
 
 export type ProviderMappingSummaryMethodInput = {
@@ -50,7 +52,10 @@ export type ProviderMappingSummaryMethodInput = {
   productionThresholdRequired?: boolean;
 };
 
+export type MappingSummaryProfile = { id: string; dropxId: string; fullName: string; state: MappingProfileState; status: string };
+
 export type ProviderMappingSummaryDetail = {
+  profiles: MappingSummaryProfile[];
   key: string;
   providerMemberId: string;
   providerMemberName: string;
@@ -75,6 +80,8 @@ export type ProviderMappingSummaryStation = {
   ready: number;
   unmapped: number;
   dataIssues: number;
+  profileCompleted: number; profilePending: number; profileReview: number; profileUnknown: number;
+  profiles: MappingSummaryProfile[];
   completionPercent: number;
   details: ProviderMappingSummaryDetail[];
 };
@@ -269,6 +276,10 @@ export function buildProviderMappingSummary({
 
     detailsByStation.get(stationId)?.push({
       key,
+      profiles: [...new Set((relevantPeriods.length ? relevantPeriods : mapping ? [mapping] : []).map(p=>p.workforceId).filter(Boolean))].flatMap(id=>{
+        const person=workerById.get(id!);
+        return person ? [{id:person.id,dropxId:text(person.dropxId),fullName:text(person.fullName),state:mappingProfileState(person.onboardingStatus),status:text(person.onboardingStatus)}] : [];
+      }),
       providerMemberId: memberId,
       providerMemberName: text(source?.providerMemberName),
       dropxId: text(worker?.dropxId),
@@ -291,6 +302,7 @@ export function buildProviderMappingSummary({
     const ready = details.filter(detail => detail.status === "ready").length;
     const unmapped = details.filter(detail => detail.status === "unmapped").length;
     const dataIssues = details.length - ready - unmapped;
+    const profiles = uniqueMappingProfiles(details.flatMap(d=>d.profiles));
     return {
       stationId: station.id,
       stationCode: station.code,
@@ -302,6 +314,7 @@ export function buildProviderMappingSummary({
       ready,
       unmapped,
       dataIssues,
+      profiles, ...mappingProfileTotals(profiles),
       completionPercent: details.length ? Math.round((ready / details.length) * 100) : 100,
       details
     } satisfies ProviderMappingSummaryStation;
@@ -320,5 +333,12 @@ export function providerMappingSummaryTotals(stations: ProviderMappingSummarySta
     unmapped: sum.unmapped + station.unmapped,
     dataIssues: sum.dataIssues + station.dataIssues
   }), {stations: 0, total: 0, mapped: 0, ready: 0, unmapped: 0, dataIssues: 0});
-  return {...totals, completionPercent: totals.total ? Math.round((totals.ready / totals.total) * 100) : 100};
+  return {...totals, ...mappingProfileTotals(uniqueMappingProfiles(stations.flatMap(s=>s.profiles))), completionPercent: totals.total ? Math.round((totals.ready / totals.total) * 100) : 100};
+}
+
+export function uniqueMappingProfiles(profiles: MappingSummaryProfile[]) {
+  return [...new Map(profiles.map(p=>[p.id,p])).values()];
+}
+export function mappingProfileTotals(profiles: MappingSummaryProfile[]) {
+  return {profileCompleted:profiles.filter(p=>p.state==="completed").length,profilePending:profiles.filter(p=>p.state==="pending").length,profileReview:profiles.filter(p=>p.state==="review").length,profileUnknown:profiles.filter(p=>p.state==="unknown").length};
 }

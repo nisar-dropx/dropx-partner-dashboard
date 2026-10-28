@@ -41,7 +41,7 @@ test("saved-only mappings are visible as source-data issues and empty stations r
   assert.equal(qlda.dataIssues, 1);
   assert.equal(kgqa.total, 0);
   assert.equal(kgqa.completionPercent, 100);
-  assert.deepEqual(providerMappingSummaryTotals(rows), {stations:2,total:1,mapped:1,ready:0,unmapped:0,dataIssues:1,completionPercent:0});
+  assert.deepEqual(providerMappingSummaryTotals(rows), {stations:2,total:1,mapped:1,ready:0,unmapped:0,dataIssues:1,completionPercent:0,profileCompleted:0,profilePending:0,profileReview:0,profileUnknown:1});
 });
 
 test("newest source and mapping records win deterministically", () => {
@@ -76,4 +76,29 @@ test("one-day mappings cover only matching provider activity dates", () => {
   ]});
   assert.equal(exact[0].details[0].status,"ready");
   assert.equal(exact[0].details[0].coverageLabel,"1/1 active day");
+});
+
+
+test("profile completion is independent of mapping readiness and distinct by associate", () => {
+  const rows = buildProviderMappingSummary({stations,methods,
+    workers:[{id:"shared",dropxId:"D1",fullName:"Pending associate",onboardingStatus:"pending"},{id:"done",dropxId:"D2",onboardingStatus:"active"},{id:"review",dropxId:"D3",onboardingStatus:"under_review"}],
+    sourceMembers:[{stationCode:"QLDA",providerMemberId:"A"},{stationCode:"QLDA",providerMemberId:"B"},{stationCode:"KGQA",providerMemberId:"C"},{stationCode:"QLDA",providerMemberId:"D"},{stationCode:"QLDA",providerMemberId:"E"}],
+    mappings:[["qlda","A","shared"],["qlda","B","shared"],["kgqa","C","shared"],["qlda","D","done"],["qlda","E","review"]].map(([stationId,providerMemberId,workforceId])=>({id:providerMemberId,stationId,providerMemberId,workforceId,paymentMethodId:"mg",paymentValues:{MG_PER_DAY:800}}))
+  });
+  const qlda=rows.find(r=>r.stationId==="qlda");
+  assert.equal(qlda.ready,4,"saved mapping/pay data does not imply completed registration");
+  assert.equal(qlda.profilePending,1,"two IDs for one associate count once");
+  assert.equal(qlda.profileCompleted,1);assert.equal(qlda.profileReview,1);
+  assert.equal(providerMappingSummaryTotals(rows).profilePending,1,"cross-station associate counts once in total");
+  assert.equal(qlda.details.find(d=>d.providerMemberId==="A").profiles[0].state,"pending");
+});
+
+test("historical mapping periods retain every associated profile in the selected activity", () => {
+  const rows=buildProviderMappingSummary({stations:[stations[0]],methods,selectedMonths:["2026-10"],
+    workers:[{id:"one",onboardingStatus:"returned"},{id:"two",onboardingStatus:"active"}],
+    sourceMembers:[{stationCode:"QLDA",providerMemberId:"A",outboundDates:["2026-10-01","2026-10-02"]}],
+    mappings:[{id:"one",stationId:"qlda",providerMemberId:"A",workforceId:"one",effectiveFrom:"2026-10-01",effectiveTo:"2026-10-01"},{id:"two",stationId:"qlda",providerMemberId:"A",workforceId:"two",effectiveFrom:"2026-10-02"}]
+  });
+  assert.equal(rows[0].profilePending,1);assert.equal(rows[0].profileCompleted,1);
+  assert.equal(rows[0].details[0].profiles.length,2);
 });
