@@ -89,10 +89,15 @@ export function NlRecoveryMaster({
                       "salary_cap_enabled",
                       "reserve_other_recoveries",
                       "cctv_public_confirmation",
+                      "installment_thresholds_enabled",
                     ].map((k) => [k, f.has(k)]),
                   ),
                   ...Object.fromEntries(
                     [
+                      "max_installments",
+                      "installment_two_month_min",
+                      "installment_three_month_min",
+                      "installment_extra_month_step",
                       "payroll_cutoff_day",
                       "salary_cap_percent",
                       "attachment_max_count",
@@ -237,6 +242,19 @@ export function NlRecoveryMaster({
                   </label>
                 ))}
               </div>
+              <fieldset className={styles.fieldset}>
+                <legend>Recurring recovery</legend>
+                <label className={styles.check}><input type="checkbox" name="installment_thresholds_enabled" defaultChecked={settings.recovery_policy.installment_thresholds_enabled} />Apply minimum recovery amounts</label>
+                <div className={styles.formGrid}>
+                  {([
+                    ["installment_two_month_min", "2 months · above (₹)", 7000],
+                    ["installment_three_month_min", "3 months · above (₹)", 10000],
+                    ["installment_extra_month_step", "Each extra month · add (₹)", 5000],
+                    ["max_installments", "Maximum months", 24],
+                  ] as const).map(([key, label, fallback]) => <label key={key}>{label}<input name={key} type="number" required min={key === "max_installments" ? 2 : 1} max={key === "max_installments" ? 60 : 10000000} step={1} defaultValue={settings.recovery_policy[key] ?? fallback} /></label>)}
+                </div>
+                <small className={styles.hint}>Applies to each person's share, including plans set by monthly amount. Recurring plans still need approval.</small>
+              </fieldset>
               <details>
                 <summary>
                   Pay sources, eligible designations & file types

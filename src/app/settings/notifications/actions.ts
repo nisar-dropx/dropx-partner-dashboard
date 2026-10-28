@@ -195,3 +195,19 @@ export async function sendAmazonNowAdditionalRecipients() {
  revalidatePath('/settings/notifications');
  redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1&message='+encodeURIComponent(message))+'#amazon-now');
 }
+
+export async function saveLossStageReminderSettings(form:FormData){
+ const auth=await requirePagePermission('ops_notification_settings','edit');
+ const company=requireCompanyId(auth),db=digestDatabase();let error='';
+ try{
+  if(auth.readOnly||auth.isPreview)throw Error('Use your own account to change reminders.');
+  const stage=String(form.get('stage')),state=String(form.get('state'));
+  if(!['recovery','dispute','response'].includes(stage)||!['enabled','disabled'].includes(state))throw Error('Invalid reminder setting.');
+  const events=[`loss_reminder_${stage}_morning`,`loss_reminder_${stage}_afternoon`];
+  const controls=await db.from('portal_notification_controls').select('event_key,config').eq('company_id',company).eq('portal','ops').in('event_key',events);
+  if(controls.error||controls.data.length!==2||controls.data.some(c=>c.config?.delivery_ready!==true))throw Error('Reminder release is not ready.');
+  const saved=await db.from('portal_notification_controls').update({state,paused_until:null,updated_by:auth.userId,updated_at:new Date().toISOString()}).eq('company_id',company).eq('portal','ops').in('event_key',events).select('event_key');
+  if(saved.error||saved.data.length!==2)throw Error('Reminder settings could not be saved.');
+ }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
+ revalidatePath('/settings/notifications');redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#loss-stage-reminders');
+}

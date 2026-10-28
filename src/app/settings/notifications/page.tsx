@@ -1,3 +1,4 @@
+import {LossReminderSettings} from '@/components/loss-reminder-settings';
 import {InsightNotificationSettings} from '@/components/insight-notification-settings';
 import { AmazonNowNotificationSettings } from '@/components/amazon-now-notification-settings';
 import {CodNotificationSettings} from '@/components/cod-notification-settings';
@@ -31,12 +32,13 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  <AmazonNowNotificationSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly} domain={String(control.data.config.email_domain || "")}/>
  <RegistrationNotificationSettings companyId={company} canEdit={canEdit} ownerUserId={isCompanyOwner(auth)&&!auth.isPreview&&!auth.readOnly?auth.userId:undefined} ownerEmail={auth.email}/>
  {adhoc.data?<section id="adhoc-report"><h2>Ad hoc costs · Morning report</h2><a className="button" href="/api/ops-pulse/adhoc-email-preview" target="_blank" rel="noreferrer">Preview / send sample to me</a><p>Van, Driver and DA · Previous day and MTD · Estimated vs actual Excel · Monthly replies.</p><DigestSettingsForm control={adhoc.data} action={saveAdHocDigestSettings} canEdit={canEdit} receipts={adhocHistory.data||[]}/></section>:null}
+ <LossReminderSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly}/>
  <CodNotificationSettings companyId={company} auth={auth}/>
  <PerformanceDataUpdateSettings control={dataUpdate.data} action={savePerformanceDataUpdateSettings} canEdit={canEdit} receipts={updateHistory.data||[]}/>
  <section className="panel" style={{padding:24}}><h2>Daily performance review status</h2><p>Each recipient sees only their mapped locations. Pending locations first, with pending reviewers and review layers; completed locations follow. Proxy reviews identify who reviewed and on whose behalf.</p><p>Included operation models: {String((control.data.config.included_models||[]).join(', '))}. Other models are excluded from this mail.</p></section>
  <DigestSettingsForm control={control.data} action={saveDigestSettings} canEdit={canEdit} receipts={history.data||[]}/>
  {lossDigest.data?<section id="loss-recovery-digest" className="panel" style={{padding:24,marginTop:20}}>
-  <h2>Loss recovery · Daily action digest</h2>
+  <h2>Loss recovery · Legacy daily digest</h2>
   <p>Scoped NL/SLP open actions (station / cluster / SLP). Empty days send nothing. Cron is already registered; keep <b>disabled</b> until recipients are verified. Enabling requires <code>delivery_ready=true</code> in the control config after the dry-run day.</p>
   <p><a className="button secondary" href="/api/ops-pulse/loss-recovery-digest-preview" target="_blank" rel="noreferrer">Preview current report / send to me</a></p>
   <form action={saveLossRecoveryDigestSettings} className="form-grid" style={{marginTop:16,gap:18,gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,280px),1fr))'}}>

@@ -452,6 +452,7 @@ export function RecoveryForm({
           plan,
           maxInstallments,
           capPercent,
+          policy,
         )
       : "";
   const limitOf = (p: RecoveryPerson) =>
@@ -889,6 +890,7 @@ export function RecoveryForm({
                     </label>
                   </div>
                 ) : null}
+                {plan.mode === "installments" && policy?.installment_thresholds_enabled ? <small className={styles.hint}>Per person: 2 months above {money(Number(policy.installment_two_month_min))}; 3 above {money(Number(policy.installment_three_month_min))}; each extra month adds {money(Number(policy.installment_extra_month_step))}. Approval required.</small> : null}
                 <details className={styles.compactDetails}><summary>Recovery rules</summary><p className={styles.hint}>
                   Eligible station DAs and People staff, using the current debit-scope rules in Master.
                   {capEnabled
