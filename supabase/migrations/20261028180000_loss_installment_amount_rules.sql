@@ -5,7 +5,7 @@ returns trigger language plpgsql security definer set search_path=public as $$
 declare policy jsonb; line jsonb; months integer; threshold numeric;
 begin
   if new.is_deleted or new.recovery_mode <> 'installments' then return new; end if;
-  if tg_op = 'UPDATE' and old.recovery_mode = new.recovery_mode
+  if tg_op = 'UPDATE' and not old.is_deleted and old.recovery_mode = new.recovery_mode
     and old.allocations is not distinct from new.allocations
     and old.installment_basis is not distinct from new.installment_basis
     and old.installment_value is not distinct from new.installment_value then return new; end if;
