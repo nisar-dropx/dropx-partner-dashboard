@@ -14,6 +14,7 @@ type Result = {
 type Outcome = {
   summary: { saved: number; unchanged: number; failed: number; skipped: number };
   results: Result[];
+  payroll_sync?: { status: string; message: string };
 };
 
 /** Download the scoped recovery worklist, fill it offline, upload it back. */
@@ -156,6 +157,7 @@ export function LossWorkbook({
       ) : null}
       {outcome ? (
         <div className={styles.uploadResult} role="status">
+          {outcome.payroll_sync ? <p>{outcome.payroll_sync.message}</p> : null}
           <div className={styles.toolbar}>
             <span className={`${styles.badge} ${styles.good}`}>
               {outcome.summary.saved} saved

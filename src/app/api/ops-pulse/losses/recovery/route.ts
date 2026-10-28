@@ -10,6 +10,7 @@ import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
 import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
 import { hasPermission } from "@/lib/authorization";
 import { readAllRows } from "@/lib/supabase-pagination";
 import type { RecoveryPerson } from "@/lib/ops-pulse/nl-loss-policy";
@@ -189,7 +190,7 @@ export async function POST(request: Request) {
       body.plan={...body.plan,deduction_month:responseWindow.data?.recovery_month && responseWindow.data.recovery_month>resolved.data ? responseWindow.data.recovery_month : resolved.data};
     }
     if (outcome.data?.allocation_required) {
-      // Station users may dispute/clarify only — recovery plans are Cluster propose → SLP approve.
+      // Check who can assign recovery. Routine plans become eligible in the atomic writer without approval.
       await assertLifecycleAction(auth, station.id, "propose");
       await loadRecoveryPayables(
         auth,
@@ -242,7 +243,8 @@ export async function POST(request: Request) {
         409,
       );
     }
-    return reply({ recovery: result.data });
+    const payroll_sync = await refreshLossPayroll(scope.company);
+    return reply({ recovery: result.data, payroll_sync });
   } catch (e) {
     return reply(
       {
@@ -293,7 +295,8 @@ export async function DELETE(request: Request) {
         },
         409,
       );
-    return reply({ recovery: r.data });
+    const payroll_sync = await refreshLossPayroll(scope.company);
+    return reply({ recovery: r.data, payroll_sync });
   } catch (e) {
     return reply(
       {

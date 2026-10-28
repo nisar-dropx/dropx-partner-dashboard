@@ -520,7 +520,7 @@ export function RecoveryForm({
       const j = await res.json();
       if (!res.ok) throw Error(j.error);
       setRecovery(j.recovery);
-      setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : j.recovery.approval_status === "approved" ? "Saved for payroll. The full recovery will be included in the applicable payroll calculation." : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
+      setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. The full recovery will be included in the applicable payroll calculation.") : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -555,7 +555,7 @@ export function RecoveryForm({
       setAmounts({});
       setRemarks("");
       setDetails({});
-      setSuccess("Plan removed. History is preserved.");
+      setSuccess(`Plan removed. History is preserved.${j.payroll_sync?.message ? " " + j.payroll_sync.message : ""}`);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not remove plan.");

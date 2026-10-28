@@ -27,6 +27,7 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
     </> : <>
       {!compact ? <><td className={styles.good}><Pair {...row.updated}/></td><td className={styles.warn}><Pair {...row.pending}/></td></> : null}
       <td className={styles.good}><Pair count={row.recoveredCount} amount={row.recovered}/></td>
+      {!compact ? <td className={styles.info}><Pair count={row.draftCount} amount={row.draft}/></td> : null}
       <td className={styles.warn}><Pair count={row.remainingCount} amount={row.remaining}/></td>
       {!compact ? <td><Pair {...row.nonrecoverable}/></td> : null}
     </>}
@@ -39,10 +40,10 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
       <select aria-label={`${title} sort`} value={sort} onChange={e=>setSort(e.target.value)}>{sorts.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
     </div>:null}</div>
     <div className={styles.scroll}><table><caption className={styles.caption}>Each cell shows TIDs and value. Updated is saved recovery detail; recovered is posted payroll or an approved receipt.</caption><thead><tr><th>Station</th><th title={compact ? "Confirmed recoverable tracking IDs and value" : "Total tracking IDs and loss value"}>{compact ? "Recoverable" : "Total TIDs / value"}</th>
-      {initial ? <><th>Waiting on station</th><th>Awaiting Amazon / final</th></> : <>{!compact?<><th>Updated</th><th>Pending update</th></>:null}<th>Recovered</th><th>Pending recovery</th>{!compact?<th>Non-recoverable</th>:null}</>}
+      {initial ? <><th>Waiting on station</th><th>Awaiting Amazon / final</th></> : <>{!compact?<><th>Updated</th><th>Pending update</th></>:null}<th>Recovered</th>{!compact?<th title="Applied in an open payroll; included in pending recovery until payroll is confirmed">Draft payroll</th>:null}<th>Pending recovery</th>{!compact?<th>Non-recoverable</th>:null}</>}
       {compact?<th>Status breakup</th>:<th>Last dates</th>}</tr></thead><tbody>
       {rows.map(row=><tr key={row.station}><th scope="row"><Link href={stationHref(row.station)} prefetch={false}>{row.station} ↗</Link>{compact?<small className={styles.stationDate}>Updated {date(row.updatedAt)}</small>:null}</th>{metrics(row)}</tr>)}
-      {!rows.length?<tr><td colSpan={initial?5:compact?5:8}>No cases match these filters.</td></tr>:null}
+      {!rows.length?<tr><td colSpan={initial?5:compact?5:9}>No cases match these filters.</td></tr>:null}
     </tbody>{rows.length>0?<tfoot><tr><th scope="row">Total</th>{metrics(total)}</tr></tfoot>:null}</table></div>
   </section>;
 }

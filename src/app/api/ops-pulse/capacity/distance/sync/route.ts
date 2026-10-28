@@ -28,6 +28,9 @@ export async function POST(request: Request) {
   if (!scope.locations.some((s) => s.id === stationId && isAmazonEdspXptLocation(s))) return fail("Station not found.", 404);
   if (!adminKey()) return fail("Amazon sync is not configured. Set AMAZON_SYNC_ADMIN_KEY.", 503);
   try {
+    // Road kilometres are calculated by dropx-amazon-sync with MAPBOX_ACCESS_TOKEN
+    // and MAPBOX_ACCESS_TOKEN_FALLBACK (quota/rate-limit failover). Ops Pulse does
+    // not call Mapbox directly.
     const res = await fetch(`${workerUrl()}/payable-distance/station`, {
       method: "POST",
       headers: { authorization: `Bearer ${adminKey()}`, "content-type": "application/json" },
@@ -35,7 +38,16 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(110000),
       cache: "no-store",
     });
-    if (!res.ok) return fail(res.status === 401 ? "Amazon sync rejected the request. Check the admin key." : "Amazon sync failed. Existing distances were kept; please retry.", 502);
+    if (!res.ok) {
+      return fail(
+        res.status === 401
+          ? "Amazon sync rejected the request. Check the admin key."
+          : res.status === 503
+            ? "Road routing is unavailable right now. Existing distances were kept; please retry shortly."
+            : "Amazon sync failed. Existing distances were kept; please retry.",
+        502
+      );
+    }
     const [result] = (await res.json()) as any[];
     revalidateTag("ops-capacity-distance");
     if (!result || result.outcome !== "done") return fail("Amazon sync failed. Existing distances were kept; please retry.", 502);
