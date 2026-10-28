@@ -9,8 +9,7 @@ export function lossUpdateTime(value?: string) {
   }) + " IST";
 }
 export function LossShipmentHistory({ month, caseKey, tid }: { month: string; caseKey: string; tid: string }) {
-  return <section className={styles.shipmentHistory} aria-label={`PID history for ${tid}`}>
-    <h3>Shipment history · {tid}</h3>
-    <LossPidTimeline month={month} caseKey={caseKey} initiallyOpen />
+  return <section className={styles.shipmentHistory} aria-label={`Shipment history for tracking ID ${tid}`}>
+    <LossPidTimeline month={month} caseKey={caseKey} initiallyOpen embedded title={`Shipment history · ${tid}`} />
   </section>;
 }
