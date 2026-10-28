@@ -19,7 +19,19 @@ export async function enqueueActivationAutomation(input: {
   partnerCode?: string | null;
   isDeliveryAssociate?: boolean;
   accountKey?: "edsp" | "now";
+  fatherName?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  stateCode?: string | null;
+  pincode?: string | null;
+  landmark?: string | null;
+  drivingLicenseNo?: string | null;
+  dlFrontPath?: string | null;
+  dlBackPath?: string | null;
+  dropxId?: string | null;
 }) {
+  const hasDl = Boolean(String(input.drivingLicenseNo || "").trim());
   const payload = {
     fullName: input.fullName,
     dob: input.dob,
@@ -28,7 +40,23 @@ export async function enqueueActivationAutomation(input: {
     email: input.email,
     mobile: input.mobile,
     designation: input.designation,
-    location: input.stationCode
+    location: input.stationCode,
+    fatherName: input.fatherName,
+    father_name: input.fatherName,
+    address: input.address,
+    street: input.address,
+    city: input.city,
+    state: input.state || input.stateCode,
+    stateCode: input.stateCode,
+    pincode: input.pincode,
+    postal_pin: input.pincode,
+    landmark: input.landmark,
+    drivingLicenseNo: input.drivingLicenseNo,
+    driving_license_no: input.drivingLicenseNo,
+    dlFrontPath: input.dlFrontPath,
+    dlBackPath: input.dlBackPath,
+    hasDrivingLicence: hasDl,
+    dropxId: input.dropxId
   };
   const tasks: Array<Promise<unknown>> = [];
   if (input.pan) {
@@ -59,6 +87,10 @@ export async function enqueueActivationAutomation(input: {
         designationCode: input.designationCode,
         designationName: input.designation,
         isDeliveryAssociate: input.isDeliveryAssociate,
+        hasDrivingLicence: hasDl,
+        drivingLicenseNo: input.drivingLicenseNo,
+        dlFrontPath: input.dlFrontPath,
+        dlBackPath: input.dlBackPath,
         payload
       })
     }).catch((error) => console.error("[lifecycle-automation] idfy enroll", error))

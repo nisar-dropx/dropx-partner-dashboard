@@ -32,7 +32,7 @@ async function requireScopedApplicant(id: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status, identity_exception_required, pan_number, email, mobile, gender, date_of_birth")
+    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status, identity_exception_required, pan_number, email, mobile, gender, date_of_birth, father_name, address, state_code, postal_pin, landmark, driving_license_no, dl_front_path, dl_back_path, dropx_id")
     .eq("company_id", companyId)
     .eq("id", id)
     .maybeSingle();
@@ -216,20 +216,46 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
     const station = applicant.location_id
       ? await supabaseAdmin!.from("stations").select("station_code").eq("id", applicant.location_id).maybeSingle()
       : { data: null };
+    const profile = applicant as {
+      pan_number?: string | null;
+      email?: string | null;
+      date_of_birth?: string | null;
+      gender?: string | null;
+      mobile?: string | null;
+      father_name?: string | null;
+      address?: string | null;
+      state_code?: string | null;
+      postal_pin?: string | null;
+      landmark?: string | null;
+      driving_license_no?: string | null;
+      dl_front_path?: string | null;
+      dl_back_path?: string | null;
+      dropx_id?: string | null;
+    };
     await enqueueActivationAutomation({
       profileType: "workforce",
       profileId: id,
-      pan: (applicant as { pan_number?: string | null }).pan_number,
-      email: (applicant as { email?: string | null }).email,
+      pan: profile.pan_number,
+      email: profile.email,
       fullName: applicant.full_name,
-      dob: (applicant as { date_of_birth?: string | null }).date_of_birth,
-      gender: (applicant as { gender?: string | null }).gender,
+      dob: profile.date_of_birth,
+      gender: profile.gender,
       doj: applicant.date_of_join,
-      mobile: (applicant as { mobile?: string | null }).mobile,
+      mobile: profile.mobile,
       designation: applicant.designation,
       designationCode: policy.code,
       stationCode: station.data?.station_code ?? null,
-      isDeliveryAssociate: /\bDA\b|DELIVERY\s*ASSOCIATE/i.test(`${policy.code} ${applicant.designation || ""}`)
+      isDeliveryAssociate: /\bDA\b|DELIVERY\s*ASSOCIATE/i.test(`${policy.code} ${applicant.designation || ""}`),
+      fatherName: profile.father_name,
+      address: profile.address,
+      stateCode: profile.state_code,
+      state: profile.state_code,
+      pincode: profile.postal_pin,
+      landmark: profile.landmark,
+      drivingLicenseNo: profile.driving_license_no,
+      dlFrontPath: profile.dl_front_path,
+      dlBackPath: profile.dl_back_path,
+      dropxId: profile.dropx_id
     });
     revalidatePath("/people/workforce-lifecycle");
     lifecycleRedirect({ notice: `${applicant.full_name} approved and activated.` });
