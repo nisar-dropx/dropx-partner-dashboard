@@ -68,6 +68,7 @@ const mocks = {
 function withSharedModules(base) {
   return {
     ...base,
+    "./mapping-summary-access": moduleAt("src/lib/mapping-summary-access.ts", {}),
     "@/lib/session-user": moduleAt("src/lib/session-user.ts", base),
     "@/lib/access-cache": moduleAt("src/lib/access-cache.ts", base)
   };
@@ -139,6 +140,10 @@ assert.deepEqual(preview.locationScopeIds, actualStation.locationScopeIds);
 assert.equal(preview.hasAllLocationAccess, actualStation.hasAllLocationAccess);
 assert.equal(auth.hasPermission(preview, "people_all", "add"), false);
 assert.equal(auth.hasPermission(preview, "people_all", "view"), true);
+const mappingPreview = {...preview, permissions: {...preview.permissions, ops_provider_mapping: {canView: true, canAdd: true, canEdit: true}}};
+assert.equal(auth.hasPermission(mappingPreview, "ops_provider_mapping_summary", "access"), true);
+assert.equal(auth.hasPermission(mappingPreview, "ops_provider_mapping_summary", "edit"), false, "Summary inheritance never bypasses read-only previews");
+assert.equal(auth.hasPermission(mappingPreview, "provider_mapping_summary", "access"), false, "Summary access stays on the source mapping surface");
 for (const invalid of ["other-company", "inactive"]) {
   selected = invalid;
   await assert.rejects(auth.getAuthorization(), /preview-unavailable/, "invalid targets fail closed with an exit control");
