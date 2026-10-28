@@ -1,4 +1,4 @@
-import { requireConnectAccount, type ConnectAccount } from "../../../../../../../src/lib/connect-auth";
+import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { userFacingError } from "@/lib/user-facing-error";
 
 export const dynamic = "force-dynamic";
