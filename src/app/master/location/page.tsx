@@ -9,6 +9,8 @@ import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { indiaStateCode, indiaStateOptions } from "@/lib/india-states";
+import { PeopleOwnershipRefresh } from "@/components/people-ownership-refresh";
+import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import {
   createLocation,
@@ -53,7 +55,8 @@ type LocationRow = {
   longitude: number | null;
   geofence_radius_m?: number | null;
   station_email: string | null;
-  station_manager_email: string | null;
+  peopleOwner: string;
+  peopleOwnerKeys: string[];
   parent_station_id: string | null;
   hide_from_location_list: boolean;
   inbound_requires_destination: boolean;
@@ -61,23 +64,6 @@ type LocationRow = {
   is_active: boolean;
   providers?: { code: string; name: string } | null;
   location_models?: { code: string; name: string } | null;
-};
-
-type UserRow = {
-  id: string;
-  full_name: string | null;
-  email: string | null;
-  role: string;
-  role_id: string | null;
-  reports_to_user_id: string | null;
-  is_active: boolean;
-};
-
-type UserRoleRow = {
-  id: string;
-  code: string;
-  name: string;
-  location_access_mode: string | null;
 };
 
 type RawLocationRow = Omit<LocationRow, "providers" | "location_models"> & {
@@ -102,28 +88,6 @@ function isMissingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
 }
 
-function descendantUserEmails(users: UserRow[], managerId: string) {
-  const descendants = new Set<string>();
-  let added = true;
-
-  while (added) {
-    added = false;
-    users.forEach((user) => {
-      if (user.reports_to_user_id === managerId || (user.reports_to_user_id && descendants.has(user.reports_to_user_id))) {
-        if (!descendants.has(user.id)) {
-          descendants.add(user.id);
-          added = true;
-        }
-      }
-    });
-  }
-
-  return users
-    .filter((user) => user.id === managerId || descendants.has(user.id))
-    .map((user) => normalizeEmail(user.email))
-    .filter(Boolean);
-}
-
 function locationsForAuthorization(locations: LocationRow[], authorization: Awaited<ReturnType<typeof requirePagePermission>>) {
   if (authorization.hasAllLocationAccess) return locations;
 
@@ -134,7 +98,6 @@ function locationsForAuthorization(locations: LocationRow[], authorization: Awai
     if (location.hide_from_location_list) return false;
     if (allowedLocationIds.has(location.id)) return true;
     if (signedInEmail && normalizeEmail(location.station_email) === signedInEmail) return true;
-    if (signedInEmail && normalizeEmail(location.station_manager_email) === signedInEmail) return true;
     return false;
   });
 }
@@ -144,8 +107,7 @@ async function loadMasterData(companyId: string) {
     return {
       providers: [] as ProviderRow[],
       models: [] as ModelRow[],
-      users: [] as UserRow[],
-      userRoles: [] as UserRoleRow[],
+      managerOptions: [] as {value:string;label:string}[],
       locations: [] as LocationRow[],
       error: "Supabase service role key is not configured."
     };
@@ -163,15 +125,11 @@ async function loadMasterData(companyId: string) {
     city,
     state,
     region,
-    aom,
-    cluster_manager,
-    cluster,
     postal_code,
     latitude,
     longitude,
     geofence_radius_m,
     station_email,
-    station_manager_email,
     parent_station_id,
     hide_from_location_list,
     inbound_requires_destination,
@@ -196,13 +154,12 @@ async function loadMasterData(companyId: string) {
     longitude,
     geofence_radius_m,
     station_email,
-    station_manager_email,
     is_active,
     providers (code, name),
     location_models (code, name)
   `;
 
-  const [providersResult, modelsResult, usersResult, userRolesResult, initialLocationsResult] = await Promise.all([
+  const [providersResult, modelsResult, initialLocationsResult] = await Promise.all([
     supabaseAdmin
       .from("providers")
       .select("id, code, name, is_active")
@@ -222,18 +179,6 @@ async function loadMasterData(companyId: string) {
       .eq("company_id", companyId)
       .order("code"),
     supabaseAdmin
-      .from("profiles")
-      .select("id, full_name, email, role, role_id, reports_to_user_id, is_active")
-      .eq("is_active", true)
-      .eq("company_id", companyId)
-      .order("full_name"),
-    supabaseAdmin
-      .from("user_roles")
-      .select("id, code, name, location_access_mode")
-      .eq("is_active", true)
-      .eq("company_id", companyId)
-      .order("name"),
-    supabaseAdmin
       .from("stations")
       .select(locationSelect)
       .eq("company_id", companyId)
@@ -251,28 +196,28 @@ async function loadMasterData(companyId: string) {
   const error =
     providersResult.error?.message ||
     modelsResult.error?.message ||
-    usersResult.error?.message ||
-    userRolesResult.error?.message ||
     locationsResult.error?.message ||
     null;
 
   const rawLocations = (locationsResult.data ?? []) as unknown as RawLocationRow[];
   const rawModels = (modelsResult.data ?? []) as unknown as RawModelRow[];
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, rawLocations.map((row) => row.id));
+  const ownership = nlPeopleClusters(rawLocations, hierarchy.byLocation);
 
   return {
+    managerOptions: ownership.options,
     providers: (providersResult.data ?? []) as ProviderRow[],
     models: rawModels.map((row) => ({
       ...row,
       providers: firstRelation(row.providers)
     })) as ModelRow[],
-    users: (usersResult.data ?? []) as UserRow[],
-    userRoles: (userRolesResult.data ?? []) as UserRoleRow[],
     locations: rawLocations.map((row) => {
       const resolved = hierarchy.byLocation.get(row.id);
       const clusterManager = resolved?.clusterManagers[0]?.name ?? null;
       return {
         ...row,
+        peopleOwner: ownership.byStation.get(row.id)?.cluster ?? "Not mapped in People",
+        peopleOwnerKeys: ownership.byStation.get(row.id)?.clusterKeys ?? ["unmapped"],
         aom: resolved?.areaOperationsManagers[0]?.name ?? null,
         cluster_manager: clusterManager,
         cluster: clusterManager,
@@ -301,7 +246,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
   const authorization = await requirePagePermission("master_locations", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_locations;
-  const { providers, models, users, userRoles, locations, error } = await loadMasterData(companyId);
+  const { providers, models, locations, managerOptions: allManagerOptions, error } = await loadMasterData(companyId);
   const visibleLocations = locationsForAuthorization(locations, authorization);
   const addType = pagePermission.canAdd ? searchParams?.add : null;
   const [editType, editId] = (searchParams?.edit ?? "").split(":");
@@ -319,30 +264,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
     helper: model.providers?.name ?? undefined,
     providerId: model.provider_id
   }));
-  const eligibleManagerUsers = users
-    .filter((user) => {
-      const role = userRoles.find((item) => item.id === user.role_id);
-      return user.email &&
-        String(role?.code ?? "").trim().toUpperCase() !== "LOCATION" &&
-        String(user.role ?? "").trim().toUpperCase() !== "LOCATION";
-    });
-  const managerOptions = eligibleManagerUsers
-    .map((user) => {
-      const role = userRoles.find((item) => item.id === user.role_id)?.name || user.role;
-      const scopeEmails = descendantUserEmails(users, user.id);
-      return {
-        value: user.email ?? "",
-        label: user.full_name || user.email || "Unnamed user",
-        helper: [role, user.email].filter(Boolean).join(" - "),
-        scopeValues: scopeEmails.length ? scopeEmails : [normalizeEmail(user.email)]
-      };
-    });
-  const hierarchyUserOptions = eligibleManagerUsers
-    .map((user) => ({
-      value: user.email ?? "",
-      label: user.full_name || user.email || "Unnamed user",
-      helper: [userRoles.find((item) => item.id === user.role_id)?.name || user.role, user.email].filter(Boolean).join(" - ")
-    }));
+  const visibleManagerKeys = new Set(visibleLocations.flatMap(location => location.peopleOwnerKeys));
+  const managerOptions = allManagerOptions.filter(option => visibleManagerKeys.has(option.value));
   const parentStationOptions = locations
     .filter((location) => location.id !== editLocation?.id && location.is_active && location.location_models?.code !== "XPT")
     .map((location) => ({
@@ -356,10 +279,11 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       <PageHead
         eyebrow="Setup"
         title="Locations"
-        subtitle="No demo rows are shown here. These records read from and write to Supabase."
+        subtitle="Maintain location details here. Manager assignments come from People → Managed locations."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
+      <PeopleOwnershipRefresh paused={Boolean(addType || editLocation)} />
       {error ? (
         <section className="panel">
           <div className="panel-body">
@@ -399,7 +323,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Address line 2<input className="field" name="address_line2" placeholder="Enter address line 2" /></label>
               <label>City<input className="field" name="city" placeholder="Enter city" /></label>
               <label>State<SearchableSelect name="state" options={[...indiaStateOptions]} placeholder="Select state" required /></label>
-              <label>Manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} placeholder="Select manager" required /></label>
+              <p className="subtle">Manager assignments are maintained in People → Managed locations.</p>
               <label>Postal code<input className="field" name="postal_code" placeholder="Enter postal code" /></label>
               <label>Latitude<input className="field" name="latitude" placeholder="Enter latitude" step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" placeholder="Enter longitude" step="any" type="number" min="-180" max="180" /></label>
@@ -446,7 +370,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Address line 2<input className="field" name="address_line2" defaultValue={editLocation.address_line2 ?? ""} /></label>
               <label>City<input className="field" name="city" defaultValue={editLocation.city ?? ""} /></label>
               <label>State<SearchableSelect name="state" options={[...indiaStateOptions]} defaultValue={indiaStateCode(editLocation.state)} placeholder="Select state" required /></label>
-              <label>Manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.station_manager_email ?? ""} placeholder="Select manager" required /></label>
+              <p className="subtle">Manager assignments are maintained in People → Managed locations.</p>
               <label>Postal code<input className="field" name="postal_code" defaultValue={editLocation.postal_code ?? ""} /></label>
               <label>Latitude<input className="field" name="latitude" defaultValue={editLocation.latitude ?? ""} step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" defaultValue={editLocation.longitude ?? ""} step="any" type="number" min="-180" max="180" /></label>

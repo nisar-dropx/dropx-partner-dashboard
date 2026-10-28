@@ -65,15 +65,6 @@ function isExistingUserError(message: string) {
   return text.includes("already") || text.includes("registered") || text.includes("exists");
 }
 
-type ProfileAccessRow = {
-  id: string;
-  email: string | null;
-  role_id: string | null;
-  reports_to_user_id: string | null;
-  location_scope_ids: string[] | null;
-  company_id?: string | null;
-};
-
 function masterLocationRedirect(params: { error?: string; notice?: string }): never {
   const query = new URLSearchParams();
   if (params.error) query.set("locationError", params.error);
@@ -204,7 +195,6 @@ async function syncLocationEmailProfile(
   locationId: string,
   stationEmail: string | null,
   stationName: string,
-  managerEmail: string,
   companyId: string
 ) {
   if (!supabaseAdmin || !stationEmail) return;
@@ -216,7 +206,6 @@ async function syncLocationEmailProfile(
   }
 
   const roleId = await ensureLocationRole(companyId);
-  const manager = await findProfileByEmail(managerEmail, companyId);
   const existingProfile = await findProfileByEmail(email, companyId);
   const authUserId = existingProfile?.id ?? await ensureAuthUserForLocationEmail(email, stationName);
   const profile = existingProfile ?? await findProfileById(authUserId, companyId) ?? await findProfileByEmail(email, companyId);
@@ -236,7 +225,6 @@ async function syncLocationEmailProfile(
     full_name: profile?.full_name || stationName,
     email,
     role_id: roleId,
-    reports_to_user_id: manager?.id ?? null,
     location_scope_ids: nextScope,
     company_id: companyId,
     invite_method: "Location Master",
@@ -279,11 +267,10 @@ async function trySyncLocationEmailProfile(
   locationId: string,
   stationEmail: string | null,
   stationName: string,
-  managerEmail: string,
   companyId: string
 ) {
   try {
-    await syncLocationEmailProfile(locationId, stationEmail, stationName, managerEmail, companyId);
+    await syncLocationEmailProfile(locationId, stationEmail, stationName, companyId);
     return null;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -309,72 +296,6 @@ async function removeLocationEmailProfileScope(locationId: string, stationEmail:
     .eq("company_id", companyId);
 
   if (error) throw new Error(`Old location email access could not be updated: ${error.message}`);
-}
-
-async function locationAccessProfiles(managerEmail: string, companyId: string) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-
-  const [profilesResult, allLocationRolesResult] = await Promise.all([
-    supabaseAdmin
-      .from("profiles")
-      .select("id, email, role_id, reports_to_user_id, location_scope_ids")
-      .eq("company_id", companyId),
-    supabaseAdmin
-      .from("user_roles")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("location_access_mode", "all_locations")
-  ]);
-
-  if (profilesResult.error) throw new Error(profilesResult.error.message);
-  if (allLocationRolesResult.error) throw new Error(allLocationRolesResult.error.message);
-
-  const profiles = (profilesResult.data ?? []) as ProfileAccessRow[];
-  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
-  const selectedManager = profiles.find(
-    (profile) => profile.email?.trim().toLowerCase() === managerEmail.trim().toLowerCase()
-  );
-
-  if (!selectedManager) throw new Error("Selected manager was not found in the user list.");
-
-  const allLocationRoleIds = new Set((allLocationRolesResult.data ?? []).map((role) => role.id));
-  const accessProfileIds = new Set(
-    profiles
-      .filter((profile) => profile.role_id && allLocationRoleIds.has(profile.role_id))
-      .map((profile) => profile.id)
-  );
-  const visited = new Set<string>();
-  let current: ProfileAccessRow | undefined = selectedManager;
-
-  while (current) {
-    if (visited.has(current.id)) {
-      throw new Error("The reporting-manager hierarchy contains a loop. Correct it before assigning this location.");
-    }
-
-    visited.add(current.id);
-    accessProfileIds.add(current.id);
-    current = current.reports_to_user_id ? profilesById.get(current.reports_to_user_id) : undefined;
-  }
-
-  return profiles.filter((profile) => accessProfileIds.has(profile.id));
-}
-
-async function addLocationAccess(locationId: string, profiles: ProfileAccessRow[], companyId: string) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-  const admin = supabaseAdmin;
-
-  await Promise.all(profiles.map(async (profile) => {
-    const currentScope = profile.location_scope_ids ?? [];
-    if (currentScope.includes(locationId)) return;
-
-    const { error } = await admin
-      .from("profiles")
-      .update({ location_scope_ids: [...currentScope, locationId] })
-      .eq("id", profile.id)
-      .eq("company_id", companyId);
-
-    if (error) throw new Error(`Location saved, but user access could not be updated: ${error.message}`);
-  }));
 }
 
 async function countLocationDependencyRows(
@@ -548,12 +469,9 @@ export async function createLocation(formData: FormData) {
   const geofenceRadiusM = optionalGeofenceRadius(formData.get("geofence_radius_m"));
   const stationEmail = clean(formData.get("station_email"));
   const parentStationId = clean(formData.get("parent_station_id"));
-  const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
-  const stationReportingEmail = stationManagerEmail;
   const hideFromLocationList = formData.get("hide_from_location_list") === "on";
   const isHo = formData.get("is_ho") === "on";
   const address = [addressLine1, addressLine2, city, state, postalCode].filter(Boolean).join(", ");
-  const accessProfiles = await locationAccessProfiles(stationReportingEmail, companyId);
 
   const payload = withCompany({
     station_code: stationCode,
@@ -565,13 +483,11 @@ export async function createLocation(formData: FormData) {
     address_line2: addressLine2,
     city,
     state,
-    cluster: null,
     postal_code: postalCode,
     latitude,
     longitude,
     geofence_radius_m: geofenceRadiusM,
     station_email: stationEmail,
-    station_manager_email: stationManagerEmail,
     parent_station_id: parentStationId,
     hide_from_location_list: hideFromLocationList,
       inbound_requires_destination: formData.get("inbound_requires_destination") === "on",
@@ -588,8 +504,7 @@ export async function createLocation(formData: FormData) {
 
   if (error) throw new Error(error.message);
   if (!location) throw new Error("Unable to create location.");
-  await addLocationAccess(location.id, accessProfiles, companyId);
-  const syncError = await trySyncLocationEmailProfile(location.id, stationEmail, stationName, stationReportingEmail, companyId);
+  const syncError = await trySyncLocationEmailProfile(location.id, stationEmail, stationName, companyId);
   revalidatePath("/master/location");
   revalidatePath("/users");
   if (syncError) {
@@ -620,13 +535,10 @@ export async function updateLocation(formData: FormData) {
   const geofenceRadiusM = optionalGeofenceRadius(formData.get("geofence_radius_m"));
   const stationEmail = clean(formData.get("station_email"));
   const parentStationId = clean(formData.get("parent_station_id"));
-  const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
-  const stationReportingEmail = stationManagerEmail;
   const isActive = formData.get("is_active") !== "inactive";
   const hideFromLocationList = formData.get("hide_from_location_list") === "on";
   const isHo = formData.get("is_ho") === "on";
   const address = [addressLine1, addressLine2, city, state, postalCode].filter(Boolean).join(", ");
-  const accessProfiles = await locationAccessProfiles(stationReportingEmail, companyId);
   const { data: existingLocation, error: existingLocationError } = await supabaseAdmin
     .from("stations")
     .select("station_email")
@@ -645,13 +557,11 @@ export async function updateLocation(formData: FormData) {
       address_line2: addressLine2,
       city,
       state,
-      cluster: null,
       postal_code: postalCode,
       latitude,
       longitude,
       geofence_radius_m: geofenceRadiusM,
       station_email: stationEmail,
-      station_manager_email: stationManagerEmail,
       parent_station_id: parentStationId,
       hide_from_location_list: hideFromLocationList,
       inbound_requires_destination: formData.get("inbound_requires_destination") === "on",
@@ -674,12 +584,11 @@ export async function updateLocation(formData: FormData) {
   }
 
   if (error) throw new Error(error.message);
-  await addLocationAccess(id, accessProfiles, companyId);
   if (normalizeEmail(existingLocation?.station_email) !== normalizeEmail(stationEmail)) {
     await removeLocationEmailProfileScope(id, existingLocation?.station_email ?? null, companyId);
   }
   if (isActive) {
-    const syncError = await trySyncLocationEmailProfile(id, stationEmail, stationName, stationReportingEmail, companyId);
+    const syncError = await trySyncLocationEmailProfile(id, stationEmail, stationName, companyId);
     if (syncError) {
       revalidatePath("/master/location");
       revalidatePath("/users");

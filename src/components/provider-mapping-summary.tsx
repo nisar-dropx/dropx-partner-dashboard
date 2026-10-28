@@ -27,6 +27,7 @@ const statusLabel: Record<ProviderMappingSummaryStatus, string> = {
 type FilterOption = {value: string; label: string; meta?: string};
 
 type ProviderMappingSummaryProps = {
+  managerOptions?: FilterOption[];
   canOpenMapping?: boolean; canOpenWorkforce?: boolean; workforcePath?: string;
   stations: ProviderMappingSummaryStationInput[];
   sourceMembers: ProviderMappingSummarySourceInput[];
@@ -96,7 +97,7 @@ function CompactMultiSelect({label, allLabel, options, selected, onChange}: {
   </div>;
 }
 
-export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=false,workforcePath="/work-force-register",stations, sourceMembers, mappings, workers, methods, availableMonths, initialMonth}: ProviderMappingSummaryProps) {
+export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,canOpenWorkforce=false,workforcePath="/work-force-register",stations, sourceMembers, mappings, workers, methods, availableMonths, initialMonth}: ProviderMappingSummaryProps) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selection, setSelection] = useState<{stationId:string;metric:string}|null>(null);
@@ -115,8 +116,14 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
   const stationOptions = useMemo(() => monthly.map(station => ({
     value: station.stationId, label: station.stationCode, meta: station.stationName || "Name unavailable"
   })).sort((left, right) => left.label.localeCompare(right.label)), [monthly]);
-  const ownerOptions = useMemo(() => [...new Set(stations.map(station => String(station.cluster || "Not mapped in People").trim() || "Not mapped in People"))]
-    .sort().map(value => ({value, label: value})), [stations]);
+  const ownerOptions = managerOptions;
+  useEffect(() => {
+    const available = new Set(managerOptions.map(option => option.value));
+    setSelectedOwners(current => {
+      const next = current.filter(value => available.has(value));
+      return next.length === current.length ? current : next;
+    });
+  }, [managerOptions]);
   const regionOptions = useMemo(() => [...new Set(stations.map(station => String(station.region || "Unassigned").trim() || "Unassigned"))]
     .sort().map(value => ({value, label: value})), [stations]);
   const filtered = useMemo(() => {
@@ -130,7 +137,7 @@ export function ProviderMappingSummary({canOpenMapping=false,canOpenWorkforce=fa
       const queryMatch = !term || `${station.stationCode} ${station.stationName} ${station.cluster} ${station.region}`.toLowerCase().includes(term);
       return statusMatch && queryMatch
         && (!stationSet.size || stationSet.has(station.stationId))
-        && (!ownerSet.size || ownerSet.has(station.cluster))
+        && (!ownerSet.size || station.clusterKeys.some(key => ownerSet.has(key)))
         && (!regionSet.size || regionSet.has(station.region));
     });
   }, [monthly, query, selectedOwners, selectedRegions, selectedStations, status]);

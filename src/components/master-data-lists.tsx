@@ -40,7 +40,8 @@ type LocationRow = {
   longitude: number | null;
   geofence_radius_m?: number | null;
   station_email: string | null;
-  station_manager_email: string | null;
+  peopleOwner?: string;
+  peopleOwnerKeys?: string[];
   parent_station_id?: string | null;
   is_active: boolean;
   providers?: { code: string; name: string } | null;
@@ -393,11 +394,7 @@ export function MasterDataLists({
       const matchesProvider = !locationProviders.length || locationProviders.some((provider) => sameText(location.providers?.code || location.providers?.name, provider));
       const matchesModel = !locationModels.length || locationModels.some((model) => sameText(location.location_models?.code || location.location_models?.name, model));
       const matchesState = !locationStates.length || locationStates.some((state) => sameText(indiaStateCode(location.state), state));
-      const managerScopes = locationManagers.flatMap((manager) => {
-        const option = locationManagerOptions.find((item) => sameText(item.value, manager));
-        return option?.scopeValues?.length ? option.scopeValues : [manager];
-      });
-      const matchesManager = !locationManagers.length || managerScopes.some((manager) => sameText(location.station_manager_email, manager));
+      const matchesManager = !locationManagers.length || (location.peopleOwnerKeys ?? []).some(key => locationManagers.includes(key));
       return matchesProvider && matchesModel && matchesState && matchesManager && searchMatch([
         location.station_code,
         location.station_name,
@@ -413,7 +410,7 @@ export function MasterDataLists({
         location.latitude?.toString(),
         location.longitude?.toString(),
         location.station_email,
-        location.station_manager_email,
+        location.peopleOwner,
         location.providers?.name,
         location.providers?.code,
         location.location_models?.name,
@@ -471,7 +468,7 @@ export function MasterDataLists({
         "Location Code": location.station_code,
         "Location Name": location.station_name || "",
         State: indiaStateCode(location.state) || location.state || "",
-        Manager: managerOptions.find((manager) => sameText(manager.value, location.station_manager_email))?.label || location.station_manager_email || "",
+        "People manager": location.peopleOwner || "Not mapped in People",
         Provider: location.providers?.name || location.providers?.code || "",
         Model: location.location_models?.code || location.location_models?.name || "",
         "Parent Location": location.parent_station_id
@@ -536,7 +533,7 @@ export function MasterDataLists({
                 <th>Code</th>
                 <th>Location</th>
                 <th>State</th>
-                <th>Manager</th>
+                <th>People manager</th>
                 <th>Provider</th>
                 <th>Model</th>
                 <th>Parent Location</th>
@@ -552,7 +549,7 @@ export function MasterDataLists({
                   <td><strong>{row.station_code}</strong></td>
                   <td>{row.station_name && !sameText(row.station_name, row.station_code) ? row.station_name : "-"}</td>
                   <td>{indiaStateCode(row.state) || row.state || "-"}</td>
-                  <td>{managerOptions.find((manager) => sameText(manager.value, row.station_manager_email))?.label || row.station_manager_email || "-"}</td>
+                  <td>{row.peopleOwner || "Not mapped in People"}</td>
                   <td>{row.providers?.name || "-"}</td>
                   <td>{row.location_models?.code || "-"}</td>
                   <td>{row.parent_station_id ? locations.find((location) => location.id === row.parent_station_id)?.station_code || "Mapped" : "-"}</td>
