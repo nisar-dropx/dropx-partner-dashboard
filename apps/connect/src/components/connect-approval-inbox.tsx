@@ -502,8 +502,8 @@ function ApprovalRow({
   );
 }
 
-function ApprovalModal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  return <ConnectDialog className={`dx-approval-modal${wide ? " dx-approval-modal-wide" : ""}`} eyebrow={`Approval inbox · ${title}`} onClose={onClose} title="Review request">
+function ApprovalModal({ title, onClose, children, wide = false, compactAdvance = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; compactAdvance?: boolean }) {
+  return <ConnectDialog className={`dx-approval-modal${wide ? " dx-approval-modal-wide" : ""}${compactAdvance ? " dx-advance-modal" : ""}`} eyebrow={`Approval inbox · ${title}`} onClose={onClose} title="Review request">
     <div className="dx-approval-modal-body">{children}</div>
   </ConnectDialog>;
 }
@@ -1774,19 +1774,19 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const approval = assigned ?? team;
             if (!approval) return null;
             const fromTeam = Boolean(team);
-            return <ApprovalModal onClose={closeModal} title={approval.workerName}>
+            return <ApprovalModal onClose={closeModal} title={approval.workerName} compactAdvance>
               <ApprovalHead
                 eyebrow={fromTeam ? `All team · ${approval.stepName}` : `Pay advance · ${approval.stepName}`}
                 name={approval.workerName}
                 meta={`${approval.requestNumber} · ${approval.workerCode}`}
-                badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>}
+                badge={<span className="dx-approval-badge">Requested <strong>{money(approval.requestedAmount)}</strong></span>}
               />
               {fromTeam ? (
                 <p className="subtle" style={{ marginTop: 0 }}>
                   Assigned to a manager on your reporting line. Acting here takes over that step.
                 </p>
               ) : null}
-              <ConnectPayAdvanceReview key={`${account.id}:${approval.requestId}`} accountId={account.id} profileType={account.profileType} approval={approval} />
+              <ConnectPayAdvanceReview key={`${account.id}:${approval.requestId}`} accountId={account.id} profileType={account.profileType} approval={approval}>
               <div className="dx-approval-finance-terms">
                 <label className="dx-approval-note-field">Approved amount
                   <input aria-label="Approved amount" type="number" min="0.01" step="0.01"
@@ -1800,7 +1800,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                     onChange={event => setPayAdvanceTerms(current => ({ ...current, [approval.id]: { amount: current[approval.id]?.amount ?? String(approval.approvedAmount ?? approval.requestedAmount), installments: event.target.value } }))} />
                 </label> : null}
               </div>
-              <ApprovalNote id={approval.id} notes={notes} onChange={value => setNote(approval.id, value)} placeholder="Add a reason when rejecting" />
+              <ApprovalNote id={approval.id} notes={notes} onChange={value => setNote(approval.id, value)} placeholder="Optional for approval; required for return or rejection" />
+              </ConnectPayAdvanceReview>
               {payAdvanceError ? <p className="dx-error" role="alert">{payAdvanceError}</p> : null}
               <ApprovalToolbar saving={saving}
                 onApprove={() => void decidePayAdvance(approval, "approved")}

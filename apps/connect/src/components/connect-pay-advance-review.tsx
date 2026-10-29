@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import type { PayAdvanceApproval, PayAdvanceReviewDetails } from "@/lib/connect-pay-advance-approval";
 
-const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
+const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
 const label = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
 function date(value: string | null, monthOnly = false) {
   if (!value) return "Not recorded";
@@ -14,8 +14,8 @@ function date(value: string | null, monthOnly = false) {
     : { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }).format(parsed);
 }
 
-export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
-  accountId: string; profileType: string; approval: PayAdvanceApproval;
+export function ConnectPayAdvanceReview({ accountId, profileType, approval, children }: {
+  accountId: string; profileType: string; approval: PayAdvanceApproval; children?: ReactNode;
 }) {
   const [data, setData] = useState<PayAdvanceReviewDetails | null>(null);
   const [error, setError] = useState("");
@@ -42,22 +42,19 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
   const outstanding = data?.advances.reduce((sum, a) => sum + a.outstanding, 0) ?? approval.outstandingAdvance;
   const reserved = data?.advances.reduce((sum, a) => sum + a.reserved, 0) ?? approval.reservedRecovery;
   return <section className="dx-advance-review" aria-label="Advance request details">
-    <p className="dx-advance-explanation">You are reviewing a pay advance at the <strong>{approval.stepName}</strong> step. Approval records this decision; payment is confirmed separately by the bank.</p>
-    <dl className="dx-approval-facts dx-advance-key-facts">
-      <div><dt>Requested advance</dt><dd>{money(approval.requestedAmount)}</dd></div>
-      {approval.approvedAmount != null ? <div><dt>{previous ? "Previously approved amount" : "Amount carried into this approval"}</dt><dd>{money(previous?.approvedAmount ?? approval.approvedAmount)}
-        <small>{previous ? `${previous.actorName || previous.label} · ${previous.label} · ${date(previous.actedAt)}` : "See approval history below for the earlier decision."}</small>
-        <small>This is an approval amount, not a paid advance.</small></dd></div> : null}
-      <div><dt>Available advance for this request</dt><dd>{max == null ? "Unavailable" : money(max)}<small>{approval.stepType === "finance" ? "Current eligibility, capped by the request's original limit." : "Current eligibility, capped by the requested amount at this approval step."}</small></dd></div>
-      <div><dt>Unpaid salary / payout balance</dt><dd>{outstandingPay == null ? "Unavailable" : money(outstandingPay)}<small>Expand payroll periods below to see which months contribute.</small></dd></div>
-      <div><dt>Recovery terms</dt><dd>{approval.recoveryMode === "installments" ? `${approval.installments} installments` : "One-time deduction"}</dd></div>
-      {approval.neededBy ? <div><dt>Needed by</dt><dd>{new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(approval.neededBy))}</dd></div> : null}
-      <div className="dx-advance-wide"><dt>Reason for request</dt><dd>{approval.reason}</dd></div>
+    <p className="dx-advance-reason"><strong>Reason</strong> {approval.reason || "Not provided"}</p>
+    <dl className="dx-advance-metrics">
+      <div><dt>Available limit</dt><dd>{max == null ? "Unavailable" : money(max)}</dd></div>
+      <div><dt>Paid this month</dt><dd>{money(approval.monthPaidAmount)} <small>({approval.monthPaidCount} {approval.monthPaidCount === 1 ? "time" : "times"})</small></dd></div>
+      <div><dt>Advance to recover</dt><dd>{money(outstanding)}</dd></div>
     </dl>
+    {approval.neededBy ? <p className="dx-advance-explanation">Needed by {new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(approval.neededBy))}</p> : null}
+    <div className="dx-advance-decision">{children}</div>
     {error ? <div className="dx-advance-load-error" role="alert"><p>{error}</p><button type="button" onClick={() => setAttempt(n => n + 1)}>Retry review details</button></div>
-      : !data ? <p role="status" className="dx-advance-explanation">Loading approval history, payroll periods and advance history…</p> : <>
+      : !data ? <p role="status" className="dx-advance-explanation">Loading history…</p> : <div className="dx-advance-details">
         <details className="dx-advance-section">
-          <summary><span><strong>Approval history</strong><small>{data.steps.filter(s => s.status === "approved").length} approved · {approval.stepName} pending</small></span><ChevronDown aria-hidden="true" /></summary>
+          <summary><span><strong>Approvals</strong><small>{previous ? `${money(previous.approvedAmount!)} approved · ${previous.actorName || previous.label}` : "No earlier approval"}</small></span><ChevronDown aria-hidden="true" /></summary>
+          <p className="dx-advance-history-hint">Current step: {approval.stepName} · Awaiting decision. Payment follows bank confirmation.</p>
           <ol className="dx-advance-timeline">
             <li><strong>Request submitted</strong><span>{data.submittedBy}</span><small>{date(data.requestedAt)}</small></li>
             {data.steps.map(step => <li key={step.id} className={step.status === "pending" ? "is-current" : ""}>
@@ -68,27 +65,26 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
           </ol>
         </details>
         <details className="dx-advance-section">
-          <summary><span><strong>Outstanding payroll periods</strong><small>{money(data.capacity.outstandingPay)} unpaid across the periods below</small></span><ChevronDown aria-hidden="true" /></summary>
+          <summary><span><strong>Payroll periods &amp; eligibility</strong><small>{outstandingPay == null ? "Balance unavailable" : `${money(outstandingPay)} unpaid salary / payout`}</small></span><ChevronDown aria-hidden="true" /></summary>
           <div className="dx-advance-section-body">
             <dl className="dx-advance-periods">{data.capacity.breakdown.map(period => <div key={period.month}><dt>{date(period.month, true)}</dt><dd>{money(period.outstanding)}</dd></div>)}</dl>
-            <p>Previous and current month unpaid pay, after recorded deductions and payments. This balance is salary/payout owed to the person, not an advance owed by them.</p>
+            <p>Salary / payout owed after recorded deductions and payments.</p>
             <dl className="dx-advance-periods"><div><dt>{data.capacity.eligibilityPercent}% of unpaid pay</dt><dd>{money(data.capacity.outstandingPay * data.capacity.eligibilityPercent / 100)}</dd></div>
               <div><dt>Other pending / approved unpaid advances</dt><dd>{money(data.capacity.committedAdvance)}</dd></div>
               <div><dt>Available advance now</dt><dd>{money(data.capacity.maxEligibleAmount)}</dd></div>
               <div><dt>Maximum for this request</dt><dd>{money(data.requestLimit)}</dd></div></dl>
-            <p>Other unpaid requests reduce availability. Each approval step keeps its allowed request limit. Eligibility is checked again when you approve.</p>
+            <p>Available limit accounts for other unpaid requests and this approval step’s cap. Rechecked on approval.</p>
           </div>
         </details>
-      </>}
-    <dl className="dx-approval-facts dx-advance-key-facts">
-      <div><dt>Paid advances this month</dt><dd>{approval.monthPaidCount} · {money(approval.monthPaidAmount)}</dd></div>
-      <div><dt>Outstanding advance to recover</dt><dd>{money(outstanding)}</dd></div>
-      <div><dt>Scheduled payroll deductions</dt><dd>{money(reserved)}<small>Included in outstanding until recovery is confirmed.</small></dd></div>
-      {recovered != null ? <div><dt>Recovered from paid advances</dt><dd>{money(recovered)}</dd></div> : null}
-    </dl>
-    {data ? <details className="dx-advance-section">
-      <summary><span><strong>Advance payment and recovery history</strong><small>{data.advances.length} paid {data.advances.length === 1 ? "advance" : "advances"} · {money(outstanding)} outstanding</small></span><ChevronDown aria-hidden="true" /></summary>
+    <details className="dx-advance-section">
+      <summary><span><strong>Advance history</strong><small>{data.advances.length ? `${data.advances.length} paid · ${money(recovered ?? 0)} recovered` : "No paid advances"}</small></span><ChevronDown aria-hidden="true" /></summary>
       <div className="dx-advance-section-body">
+        <dl className="dx-advance-periods">
+          <div><dt>Requested recovery</dt><dd>{approval.recoveryMode === "installments" ? `${approval.installments} installments` : "One-time deduction"}</dd></div>
+          <div><dt>Outstanding advance</dt><dd>{money(outstanding)}</dd></div>
+          <div><dt>Scheduled deductions</dt><dd>{money(reserved)}</dd></div>
+        </dl>
+        {reserved > 0 ? <p>Scheduled deductions remain outstanding until recovery is confirmed.</p> : null}
         {!data.advances.length ? <p>No paid advances are recorded for this person. This pending request will appear here after bank-confirmed payment.</p> : data.advances.map(a => <details className="dx-advance-history-entry" key={a.id}>
           <summary><span><strong>{a.reference} · {money(a.amount)}</strong><small>{date(a.paidAt)} · {money(a.outstanding)} outstanding</small></span><ChevronDown aria-hidden="true" /></summary>
           <div className="dx-advance-section-body">
@@ -100,6 +96,6 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
           </div>
         </details>)}
       </div>
-    </details> : null}
+    </details></div>}
   </section>;
 }
