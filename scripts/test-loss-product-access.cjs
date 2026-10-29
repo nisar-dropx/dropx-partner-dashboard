@@ -15,10 +15,10 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  const {assertLifecycleAction}=load('src/lib/ops-pulse/nl-loss-lifecycle.ts');
  const base={companyId:'C',userId:'actor',roleCode:'OPERATIONS_SI',isMasterOwner:false,readOnly:false};
  for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_GM','GENERAL_MANAGER']){
-  auth={...base,roleCode};await assertLifecycleAction(auth,'S','propose');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve'),/Only SLP Manager/);
+  auth={...base,roleCode};await assert.rejects(()=>assertLifecycleAction(auth,'S','clarify'),/do not have access/);await assertLifecycleAction(auth,'S','propose');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve'),/Only SLP Manager/);
  }
  for(const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_MP']){
-  auth={...base,roleCode};await assertLifecycleAction(auth,'S','approve','someone-else');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve','actor'),/another authorised/);
+  auth={...base,roleCode};await assert.rejects(()=>assertLifecycleAction(auth,'S','clarify'),/do not have access/);await assertLifecycleAction(auth,'S','approve','someone-else');await assert.rejects(()=>assertLifecycleAction(auth,'S','approve','actor'),/another authorised/);
  }
  await assert.rejects(()=>assertLifecycleAction({...base,readOnly:true},'S','propose'),/edit access/);
  const api=load('src/app/api/ops-pulse/losses/case-response/route.ts');

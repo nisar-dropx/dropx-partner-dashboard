@@ -1,6 +1,5 @@
 import {
   approveLossRecovery,
-  submitLossClarification,
   transitionLossLifecycle,
 } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -49,27 +48,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "clarify") {
-      const note = String(body.note || "");
-      if (note.trim().length < 10) {
-        return reply({ error: "Explain the clarification (at least 10 characters)." }, 400);
-      }
-      // Associates clarify via DropX One; portal callers cannot spoof source=associate
-      // to bypass ops_losses edit.
-      if (!hasPermission(auth, "ops_losses", "edit")) {
-        return reply({ error: "Access denied." }, 403);
-      }
-      const data = await submitLossClarification({
-        auth,
-        month,
-        caseKey,
-        note,
-        reason: String(body.reason || ""),
-        category: String(body.category || "clarification"),
-        employeeRef: body.employee_ref ?? null,
-        evidenceUrl: body.evidence_url ?? null,
-        source: "station",
-      });
-      return reply({ ok: true, clarification: data });
+      return reply({ error: "Loss recovery clarification is no longer available." }, 410);
     }
 
     if (!Number.isInteger(body.version)) {

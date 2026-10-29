@@ -566,3 +566,13 @@ policy writes to available-pay validation. Due RPCs retain their shape and retur
 percent for compatibility. Release the Dashboard and companion HRMS payroll changes
 together. Tests cover >50% saves, available-pay reservations, legacy client fields,
 carry-forward, paid-history preservation and the existing redispute gates.
+
+### Loss clarification retired — 29 October 2026
+DropX One loss recovery is read-only for all recipient profiles. The clarification
+button, question history and Ops reply inbox are removed. Legacy POST requests and
+the Ops clarification endpoints return 410; lifecycle `clarify` is denied. These
+routes no longer call the clarification RPCs or create payroll holds. Historical
+database records remain for audit only. Existing held plans are not automatically
+approved: authorised reviewers can use the normal recovery correction/approval
+flow without the retired question-resolution prerequisite. Restricted shipment
+redisputes and payroll deduction history remain unchanged.

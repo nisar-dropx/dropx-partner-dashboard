@@ -19,10 +19,7 @@ export function ConnectLossRecoveries({
   const [rows, setRows] = useState<Recovery[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [note, setNote] = useState("");
-  const [active, setActive] = useState<string | null>(null);
   const [detail, setDetail] = useState<Recovery | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,37 +43,6 @@ export function ConnectLossRecoveries({
   useEffect(() => {
     void load();
   }, [load]);
-
-  async function submitClarification(row: Recovery) {
-    if (note.trim().length < 10) {
-      setError("Explain the clarification in at least 10 characters.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch("/api/connect/loss-recoveries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId,
-          profileType,
-          month: row.month,
-          caseKey: row.caseKey,
-          note: note.trim(),
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to submit clarification.");
-      setNote("");
-      setActive(null);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to submit clarification.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   if (loading) return null;
   if (!rows.length && !error) return null;
@@ -113,35 +79,10 @@ export function ConnectLossRecoveries({
                 {money(row.outstanding)}
                 {row.inPayroll > 0 ? ` · In draft payroll ${money(row.inPayroll)}` : ""}
               </p>
-              {row.clarifications?.length ? <details><summary>Questions &amp; replies · {row.clarifications.length}</summary>{row.clarifications.map((q,i)=><div key={i}><p><b>You:</b> {q.note}</p>{q.decision_note?<p><b>{q.decided_by_name||"Loss review team"}:</b> {q.decision_note}</p>:<small>Awaiting loss review team · recovery paused</small>}</div>)}</details>:null}
               <div className={styles.actions}>
                 <button type="button" onClick={() => setDetail(row)}>
                   View details
                 </button>
-                {active === key ? (
-                  <div>
-                    <label>
-                      Ask the loss review team
-                      <textarea
-                        value={note}
-                        onChange={(e) => setNote(e.target.value)}
-                        rows={3}
-                        maxLength={4000}
-                      />
-                    </label>
-                    <small>Reviewed by SLP / Finance / National Head / Managing Partner. Your recovery pauses for review; the reply appears here.</small>
-                    <button type="button" disabled={busy} onClick={() => void submitClarification(row)}>
-                      Send for review
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => setActive(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                ) : row.approvalStatus === "approved" ? (
-                  <button type="button" onClick={() => setActive(key)}>
-                    Request clarification
-                  </button>
-                ) : null}
               </div>
             </li>
           );

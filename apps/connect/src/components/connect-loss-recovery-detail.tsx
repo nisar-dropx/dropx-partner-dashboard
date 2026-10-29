@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { ConnectDialog } from "./connect-dialog";
 
 export type Recovery = {
-  clarifications?: {note:string;status:string;decision_note:string;decided_by_name:string|null;created_at:string}[];
   deductions?: {key:string;month:string;amount:number;confirmed:boolean}[];
   month: string;
   caseKey: string;

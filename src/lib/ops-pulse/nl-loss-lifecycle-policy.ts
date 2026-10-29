@@ -23,7 +23,7 @@ export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 
 export const LIFECYCLE_LABELS: Record<LifecycleStatus, string> = {
   imported: "Imported",
-  station_dispute_or_clarification_window: "Station dispute / clarification",
+  station_dispute_or_clarification_window: "Station dispute",
   cluster_validation_pending: "Awaiting cluster validation",
   slp_final_confirmation_pending: "Awaiting exception approval",
   recovery_approved_scheduled: "Recovery approved · scheduled",
@@ -48,8 +48,7 @@ export type LifecycleAction =
   | "mark_needs_review"
   | "clear_needs_review"
   | "propose"
-  | "approve"
-  | "clarify";
+  | "approve";
 
 const CLUSTER_ACTIONS = new Set<LifecycleAction>([
   "ready_for_cluster",
@@ -65,7 +64,7 @@ const SLP_ACTIONS = new Set<LifecycleAction>([
   "resume",
   "mark_needs_review",
 ]);
-const STATION_ACTIONS = new Set<LifecycleAction>(["clarify", "propose"]);
+const STATION_ACTIONS = new Set<LifecycleAction>(["propose"]);
 
 export function lifecycleLabel(status: string | null | undefined) {
   if (status && status in LIFECYCLE_LABELS) return LIFECYCLE_LABELS[status as LifecycleStatus];
