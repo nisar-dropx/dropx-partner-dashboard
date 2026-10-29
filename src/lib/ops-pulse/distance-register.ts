@@ -1,4 +1,5 @@
 import {
+  distanceNoPayoutReasons,
   kilometreRate,
   routeFuelForDay,
   type RouteDistanceContext,
@@ -40,10 +41,15 @@ export type DistanceEntry = {
 export const distanceMethods: Record<string, string> = {
   amazon_gps: "Amazon GPS",
   amazon_gps_roads: "GPS + road connections",
+  gps_trail: "GPS trail (Mapbox fallback)",
   scan_roads: "Roads between scans",
   manual: "Imported kilometres",
   pending: "Awaiting evidence",
 };
+/** Anomalous / left-on-ground days stay stored but are not ops pending. */
+export const distanceExcludedReasons = distanceNoPayoutReasons;
+/** Register / Excel default: payable Ready days only (matches payroll fuel). */
+export const distanceReadyStatuses = ["Ready"] as const;
 export type DistanceViewFilters = {
   from: string;
   to: string;
@@ -56,18 +62,24 @@ export type DistanceViewFilters = {
 };
 export function distanceStatus(row: DistanceEntry) {
   if (row.status === "ready") return "Ready";
-  return ["input_conflict", "route_needs_review", "identity_mismatch", "conflicting_scan", "amazon_identity_missing", "mapping_changed"].includes(row.reason || "")
+  if (distanceExcludedReasons.has(row.reason || "")) return "Excluded";
+  return ["input_conflict", "identity_mismatch", "conflicting_scan", "amazon_identity_missing", "mapping_changed"].includes(row.reason || "")
     ? "Needs attention" : "Pending";
 }
-export function filterDistanceEntries(rows: DistanceEntry[], filters: DistanceViewFilters) {
+/** Date/station/search scope without status — used for No payouts sheet. */
+export function filterDistanceScope(rows: DistanceEntry[], filters: Omit<DistanceViewFilters, "statuses"> | DistanceViewFilters) {
   const query = filters.query.trim().toLowerCase();
   return rows.filter((r) => r.date >= filters.from && r.date <= filters.to &&
     (!filters.stations.length || filters.stations.includes(r.station)) &&
     (!filters.regions.length || filters.regions.includes(r.region)) &&
     (!filters.clusters.length || filters.clusters.includes(r.cluster)) &&
-    (!filters.statuses.length || filters.statuses.includes(distanceStatus(r))) &&
     (!filters.methods.length || filters.methods.includes(distanceMethods[r.method] || r.method)) &&
     (!query || [r.name, r.amazonId, r.dropxId, r.transporterId].some((value) => value.toLowerCase().includes(query))));
+}
+export function filterDistanceEntries(rows: DistanceEntry[], filters: DistanceViewFilters) {
+  // Empty status selection = Ready only (payout view); non-ready live on the No payouts export sheet.
+  const statuses = filters.statuses.length ? filters.statuses : [...distanceReadyStatuses];
+  return filterDistanceScope(rows, filters).filter((r) => statuses.includes(distanceStatus(r)));
 }
 export type DistanceAssociate = {
   key: string;
@@ -99,7 +111,7 @@ export function groupDistanceAssociates(rows: DistanceEntry[]): DistanceAssociat
       key, name: days[0].name, amazonIds: unique("amazonId"), dropxIds: unique("dropxId"),
       transporterIds: unique("transporterId"), stations: unique("station"), rows: days,
       days: new Set(days.map((r) => r.date)).size,
-      pendingDays: new Set(days.filter((r) => r.status !== "ready").map((r) => r.date)).size,
+      pendingDays: new Set(days.filter((r) => r.status !== "ready" && distanceStatus(r) !== "Excluded").map((r) => r.date)).size,
       km: ready.length ? ready.reduce((sum, r) => sum + (r.km ?? 0), 0) : null,
       fuel: ready.length ? ready.reduce((sum, r) => sum + (r.fuel ?? 0), 0) : null,
     };
@@ -189,6 +201,12 @@ export function buildDistanceEntries(input: {
       )
         continue;
       const hasActivity = activity.some((a) => a.work_date === date);
+      const stored = input.context.rows.find(
+          (r) =>
+            r.workforce_id === m.workforce_id &&
+            r.station_id === m.station_id &&
+            r.work_date === date,
+        );
       let fuel;
       try {
         fuel = routeFuelForDay(input.context, {
@@ -211,17 +229,27 @@ export function buildDistanceEntries(input: {
           returnKm: null,
           updatedAt: null,
           routeId: null,
-          source: "calculated",
+          source: "calculated" as const,
+        };
+      }
+      // Payroll skips no-payout days; keep them for the Excel No payouts sheet (Ready UI hides them).
+      if (!fuel && stored && distanceNoPayoutReasons.has(stored.reason || "")) {
+        fuel = {
+          status: "pending" as const,
+          reason: stored.reason,
+          km: null,
+          rate,
+          amount: null,
+          departureKm: null,
+          deliveryKm: null,
+          returnKm: null,
+          updatedAt: stored.calculated_at ?? null,
+          routeId: null,
+          source: "calculated" as const,
         };
       }
       if (!fuel) continue;
-      const stored = input.context.rows.find(
-          (r) =>
-            r.workforce_id === m.workforce_id &&
-            r.station_id === m.station_id &&
-            r.work_date === date,
-        ),
-        detail = meta.get(stored?.id);
+      const detail = meta.get(stored?.id);
       const key = `${m.workforce_id}|${m.station_id}|${date}`;
       const entry: DistanceEntry = {
         key,

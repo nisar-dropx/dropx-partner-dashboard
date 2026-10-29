@@ -133,6 +133,8 @@ export function directPayForDay(
     cumulativeAttendanceUnitsBefore?: number;
     attendanceSource?: "biometric" | "shipment_data";
     attendanceInput?: { basis: DirectPayAttendanceBasis; quantity: number } | null;
+    /** Read-only CPS estimate: one daily unit when this mapping has imported deliveries. */
+    dailyDeliveryCount?: number;
   }
 ) {
   const values = Object.fromEntries(Object.entries(paymentValues ?? {}).map(([key, value]) => [key.trim().toUpperCase(), value]));
@@ -191,7 +193,10 @@ export function directPayForDay(
       missing = true;
       continue;
     }
-    const componentAttendanceUnit = usesAggregateAttendance && attendanceBasis === "days"
+    const deliveryDayEstimate = schedule === "per_day" && options?.dailyDeliveryCount !== undefined;
+    const componentAttendanceUnit = deliveryDayEstimate
+      ? (Number(options?.dailyDeliveryCount) > 0 ? 1 : 0)
+      : usesAggregateAttendance && attendanceBasis === "days"
       ? importedQuantity ?? 0
       : sourceAttendanceUnit;
     const componentMinutes = usesAggregateAttendance && attendanceBasis === "hours"

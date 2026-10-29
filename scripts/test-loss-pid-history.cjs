@@ -23,8 +23,8 @@ function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';c
  const caseRows=XLSX.utils.sheet_to_json(book.Sheets.Cases);
  assert.equal(caseRows[0].TID,'0001','Excel preserves leading-zero shipment IDs');
  assert.equal(caseRows[0]['History updates'],3);assert.ok(caseRows[0]['Last updated by']);
- const audit=XLSX.utils.sheet_to_json(book.Sheets['PID history']);assert.equal(audit.length,4);assert.ok(audit.every(r=>r['PID / TID']==='0001'));
+ const audit=XLSX.utils.sheet_to_json(book.Sheets['Tracking history']);assert.equal(audit.length,4);assert.ok(audit.every(r=>r['Tracking ID']==='0001'));
  failSource=true;assert.notEqual((await workbook.GET(new Request('https://ops.test/api/ops-pulse/losses/workbook?kind=nl'))).status,200);
  console.log('PASS actual workbook endpoint: last-update columns, full scoped history, leading-zero IDs and visible history-source failure');
- console.log('PASS PID history: multiple sources/months, 500-row pagination, removed source, company/station/read-only access and fail-closed completeness');
+ console.log('PASS tracking history: multiple sources/months, 500-row pagination, removed source, company/station/read-only access and fail-closed completeness');
 })().catch(e=>{console.error(e);process.exitCode=1;});

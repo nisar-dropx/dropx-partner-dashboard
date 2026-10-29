@@ -43,7 +43,10 @@ export default async function DistancePage({
       clusters: values(searchParams.clusters),
     };
   const selected = selectedDistanceStations(stations, filters),
-    statuses = values(searchParams.status),
+    // Default Ready-only (payout view). Explicit status=… can still widen for ops.
+    statuses = values(searchParams.status).length
+      ? values(searchParams.status)
+      : ["Ready"],
     methods = values(searchParams.method),
     q = one(searchParams.q) || "";
   // Distance settles only after the work day closes, so open on the last settled day.
@@ -147,8 +150,8 @@ export default async function DistancePage({
             <AttendanceMultiSelect
               name="status"
               label="statuses"
-              allLabel="All statuses"
-              options={["Ready", "Pending", "Needs attention"]}
+              allLabel="Ready only (payout)"
+              options={["Ready", "Pending", "Needs attention", "Excluded"]}
               defaultValues={statuses}
             />
           </div>
@@ -197,8 +200,10 @@ export default async function DistancePage({
         )}
         <p className={styles.note}>
           Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
-          up to 31 days per view. Distances sync every morning at 5:00 IST; maps
-          load when opened. Pending distance is never counted as zero.
+          up to 31 days per view. Defaults to Ready days only (same payable fuel
+          as workforce payroll). Excluded, scan-mismatch, and other non-ready
+          days are omitted here and listed on the Excel “No payouts” sheet.
+          Distances sync every morning at 5:00 IST; maps load when opened.
         </p>
       </div>
     </AppShell>

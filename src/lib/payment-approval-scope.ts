@@ -44,7 +44,8 @@ async function approvalEligibility(
   requests: PaymentApprovalScopeRequest[],
   includeReportingManagers: boolean
 ) {
-  if (authorization.roleCode === "OWNER" || authorization.isMasterOwner) {
+  // Owner takeover authority belongs to the team view, not the personal inbox.
+  if (includeReportingManagers && (authorization.roleCode === "OWNER" || authorization.isMasterOwner)) {
     return new Set(requests.map((request) => request.id));
   }
   const eligibleIds = new Set<string>();

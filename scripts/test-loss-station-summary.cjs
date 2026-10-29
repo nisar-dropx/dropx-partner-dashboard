@@ -7,7 +7,7 @@ function load(file) {
   const js = ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   new Function('require','module','exports',js)(id=>id.startsWith('.')?load(path.join(path.dirname(file),id)):require(id),m,m.exports); return m.exports;
 }
-const {lossFacts,recoverableLossFacts,filterLossFacts,totalLossFacts,groupLossFacts} = load('src/lib/ops-pulse/loss-station-summary.ts');
+const {lossFacts,recoverableLossFacts,filterLossFacts,filterLossFactsByOwnership,totalLossFacts,groupLossFacts} = load('src/lib/ops-pulse/loss-station-summary.ts');
 const row=(id,amount,extra={})=>({case_key:id,report:'nl',month:'2026-09',station_code:'AAA',amount,source_status:'Recoverable',source_present:true,details:{case_status:'resolved'},recovery:null,...extra});
 const plan=(amount,extra={})=>({source_amount:amount,source_status:'Recoverable',approval_status:'approved',allocations:[{amount}],updated_at:'2026-10-28T08:00:00Z',...extra});
 const line=(id,employee,paid,extra={})=>({case_key:id,report:'nl',month:'2026-09',station_code:'AAA',employee_ref:employee,deducted:paid,waived:0,in_payroll:0,...extra});
@@ -32,13 +32,23 @@ assert.equal(filterLossFacts(summary,{station:'BBB'}).length,1,'station filter e
 assert.equal(filterLossFacts(summary,{status:'pending_update'}).length,2);
 assert.equal(filterLossFacts(summary,{status:'updated'}).length,1);
 assert.equal(filterLossFacts(summary,{status:'all'}).length,3,'reset/all statuses cannot restore excluded cases');
+const ownership=[
+  {station:'AAA',clusterKeys:['cm:kerala'],region:'KL'},
+  {station:'BBB',clusterKeys:['aom:south'],region:'AP'},
+];
+assert.equal(filterLossFactsByOwnership(summary,ownership,{cluster:'cm:kerala'}).length,2,'People cluster filter includes only its station cases');
+assert.equal(filterLossFactsByOwnership(summary,ownership,{region:'AP'}).length,1,'region filter applies to the same scoped case population');
+assert.equal(filterLossFactsByOwnership(summary,ownership,{cluster:'cm:kerala',region:'AP'}).length,0,'cluster and region filters intersect');
+assert.equal(filterLossFactsByOwnership(summary,ownership,{}).length,3,'All ownership filters preserve the complete authorized population');
 const totals=totalLossFacts(facts);
 assert.equal(totals.amount,370);assert.equal(totals.recovered,50);assert.equal(totals.remaining,190);assert.equal(totals.updated.count,1);assert.equal(totals.pending.count,2);assert.equal(totals.nonrecoverable.count,1);
 assert.equal(filterLossFacts(facts,{station:'AAA',stage:'final',status:'pending_update'}).length,1);
 assert.equal(filterLossFacts(facts,{station:'OUTSIDE'}).length,0);
 assert.equal(filterLossFacts(facts,{period:'2025-01'}).length,0);
 assert.deepEqual(groupLossFacts(facts,'station').map(r=>r.station),['AAA','BBB']);
+assert.deepEqual(groupLossFacts(facts,'station','desc').map(r=>r.station),['BBB','AAA'],'station header reverses direction');
 assert.equal(groupLossFacts(facts,'remaining')[0].station,'AAA');
+assert.equal(groupLossFacts(facts,'remaining','asc')[0].station,'BBB','numeric headers support ascending order');
 facts=lossFacts([row('receipt',100,{recovery:plan(100,{outcome_code:'already_recovered',recovery_details:{receipt_reference:'R',received_amount:'100'}})})],[line('receipt','a',40)],['Recoverable']);
 assert.equal(facts[0].recovered,100,'receipt and payroll cannot double count the same loss');assert.equal(facts[0].remaining,0);
 assert.equal(recoverableLossFacts(facts).length,1,'fully recovered cases remain visible');

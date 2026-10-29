@@ -112,6 +112,8 @@ export type WorkforcePayoutLoadScope = {
   includeLossRecoveries?: boolean;
   /** Read-only ID insights: retain per-mapping costs before worker consolidation/adjustments. */
   providerCostSegmentsOnly?: boolean;
+  /** Only honored for read-only provider cost segments; never changes payroll eligibility. */
+  providerDailyCostBasis?: "delivery_days";
 };
 
 export async function loadWorkforcePayoutRows(
@@ -1135,6 +1137,10 @@ export async function loadWorkforcePayoutRows(
     const productionRules = productionRulesFor(mapping, location);
     const attendanceComponents = attendanceComponentsFor(mapping);
     const attendanceSourceKey = `provider:${String(mapping.id)}`;
+    const deliveryDayCost = scope.providerCostSegmentsOnly === true && scope.providerDailyCostBasis === "delivery_days";
+    const dailyOnlyDeliveryCost = deliveryDayCost && attendanceComponents.length > 0
+      && attendanceComponents.every(component => /day/i.test(String(component.pay_schedule ?? ""))
+        && component.calculation_type !== "fixed_monthly");
     const requiresMonthlyDayHistory = attendanceComponents.some((component) =>
       directPayAttendanceBasis(component) === "days"
       && (component.calculation_type === "fixed_monthly" || /month/i.test(String(component.pay_schedule ?? ""))));
@@ -1164,6 +1170,11 @@ export async function loadWorkforcePayoutRows(
       missingRouteDistance ||= routeFuel?.status==='pending';
       const productionLines = productionRules.map((rule) => {
         if(isKilometreField(rule.code)&&routeFuel) return {code:rule.code,label:'Fuel allowance · calculated route km',componentType:rule.componentType,count:routeFuel.km??0,rate:routeFuel.rate,amount:routeFuel.amount??0,sortOrder:rule.sortOrder};
+        // After route distance is enabled, never fall back to provider metrics for KM_RUN (absent / excluded = ₹0 fuel).
+        if(isKilometreField(rule.code)&&routeContext.enabledFrom&&date>=routeContext.enabledFrom) {
+          const rate = kmRate ?? (Number(rule.rate) || 0);
+          return {code:rule.code,label:'Fuel allowance · no payable distance',componentType:rule.componentType,count:0,rate,amount:0,sortOrder:rule.sortOrder};
+        }
         const providerUnits = rule.customProduction
           ? 0
           : rows.reduce((sum, daily) => sum + metricValue(daily, String(rule.source ?? "")), 0);
@@ -1234,12 +1245,13 @@ export async function loadWorkforcePayoutRows(
             }
           ),
           attendanceSource: hasImportedAttendance ? "biometric" : captureSetting.capture_method,
-          attendanceInput: aggregateAttendance?.input
+          attendanceInput: aggregateAttendance?.input,
+          dailyDeliveryCount: deliveryDayCost ? rows.reduce((sum, daily) => sum + Math.max(0, Number(daily.total_delivery ?? (Number(daily.amazon_delivery ?? 0) + Number(daily.swa_delivery ?? 0))) || 0), 0) : undefined
         }
       );
       const workDayUnits = attendancePay.attendanceUnit;
       missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0
-        && (attendancePay.missing || Boolean(aggregateAttendance?.issue) || invalidAggregateAttendance);
+        && (attendancePay.missing || (!dailyOnlyDeliveryCost && (Boolean(aggregateAttendance?.issue) || invalidAggregateAttendance)));
       const attendanceLines = attendancePay.lines.map((line) => ({
         code: line.code,
         label: line.label,
@@ -1264,7 +1276,7 @@ export async function loadWorkforcePayoutRows(
           && !aggregateAttendance.issue
           ? "Bulk upload range"
           : hasImportedAttendance ? "Bulk upload" : attendanceCaptureLabel(captureSetting.capture_method),
-        attendanceRange: aggregateAttendance && date === aggregateAttendance.period.effective_to
+        attendanceRange: !dailyOnlyDeliveryCost && aggregateAttendance && date === aggregateAttendance.period.effective_to
           ? {
             basis: aggregateAttendance.period.attendance_basis,
             quantity: aggregateAttendance.period.quantity,
