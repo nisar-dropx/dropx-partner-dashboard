@@ -1,5 +1,17 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## September bank reconciliation — 29 October 2026
+
+The recovery master now starts at September 2026, following reconciliation of manual
+September salary payments. Open-payroll, processing and available-pay checks still apply.
+Payroll windows subtract actual settled credits from `workforce_payout_effective_paid_allocations`,
+including ownership transfers, rather than the original instruction amount.
+
+`scripts/reconcile-historical-workforce-settlements.sql` records already-made bank payments
+against inspected published payroll evidence and finalizes them through the existing payment RPC.
+It skips matching paid UTRs, refuses conflicting evidence, and records the file hash and source row
+in payment history. No bank file is produced. Supply private evidence outside the repository;
+run the rollback-only dry run first. The optional master boundary change is in the same transaction.
 ## Ad hoc bank confirmation before Workforce mapping — 29 October 2026
 
 A missing Workforce mapping must not reject a bank-confirmed ad hoc payment.
@@ -116,7 +128,7 @@ Cluster Managers propose; they cannot approve their own proposal.
 
 **What is due** (`nl_loss_recovery_due(company, salary_month, target, run)`):
 
-- Never before `recovery_policy.payroll_start_month` (2026-10). September 2026 payroll gets nothing.
+- Never before `recovery_policy.payroll_start_month` (currently 2026-09 after bank reconciliation).
 - One instalment per person per plan per payroll: instalment n is due only when n-1 is already in an
   earlier salary month. A missed month shifts the remaining instalments; it never doubles up.
 - **Exit:** if the person's `last_working_date` is on or before the end of the salary month, every
