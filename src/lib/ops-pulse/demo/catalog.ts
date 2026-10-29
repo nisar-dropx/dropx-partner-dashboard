@@ -288,6 +288,18 @@ define(
   "Review plan",
 );
 define(
+  ["/edd/scrub"],
+  "report",
+  "In-station and on-road scrub status together, with pending days and history.",
+  ["Station", "In-station", "On-road", "Last fetched"],
+  [
+    ["DEMO-01", "Done today", "2d pending", "Today · 09:10"],
+    ["DEMO-02", "3d pending", "Done today", "Today · 09:10"],
+    ["DEMO-03", "7+ days pending", "1d pending", "Today · 09:10"],
+  ],
+  "View scrub history",
+);
+define(
   [
     "/capacity/distance",
     "/attendance/da-distance",
