@@ -56,6 +56,9 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
     return () => controller.abort();
   }, [account.id, account.companyId, account.profileType, attempt]);
   const salary = rows.find(row => row.id === selected) ?? rows[0];
+  const lossDeductions = (salary?.deductions ?? []).filter(row => row.lossSplit || row.recoveryKey);
+  const otherDeductions = (salary?.deductions ?? []).filter(row => !row.lossSplit && !row.recoveryKey);
+  const lossTotal = Math.round(lossDeductions.reduce((sum, row) => sum + row.amount, 0) * 100) / 100;
 
   return <section className={styles.page} aria-busy={loading}>
     <header className={styles.header}>
@@ -82,16 +85,14 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
               <section><h3>Earnings</h3>{salary.earnings.map((row, index) => <div className={styles.line} key={index}><span>{row.name}</span><b>{money(row.amount)}</b></div>)}<div className={styles.total}><span>Total earnings</span><b>{money(salary.totalEarnings)}</b></div></section>
               <section>
                 <h3>Deductions</h3>
-                {salary.deductions.length ? salary.deductions.map((row, index) => (
-                  <div className={styles.line} key={index}>
-                    <span>
-                      {row.name}
-                      {row.recoveryKey ? <RecoveryDetailButton accountId={account.id} profileType={account.profileType} recoveryKey={row.recoveryKey} amount={row.amount} payrollLabel="salary calculation"/> : null}
-                      {row.lossSplit ? <small className={styles.helper}>Loss case split · payslip combines these as Loss Recovery Deduction</small> : null}
-                    </span>
-                    <b>{money(row.amount)}</b>
-                  </div>
-                )) : <p className={styles.helper}>No deductions in this calculation.</p>}
+                {otherDeductions.map((row, index) => <div className={styles.line} key={index}><span>{row.name}</span><b>{money(row.amount)}</b></div>)}
+                {lossDeductions.length ? <details>
+                  <summary><span>Loss Recovery · {lossDeductions.length}</span> <b>{money(lossTotal)}</b></summary>
+                  {lossDeductions.map((row, index) => <div className={styles.line} key={row.recoveryKey || index}>
+                    <span>{row.name}{row.recoveryKey ? <RecoveryDetailButton accountId={account.id} profileType={account.profileType} recoveryKey={row.recoveryKey} amount={row.amount} payrollLabel="salary calculation"/> : null}</span><b>{money(row.amount)}</b>
+                  </div>)}
+                </details> : null}
+                {!salary.deductions.length ? <p className={styles.helper}>No deductions in this calculation.</p> : null}
                 <div className={styles.total}><span>Total deductions</span><b>{money(salary.deductionTotal)}</b></div>
               </section>
             </div>

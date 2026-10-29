@@ -16,10 +16,10 @@ const pay = {
 };
 const person = (ref) => ({ ref, employee_code: "D1", full_name: "A", designation: "DA", is_active: true, ...pay });
 
-test("People recovery targets expose eligibility but no salary amounts", () => {
+test("People recovery targets defer salary checks to payroll and expose no salary amounts", () => {
   const disclosed = recoveryPersonPayDisclosure(person("employee:1"));
   assert.equal(disclosed.pay_detail_access, "restricted");
-  assert.equal(disclosed.pay_check_state, "ready");
+  assert.equal(disclosed.pay_check_state, "payroll");
   for (const key of Object.keys(pay)) assert.equal(Object.hasOwn(disclosed, key), false, key);
 });
 
@@ -47,4 +47,10 @@ test("People salary validation errors never disclose monetary values", () => {
   assert.doesNotMatch(safe, /override/);
   assert.doesNotMatch(safe, /₹|12,000|10,000|25%/);
   assert.equal(privacySafeRecoveryError(exposed, false), exposed);
+});
+
+test("missing People payroll does not expose an unavailable-salary warning", () => {
+  const disclosed = recoveryPersonPayDisclosure({ ...person("contractor:1"), recovery_limit: null });
+  assert.equal(disclosed.pay_check_state, "payroll");
+  assert.equal(Object.hasOwn(disclosed, "salary_payable"), false);
 });

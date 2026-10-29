@@ -396,7 +396,7 @@ export function RecoveryForm({
   const available = people.filter(
     (p) =>
       selected.includes(p.ref) ||
-      `${p.full_name} ${p.employee_code} ${p.designation}`
+      `${p.full_name} ${p.employee_code} ${p.designation} ${(p.station_codes || []).join(" ")}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -758,7 +758,7 @@ export function RecoveryForm({
                     </select>
                   </label>
                   <label>Designation<select value={designationFilter} onChange={e=>setDesignationFilter(e.target.value)}><option value="">All designations</option>{[...new Set(people.map(p=>p.designation))].sort().map(d=><option key={d}>{d}</option>)}</select></label>
-                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={selectPeople}/></div>
+                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={selectPeople}/></div>
                 </div>
                 <div
                   className={styles.methods}
@@ -809,7 +809,7 @@ export function RecoveryForm({
                 </p></details>
                 {salaryLoading && selected.length > 0 ? <p role="status" className={styles.hint}>Checking salary limits for selected people…</p> : null}
                 {salaryError ? <p role="alert" className={styles.failure}>{salaryError}</p> : null}
-                {!search.trim() && !selected.length ? <p className={styles.hint}>Open Select names to choose Station Manager and below (station staff and DAs).</p> : null}
+                {!search.trim() && !selected.length ? <p className={styles.hint}>Select station staff, DAs, or the mapped Cluster Manager / AOM.</p> : null}
                 <div className={styles.people}>
                   {available.filter(p => selected.includes(p.ref)).map((p) => (
                     <div className={styles.person} key={p.ref}>
@@ -828,24 +828,14 @@ export function RecoveryForm({
                         <span>
                           <strong>{p.full_name}</strong>
                           <small>
-                            {p.employee_code} · {p.designation}
+                            {p.employee_code} · {p.designation}{p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
-                          {capEnabled && selected.includes(p.ref) ? (
-                            <small
-                              className={
-                                p.pay_check_state === "unavailable"
-                                  ? styles.pending
-                                  : styles.payFacts
-                              }
-                            >
-                              {p.pay_detail_access === "restricted"
-                                ? p.pay_check_state === "unavailable"
-                                  ? "Salary eligibility unavailable · review payroll / mapping"
-                                  : "Salary eligibility verified securely · amount hidden"
-                                : p.recovery_limit == null
-                                  ? "Payout payable unavailable · review payout / mapping"
-                                  : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · available for recovery ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
+                          {capEnabled && p.pay_detail_access !== "restricted" && selected.includes(p.ref) ? (
+                            <small className={p.recovery_limit == null ? styles.pending : styles.payFacts}>
+                              {p.recovery_limit == null
+                                ? "Payout payable unavailable · review payout / mapping"
+                                : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)} · available ${money(limitOf(p) ?? 0)}`}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) &&

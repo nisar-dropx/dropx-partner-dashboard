@@ -100,3 +100,18 @@ test("recalculation does not repeat a case when the largest station row changes"
   assert.equal(rows.reduce((n, r) => n + r.deductions, 0), 300);
   assert.equal(rows.reduce((n, r) => n + r.netAmount, 0), 1800);
 });
+
+
+test("display groups shipment losses without modifying payroll keys or totals", async () => {
+  const { groupWorkforceDeductionDisplay } = await import("./workforce-loss-recovery.ts");
+  const rows = [row("a", "w1", 2000)];
+  applyWorkforceLossRecoveries(rows, [line("A", 300), line("B", 600)]);
+  const before = JSON.stringify(rows);
+  const display = groupWorkforceDeductionDisplay([{ code: "TDS", label: "TDS", amount: 100 }, ...rows[0].deductionBreakdown]);
+  assert.equal(display.lossTotal, 900);
+  assert.equal(display.losses.length, 2);
+  assert.deepEqual(display.other.map(item => item.code), ["TDS"]);
+  assert.equal(JSON.stringify(rows), before);
+  applyWorkforceLossRecoveries(rows, [line("A", 300), line("B", 600)]);
+  assert.equal(rows[0].netAmount, 1100);
+});

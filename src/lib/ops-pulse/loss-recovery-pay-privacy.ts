@@ -21,8 +21,8 @@ function withoutPrivatePay<T extends Record<string, unknown>>(value: T): T {
 
 /**
  * Only Workforce profiles may expose payout values to an Ops recovery user.
- * People employees and contractors retain a boolean eligibility result while
- * the actual payroll figures remain server-side for enforcement.
+ * People employees and contractors never expose salary readiness or amounts.
+ * Employment is verified on save; available pay is enforced by payroll.
  */
 export function recoveryPersonPayDisclosure(person: RecoveryPerson): RecoveryPerson {
   if (isWorkforceRecoveryRef(person.ref)) {
@@ -35,7 +35,7 @@ export function recoveryPersonPayDisclosure(person: RecoveryPerson): RecoveryPer
   return {
     ...withoutPrivatePay(person as RecoveryPerson & Record<string, unknown>),
     pay_detail_access: "restricted",
-    pay_check_state: person.recovery_limit == null ? "unavailable" : "ready",
+    pay_check_state: "payroll",
   };
 }
 

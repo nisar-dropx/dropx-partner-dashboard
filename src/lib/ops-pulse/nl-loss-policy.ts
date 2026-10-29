@@ -21,6 +21,7 @@ export type RecoveryPerson = {
   employee_code: string;
   full_name: string;
   designation: string;
+  station_codes?: string[];
   is_active: boolean;
   salary_month?: string;
   salary_payable?: number | null;
@@ -33,8 +34,8 @@ export type RecoveryPerson = {
   salary_source?: string;
   /** Pay amounts are returned only for Workforce profiles. */
   pay_detail_access?: "workforce" | "restricted";
-  /** People profiles expose only whether the server-side pay check is ready. */
-  pay_check_state?: "ready" | "unavailable";
+  /** People checks are deferred to payroll; no salary readiness is disclosed. */
+  pay_check_state?: "ready" | "unavailable" | "payroll";
   /** Saved plan lines only. */
   monthly_amount?: number;
   installments?: { n: number; amount: number }[];

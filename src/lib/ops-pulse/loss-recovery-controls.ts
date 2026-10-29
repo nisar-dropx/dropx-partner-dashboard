@@ -57,11 +57,8 @@ const CLUSTER_AND_ABOVE = new Set([
   "ZONAL_HEAD",
 ]);
 
-/** Debit targets stop at Station Manager. Managers above that stay out of the picker. */
+/** Debit targets stop at the mapped AOM. Higher management remains excluded. */
 const MANAGERIAL_DEBIT_CODES = new Set([
-  "CM",
-  "CLM",
-  "AOM",
   "BH",
   "RH",
   "RM",
@@ -126,7 +123,7 @@ export function mayMarkAlreadyRecovered(auth: LossRole) {
   return isClusterOrAboveTitle(auth.designationName);
 }
 
-/** True when this person must never appear as a payroll debit target (CM / AOM / above). */
+/** True for roles above the station’s mapped Cluster Manager / AOM. */
 export function isLossRecoveryManagerialTarget(person: {
   designation?: string | null;
   designation_code?: string | null;
@@ -136,10 +133,13 @@ export function isLossRecoveryManagerialTarget(person: {
     person.designationCode ?? person.designation_code ?? "",
   );
   if (code && MANAGERIAL_DEBIT_CODES.has(code)) return true;
-  return isClusterOrAboveTitle(person.designation);
+  if (["CM", "CLM", "AOM"].includes(code)) return false;
+  const title = normalizedLossRoleCode(person.designation);
+  if (["CLUSTER_MANAGER", "AREA_OPERATIONS_MANAGER", "AREA_OPERATION_MANAGER", "AOM", "CLM", "CM"].includes(title)) return false;
+  return isClusterOrAboveTitle(person.designation) || MANAGERIAL_DEBIT_CODES.has(title) || ["HR_MANAGER", "SLP_MANAGER", "FINANCE_MANAGER", "OWNER"].includes(title);
 }
 
-/** Station Manager and below only — hides manager identities and salaries from reportees. */
+/** The database scopes these identities to the station; pay disclosure is separate. */
 export function filterLossRecoveryDebitPeople<T extends { designation?: string | null }>(
   people: T[],
 ) {

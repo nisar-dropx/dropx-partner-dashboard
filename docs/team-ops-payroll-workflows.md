@@ -1,5 +1,24 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Recovery assignment and deduction display — 29 October 2026
+
+People employees and contractors can be assigned recovery without a calculated salary.
+Employment, station scope, allocation, schedule and exception checks still apply on save.
+The People payroll engine enforces available take-home when deducting; unfunded whole
+lines remain due. Workforce continues to check payout eligibility when saving.
+Migration `20261029143000_loss_people_assignment_and_managers.sql` restores the mapped
+Cluster Manager / AOM directory ceiling without exposing People pay amounts.
+Migration `20261029160000_loss_parent_child_recipients.sql` adds the configured active,
+same-provider EDSP/XPT parent–child scope to both the picker and save validation.
+An XPT includes its EDSP parent, not sibling XPTs. The picker shows source station codes
+and deduplicates people by recovery reference. Higher management stays excluded.
+
+Workforce and People show one expandable loss total. Underlying recovery keys remain
+individual, so history, carry-forward and exactly-once deductions are unchanged. Payslips
+show one **Loss Recovery** line. DropX One assignment notices expire after seven days
+and leave the home screen as soon as read; shipment details remain in Salary Calculation
+or Payments.
+
 ## Live payroll refresh — 28 October 2026
 
 Routine recovery saves require no separate approval. Individual saves/removals and bulk workbook
@@ -92,13 +111,10 @@ Cluster Managers propose; they cannot approve their own proposal.
 - A plan whose source amount or status changed waits for review in Losses and is not deducted.
 - Written-off lines (`nl_recovery_waivers`) are never due again.
 
-**Debit directory scope:** Recovery people are Station Manager and below only
-(`directory_ceiling_designations = ["STM"]`, plus `CM` / `CLM` / `AOM` and higher in
-`directory_excluded_designations`). Location / station actors never see Cluster, City or Area
-manager salaries. App code mirrors this with `filterLossRecoveryDebitPeople` /
-`isLossRecoveryManagerialTarget` so a blocked person cannot be selected or saved even before the
-policy migration is applied. Employees and contractors take payable from People (HRMS)
-`hr_payroll_run_people` only; workforce takes payable from Dashboard payout worksheets only.
+**Debit directory scope:** Current station staff, Workforce and the mapped Cluster Manager /
+AOM are eligible; the reporting walk stops at AOM. Higher management stays excluded.
+People salary amounts never leave the server in the recovery picker. Assignment does not
+require a calculated People run; payroll applies available-pay limits when calculating.
 
 **Already recovered:** `mayMarkAlreadyRecovered` — Cluster Manager / City Manager / AOM and above
 (or SLP / NH / Finance / MP redispute roles). Station and under-managers with Losses edit do **not**

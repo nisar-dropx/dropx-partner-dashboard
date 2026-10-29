@@ -1,5 +1,6 @@
 "use client";
 
+import { groupWorkforceDeductionDisplay } from "@/lib/workforce-loss-recovery";
 import { routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
 import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
@@ -1146,6 +1147,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             const reviewDays = row.dailyBreakdown.filter(day => day.deliveryReview);
             const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined);
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
+            const deductionDisplay = groupWorkforceDeductionDisplay(deductionTotals);
             const paymentBalanceAvailable = row.paymentSummary
               ? audience === "helpers" || isWorkforcePayoutPaymentBalanceAvailable(row.paymentSummary)
               : false;
@@ -1286,7 +1288,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                             <caption className="sr-only">Deduction-head totals for {row.name}</caption>
                             <thead><tr><th scope="col">Deduction</th><th className="payout-money" scope="col">Total</th></tr></thead>
                             <tbody>
-                              {deductionTotals.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="negative payout-money"><strong>- {money(item.amount)}</strong></td></tr>)}
+                              {deductionDisplay.other.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="negative payout-money"><strong>- {money(item.amount)}</strong></td></tr>)}
+                              {deductionDisplay.losses.length ? <tr>
+                                <td><details><summary><strong>Shipment loss</strong> · {deductionDisplay.losses.length} deduction{deductionDisplay.losses.length === 1 ? "" : "s"}</summary>
+                                  <table aria-label="Shipment loss breakdown"><thead><tr><th>Shipment / loss period</th><th>Deducted</th></tr></thead><tbody>
+                                    {deductionDisplay.losses.map((item, index) => <tr key={item.recoveryKey || `${item.code}-${index}`}><td>{item.label.replace(/^Loss recovery · /, "")}</td><td className="negative payout-money">− {money(item.amount)}</td></tr>)}
+                                  </tbody></table>
+                                </details></td>
+                                <td className="negative payout-money"><strong>− {money(deductionDisplay.lossTotal)}</strong></td>
+                              </tr> : null}
                               {!deductionTotals.length ? <tr><td className="empty-cell" colSpan={2}>No deductions for this period.</td></tr> : null}
                             </tbody>
                             <tfoot><tr><th scope="row">Gross deductions</th><td className={`${row.deductions ? "negative " : ""}payout-money`}><strong>{row.deductions ? `- ${money(row.deductions)}` : money(0)}</strong></td></tr></tfoot>

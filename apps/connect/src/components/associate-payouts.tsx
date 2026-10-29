@@ -246,6 +246,9 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
 
   const visibleEarnings = (payout?.earnings ?? []).filter((line) => line.amount !== 0 || line.rate !== null || line.units !== null);
   const visibleDeductions = (payout?.deductionLines ?? []).filter((line) => line.amount !== 0);
+  const shipmentLosses = visibleDeductions.filter(line => line.code === "LOSS_RECOVERY" || line.recoveryKey);
+  const otherDeductions = visibleDeductions.filter(line => line.code !== "LOSS_RECOVERY" && !line.recoveryKey);
+  const shipmentLossTotal = Math.round(shipmentLosses.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
 
   return <section className={styles.card} aria-busy={loading}>
     <header className={styles.heading}>
@@ -301,7 +304,11 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         <div className={styles.tableWrap}>
           <table className={`${styles.breakdownTable} ${styles.deductionTable}`} aria-label="Deduction heads breakdown">
             <thead><tr><th scope="col">Deduction</th><th scope="col">Amount</th></tr></thead>
-            <tbody>{visibleDeductions.map((line) => <tr key={line.recoveryKey || line.code}><th scope="row">{line.label}{line.recoveryKey ? <RecoveryDetailButton accountId={accountId} profileType={profileType} recoveryKey={line.recoveryKey} amount={line.amount} payrollLabel="published payout"/> : null}</th><td>− {money(line.amount)}</td></tr>)}</tbody>
+            <tbody>{otherDeductions.map((line) => <tr key={line.code}><th scope="row">{line.label}</th><td>− {money(line.amount)}</td></tr>)}
+              {shipmentLosses.length ? <tr><th scope="row"><details><summary>Shipment loss · {shipmentLosses.length}</summary>
+                {shipmentLosses.map((line, index) => <div key={line.recoveryKey || index}><span>{line.label} · {money(line.amount)}</span>{line.recoveryKey ? <RecoveryDetailButton accountId={accountId} profileType={profileType} recoveryKey={line.recoveryKey} amount={line.amount} payrollLabel="published payout"/> : null}</div>)}
+              </details></th><td>− {money(shipmentLossTotal)}</td></tr> : null}
+            </tbody>
             <tfoot><tr><th scope="row">Gross deductions</th><td>− {money(payout.deductions)}</td></tr></tfoot>
           </table>
         </div>
