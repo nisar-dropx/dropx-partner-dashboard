@@ -40,10 +40,18 @@ export type DistanceEntry = {
 export const distanceMethods: Record<string, string> = {
   amazon_gps: "Amazon GPS",
   amazon_gps_roads: "GPS + road connections",
+  gps_trail: "GPS trail (Mapbox fallback)",
   scan_roads: "Roads between scans",
   manual: "Imported kilometres",
   pending: "Awaiting evidence",
 };
+/** Anomalous / left-on-ground days stay stored but are not ops pending. */
+export const distanceExcludedReasons = new Set([
+  "route_excluded",
+  "route_needs_review",
+  "scan_excluded",
+  "scan_location_missing",
+]);
 export type DistanceViewFilters = {
   from: string;
   to: string;
@@ -56,7 +64,8 @@ export type DistanceViewFilters = {
 };
 export function distanceStatus(row: DistanceEntry) {
   if (row.status === "ready") return "Ready";
-  return ["input_conflict", "route_needs_review", "identity_mismatch", "conflicting_scan", "amazon_identity_missing", "mapping_changed"].includes(row.reason || "")
+  if (distanceExcludedReasons.has(row.reason || "")) return "Excluded";
+  return ["input_conflict", "identity_mismatch", "conflicting_scan", "amazon_identity_missing", "mapping_changed"].includes(row.reason || "")
     ? "Needs attention" : "Pending";
 }
 export function filterDistanceEntries(rows: DistanceEntry[], filters: DistanceViewFilters) {
@@ -99,7 +108,7 @@ export function groupDistanceAssociates(rows: DistanceEntry[]): DistanceAssociat
       key, name: days[0].name, amazonIds: unique("amazonId"), dropxIds: unique("dropxId"),
       transporterIds: unique("transporterId"), stations: unique("station"), rows: days,
       days: new Set(days.map((r) => r.date)).size,
-      pendingDays: new Set(days.filter((r) => r.status !== "ready").map((r) => r.date)).size,
+      pendingDays: new Set(days.filter((r) => r.status !== "ready" && distanceStatus(r) !== "Excluded").map((r) => r.date)).size,
       km: ready.length ? ready.reduce((sum, r) => sum + (r.km ?? 0), 0) : null,
       fuel: ready.length ? ready.reduce((sum, r) => sum + (r.fuel ?? 0), 0) : null,
     };

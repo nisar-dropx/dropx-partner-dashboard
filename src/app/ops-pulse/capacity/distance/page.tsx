@@ -148,7 +148,7 @@ export default async function DistancePage({
               name="status"
               label="statuses"
               allLabel="All statuses"
-              options={["Ready", "Pending", "Needs attention"]}
+              options={["Ready", "Pending", "Needs attention", "Excluded"]}
               defaultValues={statuses}
             />
           </div>
