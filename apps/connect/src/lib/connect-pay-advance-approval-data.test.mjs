@@ -190,9 +190,12 @@ test('review presentation distinguishes prior approval, unpaid payroll periods a
   const mod={exports:{}};const states=[details,'',0];
   const source=ts.transpileModule(fs.readFileSync(new URL('../components/connect-pay-advance-review.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   new Function('require','module','exports',source)(name=>name==='react'?{...React,useEffect(){},useState(){return [states.shift(),()=>{}]}}:name==='lucide-react'?{ChevronDown:()=>null}:require(name),mod,mod.exports);
-  const html=renderToStaticMarkup(React.createElement(mod.exports.ConnectPayAdvanceReview,{accountId:'account-a',profileType:'employee',approval:{id:'step-a',requestId:'request-a',stepName:'Finance processing',requestedAmount:2000,approvedAmount:2000,outstandingPay:12000,maxEligibleAmount:3000,outstandingAdvance:4000,reservedRecovery:500,monthPaidCount:1,monthPaidAmount:5000,recoveryMode:'one_time',reason:'Travel'}}));
-  for(const text of ['Previously approved amount','Earlier manager','Approval history','September 2026','October 2026','Available advance now','Advance payment and recovery history','UTR-123','Scheduled','Recovered'])assert.ok(html.includes(text),text);
+  const html=renderToStaticMarkup(React.createElement(mod.exports.ConnectPayAdvanceReview,{accountId:'account-a',profileType:'employee',approval:{id:'step-a',requestId:'request-a',stepName:'Finance processing',requestedAmount:2000,approvedAmount:2000,outstandingPay:12000,maxEligibleAmount:3000,outstandingAdvance:4000,reservedRecovery:500,monthPaidCount:1,monthPaidAmount:5000,recoveryMode:'one_time',reason:'Travel'}}, React.createElement('input',{'aria-label':'Approved amount'})));
+  for(const text of ['Available limit','Paid this month','Advance to recover','Travel','Earlier manager','Approvals','September 2026','October 2026','Available advance now','Advance history','UTR-123','Scheduled','Recovered'])assert.ok(html.includes(text),text);
   assert.ok(!html.includes('Amount from previous review'));
-  assert.ok(html.includes('This is an approval amount, not a paid advance.'));
-  assert.ok(html.includes('<details'),'sections can expand without changing approval state');
+  assert.ok(html.includes('Payment follows bank confirmation.'));
+  assert.ok(html.indexOf('aria-label="Approved amount"') < html.indexOf('<details'),'decision fields come before expandable history');
+  assert.ok(!/<details[^>]*\bopen(?:[\s=>])/.test(html),'history starts collapsed');
+  assert.ok(html.indexOf('₹5,000') < html.indexOf('<details'),'amount paid this month is immediately visible');
+  assert.ok(html.indexOf('₹4,000') < html.indexOf('<details'),'outstanding includes scheduled but unconfirmed recovery');
 });
