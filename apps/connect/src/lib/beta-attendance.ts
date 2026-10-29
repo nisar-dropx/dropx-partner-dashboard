@@ -31,3 +31,16 @@ export async function loadBetaAttendance(db:SupabaseClient,company:string,biomet
   const punches=latest.data?await db.from('attendance_punches').select('punch_date,punch_time,punch_label,created_at,source,calculated,worker_status').eq('company_id',company).eq('enrolment_id',biometricId).eq('source','biometric').eq('punch_date',latest.data.punch_date).gte('punch_time',since).lte('punch_time',now).order('punch_time',{ascending:false}).limit(100):{data:[],error:null};
   return {data:betaAttendanceEvidence(daily.data,punches.data??[],since,Date.parse(now)),error:daily.error||latest.error||punches.error};
 }
+
+/** A bounded calendar-month view of this pilot's biometric evidence only. */
+export async function loadBetaAttendanceMonth(db:SupabaseClient,company:string,biometricId:string|null,since:string,month:string) {
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||!biometricId||!Number.isFinite(Date.parse(since)))throw new Error('Attendance identity or month unavailable');
+  const start=`${month}-01`, end=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5)),1)).toISOString().slice(0,10);
+  const [daily,punches]=await Promise.all([
+    db.from('attendance_daily').select('punch_date,in_time,out_time,status,updated_at').eq('company_id',company).eq('enrolment_id',biometricId).gte('punch_date',start).lt('punch_date',end).order('punch_date',{ascending:false}).limit(32),
+    db.from('attendance_punches').select('punch_date,punch_time,punch_label,created_at,source,calculated,worker_status').eq('company_id',company).eq('enrolment_id',biometricId).eq('source','biometric').gte('punch_date',start).lt('punch_date',end).gte('punch_time',since).lte('punch_time',new Date().toISOString()).order('punch_time',{ascending:false}).limit(3001)
+  ]);
+  if(daily.error||punches.error)throw new Error('Attendance could not be refreshed. Try again.');
+  const dates=[...new Set([...(daily.data??[]),...(punches.data??[])].map(p=>p.punch_date))].sort().reverse();
+  return {days:dates.map(date=>betaAttendanceEvidence(daily.data?.find(p=>p.punch_date===date)??null,(punches.data??[]).filter(p=>p.punch_date===date),since)).filter((p):p is BetaAttendance=>Boolean(p)),truncated:(punches.data?.length??0)>3000};
+}

@@ -13,6 +13,7 @@ import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
 import { resolveConnectPreview } from "./connect-preview";
+import { loadBetaWorkspaceAccess } from "./beta-workspace-access";
 import { eligibleConnectWorkforceAccount } from "../../../../src/lib/connect-account-freshness";
 
 export { normalizeConnectMobile } from "@/lib/country-codes";
@@ -49,6 +50,7 @@ export type ConnectAccount = {
   designationCode: string | null;
   providerMappingRequired: boolean;
   activationOnly: boolean;
+  betaWorkspaceActive?: boolean;
   onboardingBeta: boolean;
   activationStage: string | null;
 };
@@ -107,6 +109,8 @@ type IsolatedAmazonPilotAccountRow = {
   designation_id: string | null;
   full_name: string | null;
   alias_email: string | null;
+  continuation_status?: string | null;
+  inbox_status?: string | null;
   mobile: string | null;
   biometric_id: string | null;
   status: string | null;
@@ -819,7 +823,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
   if (pilotMobile.length === 10) {
     const isolatedPilots = await supabaseAdmin
       .from("workforce_amazon_email_pilot_candidates")
-      .select("id,company_id,designation_id,full_name,alias_email,mobile,biometric_id,status")
+      .select("id,company_id,designation_id,full_name,alias_email,mobile,biometric_id,status,continuation_status,inbox_status")
       .eq("mobile", pilotMobile)
       .is("closed_at", null)
       .order("created_at", { ascending: false });
@@ -1086,17 +1090,20 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       activationStage: null
       };
     }));
-  const isolatedPilotAccounts: ConnectAccount[] = isolatedPilotRows
+  const isolatedPilotAccounts: ConnectAccount[] = await Promise.all(isolatedPilotRows
     .filter((pilot) => companyNameById.has(pilot.company_id))
-    .map((pilot) => ({
+    .map(async (pilot):Promise<ConnectAccount> => {
+      const betaWorkspaceActive=await loadBetaWorkspaceAccess(supabaseAdmin!,pilot);
+      return ({
       id: pilot.id,
       companyId: pilot.company_id,
       profileType: "workforce",
       name: pilot.full_name,
       email: pilot.alias_email,
       reference: null,
-      role: "Amazon onboarding · Beta",
-      status: "Pending",
+      role: betaWorkspaceActive ? "Amazon associate · Beta" : "Amazon onboarding · Beta",
+      status: betaWorkspaceActive ? "Active" : "Pending",
+      betaWorkspaceActive,
       biometricId: pilot.biometric_id,
       profilePhotoUrl: null,
       pageAccess: ["activation"],
@@ -1110,7 +1117,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       activationOnly: true,
       onboardingBeta: true,
       activationStage: `amazon_email_pilot:${pilot.status ?? "pending"}`
-    }));
+    });}));
   return [...resolvedAccounts, ...isolatedPilotAccounts];
 }
 

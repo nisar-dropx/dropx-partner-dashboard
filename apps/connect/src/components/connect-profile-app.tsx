@@ -42,6 +42,7 @@ export type AppAccount = {
   designationCode?: string | null;
   providerMappingRequired?: boolean;
   activationOnly?: boolean;
+  betaWorkspaceActive?: boolean;
   onboardingBeta?: boolean;
   readOnlyPreview?: boolean;
   activationStage?: string | null;

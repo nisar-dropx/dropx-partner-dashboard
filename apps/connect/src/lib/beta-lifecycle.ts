@@ -22,14 +22,18 @@ export function betaLifecycleSummary(data:BetaLifecycleInput,now=Date.now()) {
     ...m, owner:m.id==='attendance'?'Station team':m.id==='activation'?'Associate / station team':m.status==='action'?'Associate':'Amazon / station team'
   }));
   const base={milestones,next,amazonState,freshness,followUps,active:false,
-    workspaceStatus:'isolated_beta' as const,
+    workspaceStatus:'isolated_beta' as 'isolated_beta'|'active_beta',
+    betaWorkspaceActive:false,
     workspaceDetail:'This test account is separate from the Workforce register. Regular work and payment access need a reviewed Workforce profile and ID/pay mapping.',
     registrationReviewPending:data.registrationStatus==='submitted'};
   if(data.closedAt)return {...base,next:null,stage:'archived',label:'Pilot archived',instruction:'The beta workspace is closed. An authorised admin can review restoration.'};
   if(data.verificationClosed||amazonState==='OFFBOARDED')return {...base,next:null,stage:'offboarded',label:'Amazon profile offboarded',instruction:'Contact your station team to review the outcome.'};
   if(data.offboardingRequested)return {...base,next:null,stage:'exit_requested',label:'Exit request in progress',instruction:'Your station team is following up on your request.'};
   if(amazonState==='INACTIVE')return {...base,next:milestones.find(m=>m.id==='ready')??null,stage:'inactive',label:'Amazon ID inactive',instruction:'Amazon lists your ID as inactive. Ask your station team to review the reason.'};
-  if(active)return {...base,active:true,stage:'active',label:freshness==='fresh'?'Amazon ID active':'Amazon ID last confirmed active',
+  if(active)return {...base,active:true,
+    betaWorkspaceActive:!data.sourceStatus?.unavailable && Number.isFinite(observed) && observed<=now+300000,
+    workspaceStatus:!data.sourceStatus?.unavailable && Number.isFinite(observed) && observed<=now+300000?'active_beta':'isolated_beta',
+    workspaceDetail:'Amazon activation opens your beta Home, Work and Inbox. Registration review, attendance approval and payment setup are tracked separately.',stage:'active',label:freshness==='fresh'?'Amazon ID active':'Amazon ID last confirmed active',
     instruction:'Amazon has activated your ID. Any remaining training or attendance records are shown separately below.'};
   return {...base,stage:next?.id??'complete',label:next?.label??'Work setup complete',instruction:next?.detail??'All tracked steps are confirmed.'};
 }
