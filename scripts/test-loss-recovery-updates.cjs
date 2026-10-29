@@ -84,3 +84,9 @@ const monthly=summarizeLossDebits(debits,'person_month');assert.equal(monthly.le
 assert.equal(monthly.find(g=>g.payrollMonth==='2026-09').deducted,50);
 assert.equal(monthly.find(g=>g.payrollMonth==='2026-10').draft,25);
 console.log('PASS salary month: individual assignment, earlier-only filter/export, monthly grouping and compact labels.');
+const earlierPage=renderToStaticMarkup(React.createElement(LossRecoveryUpdates,{rows:earlier,earlierOnly:true}));
+assert.match(earlierPage,/Earlier salary recovery · saved assignments/);
+assert.match(earlierPage,/September 2026 salary/);
+assert.doesNotMatch(earlierPage,/October 2026 salary/);
+assert.match(earlierPage,/salaryScope=earlier/);
+console.log('PASS dedicated earlier-payroll view isolates previous salary assignments and export.');

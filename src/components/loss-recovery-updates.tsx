@@ -8,8 +8,8 @@ import { ListPager, usePaged } from './list-pager';
 import styles from './nl-loss.module.css';
 
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(value);
-export function LossRecoveryUpdates({ rows }: { rows: RecoveryUpdate[] }) {
-  const [station, setStation] = useState(''), [month, setMonth] = useState(''), [status, setStatus] = useState(''), [query, setQuery] = useState(''), [salaryScope, setSalaryScope] = useState('all');
+export function LossRecoveryUpdates({ rows, earlierOnly = false }: { rows: RecoveryUpdate[]; earlierOnly?: boolean }) {
+  const [station, setStation] = useState(''), [month, setMonth] = useState(''), [status, setStatus] = useState(''), [query, setQuery] = useState(''), [salaryScope, setSalaryScope] = useState(earlierOnly ? 'earlier' : 'all');
   const currentMonth = indiaMonth();
   const shown = filterRecoveryUpdates(rows, { station, month, status, query, salaryScope, currentMonth });
   const exportParams = new URLSearchParams({station, month, status, query, salaryScope});
@@ -25,13 +25,13 @@ export function LossRecoveryUpdates({ rows }: { rows: RecoveryUpdate[] }) {
         <label>Station<select value={station} onChange={event => setStation(event.target.value)}><option value="">All stations</option>{[...new Set(rows.map(row => row.station))].sort().map(code => <option key={code}>{code}</option>)}</select></label>
         <label>Loss month<select value={month} onChange={event => setMonth(event.target.value)}><option value="">All months · till date</option>{[...new Set(rows.map(row => row.month))].sort().reverse().map(value => <option key={value} value={value}>{monthLabel(value)}</option>)}</select></label>
         <label>Recovery status<select value={status} onChange={event => setStatus(event.target.value)}><option value="">All saved updates</option>{[...new Set(rows.map(row => row.status))].sort().map(value => <option key={value} value={value}>{RECOVERY_QUEUE_LABELS[value] || value}</option>)}</select></label>
-        <label>Salary period<select value={salaryScope} onChange={event => setSalaryScope(event.target.value)}><option value="all">All salary months</option><option value="earlier">Earlier salary months</option></select></label>
+        <label>Salary period<select disabled={earlierOnly} value={salaryScope} onChange={event => setSalaryScope(event.target.value)}><option value="all">All salary months</option><option value="earlier">Earlier salary months</option></select></label>
         <a className={styles.button} href={`/api/ops-pulse/losses/recovery/export?${exportParams}`}>Download Excel</a>
         <label>Search<input placeholder="TID, person or station" value={query} onChange={event => setQuery(event.target.value)}/></label>
         <a className={styles.button} href="/team-ops/losses/recovery-updates">Pending recovery updates →</a>
       </div>
     </section>
-    {earlierPeople.length ? <div className={styles.toolbar} style={{padding:'4px 0'}}><button className={styles.button} aria-pressed={salaryScope === 'earlier'} onClick={() => setSalaryScope(salaryScope === 'earlier' ? 'all' : 'earlier')}>Earlier salary months · {new Set(earlierPeople.map(person => person.ref)).size} people · {money(earlierAssigned)} assigned →</button></div> : null}
+    {earlierPeople.length && !earlierOnly ? <div className={styles.toolbar} style={{padding:'4px 0'}}><a className={styles.button} href="/team-ops/losses/recovery?view=earlier">Earlier salary months · {new Set(earlierPeople.map(person => person.ref)).size} people · {money(earlierAssigned)} assigned →</a></div> : null}
     <div className={`${styles.metrics} ${styles.metrics4}`}>
       <div><span>Saved recovery TIDs</span><strong>{totals.count.toLocaleString('en-IN')}</strong><small>{money(totals.amount)} loss value · {totals.people} assigned people</small></div>
       <div><span>Pending collection</span><strong>{money(totals.outstanding)}</strong><small>Includes {money(totals.draft)} in draft payroll</small></div>
@@ -39,7 +39,7 @@ export function LossRecoveryUpdates({ rows }: { rows: RecoveryUpdate[] }) {
       <div><span>Awaiting approval / review</span><strong>{totals.review.toLocaleString('en-IN')}</strong><small>Saved updates requiring attention</small></div>
     </div>
     <section className={styles.panel}>
-      <div className={styles.panelHead}><div><h2>Station recovery updates</h2><small>Salary month = planned payroll; loss month = shipment loss period. See Payroll deductions for actual debits.</small></div></div>
+      <div className={styles.panelHead}><div><h2>{earlierOnly ? 'Earlier salary recovery · saved assignments' : 'Station recovery updates'}</h2><small>Salary month = planned payroll; loss month = shipment loss period. See Payroll deductions for actual debits.</small></div></div>
       <div className={styles.tableWrap}><table><thead><tr><th>Station</th><th>TIDs / people</th><th>Loss value</th><th>Assigned</th><th>Recovered</th><th>Pending collection</th><th>Draft payroll</th><th>Last update</th></tr></thead>
         <tbody>{groups.map(group => <tr key={group.code}><td><button className={styles.button} onClick={() => setStation(group.code)}>{group.code}</button></td><td>{group.count} / {group.people}</td><td>{money(group.amount)}</td><td>{money(group.assigned)}</td><td>{money(group.collected)}</td><td>{money(group.outstanding)}</td><td>{money(group.draft)}</td><td>{group.updatedAt ? formatOpsDate(group.updatedAt) : '—'}</td></tr>)}</tbody></table></div>
       {!shown.length ? <p className={styles.empty}>No saved recovery updates match this selection. Open Pending recovery updates to assign final cases.</p> : null}

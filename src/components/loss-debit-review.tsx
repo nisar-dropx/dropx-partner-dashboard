@@ -14,11 +14,11 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(n);
-export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
+export function LossDebitReview({ rows, earlierOnly = false }: { rows: LossDebit[]; earlierOnly?: boolean }) {
   const [month, setMonth] = useState(deductionMonth("current_month")!),
     [station, setStation] = useState(""),
     [person, setPerson] = useState(""),
-    [designation, setDesignation] = useState(""), [salaryScope, setSalaryScope] = useState('selected');
+    [designation, setDesignation] = useState(""), [salaryScope, setSalaryScope] = useState(earlierOnly ? 'earlier' : 'selected');
   const currentMonth = indiaMonth();
   const filtered = filterLossDebits(rows, {
     month, salaryScope, currentMonth,
@@ -59,7 +59,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
               onChange={(e) => setMonth(e.target.value)}
             />
           </label>
-          <label>View<select value={salaryScope} onChange={e => setSalaryScope(e.target.value)}><option value="selected">Selected salary month</option><option value="earlier">Earlier salary months</option></select></label>
+          <label>View<select disabled={earlierOnly} value={salaryScope} onChange={e => setSalaryScope(e.target.value)}><option value="selected">Selected salary month</option><option value="earlier">Earlier salary months</option></select></label>
           <label>
             Station
             <select
@@ -217,7 +217,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
                     <td>
                       <button
                         className={styles.button}
-                        onClick={() => {setSalaryScope('selected'); setMonth(t.key);}}
+                        onClick={() => {if (!earlierOnly) setSalaryScope('selected'); setMonth(t.key);}}
                       >
                         {monthLabel(t.key)}
                       </button>
