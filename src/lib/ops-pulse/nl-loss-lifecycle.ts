@@ -9,7 +9,6 @@ import { recoveryContext } from "./nl-recovery-context";
 import {
   clusterMayAct,
   slpMayAct,
-  stationMayAct,
   type LifecycleAction,
 } from "./nl-loss-lifecycle-policy";
 
@@ -21,7 +20,7 @@ export function canViewLosses(auth: AuthorizationContext) {
   return hasPermission(auth, "ops_losses", "access");
 }
 
-/** Station-scoped Losses access without Master edit: view + clarify/dispute only. */
+/** Station-scoped Losses access without Master edit: view and permitted recovery updates. */
 export function isStationLossActor(auth: AuthorizationContext) {
   return canViewLosses(auth) && !canEditLossRecoveryMaster(auth);
 }
@@ -72,12 +71,6 @@ export async function assertLifecycleAction(
     return {isCluster:false,isSlp:mayActivateRedispute(auth),isStationOnly:true};
   }
   const actors = await lossLifecycleActors(auth, stationId);
-  if (action === "clarify" && (actors.isStationOnly || actors.isCluster || actors.isSlp)) {
-    if (!stationMayAct(action) && !actors.isCluster && !actors.isSlp) {
-      throw Error("You do not have access to raise a clarification.");
-    }
-    return actors;
-  }
   if (action === "approve") {
     if (!actors.isSlp) throw Error("Only SLP Manager, National Head, Finance Manager or Managing Partner can approve this recovery.");
     if (proposedBy && auth.userId && proposedBy === auth.userId) {
@@ -138,8 +131,6 @@ export async function approveLossRecovery(input: {
     "approve",
     plan.data?.proposed_by ?? null,
   );
-  const questions = await supabaseAdmin!.from("nl_loss_clarifications").select("id").eq("company_id",ctx.scope.company).eq("month",input.month).eq("case_key",ctx.caseKey).in("status",["submitted","returned"]).limit(1);
-  if(questions.error || questions.data?.length) throw Error("Resolve the associate question in Exception approvals before reapproving recovery.");
   const { data, error } = await supabaseAdmin!.rpc("nl_loss_recovery_approve", {
     p_company: ctx.scope.company,
     p_month: input.month,
@@ -149,44 +140,6 @@ export async function approveLossRecovery(input: {
     p_name: ctx.auth.fullName || ctx.auth.email || "Ops",
     p_note: input.note ?? null,
     p_lifecycle_version: input.lifecycleVersion,
-  });
-  if (error) throw Error(error.message);
-  return data;
-}
-
-export async function submitLossClarification(input: {
-  auth: AuthorizationContext;
-  month: string;
-  caseKey: string;
-  note: string;
-  reason?: string;
-  category?: string;
-  employeeRef?: string | null;
-  evidenceUrl?: string | null;
-  source?: "station" | "associate" | "cluster";
-}) {
-  const ctx = await recoveryContext(input.month, input.caseKey, false);
-  // Portal/station clarifications need Losses edit. Associate source is only for
-  // DropX One (Connect), which authenticates the person separately.
-  if (input.source !== "associate" && !hasPermission(ctx.auth, "ops_losses", "edit")) {
-    throw Error("Access denied.");
-  }
-  if (input.source === "associate") {
-    throw Error("Associate clarifications must be submitted from DropX One.");
-  }
-  const { data, error } = await supabaseAdmin!.rpc("nl_loss_clarification_submit", {
-    p_company: ctx.scope.company,
-    p_month: input.month,
-    p_case: ctx.caseKey,
-    p_actor: ctx.auth.userId,
-    p_name: ctx.auth.fullName || ctx.auth.email || "Ops",
-    p_note: input.note,
-    p_reason: input.reason ?? "",
-    p_category: input.category ?? "clarification",
-    p_employee_ref: input.employeeRef ?? null,
-    p_evidence_url: input.evidenceUrl ?? null,
-    p_attachments: [],
-    p_source: input.source ?? "station",
   });
   if (error) throw Error(error.message);
   return data;
