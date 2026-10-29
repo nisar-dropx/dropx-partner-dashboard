@@ -2,11 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findRosterWeekOffCapBreach, isPastRosterWeek, rosterMonthMinWeekStart, rosterMonthMaxWeekStart } from './roster-interactions.ts';
 
-test('month week floor is the Monday on or before the 1st', () => {
+test('month week floor is the Monday on or before the 1st; forward reaches 4 weeks ahead', () => {
   assert.equal(rosterMonthMinWeekStart('2026-10-28'), '2026-09-28');
-  assert.equal(rosterMonthMaxWeekStart('2026-10-28'), '2026-10-26');
+  // 4 weeks from 2026-10-28 is 2026-11-25 (Wednesday) → Monday on or before is 2026-11-23.
+  assert.equal(rosterMonthMaxWeekStart('2026-10-28'), '2026-11-23');
   assert.equal(isPastRosterWeek('2026-09-28', '2026-10-26'), true);
   assert.equal(isPastRosterWeek('2026-10-26', '2026-10-26'), false);
+});
+
+test('forward 4-week cap can cross into the next calendar year in late December', () => {
+  // 2026-12-15 + 28 days = 2027-01-12 (Tuesday) → Monday on or before is 2027-01-11.
+  assert.equal(rosterMonthMaxWeekStart('2026-12-15'), '2027-01-11');
+  assert.equal(rosterMonthMinWeekStart('2027-01-05'), '2026-12-28');
 });
 
 const joseph = 'contractor:d0905';

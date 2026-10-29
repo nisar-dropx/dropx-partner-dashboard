@@ -16,7 +16,8 @@ const checks = [
   [payDay.includes('case "present_wfh":') && payDay.includes('return "paid-leave"') && payDay.includes('case "paid_holiday":') && payDay.includes('return "week-off"'), "calendar maps WFH to paid-leave and holiday to week-off"],
   [insights.includes('calendarClass: "paid-leave"') && insights.includes('label: "Present · WFH"'), "day details still surface Present · WFH on click"],
   [styles.includes("background: #4f46e5") && styles.includes("background: #b91c1c") && styles.includes("background: #fbbf24") && styles.includes("background: #475569") && styles.includes("background: transparent"), "calendar colors separate full, paid leave, absent, review, week off, and no-record"],
-  [styles.includes(".dx-attendance-day-insight.compact") && styles.includes("repeat(4, minmax(0, 1fr))"), "mobile day details use the compact layout"]
+  [styles.includes(".dx-attendance-day-insight.compact") && styles.includes("repeat(4, minmax(0, 1fr))"), "mobile day details use the compact layout"],
+  [component.includes('yearEndMonth = `${now.getFullYear()}-12`') && component.includes("disabled={atYearEnd}") && !component.includes("disabled={futureMonth}"), "attendance month Next stays enabled through December of the current year"]
 ];
 
 const failed = checks.filter(([ok]) => !ok);

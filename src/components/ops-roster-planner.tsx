@@ -30,11 +30,9 @@ import {
   recurringTemplateDate,
   rosterAssignmentToDragPayload,
   rosterCoverage,
-  rosterMonthEnd,
   rosterMonthMaxWeekStart,
   rosterMonthMinWeekStart,
   rosterWeek,
-  rosterWeekInCurrentMonth,
   type RosterAssignmentValue,
   type RosterDragPayload,
   type RosterTool
@@ -219,13 +217,14 @@ export function OpsRosterPlanner({
   const activeDragPayloadRef = useRef<RosterDragPayload | null>(null);
 
   const isRecurring = liveRecurring;
-  const monthEnd = useMemo(() => rosterMonthEnd(today), [today]);
   const minWeekStart = useMemo(() => rosterMonthMinWeekStart(today), [today]);
   const viewingPastWeek = useMemo(() => isPastRosterWeek(weekStart, initialWeekStart), [initialWeekStart, weekStart]);
   const dates = useMemo(() => {
-    if (isRecurring || isPeekedWeek || viewingPastWeek) return rosterWeekInCurrentMonth(weekStart, today);
-    return rosterWeek(weekStart).filter((date) => date >= templateStart && date <= livePeriodEnd && date <= monthEnd);
-  }, [isPeekedWeek, isRecurring, livePeriodEnd, monthEnd, templateStart, today, viewingPastWeek, weekStart]);
+    // Full Mon–Sun strip for browsing (past peeks and upcoming weeks past month-end).
+    // Dated edit mode still clips to the open plan's own period.
+    if (isRecurring || isPeekedWeek || viewingPastWeek) return rosterWeek(weekStart);
+    return rosterWeek(weekStart).filter((date) => date >= templateStart && date <= livePeriodEnd);
+  }, [isPeekedWeek, isRecurring, livePeriodEnd, templateStart, viewingPastWeek, weekStart]);
   const maxWeekStart = useMemo(() => rosterMonthMaxWeekStart(today), [today]);
   const holidayByDate = useMemo(() => new Map(holidays.map((holiday) => [holiday.calendarDate, holiday])), [holidays]);
   const shiftById = useMemo(() => new Map(shifts.map((shift) => [shift.id, shift])), [shifts]);

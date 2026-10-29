@@ -49,10 +49,11 @@ export function rosterMondayOnOrBefore(value: string) {
 
 /**
  * Latest week Monday that may be opened in the station roster week view.
- * Navigation stays a normal week strip, but cannot leave the current calendar month.
+ * Back stays within the current month; forward can continue 4 weeks ahead so
+ * planners can open the next few weeks without the Next control locking at month end.
  */
 export function rosterMonthMaxWeekStart(today: string) {
-  return rosterMondayOnOrBefore(rosterMonthEnd(today));
+  return rosterMondayOnOrBefore(moveIsoDate(today, 4 * 7));
 }
 
 /**

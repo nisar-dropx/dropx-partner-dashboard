@@ -249,6 +249,8 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  // Browse remaining months of this calendar year (e.g. Oct → Nov/Dec); stop at December.
+  const yearEndMonth = `${now.getFullYear()}-12`;
   const [month, setMonth] = useState(currentMonth);
   const [tab, setTab] = useState<"calendar" | "list" | "punches">(initialFilter === "all" ? "calendar" : "list");
   const [filter, setFilter] = useState<AttendanceFilter>(initialFilter);
@@ -328,7 +330,7 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
   const days = new Date(year, monthNumber, 0).getDate();
   const leading = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
   const total = (data?.rows ?? []).reduce((sum, row) => sum + minutes(row.workHours), 0);
-  const futureMonth = month >= currentMonth;
+  const atYearEnd = month >= yearEndMonth;
   const openFlags = punchStatus?.openFlags ?? [];
   const todayDate = localIsoDate(now);
   const insightFor = useCallback((row: Row | undefined) => attendanceDayInsight(row, {
@@ -407,7 +409,16 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
         <div className="dx-month-control">
           <button aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}><ChevronLeft /></button>
           <strong>{monthLabel(month)}</strong>
-          <button aria-label="Next month" disabled={futureMonth} onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight /></button>
+          <button
+            aria-label="Next month"
+            disabled={atYearEnd}
+            onClick={() => {
+              const next = shiftMonth(month, 1);
+              if (next <= yearEndMonth) setMonth(next);
+            }}
+          >
+            <ChevronRight />
+          </button>
         </div>
       </div>
 
