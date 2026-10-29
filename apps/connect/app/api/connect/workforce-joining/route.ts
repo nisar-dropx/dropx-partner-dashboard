@@ -1,4 +1,4 @@
-import { betaLifecycleEnabled, betaLifecycleSummary } from '@/lib/beta-lifecycle';
+import { betaLifecycleEnabled, betaLifecycleSummary, betaTrainingExitAllowed } from '@/lib/beta-lifecycle';
 import { betaSourceProgress, betaInboxActions, betaChecks, betaLearning, verifiedBetaSnapshot } from "@/lib/beta-verification";
 import { betaUanProgress, loadBetaUanMail } from "@/lib/beta-uan";
 import { acknowledgedBetaExitNote } from "@/lib/beta-exit-notice";
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
       const journey=betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus,invitationAvailable:Boolean(rawInvitationUrl),bgcAction:bgcChecks.some(item=>item.status==="action")});
       const invitationUrl=journey.invitationUnlocked?rawInvitationUrl:null;
       const lifecycleEnhanced=betaLifecycleEnabled(company,account.id);
-      const lifecycle=lifecycleEnhanced?betaLifecycleSummary({isolatedBeta:true,lifecycleEnhanced,stage:journey.stage,registrationStatus,registrationReturnNote:registration.data?.return_note,continuationStatus:candidate.data.continuation_status,...betaSourceProgress(live),bgcStatus:live?.bgc_status,bgcChecks,uan,learning,driverId:live?.driver_id,inboxActions,invitationAvailable:Boolean(rawInvitationUrl),operationalStatus:live?.operational_status,verificationClosed:verificationCases.some(item=>item.status==="offboarded"),offboardingRequested,latestAttendance:attendance.data?{inTime:attendance.data.in_time,outTime:attendance.data.out_time}:null}):null;
+      const lifecycle=lifecycleEnhanced?betaLifecycleSummary({isolatedBeta:true,lifecycleEnhanced,stage:journey.stage,registrationStatus,registrationReturnNote:registration.data?.return_note,continuationStatus:candidate.data.continuation_status,...betaSourceProgress(live),bgcStatus:live?.bgc_status,bgcChecks,uan,learning,driverId:live?.driver_id,inboxActions,invitationAvailable:Boolean(rawInvitationUrl),operationalStatus:live?.operational_status,verificationClosed:verificationCases.some(item=>item.status==="offboarded"),offboardingRequested,sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error?.includes("amazon_source_unavailable"))},latestAttendance:attendance.data?{inTime:attendance.data.in_time,outTime:attendance.data.out_time}:null}):null;
       return NextResponse.json({
         available:true,pilot:true,isolatedBeta:true,registeredMobile:candidate.data.mobile,
         stationState:(Array.isArray(candidate.data.stations)?candidate.data.stations[0]:candidate.data.stations)?.state??null,
@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
         registrationReady:journey.ready,
         reportUpdatedAt:live?.idfy_observed_at??null,reportDate:null,stale:Boolean(live?.idfy_observed_at&&Date.now()-Date.parse(live.idfy_observed_at)>24*3600000),syncDelayed:Boolean(snapshot.error||live?.sync_error||!live?.idfy_observed_at),
         inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanLinks,uan,uanStatus:uan.status,...betaSourceProgress(live),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
-        sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at??null,idfyUpdatedAt:live?.idfy_observed_at??null,lastAttemptAt:snapshot.data?.updated_at??null,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error||uan.syncDelayed)},driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
+        sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at??null,idfyUpdatedAt:live?.idfy_observed_at??null,amazonDelayed:Boolean(live?.sync_error?.includes("amazon_source_unavailable")),lastAttemptAt:snapshot.data?.updated_at??null,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error||uan.syncDelayed)},driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
         invitationUrl,invitationAvailable:Boolean(rawInvitationUrl),invitationReceivedAt:amazonMessage?.received_at??candidate.data.last_message_at,
         registrationRequired:!registrationSubmitted,registrationStatus,registrationReturnNote:lifecycleEnhanced?registration.data?.return_note??null:null,registrationUpdatedAt:registration.data?.updated_at??null,
@@ -191,6 +191,16 @@ export async function POST(request:NextRequest){
   if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
    let betaNote=note;
    if(body.action==="not_continuing"){
+    if(betaLifecycleEnabled(account.companyId,account.id)){
+     const [candidate,snapshot,invitation]=await Promise.all([
+      supabaseAdmin.from("workforce_amazon_email_pilot_candidates").select("alias_email").eq("company_id",account.companyId).eq("id",account.id).is("closed_at",null).maybeSingle(),
+      supabaseAdmin.from("workforce_beta_verification_snapshots").select("*").eq("company_id",account.companyId).eq("candidate_id",account.id).maybeSingle(),
+      supabaseAdmin.from("workforce_amazon_invitation_requests").select("external_reference").eq("company_id",account.companyId).eq("email_pilot_candidate_id",account.id).eq("status","sent").order("requested_at",{ascending:false}).limit(1).maybeSingle()
+     ]);
+     const live=verifiedBetaSnapshot(snapshot.data,candidate.data?.alias_email,invitation.data?.external_reference);
+     if(candidate.error||snapshot.error||invitation.error||!betaTrainingExitAllowed(live))
+      return NextResponse.json({error:"Your Amazon status needs a station-team review. This training-only exit is unavailable for activated IDs."},{status:409,headers});
+    }
     const reason=await supabaseAdmin.from("workforce_onboarding_exit_reasons").select("id,requires_note").eq("company_id",account.companyId).eq("client_code","AMAZON").eq("is_active",true).eq("id",body.reasonId).maybeSingle();
     if(reason.error||!reason.data)throw new Error("Choose an available reason for leaving.");
     betaNote=acknowledgedBetaExitNote({acknowledged:body.trainingPayoutAcknowledged,version:body.trainingPayoutNoticeVersion,note,requiresNote:reason.data.requires_note});
