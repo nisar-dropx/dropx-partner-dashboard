@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, Home, LocateFixed, Plane, ReceiptText, RotateCcw, Wallet, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, Home, LocateFixed, Plane, ReceiptText, RotateCcw, Wallet, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
@@ -13,6 +13,7 @@ type UnifiedRequest = {
   id: string;
   kind: RequestKind;
   title: string;
+  reference?: string;
   eyebrow: string;
   submittedAt: string;
   status: string;
@@ -96,6 +97,7 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
   const [month, setMonth] = useState(currentMonthKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [expandedRequestIds, setExpandedRequestIds] = useState<Set<string>>(() => new Set());
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
   const load = useCallback(async (background = false) => {
@@ -223,11 +225,13 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
       unified.push({
         id: `advance:${item.source}:${item.id}`,
         kind: "advance",
-        title: `${item.title} – ${money(item.amount)}`,
+        title: money(item.amount),
+        reference: item.reference || (item.source === "payroll" ? item.title : `ADV-${String(item.id).replaceAll("-", "").slice(0, 10).toUpperCase()}`),
         eyebrow: item.source === "payroll" ? "Payroll advance" : "Advance request",
         submittedAt: item.requestedAt,
         status: item.status,
         facts: [
+          ...(item.purpose ? [{ label: "Reason", value: item.purpose }] : []),
           ...(item.approvedAmount != null ? [{ label: "Approved amount", value: money(item.approvedAmount) }] : []),
           ...(item.recovery ? [{ label: "Recovery", value: statusLabel(String(item.recovery)) }] : []),
           ...(item.note ? [{ label: reviewNoteLabel(item.status), value: item.note }] : [])
@@ -361,6 +365,14 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
 
   const visible = filter === "all" ? monthRequests : monthRequests.filter((request) => request.kind === filter);
   const activeKinds = (Object.keys(kindMeta) as RequestKind[]).filter((kind) => counts[kind]);
+  function toggleRequestDetails(requestId: string) {
+    setExpandedRequestIds((current) => {
+      const next = new Set(current);
+      if (next.has(requestId)) next.delete(requestId);
+      else next.add(requestId);
+      return next;
+    });
+  }
 
   return (
     <section className="dx-approval-inbox">
@@ -389,43 +401,52 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
       {loading ? <div className="dx-loader"><span /><small>Loading your requests…</small></div> : null}
       {!loading ? (
         <div className="dx-approval-list">
-          {visible.length ? visible.map((request) => (
-            <article className="dx-approval-card" key={request.id}>
+          {visible.length ? visible.map((request) => {
+            const compactAdvance = request.kind === "advance";
+            const expanded = !compactAdvance || expandedRequestIds.has(request.id);
+            const detailsId = `request-details-${request.id.replaceAll(":", "-")}`;
+            return <article className={`dx-approval-card${compactAdvance ? " dx-approval-card-compact" : ""}${expanded ? " expanded" : ""}`} key={request.id}>
               <div className="dx-approval-card-head">
                 <div>
                   <p className="dx-approval-eyebrow">{kindMeta[request.kind].label} · {request.eyebrow}</p>
+                  {request.reference ? <p className="dx-approval-reference">{request.reference}</p> : null}
                   <h2>{request.title}</h2>
                   <p className="dx-approval-sub">Submitted {dateTime(request.submittedAt)}</p>
                 </div>
                 <span className={`dx-approval-badge ${statusBadgeClass(request.status)}`}>{statusLabel(request.status)}</span>
               </div>
-              {request.facts.length ? (
-                <dl className="dx-approval-facts">
-                  {request.facts.map((fact) => (
-                    <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>
-                  ))}
-                </dl>
-              ) : null}
-              {request.steps.length ? (
-                <div className="dx-expense-timeline">
-                  {request.steps.map((step, index) => (
-                    <div key={`${request.id}:${index}`}>
-                      <i>{step.status === "rejected" ? <X /> : step.status === "pending" ? <ClipboardList /> : <Check />}</i>
-                      <span>
-                        <strong>{step.name}</strong>
-                        <small>{statusLabel(step.status)}{step.note ? ` · ${step.note}` : ""}</small>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+              {compactAdvance ? <button aria-controls={detailsId} aria-expanded={expanded} className="dx-request-detail-toggle" onClick={() => toggleRequestDetails(request.id)} type="button">
+                <span>{expanded ? "Hide details" : "View details & lifecycle"}</span><ChevronDown aria-hidden="true" />
+              </button> : null}
+              {expanded ? <div className={compactAdvance ? "dx-request-expanded-details" : undefined} id={compactAdvance ? detailsId : undefined}>
+                {request.facts.length ? (
+                  <dl className="dx-approval-facts">
+                    {request.facts.map((fact) => (
+                      <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>
+                    ))}
+                  </dl>
+                ) : null}
+                {request.steps.length ? (
+                  <div className="dx-expense-timeline">
+                    {request.steps.map((step, index) => (
+                      <div key={`${request.id}:${index}`}>
+                        <i>{step.status === "rejected" ? <X /> : step.status === "pending" ? <ClipboardList /> : <Check />}</i>
+                        <span>
+                          <strong>{step.name}</strong>
+                          <small>{statusLabel(step.status)}{step.note ? ` · ${step.note}` : ""}</small>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : compactAdvance ? <p className="dx-request-lifecycle-empty">Lifecycle details are not available for this older request.</p> : null}
+              </div> : null}
               {request.withdrawId ? (
                 <button className="dx-request-withdraw" disabled={withdrawingId === request.withdrawId} onClick={() => void withdrawAttendance(request.withdrawId!)} type="button">
                   <RotateCcw />{withdrawingId === request.withdrawId ? "Withdrawing…" : "Withdraw"}
                 </button>
               ) : null}
-            </article>
-          )) : (
+            </article>;
+          }) : (
             <div className="dx-empty">
               <FileText />
               <strong>{requests.length ? `No requests in ${monthLabel(month)}` : "No requests yet"}</strong>

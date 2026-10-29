@@ -7,9 +7,9 @@ function fixture() {
   const account = {id:'gokul',companyId:'dropx',profileType:'employee',pageAccess:['advances']};
   const state = {account,eligible:true,calls:[],authError:null,upstreamError:null,missingEligibility:false};
   const tables = {
-    payment_advance_requests:[{id:'advance',company_id:'dropx',account_id:'gokul',purpose:'Travel',amount:500,status:'submitted',requested_at:'2026-10-01',updated_at:'2026-10-01'},
+    payment_advance_requests:[{id:'11111111-1111-1111-1111-111111111111',company_id:'dropx',account_id:'gokul',purpose:'Travel',amount:500,status:'submitted',requested_at:'2026-10-01T09:00:00.000Z',updated_at:'2026-10-01T09:00:00.000Z'},
       {id:'other',company_id:'other',account_id:'gokul',amount:999}],
-    hr_pay_advance_requests:[{id:'payroll',company_id:'dropx',worker_type:'employee',worker_id:'gokul',reason:'Pay',requested_amount:200,status:'pending',requested_at:'2026-10-01'}]
+    hr_pay_advance_requests:[{id:'payroll',request_number:'ADV-202610-00001',company_id:'dropx',worker_type:'employee',worker_id:'gokul',reason:'Pay',requested_amount:200,status:'pending',requested_at:'2026-10-01T09:00:00.000Z'}]
   };
   const db = {from(table) {
     let rows=tables[table]??[];
@@ -32,7 +32,7 @@ function fixture() {
     return Response.json(options.method==='GET' ? (state.missingEligibility?{}:{account:{eligibleForAdvance:state.eligible}}) : {ok:true},{status:options.method==='POST'?201:200});
   };
   new Function('require','module','exports','fetch',source)(id=>{assert.ok(id in mocks,id);return mocks[id]},mod,mod.exports,fetch);
-  return {state,...mod.exports};
+  return {state,tables,...mod.exports};
 }
 const getRequest=()=>new Request('https://one.dropxlogistics.com/api/connect/advances?accountId=gokul&profileType=employee',{headers:{cookie:'dropx_connect_session=test-only'}});
 const mutation=method=>new Request('https://one.dropxlogistics.com/api/connect/advances',{method,headers:{cookie:'dropx_connect_session=test-only','content-type':'application/json'},body:JSON.stringify({accountId:'gokul',profileType:'employee',amount:500,purpose:'Travel',requestId:'advance'})});
@@ -40,11 +40,21 @@ const mutation=method=>new Request('https://one.dropxlogistics.com/api/connect/a
 test('active account is eligible; both advances screen and My Requests contracts survive',async()=>{
   const f=fixture();const response=await f.GET(getRequest());const body=await response.json();
   assert.equal(response.status,200);assert.equal(body.account.eligibleForAdvance,true);
-  assert.deepEqual(body.requests.map(r=>r.id),['advance','payroll']);
+  assert.deepEqual(body.requests.map(r=>r.id),['11111111-1111-1111-1111-111111111111','payroll']);
   assert.equal(body.requests[0].purpose,'Travel');assert.equal(body.requests[0].title,'Travel');
+  assert.equal(body.requests[0].reference,'ADV-1111111111');
+  assert.equal(body.requests[1].reference,'ADV-202610-00001');
   assert.equal(body.requests[0].requested_at,body.requests[0].requestedAt);
   assert.equal(body.requests[0].canWithdraw,true);assert.equal(body.requests[1].canWithdraw,false);
   assert.equal(f.state.calls[0].cache,'no-store');assert.match(f.state.calls[0].url,/accountId=gokul/);
+});
+test('cutover duplicate is suppressed when the canonical payroll row lacks an external reference',async()=>{
+  const f=fixture();
+  Object.assign(f.tables.hr_pay_advance_requests[0],{reason:'Travel',requested_amount:500,external_source:null,external_reference:null});
+  const response=await f.GET(getRequest());const body=await response.json();
+  assert.equal(response.status,200);
+  assert.deepEqual(body.requests.map(r=>r.id),['payroll']);
+  assert.equal(body.requests[0].reference,'ADV-202610-00001');
 });
 test('inactive and missing eligibility are distinct and fail closed',async()=>{
   const f=fixture();f.state.eligible=false;
@@ -77,4 +87,14 @@ test('client does not label failed/missing eligibility responses as inactive',()
   assert.match(source,/typeof payload.account\?\.eligibleForAdvance !== "boolean"/);
   assert.match(source,/!error && eligibleForAdvance === false/);
   assert.match(source,/setEligibleForAdvance\(null\)/);
+});
+test('advance cards show a request reference and keep details and lifecycle collapsed by default',()=>{
+  const advances=fs.readFileSync(new URL('../components/connect-advances.tsx',import.meta.url),'utf8');
+  const myRequests=fs.readFileSync(new URL('../components/connect-my-requests.tsx',import.meta.url),'utf8');
+  assert.match(advances,/Request ID/);
+  assert.match(advances,/Approval lifecycle/);
+  assert.match(advances,/aria-expanded=\{expanded\}/);
+  assert.match(myRequests,/dx-approval-reference/);
+  assert.match(myRequests,/View details & lifecycle/);
+  assert.match(myRequests,/dx-request-expanded-details/);
 });
