@@ -31,7 +31,7 @@ async function StationEddNetwork({ authorization, query }: { authorization: Auth
 export default async function StationEddPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const authorization = await requireStationEddAccess();
   return (
-    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead eyebrow="Ops Pulse · Delivery Performance" title="EDDs · All locations"
           subtitle="First-dispatch pending, delivery outcomes and HFR—across every location you manage."

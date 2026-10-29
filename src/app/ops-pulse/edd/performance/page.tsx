@@ -44,11 +44,11 @@ export default async function EddPerformanceNetworkPage() {
   }
 
   return (
-    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Live tracking"
-          title="Delivery Performance"
+          title="Live performance"
           subtitle="Performance: assigned/delivered/returned/held by station, refreshed every 15 minutes. Open a station for the full breakdown."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

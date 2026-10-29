@@ -69,7 +69,7 @@ export default async function EddStationPage({
   const placeBits = [location?.city, location?.state].filter(Boolean).join(", ");
 
   return (
-    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Station drill-down"

@@ -41,11 +41,11 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
   const clusters = await clustersPending;
 
   return (
-    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Ops Live"
-          title="Ops Live"
+          title="Live performance"
           subtitle="The day's delivery report: how much of the morning load is delivered, what is on the road, and which stations need attention. Refreshed hourly, 6:05am to 11:05pm IST."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

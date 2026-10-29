@@ -72,7 +72,7 @@ const sourcePages: Record<string, [string, string]> = {
   ops_shift_status: ["Shift Attendance", "/ops-pulse?view=manpower"], ops_business_documents: ["Business Documents", "/business-documents"],
   ops_capacity_snapshot: ["Capacity", "/capacity"], ops_cps_snapshot: ["CPS", "/cps"], ops_cpu_snapshot: ["CPU", "/cpu"],
   ops_store_audit_summary: ["Store Audits", "/store-audits"], ops_station_audit_summary: ["Station Audits", "/audits"],
-  ops_cod_status: ["COD Status", "/cod/status"], ops_cod_summary: ["COD submissions", "/cod/submission"], ops_cod_ageing: ["COD Reports", "/cod/reports"],
+  ops_cod_status: ["COD Status", "/cod/status"], ops_cod_summary: ["COD submissions", "/cod/submission"], ops_cod_ageing: ["COD Status", "/cod/status"],
   ops_payment_inbox_summary: ["Your payment inbox", "/payments/approvals"], ops_roster_summary: ["Rostering", "/rostering"],
   ops_loss_case_summary: ["Loss cases", "/team-ops/losses/nl"], ops_loss_recovery_summary: ["Loss recovery", "/team-ops/losses/nl"],
   ops_fleet_daily_report: ["Fleet reports", "/fleet/reports"], ops_report_catalog: ["Reports", "/reports"],
