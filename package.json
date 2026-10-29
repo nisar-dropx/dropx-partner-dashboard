@@ -28,7 +28,7 @@
     "sync:report-bot-worker": "node scripts/sync-report-bot-worker.mjs",
     "test:report-bot": "node --experimental-strip-types --test src/lib/report-bot/logic.test.mjs src/lib/report-bot/report-bot-db.test.mjs",
     "test:whatsapp-templates": "node --experimental-strip-types --test src/lib/whatsapp-template-builder.test.mjs src/lib/whatsapp-template-actions.test.mjs src/lib/workforce-payout-whatsapp.test.mjs src/lib/workforce-payout-whatsapp-integration.test.mjs src/lib/helper-payout-publication.test.mjs src/lib/payout-app-notification-history.test.mjs src/lib/payout-review-display.test.mjs src/lib/payout-review-dashboard-route.test.mjs src/lib/payout-dispute-decision.test.mjs",
-    "build": "pnpm run test:ops-client-demo && pnpm run test:provider-mapping-period && pnpm run test:workforce-payout-summary && pnpm run test:workforce-payout-bank && pnpm run test:payable-balance && pnpm run test:central-bank-response && pnpm run test:payment-recovery && pnpm run verify:adhoc-da && pnpm run test:whatsapp-templates && pnpm run test:people-sheet && pnpm run test:biometric-attendance && next build",
+    "build": "pnpm run test:unified-advances && pnpm run test:ops-client-demo && pnpm run test:provider-mapping-period && pnpm run test:workforce-payout-summary && pnpm run test:workforce-payout-bank && pnpm run test:payable-balance && pnpm run test:central-bank-response && pnpm run test:payment-recovery && pnpm run verify:adhoc-da && pnpm run test:whatsapp-templates && pnpm run test:people-sheet && pnpm run test:biometric-attendance && next build",
     "build:connect": "node --experimental-strip-types --test apps/connect/src/lib/connect-wfh-access.test.mjs apps/connect/src/lib/direct-workforce-payment.test.mjs apps/connect/src/lib/provider-attendance-payment.test.mjs apps/connect/src/lib/payout-mapping-relocks.test.mjs apps/connect/src/lib/helper-payout-publications.test.mjs && node --test apps/connect/src/lib/workforce-own-adjustments.test.mjs && next build apps/connect",
     "start": "next start",
     "lint": "next lint",
@@ -47,7 +47,8 @@
     "test:ops-design": "node --experimental-strip-types --test src/lib/ops-pulse/design-navigation.test.mjs src/components/ops-design-shell.test.mjs src/components/ops-compact-workspaces.test.mjs src/components/ops-permission-matrix.test.mjs src/components/ops-ai-chat.test.mjs",
     "verify:ops-app": "node scripts/verify-opspulse-app.mjs && node --test scripts/test-opspulse-service-worker.mjs src/components/ops-app-install.test.mjs",
     "test:ops-client-demo": "node scripts/test-ops-client-demo.mjs",
-    "test:loss-stage-reminders": "node scripts/test-loss-stage-reminders.cjs && node scripts/test-loss-reminder-scope.cjs && node scripts/test-loss-stage-reminder-migration.mjs && node scripts/test-loss-installment-amount-rules.mjs"
+    "test:loss-stage-reminders": "node scripts/test-loss-stage-reminders.cjs && node scripts/test-loss-reminder-scope.cjs && node scripts/test-loss-stage-reminder-migration.mjs && node scripts/test-loss-installment-amount-rules.mjs",
+    "test:unified-advances": "node scripts/test-unified-paid-advance-ledger.mjs && node scripts/test-unified-advance-cutover.mjs && node --experimental-strip-types --test src/lib/workforce-paid-advances-allocation.test.mjs apps/connect/src/lib/connect-pay-advance-approval-data.test.mjs apps/connect/src/lib/connect-advances-route.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",

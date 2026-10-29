@@ -1,43 +1,17 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels";
 import { isAdvanceEligible, validAdvanceApprovalAmount } from "@/lib/advance-eligibility";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
 import { openPayAdvanceApproval } from "@/lib/payment-advance-approval";
-import { loadPayAdvanceCapacity } from "@/lib/pay-advance-capacity";
+import { loadPayAdvanceCapacity, loadOwnWorkforceAdvanceDeduction } from "@/lib/pay-advance-capacity";
 import { sendPaymentAdvanceRequestNotification, sendPaymentAdvanceWithdrawalNotification } from "@/lib/payment-advance-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
 function indiaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-}
-
-async function isDirectAdvanceRequester(companyId: string, profileType: WorkforceProfileType, accountId: string) {
-  if (!supabaseAdmin) return false;
-  const workerColumn = profileType === "employee" ? "employee_id" : "contractor_id";
-  const today = indiaToday();
-  const engagement = await supabaseAdmin.from("hr_engagements").select("id,person_id,status")
-    .eq("company_id", companyId).eq("worker_type", profileType).eq(workerColumn, accountId).eq("status", "active")
-    .limit(1).maybeSingle();
-  if (engagement.error || !engagement.data) return false;
-  const assignment = await supabaseAdmin.from("hr_work_assignments")
-    .select("id,designation_id,is_top_level,effective_from,effective_to")
-    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
-    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
-    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-  if (assignment.error || !assignment.data) return false;
-  if (assignment.data.is_top_level) return true;
-  if (!assignment.data.designation_id) return false;
-  const designation = await supabaseAdmin.from("designations").select("code,name")
-    .eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle();
-  if (designation.error || !designation.data) return false;
-  return isManagingPartnerDesignation({
-    code: designation.data.code as string | null,
-    name: String(designation.data.name ?? "")
-  });
 }
 
 async function hasCurrentPeopleAssignment(companyId: string, profileType: WorkforceProfileType, accountId: string) {
@@ -142,12 +116,18 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("accountId") ?? "",
       request.nextUrl.searchParams.get("profileType") ?? ""
     );
+    const earningsMonth=request.nextUrl.searchParams.get("earningsMonth");
+    if(earningsMonth) {
+      if(account.profileType!=="workforce" || !/^\d{4}-\d{2}$/.test(earningsMonth)) throw new Error("Invalid earnings request.");
+      return NextResponse.json({advanceRecoveryAmount:await loadOwnWorkforceAdvanceDeduction(account.companyId,account.accountId,earningsMonth)},
+        {headers:{"Cache-Control":"private, no-store"}});
+    }
     const [result, capacity] = await Promise.all([supabaseAdmin
-      .from("payment_advance_requests")
-      .select("id, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
+      .from("hr_pay_advance_requests")
+      .select("id, amount:requested_amount, purpose:reason, status, approved_amount, decision_comment:decision_note, requested_at, updated_at")
       .eq("company_id", account.companyId)
-      .eq("profile_type", account.profileType)
-      .eq("account_id", account.accountId)
+      .eq("worker_type", account.profileType)
+      .eq("worker_id", account.accountId)
       .order("requested_at", { ascending: false }),
       loadPayAdvanceCapacity({
         companyId: account.companyId,
@@ -183,59 +163,25 @@ export async function POST(request: NextRequest) {
     if (purpose.length < 10) throw new Error("Enter a clearer purpose for this advance (at least 10 characters).");
     if (purpose.length > 500) throw new Error("Purpose must be 500 characters or fewer.");
 
-    const directApprove = account.profileType !== "workforce"
-      && await isDirectAdvanceRequester(account.companyId, account.profileType, account.accountId);
-    const result = await supabaseAdmin
-      .from("payment_advance_requests")
-      .insert({
-        company_id: account.companyId,
-        profile_type: account.profileType,
-        account_id: account.accountId,
-        account_code: account.accountCode || null,
-        requester_name: account.name || null,
-        station_code: account.station || null,
-        designation: account.designation || null,
-        amount,
-        purpose,
-        source_app: "one_app",
-        status: directApprove ? "approved" : "submitted",
-        approved_amount: directApprove ? amount : null,
-        decision_comment: directApprove ? "Auto-approved for managing partner / top-level assignment." : null
-      })
-      .select("id, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
-      .single();
-    if (result.error) throw new Error(result.error.message);
-    if (!directApprove) {
-      try {
-        await openPayAdvanceApproval({
-          companyId: account.companyId,
-          profileType: account.profileType as "employee" | "contractor" | "workforce",
-          accountId: account.accountId,
-          locationId: account.locationId,
-          amount,
-          purpose,
-          paymentRequestId: String(result.data.id),
-          ...capacity
-        });
-      } catch (chainError) {
-        await supabaseAdmin.from("payment_advance_requests").delete().eq("id", result.data.id);
-        throw chainError;
-      }
-      await supabaseAdmin.from("payment_advance_requests").update({ status: "in_review", updated_at: new Date().toISOString() }).eq("id", result.data.id);
-    }
+    const created = await openPayAdvanceApproval({
+      companyId: account.companyId,
+      profileType: account.profileType as "employee" | "contractor" | "workforce",
+      accountId: account.accountId, locationId: account.locationId, amount, purpose, ...capacity
+    });
+    const result = { data: { id: created.requestId, amount, purpose, status: "pending" } };
     await createAppNotification({
       accountId: account.accountId,
       companyId: account.companyId,
-      eventCode: directApprove ? "advance_request_approved" : "advance_request_raised",
+      eventCode: "advance_request_raised",
       profileType: account.profileType,
       sourceKey: String(result.data.id),
       variables: { amount: amount.toLocaleString("en-IN", { maximumFractionDigits: 2 }) }
     });
-    if (!directApprove) await sendPaymentAdvanceRequestNotification(account.companyId, String(result.data.id));
+    await sendPaymentAdvanceRequestNotification(account.companyId, String(result.data.id));
     return NextResponse.json({
       ok: true,
       request: result.data,
-      notice: directApprove ? "Advance request approved." : "Advance request submitted."
+      notice: "Advance request submitted."
     }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit advance request.";
@@ -252,13 +198,13 @@ export async function PATCH(request: NextRequest) {
     if (!requestId) throw new Error("Advance request is required.");
 
     const owned = await supabaseAdmin
-      .from("payment_advance_requests")
-      .select("id, amount")
+      .from("hr_pay_advance_requests")
+      .select("id, amount:requested_amount")
       .eq("company_id", account.companyId)
-      .eq("profile_type", account.profileType)
-      .eq("account_id", account.accountId)
+      .eq("worker_type", account.profileType)
+      .eq("worker_id", account.accountId)
       .eq("id", requestId)
-      .in("status", ["submitted", "in_review"])
+      .in("status", ["pending", "returned"])
       .maybeSingle();
     if (owned.error) throw new Error(owned.error.message);
     if (!owned.data) throw new Error("This request has already been decided and can no longer be withdrawn.");

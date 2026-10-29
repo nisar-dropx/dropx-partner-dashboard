@@ -18,10 +18,10 @@ function fixture() {
     const query = {select(){return query},eq(key,value){rows=rows.filter(row=>row[key]===value);return query},in(key,values){rows=rows.filter(row=>values.includes(row[key]));return query},order(){return query},limit(n){rows=rows.slice(0,n);return query},
       maybeSingle(){return Promise.resolve({data:state.error?null:rows[0]??null,error:state.error})},then(resolve,reject){return Promise.resolve({data:state.error?null:rows,error:state.error}).then(resolve,reject)}};
     return query;
-  }, async rpc(name,args){state.rpcCalls.push({name,args});return {data:'pending',error:state.error}} };
+  }, async rpc(name,args){if(name==='pay_advance_worker_summary') return {data:{monthPaidCount:2,monthPaidAmount:3000,outstandingAdvance:1200,reservedRecovery:800},error:state.error};state.rpcCalls.push({name,args});return {data:'pending',error:state.error}} };
   const mod={exports:{}};
   const source=ts.transpileModule(fs.readFileSync(new URL('./connect-pay-advance-approval-data.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const mocks={'server-only':{},'./connect-approver-identity':{
+  const mocks={'./connect-advance-context':{loadCurrentAdvanceCapacity:async()=>({outstandingPay:12000,maxEligibleAmount:state.liveMaximum??3000})},'server-only':{},'./connect-approver-identity':{
     resolveConnectActorUserIds:async()=>state.actors,
     resolveConnectVisibleApproverUserIds:async()=>state.visible,
     adoptPendingStepForHigherManager:async({parentId})=>{
@@ -63,12 +63,15 @@ test('unlinked accounts have no pay-advance approvals',async()=>{
   await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved',''),/not assigned/);
 });
 
-test('People pay amounts stay private while eligibility remains visible',async()=>{
+test('assigned People approvers see live pay and previous advance balances',async()=>{
   const f=fixture(); f.state.hr_pay_advance_requests[0].worker_type='employee';
   const [row]=await f.listConnectPayAdvanceApprovals(account);
-  assert.equal(row.outstandingPay,null);
-  assert.equal(row.maxEligibleAmount,null);
-  assert.equal(row.eligibilityPercent,null);
+  assert.equal(row.outstandingPay,12000);
+  assert.equal(row.monthPaidCount,2);
+  assert.equal(row.monthPaidAmount,3000);
+  assert.equal(row.outstandingAdvance,1200);
+  assert.equal(row.maxEligibleAmount,3000);
+  assert.equal(row.eligibilityPercent,25);
   assert.equal(row.eligibilityWithinLimit,true);
 });
 
@@ -97,4 +100,10 @@ test('team advances waiting with reportees appear only in All-team and stay acti
   assert.equal(f.state.adopted,true);
   assert.equal(f.state.rpcCalls[0].args.p_request_id,'request-c');
   assert.equal(f.state.rpcCalls[0].args.p_decision,'returned');
+});
+
+test('approval rechecks current capacity instead of relying on the request snapshot',async()=>{
+  const f=fixture();f.state.liveMaximum=800;
+  await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved','',1000,1),/outstanding-pay limit/);
+  assert.equal(f.state.rpcCalls.length,0);
 });

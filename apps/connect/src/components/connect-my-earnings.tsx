@@ -17,7 +17,7 @@ type Account = { id: string; profileType: string };
 type ProductionLine = { label: string; count: number; rate: number; amount: number };
 type DailyEarning = OwnProductionDay & {production: ProductionLine[]};
 type Earning = { id: string; location: string; provider: string; model: string; paymentMethod: string; workDays: number; production: ProductionLine[]; daily: DailyEarning[]; baseAmount: number; additions: number; grossAmount: number };
-type Payload = { routeFuel?:DailyRouteFuel[]; month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary; summary: { workDays: number; baseAmount: number;incentiveAmount:number; additions: number; grossAmount: number;deductionAmount:number;netAmount:number } };
+type Payload = { routeFuel?:DailyRouteFuel[]; month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary; summary: { workDays: number; baseAmount: number;incentiveAmount:number; additions: number; grossAmount: number;deductionAmount:number;advanceRecoveryAmount?:number;netAmount:number } };
 
 function money(value: number) { return `₹${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function monthLabel(value: string) { return new Date(`${value}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }); }
@@ -71,7 +71,8 @@ function MyEarnings({ account }: { account: Account }) {
         <article><small>Production pay</small><strong>{money(summary.baseAmount)}</strong></article>
         <article><small>Production incentives</small><strong>{money(summary.incentiveAmount)}</strong></article>
         <article><small>Additional pay</small><strong>{money(summary.additions)}</strong></article>
-        <article><small>Approved deductions</small><strong>{money(summary.deductionAmount)}</strong></article>
+        <article><small>Advance deduction</small><strong>{money(summary.advanceRecoveryAmount??0)}</strong></article>
+        <article><small>Total deductions</small><strong>{money(summary.deductionAmount)}</strong></article>
         <article className="total"><small>{data.routeFuel?.some(f=>f.status==='pending')?'Known earnings · fuel pending':'Estimated earnings'}</small><strong>{money(summary.netAmount)}</strong></article>
       </div>
       <p className="dx-workforce-payment-note">Production + eligible incentives + approved additions − approved deductions. This is not your unpaid balance. Training pay and other payroll-only entitlements are confirmed in statements.</p>

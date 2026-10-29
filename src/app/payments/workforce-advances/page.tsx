@@ -45,8 +45,8 @@ export default async function WorkforceAdvancesPage() {
   const companyId = requireCompanyId(authorization);
   const allLocations = authorization.hasAllLocationAccess || isCompanyOwner(authorization);
   const allowedLocationIds = new Set(authorization.locationScopeIds.map(String));
-  const canAdd = hasPermission(authorization, pageCode, "add");
-  const canEdit = hasPermission(authorization, pageCode, "edit");
+  const canAdd = false;
+  const canEdit = false;
   let rows: WorkforceAdvanceRegisterRow[] = [];
   let workforceOptions: WorkforceAdvanceOption[] = [];
   let error: string | null = null;
@@ -80,23 +80,33 @@ export default async function WorkforceAdvancesPage() {
       const advances: any[] = [];
       if (allLocations) {
         const advanceResult = await readAllRows(supabaseAdmin
-          .from("workforce_advances")
-          .select("id,workforce_id,station_id,imported_dropx_id,link_status,identity_revision,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
+          .from("pay_advances")
+          .select("id,workforce_id:worker_id,imported_dropx_id:worker_code,advance_date:paid_at,amount,payment_reference:bank_reference,evidence_type,provenance,created_at").eq("worker_type","workforce")
           .eq("company_id", companyId)
-          .order("advance_date", { ascending: false })
+          .order("paid_at", { ascending: false })
           .order("created_at", { ascending: false }));
-        advances.push(...advanceResult.data);
+        advances.push(...advanceResult.data.map(a=>({...a,
+          advance_date:String(a.advance_date).slice(0,10),station_id:a.provenance?.station_id,
+          advance_number:a.provenance?.request_number??a.provenance?.advance_number??`ADV-${String(a.id).slice(0,8)}`,
+          link_status:a.workforce_id?'linked':'pending',payment_mode:'bank',source_type:a.evidence_type,
+          external_reference:a.provenance?.external_reference,remark:a.evidence_type==='legacy_recorded'?'Historical paid advance':'Bank confirmed'
+        })));
         error = advanceResult.error?.message ?? null;
       } else {
         for (let index = 0; index < visibleWorkforceIds.length; index += 100) {
           const advanceResult = await readAllRows(supabaseAdmin
-            .from("workforce_advances")
-            .select("id,workforce_id,station_id,imported_dropx_id,link_status,identity_revision,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
+            .from("pay_advances")
+            .select("id,workforce_id:worker_id,imported_dropx_id:worker_code,advance_date:paid_at,amount,payment_reference:bank_reference,evidence_type,provenance,created_at").eq("worker_type","workforce")
             .eq("company_id", companyId)
-            .in("workforce_id", visibleWorkforceIds.slice(index, index + 100))
-            .order("advance_date", { ascending: false })
+            .in("worker_id", visibleWorkforceIds.slice(index, index + 100))
+            .order("paid_at", { ascending: false })
             .order("created_at", { ascending: false }));
-          advances.push(...advanceResult.data);
+          advances.push(...advanceResult.data.map(a=>({...a,
+          advance_date:String(a.advance_date).slice(0,10),station_id:a.provenance?.station_id,
+          advance_number:a.provenance?.request_number??a.provenance?.advance_number??`ADV-${String(a.id).slice(0,8)}`,
+          link_status:a.workforce_id?'linked':'pending',payment_mode:'bank',source_type:a.evidence_type,
+          external_reference:a.provenance?.external_reference,remark:a.evidence_type==='legacy_recorded'?'Historical paid advance':'Bank confirmed'
+        })));
           if (advanceResult.error) { error = advanceResult.error.message; break; }
         }
       }
@@ -111,8 +121,8 @@ export default async function WorkforceAdvancesPage() {
         const ids = advanceIds.slice(index, index + 100);
         const [recoveries, reassignments] = await Promise.all([
           readAllRows(supabaseAdmin
-            .from("workforce_advance_recoveries")
-            .select("id,advance_id,period_start,period_end,amount,recovery_type,status,created_at,reversed_at,reversal_reason")
+            .from("pay_advance_deductions")
+            .select("id,advance_id,period_start,amount,recovery_type:target_kind,status,created_at,provenance")
             .eq("company_id", companyId)
             .in("advance_id", ids)
             .order("created_at")),
@@ -130,15 +140,15 @@ export default async function WorkforceAdvancesPage() {
           recoveryHistoryByAdvance.set(key, [...(recoveryHistoryByAdvance.get(key) ?? []), {
             id: String(recovery.id),
             periodStart: String(recovery.period_start),
-            periodEnd: String(recovery.period_end),
+            periodEnd: String(recovery.provenance?.period_end??recovery.period_start),
             amount: roundMoney(Number(recovery.amount ?? 0)),
             type: String(recovery.recovery_type),
-            status: String(recovery.status),
+            status: String(recovery.status)==="confirmed"?"deducted":String(recovery.status),
             createdAt: String(recovery.created_at),
-            reversedAt: recovery.reversed_at ? String(recovery.reversed_at) : null,
-            reversalReason: String(recovery.reversal_reason ?? "")
+            reversedAt: null,
+            reversalReason: ""
           }]);
-          if (String(recovery.status) === "deducted") {
+          if (["confirmed","waived"].includes(String(recovery.status))) {
             recoveredByAdvance.set(key, roundMoney((recoveredByAdvance.get(key) ?? 0) + Number(recovery.amount ?? 0)));
           }
         }
@@ -227,7 +237,7 @@ export default async function WorkforceAdvancesPage() {
     <PageHead
       eyebrow="Payments"
       title="Workforce Advance Register"
-      subtitle="Track paid, recovered, and pending advances. Unregistered DropX IDs remain visible to company-wide users and become deductible only after Workforce registration links them."
+      subtitle="Bank-confirmed advances and historical paid advances, with automatic payroll recovery. New requests start from the Workforce profile."
     />
     {error
       ? <section className="panel message-panel error"><div className="panel-body"><strong>Advance register unavailable</strong><p className="subtle">{error}</p></div></section>

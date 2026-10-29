@@ -22,6 +22,7 @@ function uniqueEmails(values: (string | null | undefined)[]) {
 
 type AdvanceRequestRow = {
   id: string;
+  table: "hr_pay_advance_requests" | "payment_advance_requests";
   profile_type: string;
   account_id: string;
   account_code: string | null;
@@ -43,7 +44,7 @@ const sourceAppLabels: Record<string, string> = { ops: "Ops", one_app: "One App"
 async function currentApproverEmails(companyId: string, paymentRequestId: string) {
   if (!supabaseAdmin) return [];
   const hr = await supabaseAdmin.from("hr_pay_advance_requests").select("id")
-    .eq("company_id", companyId).eq("external_source", "payment_advance_requests").eq("external_reference", paymentRequestId).maybeSingle();
+    .eq("company_id", companyId).or(`id.eq.${paymentRequestId},and(external_source.eq.payment_advance_requests,external_reference.eq.${paymentRequestId})`).maybeSingle();
   if (hr.error || !hr.data) return [];
   const step = await supabaseAdmin.from("hr_pay_advance_steps").select("approver_user_id")
     .eq("company_id", companyId).eq("request_id", hr.data.id).eq("status", "pending").order("step_order").limit(1).maybeSingle();
@@ -132,7 +133,7 @@ async function threadedSend(input: { companyId: string; request: AdvanceRequestR
     inReplyTo: lastMessageId ?? undefined,
     references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined
   });
-  await supabaseAdmin.from("payment_advance_requests").update({
+  await supabaseAdmin.from(input.request.table).update({
     email_root_message_id: rootMessageId ?? result.messageId ?? messageId,
     email_last_message_id: result.messageId ?? messageId,
     email_send_count: (input.request.email_send_count ?? 0) + 1,
@@ -143,6 +144,18 @@ async function threadedSend(input: { companyId: string; request: AdvanceRequestR
 
 async function loadRequest(companyId: string, requestId: string) {
   if (!supabaseAdmin) return null;
+  const canonical = await supabaseAdmin.from("hr_pay_advance_requests")
+    .select("id,worker_type,worker_id,worker_code,worker_name,requested_amount,reason,status,approved_amount,decision_note,email_root_message_id,email_last_message_id,email_send_count")
+    .eq("company_id",companyId).eq("id",requestId).maybeSingle();
+  if (canonical.error) throw new Error(canonical.error.message);
+  if (canonical.data) {
+    const r=canonical.data;
+    return { id:r.id, table:"hr_pay_advance_requests", profile_type:r.worker_type, account_id:r.worker_id,
+      account_code:r.worker_code, requester_name:r.worker_name, station_code:null, amount:r.requested_amount,
+      purpose:r.reason, status:r.status, approved_amount:r.approved_amount, decision_comment:r.decision_note,
+      email_root_message_id:r.email_root_message_id,email_last_message_id:r.email_last_message_id,
+      email_send_count:r.email_send_count,source_app:"one_app" } as AdvanceRequestRow;
+  }
   const result = await supabaseAdmin
     .from("payment_advance_requests")
     .select("id, profile_type, account_id, account_code, requester_name, station_code, amount, purpose, status, approved_amount, decision_comment, email_root_message_id, email_last_message_id, email_send_count, source_app")
@@ -150,7 +163,7 @@ async function loadRequest(companyId: string, requestId: string) {
     .eq("id", requestId)
     .maybeSingle();
   if (result.error || !result.data) return null;
-  return result.data as AdvanceRequestRow;
+  return { ...result.data, table:"payment_advance_requests" } as AdvanceRequestRow;
 }
 
 async function companyName(companyId: string) {
@@ -165,7 +178,7 @@ export async function sendPaymentAdvanceRequestNotification(companyId: string, r
     if (!request) return skipped("Advance request not found.");
     const to = await currentApproverEmails(companyId, requestId);
     const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "submitted");
-    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: ["submitted", "in_review"].includes(request.status) });
+    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: ["pending", "submitted", "in_review"].includes(request.status) });
   } catch (error) {
     console.error("Advance request submission email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request submission email failed.");
@@ -202,8 +215,8 @@ export async function sendPaymentAdvanceReminder(companyId: string, requestId: s
   try {
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
-    if (!["submitted", "in_review"].includes(request.status)) {
-      await supabaseAdmin!.from("payment_advance_requests").update({ email_next_reminder_at: null }).eq("company_id", companyId).eq("id", request.id);
+    if (!["pending", "submitted", "in_review"].includes(request.status)) {
+      await supabaseAdmin!.from(request.table).update({ email_next_reminder_at: null }).eq("company_id", companyId).eq("id", request.id);
       return skipped("This advance request is no longer awaiting approval.");
     }
     const to = await currentApproverEmails(companyId, requestId);

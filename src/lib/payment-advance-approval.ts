@@ -206,7 +206,7 @@ export async function openPayAdvanceApproval(input: {
   locationId: string;
   amount: number;
   purpose: string;
-  paymentRequestId: string;
+  paymentRequestId?: string | null;
   outstandingPay: number;
   eligibilityPercent: number;
   maxEligibleAmount: number;
@@ -247,7 +247,7 @@ export async function openPayAdvanceApproval(input: {
     p_outstanding_pay: input.outstandingPay,
     p_eligibility_percent: input.eligibilityPercent,
     p_max_eligible_amount: input.maxEligibleAmount,
-    p_external_reference: input.paymentRequestId
+    p_external_reference: input.paymentRequestId ?? null
   });
   if (created.error) throw new Error(created.error.message);
   const requestId = String(created.data ?? "");
