@@ -1,4 +1,6 @@
 import { FieldExecutivePageContent } from "@/components/field-executive-page-content";
+import { VendorLifecycleWorkspace } from "@/components/vendor-lifecycle-workspace";
+import { VendorWorkspaceNavigation, type VendorSection } from "@/components/vendor-workspace-navigation";
 
 export default function VendorsPage({
   searchParams
@@ -15,8 +17,15 @@ export default function VendorsPage({
     date_of_join?: string;
     location_id?: string;
     designation?: string;
+    section?: string;
   };
 }) {
+  const allowedSections = new Set<VendorSection>(["overview", "register", "van", "security", "housekeeping", "pest", "contracts", "master"]);
+  const requestedSection = searchParams?.section as VendorSection | undefined;
+  const section: VendorSection = requestedSection && allowedSections.has(requestedSection) ? requestedSection : "overview";
+  if (section !== "register") {
+    return <VendorLifecycleWorkspace section={section} errorMessage={searchParams?.error} notice={searchParams?.notice}/>;
+  }
   return (
     <FieldExecutivePageContent
       activeLabel="Vendors"
@@ -35,6 +44,7 @@ export default function VendorsPage({
       pageCode="vendors"
       pageSubtitle="Register and maintain vendors by location."
       pageTitle="Vendors"
+      registerNavigation={<VendorWorkspaceNavigation active="register" />}
       returnPath="/vendors"
       viewId={searchParams?.view}
       addFormValues={{
