@@ -82,7 +82,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
 
   const milestones=useMemo(()=>data?betaMilestones(data):[],[data]);
   const done=milestones.filter(item=>item.status==="complete").length;
-  const lifecycle=useMemo(()=>data?.lifecycleEnhanced?betaLifecycleSummary({...data,sourceStatus:{...data.sourceStatus,delayed:data.sourceStatus?.amazonDelayed??false}}):null,[data]);
+  const lifecycle=useMemo(()=>data?.lifecycleEnhanced?betaLifecycleSummary({...data,sourceStatus:{...data.sourceStatus,unavailable:Boolean(error)||data.sourceStatus?.unavailable,delayed:data.sourceStatus?.amazonDelayed??false}}):null,[data,error,refresh]);
   const next=lifecycle?lifecycle.next:milestones.find(item=>item.status==="action")??milestones.find(item=>item.status==="in_progress")??milestones.find(item=>item.status==="pending");
   const selected=view==="overview"?null:milestones.find(item=>item.id===view)??null;
 
