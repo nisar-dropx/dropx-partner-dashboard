@@ -576,3 +576,12 @@ database records remain for audit only. Existing held plans are not automaticall
 approved: authorised reviewers can use the normal recovery correction/approval
 flow without the retired question-resolution prerequisite. Restricted shipment
 redisputes and payroll deduction history remain unchanged.
+
+
+### Former staff and unpaid payroll (29 October 2026)
+
+- NL / SLP Final recipients include ended People engagements at their posting during an unpaid payroll month, plus Workforce profiles with an open payable period. EDSP/XPT scope and the AOM ceiling still apply.
+- A former worker may use an unpaid earlier month while that payroll is draft/calculated (People) or unclosed (Workforce). This is independent of the loss month and the normal fifth-day default. The chosen month is explicit; multi-person allocations cannot combine different months silently.
+- Paid amounts and issued/processing bank instructions are excluded. The picker reveals only the maximum recovery capacity for former People, not gross salary or salary components. Saving rechecks payroll state and balance under bank/payroll locks. Former-worker or older-month plans still require independent approval.
+- Only an explicitly validated allocation receives `unpaid_open_payroll`; this permits that approved line before the global rollout month without enabling legacy historical plans. Existing recovery keys, locked deductions, source and redispute gates remain unchanged.
+- People refresh may append new whole loss lines to a partly-paid open snapshot only within its unpaid balance. It preserves all previous items/earnings, never edits issued bank files, and verifies run/bank/due hashes atomically. Workforce calculation also respects paid and processing bank amounts.

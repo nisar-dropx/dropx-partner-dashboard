@@ -13,6 +13,18 @@ import {
   isLossRecoveryManagerialTarget,
 } from "./loss-recovery-controls";
 
+import { availablePayrollMonths, recoveryDirectoryWithPayroll, type RecoveryPayrollWindow } from "./loss-open-payroll";
+
+export async function loadRecoveryDirectory(company: string, station: string) {
+  const directory = await supabaseAdmin!.rpc("loss_recovery_people_with_locations", {p_company:company,p_station:station});
+  if (directory.error) throw Error("Station employees could not be loaded.");
+  const people = filterLossRecoveryDebitPeople((directory.data || []) as RecoveryPerson[]);
+  if (!people.length) return [];
+  const windows = await supabaseAdmin!.rpc("loss_recovery_payroll_windows", {p_company:company,p_refs:people.map(p=>p.ref)});
+  if (windows.error) throw Error("Open payroll months could not be checked.");
+  return recoveryDirectoryWithPayroll(people,windows.data || []);
+}
+
 export async function loadRecoveryPayables(
   auth: AuthorizationContext,
   company: string,
@@ -72,7 +84,7 @@ export async function loadRecoveryPayables(
   const workforceIds = people
     .filter((p) => p.ref.startsWith("workforce:"))
     .map((p) => p.ref.slice(10));
-  const [employees, contractors, workforce, payroll, existing] = await Promise.all([
+  const [employees, contractors, workforce, payroll, existing, windowsResult] = await Promise.all([
     employeeIds.length
       ? db
           .from("employees")
@@ -108,14 +120,17 @@ export async function loadRecoveryPayables(
     readAllRows(
       db
         .from("nl_loss_recoveries")
-        .select("month,case_key,allocations")
+        .select("month,case_key,allocations,approval_status")
         .eq("company_id", company)
         .eq("is_deleted", false)
+        .in("approval_status", ["proposed","approved"])
         .order("month")
         .order("case_key"),
     ),
+    db.rpc("loss_recovery_payroll_windows", {p_company:company,p_refs:people.map(p=>p.ref)}),
   ]);
-  if (employees.error || contractors.error || workforce.error || payroll.error || existing.error)
+  const windows = (windowsResult.data || []) as RecoveryPayrollWindow[];
+  if (windowsResult.error || employees.error || contractors.error || workforce.error || payroll.error || existing.error)
     throw Error(
       "Employee eligibility or payable salary could not be verified.",
     );
@@ -156,7 +171,12 @@ export async function loadRecoveryPayables(
           String(a.hr_payroll_runs?.updated_at),
         ),
       )[0] as any;
-    const eligible = !duplicate && eligibleRecoveryEmployment(record,start,end,policy,!!employeePay) && (!policy.eligible_designations.length || policy.eligible_designations.some(d => d.toLowerCase() === person.designation.toLowerCase()));
+    const window = windows.find(w => w.employee_ref === person.ref && w.salary_month === month);
+    const departed = !record.is_active || !!record.last_working_date && record.last_working_date < new Date().toISOString().slice(0,10);
+    const normalEmployment = eligibleRecoveryEmployment(record,start,end,policy,!!employeePay);
+    const openMonths = availablePayrollMonths(windows,person.ref);
+    const unpaidCheck = departed || month < new Date(Date.now()+330*60*1000).toISOString().slice(0,7);
+    let eligible = !duplicate && (normalEmployment || !!window?.payroll_open) && (!policy.eligible_designations.length || policy.eligible_designations.some(d => d.toLowerCase() === person.designation.toLowerCase()));
     let payable: number | null = null;
     let gross: number | null = null;
     // Employees/contractors use People (HRMS) payroll only; workforce uses payout worksheets only.
@@ -215,6 +235,14 @@ export async function loadRecoveryPayables(
         source = "Dashboard workforce payout worksheet";
       }
     }
+    // Available money excludes paid bank instructions. An issued file freezes
+    // this payroll, even if its nominal remaining balance is positive.
+    if (window) {
+      if (!window.payroll_open) payable = 0;
+      else if (person.ref.startsWith("workforce:")) payable = payable == null ? null : Math.max(0,payable - Number(window.paid));
+      else payable = window.payable == null ? null : Number(window.payable);
+    } else if (unpaidCheck) payable = 0;
+    if (departed || !normalEmployment) eligible = eligible && !!window?.payroll_open && payable != null && payable > 0;
     if (payable != null && !Number.isFinite(payable)) payable = null;
     if (gross != null && !Number.isFinite(gross)) gross = null;
     const reserved = policy.reserve_other_recoveries
@@ -235,16 +263,19 @@ export async function loadRecoveryPayables(
       employee_ref: person.ref,
       salary_month: month,
       eligible,
+      bank_paid: person.ref.startsWith("workforce:") ? Number(window?.paid || 0) : null,
       payable,
       gross,
       source,
       checked_at: new Date().toISOString(),
       policy_updated_at: policyUpdated,
     });
-    if (eligible)
+    if (eligible || !duplicate && openMonths.length > 0)
       result.push({
         ...person,
         salary_month: month,
+        open_payroll_months: openMonths,
+        unpaid_payroll_check: unpaidCheck,
         salary_payable: payable,
         salary_gross: gross,
         recovery_limit: limit,

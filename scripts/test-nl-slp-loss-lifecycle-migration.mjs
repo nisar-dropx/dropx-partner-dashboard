@@ -539,5 +539,44 @@ await db.query(full('PARENT-TO-CHILD',`employee:${uid(213)}`));
 await db.query(full('CHILD-TO-PARENT',`employee:${E1}`));
 eq('Parent and child staff allocations pass save validation',(await one(`select count(*)::int n from nl_loss_recoveries where case_key in ('PARENT-TO-CHILD','CHILD-TO-PARENT') and approval_status='approved'`)).n,2);
 
+// Former staff can use a real unpaid month, without opening historical payroll globally.
+await db.exec(`alter table hr_payroll_runs add column if not exists updated_at timestamptz default now();
+alter table hr_payroll_run_people add column if not exists net_pay numeric default 0;
+alter table hr_payroll_run_people add column if not exists adjusted_net_pay numeric;
+alter table workforce add column if not exists deleted_at timestamptz;
+alter table workforce add column if not exists date_of_join date;
+create table if not exists hr_payroll_bank_lines(id uuid primary key default gen_random_uuid(),company_id uuid,run_id uuid,worker_id uuid,status text,amount numeric);
+create table if not exists workforce_payroll_runs(id uuid primary key default gen_random_uuid(),company_id uuid,period_start date,period_end date,status text);
+create table if not exists workforce_payout_payment_items(id uuid primary key default gen_random_uuid(),company_id uuid,workforce_id uuid,period_start date,period_end date,status text,instruction_amount numeric);`);
+const departedSql=readFileSync('supabase/migrations/20261029183000_loss_departed_open_payroll.sql','utf8');
+await db.exec(departedSql); await db.exec(departedSql);
+await db.exec(`insert into hr_payroll_runs(id,company_id,period_start,period_end,status) values('${uid(501)}','${C}','2026-09-01','2026-09-30','calculated');
+insert into hr_payroll_run_people(id,company_id,run_id,worker_type,worker_id,net_pay) values('${uid(502)}','${C}','${uid(501)}','employee','${uid(11)}',3000);
+update hr_engagements set status='ended',end_date='2026-09-25' where employee_id='${uid(11)}';
+update hr_work_assignments set effective_to='2026-09-25' where engagement_id='${uid(31)}';
+update employees set is_active=false,last_working_date='2026-09-25' where id='${uid(11)}';
+insert into hr_payroll_bank_lines(company_id,run_id,worker_id,status,amount) values('${C}','${uid(501)}','${uid(11)}','paid',1000);
+insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at)
+select '${C}','employee:${uid(11)}','2026-09',true,2000,3000,'unpaid payroll',updated_at from nl_loss_sources;
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values('${C}','nl','2026-09','DEPARTED-OPEN','BLR1',100,'Recoverable');`);
+eq('Ended People engagement reappears at its historical station',(await db.query(`select ref from loss_recovery_people('${C}','${S}') where ref='employee:${uid(11)}'`)).rows.length,1);
+eq('Paid portion excluded from available pay',Number((await one(`select payable from loss_recovery_payroll_windows('${C}',array['employee:${uid(11)}']) where salary_month='2026-09'`)).payable),2000);
+const departedSave=full('DEPARTED-OPEN',`employee:${uid(11)}`).replace('"mode":"full"','"mode":"full","deduction_month":"2026-09"');
+await db.query(departedSave);
+eq('Prior unpaid month is persisted',(await one(`select deduction_month m,approval_status s from nl_loss_recoveries where case_key='DEPARTED-OPEN'`)),{m:'2026-09',s:'proposed'});
+eq('Former employee plan is not deducted before approval',(await db.query(`select * from nl_loss_recovery_due('${C}','2026-09','hrms','${uid(501)}') where case_key='DEPARTED-OPEN'`)).rows.length,0);
+await db.exec(`insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values('${C}','nl','2026-09','DEPARTED-OVER','BLR1',2500,'Recoverable');`);
+try { await db.query(full('DEPARTED-OVER',`employee:${uid(11)}`).replace('"amount":"100"','"amount":"2500"').replace('"mode":"full"','"mode":"full","deduction_month":"2026-09"'));eq('Over-allocation must reject',true,false); }
+catch(e){eq('Over-allocation explains the available limit',/maximum available recovery/.test(e.message),true);}
+await db.exec(`update nl_loss_recoveries set approval_status='approved' where case_key='DEPARTED-OPEN';update nl_loss_month_cases set lifecycle_status='recovery_approved_scheduled' where case_key='DEPARTED-OPEN'`);
+eq('Explicit approved prior-month assignment is due in that payroll',(await db.query(`select * from nl_loss_recovery_due('${C}','2026-09','hrms','${uid(501)}') where case_key='DEPARTED-OPEN'`)).rows.length,1);
+eq('No other old plans become September deductions',(await db.query(`select * from nl_loss_recovery_due('${C}','2026-09','hrms','${uid(501)}') where case_key<>'DEPARTED-OPEN'`)).rows.length,0);
+await db.exec(`insert into hr_payroll_bank_lines(company_id,run_id,worker_id,status,amount) values('${C}','${uid(501)}','${uid(11)}','issued',50)`);
+eq('Issued bank file removes open eligibility',(await one(`select loss_recovery_open_payroll('${C}','employee:${uid(11)}','2026-09') ok`)).ok,false);
+await db.exec(`delete from hr_payroll_bank_lines where status='issued';update hr_payroll_runs set status='approved' where id='${uid(501)}'`);
+eq('Closed payroll removes eligibility',(await one(`select loss_recovery_open_payroll('${C}','employee:${uid(11)}','2026-09') ok`)).ok,false);
+await mustReject('Closed payroll cannot be reused',departedSave.replace(',0,',',1,'));
+eq('Public callers cannot inspect payroll balances',(await one(`select has_function_privilege('authenticated','loss_recovery_payroll_windows(uuid,text[])','execute') allowed`)).allowed,false);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);

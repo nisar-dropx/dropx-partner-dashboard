@@ -115,3 +115,14 @@ test("display groups shipment losses without modifying payroll keys or totals", 
   applyWorkforceLossRecoveries(rows, [line("A", 300), line("B", 600)]);
   assert.equal(rows[0].netAmount, 1100);
 });
+
+test('part-paid workforce recovery uses only the unpaid balance',()=>{
+  const rows=[row('a','w1',3000)];
+  const result=applyWorkforceLossRecoveries(rows,[line('A',1500),line('B',600)],[{worker_id:'w1',paid:1000,processing:false}]);
+  assert.equal(rows[0].netAmount,1500);assert.equal(result.carried.length,1);
+});
+test('bank processing freezes new workforce deductions',()=>{
+  const rows=[row('a','w1',3000)];
+  assert.equal(applyWorkforceLossRecoveries(rows,[line('A',100)],[{worker_id:'w1',paid:0,processing:true}]).carried.length,1);
+  assert.equal(rows[0].netAmount,3000);
+});

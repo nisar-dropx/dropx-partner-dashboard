@@ -7,7 +7,7 @@ import {
   filterLossRecoveryDebitPeople,
 } from "@/lib/ops-pulse/loss-recovery-controls";
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
-import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
+import { loadRecoveryPayables, loadRecoveryDirectory } from "@/lib/ops-pulse/nl-recovery-payables";
 import { assertLifecycleAction } from "@/lib/ops-pulse/nl-loss-lifecycle";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
@@ -79,10 +79,7 @@ export async function GET(request: Request) {
     if (!requestedPayrollMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedPayrollMonth)) throw Error("Choose a valid payroll month.");
     const [people, history, nextMonth] = await Promise.all([
       directoryOnly
-        ? supabaseAdmin!.rpc("loss_recovery_people", { p_company: scope.company, p_station: station.id }).then(({ data, error }) => {
-            if (error) throw Error("Station employees could not be loaded.");
-            return filterLossRecoveryDebitPeople((data ?? []) as RecoveryPerson[]);
-          })
+        ? loadRecoveryDirectory(scope.company, station.id)
         : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined, requestedPayrollMonth),
       readAllRows(
         supabaseAdmin!

@@ -32,6 +32,12 @@ export function recoveryPersonPayDisclosure(person: RecoveryPerson): RecoveryPer
       pay_check_state: person.recovery_limit == null ? "unavailable" : "ready",
     };
   }
+  if (person.unpaid_payroll_check) return {
+    ...withoutPrivatePay(person as RecoveryPerson & Record<string, unknown>),
+    recovery_limit: person.recovery_limit,
+    pay_detail_access: "recovery_limit",
+    pay_check_state: person.recovery_limit == null ? "unavailable" : "ready",
+  };
   return {
     ...withoutPrivatePay(person as RecoveryPerson & Record<string, unknown>),
     pay_detail_access: "restricted",
