@@ -365,6 +365,15 @@ const adhocExceptionsMigration = readFileSync(new URL(
 ), 'utf8');
 await db.exec(adhocExceptionsMigration);
 await db.exec(adhocExceptionsMigration);
+// Preserve the independently shipped mapping fix in either deployment order.
+const mappingMigration = readFileSync(new URL(
+  '../supabase/migrations/20261029210000_adhoc_paid_day_mapping_bank_isolate.sql', import.meta.url
+), 'utf8');
+const mappingFinalizerPatch = mappingMigration.match(/do \$patch_partial_finalizer\$[\s\S]*?\$patch_partial_finalizer\$;/)?.[0];
+assert.ok(mappingFinalizerPatch, 'Mapping migration must include the partial finalizer patch');
+await db.exec(mappingFinalizerPatch);
+await db.exec(mappingFinalizerPatch);
+await db.exec(adhocExceptionsMigration);
 
 const effectiveDefinitions = await db.query(`
   select pg_get_functiondef(signature::regprocedure) definition
@@ -935,6 +944,8 @@ await db.exec(`
       raise exception 'This associate already has a paid ad hoc request for this location and work date';
     elsif new.request_no='ADHOCFINAL' and new.status='processed' then
       raise exception 'This work date is already in a finalized Workforce payout. Finance must review it before paying ad hoc';
+    elsif new.request_no='ADHOCUNMAPPED' and new.status='processed' then
+      raise exception 'Paid work-day Adhoc DA ADHOCUNMAPPED has no Workforce mapping for this station and work date.';
     end if;
     return new;
   end $$;
@@ -944,22 +955,24 @@ await db.exec(`
     beneficiary_account_number,beneficiary_ifsc,amount)
   select gen_random_uuid(),'10000000-0000-4000-8000-000000000001',ref,
     '10000000-0000-4000-8000-000000000102','processing','PROCESSING','account_transfer','123456789012','SBIN0000001',100
-  from unnest(array['ADHOCVALID','ADHOCDUP','ADHOCFINAL']) ref;
+  from unnest(array['ADHOCVALID','ADHOCDUP','ADHOCFINAL','ADHOCUNMAPPED']) ref;
 `);
-const adhocPayload={workforce:[],helpers:[],payroll:[],generic:['ADHOCVALID','ADHOCDUP','ADHOCFINAL'].map((ref,i)=>({
+const adhocPayload={workforce:[],helpers:[],payroll:[],generic:['ADHOCVALID','ADHOCDUP','ADHOCFINAL','ADHOCUNMAPPED'].map((ref,i)=>({
   ...rows.generic[0],row_number:101+i,reference_no:ref,debit_amount_paise:10000,utr_cin:`TEST-${ref}`
 }))};
 for (const operationId of ['10000000-0000-4000-8000-000000000e01','10000000-0000-4000-8000-000000000e02']) {
   const result=(await partialCall({operationId,fileHash:'e'.repeat(64),payload:adhocPayload})).rows[0].result;
   assert.equal(result.processed_rows,1);
-  assert.equal(result.error_rows,2);
-  assert.deepEqual(result.row_errors.map(r=>r.row_number),[102,103]);
+  assert.equal(result.error_rows,3);
+  assert.deepEqual(result.row_errors.map(r=>r.row_number),[102,103,104]);
   assert.match(result.row_errors[0].message,/already has a paid ad hoc/);
   assert.match(result.row_errors[1].message,/finalized Workforce payout/);
+  assert.match(result.row_errors[2].message,/no Workforce mapping/);
 }
 assert.deepEqual((await db.query("select request_no,status from payment_requests where request_no like 'ADHOC%' order by request_no")).rows,[
   {request_no:'ADHOCDUP',status:'processing'},
   {request_no:'ADHOCFINAL',status:'processing'},
+  {request_no:'ADHOCUNMAPPED',status:'processing'},
   {request_no:'ADHOCVALID',status:'processed'}
 ]);
 assert.equal((await db.query("select count(*)::integer n from payment_request_approvals a join payment_requests r on r.id=a.payment_request_id where r.request_no='ADHOCVALID' and a.action='processed'")).rows[0].n,1);
