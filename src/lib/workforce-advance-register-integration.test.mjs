@@ -368,6 +368,15 @@ test("high-frequency attendance and shipment revisions are scoped to the payout 
 test("recovery hardening versions all loader inputs and preserves FIFO audit history", () => {
   const loaderTables = new Set([...payoutLoader.matchAll(/\.from\(["']([^"']+)["']\)/g)].map((match) => match[1]));
   for (const table of loaderTables) {
+    if (table === "workforce_payout_payment_items") {
+      const bankDependency = source("../../supabase/migrations/20261029190000_workforce_bank_balance_dependency.sql");
+      assert.match(bankDependency, /'workforce_payout_payment_items'/);
+      for (const event of ["insert", "update", "delete"]) {
+        assert.match(bankDependency, new RegExp(`create trigger workforce_payout_dependency_revision_${event} after ${event}`));
+      }
+      assert.match(bankDependency, /workforce_touch_payout_dependency_from_changed_rows/);
+      continue;
+    }
     if (table === "payment_requests") {
       const paidDayMigration = source("../../supabase/migrations/20261025120000_adhoc_wishmaster_paid_days.sql");
       assert.match(paidDayMigration, /lock_workforce_payment_allocation_company\(new.company_id\)/);

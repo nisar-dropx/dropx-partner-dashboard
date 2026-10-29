@@ -1,0 +1,23 @@
+import { PGlite } from '@electric-sql/pglite';
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const db = new PGlite();
+await db.exec(`create table workforce_payout_dependency_revisions(company_id uuid primary key,revision bigint,updated_at timestamptz);
+create table workforce_payout_payment_items(id int primary key,company_id uuid,status text,instruction_amount numeric);
+create function lock_workforce_payment_allocation_company(uuid) returns void language sql as 'select';`);
+const existing=await fs.readFile(new URL('../supabase/migrations/20261007110000_workforce_advance_recovery_hardening.sql',import.meta.url),'utf8');
+await db.exec(existing.slice(existing.indexOf('create or replace function public.workforce_bump_payout_dependency_revision'),existing.indexOf('-- ADVANCE')));
+const migration=await fs.readFile(new URL('../supabase/migrations/20261029190000_workforce_bank_balance_dependency.sql',import.meta.url),'utf8');
+await db.exec(migration); await db.exec(migration);
+const c='11111111-1111-1111-1111-111111111111';
+await db.exec(`insert into workforce_payout_payment_items values(1,'${c}','processing',1000),(2,'${c}','processing',500)`);
+async function revision(){return Number((await db.query('select revision from workforce_payout_dependency_revisions')).rows[0].revision);}
+assert.equal(await revision(),1);
+await db.exec("update workforce_payout_payment_items set status='paid' where id=1");
+assert.equal(await revision(),2,'settlement invalidates the pre-payment calculation token');
+await db.exec("begin; update workforce_payout_payment_items set status='cancelled'; rollback;");
+assert.equal(await revision(),2,'failed transactions do not publish a new token');
+await db.exec('delete from workforce_payout_payment_items where id=2');
+assert.equal(await revision(),3);
+await db.close();
+console.log('Bank instruction and settlement revision checks passed.');
