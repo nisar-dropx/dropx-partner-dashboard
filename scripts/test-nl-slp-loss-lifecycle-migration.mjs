@@ -602,5 +602,23 @@ eq('October open payroll still selectable',(await one(`select loss_recovery_open
 eq('Existing payroll snapshot remains unchanged',(await one(`select row_to_json(p) snapshot from hr_payroll_run_people p where id='${uid(502)}'`)).snapshot,oldSnapshot);
 eq('Boundary patch preserves private RPC permissions',(await one(`select has_function_privilege('authenticated','loss_recovery_payroll_windows(uuid,text[])','execute') allowed`)).allowed,false);
 
+// September becomes available only after its manual-bank reconciliation.
+await db.exec(`alter table workforce_payout_payment_items add column settled_amount numeric;
+alter table workforce_payout_payment_items add column credited_workforce_id uuid;
+create view workforce_payout_effective_paid_allocations as select company_id,
+ coalesce(credited_workforce_id,workforce_id) credited_workforce_id,period_start,period_end,
+ settled_amount settled_amount_snapshot from workforce_payout_payment_items where status='paid';
+update nl_loss_sources set recovery_policy=jsonb_set(recovery_policy,'{payroll_start_month}','"2026-09"');
+insert into workforce_payout_payment_items(company_id,workforce_id,period_start,period_end,status,instruction_amount,settled_amount)
+values('${C}','${W1}','2026-09-01','2026-09-30','paid',1200,400);`);
+const settlementSql=readFileSync('supabase/migrations/20261029203000_loss_payroll_settled_balance.sql','utf8');
+await db.exec(settlementSql);await db.exec(settlementSql);
+eq('September configured window includes unpaid People',Number((await one(`select payable from loss_recovery_payroll_windows('${C}',array['employee:${uid(11)}']) where salary_month='2026-09'`)).payable),2000);
+eq('Partial settlement leaves actual unpaid salary',Number((await one(`select payable from loss_recovery_payroll_windows('${C}',array['workforce:${W1}']) where salary_month='2026-09'`)).payable),800);
+await db.exec(`update workforce_payout_payment_items set credited_workforce_id='${uid(700)}'`);
+eq('Transferred bank credit no longer reduces original worker balance',Number((await one(`select payable from loss_recovery_payroll_windows('${C}',array['workforce:${W1}']) where salary_month='2026-09'`)).payable),1200);
+eq('August remains outside the configured boundary',(await db.query(`select * from loss_recovery_payroll_windows('${C}') where salary_month<'2026-09'`)).rows.length,0);
+eq('Settlement fix preserves private RPC permissions',(await one(`select has_function_privilege('authenticated','loss_recovery_payroll_windows(uuid,text[])','execute') allowed`)).allowed,false);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
