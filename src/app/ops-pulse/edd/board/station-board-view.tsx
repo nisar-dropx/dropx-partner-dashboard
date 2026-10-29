@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, Check, Copy, Download, ImageDown, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import {
@@ -34,6 +34,7 @@ type Props = {
 
 type BlockBusy = "image" | "share" | null;
 type TidMode = "grouped" | "day";
+type PanelMode = "card" | "tids";
 
 type TidRow = {
   trackingId: string;
@@ -252,6 +253,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [tidsError, setTidsError] = useState<string | null>(null);
   const [tidMode, setTidMode] = useState<TidMode>("grouped");
   const [tidDay, setTidDay] = useState<string | null>(null);
+  const [panelMode, setPanelMode] = useState<PanelMode>("card");
   const [copied, setCopied] = useState(false);
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState("");
@@ -440,6 +442,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setTidsError(null);
     setTidMode("grouped");
     setTidDay(null);
+    setPanelMode("card");
     setCopied(false);
   }
 
@@ -449,6 +452,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setTidsError(null);
     setTidMode("grouped");
     setTidDay(null);
+    setPanelMode("card");
     setCopied(false);
   }
 
@@ -469,9 +473,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       const body = await response.json().catch(() => ({})) as { rows?: TidRow[]; error?: string };
       if (!response.ok) throw new Error(String(body.error ?? "Unable to load tracking IDs."));
       setTids(Array.isArray(body.rows) ? body.rows : []);
+      setPanelMode("tids");
     } catch (err) {
       setTidsError(err instanceof Error ? err.message : "Unable to load tracking IDs.");
       setTids(null);
+      setPanelMode("card");
     } finally {
       setTidsBusy(false);
     }
@@ -822,111 +828,105 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
               <button type="button" className={s.primary} disabled={stationShareBusy !== null} onClick={() => void shareStation(true)}>
                 {stationShareBusy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
               </button>
-              <button type="button" disabled={tidsBusy} onClick={() => void loadTids()}>
-                {tidsBusy ? <Loader2 size={14} className="spin" /> : <ListOrdered size={14} />} View TIDs
-              </button>
+              {panelMode === "tids" ? (
+                <button type="button" onClick={() => setPanelMode("card")}>
+                  <LayoutList size={14} /> View station card
+                </button>
+              ) : (
+                <button type="button" disabled={tidsBusy} onClick={() => void loadTids()}>
+                  {tidsBusy ? <Loader2 size={14} className="spin" /> : <ListOrdered size={14} />} View TIDs
+                </button>
+              )}
             </div>
 
-            {view === "creturn" ? (
-              <div className={s.shareCard}>
-                <div className={s.shareCardHead}>
-                  <span>Ops Pulse · Station board</span>
-                  <strong>C-Return · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
-                  <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
-                </div>
-                <table>
-                  <thead>
-                    <tr><th>Status</th><th>Count</th></tr>
-                  </thead>
-                  <tbody>
-                    {CRETURN_DISPLAY.map((status) => (
-                      <tr key={status}>
-                        <td>{CRETURN_SHORT[status]}</td>
-                        <td>{count(selected.board.cReturn[status] ?? 0)}</td>
-                      </tr>
-                    ))}
-                    <tr className={s.shareTotal}>
-                      <td>Grand Total</td>
-                      <td>{count(selected.board.cReturnTotal)}</td>
-                    </tr>
-                    <tr className={s.shareTotal}>
-                      <td>Pickup Done %</td>
-                      <td>{selected.board.pickupDonePct}%</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
+            {tidsError ? <p className={s.error}>{tidsError}</p> : null}
 
-            {view === "edd" ? (
-              <div className={s.shareCard}>
-                <div className={s.shareCardHead}>
-                  <span>Ops Pulse · Station board</span>
-                  <strong>EDD · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
-                  <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · last 5 days + upcoming</small>
+            {panelMode === "card" ? (
+              view === "creturn" ? (
+                <div className={s.shareCard}>
+                  <div className={s.shareCardHead}>
+                    <span>Ops Pulse · Station board</span>
+                    <strong>C-Return · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
+                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
+                  </div>
+                  <div className={s.shareCols}><span>Status</span><span>Count</span></div>
+                  <div className={s.shareRows}>
+                    {CRETURN_DISPLAY.map((status) => (
+                      <div key={status} className={s.shareRow}>
+                        <span>{CRETURN_SHORT[status]}</span>
+                        <strong>{count(selected.board.cReturn[status] ?? 0)}</strong>
+                      </div>
+                    ))}
+                    <div className={`${s.shareRow} ${s.shareTotal}`}>
+                      <span>Grand Total</span>
+                      <strong>{count(selected.board.cReturnTotal)}</strong>
+                    </div>
+                    <div className={`${s.shareRow} ${s.shareTotal}`}>
+                      <span>Pickup Done %</span>
+                      <strong>{selected.board.pickupDonePct}%</strong>
+                    </div>
+                  </div>
                 </div>
-                <table>
-                  <thead>
-                    <tr><th>Promised date</th><th>Packages</th></tr>
-                  </thead>
-                  <tbody>
+              ) : view === "edd" ? (
+                <div className={s.shareCard}>
+                  <div className={s.shareCardHead}>
+                    <span>Ops Pulse · Station board</span>
+                    <strong>EDD · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
+                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · last 5 days + upcoming</small>
+                  </div>
+                  <div className={s.shareCols}><span>Promised date</span><span>Packages</span></div>
+                  <div className={s.shareRows}>
                     {(dates.length ? dates : collectEddDates([selected], payload.businessDate)).map((d) => {
                       const value = selected.board.eddByDate[d] ?? 0;
                       const max = Math.max(...dates.map((day) => selected.board.eddByDate[day] ?? 0), 1);
                       return (
-                        <tr key={d}>
-                          <td>{boardDayLabel(d)}</td>
-                          <td className={value ? s.heat : undefined} style={value ? { background: heatColor(value, max) } : undefined}>
-                            {count(value)}
-                          </td>
-                        </tr>
+                        <div key={d} className={s.shareRow} style={value ? { background: heatColor(value, max) } : undefined}>
+                          <span>{boardDayLabel(d)}</span>
+                          <strong>{count(value)}</strong>
+                        </div>
                       );
                     })}
-                    <tr className={s.shareTotal}>
-                      <td>Window total</td>
-                      <td>{count(dates.reduce((sum, d) => sum + (selected.board.eddByDate[d] ?? 0), 0))}</td>
-                    </tr>
-                    <tr className={s.shareTotal}>
-                      <td>Full backlog</td>
-                      <td>{count(eddStationTotal(selected))}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-
-            {view === "dsr" || view === "zero" ? (
-              <div className={s.shareCard}>
-                <div className={s.shareCardHead}>
-                  <span>Ops Pulse · Station board</span>
-                  <strong>{view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
-                  <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
+                    <div className={`${s.shareRow} ${s.shareTotal}`}>
+                      <span>Window total</span>
+                      <strong>{count(dates.reduce((sum, d) => sum + (selected.board.eddByDate[d] ?? 0), 0))}</strong>
+                    </div>
+                    <div className={`${s.shareRow} ${s.shareTotal}`}>
+                      <span>Full backlog</span>
+                      <strong>{count(eddStationTotal(selected))}</strong>
+                    </div>
+                  </div>
                 </div>
-                <table className={s.zero}>
-                  <thead>
-                    <tr>
-                      <th>DA</th><th>Del</th><th>Fail</th><th>Rej</th><th>OOR</th><th>Total</th><th>DSR%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+              ) : (
+                <div className={s.shareCard}>
+                  <div className={s.shareCardHead}>
+                    <span>Ops Pulse · Station board</span>
+                    <strong>{view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
+                  </div>
+                  <div className={s.shareColsWide}>
+                    <span>DA</span><span>Del</span><span>Fail</span><span>Rej</span><span>OOR</span><span>Tot</span><span>DSR%</span>
+                  </div>
+                  <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
                     {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
-                      <tr key={da.driverId}>
-                        <td title={da.driverName || da.driverId}>{da.driverName || da.driverId}</td>
-                        <td>{da.delivered}</td>
-                        <td>{da.failed || 0}</td>
-                        <td>{da.rejected || 0}</td>
-                        <td>{da.oor || 0}</td>
-                        <td>{da.total}</td>
-                        <td className={s.heat} style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</td>
-                      </tr>
+                      <div key={da.driverId} className={s.shareRowWide}>
+                        <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
+                        <strong>{da.delivered}</strong>
+                        <strong>{da.failed || 0}</strong>
+                        <strong>{da.rejected || 0}</strong>
+                        <strong>{da.oor || 0}</strong>
+                        <strong>{da.total}</strong>
+                        <strong style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</strong>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                    {!(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).length ? (
+                      <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>
+                    ) : null}
+                  </div>
+                </div>
+              )
             ) : null}
 
-            {tidsError ? <p className={s.error}>{tidsError}</p> : null}
-            {tids ? (
+            {panelMode === "tids" && tids ? (
               <div className={s.tidBlock}>
                 <div className={s.panelHead}>
                   <h3>
@@ -947,10 +947,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <ArrowLeft size={12} /> All dates
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void copyTids(tidMode === "day" ? dayTids : tids)}
-                    >
+                    <button type="button" onClick={() => void copyTids(tidMode === "day" ? dayTids : tids)}>
                       {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy TIDs"}
                     </button>
                   </div>
@@ -980,27 +977,13 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <span>{group.rows.length.toLocaleString("en-IN")} TIDs</span>
                       </button>
                     ))}
+                    {!tidGroups.length ? <p className={s.empty}>No TIDs in the visible EDD window.</p> : null}
                   </div>
                 ) : (
-                  <div className={s.scroll}>
-                    <table className={`${s.table} ${s.tids}`}>
-                      <thead>
-                        <tr>
-                          <th>TID</th>
-                          <th>Status</th>
-                          {view !== "creturn" ? <th>DA</th> : null}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tids.map((row) => (
-                          <tr key={row.trackingId}>
-                            <td>{row.trackingId}</td>
-                            <td>{row.status || "—"}</td>
-                            {view !== "creturn" ? <td>{row.driverName || row.driverId || "—"}</td> : null}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className={s.tidPlain}>
+                    {tids.map((row) => (
+                      <code key={row.trackingId}>{row.trackingId}{row.status ? ` · ${row.status}` : ""}</code>
+                    ))}
                   </div>
                 )}
               </div>
