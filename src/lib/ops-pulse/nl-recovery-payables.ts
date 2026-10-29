@@ -41,7 +41,7 @@ export async function loadRecoveryPayables(
   endDate.setUTCMonth(endDate.getUTCMonth() + 1);
   endDate.setUTCDate(0);
   const end = endDate.toISOString().slice(0, 10);
-  const directory = await db.rpc("loss_recovery_people", {
+  const directory = await db.rpc("loss_recovery_people_with_locations", {
     p_company: company,
     p_station: station,
   });

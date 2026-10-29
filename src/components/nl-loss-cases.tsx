@@ -396,7 +396,7 @@ export function RecoveryForm({
   const available = people.filter(
     (p) =>
       selected.includes(p.ref) ||
-      `${p.full_name} ${p.employee_code} ${p.designation}`
+      `${p.full_name} ${p.employee_code} ${p.designation} ${(p.station_codes || []).join(" ")}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -758,7 +758,7 @@ export function RecoveryForm({
                     </select>
                   </label>
                   <label>Designation<select value={designationFilter} onChange={e=>setDesignationFilter(e.target.value)}><option value="">All designations</option>{[...new Set(people.map(p=>p.designation))].sort().map(d=><option key={d}>{d}</option>)}</select></label>
-                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={selectPeople}/></div>
+                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={selectPeople}/></div>
                 </div>
                 <div
                   className={styles.methods}
@@ -828,7 +828,7 @@ export function RecoveryForm({
                         <span>
                           <strong>{p.full_name}</strong>
                           <small>
-                            {p.employee_code} · {p.designation}
+                            {p.employee_code} · {p.designation}{p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
                           {capEnabled && p.pay_detail_access !== "restricted" && selected.includes(p.ref) ? (

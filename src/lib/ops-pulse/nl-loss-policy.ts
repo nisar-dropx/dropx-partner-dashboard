@@ -21,6 +21,7 @@ export type RecoveryPerson = {
   employee_code: string;
   full_name: string;
   designation: string;
+  station_codes?: string[];
   is_active: boolean;
   salary_month?: string;
   salary_payable?: number | null;

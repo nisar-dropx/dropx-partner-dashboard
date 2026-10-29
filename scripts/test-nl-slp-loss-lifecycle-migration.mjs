@@ -506,5 +506,38 @@ await mustReject('Workforce still needs payout eligibility',full('WF-NO-PAY',`wo
 await db.exec(`update nl_recovery_payables set eligible=false where employee_ref='employee:${E1}'`);
 await mustReject('People employment check remains enforced',full('PEOPLE-INACTIVE',`employee:${E1}`));
 
+// Linked EDSP/XPT recipients must pass the same save-time scope validation.
+await db.exec(`create table location_models(id uuid primary key,code text);
+alter table stations add column parent_station_id uuid;
+alter table stations add column location_model_id uuid;
+alter table stations add column provider_id uuid;
+alter table stations add column is_active boolean default true;
+insert into location_models values('${uid(201)}','EDSP'),('${uid(202)}','XPT'),('${uid(203)}','AMXL');
+update stations set location_model_id='${uid(201)}',provider_id='${uid(204)}' where id='${S}';
+insert into stations(id,company_id,station_code,parent_station_id,location_model_id,provider_id,is_active) values
+('${uid(205)}','${C}','XPT1','${S}','${uid(202)}','${uid(204)}',true),
+('${uid(206)}','${C}','SIBLING','${S}','${uid(202)}','${uid(204)}',true),
+('${uid(207)}','${C}','AMXL1','${S}','${uid(203)}','${uid(204)}',true),
+('${uid(208)}','${C}','OTHER-PROVIDER','${S}','${uid(202)}','${uid(209)}',true),
+('${uid(210)}','${C}','INACTIVE','${S}','${uid(202)}','${uid(204)}',false),
+('${uid(211)}','${uid(212)}','OTHER-COMPANY','${S}','${uid(202)}','${uid(204)}',true);
+insert into employees(id,company_id,employee_code,full_name,location_id) values('${uid(213)}','${C}','XPT-STAFF','Child station staff','${uid(205)}');
+update nl_recovery_payables set eligible=true,checked_at=now() where employee_ref='employee:${E1}';
+insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,gross,source,policy_updated_at)
+select '${C}','employee:${uid(213)}',salary_month,true,null,null,'People',(select updated_at from nl_loss_sources) from nl_recovery_payables limit 1;
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+('${C}','nl','2026-09','PARENT-TO-CHILD','BLR1',100,'Recoverable'),
+('${C}','nl','2026-09','CHILD-TO-PARENT','XPT1',100,'Recoverable');`);
+const linkedDirectorySql=readFileSync('supabase/migrations/20261029160000_loss_parent_child_recipients.sql','utf8');
+await db.exec(linkedDirectorySql); await db.exec(linkedDirectorySql);
+eq('EDSP scope includes only active same-provider XPT children',(await db.query(`select station_code from loss_recovery_station_scope('${C}','${S}') order by station_code`)).rows.map(r=>r.station_code),['BLR1','SIBLING','XPT1']);
+eq('XPT scope includes its parent but no siblings',(await db.query(`select station_code from loss_recovery_station_scope('${C}','${uid(205)}') order by station_code`)).rows.map(r=>r.station_code),['BLR1','XPT1']);
+eq('Foreign company cannot resolve station',(await db.query(`select * from loss_recovery_station_scope('${uid(212)}','${S}')`)).rows.length,0);
+eq('Child recipient has station label',(await one(`select station_codes from loss_recovery_people_with_locations('${C}','${S}') where ref='employee:${uid(213)}'`)).station_codes,['XPT1']);
+eq('Directory returns unique recipient refs',(await one(`select count(*)=count(distinct ref) ok from loss_recovery_people_with_locations('${C}','${S}')`)).ok,true);
+await db.query(full('PARENT-TO-CHILD',`employee:${uid(213)}`));
+await db.query(full('CHILD-TO-PARENT',`employee:${E1}`));
+eq('Parent and child staff allocations pass save validation',(await one(`select count(*)::int n from nl_loss_recoveries where case_key in ('PARENT-TO-CHILD','CHILD-TO-PARENT') and approval_status='approved'`)).n,2);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
