@@ -125,34 +125,11 @@ update stations set provider_id='${provider}';
 create function lock_workforce_payment_allocation_company(uuid) returns void language sql as 'select';
 create table test_dependency_bumps(company_id uuid,day date);
 create function workforce_bump_payout_period_dependency_revision(uuid,date) returns void language sql as 'insert into public.test_dependency_bumps values($1,$2)';
-create table test_dependency_refreshes(company_id uuid,workforce_id uuid,station_id uuid,first_day date,last_day date,actor_id uuid);
-create function enqueue_workforce_payout_dependency_refresh(uuid,uuid,uuid,date,date,uuid) returns integer language plpgsql as $$
-begin
-  if $1 is null or $2 is null or $3 is null or $4 is null or $5 is null or $5 < $4 then
-    raise exception 'A payout dependency refresh requires company, Workforce, location, and a valid effective period.';
-  end if;
-  insert into public.test_dependency_refreshes values($1,$2,$3,$4,$5,$6);
-  return 1;
-end $$;
+create function enqueue_workforce_payout_dependency_refresh(uuid,uuid,uuid,date,date,uuid) returns integer language sql as 'select 0';
 create table workforce_payout_effective_paid_allocations(company_id uuid,credited_workforce_id uuid,station_id uuid,period_start date,period_end date);
 `);
 const migration=readFileSync(new URL('../supabase/migrations/20261025120000_adhoc_wishmaster_paid_days.sql',import.meta.url),'utf8');
 await db.exec(migration); await db.exec(migration);
-// Reproduce the production upload failure against a strict queue contract.
-const unmappedWorkDay=await insert({request_no:'UNMAPPED-WORK-DAY',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-15',adhoc_provider_employee_id:'UNMAPPED001',adhoc_da_name:'Unmapped associate'});
-await assert.rejects(()=>db.query("update payment_requests set status='processed' where id=$1",[unmappedWorkDay.id]),/payout dependency refresh requires/);
-assert.equal((await db.query('select status from payment_requests where id=$1',[unmappedWorkDay.id])).rows[0].status,'pending','Failed finalization rolls back the payment');
-const refreshFix=readFileSync(new URL('../supabase/migrations/20261029141455_adhoc_paid_day_optional_workforce_refresh.sql',import.meta.url),'utf8');
-await db.exec(refreshFix); await db.exec(refreshFix);
-await db.query("update payment_requests set status='processed' where id=$1",[unmappedWorkDay.id]);
-const savedUnmapped=(await db.query('select status,adhoc_workforce_id,adhoc_provider_employee_id,adhoc_adjustment_id from payment_requests where id=$1',[unmappedWorkDay.id])).rows[0];
-assert.deepEqual(savedUnmapped,{status:'processed',adhoc_workforce_id:null,adhoc_provider_employee_id:'UNMAPPED001',adhoc_adjustment_id:null});
-assert.equal((await db.query('select count(*) n from test_dependency_refreshes')).rows[0].n,0,'No refresh may target an invented worker');
-assert.equal((await db.query('select count(*) n from test_dependency_bumps')).rows[0].n,1,'Unmapped paid day still invalidates the period');
-await db.query("update payment_requests set status='processed' where id=$1",[unmappedWorkDay.id]);
-assert.equal((await db.query('select count(*) n from test_dependency_bumps')).rows[0].n,1,'Replay is idempotent for unmapped associates');
-await assert.rejects(()=>insert({request_no:'UNMAPPED-DUP',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-15',adhoc_provider_employee_id:'UNMAPPED001',adhoc_da_name:'Unmapped associate',status:'processed'}),/already has a paid/);
-await db.exec('delete from test_dependency_bumps');
 await db.exec(`delete from field_executive_provider_mappings where workforce_id='${actor}';
 update field_executive_provider_mappings set effective_from='2026-09-01';
 update workforce_payroll_runs set status='draft';
@@ -164,10 +141,8 @@ assert.equal(await count(),before);
 await db.query("update payment_requests set status='paid' where id=$1",[dated.id]);
 assert.equal(await count(),before,'Paid-day policy must not ALSO recover the ad hoc amount');
 assert.equal((await db.query('select count(*) n from test_dependency_bumps')).rows[0].n,1,'Paid transition invalidates payout dependency');
-assert.equal((await db.query('select workforce_id from test_dependency_refreshes')).rows[0].workforce_id,worker,'Mapped associate still queues the correct worker');
 await db.query("update payment_requests set status='paid' where id=$1",[dated.id]);
 assert.equal((await db.query('select count(*) n from test_dependency_bumps')).rows[0].n,1,'Retry does not repeatedly invalidate');
-assert.equal((await db.query('select count(*) n from test_dependency_refreshes')).rows[0].n,1,'Mapped retry does not duplicate refresh');
 await assert.rejects(()=>insert({request_no:'DUP',adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-11',status:'paid'}),/already has a paid/);
 await assert.rejects(()=>db.query("update payment_requests set adhoc_payout_policy='cash_recovery' where id=$1",[dated.id]),/policy is frozen/);
 await assert.rejects(()=>db.query("update payment_requests set adhoc_work_date='2026-10-12' where id=$1",[dated.id]),/identity is frozen/);

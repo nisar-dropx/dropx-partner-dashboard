@@ -360,6 +360,11 @@ await db.exec(executableDebitAccountPolicyMigration);
 await db.exec(executableDebitAccountPolicyMigration);
 await db.exec(executableReplayRowNumbersMigration);
 await db.exec(executableReplayRowNumbersMigration);
+const adhocExceptionsMigration = readFileSync(new URL(
+  '../supabase/migrations/20261029141756_bank_response_adhoc_row_exceptions.sql', import.meta.url
+), 'utf8');
+await db.exec(adhocExceptionsMigration);
+await db.exec(adhocExceptionsMigration);
 
 const effectiveDefinitions = await db.query(`
   select pg_get_functiondef(signature::regprocedure) definition
@@ -920,4 +925,42 @@ assert.equal(access.rows[0].authenticated_partial_finalize, false);
 assert.equal(access.rows[0].service_partial_operations_select, true);
 assert.equal(access.rows[0].authenticated_partial_operations_access, false);
 
-console.log("Central bank response finalizer verification passed.");
+// Exercise the real partial finalizer with a trigger raising each established
+// ad hoc financial guard. Valid siblings must reconcile; conflicts keep their
+// unpaid state, appear by source row, and stay exceptions on replay.
+await db.exec(`
+  create function test_adhoc_conflict() returns trigger language plpgsql as $$
+  begin
+    if new.request_no='ADHOCDUP' and new.status='processed' then
+      raise exception 'This associate already has a paid ad hoc request for this location and work date';
+    elsif new.request_no='ADHOCFINAL' and new.status='processed' then
+      raise exception 'This work date is already in a finalized Workforce payout. Finance must review it before paying ad hoc';
+    end if;
+    return new;
+  end $$;
+  create trigger test_adhoc_conflict before update on payment_requests
+    for each row execute function test_adhoc_conflict();
+  insert into payment_requests(id,company_id,request_no,location_id,status,approval_status,payment_mode,
+    beneficiary_account_number,beneficiary_ifsc,amount)
+  select gen_random_uuid(),'10000000-0000-4000-8000-000000000001',ref,
+    '10000000-0000-4000-8000-000000000102','processing','PROCESSING','account_transfer','123456789012','SBIN0000001',100
+  from unnest(array['ADHOCVALID','ADHOCDUP','ADHOCFINAL']) ref;
+`);
+const adhocPayload={workforce:[],helpers:[],payroll:[],generic:['ADHOCVALID','ADHOCDUP','ADHOCFINAL'].map((ref,i)=>({
+  ...rows.generic[0],row_number:101+i,reference_no:ref,debit_amount_paise:10000,utr_cin:`TEST-${ref}`
+}))};
+for (const operationId of ['10000000-0000-4000-8000-000000000e01','10000000-0000-4000-8000-000000000e02']) {
+  const result=(await partialCall({operationId,fileHash:'e'.repeat(64),payload:adhocPayload})).rows[0].result;
+  assert.equal(result.processed_rows,1);
+  assert.equal(result.error_rows,2);
+  assert.deepEqual(result.row_errors.map(r=>r.row_number),[102,103]);
+  assert.match(result.row_errors[0].message,/already has a paid ad hoc/);
+  assert.match(result.row_errors[1].message,/finalized Workforce payout/);
+}
+assert.deepEqual((await db.query("select request_no,status from payment_requests where request_no like 'ADHOC%' order by request_no")).rows,[
+  {request_no:'ADHOCDUP',status:'processing'},
+  {request_no:'ADHOCFINAL',status:'processing'},
+  {request_no:'ADHOCVALID',status:'processed'}
+]);
+assert.equal((await db.query("select count(*)::integer n from payment_request_approvals a join payment_requests r on r.id=a.payment_request_id where r.request_no='ADHOCVALID' and a.action='processed'")).rows[0].n,1);
+console.log("Central bank response finalizer verification passed, including ad hoc row exceptions and replay.");
