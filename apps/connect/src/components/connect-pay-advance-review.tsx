@@ -36,7 +36,8 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
   }, [accountId, profileType, approval.requestId, attempt]);
   const previous = data?.steps.filter(step => step.status === "approved" && step.approvedAmount != null).at(-1);
   const outstandingPay = data?.capacity.outstandingPay ?? approval.outstandingPay;
-  const max = data?.requestLimit ?? approval.maxEligibleAmount;
+  const max = data?.requestLimit ?? (approval.stepType === "finance" ? approval.maxEligibleAmount
+    : Math.min(approval.requestedAmount, approval.maxEligibleAmount ?? approval.requestedAmount));
   const recovered = data?.advances.reduce((sum, a) => sum + a.recovered, 0);
   const outstanding = data?.advances.reduce((sum, a) => sum + a.outstanding, 0) ?? approval.outstandingAdvance;
   const reserved = data?.advances.reduce((sum, a) => sum + a.reserved, 0) ?? approval.reservedRecovery;
@@ -47,7 +48,7 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
       {approval.approvedAmount != null ? <div><dt>{previous ? "Previously approved amount" : "Amount carried into this approval"}</dt><dd>{money(previous?.approvedAmount ?? approval.approvedAmount)}
         <small>{previous ? `${previous.actorName || previous.label} · ${previous.label} · ${date(previous.actedAt)}` : "See approval history below for the earlier decision."}</small>
         <small>This is an approval amount, not a paid advance.</small></dd></div> : null}
-      <div><dt>Available advance for this request</dt><dd>{max == null ? "Unavailable" : money(max)}<small>Current eligibility, capped by the request's original limit.</small></dd></div>
+      <div><dt>Available advance for this request</dt><dd>{max == null ? "Unavailable" : money(max)}<small>{approval.stepType === "finance" ? "Current eligibility, capped by the request's original limit." : "Current eligibility, capped by the requested amount at this approval step."}</small></dd></div>
       <div><dt>Unpaid salary / payout balance</dt><dd>{outstandingPay == null ? "Unavailable" : money(outstandingPay)}<small>Expand payroll periods below to see which months contribute.</small></dd></div>
       <div><dt>Recovery terms</dt><dd>{approval.recoveryMode === "installments" ? `${approval.installments} installments` : "One-time deduction"}</dd></div>
       {approval.neededBy ? <div><dt>Needed by</dt><dd>{new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(approval.neededBy))}</dd></div> : null}
@@ -75,7 +76,7 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval }: {
               <div><dt>Other pending / approved unpaid advances</dt><dd>{money(data.capacity.committedAdvance)}</dd></div>
               <div><dt>Available advance now</dt><dd>{money(data.capacity.maxEligibleAmount)}</dd></div>
               <div><dt>Maximum for this request</dt><dd>{money(data.requestLimit)}</dd></div></dl>
-            <p>Other unpaid requests reduce availability. This request also keeps its original eligibility limit. Eligibility is checked again when you approve.</p>
+            <p>Other unpaid requests reduce availability. Each approval step keeps its allowed request limit. Eligibility is checked again when you approve.</p>
           </div>
         </details>
       </>}

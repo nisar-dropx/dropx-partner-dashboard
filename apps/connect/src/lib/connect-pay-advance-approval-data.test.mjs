@@ -132,13 +132,15 @@ test('expanded review shows real approval, period and paid history; reservations
   assert.equal(result.steps[0].actorName,'Earlier manager');
   assert.equal(result.steps[0].approvedAmount,2000);
   assert.deepEqual(result.capacity.breakdown,[{month:'2026-09',outstanding:4000},{month:'2026-10',outstanding:8000}]);
-  assert.equal(result.requestLimit,3000);
+  assert.equal(result.requestLimit,2000,'Managers cannot increase the requested amount');
   assert.equal(result.advances.length,1);
   assert.equal(result.advances[0].recovered,1000);
   assert.equal(result.advances[0].reserved,500);
   assert.equal(result.advances[0].outstanding,4000);
   assert.deepEqual(result.advances[0].deductions.map(d=>d.id),['confirmed','reserved','reversed']);
   assert.equal(f.state.rpcCalls.length,0,'Viewing history must not change approval or payment state');
+  f.state.hr_pay_advance_steps.find(s=>s.id==='step-a').step_type='finance';
+  assert.equal((await f.loadConnectPayAdvanceReviewDetails(account,'request-a')).requestLimit,3000,'Finance may use the original eligibility limit');
 });
 
 test('expanded review denies unrelated, cross-company and completed requests before reading paid history',async()=>{

@@ -66,7 +66,7 @@ async function allReviewRows<T>(page: (from: number, to: number) => PromiseLike<
 export async function loadConnectPayAdvanceReviewDetails(account: ConnectAccount, requestId: string): Promise<PayAdvanceReviewDetails> {
   const visible = await resolveConnectVisibleApproverUserIds(account);
   if (!visible.length) throw new Error("This advance is not assigned to you or your reporting line.");
-  const assigned = await db().from("hr_pay_advance_steps").select("id")
+  const assigned = await db().from("hr_pay_advance_steps").select("id,step_type")
     .eq("company_id", account.companyId).eq("request_id", requestId).eq("status", "pending")
     .in("approver_user_id", visible).limit(1).maybeSingle();
   if (assigned.error) throw new Error(assigned.error.message);
@@ -108,7 +108,8 @@ export async function loadConnectPayAdvanceReviewDetails(account: ConnectAccount
     requestedAt: row.requested_at, submittedBy: names.get(row.requested_by) || row.worker_name,
     steps: steps.map(s => ({ id: s.id, label: s.step_name, status: s.status, actorName: names.get(s.approver_user_id) || null,
       actedAt: s.decided_at, note: s.decision_note, approvedAmount: s.approved_amount == null ? null : Number(s.approved_amount) })),
-    capacity, requestLimit: Math.min(capacity.maxEligibleAmount, Number(row.max_eligible_amount_snapshot ?? row.requested_amount)),
+    capacity, requestLimit: Math.min(capacity.maxEligibleAmount, Number(assigned.data.step_type === "finance"
+      ? row.max_eligible_amount_snapshot ?? row.requested_amount : row.requested_amount)),
     advances: advances.map(a => {
       const lines = deductions.filter(d => d.advance_id === a.id);
       const sum = (status: string) => lines.filter(d => d.status === status).reduce((total, d) => total + Number(d.amount), 0);
