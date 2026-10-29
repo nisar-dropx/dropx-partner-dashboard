@@ -142,21 +142,31 @@ export function dsrHeatColor(pct: number): string {
   return heatColor(t * 100, 100);
 }
 
-export function collectEddDates(stations: StationBoardStation[], businessDate: string): string[] {
-  const set = new Set<string>();
-  for (const station of stations) {
-    for (const date of Object.keys(station.board.eddByDate)) set.add(date);
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
-    const base = Date.parse(`${businessDate}T00:00:00Z`);
-    if (!Number.isNaN(base)) {
-      for (let i = -2; i <= 6; i++) {
-        const d = new Date(base + i * 86400000);
-        set.add(d.toISOString().slice(0, 10));
-      }
-    }
-  }
-  return [...set].sort();
+function shiftYmd(date: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  const utc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) + days * 86400000;
+  const d = new Date(utc);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * EDD heatmap columns: only the last 4 calendar days ending on the selected
+ * business date (Excel compact view — not the full promised-date backlog).
+ */
+export function collectEddDates(_stations: StationBoardStation[], businessDate: string, days = 4): string[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return [];
+  const out: string[] = [];
+  for (let i = days - 1; i >= 0; i--) out.push(shiftYmd(businessDate, -i));
+  return out;
+}
+
+/** Grand total for EDD rows still uses the full promised-date map, not only the 4 visible days. */
+export function eddStationTotal(station: StationBoardStation): number {
+  return Object.values(station.board.eddByDate).reduce((a, b) => a + b, 0);
 }
 
 export function filterStationsByRegion(stations: StationBoardStation[], region: StationBoardRegionId | "ALL"): StationBoardStation[] {
@@ -189,8 +199,9 @@ export function eddPivot(stations: StationBoardStation[], dates: string[]) {
   const columnTotals = Object.fromEntries(dates.map((d) => [d, stations.reduce((sum, s) => sum + (s.board.eddByDate[d] ?? 0), 0)])) as Record<string, number>;
   const rows = stations.map((station) => {
     const cells = Object.fromEntries(dates.map((d) => [d, station.board.eddByDate[d] ?? 0])) as Record<string, number>;
+    // Visible-window total for the heatmap row; full backlog remains on the station board payload.
     const total = Object.values(cells).reduce((a, b) => a + b, 0);
-    return { stationCode: station.stationCode, cells, total };
+    return { stationCode: station.stationCode, cells, total, allTotal: eddStationTotal(station) };
   });
   const grandTotal = rows.reduce((sum, row) => sum + row.total, 0);
   return { max, columnTotals, rows, grandTotal };

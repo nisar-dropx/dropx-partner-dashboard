@@ -1,16 +1,16 @@
 .board {
   display: grid;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 4px;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
+  gap: 6px 8px;
 }
 
 .title {
@@ -20,8 +20,8 @@
 
 .title h2 {
   margin: 0;
-  font-size: 16px;
-  letter-spacing: -0.3px;
+  font-size: 15px;
+  letter-spacing: -0.2px;
 }
 
 .title p {
@@ -36,25 +36,26 @@
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--surface);
 }
 
 .segment button,
 .segment a {
-  height: 28px;
-  padding: 0 9px;
+  height: 26px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   font: inherit;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 650;
   color: var(--muted);
   cursor: pointer;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
 }
 
 .segment button:hover,
@@ -72,20 +73,20 @@
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
 }
 
 .actions button {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 10px;
+  gap: 4px;
+  height: 28px;
+  padding: 0 9px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 650;
   color: var(--ink);
   cursor: pointer;
@@ -111,15 +112,15 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--line);
 }
 
 .kpi {
   display: grid;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: 1px;
+  padding: 7px 9px;
   background: var(--surface);
 }
 
@@ -130,7 +131,7 @@
 }
 
 .kpi strong {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 750;
   letter-spacing: -0.3px;
   font-variant-numeric: tabular-nums;
@@ -143,7 +144,7 @@
 
 .panel {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
 }
@@ -154,12 +155,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 7px 10px 5px;
+  padding: 6px 9px 4px;
 }
 
 .panelHead h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .panelHead span {
@@ -173,31 +174,30 @@
   justify-content: space-between;
   gap: 8px;
   margin: 0;
-  padding: 5px 10px;
+  padding: 4px 9px;
   border-top: 1px solid var(--line);
   background: linear-gradient(90deg, #f3faf6, #fff 55%);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.02em;
   color: #1f5b3f;
 }
 
 .regionActions {
   display: inline-flex;
-  gap: 4px;
+  gap: 3px;
 }
 
 .regionActions button {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
+  gap: 3px;
+  height: 22px;
+  padding: 0 7px;
   border: 1px solid #cfe3d8;
-  border-radius: 6px;
+  border-radius: 5px;
   background: #fff;
   font: inherit;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 650;
   color: #1f5b3f;
   cursor: pointer;
@@ -214,24 +214,25 @@
 
 .scroll {
   overflow: auto;
-  max-height: min(70vh, 860px);
+  max-height: min(68vh, 820px);
 }
 
 .table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
+  width: max-content;
+  border-collapse: collapse;
+  table-layout: fixed;
   font-variant-numeric: tabular-nums;
 }
 
 .table th,
 .table td {
-  padding: 3px 6px;
-  border-bottom: 1px solid #e8eef2;
-  border-right: 1px solid #eef2f5;
+  padding: 2px 5px;
+  border: 1px solid #e4ebf0;
   white-space: nowrap;
-  font-size: 11.5px;
-  line-height: 1.25;
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table th {
@@ -249,6 +250,9 @@
   position: sticky;
   left: 0;
   z-index: 1;
+  width: 56px;
+  min-width: 56px;
+  max-width: 64px;
   text-align: left;
   background: #fff;
   font-weight: 700;
@@ -261,6 +265,53 @@
 
 .table td {
   text-align: right;
+  width: 52px;
+  min-width: 44px;
+  max-width: 64px;
+}
+
+.table.edd td,
+.table.edd th:not(:first-child) {
+  width: 58px;
+  min-width: 52px;
+  max-width: 68px;
+}
+
+.table.creturn td,
+.table.creturn th:not(:first-child) {
+  width: 68px;
+  min-width: 58px;
+  max-width: 78px;
+}
+
+.table.creturn th:nth-last-child(2),
+.table.creturn td:nth-last-child(2) {
+  width: 48px;
+}
+
+.table.creturn th:last-child,
+.table.creturn td:last-child {
+  width: 58px;
+  background: #fff8df;
+  font-weight: 700;
+}
+
+.table.zero th:nth-child(2),
+.table.zero td:nth-child(2) {
+  width: 140px;
+  min-width: 120px;
+  max-width: 180px;
+  text-align: left;
+  position: static;
+  font-weight: 500;
+  background: transparent;
+}
+
+.table.zero td:not(:first-child):not(:nth-child(2)),
+.table.zero th:not(:first-child):not(:nth-child(2)) {
+  width: 46px;
+  min-width: 40px;
+  max-width: 54px;
 }
 
 .table tfoot td {
@@ -268,16 +319,12 @@
   font-weight: 700;
 }
 
-.table tbody tr:hover td {
-  filter: brightness(0.985);
-}
-
 .heat {
   font-weight: 650;
 }
 
 .emptyCell {
-  color: #c2ccd6;
+  color: #b7c2cc;
 }
 
 .muted {
@@ -286,7 +333,7 @@
 
 .error {
   margin: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
   border-radius: 8px;
   background: #fff1f0;
   color: var(--red);
@@ -294,14 +341,14 @@
 
 .empty {
   margin: 0;
-  padding: 18px 12px;
+  padding: 14px 10px;
   text-align: center;
   color: var(--muted);
 }
 
 .note {
   margin: 0;
-  padding: 0 4px;
+  padding: 0 2px;
   color: var(--muted);
   font-size: 11px;
 }

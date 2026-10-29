@@ -43,8 +43,9 @@ function asRegion(value: string | undefined): StationBoardRegionId | "ALL" {
   return "ALL";
 }
 
-function count(n: number) {
-  return n ? n.toLocaleString("en-IN") : "";
+function count(n: number, blankZero = false) {
+  if (!n && blankZero) return "";
+  return (Number(n) || 0).toLocaleString("en-IN");
 }
 
 async function downloadWorkbook(date: string, report: StationBoardView | "full", region: StationBoardRegionId | "ALL") {
@@ -184,12 +185,17 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     let guard = 0;
     while (guard < 120) {
       guard += 1;
-      const response = await fetch(`/api/ops-pulse/edd/board/backfill?days=7&startIndex=${startIndex}`, { method: "POST", cache: "no-store" });
+      const params = new URLSearchParams({
+        days: "7",
+        startIndex: String(startIndex),
+        date: payload.businessDate,
+      });
+      const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
       const body = await response.json().catch(() => ({})) as { nextIndex?: number; total?: number; done?: boolean; advanced?: number; error?: string };
       if (!response.ok) throw new Error(String(body.error ?? "Board backfill failed."));
       startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
       const total = Number(body.total ?? 0) || 0;
-      setBackfillNote(total ? `Backfilling last 7 days · ${Math.min(startIndex, total)}/${total}` : "Backfilling last 7 days…");
+      setBackfillNote(total ? `Pulling C-Return / DSR for last 7 days · ${Math.min(startIndex, total)}/${total}` : "Pulling C-Return / DSR…");
       if (body.done || !body.advanced) break;
       await reloadBoard().catch(() => undefined);
     }
@@ -372,7 +378,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </div>
                 </div>
                 <div className={s.scroll}>
-                  <table className={s.table}>
+                  <table className={`${s.table} ${s.edd}`}>
                     <thead>
                       <tr>
                         <th>Station</th>
@@ -388,7 +394,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                             const value = row.cells[d] ?? 0;
                             return (
                               <td key={d} className={value ? s.heat : s.emptyCell} style={value ? { background: heatColor(value, local.max) } : undefined}>
-                                {count(value)}
+                                {count(value, true)}
                               </td>
                             );
                           })}
@@ -433,7 +439,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </div>
                 </div>
                 <div className={s.scroll}>
-                  <table className={s.table}>
+                  <table className={`${s.table} ${s.creturn}`}>
                     <thead>
                       <tr>
                         <th>Station</th>
@@ -448,7 +454,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           <td title={stationNames[station.stationCode] || station.stationCode}>{station.stationCode}</td>
                           {CRETURN_DISPLAY.map((status) => {
                             const value = station.board.cReturn[status] ?? 0;
-                            return <td key={status} className={value ? undefined : s.emptyCell}>{count(value)}</td>;
+                            return <td key={status}>{count(value)}</td>;
                           })}
                           <td>{count(station.board.cReturnTotal)}</td>
                           <td className={s.heat} style={{ background: "#fff4bf" }}>{station.board.pickupDonePct}%</td>
@@ -489,11 +495,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </div>
                 </div>
                 <div className={s.scroll}>
-                  <table className={s.table}>
+                  <table className={`${s.table} ${s.zero}`}>
                     <thead>
                       <tr>
                         <th>Station</th>
-                        <th style={{ textAlign: "left" }}>DA</th>
+                        <th>DA</th>
                         <th>Del</th>
                         <th>Fail</th>
                         <th>Rej</th>
@@ -509,18 +515,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           return [
                             <tr key={`${station.stationCode}-empty`}>
                               <td>{station.stationCode}</td>
-                              <td colSpan={7} className={s.muted} style={{ textAlign: "left" }}>{zeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</td>
+                              <td colSpan={7} className={s.muted}>{zeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</td>
                             </tr>,
                           ];
                         }
                         return rows.map((da) => (
                           <tr key={`${station.stationCode}-${da.driverId}`}>
                             <td>{station.stationCode}</td>
-                            <td style={{ textAlign: "left", position: "static", fontWeight: 500 }}>{da.driverName || da.driverId}</td>
+                            <td title={da.driverName || da.driverId}>{da.driverName || da.driverId}</td>
                             <td>{da.delivered}</td>
-                            <td>{da.failed || ""}</td>
-                            <td>{da.rejected || ""}</td>
-                            <td>{da.oor || ""}</td>
+                            <td>{da.failed || 0}</td>
+                            <td>{da.rejected || 0}</td>
+                            <td>{da.oor || 0}</td>
                             <td>{da.total}</td>
                             <td className={s.heat} style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</td>
                           </tr>

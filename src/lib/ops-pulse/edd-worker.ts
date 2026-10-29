@@ -1005,7 +1005,7 @@ export type LoadFlashBoardBackfill = {
 };
 
 /** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
-export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?: number }): Promise<LoadFlashBoardBackfill> {
+export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?: number; date?: string }): Promise<LoadFlashBoardBackfill> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -1013,6 +1013,7 @@ export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?
   const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board/backfill`);
   if (opts?.days) url.searchParams.set("days", String(opts.days));
   if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
+  if (opts?.date) url.searchParams.set("date", opts.date);
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
