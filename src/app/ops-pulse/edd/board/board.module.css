@@ -1,16 +1,16 @@
 .board {
   display: grid;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 6px;
   color: var(--ink);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 14px;
+  gap: 8px 10px;
 }
 
 .title {
@@ -20,45 +20,51 @@
 
 .title h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   letter-spacing: -0.3px;
 }
 
 .title p {
-  margin: 2px 0 0;
+  margin: 1px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .segment {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 3px;
-  padding: 3px;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface);
 }
 
-.segment button {
-  height: 32px;
-  padding: 0 12px;
+.segment button,
+.segment a {
+  height: 28px;
+  padding: 0 9px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 650;
   color: var(--muted);
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
 
-.segment button:hover {
+.segment button:hover,
+.segment a:hover {
   background: var(--surface-soft);
   color: var(--ink);
 }
 
-.segment button[aria-pressed="true"] {
+.segment button[aria-pressed="true"],
+.segment a[aria-current="page"] {
   background: var(--brand-dark, #de5a16);
   color: #fff;
 }
@@ -66,20 +72,20 @@
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 
 .actions button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 12px;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface);
   font: inherit;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 650;
   color: var(--ink);
   cursor: pointer;
@@ -105,42 +111,40 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   overflow: hidden;
   background: var(--line);
-  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045));
 }
 
 .kpi {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
+  gap: 2px;
+  padding: 8px 10px;
   background: var(--surface);
 }
 
 .kpi span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
 }
 
 .kpi strong {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 750;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.3px;
   font-variant-numeric: tabular-nums;
 }
 
 .kpi small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .panel {
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
-  box-shadow: var(--ops-shadow, 0 1px 2px rgba(16, 24, 40, 0.045));
   overflow: hidden;
 }
 
@@ -149,34 +153,68 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 14px 8px;
+  gap: 6px;
+  padding: 7px 10px 5px;
 }
 
 .panelHead h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .panelHead span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .region {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0;
-  padding: 8px 14px;
+  padding: 5px 10px;
   border-top: 1px solid var(--line);
   background: linear-gradient(90deg, #f3faf6, #fff 55%);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #1f5b3f;
 }
 
+.regionActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.regionActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #cfe3d8;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: #1f5b3f;
+  cursor: pointer;
+}
+
+.regionActions button:hover:not(:disabled) {
+  background: #edf7f1;
+}
+
+.regionActions button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .scroll {
   overflow: auto;
-  max-height: min(72vh, 920px);
+  max-height: min(70vh, 860px);
 }
 
 .table {
@@ -188,11 +226,12 @@
 
 .table th,
 .table td {
-  padding: 6px 8px;
+  padding: 3px 6px;
   border-bottom: 1px solid #e8eef2;
   border-right: 1px solid #eef2f5;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.25;
 }
 
 .table th {
@@ -241,78 +280,30 @@
   color: #c2ccd6;
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-  padding: 12px;
-}
-
-.card {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.cardHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  background: #edf7f1;
-  border-bottom: 1px solid #d7ebe0;
-}
-
-.cardHead strong {
-  font-size: 13px;
-}
-
-.cardHead span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.card table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.card td {
-  padding: 5px 10px;
-  border-bottom: 1px solid #eef2f5;
-  font-size: 12px;
-}
-
-.card td:last-child {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 650;
-}
-
-.card tr.pct td {
-  background: #fff4bf;
-  font-weight: 750;
-}
-
 .muted {
   color: var(--muted);
 }
 
 .error {
   margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
   background: #fff1f0;
   color: var(--red);
 }
 
 .empty {
   margin: 0;
-  padding: 28px 16px;
+  padding: 18px 12px;
   text-align: center;
   color: var(--muted);
+}
+
+.note {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 @media (max-width: 900px) {

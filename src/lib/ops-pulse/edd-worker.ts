@@ -996,6 +996,44 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
   };
 }
 
+export type LoadFlashBoardBackfill = {
+  days: number;
+  advanced: number;
+  nextIndex: number;
+  total: number;
+  done: boolean;
+};
+
+/** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
+export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?: number }): Promise<LoadFlashBoardBackfill> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board/backfill`);
+  if (opts?.days) url.searchParams.set("days", String(opts.days));
+  if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(55000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return {
+    days: Number(raw.days ?? opts?.days ?? 7) || 7,
+    advanced: Number(raw.advanced ?? 0) || 0,
+    nextIndex: Number(raw.nextIndex ?? 0) || 0,
+    total: Number(raw.total ?? 0) || 0,
+    done: Boolean(raw.done)
+  };
+}
+
 /** Station board (EDD / C-Return / Zero deliveries) — same hourly Ops Live cron store. */
 export async function fetchLoadFlashBoard(date?: string, stations?: string[]): Promise<LoadFlashBoardNetwork> {
   const { baseUrl, adminKey } = workerConfig();

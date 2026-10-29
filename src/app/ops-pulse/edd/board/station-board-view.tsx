@@ -6,7 +6,9 @@ import { Download, ImageDown, Loader2, RefreshCw, Share2 } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import {
-  cReturnStatuses,
+  boardDayLabel,
+  CRETURN_DISPLAY,
+  CRETURN_SHORT,
   collectEddDates,
   dsrHeatColor,
   eddPivot,
@@ -28,6 +30,8 @@ type Props = {
   initialView?: string;
 };
 
+type BlockBusy = "image" | "share" | null;
+
 function asView(value: string | undefined): StationBoardView {
   if (value === "creturn" || value === "zero" || value === "edd") return value;
   return "edd";
@@ -41,10 +45,6 @@ function asRegion(value: string | undefined): StationBoardRegionId | "ALL" {
 
 function count(n: number) {
   return n ? n.toLocaleString("en-IN") : "";
-}
-
-function shortDate(date: string) {
-  return date.slice(5);
 }
 
 async function downloadWorkbook(date: string, report: StationBoardView | "full", region: StationBoardRegionId | "ALL") {
@@ -71,12 +71,13 @@ function buildShareTable(
   stations: StationBoardStation[],
   businessDate: string,
   regionLabel: string,
+  zeroOnly: boolean,
 ): BoardShareTable {
   const subtitle = `${formatOpsDate(businessDate, businessDate)} · ${regionLabel} · DropX Logistics`;
   if (view === "edd") {
     const dates = collectEddDates(stations, businessDate);
     const pivot = eddPivot(stations, dates);
-    const headers = ["Station", ...dates.map(shortDate), "Total"];
+    const headers = ["Station", ...dates.map(boardDayLabel), "Total"];
     const rows: BoardShareCell[][] = pivot.rows.map((row) => [
       { text: row.stationCode, bold: true, align: "left" },
       ...dates.map((d) => {
@@ -90,59 +91,41 @@ function buildShareTable(
       ...dates.map((d) => ({ text: String(pivot.columnTotals[d] || 0), bold: true, align: "right" as const })),
       { text: String(pivot.grandTotal), bold: true, align: "right" },
     ]);
-    return { title: "EDD by promised date", subtitle, headers, rows, footerNote: "Ops Pulse Station board · share to WhatsApp" };
+    return { title: `EDD · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
   }
 
   if (view === "creturn") {
-    const headers = ["Station", "Status", "Count", "Pickup %"];
-    const rows: BoardShareCell[][] = [];
-    for (const station of stations) {
-      const statuses = cReturnStatuses(station.board).filter((row) => row.count > 0);
-      if (!statuses.length) {
-        rows.push([
-          { text: station.stationCode, bold: true, align: "left" },
-          { text: "—", align: "left" },
-          { text: "0", align: "right" },
-          { text: "", align: "right" },
-        ]);
-        continue;
-      }
-      for (const row of statuses) {
-        rows.push([
-          { text: station.stationCode, bold: true, align: "left" },
-          { text: row.status, align: "left" },
-          { text: String(row.count), align: "right" },
-          { text: "", align: "right" },
-        ]);
-      }
-      rows.push([
-        { text: station.stationCode, bold: true, align: "left" },
-        { text: "Grand Total", bold: true, align: "left" },
-        { text: String(station.board.cReturnTotal), bold: true, align: "right" },
-        { text: `${station.board.pickupDonePct}%`, bold: true, bg: "#fff4bf", align: "right" },
-      ]);
-    }
-    return { title: "C-Return", subtitle, headers, rows, footerNote: "Ops Pulse Station board · share to WhatsApp" };
+    const headers = ["Station", ...CRETURN_DISPLAY.map((k) => CRETURN_SHORT[k]), "Total", "Pickup %"];
+    const rows: BoardShareCell[][] = stations.map((station) => [
+      { text: station.stationCode, bold: true, align: "left" },
+      ...CRETURN_DISPLAY.map((status) => ({
+        text: station.board.cReturn[status] ? String(station.board.cReturn[status]) : "",
+        align: "right" as const,
+      })),
+      { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" },
+      { text: `${station.board.pickupDonePct}%`, bold: true, bg: "#fff4bf", align: "right" },
+    ]);
+    return { title: `C-Return · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
   }
 
-  const headers = ["Station", "DA's Name", "Delivered", "Failed", "Rejected", "OOR", "Total", "DSR%"];
+  const headers = ["Station", "DA", "Del", "Fail", "Rej", "OOR", "Total", "DSR%"];
   const rows: BoardShareCell[][] = [];
   for (const station of stations) {
-    const das = station.board.daDsr.filter((da) => da.delivered === 0);
+    const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0) : station.board.daDsr;
     for (const da of das) {
       rows.push([
         { text: station.stationCode, bold: true, align: "left" },
         { text: da.driverName || da.driverId, align: "left" },
         { text: String(da.delivered), align: "right" },
-        { text: String(da.failed), align: "right" },
-        { text: String(da.rejected), align: "right" },
-        { text: String(da.oor), align: "right" },
+        { text: String(da.failed || ""), align: "right" },
+        { text: String(da.rejected || ""), align: "right" },
+        { text: String(da.oor || ""), align: "right" },
         { text: String(da.total), align: "right" },
         { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), align: "right" },
       ]);
     }
   }
-  return { title: "Zero deliveries (DSR 0%)", subtitle, headers, rows, footerNote: "Ops Pulse Station board · share to WhatsApp" };
+  return { title: `Zero deliveries · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
 }
 
 export function StationBoardView({ initial, stationNames = {}, initialRegion, initialView }: Props) {
@@ -151,8 +134,10 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [view, setView] = useState<StationBoardView>(() => asView(initialView));
   const [region, setRegion] = useState<StationBoardRegionId | "ALL">(() => asRegion(initialRegion));
   const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | null>(null);
+  const [blockBusy, setBlockBusy] = useState<Record<string, BlockBusy>>({});
   const [error, setError] = useState<string | null>(null);
   const [zeroOnly, setZeroOnly] = useState(true);
+  const [backfillNote, setBackfillNote] = useState("");
 
   const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
@@ -186,18 +171,42 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     window.history.replaceState(null, "", url.toString());
   }
 
+  async function reloadBoard() {
+    const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Unable to refresh the station board.");
+    const next = (await response.json()) as LoadFlashBoardNetwork;
+    setPayload(next);
+    setRun(next.run);
+  }
+
+  async function runBackfillLoop() {
+    let startIndex = 0;
+    let guard = 0;
+    while (guard < 120) {
+      guard += 1;
+      const response = await fetch(`/api/ops-pulse/edd/board/backfill?days=7&startIndex=${startIndex}`, { method: "POST", cache: "no-store" });
+      const body = await response.json().catch(() => ({})) as { nextIndex?: number; total?: number; done?: boolean; advanced?: number; error?: string };
+      if (!response.ok) throw new Error(String(body.error ?? "Board backfill failed."));
+      startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
+      const total = Number(body.total ?? 0) || 0;
+      setBackfillNote(total ? `Backfilling last 7 days · ${Math.min(startIndex, total)}/${total}` : "Backfilling last 7 days…");
+      if (body.done || !body.advanced) break;
+      await reloadBoard().catch(() => undefined);
+    }
+  }
+
   async function refresh() {
     setBusy("refresh");
     setError(null);
+    setBackfillNote("Starting Ops Live refresh + last 7 days board pull…");
     try {
       await fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" });
-      const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Unable to refresh the station board.");
-      const next = (await response.json()) as LoadFlashBoardNetwork;
-      setPayload(next);
-      setRun(next.run);
+      await runBackfillLoop();
+      await reloadBoard();
+      setBackfillNote("Last 7 days board data updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Refresh failed.");
+      setBackfillNote("");
     } finally {
       setBusy(null);
     }
@@ -207,7 +216,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setBusy("download");
     setError(null);
     try {
-      await downloadWorkbook(payload.businessDate, view === "zero" ? "zero" : view, region);
+      await downloadWorkbook(payload.businessDate, view, region);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed.");
     } finally {
@@ -215,14 +224,24 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     }
   }
 
-  async function onImage(share: boolean) {
-    setBusy(share ? "share" : "image");
+  async function shareBlock(opts: {
+    key: string;
+    label: string;
+    blockStations: StationBoardStation[];
+    share: boolean;
+    scope: "all" | "block";
+  }) {
+    const setBusyState = (value: BlockBusy | "image" | "share" | null) => {
+      if (opts.scope === "all") setBusy(value === null ? null : value);
+      else setBlockBusy((prev) => ({ ...prev, [opts.key]: value }));
+    };
+    setBusyState(opts.share ? "share" : "image");
     setError(null);
     try {
-      const table = buildShareTable(view, stations, payload.businessDate, regionLabel);
-      if (!table.rows.length) throw new Error("Nothing to share for this view.");
-      const fileName = `station-board-${payload.businessDate}-${view}-${region.toLowerCase()}`;
-      if (share) {
+      const table = buildShareTable(view, opts.blockStations, payload.businessDate, opts.label, zeroOnly);
+      if (!table.rows.length) throw new Error("Nothing to share for this block.");
+      const fileName = `station-board-${payload.businessDate}-${view}-${opts.key.toLowerCase()}`;
+      if (opts.share) {
         const files = await renderBoardShareImages(table);
         const result = await shareBoardImages(files, table.title, `${table.title} · ${table.subtitle}`);
         if (result === "downloaded") await downloadBoardShare(table, fileName);
@@ -232,7 +251,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the image.");
     } finally {
-      setBusy(null);
+      setBusyState(null);
     }
   }
 
@@ -244,7 +263,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           <p>
             {formatOpsDate(payload.businessDate, payload.businessDate)}
             {payload.asOf ? ` · updated ${formatOpsDateTime(payload.asOf, payload.asOf)}` : ""}
-            {run?.status === "running" ? " · refresh in progress" : ""}
+            {run?.status === "running" ? " · Ops Live refresh running" : ""}
           </p>
         </div>
 
@@ -254,9 +273,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
               key={date}
               href={`/edd/board?date=${encodeURIComponent(date)}&view=${view}${region === "ALL" ? "" : `&region=${region}`}`}
               aria-current={date === payload.businessDate ? "page" : undefined}
-              style={date === payload.businessDate ? { background: "var(--brand-dark, #de5a16)", color: "#fff", borderRadius: 9, padding: "0 12px", height: 32, display: "inline-flex", alignItems: "center", fontWeight: 650, textDecoration: "none" } : { padding: "0 12px", height: 32, display: "inline-flex", alignItems: "center", color: "var(--muted)", textDecoration: "none", fontWeight: 650 }}
             >
-              {shortDate(date)}
+              {boardDayLabel(date)}
             </Link>
           ))}
         </div>
@@ -298,21 +316,31 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
 
         <div className={s.actions}>
           <button type="button" disabled={busy !== null} onClick={() => void refresh()}>
-            {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Refresh
+            {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Refresh 7d
           </button>
           <button type="button" disabled={busy !== null} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
           </button>
-          <button type="button" disabled={busy !== null} onClick={() => void onImage(false)}>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void shareBlock({ key: region, label: regionLabel, blockStations: stations, share: false, scope: "all" })}
+          >
             {busy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
           </button>
-          <button type="button" className={s.primary} disabled={busy !== null} onClick={() => void onImage(true)}>
+          <button
+            type="button"
+            className={s.primary}
+            disabled={busy !== null}
+            onClick={() => void shareBlock({ key: region, label: regionLabel, blockStations: stations, share: true, scope: "all" })}
+          >
             {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
           </button>
         </div>
       </div>
 
       {error ? <p className={s.error}>{error}</p> : null}
+      {backfillNote ? <p className={s.note}>{backfillNote}</p> : null}
 
       <div className={s.kpis}>
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong><small>{regionLabel}</small></article>
@@ -325,52 +353,61 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         <section className={s.panel}>
           <div className={s.panelHead}>
             <h3>EDD · station × promised date</h3>
-            <span>Heatmap like the Excel pivot · red = high volume</span>
+            <span>Share each region block separately</span>
           </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : (
-            groups.map((group) => {
-              const local = eddPivot(group.stations, dates);
-              return (
-                <div key={group.id}>
-                  <p className={s.region}>{group.label}</p>
-                  <div className={s.scroll}>
-                    <table className={s.table}>
-                      <thead>
-                        <tr>
-                          <th>Station</th>
-                          {dates.map((d) => <th key={d}>{shortDate(d)}</th>)}
-                          <th>Grand Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {local.rows.map((row) => (
-                          <tr key={row.stationCode}>
-                            <td title={stationNames[row.stationCode] || row.stationCode}>{row.stationCode}</td>
-                            {dates.map((d) => {
-                              const value = row.cells[d] ?? 0;
-                              return (
-                                <td key={d} className={value ? s.heat : s.emptyCell} style={value ? { background: heatColor(value, local.max) } : undefined}>
-                                  {count(value)}
-                                </td>
-                              );
-                            })}
-                            <td className={s.heat} style={{ background: heatColor(row.total, Math.max(...local.rows.map((r) => r.total), 1)) }}>{count(row.total)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr>
-                          <td>Grand Total</td>
-                          {dates.map((d) => <td key={d}>{count(local.columnTotals[d] ?? 0)}</td>)}
-                          <td>{count(local.grandTotal)}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
+            const local = eddPivot(group.stations, dates);
+            const busyKey = blockBusy[group.id];
+            return (
+              <div key={group.id}>
+                <div className={s.region}>
+                  <span>{group.label}</span>
+                  <div className={s.regionActions}>
+                    <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: group.id, label: group.label, blockStations: group.stations, share: false, scope: "block" })}>
+                      {busyKey === "image" ? <Loader2 size={12} className="spin" /> : <ImageDown size={12} />} Image
+                    </button>
+                    <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: group.id, label: group.label, blockStations: group.stations, share: true, scope: "block" })}>
+                      {busyKey === "share" ? <Loader2 size={12} className="spin" /> : <Share2 size={12} />} WhatsApp
+                    </button>
                   </div>
                 </div>
-              );
-            })
-          )}
+                <div className={s.scroll}>
+                  <table className={s.table}>
+                    <thead>
+                      <tr>
+                        <th>Station</th>
+                        {dates.map((d) => <th key={d}>{boardDayLabel(d)}</th>)}
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {local.rows.map((row) => (
+                        <tr key={row.stationCode}>
+                          <td title={stationNames[row.stationCode] || row.stationCode}>{row.stationCode}</td>
+                          {dates.map((d) => {
+                            const value = row.cells[d] ?? 0;
+                            return (
+                              <td key={d} className={value ? s.heat : s.emptyCell} style={value ? { background: heatColor(value, local.max) } : undefined}>
+                                {count(value)}
+                              </td>
+                            );
+                          })}
+                          <td className={s.heat} style={{ background: heatColor(row.total, Math.max(...local.rows.map((r) => r.total), 1)) }}>{count(row.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>Grand Total</td>
+                        {dates.map((d) => <td key={d}>{count(local.columnTotals[d] ?? 0)}</td>)}
+                        <td>{count(local.grandTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
         </section>
       ) : null}
 
@@ -378,46 +415,51 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         <section className={s.panel}>
           <div className={s.panelHead}>
             <h3>C-Return · station status</h3>
-            <span>Pickup Done % highlighted for WhatsApp-ready cards</span>
+            <span>Compact matrix · yellow = pickup %</span>
           </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : (
-            groups.map((group) => (
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
+            const busyKey = blockBusy[group.id];
+            return (
               <div key={group.id}>
-                <p className={s.region}>{group.label}</p>
-                <div className={s.cards}>
-                  {group.stations.map((station) => {
-                    const statuses = cReturnStatuses(station.board);
-                    return (
-                      <article key={station.stationCode} className={s.card}>
-                        <div className={s.cardHead}>
-                          <strong>{station.stationCode}</strong>
-                          <span>{stationNames[station.stationCode] || "Station"}</span>
-                        </div>
-                        <table>
-                          <tbody>
-                            {statuses.map((row) => (
-                              <tr key={row.status}>
-                                <td>{row.status}</td>
-                                <td>{row.count ? row.count.toLocaleString("en-IN") : ""}</td>
-                              </tr>
-                            ))}
-                            <tr>
-                              <td><strong>Grand Total</strong></td>
-                              <td><strong>{station.board.cReturnTotal.toLocaleString("en-IN")}</strong></td>
-                            </tr>
-                            <tr className={s.pct}>
-                              <td>Pickup Done %</td>
-                              <td>{station.board.pickupDonePct}%</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </article>
-                    );
-                  })}
+                <div className={s.region}>
+                  <span>{group.label}</span>
+                  <div className={s.regionActions}>
+                    <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: group.id, label: group.label, blockStations: group.stations, share: false, scope: "block" })}>
+                      {busyKey === "image" ? <Loader2 size={12} className="spin" /> : <ImageDown size={12} />} Image
+                    </button>
+                    <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: group.id, label: group.label, blockStations: group.stations, share: true, scope: "block" })}>
+                      {busyKey === "share" ? <Loader2 size={12} className="spin" /> : <Share2 size={12} />} WhatsApp
+                    </button>
+                  </div>
+                </div>
+                <div className={s.scroll}>
+                  <table className={s.table}>
+                    <thead>
+                      <tr>
+                        <th>Station</th>
+                        {CRETURN_DISPLAY.map((status) => <th key={status}>{CRETURN_SHORT[status]}</th>)}
+                        <th>Total</th>
+                        <th>Pickup %</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.stations.map((station) => (
+                        <tr key={station.stationCode}>
+                          <td title={stationNames[station.stationCode] || station.stationCode}>{station.stationCode}</td>
+                          {CRETURN_DISPLAY.map((status) => {
+                            const value = station.board.cReturn[status] ?? 0;
+                            return <td key={status} className={value ? undefined : s.emptyCell}>{count(value)}</td>;
+                          })}
+                          <td>{count(station.board.cReturnTotal)}</td>
+                          <td className={s.heat} style={{ background: "#fff4bf" }}>{station.board.pickupDonePct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            ))
-          )}
+            );
+          })}
         </section>
       ) : null}
 
@@ -427,25 +469,36 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             <h3>Zero deliveries · DA DSR</h3>
             <span>
               <label className={s.muted}>
-                <input type="checkbox" checked={zeroOnly} onChange={(e) => setZeroOnly(e.target.checked)} /> Show only DAs with 0 delivered
+                <input type="checkbox" checked={zeroOnly} onChange={(e) => setZeroOnly(e.target.checked)} /> Only 0 delivered
               </label>
             </span>
           </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : (
-            groups.map((group) => (
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
+            const busyKey = blockBusy[group.id];
+            return (
               <div key={group.id}>
-                <p className={s.region}>{group.label}</p>
+                <div className={s.region}>
+                  <span>{group.label}</span>
+                  <div className={s.regionActions}>
+                    <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: group.id, label: group.label, blockStations: group.stations, share: false, scope: "block" })}>
+                      {busyKey === "image" ? <Loader2 size={12} className="spin" /> : <ImageDown size={12} />} Image
+                    </button>
+                    <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: group.id, label: group.label, blockStations: group.stations, share: true, scope: "block" })}>
+                      {busyKey === "share" ? <Loader2 size={12} className="spin" /> : <Share2 size={12} />} WhatsApp
+                    </button>
+                  </div>
+                </div>
                 <div className={s.scroll}>
                   <table className={s.table}>
                     <thead>
                       <tr>
                         <th>Station</th>
-                        <th style={{ textAlign: "left" }}>DA&apos;s Name</th>
-                        <th>Delivered</th>
-                        <th>Failed</th>
-                        <th>Rejected</th>
+                        <th style={{ textAlign: "left" }}>DA</th>
+                        <th>Del</th>
+                        <th>Fail</th>
+                        <th>Rej</th>
                         <th>OOR</th>
-                        <th>Grand Total</th>
+                        <th>Total</th>
                         <th>DSR%</th>
                       </tr>
                     </thead>
@@ -456,7 +509,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           return [
                             <tr key={`${station.stationCode}-empty`}>
                               <td>{station.stationCode}</td>
-                              <td colSpan={7} className={s.muted} style={{ textAlign: "left" }}>{zeroOnly ? "No zero-delivery DAs" : "No DA DSR rows yet"}</td>
+                              <td colSpan={7} className={s.muted} style={{ textAlign: "left" }}>{zeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</td>
                             </tr>,
                           ];
                         }
@@ -477,13 +530,13 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </table>
                 </div>
               </div>
-            ))
-          )}
+            );
+          })}
         </section>
       ) : null}
 
       {!pivot.grandTotal && view === "edd" && stations.some((row) => row.hasSnapshot) ? (
-        <p className={s.muted}>EDD date cells fill after the next Ops Live hourly refresh writes board summaries.</p>
+        <p className={s.note}>If cells are empty, click <strong>Refresh 7d</strong> to pull board data for the last week.</p>
       ) : null}
     </div>
   );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { regionForStation, STATION_BOARD_REGIONS } from "./station-board-regions.ts";
 import {
+  boardDayLabel,
   collectEddDates,
   cReturnStatuses,
   eddPivot,
@@ -17,6 +18,8 @@ test("region map covers KL, AP and OD&CG station lists", () => {
   assert.equal(STATION_BOARD_REGIONS.find((r) => r.id === "KL").stations.length, 14);
   assert.equal(STATION_BOARD_REGIONS.find((r) => r.id === "AP").stations.length, 11);
   assert.equal(STATION_BOARD_REGIONS.find((r) => r.id === "ODCG").stations.length, 9);
+  assert.equal(boardDayLabel("2026-10-29"), "Oct 29");
+  assert.equal(boardDayLabel("2026-01-05"), "Jan 5");
 });
 
 test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {

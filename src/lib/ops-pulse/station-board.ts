@@ -10,6 +10,26 @@ export const CRETURN_DISPLAY = [
   "UNPICKUPABLE",
 ] as const;
 
+/** Short labels for compact C-Return tables / WhatsApp images. */
+export const CRETURN_SHORT: Record<(typeof CRETURN_DISPLAY)[number], string> = {
+  AT_STATION: "At station",
+  CANCELLED: "Cancelled",
+  DELAYED: "Delayed",
+  ON_ROAD_WITH_DELIVERY_ASSOCIATE: "On road",
+  PICKUP_DONE: "Pickup done",
+  UNPICKUPABLE: "Unpickupable",
+};
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/** `2026-10-29` → `Oct 29` */
+export function boardDayLabel(date: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || "").trim());
+  if (!m) return date;
+  const month = MONTHS[Number(m[2]) - 1];
+  return month ? `${month} ${Number(m[3])}` : date;
+}
+
 export type StationBoardDaDsr = {
   driverId: string;
   driverName: string;
