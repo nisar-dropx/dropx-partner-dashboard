@@ -1,12 +1,14 @@
 "use client";
 
-import { IndianRupee, Plus, X } from "lucide-react";
+import { ChevronDown, IndianRupee, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Account = { id: string; profileType: string; reference?: string | null; name?: string | null; role?: string | null; workspace?: "people" | "workforce" };
 type AdvanceRequest = {
   id: string;
+  reference?: string | null;
+  source?: "ops" | "payroll";
   amount: number;
   purpose: string;
   status: string;
@@ -17,6 +19,8 @@ type AdvanceRequest = {
   canWithdraw?: boolean;
   maxEligibleAmount?: number | null;
   outstandingPay?: number | null;
+  recovery?: string | null;
+  installments?: number | null;
   steps?: Array<{ stepName: string; status: string; note?: string | null }>;
 };
 
@@ -43,6 +47,13 @@ function formatWhen(value: string) {
   });
 }
 
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("en-IN", {
+    dateStyle: "medium",
+    timeZone: "Asia/Kolkata"
+  });
+}
+
 export function ConnectAdvances({ account, active = true }: { account: Account; active?: boolean }) {
   const workforce = account.workspace === "workforce";
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
@@ -56,6 +67,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [withdrawingId, setWithdrawingId] = useState("");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
   const load = useCallback(async (background = false) => {
@@ -154,6 +166,15 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
     }
   }
 
+  function toggleDetails(requestId: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(requestId)) next.delete(requestId);
+      else next.add(requestId);
+      return next;
+    });
+  }
+
   return (
     <section className="dx-advances">
       <header className="dx-page-intro dx-advance-intro">
@@ -191,53 +212,57 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
         <div className="dx-loader"><span /><small>Loading advances…</small></div>
       ) : rows.length ? (
         <div className="dx-advance-list">
-          {rows.map((row) => (
-            <article key={row.id}>
-              <div className="dx-advance-card-head">
-                <strong>{money(Number(row.amount))}</strong>
-                <span className={`status ${row.status}`}>{label(row.status)}</span>
-              </div>
-              <p>{row.purpose}</p>
-              <dl>
-                <div>
-                  <dt>Requested</dt>
-                  <dd>{formatWhen(row.requested_at)}</dd>
-                </div>
-                {row.approved_amount != null ? (
-                  <div>
-                    <dt>Approved</dt>
-                    <dd>{money(Number(row.approved_amount))}</dd>
-                  </div>
+          {rows.map((row) => {
+            const expanded = expandedIds.has(row.id);
+            const detailId = `advance-details-${row.id}`;
+            return <article className={expanded ? "expanded" : ""} key={row.id}>
+              <button
+                aria-controls={detailId}
+                aria-expanded={expanded}
+                className="dx-advance-card-head"
+                onClick={() => toggleDetails(row.id)}
+                type="button"
+              >
+                <span>
+                  <small>{row.reference || `ADV-${row.id.slice(0, 8).toUpperCase()}`}</small>
+                  <strong>{money(Number(row.amount))}</strong>
+                  <em>Requested {formatDate(row.requested_at)}</em>
+                </span>
+                <span className="dx-advance-card-state">
+                  <b className={`status ${row.status}`}>{label(row.status)}</b>
+                  <ChevronDown aria-hidden="true" />
+                </span>
+              </button>
+              {expanded ? <div className="dx-advance-card-details" id={detailId}>
+                <section>
+                  <small>Request details</small>
+                  <p>{row.purpose}</p>
+                  <dl>
+                    <div><dt>Request ID</dt><dd>{row.reference || row.id}</dd></div>
+                    <div><dt>Submitted</dt><dd>{formatWhen(row.requested_at)}</dd></div>
+                    {row.approved_amount != null ? <div><dt>Approved</dt><dd>{money(Number(row.approved_amount))}</dd></div> : null}
+                    {row.recovery ? <div><dt>Recovery</dt><dd>{label(row.recovery)}{row.installments && row.installments > 1 ? ` · ${row.installments} instalments` : ""}</dd></div> : null}
+                    {row.decision_comment ? <div><dt>{row.status === "returned" ? "Return reason" : "Reviewer note"}</dt><dd>{row.decision_comment}</dd></div> : null}
+                    <div><dt>Last updated</dt><dd>{formatWhen(row.updated_at)}</dd></div>
+                  </dl>
+                </section>
+                {row.steps?.length ? <section className="dx-advance-lifecycle">
+                  <small>Approval lifecycle</small>
+                  <ol className="dx-advance-journey">
+                    {row.steps.map((step, index) => <li className={step.status} key={`${step.stepName}:${index}`}>
+                      <span>{index + 1}</span>
+                      <div><strong>{step.stepName}</strong><small>{label(step.status)}</small>{step.note ? <p>{step.note}</p> : null}</div>
+                    </li>)}
+                  </ol>
+                </section> : null}
+                {row.canWithdraw !== false && ["submitted", "in_review"].includes(row.status) ? (
+                  <button className="dx-advance-withdraw" disabled={withdrawingId === row.id} onClick={() => void withdraw(row.id)} type="button">
+                    {withdrawingId === row.id ? "Withdrawing…" : "Withdraw request"}
+                  </button>
                 ) : null}
-                {row.decision_comment ? (
-                  <div>
-                    <dt>Comment</dt>
-                    <dd>{row.decision_comment}</dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt>Updated</dt>
-                  <dd>{formatWhen(row.updated_at)}</dd>
-                </div>
-              </dl>
-              {row.steps?.length ? <ol className="dx-advance-journey">
-                {row.steps.map((step, index) => <li className={step.status} key={`${step.stepName}:${index}`}>
-                  <span>{index + 1}</span>
-                  <div><strong>{step.stepName}</strong><small>{label(step.status)}</small>{step.note ? <p>{step.note}</p> : null}</div>
-                </li>)}
-              </ol> : null}
-              {row.canWithdraw !== false && ["submitted", "in_review"].includes(row.status) ? (
-                <button
-                  className="dx-advance-withdraw"
-                  disabled={withdrawingId === row.id}
-                  onClick={() => void withdraw(row.id)}
-                  type="button"
-                >
-                  {withdrawingId === row.id ? "Withdrawing…" : "Withdraw request"}
-                </button>
-              ) : null}
-            </article>
-          ))}
+              </div> : null}
+            </article>;
+          })}
         </div>
       ) : (
         <div className="dx-advance-empty">

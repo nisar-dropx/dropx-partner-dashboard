@@ -14572,7 +14572,8 @@ html.native-app .dx-app-install {
 .dx-advance-capacity strong { color: #172033; font-size: 16px; }
 
 .dx-advance-list article {
-  padding: 16px;
+  overflow: hidden;
+  padding: 0;
 }
 
 .dx-advance-card-head {
@@ -14580,17 +14581,89 @@ html.native-app .dx-app-install {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  padding: 14px 15px;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.dx-advance-card-head > strong {
+.dx-advance-card-head:focus-visible {
+  outline: 3px solid rgba(241, 102, 34, .25);
+  outline-offset: -3px;
+}
+
+.dx-advance-card-head > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.dx-advance-card-head small {
+  overflow: hidden;
+  color: #667085;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dx-advance-card-head strong {
   font-size: 20px;
   letter-spacing: -0.02em;
 }
 
-.dx-advance-list article > p {
-  margin: 10px 0 14px;
+.dx-advance-card-head em {
+  color: #667085;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.dx-advance-card-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.dx-advance-card-state svg {
+  width: 16px;
+  color: #667085;
+  transition: transform .18s ease;
+}
+
+.dx-advance-list article.expanded .dx-advance-card-state svg {
+  transform: rotate(180deg);
+}
+
+.dx-advance-list article > .dx-advance-card-details {
+  display: grid;
+  align-items: stretch;
+  justify-content: initial;
+  gap: 13px;
+  padding: 14px 15px 15px;
+  border-top: 1px solid #eaecf0;
+  background: #fcfcfd;
+}
+
+.dx-advance-card-details section > small {
+  display: block;
+  margin-bottom: 7px;
+  color: #667085;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.dx-advance-card-details section > p {
+  margin: 0 0 11px;
   color: #202124;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -14623,9 +14696,9 @@ html.native-app .dx-app-install {
 .dx-advance-journey {
   display: grid;
   gap: 9px;
-  margin: 14px 0 0;
-  padding: 14px 0 0;
-  border-top: 1px solid #f0ede8;
+  margin: 0;
+  padding: 0;
+  border-top: 0;
   list-style: none;
 }
 

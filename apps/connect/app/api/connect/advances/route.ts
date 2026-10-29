@@ -8,6 +8,27 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizedAdvanceText(value: unknown) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function legacyAdvanceReference(id: unknown) {
+  const compact = clean(id).replace(/[^a-z0-9]/gi, "").slice(0, 10).toUpperCase();
+  return compact ? `ADV-${compact}` : "ADV-LEGACY";
+}
+
+function isSameAdvanceSubmission(
+  legacy: { amount?: unknown; purpose?: unknown; requested_at?: unknown },
+  payroll: { requested_amount?: unknown; reason?: unknown; requested_at?: unknown }
+) {
+  const legacyTime = new Date(clean(legacy.requested_at)).getTime();
+  const payrollTime = new Date(clean(payroll.requested_at)).getTime();
+  return Number.isFinite(legacyTime) && Number.isFinite(payrollTime)
+    && Math.abs(legacyTime - payrollTime) <= 5_000
+    && Math.abs(Number(legacy.amount) - Number(payroll.requested_amount)) < 0.01
+    && normalizedAdvanceText(legacy.purpose) === normalizedAdvanceText(payroll.reason);
+}
+
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
   return supabaseAdmin;
@@ -131,10 +152,19 @@ export async function GET(request: Request) {
 
     const linkedPaymentIds = new Set(payrollRows.filter((row) => row.external_source === "payment_advance_requests")
       .map((row) => String(row.external_reference ?? "")).filter(Boolean));
+    // Requests created during the legacy-to-payroll cutover can have both rows but no
+    // external_reference. Treat the identical account/amount/reason/timestamp pair as
+    // one request so DropX One never shows a second, stale "Owner review" card.
+    for (const paymentRow of paymentResult.data ?? []) {
+      if (payrollRows.some((payrollRow) => isSameAdvanceSubmission(paymentRow, payrollRow))) {
+        linkedPaymentIds.add(String(paymentRow.id));
+      }
+    }
     const requests = [
       ...(paymentResult.data ?? []).filter((row) => !linkedPaymentIds.has(String(row.id))).map((row) => ({
         id: row.id,
         source: "ops",
+        reference: legacyAdvanceReference(row.id),
         purpose: row.purpose,
         approved_amount: row.approved_amount,
         decision_comment: row.decision_comment,
@@ -155,6 +185,7 @@ export async function GET(request: Request) {
       ...payrollRows.map((row) => ({
         id: row.id,
         source: "payroll",
+        reference: row.request_number,
         purpose: row.reason,
         approved_amount: row.approved_amount,
         decision_comment: row.decision_note,
