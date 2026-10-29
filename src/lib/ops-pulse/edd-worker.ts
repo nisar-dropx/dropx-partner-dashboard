@@ -904,6 +904,176 @@ export type LoadFlashTrackingRow = {
  * read; callers must still filter the result to the viewer's own stations,
  * because an older worker ignores the parameter and returns every station.
  */
+export type LoadFlashBoardDa = {
+  driverId: string;
+  driverName: string;
+  delivered: number;
+  failed: number;
+  rejected: number;
+  oor: number;
+  total: number;
+  dsrPct: number;
+};
+
+export type LoadFlashBoardPayload = {
+  eddByDate: Record<string, number>;
+  cReturn: Record<string, number>;
+  cReturnTotal: number;
+  pickupDone: number;
+  pickupDonePct: number;
+  daDsr: LoadFlashBoardDa[];
+  zeroDeliveries: number;
+};
+
+export type LoadFlashBoardStation = {
+  stationCode: string;
+  hasSnapshot: boolean;
+  fetchedAt: string | null;
+  businessDate: string;
+  board: LoadFlashBoardPayload;
+};
+
+export type LoadFlashBoardNetwork = {
+  asOf: string;
+  businessDate: string;
+  dates: string[];
+  stations: LoadFlashBoardStation[];
+  run: EddNetworkRunStatus | null;
+};
+
+function emptyLoadFlashBoard(): LoadFlashBoardPayload {
+  return { eddByDate: {}, cReturn: {}, cReturnTotal: 0, pickupDone: 0, pickupDonePct: 0, daDsr: [], zeroDeliveries: 0 };
+}
+
+function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return emptyLoadFlashBoard();
+  const row = raw as Record<string, unknown>;
+  const eddByDate: Record<string, number> = {};
+  if (row.eddByDate && typeof row.eddByDate === "object" && !Array.isArray(row.eddByDate)) {
+    for (const [date, count] of Object.entries(row.eddByDate as Record<string, unknown>)) {
+      const key = String(date).slice(0, 10);
+      const n = Number(count) || 0;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(key) && n > 0) eddByDate[key] = n;
+    }
+  }
+  const cReturn: Record<string, number> = {};
+  if (row.cReturn && typeof row.cReturn === "object" && !Array.isArray(row.cReturn)) {
+    for (const [state, count] of Object.entries(row.cReturn as Record<string, unknown>)) {
+      const key = String(state || "").trim().toUpperCase();
+      const n = Number(count) || 0;
+      if (key && n > 0) cReturn[key] = n;
+    }
+  }
+  const daDsr: LoadFlashBoardDa[] = [];
+  if (Array.isArray(row.daDsr)) {
+    for (const item of row.daDsr) {
+      const da = (item ?? {}) as Record<string, unknown>;
+      const total = Number(da.total) || 0;
+      const delivered = Number(da.delivered) || 0;
+      if (total <= 0) continue;
+      daDsr.push({
+        driverId: String(da.driverId ?? "").trim() || "(no DA)",
+        driverName: String(da.driverName ?? "").trim(),
+        delivered,
+        failed: Number(da.failed) || 0,
+        rejected: Number(da.rejected) || 0,
+        oor: Number(da.oor) || 0,
+        total,
+        dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0
+      });
+    }
+  }
+  const cReturnTotal = Number(row.cReturnTotal ?? Object.values(cReturn).reduce((a, b) => a + b, 0)) || 0;
+  const pickupDone = Number(row.pickupDone ?? cReturn.PICKUP_DONE ?? 0) || 0;
+  return {
+    eddByDate,
+    cReturn,
+    cReturnTotal,
+    pickupDone,
+    pickupDonePct: Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0,
+    daDsr,
+    zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0
+  };
+}
+
+export type LoadFlashBoardBackfill = {
+  days: number;
+  advanced: number;
+  nextIndex: number;
+  total: number;
+  done: boolean;
+};
+
+/** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
+export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?: number }): Promise<LoadFlashBoardBackfill> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board/backfill`);
+  if (opts?.days) url.searchParams.set("days", String(opts.days));
+  if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(55000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return {
+    days: Number(raw.days ?? opts?.days ?? 7) || 7,
+    advanced: Number(raw.advanced ?? 0) || 0,
+    nextIndex: Number(raw.nextIndex ?? 0) || 0,
+    total: Number(raw.total ?? 0) || 0,
+    done: Boolean(raw.done)
+  };
+}
+
+/** Station board (EDD / C-Return / Zero deliveries) — same hourly Ops Live cron store. */
+export async function fetchLoadFlashBoard(date?: string, stations?: string[]): Promise<LoadFlashBoardNetwork> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board`);
+  if (date) url.searchParams.set("date", date);
+  if (stations?.length) url.searchParams.set("stations", stations.join(","));
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(30000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  const list = Array.isArray(raw.stations) ? raw.stations : [];
+  return {
+    asOf: String(raw.asOf ?? new Date().toISOString()),
+    businessDate: String(raw.businessDate ?? date ?? ""),
+    dates: Array.isArray(raw.dates) ? raw.dates.map((item) => String(item).slice(0, 10)) : [],
+    stations: list.map((item) => {
+      const row = (item ?? {}) as Record<string, unknown>;
+      return {
+        stationCode: String(row.stationCode ?? "").toUpperCase(),
+        hasSnapshot: Boolean(row.hasSnapshot),
+        fetchedAt: row.fetchedAt == null ? null : String(row.fetchedAt),
+        businessDate: String(row.businessDate ?? ""),
+        board: normalizeLoadFlashBoard(row.board)
+      };
+    }).filter((row) => row.stationCode),
+    run: normalizeRun(raw.run)
+  };
+}
+
 export async function fetchLoadFlashTracking(date?: string, stations?: string[]): Promise<LoadFlashTrackingRow[]> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {

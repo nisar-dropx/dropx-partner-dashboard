@@ -12,6 +12,18 @@ against inspected published payroll evidence and finalizes them through the exis
 It skips matching paid UTRs, refuses conflicting evidence, and records the file hash and source row
 in payment history. No bank file is produced. Supply private evidence outside the repository;
 run the rollback-only dry run first. The optional master boundary change is in the same transaction.
+## Ad hoc bank confirmation before Workforce mapping — 29 October 2026
+
+A missing Workforce mapping must not reject a bank-confirmed ad hoc payment.
+For `work_day` requests, retain the immutable station, provider ID and work date;
+the payout loader excludes that paid day using those keys even when mapping is
+entered later. Never also create a cash deduction for a paid work day.
+`reconcile_adhoc_da_recoveries()` now includes unresolved paid work-day requests.
+The existing five-minute OpsPulse reminder job calls it; a unique effective-date
+mapping links the payment and queues one payout refresh. Unresolved/ambiguous
+identities remain paid and pending mapping. Duplicate payments and finalized
+payroll guards remain enforced; closed-payroll conflicts remain for review.
+Migration: `20261029210001_adhoc_paid_day_deferred_workforce.sql`.
 
 ## Recovery assignment and deduction display — 29 October 2026
 

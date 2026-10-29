@@ -125,11 +125,23 @@ update stations set provider_id='${provider}';
 create function lock_workforce_payment_allocation_company(uuid) returns void language sql as 'select';
 create table test_dependency_bumps(company_id uuid,day date);
 create function workforce_bump_payout_period_dependency_revision(uuid,date) returns void language sql as 'insert into public.test_dependency_bumps values($1,$2)';
-create function enqueue_workforce_payout_dependency_refresh(uuid,uuid,uuid,date,date,uuid) returns integer language sql as 'select 0';
+create table test_dependency_refreshes(company_id uuid,workforce_id uuid,station_id uuid,starts date,ends date);
+create function enqueue_workforce_payout_dependency_refresh(uuid,uuid,uuid,date,date,uuid) returns integer language plpgsql as $$
+begin
+  if $1 is null or $2 is null or $3 is null or $4 is null or $5 is null or $5<$4 then
+    raise exception 'A payout dependency refresh requires company, Workforce, location, and a valid effective period.';
+  end if;
+  insert into public.test_dependency_refreshes values($1,$2,$3,$4,$5);
+  return 1;
+end $$;
 create table workforce_payout_effective_paid_allocations(company_id uuid,credited_workforce_id uuid,station_id uuid,period_start date,period_end date);
 `);
-const migration=readFileSync(new URL('../supabase/migrations/20261025120000_adhoc_wishmaster_paid_days.sql',import.meta.url),'utf8');
+const migration=readFileSync(new URL('../supabase/migrations/20261025120000_adhoc_wishmaster_paid_days.sql',import.meta.url),'utf8').replace(/^\uFEFF/,'');
 await db.exec(migration); await db.exec(migration);
+const bankIsolate=readFileSync(new URL('../supabase/migrations/20261029210000_adhoc_paid_day_mapping_bank_isolate.sql',import.meta.url),'utf8').replace(/^\uFEFF/,'');
+await db.exec(bankIsolate); await db.exec(bankIsolate);
+const deferredMapping=readFileSync(new URL('../supabase/migrations/20261029210001_adhoc_paid_day_deferred_workforce.sql',import.meta.url),'utf8');
+await db.exec(deferredMapping); await db.exec(deferredMapping);
 await db.exec(`delete from field_executive_provider_mappings where workforce_id='${actor}';
 update field_executive_provider_mappings set effective_from='2026-09-01';
 update workforce_payroll_runs set status='draft';
@@ -164,8 +176,68 @@ const imported=await insert({request_no:'FHR-IMPORTED',adhoc_shipment_id:roster.
 assert.equal(imported.adhoc_client,'Flipkart');assert.equal(imported.adhoc_provider_employee_id,'001234567890');
 await db.exec(`insert into workforce_payout_effective_paid_allocations values('${company}','${worker}','${station}','2026-10-14','2026-10-14')`);
 await assert.rejects(()=>db.query("update payment_requests set status='paid' where id=$1",[imported.id]),/finalized Workforce payout/);
+const otherStation='00000000-0000-0000-0000-000000000009';
+await db.exec(`insert into stations(id,company_id,station_code,provider_id) values('${otherStation}','${company}','OTHER','${provider}');
+insert into cps_shipment_daily values(gen_random_uuid(),'${company}','OTHER','2026-10-15','001234567892','Moved DA','Flipkart');`);
+const moved=await insert({request_no:'MOVED-STATION',location_id:otherStation,adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-15',adhoc_provider_employee_id:'001234567890',adhoc_da_name:'Wishmaster'});
+assert.equal(moved.adhoc_workforce_id,worker,'Company-unique provider-member resolves when the request station has no mapping');
+await db.query("update payment_requests set status='paid' where id=$1",[moved.id]);
+assert.equal((await db.query('select adhoc_workforce_id from payment_requests where id=$1',[moved.id])).rows[0].adhoc_workforce_id,worker);
+const unmappedPaid=await insert({request_no:'UNMAPPED-PAID',location_id:otherStation,adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-16',adhoc_provider_employee_id:'001234567899',adhoc_da_name:'No Map'});
+const refreshCount=async()=>Number((await db.query('select count(*) n from test_dependency_refreshes')).rows[0].n);
+const bumpCount=async()=>Number((await db.query('select count(*) n from test_dependency_bumps')).rows[0].n);
+const queuedBefore=await refreshCount(), bumpsBefore=await bumpCount();
+await db.query("update payment_requests set status='processed' where id=$1",[unmappedPaid.id]);
+let deferredPaid=(await db.query('select * from payment_requests where id=$1',[unmappedPaid.id])).rows[0];
+assert.equal(deferredPaid.status,'processed','Missing mapping must not block bank confirmation');
+assert.equal(deferredPaid.adhoc_workforce_id,null);
+assert.equal(deferredPaid.adhoc_provider_employee_id,'001234567899');
+assert.equal(deferredPaid.adhoc_work_date.toISOString().slice(0,10),'2026-10-16');
+assert.equal(deferredPaid.adhoc_adjustment_id,null,'Paid work days never also become cash recoveries');
+assert.equal(await refreshCount(),queuedBefore,'Do not queue a null Workforce target');
+assert.equal(await bumpCount(),bumpsBefore+1,'Bank confirmation invalidates the payout period even before mapping');
+await db.query("update payment_requests set status='processed' where id=$1",[unmappedPaid.id]);
+await db.exec('select reconcile_adhoc_da_recoveries(); select reconcile_adhoc_da_recoveries();');
+assert.equal(await refreshCount(),queuedBefore);
+assert.equal(await bumpCount(),bumpsBefore+1,'Unmapped retries must not repeatedly invalidate the period');
+await assert.rejects(()=>insert({request_no:'UNMAPPED-DUP',location_id:otherStation,adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-16',adhoc_provider_employee_id:'001234567899',adhoc_da_name:'No Map',status:'processed'}),/already has a paid/);
+await assert.rejects(()=>db.query('update payment_requests set adhoc_workforce_id=$1 where id=$2',[worker,unmappedPaid.id]),/identity is frozen/);
+
+// Mapping entered later must cover the actual work date. The scheduled RPC
+// resolves it, refreshes once, and leaves immutable bank amounts/dates intact.
+await db.exec(`insert into field_executive_provider_mappings(company_id,station_id,provider_id,provider_member_id,workforce_id,effective_from,status)
+ values('${company}','${otherStation}','${provider}','001234567899','${worker}','2026-10-17','active');
+ select reconcile_adhoc_da_recoveries();`);
+assert.equal((await db.query('select adhoc_workforce_id from payment_requests where id=$1',[unmappedPaid.id])).rows[0].adhoc_workforce_id,null,'A future-only mapping must not claim an earlier work day');
+await db.exec(`update field_executive_provider_mappings set effective_from='2026-10-16' where provider_member_id='001234567899';
+ insert into field_executive_provider_mappings(company_id,station_id,provider_id,provider_member_id,workforce_id,effective_from,status)
+ values('${company}','${otherStation}','${provider}','001234567899','${actor}','2026-10-16','active');
+ select reconcile_adhoc_da_recoveries();`);
+assert.equal((await db.query('select adhoc_workforce_id from payment_requests where id=$1',[unmappedPaid.id])).rows[0].adhoc_workforce_id,null,'Ambiguous mappings cannot guess who owes the paid day');
+assert.equal(await refreshCount(),queuedBefore);
+await db.exec(`update field_executive_provider_mappings set status='cancelled' where provider_member_id='001234567899' and workforce_id='${actor}'; select reconcile_adhoc_da_recoveries();`);
+deferredPaid=(await db.query('select * from payment_requests where id=$1',[unmappedPaid.id])).rows[0];
+assert.equal(deferredPaid.adhoc_workforce_id,worker);
+assert.equal(deferredPaid.status,'processed');
+assert.equal(Number(deferredPaid.amount),100);
+assert.equal(deferredPaid.adhoc_adjustment_id,null);
+assert.equal(await refreshCount(),queuedBefore+1);
+assert.equal(await bumpCount(),bumpsBefore+2);
+await db.exec('select reconcile_adhoc_da_recoveries(); select reconcile_adhoc_da_recoveries();');
+assert.equal(await refreshCount(),queuedBefore+1,'Deferred mapping refreshes once, even on repeated job runs');
+assert.equal((await db.query("select count(*) n from workforce_adjustments where external_reference=$1",['OPS-ADHOC-DA:'+unmappedPaid.id])).rows[0].n,0);
+
+const closedLate=await insert({request_no:'LATE-CLOSED',location_id:otherStation,adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-18',adhoc_provider_employee_id:'001234567898',adhoc_da_name:'Closed period',status:'processed'});
+await db.exec(`insert into field_executive_provider_mappings(company_id,station_id,provider_id,provider_member_id,workforce_id,effective_from,status)
+ values('${company}','${otherStation}','${provider}','001234567898','${worker}','2026-10-18','active');
+ insert into workforce_payout_effective_paid_allocations values('${company}','${worker}','${otherStation}','2026-10-18','2026-10-18');`);
+const lateClosedResult=(await db.query('select reconcile_adhoc_da_recoveries() result')).rows[0].result;
+assert.ok(lateClosedResult.errors.some(error=>error.id===closedLate.id && /finalized Workforce payout/.test(error.error)));
+assert.deepEqual((await db.query('select status,adhoc_workforce_id,adhoc_adjustment_id from payment_requests where id=$1',[closedLate.id])).rows[0],{status:'processed',adhoc_workforce_id:null,adhoc_adjustment_id:null},'Late reconciliation must not rewrite a finalized payout or undo bank confirmation');
+assert.equal(await refreshCount(),queuedBefore+1);
 await db.exec('set role authenticated');
 await assert.rejects(()=>db.query('select * from payment_adhoc_da_roster($1,$2)',[company,station]),/permission denied/);
+await assert.rejects(()=>db.query('select reconcile_adhoc_da_recoveries()'),/permission denied/);
 await db.exec('reset role');
 await db.close();
-console.log('PASS legacy recovery + new paid work-day policy: Amazon/Flipkart, leading-zero FHR, imported/manual, dated late import, scope, duplicate payment, immutable identity, finalized payroll, idempotent migration.');
+console.log('PASS legacy recovery + paid work-day policy, bank confirmation before mapping, deferred reconciliation exactly once, idempotent migrations.');

@@ -123,6 +123,7 @@ const VARIABLE_LINES: Record<string, { label: string; order: number }> = {
   ARREARS: { label: "Arrears", order: 1 },
   OTHER_INCENTIVE: { label: "Incentive", order: 2 },
   EXCEPTION_ADD: { label: "Other Earnings", order: 3 },
+  ADVANCE_RECOVERY: { label: "Advance Deduction", order: 1 },
   PAY_ADVANCE_RECOVERY: { label: "Advance Deduction", order: 1 },
   MANUAL_ADVANCE: { label: "Advance Deduction", order: 1 },
   // Payslip prints one LOSS_DEDUCTION row: manual People losses + Ops NL/SLP recoveries.

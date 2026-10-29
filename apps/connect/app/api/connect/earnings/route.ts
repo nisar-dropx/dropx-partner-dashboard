@@ -227,7 +227,18 @@ export async function GET(request: Request) {
     summary.grossAmount=Math.round((summary.baseAmount+incentives.summary.amount+summary.additions)*100)/100;
     const due = workforce?.id ? await db().rpc("nl_loss_recovery_due",{p_company:account.companyId,p_salary_month:month,p_target:"workforce"},{get:true}) : {data:[],error:null};
     if(due.error)throw new Error("Your loss deductions could not be verified. Please retry.");
-    const {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due.data||[]);
-    return NextResponse.json({ month, earnings, routeFuel, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
+    let {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due.data||[]);
+    let advanceRecoveryAmount=0;
+    if(workforce?.id) {
+      const target=new URL("/api/connect/advances",process.env.DASHBOARD_URL || "https://dashboard.dropxlogistics.com");
+      target.search=new URLSearchParams({accountId:workforce.id,profileType:"workforce",earningsMonth:month}).toString();
+      const response=await fetch(target,{headers:{cookie:request.headers.get("cookie")??""},cache:"no-store",signal:AbortSignal.timeout(30_000)});
+      const result=await response.json();
+      if(!response.ok || !Number.isFinite(result.advanceRecoveryAmount)) throw new Error("Your advance deductions could not be verified. Please retry.");
+      advanceRecoveryAmount=result.advanceRecoveryAmount;
+      deductionAmount=Math.round((deductionAmount+advanceRecoveryAmount)*100)/100;
+      netAmount=Math.round((netAmount-advanceRecoveryAmount)*100)/100;
+    }
+    return NextResponse.json({ month, earnings, routeFuel, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred,advanceRecoveryAmount} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load earnings." }, { status: 400,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"} }); }
 }

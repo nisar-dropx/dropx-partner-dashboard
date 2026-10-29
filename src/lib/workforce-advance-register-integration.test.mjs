@@ -41,162 +41,9 @@ test("Workforce Advance Register is shared by Dashboard and Ops with separate pa
   assert.match(accessSurface, /["']ops_workforce_advances["']/);
 });
 
-test("the register and both advance creation paths use canonical current-location scope", () => {
-  assert.match(registerPage, /const allLocations\s*=\s*authorization\.hasAllLocationAccess\s*\|\|\s*isCompanyOwner\(authorization\)/);
-  assert.match(registerPage, /if\s*\(!allLocations\)/);
-  assert.match(registerPage, /authorization\.locationScopeIds/);
-  assert.match(registerPage, /\.or\(["']migration_state\.is\.null,migration_state\.neq\.reclassified["']\)/);
-  assert.match(registerPage, /workforceQuery\s*=\s*workforceQuery\.in\(["']location_id["'],\s*scope\)/);
-  assert.match(registerPage, /visibleWorkforceIds\s*=\s*workforceResult\.data\.map/);
-  assert.match(registerPage, /\.in\(["']workforce_id["'],\s*visibleWorkforceIds\.slice\(index,\s*index\s*\+\s*100\)\)/);
-  assert.doesNotMatch(registerPage, /\.in\(["']station_id["'],\s*scope\)/);
-  assert.doesNotMatch(registerPage, /\.from\(["']stations["']\)[\s\S]{0,300}?\.in\(["']id["'],\s*scope\)/);
-  assert.match(registerPage, /const paidStation\s*=\s*stationById\.get\(String\(advance\.station_id\)\)/);
-  assert.match(registerPage, /const currentStation\s*=\s*stationById\.get\(String\(worker\?\.location_id\s*\?\?\s*["']["']\)\)/);
-  assert.match(registerPage, /location:\s*linkStatus\s*===\s*["']pending["']\s*\?\s*["']—["']\s*:\s*String\(currentStation\?\.station_code\s*\?\?\s*currentStation\?\.station_name/);
-  assert.match(registerPage, /paidLocation:\s*linkStatus\s*===\s*["']pending["']\s*\?\s*["']—["']\s*:\s*String\(paidStation\?\.station_code\s*\?\?\s*paidStation\?\.station_name/);
-  assert.match(registerComponent, /row\.paidLocation\s*!==\s*row\.location\s*\?\s*<small>Advance paid at \{row\.paidLocation\}<\/small>/);
 
-  assert.match(addAdvanceRoute, /const stationId\s*=\s*String\(worker\.data\?\.location_id\s*\?\?\s*["']["']\)/);
-  assert.match(addAdvanceRoute, /\.select\(["']id,dropx_id,location_id["']\)/);
-  assert.match(addAdvanceRoute, /\.or\(["']migration_state\.is\.null,migration_state\.neq\.reclassified["']\)/);
-  assert.match(addAdvanceRoute, /!allLocations\s*&&\s*!authorization\.locationScopeIds\.includes\(stationId\)/);
-  assert.match(addAdvanceRoute, /workforce_id:\s*workforceId,[\s\S]*?station_id:\s*stationId/);
-  assert.match(addAdvanceRoute, /imported_dropx_id:\s*importedDropxId,[\s\S]*?link_status:\s*["']linked["']/);
 
-  assert.match(bulkUploadRoute, /authorization\.hasAllLocationAccess\s*\|\|\s*isCompanyOwner\(authorization\)/);
-  assert.match(bulkUploadRoute, /new Set\(authorization\.locationScopeIds\)/);
-  assert.match(bulkUploadRoute, /workersQuery\s*=\s*workersQuery\.in\(["']location_id["']/);
-  assert.match(bulkUploadRoute, /!allLocations\s*&&\s*!allowedLocations\.has\(stationId\)/);
-  assert.match(bulkUploadRoute, /outside your assigned locations/i);
-  assert.match(bulkUploadRoute, /\.or\(["']migration_state\.is\.null,migration_state\.neq\.reclassified["']\)/);
-  assert.match(bulkUploadRoute, /const stationId\s*=\s*String\(worker\.location_id\s*\?\?\s*["']["']\)/);
-  assert.match(bulkUploadRoute, /dropx_id:\s*row\.dropxId/);
-  assert.doesNotMatch(bulkUploadRoute, /p_rows:[\s\S]{0,500}?workforce_id:\s*row\.workforceId/);
-  assert.doesNotMatch(bulkUploadRoute, /p_rows:[\s\S]{0,500}?station_id:\s*row\.stationId/);
-});
 
-test("bulk upload requires add permission and follows preview then explicit confirmation", () => {
-  assert.match(
-    bulkUploadRoute,
-    /currentAdminAccessSurface\(\)\s*===\s*["']ops["']\s*\?\s*["']ops_workforce_advances["']\s*:\s*["']workforce_advances["']/
-  );
-  assert.match(bulkUploadRoute, /hasPermission\(authorization,\s*pageCode,\s*["']add["']\)/);
-  assert.match(bulkUploadRoute, /mode\s*!==\s*["']preview["']\s*&&\s*mode\s*!==\s*["']commit["']/);
-  assert.match(bulkUploadRoute, /if\s*\(mode\s*===\s*["']preview["']\)\s*return Response\.json\(preview/);
-  assert.match(bulkUploadRoute, /if\s*\(issues\.length\)\s*return Response\.json/);
-  assert.match(bulkUploadRoute, /file_sha256/);
-  assert.match(bulkUploadRoute, /already imported/i);
-  assert.match(bulkUploadRoute, /workforceAdvanceImportBusinessKey/);
-  assert.match(bulkUploadRoute, /dropx_id:\s*row\.dropxId/);
-  assert.doesNotMatch(bulkUploadRoute, /external_reference:\s*row\.businessKey/);
-  assert.match(bulkUploadRoute, /deducted_amount:\s*row\.deductedAmount/);
-  assert.match(bulkUploadRoute, /already in the register as/);
-
-  assert.match(bulkUploadComponent, /submit\(["']preview["']\)/);
-  assert.match(bulkUploadComponent, /preview\.canCommit/);
-  assert.match(bulkUploadComponent, /window\.confirm\(/);
-  assert.match(bulkUploadComponent, /submit\(["']commit["']\)/);
-  assert.match(bulkUploadComponent, /Nothing has been added yet/i);
-  assert.match(bulkUploadComponent, /DEDUCTED_AMOUNT will be recorded as already recovered/i);
-  assert.match(bulkUploadComponent, /Duplicate advances are blocked even if the workbook was re-saved/i);
-  assert.match(bulkUploadComponent, /Already deducted/);
-  assert.match(registerComponent, /canAdd\s*\?\s*<>[\s\S]*?<WorkforceAdvanceBulkUpload\s*\/>/);
-});
-
-test("advance reassignment is edit-only, company-scoped, transactional and audit-backed", () => {
-  assert.match(registerPage, /const canEdit\s*=\s*hasPermission\(authorization,\s*pageCode,\s*["']edit["']\)/);
-  assert.match(registerPage, /<WorkforceAdvanceRegister[^>]+canEdit=\{canEdit\}/);
-  assert.match(registerComponent, /<th className=["']workforce-advance-action-cell["']>Actions<\/th>/);
-  assert.match(registerComponent, /<AdvanceReassignmentModal/);
-  assert.match(registerComponent, /fetch\(["']\/api\/payments\/workforce-advances\/reassign["']/);
-  assert.match(registerComponent, /const locked\s*=\s*row\.deducted\s*>\s*0/);
-  assert.match(registerComponent, /disabled=\{locked\}/);
-  assert.match(registerComponent, /workforceOptions\.filter\(\(option\)\s*=>\s*option\.id\s*!==\s*reassignRow\.workforceId\)/);
-  assert.match(registerComponent, /if\s*\(!normalizedReason\)[\s\S]*?Enter the reason for this reassignment/);
-  assert.match(registerComponent, /<textarea[\s\S]{0,500}?\brequired\b/);
-  assert.match(registerComponent, /Original imported ID/);
-  assert.match(registerComponent, /Reassignment history \(\{row\.reassignmentHistory\.length\}\)/);
-  assert.match(registerPage, /from_station_id[\s\S]*?to_station_id/);
-  assert.match(
-    registerPage,
-    /!allLocations\s*&&\s*!reassignmentLocationIds\.every\(\(locationId\)\s*=>\s*allowedLocationIds\.has\(locationId\)\)/
-  );
-  assert.match(registerPage, /normalizeDropxId\(worker\.dropx_id\)\s*!==\s*["']{2}/);
-
-  assert.match(reassignAdvanceRoute, /sameOrigin\(request\)/);
-  assert.match(
-    reassignAdvanceRoute,
-    /currentAdminAccessSurface\(\)\s*===\s*["']ops["']\s*\?\s*["']ops_workforce_advances["']\s*:\s*["']workforce_advances["']/
-  );
-  assert.match(reassignAdvanceRoute, /hasPermission\(authorization,\s*pageCode,\s*["']edit["']\)/);
-  assert.doesNotMatch(reassignAdvanceRoute, /hasPermission\(authorization,\s*pageCode,\s*["']add["']\)/);
-  assert.match(reassignAdvanceRoute, /reason\.length\s*<\s*3\s*\|\|\s*reason\.length\s*>\s*500/);
-  assert.match(reassignAdvanceRoute, /rpc\(["']workforce_reassign_advance["']/);
-  for (const parameter of [
-    "p_company_id",
-    "p_advance_id",
-    "p_target_workforce_id",
-    "p_expected_workforce_id",
-    "p_expected_identity_revision",
-    "p_reason",
-    "p_actor_user_id",
-    "p_allowed_location_ids"
-  ]) assert.match(reassignAdvanceRoute, new RegExp(`${parameter}:`));
-  assert.match(
-    reassignAdvanceRoute,
-    /p_allowed_location_ids:\s*allLocations\s*\?\s*null\s*:\s*authorization\.locationScopeIds/
-  );
-
-  assert.match(reassignmentMigration, /add column identity_revision integer not null default 0/i);
-  assert.match(reassignmentMigration, /create table public\.workforce_advance_reassignments/i);
-  assert.match(reassignmentMigration, /foreign key \(company_id, advance_id\)[\s\S]*?references public\.workforce_advances\(company_id, id\)[\s\S]*?on delete restrict/i);
-  assert.match(reassignmentMigration, /unique \(company_id, advance_id, revision\)/i);
-  assert.match(reassignmentMigration, /before update or delete on public\.workforce_advance_reassignments/i);
-  assert.match(reassignmentMigration, /original imported DropX ID is immutable/i);
-  assert.match(reassignmentMigration, /identity changes require an immutable reassignment audit/i);
-  assert.match(reassignmentMigration, /create or replace function public\.workforce_reassign_advance/i);
-  assert.match(reassignmentMigration, /order by workforce\.id[\s\S]*?for update;[\s\S]*?lock_workforce_payment_allocation_company\(p_company_id\)/i);
-  assert.match(reassignmentMigration, /advance\.identity_revision\s*<>\s*p_expected_identity_revision/i);
-  assert.match(reassignmentMigration, /advance\.workforce_id is distinct from p_expected_workforce_id/i);
-  assert.match(reassignmentMigration, /opening_deducted_amount\s*>\s*0\s*or\s*v_active_deducted\s*>\s*0/i);
-  assert.match(reassignmentMigration, /source or target Workforce advance is outside your assigned locations/i);
-  assert.match(reassignmentMigration, /insert into public\.workforce_advance_reassignments/i);
-  assert.match(reassignmentMigration, /identity_revision\s*=\s*v_next_revision/i);
-  assert.match(reassignmentMigration, /alter table public\.workforce_advance_reassignments enable row level security/i);
-  assert.match(reassignmentMigration, /grant select on table public\.workforce_advance_reassignments to service_role/i);
-  assert.match(reassignmentMigration, /revoke all on function public\.workforce_reassign_advance[\s\S]*?from public, anon, authenticated, service_role/i);
-  assert.match(reassignmentMigration, /grant execute on function public\.workforce_reassign_advance[\s\S]*?to service_role/i);
-  assert.match(reassignmentPaidLocationFix, /Historical station where the advance was paid/i);
-  assert.match(reassignmentPaidLocationFix, /The advance paid-at location is immutable/i);
-  assert.doesNotMatch(
-    reassignmentPaidLocationFix,
-    /set[\s\S]{0,180}?station_id\s*=\s*v_target_workforce\.location_id/i
-  );
-  assert.match(
-    reassignmentPaidLocationFix,
-    /v_advance\.workforce_id,\s*v_source_workforce\.location_id/i
-  );
-  assert.match(reassignmentPaidLocationFix, /'paidLocationPreserved',\s*true/i);
-});
-
-test("unregistered DropX IDs preview and render as non-deductible pending advances", () => {
-  assert.match(bulkUploadRoute, /workersByDropxId\.get\(row\.normalizedDropxId\)/);
-  assert.match(bulkUploadRoute, /if\s*\(!matches\.length\)[\s\S]*?if\s*\(!allLocations\)[\s\S]*?not available in your assigned locations/i);
-  assert.match(bulkUploadRoute, /fullName:\s*["']Awaiting Workforce registration["']/);
-  assert.match(bulkUploadRoute, /linkStatus:\s*["']pending["']/);
-  assert.match(bulkUploadRoute, /pendingRows:/);
-  assert.match(bulkUploadComponent, /Awaiting Workforce registration/);
-  assert.match(bulkUploadComponent, /cannot be deducted from payouts until registration links it automatically/i);
-
-  for (const column of ["imported_dropx_id", "link_status", "opening_deducted_amount", "linked_at"]) {
-    assert.match(registerPage, new RegExp(column));
-  }
-  assert.match(registerPage, /linkStatus\s*===\s*["']pending["'][\s\S]*?advance\.opening_deducted_amount/);
-  assert.match(registerPage, /status:\s*linkStatus\s*===\s*["']pending["']\s*\?\s*["']Awaiting Workforce registration["']/);
-  assert.match(registerComponent, /Not eligible for payout deduction/);
-  assert.match(registerComponent, /row\.linkStatus\s*===\s*["']pending["']/);
-});
 
 test("bulk import hardening atomically records opening deductions and stable duplicate keys", () => {
   assert.match(importHardeningMigration, /v_deducted_amount\s*:=\s*coalesce/i);
@@ -257,43 +104,7 @@ test("filtered rows drive totals, table pagination and the view-scoped CSV expor
   assert.match(registerComponent, /Unassigned \/ unavailable/);
 });
 
-test("advance recovery requires edit access to both payout and advance pages", () => {
-  assert.match(deductAdvancesRoute, /payoutPageCode\s*=\s*ops\s*\?\s*["']ops_workforce_payouts["']\s*:\s*["']workforce_payouts["']/);
-  assert.match(deductAdvancesRoute, /advancePageCode\s*=\s*ops\s*\?\s*["']ops_workforce_advances["']\s*:\s*["']workforce_advances["']/);
-  assert.match(
-    deductAdvancesRoute,
-    /!hasPermission\(authorization,\s*payoutPageCode,\s*["']edit["']\)\s*\|\|\s*!hasPermission\(authorization,\s*advancePageCode,\s*["']edit["']\)/
-  );
-  assert.match(deductAdvancesRoute, /Edit access to both Workforce Payouts and Workforce Advance Register is required/i);
-  assert.match(payoutPage, /canDeductAdvances\s*=\s*audience\s*===\s*["']workforce["'][\s\S]*?canEdit[\s\S]*?hasPermission\(authorization,\s*advancePageCode,\s*["']edit["']\)/);
-});
 
-test("recovery hashes every payout dependency, respects scope, and caps ADVANCE at available net pay", () => {
-  assert.match(
-    deductAdvancesRoute,
-    /rpc\(["']workforce_advance_recovery_snapshot_hash["'],\s*\{[\s\S]*?p_company_id:\s*companyId[\s\S]*?p_period_start:\s*periodStart[\s\S]*?p_period_end:\s*periodEnd/
-  );
-  assert.doesNotMatch(deductAdvancesRoute, /rpc\(["']workforce_payout_input_snapshot_hash["']/);
-  assert.match(
-    deductAdvancesRoute,
-    /const snapshotBefore\s*=\s*await payoutSnapshotHash\(companyId,\s*periodStart,\s*periodEnd\)[\s\S]*?const loaded\s*=\s*await loadWorkforcePayoutRows\(companyId,\s*authorization,\s*periodStart,\s*periodEnd\)[\s\S]*?const snapshotAfter\s*=\s*await payoutSnapshotHash\(companyId,\s*periodStart,\s*periodEnd\)/
-  );
-  assert.match(deductAdvancesRoute, /MAX_CALCULATION_ATTEMPTS\s*=\s*2/);
-  assert.match(deductAdvancesRoute, /snapshotAfter\s*!==\s*snapshotBefore\)\s*continue/);
-  assert.match(deductAdvancesRoute, /if\s*\(changedDuringApply\)\s*continue/);
-  assert.doesNotMatch(deductAdvancesRoute, /Payout inputs changed while the selected rows were being calculated/);
-  assert.match(deductAdvancesRoute, /selected payout period is still updating/i);
-  assert.match(deductAdvancesRoute, /row\.deductionBreakdown[\s\S]*?line\.code\.trim\(\)\.toUpperCase\(\)\s*===\s*["']ADVANCE["']/);
-  assert.match(deductAdvancesRoute, /otherDeductions\s*=\s*Math\.max\(0,\s*row\.deductions\s*-\s*currentAdvance\)/);
-  assert.match(deductAdvancesRoute, /maxAmount\s*=\s*Math\.max\(0,[\s\S]*?row\.grossPayment\s*-\s*otherDeductions/);
-  assert.match(deductAdvancesRoute, /max_amount:\s*maxAmount/);
-  assert.match(deductAdvancesRoute, /snapshot_hash:\s*snapshotAfter/);
-  assert.match(
-    deductAdvancesRoute,
-    /p_allowed_location_ids:\s*authorization\.hasAllLocationAccess\s*\?\s*null\s*:\s*authorization\.locationScopeIds/
-  );
-  assert.match(deductAdvancesRoute, /later advance deductions|recalculating this earlier period/i);
-});
 
 test("advance deductions revise already-published payout snapshots without fake import provenance", () => {
   assert.match(dependencyRefreshMigration, /add column refresh_source text not null default 'input_batch'/i);
@@ -326,12 +137,9 @@ test("advance deductions revise already-published payout snapshots without fake 
   );
   assert.doesNotMatch(dependencyRefreshMigration, /insert into public\.workforce_payout_import_batches/i);
 
-  assert.match(deductAdvancesRoute, /refreshWorkforcePayoutPublicationJobs/);
-  assert.match(
-    deductAdvancesRoute,
-    /workforceIds:\s*\[\.\.\.new Set\(selected\.map\([\s\S]*?periodStart,[\s\S]*?periodEnd,[\s\S]*?limit:\s*Math\.min\(100, selected\.length\)/
-  );
-  assert.match(deductAdvancesRoute, /publicationRefresh\s*\n?\s*}/);
+  const cutover=source("../../supabase/migrations/20261029115529_unified_advance_cutover.sql");
+  assert.match(cutover,/pay_advance_queue_payout_refresh/);
+  assert.match(cutover,/enqueue_workforce_payout_dependency_refresh/);
 });
 
 test("high-frequency attendance and shipment revisions are scoped to the payout month", () => {
@@ -506,4 +314,21 @@ test("advance deduction and review submission use separate row eligibility", () 
   assert.match(payoutTable, /disabled=\{!canPublish\s*\|\|\s*!reviewSelectedRows\.length/);
   assert.match(payoutTable, /chunkedValues\(advanceSelectedRows,[\s\S]*?items:\s*chunk\.map/);
   assert.match(payoutTable, /Available for advance deduction only\./);
+});
+
+test("the unified paid register preserves canonical location visibility",()=>{
+  assert.match(registerPage,/requirePagePermission\(pageCode/);
+  assert.match(registerPage,/workforceQuery = workforceQuery.in\("location_id", scope\)/);
+  assert.match(registerPage,/\.from\("pay_advances"\)/);
+  assert.match(registerPage,/\.in\("worker_id", visibleWorkforceIds.slice/);
+  assert.match(registerPage,/const canAdd = false/);
+  assert.match(registerPage,/const canEdit = false/);
+});
+test("retired manual advance mutation endpoints return Gone",async()=>{
+  for(const source of [addAdvanceRoute,bulkUploadRoute,reassignAdvanceRoute,deductAdvancesRoute]) {
+    const handler=new Function(source.replace('export async function POST','return async function POST'))();
+    const response=await handler();
+    assert.equal(response.status,410);
+    assert.match((await response.json()).error,/Manual advances are retired/);
+  }
 });

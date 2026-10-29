@@ -1,3 +1,4 @@
+import { applyWorkforcePaidAdvances } from "@/lib/workforce-paid-advances";
 import "server-only";
 import { paidAdhocDays, paidAdhocDayBreakdown } from "@/lib/adhoc-paid-days";
 import { adhocPaidDayKey } from "@/lib/adhoc-da-identity";
@@ -122,8 +123,14 @@ export async function loadWorkforcePayoutRows(
   fromDate: string,
   toDate: string,
   scope: WorkforcePayoutLoadScope = {}
-) {
+): Promise<{rows:WorkforcePayoutRow[];error:string|null}> {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
+  // Calculate shared advance allocations across every station before filtering visibility.
+  if (!authorization.hasAllLocationAccess && workforceLossRecoveryMonth(fromDate, toDate) && !scope.providerCostSegmentsOnly) {
+    const result = await loadWorkforcePayoutRows(companyId, { ...authorization, hasAllLocationAccess: true }, fromDate, toDate, scope);
+    const visible = new Set(authorization.locationScopeIds);
+    return { ...result, rows: result.rows.filter(row => row.locationId && visible.has(row.locationId)) };
+  }
   const admin = supabaseAdmin;
   const scopeEnabled = scope.workforceIds !== undefined;
   const scopedWorkforceIds = [...new Set((scope.workforceIds ?? []).map(String).map((id) => id.trim()).filter(Boolean))];
@@ -1809,6 +1816,10 @@ export async function loadWorkforcePayoutRows(
       }
     }
     applyWorkforceLossRecoveries(rowsWithPayoutValues,dueLines,payments);
+  }
+  if (lossPeriod && !scope.providerCostSegmentsOnly) {
+    try { await applyWorkforcePaidAdvances(companyId, fromDate, toDate, rowsWithPayoutValues); }
+    catch (error) { return { rows: [] as WorkforcePayoutRow[], error: error instanceof Error ? error.message : "Unable to verify advances." }; }
   }
   return {
     rows: scopeEnabled

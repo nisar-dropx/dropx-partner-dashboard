@@ -3,7 +3,22 @@ export type PayAdvanceApproval = {
   stepName: string; stepType: string; requestedAmount: number; approvedAmount: number | null;
   workerType: string; outstandingPay: number | null; eligibilityPercent: number | null;
   maxEligibleAmount: number | null; eligibilityWithinLimit: boolean;
+  monthPaidCount: number; monthPaidAmount: number; outstandingAdvance: number; reservedRecovery: number;
   recoveryMode: string; installments: number; reason: string; neededBy: string | null;
+};
+
+export type PayAdvanceReviewDetails = {
+  requestedAt: string | null;
+  submittedBy: string;
+  steps: Array<{ id: string; label: string; status: string; actorName: string | null;
+    actedAt: string | null; note: string | null; approvedAmount: number | null }>;
+  capacity: { outstandingPay: number; maxEligibleAmount: number; committedAdvance: number;
+    eligibilityPercent: number; breakdown: Array<{ month: string; outstanding: number }> };
+  requestLimit: number;
+  advances: Array<{ id: string; reference: string; amount: number; paidAt: string;
+    firstDuePeriod: string; installments: number; evidence: string; bankReference: string | null;
+    recovered: number; reserved: number; waived: number; outstanding: number;
+    deductions: Array<{ id: string; period: string; amount: number; status: string; target: string }> }>;
 };
 
 export function payAdvanceApprovalPayContext(
@@ -16,7 +31,7 @@ export function payAdvanceApprovalPayContext(
   const workerType = String(workerTypeValue ?? "").trim().toLowerCase();
   const requestedAmount = Number(requestedAmountValue ?? 0);
   const maximum = Number(maxEligibleAmountValue ?? requestedAmount);
-  const workforceAmountsVisible = workerType === "workforce";
+  const workforceAmountsVisible = ["employee", "contractor", "workforce"].includes(workerType);
   return {
     workerType,
     outstandingPay: workforceAmountsVisible ? Number(outstandingPayValue ?? 0) : null,

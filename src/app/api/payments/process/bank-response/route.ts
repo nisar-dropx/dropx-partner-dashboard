@@ -1,3 +1,5 @@
+import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
+import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 import { createHash } from "node:crypto";
 
 import { revalidatePath } from "next/cache";
@@ -726,14 +728,17 @@ export async function POST(request: Request) {
       }
     }
 
+    let payrollRefresh: Awaited<ReturnType<typeof refreshLossPayroll>> | null = null;
     if (results.some((result) => result.ok)) {
+      payrollRefresh = await refreshLossPayroll(companyId);
+      await refreshWorkforcePayoutPublicationJobs({companyId,limit:20,deadlineAtMs:Date.now()+45_000});
       revalidatePath("/payments/process");
       revalidatePath("/payments/requests");
       revalidatePath("/payments/approvals");
       revalidatePath("/payments/report");
       revalidatePath("/payments/workforce-payouts");
     }
-    return Response.json({ results }, { headers: noStore });
+    return Response.json({ results, payrollRefresh }, { headers: noStore });
   } catch (error) {
     const message = errorMessage(error);
     return errorResponse(message, databaseStatus(message));
