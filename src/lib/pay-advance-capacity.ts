@@ -72,13 +72,16 @@ async function peopleMonthBalance(companyId: string, profileType: "employee" | "
   const [due,items]=await Promise.all([
     supabaseAdmin.rpc("pay_advance_due",{p_company:companyId,p_worker_type:profileType,p_worker:workerId,
       p_period:range.start,p_target_kind:"people",p_target_key:`${run.data.id}:${profileType}:${workerId}`}),
-    supabaseAdmin.from("hr_payroll_run_items").select("amount").eq("company_id",companyId)
-      .eq("run_person_id",person.data.id).in("source",["pay_advance","unified_advance"])
+    supabaseAdmin.from("hr_payroll_run_items").select("amount,code,item_type,source").eq("company_id",companyId)
+      .eq("run_person_id",person.data.id)
   ]);
   if(due.error||items.error) throw new Error("Current paid advance deductions could not be verified.");
   const pendingDeduction=Math.max(0,(due.data??[]).reduce((sum:number,d:{amount:unknown})=>sum+Number(d.amount),0)
-    -(items.data??[]).reduce((sum,i)=>sum+Number(i.amount),0));
-  return Math.max(0, roundPayableMoney(target - settled - pendingDeduction));
+    -(items.data??[]).filter(i=>["pay_advance","unified_advance"].includes(i.source)).reduce((sum,i)=>sum+Number(i.amount),0));
+  const holds=(items.data??[]).filter(i=>i.code==="SALARY_HOLD");
+  const holdInNet=holds.some(i=>i.item_type==="deduction" && Number(i.amount)>0);
+  const held=holdInNet?0:holds.reduce((sum,i)=>sum+Number(i.amount),0);
+  return Math.max(0, roundPayableMoney(target - held - settled - pendingDeduction));
 }
 
 export async function loadPayAdvanceCapacity(input: {

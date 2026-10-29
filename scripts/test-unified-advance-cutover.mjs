@@ -58,6 +58,23 @@ try {
  await db.query(`insert into hr_payroll_bank_lines(company_id,run_id,worker_type,worker_id,status,amount) values($1,$2,'employee',$3,'paid',4000)`,[c,run,employee]);
  assert.equal((await one('select status from hr_pay_advance_requests where id=$1',[paid])).status,'recovered');
  assert.equal(Number((await one('select recovered_amount from hr_pay_advance_requests where id=$1',[unpaid])).recovered_amount),0);
- console.log('PASS: cutover twice, paid-only migration, preserved manual history, bank idempotency, Workforce publication and settlement, People snapshot and settlement.');
+ // A recovered advance permits another profile request; an unpaid request blocks duplicates.
+ const steps=JSON.stringify([{step_type:'manager',approver_user_id:id(50)},{step_type:'finance',approver_user_id:id(51)}]);
+ const createSql='select hr_create_pay_advance_request_v2($1,$2,$3,500,$4,1,$5,null,$6,$7,4000,25,1000,null) id';
+ const args=[c,'workforce',w,'one_time','A second advance request',id(50),steps];
+ const requested=(await one(createSql,args)).id;
+ assert.equal((await one('select external_source from hr_pay_advance_requests where id=$1',[requested])).external_source,'one_app');
+ await assert.rejects(db.query(createSql,args),/already awaiting approval/);
+ await db.query('select hr_cancel_pay_advance_request($1,$2)',[c,requested]);
+ await assert.rejects(db.query(createSql,[...args.slice(0,3),'manual',...args.slice(4)]),/Invalid recovery method/);
+ // Exercise the existing bank-response trigger, including retry and missing UTR.
+ await db.exec('create trigger test_bank_confirmation after update on payment_requests for each row execute function hr_sync_expense_payment_status()');
+ await db.exec(`insert into payment_requests(id,company_id,source_type,source_id,amount,bank_status) values('${id(60)}','${c}','pay_advance','${unpaid}',400,'Processing');
+ update hr_pay_advance_requests set payment_request_id='${id(60)}' where id='${unpaid}';
+ update payment_requests set bank_status='Paid' where id='${id(60)}';`);
+ assert.equal((await one('select count(*)::int n from pay_advances where request_id=$1',[unpaid])).n,0);
+ await db.exec(`update payment_requests set utr_cin='TRIGGER-UTR' where id='${id(60)}'; update payment_requests set utr_cin='TRIGGER-UTR' where id='${id(60)}';`);
+ assert.equal((await one('select count(*)::int n from pay_advances where request_id=$1',[unpaid])).n,1);
+ console.log('PASS: repeatable cutover, paid-only history, manual preservation, repeat requests, bank trigger idempotency and People/Workforce settlement.');
 } catch(e) {console.error({message:e.message,detail:e.detail,where:e.where,position:e.position});process.exitCode=1;}
 finally {await db.close();}

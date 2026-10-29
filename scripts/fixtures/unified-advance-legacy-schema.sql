@@ -63,7 +63,7 @@ create table public.companies(
   "admin_mobile_country_code" text default '91'::text
 );
 create table public.hr_audit_log(
-  "id" bigint primary key,
+  "id" bigserial primary key,
   "company_id" uuid,
   "actor_user_id" uuid,
   "entity_type" text,
