@@ -87,8 +87,11 @@ export function isIssuedPayrollStatus(status: string | null | undefined) {
   return status === "approved" || status === "locked";
 }
 
-export function payDocumentNumber(workerType: "employee" | "contractor", periodStart: string, workerCode: string | null, workerId: string) {
-  return `${workerType === "employee" ? "PAY" : "CPS"}-${String(periodStart).slice(0, 7).replace("-", "")}-${workerCode || String(workerId).slice(0, 8)}`;
+/** Download / list filename stem: DROPX-PAYSLIP-YYYY-MM-{DropX id}. */
+export function payDocumentNumber(_workerType: "employee" | "contractor", periodStart: string, workerCode: string | null, workerId: string) {
+  const period = String(periodStart).slice(0, 7);
+  const code = String(workerCode ?? "").replace(/[^A-Za-z0-9]/g, "");
+  return `DROPX-PAYSLIP-${period}-${code || String(workerId).slice(0, 8)}`;
 }
 
 /** Salary versions saved on the payroll snapshot, in the shape the payslip prints. */
