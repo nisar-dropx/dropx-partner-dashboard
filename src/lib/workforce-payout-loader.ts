@@ -1794,7 +1794,21 @@ export async function loadWorkforcePayoutRows(
     if (due.error && !isMissingLossRecoveryFunction(due.error)) {
       return { rows: [] as WorkforcePayoutRow[], error: `Ops loss recoveries could not be loaded: ${due.error.message}` };
     }
-    applyWorkforceLossRecoveries(rowsWithPayoutValues, (due.error ? [] : due.data ?? []) as WorkforceLossRecoveryLine[]);
+    const dueLines=(due.error ? [] : due.data ?? []) as WorkforceLossRecoveryLine[];
+    const payments: {worker_id:string;paid:number;processing:boolean}[]=[];
+    if(dueLines.length) {
+      const bank=await readAllRows(supabaseAdmin.from("workforce_payout_payment_items")
+        .select("id,workforce_id,status,instruction_amount").eq("company_id",companyId)
+        .eq("period_start",fromDate).eq("period_end",toDate).in("status",["paid","processing"]).order("id"));
+      if(bank.error) return {rows:[] as WorkforcePayoutRow[],error:"Recovery could not verify unpaid bank balances."};
+      for(const b of bank.data||[]) {
+        let p=payments.find(p=>p.worker_id===b.workforce_id);
+        if(!p) {p={worker_id:b.workforce_id,paid:0,processing:false};payments.push(p);}
+        if(b.status==='paid') p.paid+=Number(b.instruction_amount);
+        if(b.status==='processing') p.processing=true;
+      }
+    }
+    applyWorkforceLossRecoveries(rowsWithPayoutValues,dueLines,payments);
   }
   return {
     rows: scopeEnabled

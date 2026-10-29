@@ -24,6 +24,9 @@ export type RecoveryPerson = {
   station_codes?: string[];
   is_active: boolean;
   salary_month?: string;
+  open_payroll_months?: string[];
+  /** Former staff / an explicitly selected unpaid payroll: only the recovery limit is disclosed. */
+  unpaid_payroll_check?: boolean;
   salary_payable?: number | null;
   recovery_limit?: number | null;
   /** Legacy alias of recovery_limit: available take-home less other recoveries. */
@@ -33,7 +36,7 @@ export type RecoveryPerson = {
   reserved?: number;
   salary_source?: string;
   /** Pay amounts are returned only for Workforce profiles. */
-  pay_detail_access?: "workforce" | "restricted";
+  pay_detail_access?: "workforce" | "restricted" | "recovery_limit";
   /** People checks are deferred to payroll; no salary readiness is disclosed. */
   pay_check_state?: "ready" | "unavailable" | "payroll";
   /** Saved plan lines only. */
@@ -325,6 +328,8 @@ export function allocationError(
       const limit = person.recovery_limit;
       if (limit == null)
         return `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
+      if (monthly > Math.round(limit * 100) && person.unpaid_payroll_check)
+        return `${person.employee_code}: maximum available recovery is ₹${limit.toLocaleString("en-IN")} in ${person.salary_month}. Reduce this share or select another open payroll.`;
       if (monthly > Math.round(limit * 100))
         return `The monthly recovery of ₹${(monthly / 100).toLocaleString("en-IN")} for ${person.employee_code} is more than the available pay of ₹${limit.toLocaleString("en-IN")}. Spread it over more instalments.`;
     }

@@ -52,7 +52,7 @@ export function workforceLossRecoveryMonth(fromDate: string, toDate: string) {
  * Adds each worker's due lines to that worker's largest payout row, whole lines only and only while
  * they fit in available pay, oldest salary month first. Unpaid lines carry forward. Mutates the rows in place.
  */
-export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: Row[], lines: WorkforceLossRecoveryLine[]) {
+export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: Row[], lines: WorkforceLossRecoveryLine[], payments: {worker_id:string;paid:number;processing:boolean}[] = []) {
   const byWorker = new Map<string, WorkforceLossRecoveryLine[]>();
   for (const line of lines) {
     if (!line.worker_id) continue;
@@ -66,6 +66,8 @@ export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: 
     const target = rows
       .filter((row) => (row.reviewSubjectType ?? "workforce") === "workforce" && String(row.reviewSubjectId ?? "") === workerId)
       .sort((a, b) => b.netAmount - a.netAmount)[0];
+    const payment=payments.find(p=>p.worker_id===workerId);
+    let unpaid=payment?.processing ? 0 : Math.max(0,rounded(rows.filter(r=>String(r.reviewSubjectId??"")===workerId).reduce((sum,r)=>sum+r.netAmount,0)-(payment?.paid||0)));
     const ordered = [...workerLines].sort((a, b) =>
       String(a.deduction_month ?? "").localeCompare(String(b.deduction_month ?? "")) || a.recovery_key.localeCompare(b.recovery_key));
     if (!target) { carried.push(...ordered); continue; }
@@ -73,11 +75,12 @@ export function applyWorkforceLossRecoveries<Row extends LossRecoveryRow>(rows: 
       const amount = rounded(Number(line.amount) || 0);
       if (amount <= 0) continue;
       if (appliedKeys.has(line.recovery_key)) continue;
-      if (amount > rounded(target.netAmount)) { carried.push(line); continue; }
+      if (amount > rounded(target.netAmount) || amount > unpaid) { carried.push(line); continue; }
       target.deductionBreakdown = [...target.deductionBreakdown, { code: LOSS_RECOVERY_CODE, label: `Loss recovery · ${line.label}`, amount, recoveryKey: line.recovery_key }];
       appliedKeys.add(line.recovery_key);
       target.deductions = rounded(target.deductions + amount);
       target.netAmount = rounded(target.netAmount - amount);
+      unpaid=rounded(unpaid-amount);
     }
   }
   return { carried };

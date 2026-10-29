@@ -1,4 +1,5 @@
 "use client";
+import { commonOpenPayrollMonths } from "@/lib/ops-pulse/loss-open-payroll";
 import { LossCaseRow, LossCaseColumns } from "./loss-case-row";
 import { useEffect, useMemo, useState } from "react";
 import { FleetMultiSelect } from "./fleet-multi-select";
@@ -292,6 +293,10 @@ export function RecoveryForm({
   /** Custom split: keep amount fields for selected people; fill a sole person with the full loss. */
   function selectPeople(ids: string[]) {
     setSelected(ids);
+    const unpaid = commonOpenPayrollMonths(people, ids);
+    if (ids.some(ref => people.find(p => p.ref === ref)?.is_active === false) && unpaid.length && !unpaid.includes(deductionPeriod)) {
+      setPlan(p => ({...p, mode:"full", deduction_month:unpaid[0]}));
+    }
     setAmounts((prev) => {
       const next: Record<string, string> = {};
       for (const ref of ids) next[ref] = prev[ref] ?? "";
@@ -728,7 +733,7 @@ export function RecoveryForm({
               <label>Recovery owner &amp; next step<textarea required rows={2} maxLength={1000} placeholder="Who will follow up, by when, and how will the balance be recovered?" value={details.follow_up || ""} onChange={e => setDetails({ ...details, follow_up: e.target.value })} /></label>
               <small>Departure does not close the loss. The full balance remains outstanding.</small>
             </div> : null}
-            {option?.allocation_required ? <label>Recovery payroll month<select value={deductionPeriod || ""} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}>{[...new Set([deductionMonths.current_month, exceptionOptions.next_month, old?.deduction_month].filter(Boolean))].sort().map(m=><option key={m} value={m!}>{monthLabel(m!)}{m===exceptionOptions.next_month ? ' · enabled exception' : m===deductionMonths.current_month ? ' · current payroll' : ' · existing schedule'}</option>)}</select><small>Previous payroll stays open through day {policy?.payroll_cutoff_day || 5}. A later payroll is available only when enabled for this TID in Exceptions.</small></label> : null}
+            {option?.allocation_required ? <label>Recovery payroll month<select value={deductionPeriod || ""} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}>{[...new Set([deductionMonths.current_month, exceptionOptions.next_month, old?.deduction_month, ...commonOpenPayrollMonths(people,selected)].filter(Boolean))].sort().map(m=><option key={m} value={m!}>{monthLabel(m!)}{m===exceptionOptions.next_month ? ' · enabled exception' : m===deductionMonths.current_month ? ' · current payroll' : commonOpenPayrollMonths(people,selected).includes(m!) ? ' · unpaid payroll open' : ' · existing schedule'}</option>)}</select><small>Unpaid months remain selectable until payroll closes. Later-month recovery needs an enabled exception.</small></label> : null}
             {option?.allocation_required ? (
               <div className={styles.allocation}>
                 <div className={styles.toolbar}>
@@ -758,7 +763,7 @@ export function RecoveryForm({
                     </select>
                   </label>
                   <label>Designation<select value={designationFilter} onChange={e=>setDesignationFilter(e.target.value)}><option value="">All designations</option>{[...new Set(people.map(p=>p.designation))].sort().map(d=><option key={d}>{d}</option>)}</select></label>
-                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}${p.is_active?'':' · Inactive / left'}`}))} values={selected} onChange={selectPeople}/></div>
+                  <div className="loss-multi-filter"><FleetMultiSelect label="Recovery person" allLabel="Select names" alwaysSearch options={people.filter(p=>selected.includes(p.ref)||!designationFilter||p.designation===designationFilter).map(p=>({value:p.ref,label:p.full_name,helper:`${p.employee_code} · ${p.designation}${p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}${p.is_active?'':' · Left'}${p.open_payroll_months?.length && !p.is_active ? ` · unpaid ${p.open_payroll_months.map(monthLabel).join(", ")}` : ""}`}))} values={selected} onChange={selectPeople}/></div>
                 </div>
                 <div
                   className={styles.methods}
@@ -835,7 +840,7 @@ export function RecoveryForm({
                             <small className={p.recovery_limit == null ? styles.pending : styles.payFacts}>
                               {p.recovery_limit == null
                                 ? "Payout payable unavailable · review payout / mapping"
-                                : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)} · available ${money(limitOf(p) ?? 0)}`}
+                                : p.unpaid_payroll_check ? `${p.salary_month ? monthLabel(p.salary_month) : "Selected payroll"} · max recovery ${money(p.recovery_limit)}` : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)} · available ${money(limitOf(p) ?? 0)}`}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) &&

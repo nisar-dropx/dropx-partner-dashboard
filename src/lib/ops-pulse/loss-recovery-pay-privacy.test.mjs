@@ -54,3 +54,12 @@ test("missing People payroll does not expose an unavailable-salary warning", () 
   assert.equal(disclosed.pay_check_state, "payroll");
   assert.equal(Object.hasOwn(disclosed, "salary_payable"), false);
 });
+
+
+test("former People show recovery capacity without exposing salary breakdown", () => {
+  const disclosed=recoveryPersonPayDisclosure({...person("employee:1"),is_active:false,unpaid_payroll_check:true,salary_month:"2026-09"});
+  assert.equal(disclosed.pay_detail_access,"recovery_limit");
+  assert.equal(disclosed.recovery_limit,10000);
+  assert.equal(disclosed.salary_month,"2026-09");
+  for(const key of ["salary_gross","salary_payable","reserved","salary_source","override_limit"]) assert.equal(Object.hasOwn(disclosed,key),false);
+});
