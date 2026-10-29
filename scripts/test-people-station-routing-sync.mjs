@@ -26,6 +26,15 @@ const ids = {
   areaEngagement: "00000000-0000-0000-0000-000000000020",
   areaAssignment: "00000000-0000-0000-0000-000000000021",
   aomDesignation: "00000000-0000-0000-0000-000000000022",
+  hlmDesignation: "00000000-0000-0000-0000-000000000023",
+  hlmPerson: "00000000-0000-0000-0000-000000000024",
+  hlmUser: "00000000-0000-0000-0000-000000000025",
+  hlmEngagement: "00000000-0000-0000-0000-000000000026",
+  hlmAssignment: "00000000-0000-0000-0000-000000000027",
+  clmTwoPerson: "00000000-0000-0000-0000-000000000028",
+  clmTwoUser: "00000000-0000-0000-0000-000000000029",
+  clmTwoEngagement: "00000000-0000-0000-0000-000000000030",
+  clmTwoAssignment: "00000000-0000-0000-0000-000000000031",
 };
 
 const products = ["operations", "finance", "recruit", "workforce"];
@@ -49,36 +58,48 @@ insert into station_responsibility_roles values ('${ids.role}','${ids.company}',
 insert into designations values
  ('${ids.clmDesignation}','${ids.company}','CLM','Cluster Manager',true),
  ('${ids.aomDesignation}','${ids.company}','AOM','Area Operations Manager',true),
- ('${ids.tlDesignation}','${ids.company}','TL','Team Lead',true);
+ ('${ids.tlDesignation}','${ids.company}','TL','Team Lead',true),
+ ('${ids.hlmDesignation}','${ids.company}','HLM','Head Operations- Last Mile',true);
 insert into hr_people values
  ('${ids.oldPerson}','${ids.company}','FORMER CLM','active'),
  ('${ids.newPerson}','${ids.company}','CURRENT CLM','active'),
  ('${ids.areaPerson}','${ids.company}','AREA MANAGER','active'),
- ('${ids.localPerson}','${ids.company}','LOCAL TL','active');
+ ('${ids.localPerson}','${ids.company}','LOCAL TL','active'),
+ ('${ids.hlmPerson}','${ids.company}','HEAD OPS','active'),
+ ('${ids.clmTwoPerson}','${ids.company}','SECOND CLM','active');
 insert into hr_engagements values
  ('${ids.oldEngagement}','${ids.company}','${ids.oldPerson}','active','2020-01-01',null),
  ('${ids.newEngagement}','${ids.company}','${ids.newPerson}','active','2020-01-01',null),
  ('${ids.areaEngagement}','${ids.company}','${ids.areaPerson}','active','2020-01-01',null),
- ('${ids.localEngagement}','${ids.company}','${ids.localPerson}','active','2020-01-01',null);
+ ('${ids.localEngagement}','${ids.company}','${ids.localPerson}','active','2020-01-01',null),
+ ('${ids.hlmEngagement}','${ids.company}','${ids.hlmPerson}','active','2020-01-01',null),
+ ('${ids.clmTwoEngagement}','${ids.company}','${ids.clmTwoPerson}','active','2020-01-01',null);
 insert into hr_work_assignments values
  ('${ids.oldAssignment}','${ids.company}','${ids.oldEngagement}','${ids.clmDesignation}',null,true,'2020-01-01',null),
  ('${ids.newAssignment}','${ids.company}','${ids.newEngagement}','${ids.clmDesignation}',null,true,'2020-01-01',null),
  ('${ids.areaAssignment}','${ids.company}','${ids.areaEngagement}','${ids.aomDesignation}',null,true,'2020-01-01',null),
- ('${ids.localAssignment}','${ids.company}','${ids.localEngagement}','${ids.tlDesignation}','${ids.station}',true,'2020-01-01',null);
+ ('${ids.localAssignment}','${ids.company}','${ids.localEngagement}','${ids.tlDesignation}','${ids.station}',true,'2020-01-01',null),
+ ('${ids.hlmAssignment}','${ids.company}','${ids.hlmEngagement}','${ids.hlmDesignation}',null,true,'2020-01-01',null),
+ ('${ids.clmTwoAssignment}','${ids.company}','${ids.clmTwoEngagement}','${ids.clmDesignation}',null,true,'2020-01-01',null);
 insert into profiles(id,company_id,email,is_active,location_scope_ids,reports_to_user_id) values
  ('${ids.oldUser}','${ids.company}','former@example.com',true,array['${ids.station}'::uuid],null),
  ('${ids.newUser}','${ids.company}','current@example.com',true,'{}',null),
  ('${ids.areaUser}','${ids.company}','area@example.com',true,'{}',null),
- ('${ids.localUser}','${ids.company}','kgqe@example.com',true,array['${ids.station}'::uuid],'${ids.oldUser}');
+ ('${ids.localUser}','${ids.company}','kgqe@example.com',true,array['${ids.station}'::uuid],'${ids.oldUser}'),
+ ('${ids.hlmUser}','${ids.company}','headops@example.com',true,array['${ids.station}'::uuid],null),
+ ('${ids.clmTwoUser}','${ids.company}','second@example.com',true,'{}',null);
 insert into hr_user_person_links(company_id,person_id,user_id,status) values
  ('${ids.company}','${ids.oldPerson}','${ids.oldUser}','active'),
  ('${ids.company}','${ids.newPerson}','${ids.newUser}','active'),
  ('${ids.company}','${ids.areaPerson}','${ids.areaUser}','active'),
- ('${ids.company}','${ids.localPerson}','${ids.localUser}','active');
+ ('${ids.company}','${ids.localPerson}','${ids.localUser}','active'),
+ ('${ids.company}','${ids.hlmPerson}','${ids.hlmUser}','active'),
+ ('${ids.company}','${ids.clmTwoPerson}','${ids.clmTwoUser}','active');
 insert into people_person_access_scopes(company_id,person_id,location_scope_ids,has_all_location_access) values
  ('${ids.company}','${ids.oldPerson}','{}',false),
  ('${ids.company}','${ids.newPerson}',array['${ids.station}'::uuid],false),
- ('${ids.company}','${ids.areaPerson}',array['${ids.station}'::uuid],false);
+ ('${ids.company}','${ids.areaPerson}',array['${ids.station}'::uuid],false),
+ ('${ids.company}','${ids.hlmPerson}',array['${ids.station}'::uuid],false);
 insert into company_product_memberships(company_id,user_id,product_code,source_system,is_active,location_scope_ids,has_all_location_access)
 select '${ids.company}', '${ids.oldUser}', product, 'designation_policy', true, array['${ids.station}'::uuid], false
 from unnest(array['operations','finance','recruit','workforce']) product;
@@ -96,8 +117,14 @@ insert into hr_reporting_relationships(company_id,subject_assignment_id,manager_
  values ('${ids.company}','${ids.localAssignment}','${ids.oldAssignment}','solid_line',true,current_date-1);
 `);
 
-const migration = readFileSync(new URL("../supabase/migrations/20261024170000_sync_people_station_routing.sql", import.meta.url), "utf8");
-await db.exec(migration);
+const readMigration = (name) =>
+  readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8").replace(/^\uFEFF/, "");
+await db.exec(readMigration("20261024170000_sync_people_station_routing.sql"));
+await db.exec(readMigration("20261028180000_fix_cm_city_vs_clm_cluster.sql"));
+await db.exec(readMigration("20261028193000_ops_reconcile_preserve_company_reporting.sql"));
+const preserveManualPoc = readMigration("20261029191000_preserve_manual_station_poc_when_no_clm.sql");
+await db.exec(preserveManualPoc);
+await db.exec(preserveManualPoc);
 
 async function currentOwner() {
   const result = await db.query(`select assignment_id from station_responsibility_assignments where is_primary=true order by created_at desc,id desc`);
@@ -174,15 +201,48 @@ assert.deepEqual(await currentOwner(), [ids.areaAssignment]);
 assert.deepEqual(await currentManager(), [ids.areaAssignment]);
 assert.equal((await profile(ids.localUser)).reports_to_user_id, ids.areaUser);
 
-// When no current CLM or AOM remains, stale operational routes are cleared
-// instead of silently retaining access for a previous manager.
+// When no current CLM or AOM remains, stale synced CLM/AOM Ops POCs are cleared.
+// Company reporting lines stay owned by People Tree (not wiped by Ops reconcile).
 await db.exec(`delete from people_person_access_scopes where person_id='${ids.areaPerson}'`);
 assert.deepEqual(await currentOwner(), []);
-assert.deepEqual(await currentManager(), []);
-assert.equal((await profile(ids.localUser)).reports_to_user_id, null);
+assert.deepEqual(await currentManager(), [ids.areaAssignment]);
 
 const manualAfter = await db.query(`select location_scope_ids,has_all_location_access from company_product_memberships where user_id=$1 and source_system='manual'`, [ids.newUser]);
 assert.deepEqual(manualAfter.rows, [{ location_scope_ids: [], has_all_location_access: false }]);
 
-console.log("PASS People station routing synchronizes all generated portal scopes, ownership, reporting, removals and offboarding");
+// Manual Head Ops (HLM) POC must survive empty preferred CLM/AOM, including a
+// double-applied reconcile — HO stations are intentionally outside CLM sync.
+await db.exec(`
+insert into station_responsibility_assignments(company_id,station_id,responsibility_role_id,responsibility_code,assignee_user_id,assignee_email,assignment_id,business_line,is_primary,effective_from)
+ values ('${ids.company}','${ids.station}','${ids.role}','station_manager','${ids.hlmUser}','headops@example.com','${ids.hlmAssignment}','other',true,now());
+select public.reconcile_people_operational_routing('${ids.company}'::uuid, array['${ids.station}'::uuid]);
+`);
+assert.deepEqual(await currentOwner(), [ids.hlmAssignment]);
+
+// Ambiguous CLM ownership still clears the Ops POC (including a manual HLM).
+await db.exec(`
+insert into people_person_access_scopes(company_id,person_id,location_scope_ids,has_all_location_access) values
+ ('${ids.company}','${ids.oldPerson}',array['${ids.station}'::uuid],false),
+ ('${ids.company}','${ids.clmTwoPerson}',array['${ids.station}'::uuid],false);
+update hr_engagements set status='active',end_date=null where id='${ids.oldEngagement}';
+insert into hr_user_person_links(company_id,person_id,user_id,status)
+select '${ids.company}','${ids.clmTwoPerson}','${ids.clmTwoUser}','active'
+where not exists (
+  select 1 from hr_user_person_links where person_id='${ids.clmTwoPerson}' and user_id='${ids.clmTwoUser}'
+);
+insert into company_product_memberships(company_id,user_id,product_code,source_system,is_active,location_scope_ids,has_all_location_access)
+select '${ids.company}', '${ids.clmTwoUser}', product, 'designation_policy', true, array['${ids.station}'::uuid], false
+from unnest(array['operations','finance','recruit','workforce']) product
+where not exists (
+  select 1 from company_product_memberships
+  where user_id='${ids.clmTwoUser}' and product_code=product and source_system='designation_policy'
+);
+`);
+assert.deepEqual(await currentOwner(), []);
+
+// Unique CLM still replaces / owns the station after ambiguity is resolved.
+await db.exec(`delete from people_person_access_scopes where person_id='${ids.clmTwoPerson}'`);
+assert.deepEqual(await currentOwner(), [ids.oldAssignment]);
+
+console.log("PASS People station routing synchronizes scopes, ownership, reporting, removals, offboarding, manual HLM preserve and ambiguous clear");
 await db.close();
