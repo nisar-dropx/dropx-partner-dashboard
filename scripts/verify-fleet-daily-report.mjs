@@ -23,7 +23,7 @@ assert.equal(rows[0].mileage, 5);
 assert.equal(rows[0].costPerKm, 20);
 assert.equal(rows[0].fuelTransactions, 2);
 assert.deepEqual(rows[0].fuelSources, ['BPCL', 'IOC']);
-assert.deepEqual(rows[0].fuelBreakdown, [{ provider: 'IOC', litres: 10, amount: 1000, transactions: 1 }, { provider: 'BPCL', litres: 10, amount: 1000, transactions: 1 }]);
+assert.deepEqual(rows[0].fuelBreakdown, [{ provider: 'IOC', litres: 10, amount: 1000, transactions: 1, quantityComplete:true, estimatedLitres:0 }, { provider: 'BPCL', litres: 10, amount: 1000, transactions: 1, quantityComplete:true, estimatedLitres:0 }]);
 assert.equal(rows[1].km, null, 'Missing GPS must not be zero');
 assert.equal(rows[1].litres, null, 'Missing fuel is not measured zero consumption');
 assert.equal(rows[1].mileage, null);
@@ -128,3 +128,6 @@ assert.equal(corrected.km, 38.8);
 assert.equal(corrected.gpsQuality, 'auto_corrected');
 assert.match(p.dailyFleetCsv([corrected]), /GPS filtered/);
 console.log('Fleet daily report: date boundaries, complete ledgers, daily joins, no-data handling, mileage, CSV, sorting, company/location scope and refresh authorization passed.');
+
+assert.equal(build([km],[{...fuel,fuel_quantity:0,rate:100}]).estimatedLitres,10);
+assert.equal(build([km],[{...fuel,fuel_quantity:0,rate:null}]).fuelBreakdown[0].quantityComplete,false);

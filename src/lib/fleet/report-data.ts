@@ -34,7 +34,7 @@ export async function loadDailyReport(auth: AuthorizationContext, from: string, 
   const vehicleNos = vehicles.map(v => v.vehicle_no);
   const [km, fuel, latestKm, latestFuel] = await Promise.all([
     readAllRows(supabaseAdmin.from('fleet_daily_km').select('vehicle_no,movement_date,km,source,point_count,calculated_at,review_status,raw_km,accepted_point_count,rejected_point_count,stationary_point_count,algorithm_version').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('movement_date', from).lte('movement_date', to).order('movement_date').order('id')),
-    readAllRows(supabaseAdmin.from('fleet_fuel_transactions').select('vehicle_no,transaction_date,fuel_quantity,fuel_amount,rate,provider').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('transaction_date', from).lte('transaction_date', to).order('transaction_date').order('id')),
+    readAllRows(supabaseAdmin.from('fleet_fuel_transactions').select('vehicle_no,transaction_date,fuel_quantity,fuel_amount,rate,provider,raw_payload').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('transaction_date', from).lte('transaction_date', to).order('transaction_date').order('id')),
     supabaseAdmin.from('fleet_daily_km').select('movement_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('movement_date', { ascending: false }).limit(1),
     supabaseAdmin.from('fleet_fuel_transactions').select('transaction_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('transaction_date', { ascending: false }).limit(1)
   ]);

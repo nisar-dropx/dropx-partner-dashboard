@@ -1,12 +1,13 @@
 export type ReportVehicle = { vehicle_no: string; station_code: string; model: string; fuel_type: string; status?: string | null };
 export type KmRecord = { vehicle_no: string; movement_date: string; km: number | string | null; source: string; point_count: number | null; calculated_at: string; review_status?: string; raw_km?: number | string | null; accepted_point_count?: number; rejected_point_count?: number; stationary_point_count?: number; algorithm_version?: string };
-export type FuelRecord = { vehicle_no: string; transaction_date: string; fuel_quantity: number | string; fuel_amount: number | string; rate?: number | string | null; provider: string };
+export type FuelRecord = { vehicle_no: string; transaction_date: string; fuel_quantity: number | string; fuel_amount: number | string; rate?: number | string | null; provider: string; raw_payload?: {price_source_url?:string;price_date?:string;price_city?:string;price_fuel_type?:string} };
 export type DailyFleetRow = ReportVehicle & {
   date: string; km: number | null; litres: number | null; fuelAmount: number | null;
   mileage: number | null; costPerKm: number | null; fuelTransactions: number;
   distanceSource: string | null; pointCount: number | null; refreshedAt: string | null;
   fuelSources: string[]; rawKm: number | null; gpsQuality: string | null; acceptedPoints: number | null; rejectedPoints: number | null; stationaryPoints: number | null; dataStatus: 'gps_review' | 'ready' | 'gps_missing' | 'fuel_missing' | 'not_applicable'; provisional: boolean;
-  fuelBreakdown: Array<{ provider: string; litres: number; amount: number; transactions: number }>;
+  estimatedLitres: number; fuelPriceSources: Array<{url:string;date:string;city:string;fuel:string}>;
+  fuelBreakdown: Array<{ provider: string; litres: number; amount: number; transactions: number; quantityComplete:boolean; estimatedLitres:number }>;
 };
 export type DailyFleetReport = {
   from: string; to: string; generatedAt: string; rows: DailyFleetRow[]; vehicles: ReportVehicle[];
@@ -48,15 +49,19 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
     const rank = (item: KmRecord) => (recordedKm(item) !== null ? 2 : 0) + (item.source.toLowerCase() === 'manual' ? 1 : 0);
     if (!previous || rank(row) > rank(previous) || (rank(row) === rank(previous) && row.calculated_at > previous.calculated_at)) kmByDay.set(key, row);
   }
-  const fuelByDay = new Map<string, { litres: number; amount: number; count: number; quantityComplete: boolean; providers: Set<string>; breakdown: Map<string, { litres: number; amount: number; transactions: number }> }>();
+  const fuelByDay = new Map<string, { litres: number; amount: number; count: number; quantityComplete: boolean; estimatedLitres:number; priceSources:Array<{url:string;date:string;city:string;fuel:string}>; providers: Set<string>; breakdown: Map<string, { litres: number; amount: number; transactions: number; quantityComplete:boolean; estimatedLitres:number }> }>();
   for (const row of fuelRows) {
     const key = `${vehicleKey(row.vehicle_no)}|${row.transaction_date}`;
-    const fuel = fuelByDay.get(key) ?? { litres: 0, amount: 0, count: 0, quantityComplete: true, providers: new Set<string>(), breakdown: new Map<string, { litres: number; amount: number; transactions: number }>() };
+    const fuel = fuelByDay.get(key) ?? { litres: 0, amount: 0, count: 0, quantityComplete: true, estimatedLitres:0, priceSources:[], providers: new Set<string>(), breakdown: new Map<string, { litres: number; amount: number; transactions: number; quantityComplete:boolean; estimatedLitres:number }>() };
     const amount = Math.max(0, Number(row.fuel_amount) || 0), rate = Number(row.rate);
     const quantity = Number(row.fuel_quantity) > 0 ? Number(row.fuel_quantity) : rate > 0 && amount > 0 ? amount / rate : 0;
     if (amount > 0 && quantity <= 0) fuel.quantityComplete = false;
+    const estimated = !(Number(row.fuel_quantity)>0)&&quantity>0 ? quantity : 0;
+    fuel.estimatedLitres += estimated;
+    const proof=row.raw_payload;
+    if(estimated&&proof?.price_source_url?.startsWith('https://'))fuel.priceSources.push({url:proof.price_source_url,date:proof.price_date||row.transaction_date,city:proof.price_city||'',fuel:proof.price_fuel_type||''});
     fuel.litres += quantity;
-    fuel.amount += Math.max(0, Number(row.fuel_amount) || 0); const provider = row.provider || 'Unmapped'; const source = fuel.breakdown.get(provider) ?? { litres: 0, amount: 0, transactions: 0 }; source.litres += quantity; source.amount += Math.max(0, Number(row.fuel_amount) || 0); source.transactions += 1; fuel.breakdown.set(provider, source);
+    fuel.amount += Math.max(0, Number(row.fuel_amount) || 0); const provider = row.provider || 'Unmapped'; const source = fuel.breakdown.get(provider) ?? { litres: 0, amount: 0, transactions: 0, quantityComplete:true, estimatedLitres:0 }; source.quantityComplete &&= !(amount>0&&quantity<=0); source.estimatedLitres += estimated; source.litres += quantity; source.amount += Math.max(0, Number(row.fuel_amount) || 0); source.transactions += 1; fuel.breakdown.set(provider, source);
     fuel.count++; fuel.providers.add(row.provider); fuelByDay.set(key, fuel);
   }
   return dateDays(from, to).flatMap(date => vehicles.flatMap(vehicle => {
@@ -69,6 +74,7 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
     return [{ ...vehicle, date, km, litres: liquidFuel && fuel?.quantityComplete ? fuel.litres : null, fuelAmount: fuel?.amount ?? null,
       mileage: liquidFuel && km !== null && fuel && fuel.quantityComplete && fuel.litres > 0 ? km / fuel.litres : null,
       costPerKm: km !== null && km > 0 && fuel ? fuel.amount / km : null,
+      estimatedLitres: fuel?.estimatedLitres??0, fuelPriceSources:fuel?.priceSources??[],
       fuelTransactions: fuel?.count ?? 0, distanceSource: distance?.source ?? null,
       pointCount: distance?.point_count ?? null, refreshedAt: distance?.calculated_at ?? null,
       fuelBreakdown: [...(fuel?.breakdown ?? new Map())].map(([provider, values]) => ({ provider, ...values })),
@@ -96,8 +102,8 @@ export function dailyFleetCsv(rows: DailyFleetRow[]) {
   };
   const number = (value: number | null) => value === null ? '' : Number(value.toFixed(2));
   const data = [
-    ['Date (IST)', 'Vehicle', 'Current station', 'Model', 'Fuel type', 'Distance (km)', 'Fuel purchased (L)', 'Fuel spend (INR)', 'Estimated km/L (distance / fuel purchased)', 'Fuel cost/km (INR)', 'Fuel transactions', 'Data status', 'Day status', 'Distance source', 'GPS points', 'GPS refreshed at', 'Fuel providers', 'GPS quality', 'Raw GPS distance (km, before filtering)', 'Moving/accepted GPS points', 'Invalid/outlier GPS points', 'Stationary GPS points'],
-    ...rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, number(row.km), number(row.litres), number(row.fuelAmount), number(row.mileage), number(row.costPerKm), row.fuelTransactions, row.dataStatus === 'gps_review' ? 'GPS needs review' : row.dataStatus === 'gps_missing' ? 'Distance unavailable' : row.dataStatus === 'fuel_missing' ? 'No fuel recorded' : row.dataStatus === 'not_applicable' ? 'Km/L not applicable' : 'Distance + fuel available', row.provisional ? 'In progress' : 'Completed day', row.distanceSource, row.pointCount, row.refreshedAt, row.fuelSources.join(', '), row.gpsQuality === 'auto_corrected' ? 'GPS filtered' : row.gpsQuality === 'needs_review' ? 'GPS needs review' : '', number(row.rawKm), row.acceptedPoints, row.rejectedPoints, row.stationaryPoints])
+    ['Date (IST)', 'Vehicle', 'Current station', 'Model', 'Fuel type', 'Distance (km)', 'Fuel purchased (L)', 'Fuel spend (INR)', 'Estimated km/L (distance / fuel purchased)', 'Fuel cost/km (INR)', 'Fuel transactions', 'Data status', 'Day status', 'Distance source', 'GPS points', 'GPS refreshed at', 'Fuel providers', 'GPS quality', 'Raw GPS distance (km, before filtering)', 'Moving/accepted GPS points', 'Invalid/outlier GPS points', 'Stationary GPS points', 'Estimated litres', 'Fuel price sources'],
+    ...rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, number(row.km), number(row.litres), number(row.fuelAmount), number(row.mileage), number(row.costPerKm), row.fuelTransactions, row.dataStatus === 'gps_review' ? 'GPS needs review' : row.dataStatus === 'gps_missing' ? 'Distance unavailable' : row.dataStatus === 'fuel_missing' ? 'No fuel recorded' : row.dataStatus === 'not_applicable' ? 'Km/L not applicable' : 'Distance + fuel available', row.provisional ? 'In progress' : 'Completed day', row.distanceSource, row.pointCount, row.refreshedAt, row.fuelSources.join(', '), row.gpsQuality === 'auto_corrected' ? 'GPS filtered' : row.gpsQuality === 'needs_review' ? 'GPS needs review' : '', number(row.rawKm), row.acceptedPoints, row.rejectedPoints, row.stationaryPoints, row.estimatedLitres, row.fuelPriceSources.map(p=>`${p.date} ${p.city} ${p.fuel}: ${p.url}`).join("; ")])
   ];
   return '\uFEFF' + data.map(row => row.map(cell).join(',')).join('\r\n');
 }

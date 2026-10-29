@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict'),fs=require('fs'),ts=require(process.cwd()+'/node_modules/typescript'),crypto=require('node:crypto');
+const load=(file,deps)=>{const exports={};new Function('require','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>deps[id]??require(id),exports);return exports;};
+const parser=load('src/lib/fleet/paytap.ts',{});let persisted=0;const secret='fixture-only-signing-secret',company='fixture-company';
+const webhook=load('src/app/api/fleet/paytap/webhook/[endpointId]/route.ts',{'@/lib/supabase-admin':{supabaseAdmin:{rpc:async(name,args)=>name==='fleet_paytap_secret'?{data:[{company_id:company,signing_secret:secret,mapping:parser.EMPTY_PAYTAP_MAPPING}]}:(persisted++,assert.equal(args.p_company,company),{data:'test'})}},'@/lib/fleet/paytap':parser,'@/lib/fleet/audit-context':{fleetAuditContext:{run:async(c,fn)=>fn()}}});
+const params={params:{endpointId:'11111111-1111-4111-8111-111111111111'}};
+(async()=>{const body=JSON.stringify({type:'webhook.test',eventId:'fixture'}),time=String(Math.floor(Date.now()/1000)),sig=crypto.createHmac('sha256',secret).update(time+'.'+body).digest('hex');const headers={'x-paytap-signature':sig,'x-paytap-timestamp':time,'x-paytap-event-id':'fixture'};
+assert.equal((await webhook.POST(new Request('https://example.invalid/api',{method:'POST',body,headers}),params)).status,200);assert.equal(persisted,1);
+assert.equal((await webhook.POST(new Request('https://example.invalid/api',{method:'POST',body:body+' ',headers}),params)).status,401);
+assert.equal((await webhook.POST(new Request('https://example.invalid/api',{method:'POST',body,headers:{...headers,'x-paytap-event-id':'other'}}),params)).status,400);
+assert.equal((await webhook.POST(new Request('https://example.invalid/api',{method:'POST',body:'x'.repeat(262145),headers}),params)).status,413);assert.equal(persisted,1);
+let auth=null;
+const settings=load('src/app/api/fleet/paytap/settings/route.ts',{'@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>false},'@/lib/fleet-control':{hasActiveFleetMembership:async()=>true},'@/lib/supabase-admin':{supabaseAdmin:{}},'@/lib/fleet/system-log':{withFleetSystemLog:x=>x},'@/lib/fleet/paytap':parser,'@/lib/fleet/fuel-price-worker':{runFuelPriceLookup:async()=>{throw Error('Unexpected external lookup');}},'@/lib/supabase-pagination':{readAllRows:()=>{throw Error('Unexpected database query');}}});
+assert.equal((await settings.GET(new Request('https://example.invalid/settings'))).status,401);
+auth={companyId:company,userId:'fixture',hasAllLocationAccess:false};assert.equal((await settings.GET(new Request('https://example.invalid/settings'))).status,403);
+auth={...auth,isMasterOwner:true,readOnly:true};assert.equal((await settings.POST(new Request('https://example.invalid/settings',{method:'POST',body:'{}'}))).status,403);
+console.log('PayTap routes: signed request only, company selected by endpoint, event ID mismatch, body cap, unsigned/read-only/scoped access denied.');})().catch(e=>{console.error(e);process.exitCode=1});

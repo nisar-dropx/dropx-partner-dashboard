@@ -78,6 +78,10 @@
     {
       "path": "/api/cron/fleet-mapping-mail",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/fleet-fuel-prices",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
