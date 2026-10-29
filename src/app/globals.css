@@ -3205,6 +3205,65 @@ h3 {
 .performance-tabs a { align-items: center; display: inline-flex; gap: 7px; min-height: 34px; padding: 9px 14px; border-radius: 8px; color: #64748b; font-size: 11px; font-weight: 850; }
 .performance-tabs a.active { background: #172033; color: #fff; }
 .performance-tabs a.loading { background: #fff7ed; color: #c2410c; cursor: wait; }
+
+/* Vendor lifecycle */
+.vendor-workspace-tabs { flex-wrap: wrap; margin-bottom: 14px; max-width: 100%; width: max-content; }
+.vendor-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.vendor-kpis article { background: #fff; border: 1px solid #e5eaf0; border-radius: 12px; display: grid; gap: 4px; padding: 16px; }
+.vendor-kpis span { color: #667085; font-size: 11px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
+.vendor-kpis strong { color: #172033; font-size: 25px; line-height: 1; }
+.vendor-kpis small { color: #7b8492; font-size: 11px; }
+.vendor-category-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.vendor-category-card { background: linear-gradient(145deg, #fff, #fafbfc); border: 1px solid #e5eaf0; border-radius: 14px; color: #172033; display: grid; gap: 12px; min-height: 150px; padding: 18px; text-decoration: none; transition: border-color .15s ease, transform .15s ease; }
+.vendor-category-card:hover { border-color: #f36d2e; transform: translateY(-1px); }
+.vendor-category-card span, .vendor-category-card small { color: #7b8492; font-size: 11px; }
+.vendor-category-card h2 { font-size: 17px; margin: 4px 0 0; }
+.vendor-category-card strong { color: #eb4a1a; font-size: 28px; line-height: 1; }
+.vendor-flow { align-items: center; display: flex; flex-wrap: wrap; gap: 9px; }
+.vendor-flow span { background: #f7f8fa; border: 1px solid #e7eaf0; border-radius: 999px; color: #303a49; font-size: 11px; font-weight: 750; padding: 8px 11px; }
+.vendor-flow i { color: #9aa3af; font-style: normal; }
+.vendor-service-intro .panel-body { align-items: center; display: flex; justify-content: space-between; gap: 18px; }
+.vendor-service-intro h2 { margin: 2px 0 4px; }
+.vendor-contract-form .panel-head { align-items: center; }
+.vendor-contract-form .form-actions { align-items: end; display: flex; }
+.vendor-contract-stack { display: grid; gap: 10px; padding: 12px; }
+.vendor-contract-row { border: 1px solid #e5eaf0; border-radius: 12px; overflow: hidden; }
+.vendor-contract-head { align-items: center; display: grid; gap: 14px; grid-template-columns: minmax(220px, 1fr) auto auto; padding: 14px; }
+.vendor-contract-head h3 { font-size: 15px; margin: 2px 0; }
+.vendor-contract-head p { color: #7b8492; font-size: 11px; margin: 0; }
+.vendor-contract-meta { align-items: flex-end; display: grid; gap: 3px; text-align: right; }
+.vendor-contract-meta small { color: #7b8492; font-size: 10px; }
+.vendor-status { border-radius: 999px; display: inline-flex; font-size: 10px; font-weight: 850; justify-content: center; padding: 5px 8px; text-transform: capitalize; white-space: nowrap; }
+.vendor-status.success { background: #e8f8ef; color: #16794b; }
+.vendor-status.warning { background: #fff4dc; color: #9b6100; }
+.vendor-status.danger { background: #ffeded; color: #b52d2d; }
+.vendor-cycle-list { border-top: 1px solid #e5eaf0; display: grid; }
+.vendor-cycle-row { align-items: center; display: grid; gap: 12px; grid-template-columns: minmax(180px, 1fr) minmax(150px, .7fr) minmax(170px, .7fr) minmax(280px, 1.5fr); padding: 11px 14px; }
+.vendor-cycle-row + .vendor-cycle-row { border-top: 1px solid #eef1f4; }
+.vendor-cycle-row > div { display: grid; gap: 3px; }
+.vendor-cycle-row small { color: #7b8492; font-size: 10px; }
+.vendor-invoice-form { align-items: center; display: grid; gap: 7px; grid-template-columns: .8fr 1.2fr 1fr auto; }
+.vendor-invoice-form .field { min-width: 0; }
+.vendor-empty-inline { border-top: 1px solid #eef1f4; color: #7b8492; font-size: 11px; margin: 0; padding: 12px 14px; }
+.vendor-master-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.vendor-master-card { margin: 0; }
+.vendor-frequency-field { border: 1px solid #e1e6ec; border-radius: 9px; display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0; padding: 9px 10px; }
+.vendor-frequency-field legend { color: #657184; font-size: 10px; font-weight: 800; padding: 0 4px; text-transform: uppercase; }
+.vendor-frequency-field label { align-items: center; display: flex; flex-direction: row; font-size: 11px; gap: 5px; }
+
+@media (max-width: 1100px) {
+  .vendor-kpis, .vendor-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vendor-cycle-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .vendor-invoice-form { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .vendor-workspace-tabs { flex-wrap: nowrap; overflow-x: auto; width: 100%; }
+  .vendor-kpis, .vendor-category-grid, .vendor-master-grid { grid-template-columns: 1fr; }
+  .vendor-contract-head, .vendor-cycle-row { grid-template-columns: 1fr; }
+  .vendor-contract-meta { align-items: start; text-align: left; }
+  .vendor-invoice-form { grid-template-columns: 1fr; }
+  .vendor-service-intro .panel-body { align-items: flex-start; flex-direction: column; }
+}
 .performance-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
 .performance-summary-grid article { display: grid; gap: 4px; padding: 15px; border: 1px solid #e8edf3; border-radius: 13px; background: #fff; }
 .performance-summary-grid span { color: #64748b; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
