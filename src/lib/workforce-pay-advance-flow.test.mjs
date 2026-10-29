@@ -8,8 +8,11 @@ const read = (path) => fs.readFileSync(new URL(path, root), "utf8");
 test("workforce advances use one operational step followed by Finance", () => {
   const routing = read("src/lib/payment-advance-approval.ts");
   const migration = read("supabase/migrations/20261027233000_workforce_pay_advance_flow.sql");
-  assert.match(routing, /clusterManagers\[0\] \?\? station\?\.areaOperationsManagers\[0\]/);
+  assert.match(routing, /reportingManagerApprover/);
+  assert.match(routing, /resolvedVia: "reporting_manager"/);
+  assert.match(routing, /stationManagerApprover/);
   assert.match(routing, /step_type: "manager"[\s\S]*step_type: "finance"/);
+  assert.match(routing, /remapPendingPayAdvanceManagerSteps/);
   assert.match(migration, /jsonb_array_length\(p_steps\) <> 2/);
   assert.match(migration, /p_external_reference uuid/);
   assert.match(migration, /'payment_advance_requests',p_external_reference::text/);

@@ -42,7 +42,7 @@ async function decideAdvanceRequest(formData: FormData, decision: "approved" | "
     finish({ error: managed.error.message });
   }
   if (managed.data) {
-    finish({ error: "This request uses the Cluster Manager → Finance workflow. Review it in the DropX One Approval Inbox." });
+    finish({ error: "This request uses the reporting manager → Finance workflow. Review it in the DropX One Approval Inbox." });
   }
 
   const result = await supabaseAdmin!
