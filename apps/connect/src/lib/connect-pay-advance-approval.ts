@@ -7,6 +7,20 @@ export type PayAdvanceApproval = {
   recoveryMode: string; installments: number; reason: string; neededBy: string | null;
 };
 
+export type PayAdvanceReviewDetails = {
+  requestedAt: string | null;
+  submittedBy: string;
+  steps: Array<{ id: string; label: string; status: string; actorName: string | null;
+    actedAt: string | null; note: string | null; approvedAmount: number | null }>;
+  capacity: { outstandingPay: number; maxEligibleAmount: number; committedAdvance: number;
+    eligibilityPercent: number; breakdown: Array<{ month: string; outstanding: number }> };
+  requestLimit: number;
+  advances: Array<{ id: string; reference: string; amount: number; paidAt: string;
+    firstDuePeriod: string; installments: number; evidence: string; bankReference: string | null;
+    recovered: number; reserved: number; waived: number; outstanding: number;
+    deductions: Array<{ id: string; period: string; amount: number; status: string; target: string }> }>;
+};
+
 export function payAdvanceApprovalPayContext(
   workerTypeValue: unknown,
   requestedAmountValue: unknown,
