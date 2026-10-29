@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowLeft, Check, Copy, Download, ImageDown, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
@@ -287,11 +286,17 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()),
     [],
   );
-  const previousDay = shiftBoardDate(payload.businessDate, -1);
-  const dateChoices = useMemo(() => {
-    const set = new Set<string>([istToday, shiftBoardDate(istToday, -1), payload.businessDate, previousDay, ...(payload.dates || [])]);
-    return [...set].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort((a, b) => b.localeCompare(a)).slice(0, 8);
-  }, [istToday, payload.businessDate, payload.dates, previousDay]);
+  /** Quick chips: today + previous two IST days only. Older dates use the picker. */
+  const dateChoices = useMemo(
+    () => [istToday, shiftBoardDate(istToday, -1), shiftBoardDate(istToday, -2)],
+    [istToday],
+  );
+
+  function goToDate(date: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    // Full navigation — App Router soft nav can keep the old server payload for ?date=.
+    window.location.assign(boardHref(date));
+  }
   const tidGroups = useMemo(() => {
     if (!tids) return [];
     const allowed = new Set(dates);
@@ -518,17 +523,19 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         </div>
 
         <div className={s.segment} aria-label="Business date">
-          {dateChoices.map((date) => (
-            <Link
+          {dateChoices.map((date, index) => (
+            <button
               key={date}
-              href={boardHref(date)}
+              type="button"
               aria-current={date === payload.businessDate ? "page" : undefined}
-              title={date === istToday ? "Today" : date === shiftBoardDate(istToday, -1) ? "Previous day" : boardDayLabel(date)}
+              aria-pressed={date === payload.businessDate}
+              title={index === 0 ? "Today" : index === 1 ? "Previous day" : "Two days ago"}
+              onClick={() => goToDate(date)}
             >
               {boardDayLabel(date)}
-              {date === istToday ? <small className={s.dateTag}>Today</small> : null}
-              {date === shiftBoardDate(istToday, -1) && date !== istToday ? <small className={s.dateTag}>Prev</small> : null}
-            </Link>
+              {index === 0 ? <small className={s.dateTag}>Today</small> : null}
+              {index === 1 ? <small className={s.dateTag}>Prev</small> : null}
+            </button>
           ))}
         </div>
 
@@ -536,18 +543,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           className={s.otherDate}
           onSubmit={(event) => {
             event.preventDefault();
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(otherDate)) return;
-            window.location.href = boardHref(otherDate);
+            goToDate(otherDate || payload.businessDate);
           }}
         >
           <label>
             <span className={s.srOnly}>Other date</span>
-            <input type="date" value={otherDate || payload.businessDate} onChange={(e) => setOtherDate(e.target.value)} />
+            <input
+              type="date"
+              value={otherDate || payload.businessDate}
+              onChange={(e) => setOtherDate(e.target.value)}
+            />
           </label>
           <button type="submit">Go</button>
-          {payload.businessDate !== previousDay ? (
-            <Link href={boardHref(previousDay)} className={s.prevDay}>Previous day</Link>
-          ) : null}
         </form>
 
         <div className={s.segment} role="tablist" aria-label="Report">

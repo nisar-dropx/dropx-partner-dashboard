@@ -55,6 +55,7 @@
   text-decoration: none;
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   white-space: nowrap;
 }
 
@@ -79,10 +80,6 @@
   font-weight: 700;
   display: inline-flex;
   align-items: center;
-}
-
-.segment a {
-  gap: 4px;
 }
 
 .dateTag {
