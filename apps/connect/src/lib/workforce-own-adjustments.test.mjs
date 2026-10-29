@@ -131,7 +131,7 @@ test('unbounded or unexpectedly scoped results are rejected',async()=>{
  await assert.rejects(loadOwnAdjustmentLedger(other,account,from,to),/scope/);
 });
 
-function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,routeContext={enabledFrom:null,rows:[],manual:[],rateOverrides:[]}){
+function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,routeContext={enabledFrom:null,rows:[],manual:[],rateOverrides:[]},fetchAdvance=async()=>Response.json({advanceRecoveryAmount:0})){
  const source=readFileSync(new URL('../../app/api/connect/earnings/route.ts',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
@@ -167,7 +167,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,
     hasProviderAttendanceComponents
    }
   };
- new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);
+ new Function('require','exports','fetch',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports,fetchAdvance);
  return module.exports.GET;
 }
 const request=()=>new Request('https://one.example/api/connect/earnings?accountId=person&profileType=workforce&month=2026-09');
@@ -183,7 +183,7 @@ test('route reconciles adjustments without provider mappings and preserves state
  const response=await earningsRoute(db)(request()),body=await response.json();
  assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');
  assert.equal(response.headers.get('vary'),'Cookie');assert.equal(body.earnings.length,0);
- assert.deepEqual(body.summary,{workDays:0,baseAmount:0,additions:200,grossAmount:200,incentiveAmount:0,deductionAmount:25,netAmount:175,lossRecoveryAmount:0,lossRecoveryDeferred:0});
+ assert.deepEqual(body.summary,{workDays:0,baseAmount:0,additions:200,grossAmount:200,incentiveAmount:0,deductionAmount:25,netAmount:175,lossRecoveryAmount:0,lossRecoveryDeferred:0,advanceRecoveryAmount:0});
  assert.equal(body.adjustments.summary.pendingCount,1);
  assert.equal(db.calls.some(q=>['workforce_payroll_items','payment_requests'].includes(q.table)),false);
 });
@@ -264,7 +264,7 @@ test('route reconciles daily incentives and adjustments separately without leaki
  const campaign={id:'campaign',company_id:'company',name:'Approved reward',provider_id:'provider',station_id:'station',designation_id:'DA',metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:45,rate_value:12,flat_amount:0,maximum_amount:null,effective_from:from,effective_to:to,status:'active',approved_at:'2026-08-31T00:00:00Z',owner_note:'PRIVATE'};
  const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:q.table==='workforce_incentive_campaigns'?[campaign]:q.table==='workforce_adjustments'?[row(),row({id:'deduction',adjustment_type:'deduction',amount:25})]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
- assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155,lossRecoveryAmount:0,lossRecoveryDeferred:0});
+ assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155,lossRecoveryAmount:0,lossRecoveryDeferred:0,advanceRecoveryAmount:0});
  assert.equal(body.earnings.reduce((sum,e)=>sum+e.grossAmount,0),980);assert.equal(body.earnings.flatMap(e=>e.daily).reduce((sum,e)=>sum+e.amount,0),980);
  assert.equal(body.incentives.amount,180);assert.equal(body.incentives.campaigns[0].workDays,1);assert.equal(JSON.stringify(body).includes('PRIVATE'),false);
  const currentIndiaDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -348,4 +348,28 @@ test('earnings uses the selected payroll month and includes only own recovery on
  const response=await earningsRoute(db)(request()),body=await response.json();assert.equal(response.status,200,JSON.stringify(body));assert.equal(body.summary.lossRecoveryAmount,50);assert.equal(body.summary.deductionAmount,50);assert.equal(body.summary.netAmount,150);
  db.rpc=async()=>({data:null,error:{message:'PRIVATE DATABASE ERROR'}});
  const failed=await earningsRoute(db)(request());assert.equal(failed.status,400);assert.doesNotMatch(JSON.stringify(await failed.json()),/PRIVATE DATABASE/);
+});
+
+test('earnings includes the canonical advance once for the authenticated worker and selected month',async()=>{
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='workforce_adjustments'?[row()]:[],error:null}));
+ let calls=0;
+ const fetchAdvance=async(url,options)=>{
+  calls++;
+  assert.equal(url.pathname,'/api/connect/advances');
+  assert.equal(url.searchParams.get('accountId'),'person');assert.equal(url.searchParams.get('profileType'),'workforce');
+  assert.equal(url.searchParams.get('earningsMonth'),'2026-09');assert.equal(options.headers.cookie,'session=test');
+  return Response.json({advanceRecoveryAmount:60});
+ };
+ const req=new Request(request(),{headers:{cookie:'session=test'}});
+ const response=await earningsRoute(db,undefined,undefined,undefined,fetchAdvance)(req),body=await response.json();
+ assert.equal(response.status,200);assert.equal(calls,1);assert.equal(body.summary.advanceRecoveryAmount,60);
+ assert.equal(body.summary.deductionAmount,60);assert.equal(body.summary.netAmount,140);
+});
+
+test('earnings fails closed when canonical advances are unavailable or invalid',async()=>{
+ for(const result of [Response.json({error:'Unavailable'},{status:503}),Response.json({})]){
+  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:[],error:null}));
+  const response=await earningsRoute(db,undefined,undefined,undefined,async()=>result)(request());
+  assert.equal(response.status,400);assert.equal('summary' in await response.json(),false);
+ }
 });
