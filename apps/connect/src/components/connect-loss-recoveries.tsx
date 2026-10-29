@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RecoveryDetail, type Recovery } from "./connect-loss-recovery-detail";
+import { RecoveryDetail, monthLabel, type Recovery } from "./connect-loss-recovery-detail";
 
 const money = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 import { ConnectDialog } from "./connect-dialog";
 import styles from "./connect-loss-recoveries.module.css";
-const monthLabel = (value: string) => value;
+
 
 export function ConnectLossRecoveries({
   accountId,
@@ -68,12 +68,13 @@ export function ConnectLossRecoveries({
                 {row.reason} · Shipment ID {row.tid || row.caseKey}
               </strong>
               <small>
-                {monthLabel(row.month)} · {row.stationCode} ·{" "}
+                Loss {monthLabel(row.month)} · {row.stationCode} ·{" "}
                 {row.recoveryMode === "installments"
                   ? `Instalments (${row.installmentCount || "—"})`
                   : "Full recovery"}{" "}
                 · Status {row.status.replaceAll("_", " ")}
               </small>
+              <small><strong>Salary: {row.scheduledFromMonth ? monthLabel(row.scheduledFromMonth) : 'Not recorded'}</strong> · planned start</small>
               <p>
                 Your share {money(row.myShareAmount)} · Deducted {money(row.deducted)} · Outstanding{" "}
                 {money(row.outstanding)}

@@ -40,7 +40,7 @@ export type Recovery = {
 const money = (n: number) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const monthLabel = (value: string) => {
+export const monthLabel = (value: string) => {
   if (!/^\d{4}-\d{2}$/.test(value)) return value;
   return new Date(`${value}-01T12:00:00+05:30`).toLocaleDateString("en-IN", {
     month: "long",
@@ -70,6 +70,8 @@ export function RecoveryDetail({ detail, onClose, payrollAmount, payrollLabel }:
           {payrollAmount != null ? <p className="dx-loss-recovery-detail-note"><strong>{money(payrollAmount)}</strong> included in this {payrollLabel || "payroll"} deduction. This is already included in net pay.</p> : null}
           <dl className="dx-loss-recovery-detail">
             <DetailRow label="Shipment ID" value={detail.tidApproximate ? `${detail.tid} (approximate)` : detail.tid} />
+            <DetailRow label="Salary month · planned start" value={detail.scheduledFromMonth ? monthLabel(detail.scheduledFromMonth) : 'Not recorded'} />
+            {detail.scheduledFromMonth && detail.scheduledFromMonth < new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit'}).format(new Date()) ? <DetailRow label="Earlier salary payroll" value="See the confirmed / draft history below for actual deductions." /> : null}
             <DetailRow label="Loss month" value={monthLabel(detail.month)} />
             <DetailRow label="Case value" value={money(detail.caseAmount)} />
             <DetailRow label="Your share" value={money(detail.myShareAmount)} />
@@ -79,7 +81,7 @@ export function RecoveryDetail({ detail, onClose, payrollAmount, payrollLabel }:
             {detail.waived > 0 ? <DetailRow label="Written off" value={money(detail.waived)} /> : null}
           </dl>
           {detail.status === "redispute_won" ? <p className="dx-loss-recovery-detail-note">Redispute won. Further recovery has stopped. Any earlier deductions remain in your history; this does not record a refund.</p> : detail.status === "redispute_pending" ? <p className="dx-loss-recovery-detail-note">Redispute in progress. Further recovery is paused.</p> : detail.approvalStatus && detail.approvalStatus !== "approved" ? <p className="dx-loss-recovery-detail-note">This assignment is awaiting review and is not a confirmed payroll deduction.</p> : null}
-          {detail.deductions?.length ? <details open><summary>Payroll deduction history · {detail.deductions.length}</summary><dl className="dx-loss-recovery-detail">{detail.deductions.map(d=><DetailRow key={d.key} label={`${monthLabel(d.month)} · ${d.confirmed?"Confirmed":"Draft"}`} value={money(d.amount)}/>)}</dl></details> : null}
+          {detail.deductions?.length ? <details open><summary>Payroll deduction history · {detail.deductions.length}</summary><dl className="dx-loss-recovery-detail">{detail.deductions.map(d=><DetailRow key={d.key} label={`${monthLabel(d.month)} salary · ${d.confirmed?"Confirmed":"Draft"}`} value={money(d.amount)}/>)}</dl></details> : null}
           <details>
             <summary>Recovery plan and reason</summary>
             <dl className="dx-loss-recovery-detail">

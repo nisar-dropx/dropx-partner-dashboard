@@ -5,6 +5,7 @@ import {
   filterLossDebits,
   summarizeLossDebits,
 } from "@/lib/ops-pulse/loss-debit-review";
+import { indiaMonth } from '@/lib/ops-pulse/loss-recovery-queue-policy';
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     if (!auth) return new Response("Access denied", { status: 403 });
     const q = new URL(request.url).searchParams,
       f = {
-        month: q.get("month") || "",
+        month: q.get("month") || "", salaryScope: q.get('salaryScope') || '', currentMonth: indiaMonth(),
         station: q.get("station") || "",
         person: q.get("person") || "",
         designation: q.get("designation") || "",
@@ -36,10 +37,10 @@ export async function GET(request: Request) {
       ]),
     ]);
     add("People", [
-      ["Name", "Details", "Shipments", "Deducted", "Draft payroll"],
-      ...summarizeLossDebits(rows, "person").map((g) => [
+      ["Name", "Details", "Station", "Salary month", "Shipments", "Deducted", "Draft payroll"],
+      ...summarizeLossDebits(rows, "person_month").map((g) => [
         g.label,
-        g.detail,
+        g.detail, g.stations, g.payrollMonth,
         g.shipments,
         g.deducted,
         g.draft,
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
         "Designation",
         "Shipment ID",
         "Loss month",
-        "Debit month",
+        "Salary month",
         "Amount",
         "Status",
       ],
@@ -72,7 +73,7 @@ export async function GET(request: Request) {
     add("Monthly history", [
       ["Payroll month", "People", "Shipments", "Deducted", "Draft payroll"],
       ...summarizeLossDebits(
-        filterLossDebits(all, { ...f, month: "" }),
+        filterLossDebits(all, { ...f, month: "", salaryScope: '' }),
         "month",
       ).map((g) => [g.key, g.people, g.shipments, g.deducted, g.draft]),
     ]);

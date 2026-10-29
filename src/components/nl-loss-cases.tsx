@@ -836,6 +836,7 @@ export function RecoveryForm({
                             {p.employee_code} · {p.designation}{p.station_codes?.length ? ` · ${p.station_codes.join(" / ")}` : ""}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
+                          <small className={deductionPeriod && deductionPeriod < deductionMonths.current_month ? styles.earlierSalary : undefined}>From {deductionPeriod ? monthLabel(deductionPeriod) : 'selected'} salary{deductionPeriod && deductionPeriod < deductionMonths.current_month ? ' · Earlier payroll' : ''}{plan.mode === 'installments' ? ' · first instalment' : ''}</small>
                           {capEnabled && p.pay_detail_access !== "restricted" && selected.includes(p.ref) ? (
                             <small className={p.recovery_limit == null ? styles.pending : styles.payFacts}>
                               {p.recovery_limit == null
