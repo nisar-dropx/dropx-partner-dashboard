@@ -172,7 +172,7 @@ export async function loadRecoveryPayables(
         ),
       )[0] as any;
     const window = windows.find(w => w.employee_ref === person.ref && w.salary_month === month);
-    const departed = !record.is_active || !!record.last_working_date && record.last_working_date < new Date().toISOString().slice(0,10);
+    const departed = !person.is_active || !record.is_active || !!record.last_working_date && record.last_working_date < new Date().toISOString().slice(0,10);
     const normalEmployment = eligibleRecoveryEmployment(record,start,end,policy,!!employeePay);
     const openMonths = availablePayrollMonths(windows,person.ref);
     const unpaidCheck = departed || month < new Date(Date.now()+330*60*1000).toISOString().slice(0,7);
@@ -240,7 +240,7 @@ export async function loadRecoveryPayables(
     if (window) {
       if (!window.payroll_open) payable = 0;
       else if (person.ref.startsWith("workforce:")) payable = payable == null ? null : Math.max(0,payable - Number(window.paid));
-      else payable = window.payable == null ? null : Number(window.payable);
+      else payable = payable == null || window.payable == null ? null : Math.min(payable,Number(window.payable));
     } else if (unpaidCheck) payable = 0;
     if (departed || !normalEmployment) eligible = eligible && !!window?.payroll_open && payable != null && payable > 0;
     if (payable != null && !Number.isFinite(payable)) payable = null;
