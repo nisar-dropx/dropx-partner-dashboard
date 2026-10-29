@@ -578,5 +578,29 @@ eq('Closed payroll removes eligibility',(await one(`select loss_recovery_open_pa
 await mustReject('Closed payroll cannot be reused',departedSave.replace(',0,',',1,'));
 eq('Public callers cannot inspect payroll balances',(await one(`select has_function_privilege('authenticated','loss_recovery_payroll_windows(uuid,text[])','execute') allowed`)).allowed,false);
 
+// October is the configured lower boundary, including otherwise-open unpaid salary.
+const boundarySql=readFileSync('supabase/migrations/20261029190100_loss_payroll_start_boundary.sql','utf8');
+const oldSnapshot=(await one(`select row_to_json(p) snapshot from hr_payroll_run_people p where id='${uid(502)}'`)).snapshot;
+await db.exec(`update hr_payroll_runs set status='calculated' where id='${uid(501)}';
+insert into workforce_payout_publications(company_id,workforce_id,station_id,revision,snapshot,period_start,period_end)
+values('${C}','${W1}','${S}',1,'{"item":{"net_amount":1200}}','2026-09-01','2026-09-30');`);
+await db.exec(boundarySql);await db.exec(boundarySql);
+eq('No People or Workforce window predates configured October boundary',(await db.query(`select * from loss_recovery_payroll_windows('${C}') where salary_month<'2026-10'`)).rows.length,0);
+eq('Earlier unpaid salary alone cannot re-add former People',(await db.query(`select * from loss_recovery_people_station('${C}','${S}') where ref='employee:${uid(11)}'`)).rows.length,0);
+eq('Earlier approved unpaid flag cannot bypass payroll start',(await db.query(`select * from nl_loss_recovery_due('${C}','2026-09','hrms','${uid(501)}')`)).rows.length,0);
+try {await db.query(departedSave.replace(',0,',',1,'));eq('September save must reject',true,false);}
+catch(e){eq('September save states configured cutoff',/from 2026-10 onward only/.test(e.message),true);}
+await db.exec(`insert into hr_payroll_runs(id,company_id,period_start,period_end,status) values('${uid(503)}','${C}','2026-10-01','2026-10-31','calculated');
+insert into hr_payroll_run_people(id,company_id,run_id,worker_type,worker_id,net_pay) values('${uid(504)}','${C}','${uid(503)}','employee','${uid(11)}',3000);
+update hr_engagements set end_date='2026-10-05' where employee_id='${uid(11)}';
+update hr_work_assignments set effective_to='2026-10-05' where engagement_id='${uid(31)}';
+update employees set last_working_date='2026-10-05' where id='${uid(11)}';
+insert into hr_payroll_bank_lines(company_id,run_id,worker_id,status,amount) values('${C}','${uid(503)}','${uid(11)}','paid',1000);`);
+eq('Former staff with October unpaid payroll remain in directory',(await db.query(`select * from loss_recovery_people_station('${C}','${S}') where ref='employee:${uid(11)}'`)).rows.length,1);
+eq('October unpaid amount still excludes paid money',Number((await one(`select payable from loss_recovery_payroll_windows('${C}',array['employee:${uid(11)}']) where salary_month='2026-10'`)).payable),2000);
+eq('October open payroll still selectable',(await one(`select loss_recovery_open_payroll('${C}','employee:${uid(11)}','2026-10') ok`)).ok,true);
+eq('Existing payroll snapshot remains unchanged',(await one(`select row_to_json(p) snapshot from hr_payroll_run_people p where id='${uid(502)}'`)).snapshot,oldSnapshot);
+eq('Boundary patch preserves private RPC permissions',(await one(`select has_function_privilege('authenticated','loss_recovery_payroll_windows(uuid,text[])','execute') allowed`)).allowed,false);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
