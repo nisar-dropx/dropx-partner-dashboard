@@ -81,6 +81,69 @@
   align-items: center;
 }
 
+.segment a {
+  gap: 4px;
+}
+
+.dateTag {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.85;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.otherDate {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.otherDate input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 11px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.otherDate button,
+.prevDay {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.prevDay:hover,
+.otherDate button:hover {
+  background: var(--surface-soft);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -471,11 +534,149 @@
   min-width: 0;
 }
 
+.shareCard {
+  border: 1px solid #d7e2e8;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.shareCardHead {
+  display: grid;
+  gap: 4px;
+  padding: 12px 12px 10px;
+  background: #143447;
+  color: #fff;
+}
+
+.shareCardHead span {
+  color: #8de0d3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.shareCardHead strong {
+  font-size: 15px;
+  letter-spacing: -0.2px;
+}
+
+.shareCardHead small {
+  color: #b7c9d4;
+  font-size: 11px;
+}
+
+.shareCard table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.shareCard th {
+  background: #1f7a4d;
+  color: #fff;
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 11px;
+}
+
+.shareCard th:last-child,
+.shareCard td:last-child {
+  text-align: right;
+}
+
+.shareCard td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #e4ebf0;
+  font-size: 12px;
+}
+
+.shareCard tr:nth-child(even) td {
+  background: #f4f8fa;
+}
+
+.shareCard .shareTotal td {
+  background: #fff4bf;
+  font-weight: 700;
+}
+
 .tidBlock {
   border-top: 1px solid var(--line);
   padding-top: 6px;
   display: grid;
   gap: 6px;
+}
+
+.tidTools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tidTools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.tidGroups {
+  display: grid;
+  gap: 4px;
+}
+
+.tidGroup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d7e2e8;
+  border-radius: 8px;
+  background: #f7fbf9;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tidGroup:hover {
+  background: #eef7f2;
+}
+
+.tidGroup strong {
+  font-size: 12px;
+}
+
+.tidGroup span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tidPlain {
+  display: grid;
+  gap: 2px;
+  max-height: min(52vh, 560px);
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid #e4ebf0;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.tidPlain code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #223642;
 }
 
 .table.tids td:first-child,

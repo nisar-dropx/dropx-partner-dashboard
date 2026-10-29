@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Download, ImageDown, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, ImageDown, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import {
@@ -11,10 +12,12 @@ import {
   collectEddDates,
   dsrHeatColor,
   eddPivot,
+  eddStationTotal,
   filterStationsByRegion,
   groupStationsByRegion,
   heatColor,
   pickupPctColor,
+  shiftBoardDate,
   type StationBoardStation,
   type StationBoardView,
 } from "@/lib/ops-pulse/station-board";
@@ -31,6 +34,7 @@ type Props = {
 };
 
 type BlockBusy = "image" | "share" | null;
+type TidMode = "grouped" | "day";
 
 type TidRow = {
   trackingId: string;
@@ -39,6 +43,36 @@ type TidRow = {
   driverId: string;
   driverName: string;
 };
+
+function groupTidsByDate(rows: TidRow[]): Array<{ date: string; label: string; rows: TidRow[] }> {
+  const map = new Map<string, TidRow[]>();
+  for (const row of rows) {
+    const key = /^\d{4}-\d{2}-\d{2}$/.test(row.edd) ? row.edd : "unknown";
+    const list = map.get(key) ?? [];
+    list.push(row);
+    map.set(key, list);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, items]) => ({
+      date,
+      label: date === "unknown" ? "No EDD" : boardDayLabel(date),
+      rows: items,
+    }));
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand("copy");
+  area.remove();
+}
 
 function asView(value: string | undefined): StationBoardView {
   const key = String(value || "edd").toLowerCase().replace(/[^a-z]/g, "");
@@ -177,7 +211,10 @@ function buildStationShareTable(
       { text: boardDayLabel(d), align: "left" },
       { text: String(row?.cells[d] ?? 0), bold: true, bg: heatColor(row?.cells[d] ?? 0, pivot.max), align: "right" },
     ]);
-    rows.push([{ text: "Grand Total", bold: true, align: "left" }, { text: String(row?.total ?? 0), bold: true, align: "right" }]);
+    rows.push(
+      [{ text: "Window total", bold: true, align: "left", bg: "#fff4bf" }, { text: String(row?.total ?? 0), bold: true, align: "right", bg: "#fff4bf" }],
+      [{ text: "Full backlog", bold: true, align: "left", bg: "#fff4bf" }, { text: String(eddStationTotal(station)), bold: true, align: "right", bg: "#fff4bf" }],
+    );
     return { title: `EDD · ${label}`, subtitle, headers: ["Promised date", "Packages"], rows, footerNote: "Ops Pulse Station board" };
   }
 
@@ -214,7 +251,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [tids, setTids] = useState<TidRow[] | null>(null);
   const [tidsBusy, setTidsBusy] = useState(false);
   const [tidsError, setTidsError] = useState<string | null>(null);
+  const [tidMode, setTidMode] = useState<TidMode>("grouped");
+  const [tidDay, setTidDay] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
+  const [otherDate, setOtherDate] = useState("");
 
   const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
@@ -242,6 +283,25 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   }, [stations]);
 
   const regionLabel = region === "ALL" ? "All regions" : STATION_BOARD_REGIONS.find((r) => r.id === region)?.label ?? region;
+  const istToday = useMemo(
+    () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()),
+    [],
+  );
+  const previousDay = shiftBoardDate(payload.businessDate, -1);
+  const dateChoices = useMemo(() => {
+    const set = new Set<string>([istToday, shiftBoardDate(istToday, -1), payload.businessDate, previousDay, ...(payload.dates || [])]);
+    return [...set].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort((a, b) => b.localeCompare(a)).slice(0, 8);
+  }, [istToday, payload.businessDate, payload.dates, previousDay]);
+  const tidGroups = useMemo(() => {
+    if (!tids) return [];
+    const allowed = new Set(dates);
+    return groupTidsByDate(tids).filter((group) => group.date === "unknown" || allowed.has(group.date));
+  }, [tids, dates]);
+  const dayTids = useMemo(() => {
+    if (!tids || !tidDay) return [];
+    if (tidDay === "unknown") return tids.filter((row) => !/^\d{4}-\d{2}-\d{2}$/.test(row.edd));
+    return tids.filter((row) => row.edd === tidDay);
+  }, [tids, tidDay]);
 
   function syncUrl(nextView: StationBoardView, nextRegion: StationBoardRegionId | "ALL") {
     if (typeof window === "undefined") return;
@@ -251,6 +311,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     if (nextRegion === "ALL") url.searchParams.delete("region");
     else url.searchParams.set("region", nextRegion);
     window.history.replaceState(null, "", url.toString());
+  }
+
+  function boardHref(date: string) {
+    const regionQs = region === "ALL" ? "" : `&region=${region}`;
+    return `/edd/board?date=${encodeURIComponent(date)}&view=${view}${regionQs}`;
   }
 
   async function reloadBoard() {
@@ -368,18 +433,27 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setOpenStation(code);
     setTids(null);
     setTidsError(null);
+    setTidMode("grouped");
+    setTidDay(null);
+    setCopied(false);
   }
 
   function closeStationPanel() {
     setOpenStation(null);
     setTids(null);
     setTidsError(null);
+    setTidMode("grouped");
+    setTidDay(null);
+    setCopied(false);
   }
 
   async function loadTids() {
     if (!selected) return;
     setTidsBusy(true);
     setTidsError(null);
+    setTidMode("grouped");
+    setTidDay(null);
+    setCopied(false);
     try {
       const params = new URLSearchParams({
         station: selected.stationCode,
@@ -395,6 +469,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       setTids(null);
     } finally {
       setTidsBusy(false);
+    }
+  }
+
+  async function copyTids(rows: TidRow[]) {
+    const text = rows.map((row) => row.trackingId).filter(Boolean).join("\n");
+    if (!text) return;
+    try {
+      await copyText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setTidsError("Could not copy tracking IDs.");
     }
   }
 
@@ -432,8 +518,37 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         </div>
 
         <div className={s.segment} aria-label="Business date">
-          <span className={s.dateChip} aria-current="page">{boardDayLabel(payload.businessDate)}</span>
+          {dateChoices.map((date) => (
+            <Link
+              key={date}
+              href={boardHref(date)}
+              aria-current={date === payload.businessDate ? "page" : undefined}
+              title={date === istToday ? "Today" : date === shiftBoardDate(istToday, -1) ? "Previous day" : boardDayLabel(date)}
+            >
+              {boardDayLabel(date)}
+              {date === istToday ? <small className={s.dateTag}>Today</small> : null}
+              {date === shiftBoardDate(istToday, -1) && date !== istToday ? <small className={s.dateTag}>Prev</small> : null}
+            </Link>
+          ))}
         </div>
+
+        <form
+          className={s.otherDate}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(otherDate)) return;
+            window.location.href = boardHref(otherDate);
+          }}
+        >
+          <label>
+            <span className={s.srOnly}>Other date</span>
+            <input type="date" value={otherDate || payload.businessDate} onChange={(e) => setOtherDate(e.target.value)} />
+          </label>
+          <button type="submit">Go</button>
+          {payload.businessDate !== previousDay ? (
+            <Link href={boardHref(previousDay)} className={s.prevDay}>Previous day</Link>
+          ) : null}
+        </form>
 
         <div className={s.segment} role="tablist" aria-label="Report">
           {viewTabs.map(([key, label]) => (
@@ -706,84 +821,159 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             </div>
 
             {view === "creturn" ? (
-              <table className={`${s.table} ${s.stationCard}`}>
-                <tbody>
-                  {CRETURN_DISPLAY.map((status) => (
-                    <tr key={status}>
-                      <td>{CRETURN_SHORT[status]}</td>
-                      <td>{count(selected.board.cReturn[status] ?? 0)}</td>
+              <div className={s.shareCard}>
+                <div className={s.shareCardHead}>
+                  <span>Ops Pulse · Station board</span>
+                  <strong>C-Return · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
+                  <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
+                </div>
+                <table>
+                  <thead>
+                    <tr><th>Status</th><th>Count</th></tr>
+                  </thead>
+                  <tbody>
+                    {CRETURN_DISPLAY.map((status) => (
+                      <tr key={status}>
+                        <td>{CRETURN_SHORT[status]}</td>
+                        <td>{count(selected.board.cReturn[status] ?? 0)}</td>
+                      </tr>
+                    ))}
+                    <tr className={s.shareTotal}>
+                      <td>Grand Total</td>
+                      <td>{count(selected.board.cReturnTotal)}</td>
                     </tr>
-                  ))}
-                  <tr>
-                    <td>Grand Total</td>
-                    <td>{count(selected.board.cReturnTotal)}</td>
-                  </tr>
-                  <tr>
-                    <td>Pickup Done %</td>
-                    <td className={s.heat} style={{ background: pickupPctColor(selected.board.pickupDonePct) }}>{selected.board.pickupDonePct}%</td>
-                  </tr>
-                </tbody>
-              </table>
+                    <tr className={s.shareTotal}>
+                      <td>Pickup Done %</td>
+                      <td>{selected.board.pickupDonePct}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             ) : null}
 
             {view === "edd" ? (
-              <table className={`${s.table} ${s.stationCard}`}>
-                <thead>
-                  <tr><th>Promised date</th><th>Packages</th></tr>
-                </thead>
-                <tbody>
-                  {(dates.length ? dates : collectEddDates([selected], payload.businessDate)).map((d) => {
-                    const value = selected.board.eddByDate[d] ?? 0;
-                    const max = Math.max(...Object.values(selected.board.eddByDate), 1);
-                    return (
-                      <tr key={d}>
-                        <td>{boardDayLabel(d)}</td>
-                        <td className={value ? s.heat : undefined} style={value ? { background: heatColor(value, max) } : undefined}>
-                          {count(value)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr>
-                    <td>Grand Total</td>
-                    <td>{count(Object.values(selected.board.eddByDate).reduce((a, b) => a + b, 0))}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className={s.shareCard}>
+                <div className={s.shareCardHead}>
+                  <span>Ops Pulse · Station board</span>
+                  <strong>EDD · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
+                  <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · last 5 days + upcoming</small>
+                </div>
+                <table>
+                  <thead>
+                    <tr><th>Promised date</th><th>Packages</th></tr>
+                  </thead>
+                  <tbody>
+                    {(dates.length ? dates : collectEddDates([selected], payload.businessDate)).map((d) => {
+                      const value = selected.board.eddByDate[d] ?? 0;
+                      const max = Math.max(...dates.map((day) => selected.board.eddByDate[day] ?? 0), 1);
+                      return (
+                        <tr key={d}>
+                          <td>{boardDayLabel(d)}</td>
+                          <td className={value ? s.heat : undefined} style={value ? { background: heatColor(value, max) } : undefined}>
+                            {count(value)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className={s.shareTotal}>
+                      <td>Window total</td>
+                      <td>{count(dates.reduce((sum, d) => sum + (selected.board.eddByDate[d] ?? 0), 0))}</td>
+                    </tr>
+                    <tr className={s.shareTotal}>
+                      <td>Full backlog</td>
+                      <td>{count(eddStationTotal(selected))}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             ) : null}
 
             {view === "dsr" || view === "zero" ? (
-              <table className={`${s.table} ${s.zero} ${s.stationCard}`}>
-                <thead>
-                  <tr>
-                    <th>DA</th><th>Del</th><th>Fail</th><th>Rej</th><th>OOR</th><th>Total</th><th>DSR%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
-                    <tr key={da.driverId}>
-                      <td title={da.driverName || da.driverId}>{da.driverName || da.driverId}</td>
-                      <td>{da.delivered}</td>
-                      <td>{da.failed || 0}</td>
-                      <td>{da.rejected || 0}</td>
-                      <td>{da.oor || 0}</td>
-                      <td>{da.total}</td>
-                      <td className={s.heat} style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</td>
+              <div className={s.shareCard}>
+                <div className={s.shareCardHead}>
+                  <span>Ops Pulse · Station board</span>
+                  <strong>{view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                  <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
+                </div>
+                <table className={s.zero}>
+                  <thead>
+                    <tr>
+                      <th>DA</th><th>Del</th><th>Fail</th><th>Rej</th><th>OOR</th><th>Total</th><th>DSR%</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
+                      <tr key={da.driverId}>
+                        <td title={da.driverName || da.driverId}>{da.driverName || da.driverId}</td>
+                        <td>{da.delivered}</td>
+                        <td>{da.failed || 0}</td>
+                        <td>{da.rejected || 0}</td>
+                        <td>{da.oor || 0}</td>
+                        <td>{da.total}</td>
+                        <td className={s.heat} style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : null}
 
             {tidsError ? <p className={s.error}>{tidsError}</p> : null}
             {tids ? (
               <div className={s.tidBlock}>
                 <div className={s.panelHead}>
-                  <h3>Tracking IDs · {tids.length.toLocaleString("en-IN")}</h3>
-                  <span>{view === "creturn" ? "C-Return" : view === "edd" ? "EDD backlog" : view === "zero" ? "Zero-delivery DAs" : "DSR"}</span>
+                  <h3>
+                    {tidMode === "day" && tidDay
+                      ? `TIDs · ${tidDay === "unknown" ? "No EDD" : boardDayLabel(tidDay)} · ${dayTids.length.toLocaleString("en-IN")}`
+                      : `Tracking IDs · ${tids.length.toLocaleString("en-IN")}`}
+                  </h3>
+                  <div className={s.tidTools}>
+                    {tidMode === "day" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTidMode("grouped");
+                          setTidDay(null);
+                          setCopied(false);
+                        }}
+                      >
+                        <ArrowLeft size={12} /> All dates
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void copyTids(tidMode === "day" ? dayTids : tids)}
+                    >
+                      {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy TIDs"}
+                    </button>
+                  </div>
                 </div>
                 {!tids.length ? (
                   <p className={s.empty}>No tracking IDs for this station yet. Try Refresh 7d.</p>
+                ) : tidMode === "day" ? (
+                  <div className={s.tidPlain}>
+                    {dayTids.map((row) => (
+                      <code key={row.trackingId}>{row.trackingId}</code>
+                    ))}
+                  </div>
+                ) : view === "edd" ? (
+                  <div className={s.tidGroups}>
+                    {tidGroups.map((group) => (
+                      <button
+                        key={group.date}
+                        type="button"
+                        className={s.tidGroup}
+                        onClick={() => {
+                          setTidMode("day");
+                          setTidDay(group.date);
+                          setCopied(false);
+                        }}
+                      >
+                        <strong>{group.label}</strong>
+                        <span>{group.rows.length.toLocaleString("en-IN")} TIDs</span>
+                      </button>
+                    ))}
+                  </div>
                 ) : (
                   <div className={s.scroll}>
                     <table className={`${s.table} ${s.tids}`}>
@@ -791,8 +981,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <tr>
                           <th>TID</th>
                           <th>Status</th>
-                          {view === "edd" ? <th>EDD</th> : null}
-                          {view !== "edd" && view !== "creturn" ? <th>DA</th> : null}
+                          {view !== "creturn" ? <th>DA</th> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -800,8 +989,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           <tr key={row.trackingId}>
                             <td>{row.trackingId}</td>
                             <td>{row.status || "—"}</td>
-                            {view === "edd" ? <td>{row.edd ? boardDayLabel(row.edd) : "—"}</td> : null}
-                            {view !== "edd" && view !== "creturn" ? <td>{row.driverName || row.driverId || "—"}</td> : null}
+                            {view !== "creturn" ? <td>{row.driverName || row.driverId || "—"}</td> : null}
                           </tr>
                         ))}
                       </tbody>

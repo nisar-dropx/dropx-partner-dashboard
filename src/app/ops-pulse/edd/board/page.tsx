@@ -24,8 +24,9 @@ export default async function StationBoardPage({
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
-  // Station board is always today's IST business date (Excel station reports day).
-  const date = todayKolkata();
+  const requested = String(searchParams?.date ?? "").trim();
+  const today = todayKolkata();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : today;
 
   let error: string | null = null;
   let payload: LoadFlashBoardNetwork | null = null;

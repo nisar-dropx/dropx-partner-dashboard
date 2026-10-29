@@ -158,19 +158,35 @@ export function dsrHeatColor(pct: number): string {
   return heatColor(t * 100, 100);
 }
 
+/** Shift a YYYY-MM-DD by N calendar days (UTC date math — safe for IST board dates). */
+export function shiftBoardDate(date: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  const utc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) + days * 86400000;
+  const d = new Date(utc);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /**
- * EDD heatmap columns: every promised date present in the ageing pivot
- * (matches Station Reports.xlsm), sorted ascending. Empty maps fall back to
- * the business date alone so the table still renders.
+ * EDD heatmap columns: last `pastDays` calendar days ending on the business
+ * date (default 5 = today + 4 prior), plus every upcoming promised date that
+ * still has packages. Older backlog dates are omitted from the grid.
  */
-export function collectEddDates(stations: StationBoardStation[], businessDate: string): string[] {
+export function collectEddDates(stations: StationBoardStation[], businessDate: string, pastDays = 5): string[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return [];
+  const windowStart = shiftBoardDate(businessDate, -(Math.max(1, pastDays) - 1));
   const set = new Set<string>();
+  for (let i = Math.max(1, pastDays) - 1; i >= 0; i--) set.add(shiftBoardDate(businessDate, -i));
   for (const station of stations) {
     for (const [date, count] of Object.entries(station.board.eddByDate)) {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number(count) > 0) set.add(date);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !(Number(count) > 0)) continue;
+      if (date > businessDate) set.add(date);
+      else if (date >= windowStart) set.add(date);
     }
   }
-  if (!set.size && /^\d{4}-\d{2}-\d{2}$/.test(businessDate)) set.add(businessDate);
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 

@@ -57,7 +57,20 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
     },
   ];
   const dates = collectEddDates(stations, "2026-10-29");
-  assert.deepEqual(dates, ["2026-10-29", "2026-10-30"]);
+  assert.deepEqual(dates, ["2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"]);
+  const oldBoard = normalizeBoard({
+    eddByDate: { "2026-09-15": 9, "2026-10-28": 2, "2026-11-02": 4 },
+    cReturn: {},
+    cReturnTotal: 0,
+    pickupDone: 0,
+    pickupDonePct: 0,
+    daDsr: [],
+    zeroDeliveries: 0,
+  });
+  assert.deepEqual(
+    collectEddDates([{ stationCode: "QLDA", hasSnapshot: true, fetchedAt: null, businessDate: "2026-10-30", board: oldBoard }], "2026-10-30"),
+    ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-11-02"],
+  );
   const pivot = eddPivot(stations, ["2026-10-29", "2026-10-30"]);
   assert.equal(pivot.grandTotal, 19);
   assert.equal(pivot.columnTotals["2026-10-29"], 16);
