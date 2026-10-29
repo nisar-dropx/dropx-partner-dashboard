@@ -10,6 +10,14 @@ export const CRETURN_DISPLAY = [
   "UNPICKUPABLE",
 ] as const;
 
+/** Excel rule: these Amazon states roll into PICKUP_DONE on the C-Return pivot. */
+export const CRETURN_PICKED_UP_BUCKET = new Set([
+  "PICKUP_DONE",
+  "DELIVERED",
+  "READY_FOR_FC_RETURN",
+  "DEPARTED_FOR_FC",
+]);
+
 /** Short labels for compact C-Return tables / WhatsApp images. */
 export const CRETURN_SHORT: Record<(typeof CRETURN_DISPLAY)[number], string> = {
   AT_STATION: "At station",
@@ -67,7 +75,15 @@ export type StationBoardNetwork = {
   run: { id: string; status: string; stationsTotal: number; stationsDone: number; stationsOk: number; stationsFailed: number; startedAt: string; finishedAt: string | null } | null;
 };
 
-export type StationBoardView = "edd" | "creturn" | "zero";
+export type StationBoardView = "edd" | "creturn" | "dsr" | "zero";
+
+/** Soft ink-friendly tint for Pickup % (avoid washed yellow). */
+export function pickupPctColor(pct: number): string {
+  if (pct >= 80) return "#d9f0e3";
+  if (pct >= 50) return "#e7f3ec";
+  if (pct > 0) return "#f3ece2";
+  return "#f1e8e6";
+}
 
 export function emptyBoard(): StationBoardPayload {
   return { eddByDate: {}, cReturn: {}, cReturnTotal: 0, pickupDone: 0, pickupDonePct: 0, daDsr: [], zeroDeliveries: 0 };
@@ -142,26 +158,20 @@ export function dsrHeatColor(pct: number): string {
   return heatColor(t * 100, 100);
 }
 
-function shiftYmd(date: string, days: number): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!match) return date;
-  const utc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) + days * 86400000;
-  const d = new Date(utc);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /**
- * EDD heatmap columns: only the last 4 calendar days ending on the selected
- * business date (Excel compact view — not the full promised-date backlog).
+ * EDD heatmap columns: every promised date present in the ageing pivot
+ * (matches Station Reports.xlsm), sorted ascending. Empty maps fall back to
+ * the business date alone so the table still renders.
  */
-export function collectEddDates(_stations: StationBoardStation[], businessDate: string, days = 4): string[] {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return [];
-  const out: string[] = [];
-  for (let i = days - 1; i >= 0; i--) out.push(shiftYmd(businessDate, -i));
-  return out;
+export function collectEddDates(stations: StationBoardStation[], businessDate: string): string[] {
+  const set = new Set<string>();
+  for (const station of stations) {
+    for (const [date, count] of Object.entries(station.board.eddByDate)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number(count) > 0) set.add(date);
+    }
+  }
+  if (!set.size && /^\d{4}-\d{2}-\d{2}$/.test(businessDate)) set.add(businessDate);
+  return [...set].sort((a, b) => a.localeCompare(b));
 }
 
 /** Grand total for EDD rows still uses the full promised-date map, not only the 4 visible days. */
@@ -273,7 +283,7 @@ export function stationBoardSheets(
     });
   }
 
-  if (view === "zero" || view === "full") {
+  if (view === "dsr" || view === "full") {
     sheets.push({
       name: "DA DSR",
       rows: stations.flatMap((station) =>
@@ -292,6 +302,9 @@ export function stationBoardSheets(
         })),
       ),
     });
+  }
+
+  if (view === "zero" || view === "full") {
     sheets.push({
       name: "Zero deliveries",
       rows: stations.flatMap((station) =>
@@ -316,7 +329,12 @@ export function stationBoardSheets(
 }
 
 export function stationBoardFilename(date: string, view: StationBoardView | "full", scope = "") {
-  const slug = view === "full" ? "all" : view === "creturn" ? "c-return" : view === "zero" ? "zero-deliveries" : "edd";
+  const slug =
+    view === "full" ? "all"
+      : view === "creturn" ? "c-return"
+        : view === "dsr" ? "da-dsr"
+          : view === "zero" ? "zero-deliveries"
+            : "edd";
   const suffix = scope.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
   return `station-board-${date}-${slug}${suffix ? `-${suffix}` : ""}.xlsx`;
 }

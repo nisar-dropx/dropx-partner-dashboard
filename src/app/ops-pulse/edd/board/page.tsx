@@ -24,8 +24,8 @@ export default async function StationBoardPage({
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
-  const requested = String(searchParams?.date ?? "").trim();
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : todayKolkata();
+  // Station board is always today's IST business date (Excel station reports day).
+  const date = todayKolkata();
 
   let error: string | null = null;
   let payload: LoadFlashBoardNetwork | null = null;
@@ -45,7 +45,7 @@ export default async function StationBoardPage({
         <PageHead
           eyebrow="Ops Pulse · Station board"
           title="Live performance"
-          subtitle="Compact EDD, C-Return and zero-delivery boards by region — same hourly Ops Live refresh, Excel download and WhatsApp-ready images."
+          subtitle="EDD, C-Return, DSR and zero-delivery boards by station — hourly Ops Live refresh, Excel, WhatsApp images and tracking IDs."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />

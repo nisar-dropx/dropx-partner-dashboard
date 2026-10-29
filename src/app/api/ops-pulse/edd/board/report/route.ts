@@ -15,7 +15,7 @@ import { compressedWorkbookResponse } from "@/lib/report-workbook";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VIEWS = new Set<StationBoardView | "full">(["edd", "creturn", "zero", "full"]);
+const VIEWS = new Set<StationBoardView | "full">(["edd", "creturn", "dsr", "zero", "full"]);
 const REGIONS = new Set<StationBoardRegionId | "ALL">(["ALL", "KL", "AP", "ODCG", "OTHER"]);
 
 export async function GET(request: Request) {
