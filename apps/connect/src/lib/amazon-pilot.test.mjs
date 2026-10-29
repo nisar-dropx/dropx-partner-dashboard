@@ -35,7 +35,7 @@ test('associate action links are cleaned and restricted to Amazon invitation or 
 test('activation-only registration is reachable and submits to beta draft storage',()=>{
  const flow=readFileSync(new URL('../components/connect-login-flow.tsx',import.meta.url),'utf8');
  const profile=readFileSync(new URL('../components/connect-profile-app.tsx',import.meta.url),'utf8');
- assert.match(flow,/account\.activationOnly && next !== "activation" && next !== "profile"/);
+ assert.match(flow,/setupOnly\(account\) && next !== "activation" && next !== "profile"/);
  assert.match(flow,/!\(account\.activationOnly && next === "activation"\)/);
  assert.match(flow,/>Registration<\/button>/);
  assert.match(profile,/if \(account\.activationOnly\)[\s\S]*?_beta_status = "submitted"[\s\S]*?fetch\("\/api\/connect\/profile-draft"/);
@@ -70,7 +70,7 @@ test('isolated email pilot is visible without converting an active Workforce acc
  assert.match(auth,/const isolatedPilotAccounts/);
  assert.match(auth,/return the canonical account list unchanged/);
  assert.doesNotMatch(auth,/Amazon onboarding profiles are temporarily unavailable/);
- assert.match(auth,/role: "Amazon onboarding · Beta"/);
+ assert.match(auth,/role: betaWorkspaceActive \? "Amazon associate · Beta" : "Amazon onboarding · Beta"/);
  assert.match(auth,/activationOnly: true,[\s\S]*onboardingBeta: true/);
  assert.doesNotMatch(auth,/emailPilot\.data\)\{activationOnly=true/);
  assert.match(flow,/account\.activationOnly \|\| account\.onboardingBeta/);

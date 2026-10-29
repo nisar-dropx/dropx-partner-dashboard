@@ -27,6 +27,8 @@ import { ConnectMyRequests } from "./connect-my-requests";
 import { ConnectWorkforcePayments } from "./connect-workforce-payments";
 import { ConnectWorkforceWork } from "./connect-workforce-work";
 import { ConnectPeopleWorkspace } from "./connect-people-workspace";
+import { betaWorkspacePageAllowed } from "../lib/beta-workspace-pages";
+import { ConnectBetaWorkspace } from "./connect-beta-workspace";
 import { ConnectBetaInbox } from "./connect-beta-inbox";
 import { isIsolatedAmazonOtpAccount } from "../lib/beta-amazon-otp";
 import { ConnectBetaJourneyShell } from "./connect-beta-journey-shell";
@@ -80,6 +82,7 @@ const biometricEnabledOnDevice = () =>
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
+const setupOnly = (account?: AppAccount | null) => Boolean(account?.activationOnly && !account.betaWorkspaceActive);
 const defaultPageAccess: DropxOnePageCode[] = ["dashboard", "profile", "attendance", "roster", "leave", "settings"];
 const isManagerAccount = (account: AppAccount | null) => account?.profileType === "user";
 const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
@@ -88,7 +91,7 @@ const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
 const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const allowed = (account: AppAccount | null, page: DropxOnePageCode) =>
-  !account?.activationOnly && (requiredDropxOnePageCodes.includes(page) ||
+  account?.activationOnly ? betaWorkspacePageAllowed(account,page) : (requiredDropxOnePageCodes.includes(page) ||
   (page === "documents" && peopleDocumentsAvailable(account)) ||
   (page === "performance" && (account?.profileType === "employee" || account?.profileType === "contractor")) ||
   (account?.pageAccess ?? defaultPageAccess).includes(page));
@@ -106,7 +109,7 @@ const workforceWorkAvailable = (account: AppAccount | null) => Boolean(
 );
 
 function landingPage(account: AppAccount): Step {
-  if (account.activationOnly) return "activation";
+  if (setupOnly(account)) return "activation";
   if (!active(account)) return "profile";
   if (isWorkforceWorkspace(account)) return "dashboard";
   if (allowed(account, "dashboard")) return "dashboard";
@@ -225,7 +228,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     }
     const selected = resolveConnectRouteAccount(rows, selectedAccountKey, selectedAccountId);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
-    const destination = selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts";
+    const destination = selected ? (selected.betaWorkspaceActive && pathname === "/activation" && searchParams.get("history") !== "1" ? "dashboard" : stepFromPath(pathname) ?? landingPage(selected)) : "accounts";
+    if(selected?.betaWorkspaceActive && destination === "dashboard" && pathname === "/activation")router.replace(connectAccountRoute("/dashboard",selected));
     if (destination === "wfh" || destination === "leave") setLeaveSection(leaveRouteState(destination).section);
     setStep(destination === "wfh" ? "leave" : destination);
   }
@@ -285,8 +289,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     notificationAccount.current = account ? accountKey(account) : "";
     setNotifications([]); setDashboardNotices([]); setOpenedNotice(null); setUnreadNotifications(0);
     setConnectUnreadCount(0); setConnectTarget({ caseId: "", announcementId: "" });
-    if (account) void loadNotifications(false);
-    if (!account) return;
+    if (account && !isIsolatedAmazonOtpAccount(account)) void loadNotifications(false);
+    if (!account || isIsolatedAmazonOtpAccount(account)) return;
     const refresh = () => { if (document.visibilityState === "visible") void loadNotifications(false); };
     const timer = window.setInterval(refresh, 60_000);
     window.addEventListener("focus", refresh);
@@ -312,7 +316,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     return () => { cancelled = true; window.clearTimeout(timeout); controller.abort(); };
   }, [account?.id, account?.companyId, account?.profileType, account?.workspace, account?.pageAccess, reporteeAttempt]);
   useEffect(() => {
-    if (userPreview || !account || ["mobile", "pin", "otp", "createPin", "unlock", "accounts"].includes(step)) return;
+    if (userPreview || !account || isIsolatedAmazonOtpAccount(account) || ["mobile", "pin", "otp", "createPin", "unlock", "accounts"].includes(step)) return;
     const key = `${account.profileType}:${account.id}:${step}`;
     if (lastLoggedScreen.current === key) return;
     lastLoggedScreen.current = key;
@@ -333,7 +337,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     }).catch(() => undefined);
   }, [account, step, userPreview]);
   useEffect(() => {
-    if (!account || userPreview) return;
+    if (!account || userPreview || isIsolatedAmazonOtpAccount(account)) return;
     const send = (eventCode: string, action: string, metadata: Record<string, string>) => {
       void fetch("/api/connect/event-log", {
         method: "POST",
@@ -637,9 +641,39 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     router.push(urlFor(destination, next));
     pendingApprovalSection.current = null;
   }
+  useEffect(() => {
+    if(!account || !isIsolatedAmazonOtpAccount(account))return;
+    let disposed=false,busy=false;
+    const controller=new AbortController(), key=accountKey(account), wasActive=Boolean(account.betaWorkspaceActive);
+    const refresh=async()=>{
+      if(busy||document.visibilityState!=="visible")return;
+      busy=true;
+      try {
+        const response=await fetch("/api/connect/auth/session",{cache:"no-store",signal:controller.signal});
+        if(!response.ok)return;
+        const payload=await response.json();
+        if(disposed)return;
+        if(!payload.authenticated){setAccounts([]);setAccount(null);setStep("mobile");return;}
+        const rows:AppAccount[]=payload.accounts??[], updated=rows.find(row=>accountKey(row)===key);
+        setAccounts(rows);
+        if(!updated){setAccount(null);setStep("accounts");router.replace("/accounts");return;}
+        setAccount(updated);
+        if(Boolean(updated.betaWorkspaceActive)!==wasActive){
+          const destination=updated.betaWorkspaceActive?"dashboard":"activation";
+          setStep(destination);router.replace(connectAccountRoute(routeForStep[destination]!,updated));
+        }
+      }catch{/* Preserve the last screen during a network outage; reads remain server-authorised. */}
+      finally{busy=false;}
+    };
+    const timer=window.setInterval(refresh,30000);
+    window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);
+    return()=>{disposed=true;controller.abort();window.clearInterval(timer);window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh);};
+  },[account?.id,account?.companyId,account?.profileType,account?.betaWorkspaceActive,router]);
+
   function urlFor(next: Step, targetAccount = account) {
     const route = routeForStep[next] ?? "/accounts";
-    return connectAccountRoute(route, targetAccount, requestedApprovalSection ?? pendingApprovalSection.current);
+    const url=connectAccountRoute(route, targetAccount, requestedApprovalSection ?? pendingApprovalSection.current);
+    return next === "activation" && targetAccount?.betaWorkspaceActive ? `${url}${url.includes("?")?"&":"?"}history=1` : url;
   }
   function open(next: Step, nextAttendanceFilter: AttendanceFilter = "all") {
     setDrawer(false); setProfileMenu(false);
@@ -656,7 +690,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       if (pathname !== "/accounts") router.replace("/accounts");
       return;
     }
-    if (account.activationOnly && next !== "activation" && next !== "profile" && next !== "accounts" && !(next === "betaInbox" && isIsolatedAmazonOtpAccount(account))) {
+    if (setupOnly(account) && next !== "activation" && next !== "profile" && next !== "accounts" && !(next === "betaInbox" && isIsolatedAmazonOtpAccount(account))) {
       setStep("activation");
       if (pathname !== "/activation") router.replace(urlFor("activation"));
       return;
@@ -789,7 +823,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </div>
       <nav>
         <small className="dx-nav-label">Workspace</small>
-        {account.activationOnly ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Work setup</button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />Registration</button>:null}</> : isWorkforceWorkspace(account) ? <>
+        {setupOnly(account) ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Work setup</button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />Registration</button>:null}</> : isWorkforceWorkspace(account) ? <>
           <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Home</button>
           {account.onboardingBeta ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Amazon setup <small>Beta</small></button> : null}
           {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><CreditCard />Payments</button> : null}
@@ -850,7 +884,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </section>
       <nav>
         {isIsolatedAmazonOtpAccount(account) ? <button onClick={() => open("betaInbox")}><Mail />Mail inbox<ChevronRight /></button> : null}
-        {account.activationOnly ? <><button onClick={() => open("activation")}><ShieldCheck />Work setup<ChevronRight /></button>{!active(account)?<button onClick={() => open("profile")}><UserRound />Registration<ChevronRight /></button>:null}</> : isWorkforceWorkspace(account) ? <>
+        {setupOnly(account) ? <><button onClick={() => open("activation")}><ShieldCheck />Work setup<ChevronRight /></button>{!active(account)?<button onClick={() => open("profile")}><UserRound />Registration<ChevronRight /></button>:null}</> : isWorkforceWorkspace(account) ? <>
           <button onClick={() => open("dashboard")}><Gauge />Home<ChevronRight /></button>
           {account.onboardingBeta ? <button onClick={() => open("activation")}><ShieldCheck />Amazon setup <small>Beta</small><ChevronRight /></button> : null}
           {workforcePaymentsAvailable(account) ? <button onClick={() => open("payments")}><CreditCard />Payments<ChevronRight /></button> : null}
@@ -908,18 +942,19 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
       {error && !(isolatedBetaJourney && error === "Complete the required work setup to unlock this workspace.") ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
       {step === "accounts" ? <section className="dx-accounts">{accounts.map((row) => <button aria-label={`Open ${row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce" : "People")} account: ${row.name || row.reference || "account"}`} className={isWorkforceWorkspace(row) ? "workforce" : "people"} key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.name || row.reference}</strong><em>{row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce workspace" : "People workspace")} · {row.role || "-"}</em><small>{row.companyName || "-"}{row.reference ? ` · ${row.reference}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
-      {!userPreview && account && active(account) && allowed(account, "attendance") ? (
+      {!userPreview && !isolatedBetaJourney && account && active(account) && allowed(account, "attendance") ? (
         <AttendanceLocationMonitor account={account} />
       ) : null}
-      {!userPreview && account ? <ConnectNativeBridge account={account} /> : null}
+      {!userPreview && !isolatedBetaJourney && account ? <ConnectNativeBridge account={account} /> : null}
       <PullToRefresh />
+      {isolatedBetaJourney && account?.betaWorkspaceActive && ["dashboard","work","attendance","payments","earnings"].includes(step) ? <ConnectBetaJourneyShell account={account} registration={false}><ConnectBetaWorkspace account={account} view={step === "work" || step === "attendance" ? "work" : step === "payments" || step === "earnings" ? "payments" : "home"} onOpen={open}/></ConnectBetaJourneyShell> : null}
       {step === "dashboard" && account ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}
       {openedNotice ? <ConnectNoticeDialog notice={openedNotice} onClose={() => setOpenedNotice(null)} onContinue={() => { navigateNotification(openedNotice); setOpenedNotice(null); }} /> : null}
-      {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} />}</ConnectBetaJourneyShell> : null}
+      {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} onHome={()=>open("dashboard")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} />}</ConnectBetaJourneyShell> : null}
       {step === "betaInbox" && account && isIsolatedAmazonOtpAccount(account) ? <ConnectBetaJourneyShell account={account} registration={false}><ConnectBetaInbox key={accountKey(account)} account={account} /></ConnectBetaJourneyShell> : null}
-      {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
+      {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} onHome={()=>open("dashboard")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
-      {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
+      {step === "dashboard" && account && !isolatedBetaJourney && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "salary" && account && canViewInterimSalary(account) ? <ConnectInterimSalary key={accountKey(account)} account={account} onDocuments={() => open("documents")} onAttendance={allowed(account, "attendance") ? () => open("attendance") : undefined} /> : null}
@@ -932,11 +967,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         <button onClick={() => setReporteeAttempt((attempt) => attempt + 1)}>Retry approval access</button>
       </section> : null}
       {step === "advances" && account && sharedSelfService(account) && allowed(account, "advances") ? <ConnectAdvances account={account} /> : null}
-      {step === "payments" && account && workforcePaymentsAvailable(account) ? <ConnectWorkforcePayments account={account} /> : null}
-      {step === "work" && account && workforceWorkAvailable(account) ? <ConnectWorkforceWork account={account} /> : null}
+      {step === "payments" && account && !isolatedBetaJourney && workforcePaymentsAvailable(account) ? <ConnectWorkforcePayments account={account} /> : null}
+      {step === "work" && account && !isolatedBetaJourney && workforceWorkAvailable(account) ? <ConnectWorkforceWork account={account} /> : null}
       {step === "refer" && account && allowed(account, "refer_earn") ? <ConnectReferEarn account={account} /> : null}
       {step === "reimbursements" && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <ConnectReimbursements account={account} /> : null}
-      {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} initialFilter={attendanceFilter} /> : null}
+      {step === "attendance" && account && !isolatedBetaJourney && allowed(account, "attendance") ? <ConnectAttendance account={account} initialFilter={attendanceFilter} /> : null}
       {step === "roster" && account && allowed(account, "roster") ? <ConnectRoster account={account} /> : null}
       {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
       {step === "lop" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
@@ -953,9 +988,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     </main>}
     {loggedIn && account ? <nav aria-label="Primary navigation" className="dx-mobile-nav">
       {isIsolatedAmazonOtpAccount(account) ? <button aria-current={step === "betaInbox" ? "page" : undefined} className={step === "betaInbox" ? "active" : ""} onClick={() => open("betaInbox")}><Mail /><span>Inbox</span></button> : null}
-      {account.activationOnly ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Setup</span></button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Register</span></button>:null}</> : isWorkforceWorkspace(account) ? <>
+      {setupOnly(account) ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Setup</span></button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Register</span></button>:null}</> : isWorkforceWorkspace(account) ? <>
         <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button>
-        {account.onboardingBeta ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Amazon</span></button> : null}
+        {account.onboardingBeta && !account.betaWorkspaceActive ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Amazon</span></button> : null}
         {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><IndianRupee /><span>Payments</span></button> : null}
         {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays /><span>Work</span></button> : null}
         {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span>{connectUnreadCount > 0 ? <b className="dx-connect-unread" aria-label={`${connectUnreadCount} unread Connect updates`}>{connectUnreadCount > 99 ? "99+" : connectUnreadCount}</b> : null}</button> : null}

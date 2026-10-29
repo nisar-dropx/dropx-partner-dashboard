@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {BETA_LIFECYCLE_COMPANY as co,BETA_LIFECYCLE_CANDIDATE as ca} from './beta-lifecycle.ts';
+import * as betaWorkspaceAccess from './beta-workspace-access.ts';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -45,7 +47,7 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
           return op==='is'&&value==='null' ? r[key]==null : String(r[key])===value;
         }));return q;
       },
-      order(){return q}, maybeSingle(){single=true;return q},
+      order(){return q}, limit(){return q}, maybeSingle(){single=true;return q},
       then(resolve,reject){return Promise.resolve({data:single?rows[0]??null:rows,error:table==='workforce_amazon_email_pilot_candidates'?pilotError:null}).then(resolve,reject)}
     };
     return q;
@@ -60,6 +62,7 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
     '@/lib/dropx-one-pages':{peopleDocumentsAvailable,requiredDropxOnePageCodes},
     '../../../../src/lib/connect-session-issuance':{},
     '../../../../src/lib/connect-account-freshness':accountFreshness,
+    './beta-workspace-access':betaWorkspaceAccess,
     './connect-wfh-access':{connectWfhEligible:()=>false,loadConnectWfhPolicies:async()=>new Map()},
     './connect-business-trip-access':{connectBusinessTripEligible:()=>false,loadConnectBusinessTripPolicies:async()=>new Map()},
     './connect-preview':{resolveConnectPreview:async()=>null},
@@ -127,4 +130,18 @@ test('pending, under-review, returned and approved onboarding identities retain 
   const workforce=statuses.map(status=>({...normal(status),onboarding_status:status,lifecycle_status:'onboarding',is_active:false}));
   const rows=await fixture({workforce}).findConnectAccounts('91',mobile);
   assert.deepEqual(rows.map(row=>row.id).sort(),statuses.sort());
+});
+
+test('activated pilot uses normal beta navigation without granting canonical endpoint access',async()=>{
+ const f=fixture({beta:true});
+ f.tables.companies.push({id:co,name:'DropX',is_active:true});
+ f.tables.workforce_amazon_email_pilot_candidates=[{...pilot(ca),company_id:co,continuation_status:'continuing'}];
+ f.tables.workforce_beta_verification_snapshots=[{company_id:co,candidate_id:ca,amazon_profile_id:'provider',identity_email:'test.kbwe@example.com',operational_status:'ACTIVE',lsc_observed_at:new Date().toISOString()}];
+ f.tables.workforce_amazon_invitation_requests=[{company_id:co,email_pilot_candidate_id:ca,external_reference:'provider'}];
+ const rows=await f.findConnectAccounts('91',mobile),beta=rows.find(r=>r.id===ca);
+ assert.equal(beta.betaWorkspaceActive,true);assert.equal(beta.status,'Active');
+ assert.equal(beta.activationOnly,true);assert.equal(beta.reference,null);assert.deepEqual(beta.pageAccess,['activation']);
+ canonical(rows.find(r=>r.id==='ordinary'));
+ const source=readFileSync(new URL('./connect-auth.ts',import.meta.url),'utf8');
+ assert.match(source,/if\s*\(account.activationOnly\s*&&\s*!options.allowActivationOnly\)/);
 });
