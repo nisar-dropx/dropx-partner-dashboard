@@ -760,7 +760,8 @@ async function loadFieldExecutiveData(
       `;
   const legacyExecutiveSelect = executiveSelect
     .replace("mobile_country_code,", "")
-    .replace("people_lifecycle_status,", "");
+    .replace("people_lifecycle_status,", "")
+    .replace("deleted_at,", "");
   let executivesResult: { data: unknown[] | null; error: { message?: string } | null } = await supabaseAdmin
     .from(table)
     .select(executiveSelect)
