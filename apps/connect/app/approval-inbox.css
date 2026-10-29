@@ -52,6 +52,34 @@
 .dx-approval-row button:disabled { opacity: .5; cursor: not-allowed; }
 .dx-approval-inbox button:focus-visible, .dx-dialog button:focus-visible, .dx-approval-journey summary:focus-visible { outline: 3px solid #f5a976; outline-offset: 3px; }
 .dx-approval-card { padding: 20px; border: 1px solid #e3e8f0; border-radius: 16px; background: #fff; }
+.dx-advance-review { display: grid; gap: 16px; min-width: 0; }
+.dx-advance-explanation, .dx-advance-section-body p { margin: 0; color: #667085; font-size: 12px; line-height: 1.6; }
+.dx-advance-key-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
+.dx-advance-key-facts dd small { display: block; color: #667085; font-size: 11px; line-height: 1.5; margin-top: 4px; }
+.dx-advance-wide { grid-column: 1 / -1; }
+.dx-advance-section, .dx-advance-history-entry { min-width: 0; border: 1px solid #dfe5ec; border-radius: 12px; }
+.dx-advance-section > summary, .dx-advance-history-entry > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px; list-style: none; cursor: pointer; background: #f8fafc; border-radius: 12px; }
+.dx-advance-section summary::-webkit-details-marker { display: none; }
+.dx-advance-section summary > span { display: grid; gap: 4px; min-width: 0; }
+.dx-advance-section summary strong { color: #344054; font-size: 13px; }
+.dx-advance-section summary small { color: #667085; font-size: 11px; line-height: 1.5; }
+.dx-advance-section summary > svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.dx-advance-section[open] > summary > svg, .dx-advance-history-entry[open] > summary > svg { transform: rotate(180deg); }
+.dx-advance-section summary:focus-visible { outline: 3px solid #f5a976; outline-offset: 3px; }
+.dx-advance-section-body { display: grid; gap: 12px; padding: 14px; min-width: 0; overflow-wrap: anywhere; }
+.dx-advance-timeline { display: grid; gap: 12px; margin: 0; padding: 16px 16px 16px 34px; }
+.dx-advance-timeline li { padding: 8px; font-size: 12px; line-height: 1.5; }
+.dx-advance-timeline li.is-current { border-left: 3px solid #b96f26; background: #fff6ed; }
+.dx-advance-timeline li span, .dx-advance-timeline li small { display: block; color: #667085; margin-top: 3px; }
+.dx-advance-timeline li p { margin: 6px 0 0; white-space: pre-wrap; }
+.dx-advance-periods { display: grid; gap: 10px; margin: 0; font-size: 12px; }
+.dx-advance-periods > div { display: flex; justify-content: space-between; gap: 20px; }
+.dx-advance-periods dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.dx-advance-table-scroll { overflow-x: auto; }
+.dx-advance-table-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dx-advance-table-scroll th, .dx-advance-table-scroll td { padding: 9px 7px; border-bottom: 1px solid #e3e8f0; text-align: left; white-space: nowrap; }
+.dx-advance-load-error { color: #b42318; font-size: 12px; }
+@media (max-width: 520px) { .dx-advance-key-facts { grid-template-columns: minmax(0, 1fr); } }
 .dx-approval-card-compact { overflow: hidden; padding: 0; }
 .dx-approval-card-compact .dx-approval-card-head { padding: 14px 15px 12px; }
 .dx-approval-card-compact .dx-approval-eyebrow { font-size: 9px; }

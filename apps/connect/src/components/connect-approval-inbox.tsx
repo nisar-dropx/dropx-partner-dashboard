@@ -2,6 +2,7 @@
 
 import type { ConnectApprovalSection } from "@/lib/connect-approval-links";
 import type { PayAdvanceApproval } from "@/lib/connect-pay-advance-approval";
+import { ConnectPayAdvanceReview } from "./connect-pay-advance-review";
 
 import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, Pencil, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -1785,21 +1786,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   Assigned to a manager on your reporting line. Acting here takes over that step.
                 </p>
               ) : null}
-              <dl className="dx-approval-facts">
-                <div><dt>Requested amount</dt><dd>{money(approval.requestedAmount)}</dd></div>
-                {approval.approvedAmount != null ? <div><dt>Amount from previous review</dt><dd>{money(approval.approvedAmount)}</dd></div> : null}
-                {approval.outstandingPay != null ? <>
-                  <div><dt>Current outstanding pay</dt><dd>{money(approval.outstandingPay)}</dd></div>
-                  <div><dt>Maximum eligible · {approval.eligibilityPercent ?? 25}%</dt><dd>{money(approval.maxEligibleAmount ?? 0)}</dd></div>
-                </> : <div><dt>Eligibility</dt><dd>{approval.eligibilityWithinLimit ? "Within permitted limit" : "Exceeds permitted limit"}</dd></div>}
-                <div><dt>Advances paid this month</dt><dd>{approval.monthPaidCount}</dd></div>
-                <div><dt>Total advances paid this month</dt><dd>{money(approval.monthPaidAmount)}</dd></div>
-                <div><dt>Current outstanding advance</dt><dd>{money(approval.outstandingAdvance)}</dd></div>
-                <div><dt>Scheduled payroll deductions</dt><dd>{money(approval.reservedRecovery)}</dd></div>
-                <div><dt>Recovery</dt><dd>{statusLabel(approval.recoveryMode)}{approval.recoveryMode === "installments" ? ` · ${approval.installments} installments` : ""}</dd></div>
-                {approval.neededBy ? <div><dt>Needed by</dt><dd>{displayDate(approval.neededBy)}</dd></div> : null}
-                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-              </dl>
+              <ConnectPayAdvanceReview key={`${account.id}:${approval.requestId}`} accountId={account.id} profileType={account.profileType} approval={approval} />
               <div className="dx-approval-finance-terms">
                 <label className="dx-approval-note-field">Approved amount
                   <input aria-label="Approved amount" type="number" min="0.01" step="0.01"
