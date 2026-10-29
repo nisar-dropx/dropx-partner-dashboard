@@ -45,7 +45,7 @@ test('active account is eligible; both advances screen and My Requests contracts
   assert.equal(body.requests[0].reference,'ADV-1111111111');
   assert.equal(body.requests[1].reference,'ADV-202610-00001');
   assert.equal(body.requests[0].requested_at,body.requests[0].requestedAt);
-  assert.equal(body.requests[0].canWithdraw,true);assert.equal(body.requests[1].canWithdraw,false);
+  assert.equal(body.requests[0].canWithdraw,false);assert.equal(body.requests[1].canWithdraw,true);
   assert.equal(f.state.calls[0].cache,'no-store');assert.match(f.state.calls[0].url,/accountId=gokul/);
 });
 test('cutover duplicate is suppressed when the canonical payroll row lacks an external reference',async()=>{

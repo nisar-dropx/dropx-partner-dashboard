@@ -58,7 +58,7 @@ async function peopleMonthBalance(companyId: string, profileType: "employee" | "
   if (!run.data) return 0;
   const [person, paid] = await Promise.all([
     supabaseAdmin.from("hr_payroll_run_people")
-      .select("net_pay,adjusted_net_pay")
+      .select("id,net_pay,adjusted_net_pay")
       .eq("company_id", companyId).eq("run_id", run.data.id)
       .eq("worker_type", profileType).eq("worker_id", workerId).maybeSingle(),
     supabaseAdmin.from("hr_payroll_bank_lines")
@@ -68,13 +68,24 @@ async function peopleMonthBalance(companyId: string, profileType: "employee" | "
   if (person.error || paid.error) throw new Error(person.error?.message ?? paid.error?.message ?? "Unable to calculate outstanding salary.");
   const target = Number(person.data?.adjusted_net_pay ?? person.data?.net_pay ?? 0);
   const settled = (paid.data ?? []).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
-  return Math.max(0, roundPayableMoney(target - settled));
+  if(!person.data) return 0;
+  const [due,items]=await Promise.all([
+    supabaseAdmin.rpc("pay_advance_due",{p_company:companyId,p_worker_type:profileType,p_worker:workerId,
+      p_period:range.start,p_target_kind:"people",p_target_key:`${run.data.id}:${profileType}:${workerId}`}),
+    supabaseAdmin.from("hr_payroll_run_items").select("amount").eq("company_id",companyId)
+      .eq("run_person_id",person.data.id).in("source",["pay_advance","unified_advance"])
+  ]);
+  if(due.error||items.error) throw new Error("Current paid advance deductions could not be verified.");
+  const pendingDeduction=Math.max(0,(due.data??[]).reduce((sum:number,d:{amount:unknown})=>sum+Number(d.amount),0)
+    -(items.data??[]).reduce((sum,i)=>sum+Number(i.amount),0));
+  return Math.max(0, roundPayableMoney(target - settled - pendingDeduction));
 }
 
 export async function loadPayAdvanceCapacity(input: {
   companyId: string;
   profileType: SupportedAdvanceProfile;
   accountId: string;
+  excludeRequestId?: string;
 }) {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
   const today = new Intl.DateTimeFormat("en-CA", {
@@ -87,11 +98,11 @@ export async function loadPayAdvanceCapacity(input: {
     : peopleMonthBalance(input.companyId, input.profileType, input.accountId, month)));
   const outstandingPay = roundPayableMoney(balances.reduce((sum, value) => sum + value, 0));
   const active = await supabaseAdmin.from("hr_pay_advance_requests")
-    .select("requested_amount,approved_amount,status")
+    .select("id,requested_amount,approved_amount,status")
     .eq("company_id", input.companyId).eq("worker_type", input.profileType).eq("worker_id", input.accountId)
-    .in("status", ["pending", "approved", "disbursed", "partially_recovered"]);
+    .in("status", ["pending", "approved"]);
   if (active.error) throw new Error(active.error.message);
-  const committedAdvance = roundPayableMoney((active.data ?? []).reduce((sum, row) =>
+  const committedAdvance = roundPayableMoney((active.data ?? []).filter(row=>row.id!==input.excludeRequestId).reduce((sum, row) =>
     sum + Number(row.approved_amount ?? row.requested_amount ?? 0), 0));
   return {
     outstandingPay,
@@ -100,4 +111,15 @@ export async function loadPayAdvanceCapacity(input: {
     maxEligibleAmount: advanceEligibilityAmount(outstandingPay, committedAdvance),
     breakdown: months.map((month, index) => ({ month, outstanding: balances[index] }))
   };
+}
+
+export async function loadOwnWorkforceAdvanceDeduction(companyId:string,workerId:string,month:string) {
+  const range=payableBalanceMonthRange(month);
+  if(!range) throw new Error("Choose a valid payroll month.");
+  const result=await loadWorkforcePayoutRows(companyId,allLocationContext(companyId),range.start,range.end,{
+    workforceIds:[workerId],includeLossRecoveries:true
+  });
+  if(result.error) throw new Error(result.error);
+  return roundPayableMoney(result.rows.reduce((sum,row)=>sum+row.deductionBreakdown
+    .filter(line=>line.code==='ADVANCE_RECOVERY').reduce((n,line)=>n+line.amount,0),0));
 }

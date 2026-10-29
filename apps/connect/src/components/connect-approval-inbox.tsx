@@ -1788,10 +1788,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               <dl className="dx-approval-facts">
                 <div><dt>Requested amount</dt><dd>{money(approval.requestedAmount)}</dd></div>
                 {approval.approvedAmount != null ? <div><dt>Amount from previous review</dt><dd>{money(approval.approvedAmount)}</dd></div> : null}
-                {approval.workerType === "workforce" && approval.outstandingPay != null ? <>
-                  <div><dt>Current outstanding payout</dt><dd>{money(approval.outstandingPay)}</dd></div>
+                {approval.outstandingPay != null ? <>
+                  <div><dt>Current outstanding pay</dt><dd>{money(approval.outstandingPay)}</dd></div>
                   <div><dt>Maximum eligible · {approval.eligibilityPercent ?? 25}%</dt><dd>{money(approval.maxEligibleAmount ?? 0)}</dd></div>
                 </> : <div><dt>Eligibility</dt><dd>{approval.eligibilityWithinLimit ? "Within permitted limit" : "Exceeds permitted limit"}</dd></div>}
+                <div><dt>Advances paid this month</dt><dd>{approval.monthPaidCount}</dd></div>
+                <div><dt>Total advances paid this month</dt><dd>{money(approval.monthPaidAmount)}</dd></div>
+                <div><dt>Current outstanding advance</dt><dd>{money(approval.outstandingAdvance)}</dd></div>
+                <div><dt>Scheduled payroll deductions</dt><dd>{money(approval.reservedRecovery)}</dd></div>
                 <div><dt>Recovery</dt><dd>{statusLabel(approval.recoveryMode)}{approval.recoveryMode === "installments" ? ` · ${approval.installments} installments` : ""}</dd></div>
                 {approval.neededBy ? <div><dt>Needed by</dt><dd>{displayDate(approval.neededBy)}</dd></div> : null}
                 <div><dt>Reason</dt><dd>{approval.reason}</dd></div>

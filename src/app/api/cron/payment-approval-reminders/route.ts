@@ -57,7 +57,7 @@ async function processReminders(request: Request, catchUp: boolean) {
       .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
       .or(`email_next_reminder_at.is.null,email_next_reminder_at.lte.${new Date().toISOString()}`)
       .order("email_next_reminder_at", { ascending: true, nullsFirst: true }).limit(200),
-    supabaseAdmin.from("payment_advance_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20),
+    supabaseAdmin.from("hr_pay_advance_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20),
     supabaseAdmin.from("payment_requests")
       .select("id,company_id,amount,payment_mode,payment_portal,payment_reference,bank_account_no,ifsc,account_holder_name")
       .in("approval_status", ["FINAL_APPROVED", "final_approved"])

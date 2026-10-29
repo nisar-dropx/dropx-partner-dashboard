@@ -1,3 +1,4 @@
+import {loadCurrentAdvanceCapacity} from "./connect-advance-context";
 import "server-only";
 import type { ConnectAccount } from "./connect-auth";
 import {
@@ -10,11 +11,19 @@ import { supabaseAdmin } from "./supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 
-function mapPayAdvanceRows(
+async function mapPayAdvanceRows(
+  companyId: string,
   steps: Array<{ id: string; request_id: string; step_name: string; step_type: string }>,
   requests: Array<Record<string, unknown>>
-): PayAdvanceApproval[] {
-  return requests.map((row) => {
+): Promise<PayAdvanceApproval[]> {
+  const month = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit"}).format(new Date()) + "-01";
+  return Promise.all(requests.map(async (row) => {
+    const result = await db().rpc("pay_advance_worker_summary", {
+      p_company: companyId, p_worker_type: row.worker_type, p_worker: row.worker_id, p_month: month
+    });
+    if (result.error) throw new Error("Unable to verify the worker's paid advance history. Please retry.");
+    const history = result.data;
+    const live = await loadCurrentAdvanceCapacity(companyId,String(row.id));
     const step = steps.find((item) => item.request_id === row.id)!;
     const pay = payAdvanceApprovalPayContext(row.worker_type, row.requested_amount, row.outstanding_pay_snapshot,
       row.eligibility_percent_snapshot, row.max_eligible_amount_snapshot);
@@ -29,15 +38,19 @@ function mapPayAdvanceRows(
       requestedAmount: Number(row.requested_amount),
       approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
       ...pay,
+      outstandingPay:live.outstandingPay,
+      maxEligibleAmount:Math.min(live.maxEligibleAmount,Number(row.max_eligible_amount_snapshot??row.requested_amount)),
+      monthPaidCount: Number(history.monthPaidCount), monthPaidAmount: Number(history.monthPaidAmount),
+      outstandingAdvance: Number(history.outstandingAdvance), reservedRecovery: Number(history.reservedRecovery),
       recoveryMode: String(row.recovery_mode),
       installments: Number(row.approved_installments ?? row.requested_installments),
       reason: String(row.reason),
       neededBy: row.needed_by == null ? null : String(row.needed_by)
     };
-  });
+  }));
 }
 
-const REQUEST_SELECT = "id,request_number,worker_type,worker_name,worker_code,requested_amount,approved_amount,outstanding_pay_snapshot,eligibility_percent_snapshot,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by";
+const REQUEST_SELECT = "id,request_number,worker_type,worker_id,worker_name,worker_code,requested_amount,approved_amount,outstanding_pay_snapshot,eligibility_percent_snapshot,max_eligible_amount_snapshot,recovery_mode,requested_installments,approved_installments,reason,needed_by";
 
 /** Only steps assigned to this login — not subordinates' queues. */
 export async function listConnectPayAdvanceApprovals(account: ConnectAccount): Promise<PayAdvanceApproval[]> {
@@ -51,7 +64,7 @@ export async function listConnectPayAdvanceApprovals(account: ConnectAccount): P
     .select(REQUEST_SELECT)
     .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map((step) => step.request_id));
   if (requests.error) throw new Error(requests.error.message);
-  return mapPayAdvanceRows(steps.data, requests.data ?? []);
+  return mapPayAdvanceRows(account.companyId, steps.data, requests.data ?? []);
 }
 
 /**
@@ -74,7 +87,7 @@ export async function listConnectPayAdvanceOversight(account: ConnectAccount): P
     .select(REQUEST_SELECT)
     .eq("company_id", account.companyId).eq("status", "pending").in("id", steps.data.map((step) => step.request_id));
   if (requests.error) throw new Error(requests.error.message);
-  return mapPayAdvanceRows(steps.data, requests.data ?? []);
+  return mapPayAdvanceRows(account.companyId, steps.data, requests.data ?? []);
 }
 
 export async function decideConnectPayAdvanceApproval(account: ConnectAccount, requestId: string, action: unknown, note: unknown, amount?: unknown, installments?: unknown) {
@@ -101,13 +114,14 @@ export async function decideConnectPayAdvanceApproval(account: ConnectAccount, r
       .eq("company_id", account.companyId).eq("id", requestId).eq("status", "pending").maybeSingle();
     if (request.error) throw new Error(request.error.message);
     if (!request.data) throw new Error("This pay advance is no longer pending.");
-    const decisionMaximum = step.step_type === "finance"
+    const live = await loadCurrentAdvanceCapacity(account.companyId,requestId);
+    const snapshotMaximum = step.step_type === "finance"
       ? Number(request.data.max_eligible_amount_snapshot ?? request.data.requested_amount)
       : Number(request.data.requested_amount);
     terms = payAdvanceFinanceTerms(
       amount,
       step.step_type === "finance" ? installments : request.data.requested_installments,
-      decisionMaximum
+      Math.min(snapshotMaximum,live.maxEligibleAmount)
     );
   }
   const result = await db().rpc("hr_decide_pay_advance_step", {

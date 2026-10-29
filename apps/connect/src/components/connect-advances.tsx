@@ -255,7 +255,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
                     </li>)}
                   </ol>
                 </section> : null}
-                {row.canWithdraw !== false && ["submitted", "in_review"].includes(row.status) ? (
+                {row.canWithdraw === true && ["pending", "returned"].includes(row.status) ? (
                   <button className="dx-advance-withdraw" disabled={withdrawingId === row.id} onClick={() => void withdraw(row.id)} type="button">
                     {withdrawingId === row.id ? "Withdrawing…" : "Withdraw request"}
                   </button>
