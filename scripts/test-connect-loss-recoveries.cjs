@@ -5,7 +5,7 @@ const client={rpc:async(name,args)=>{if(name==='nl_recovery_debits')return {data
  {employee_ref:`${account.profileType==='workforce'?'workforce':account.profileType==='contractor'?'contractor':'employee'}:${account.id}`,month:'2026-09',case_key:'slp:TID1',report:'slp',station_code:'SPBE',total:400,deducted:400,outstanding:0,in_payroll:0,status:'recovered',last_deducted_in:'2026-10'},
  {employee_ref:'employee:someone-else',month:'2026-09',case_key:'PRIVATE',total:900,outstanding:900},
  {employee_ref:`${account.profileType==='workforce'?'workforce':account.profileType==='contractor'?'contractor':'employee'}:${account.id}`,month:'2026-09',case_key:'DRAFT',total:200,outstanding:200}
- ]};},from:table=>{let key;const q={select:()=>q,order:()=>q,limit:async()=>({data:[],error:null}),eq:(k,v)=>{if(k==='case_key')key=v;return q;},maybeSingle:async()=> table==='nl_loss_month_cases'?{data:{amount:1000,details:{tid:'TID1'}}}:planError?{error:{message:'db failed'}}:{data:{approval_status:key==='DRAFT'?'proposed':paused?'needs_review':'approved',allocations:[{ref:`${account.profileType==='workforce'?'workforce':account.profileType==='contractor'?'contractor':'employee'}:${account.id}`,amount:400}],deduction_month:'2026-10'}}};return q;}};
+ ]};},from:table=>{assert.notEqual(table,'nl_loss_clarifications','Read-only recovery must not query retired questions');let key;const q={select:()=>q,order:()=>q,limit:async()=>({data:[],error:null}),eq:(k,v)=>{if(k==='case_key')key=v;return q;},maybeSingle:async()=> table==='nl_loss_month_cases'?{data:{amount:1000,details:{tid:'TID1'}}}:planError?{error:{message:'db failed'}}:{data:{approval_status:key==='DRAFT'?'proposed':paused?'needs_review':'approved',allocations:[{ref:`${account.profileType==='workforce'?'workforce':account.profileType==='contractor'?'contractor':'employee'}:${account.id}`,amount:400}],deduction_month:'2026-10'}}};return q;}};
 const mod={exports:{}};
 process.env.NEXT_PUBLIC_SUPABASE_URL='https://test.invalid';process.env.SUPABASE_SERVICE_ROLE_KEY='test';
 new Function('require','module','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{
@@ -17,6 +17,7 @@ new Function('require','module','exports',ts.transpileModule(fs.readFileSync(fil
 (async()=>{
 for(const profileType of ['employee','workforce','contractor']){
  account={profileType,id:'mine',companyId:'company'};
+ assert.equal((await mod.exports.POST()).status,410,'Clarification writes are retired for every profile');
  const get=(extra='')=>mod.exports.GET(new Request(`https://one.test/api/connect/loss-recoveries?profileType=${profileType}&accountId=mine${extra}`));
  const result=await get(); assert.equal(result.status,200);assert.equal(result.data.recoveries.length,2);
  assert.equal(result.data.recoveries[1].status,'awaiting_approval');assert.equal(result.data.recoveries[1].approvalStatus,'proposed');

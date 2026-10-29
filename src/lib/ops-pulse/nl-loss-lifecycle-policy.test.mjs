@@ -9,7 +9,7 @@ import {
 } from "./nl-loss-lifecycle-policy.ts";
 
 test("station actors may submit proposals but never approve", () => {
-  assert.equal(stationMayAct("clarify"), true);
+  assert.equal(stationMayAct("clarify"), false);
   assert.equal(stationMayAct("propose"), true);
   assert.equal(stationMayAct("approve"), false);
 });

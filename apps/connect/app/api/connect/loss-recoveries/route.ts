@@ -96,8 +96,6 @@ export async function GET(request: Request) {
     const debitRows = await client.rpc("nl_recovery_debits", {p_company:company,p_ref:ref});
     if(debitRows.error) throw new Error("Your deduction history could not be loaded. Please retry.");
     const ownDebits=(debitRows.data ?? []).filter((r: {employee_ref:string})=>r.employee_ref===ref);
-    const questions = await client.from("nl_loss_clarifications").select("month,case_key,note,status,decision_note,decided_by_name,created_at").eq("company_id",company).eq("employee_ref",ref).order("created_at",{ascending:false}).limit(500);
-    if(questions.error)throw Error("Your recovery questions could not be loaded.");
     const recoveries = [];
     for (const row of rows) {
       const caseRow = await client
@@ -124,7 +122,6 @@ export async function GET(request: Request) {
       const details = (caseRow.data?.details ?? {}) as Record<string, unknown>;
       const share = myAllocation(plan.data?.allocations, ref);
       recoveries.push({
-        clarifications: (questions.data||[]).filter(q=>q.month===row.month && q.case_key===row.case_key),
         month: row.month,
         caseKey: row.case_key,
         tid: tidFromCase(row.case_key, details),
@@ -178,74 +175,10 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  try {
-    if (
-      request.headers.get("origin") &&
-      request.headers.get("origin") !== new URL(request.url).origin
-    ) {
-      return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-    }
-    const body = await request.json();
-    const account = await boundAccount(
-      String(body.accountId || ""),
-      String(body.profileType || ""),
-    );
-    const accountId = account.id;
-    const profileType = account.profileType;
-    const month = String(body.month || "");
-    const caseKey = String(body.caseKey || "");
-    const note = String(body.note || "").trim();
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !caseKey || note.length < 10 || note.length > 4000) {
-      return NextResponse.json({ error: "Case, month and a note (10+ characters) are required." }, { status: 400 });
-    }
-    const ref = recoveryRef(profileType, accountId);
-    const client = db();
-    // Ensure the associate is allocated on an approved plan before accepting a clarification.
-    const ledger = await client.rpc("nl_recovery_ledger", {
-      p_company: account.companyId,
-      p_from_month: month,
-      p_ref: ref,
-    });
-    const mine = (ledger.data ?? []).some(
-      (r: { month?: string; case_key?: string }) => r.month === month && r.case_key === caseKey,
-    );
-    if (!mine) {
-      return NextResponse.json({ error: "This recovery is not assigned to you." }, { status: 403 });
-    }
-    const plan = await client
-      .from("nl_loss_recoveries")
-      .select("approval_status,is_deleted")
-      .eq("company_id", account.companyId)
-      .eq("month", month)
-      .eq("case_key", caseKey)
-      .maybeSingle();
-    if (!plan.data || plan.data.is_deleted || plan.data.approval_status !== "approved") {
-      return NextResponse.json(
-        { error: "This recovery is not yet confirmed for payroll." },
-        { status: 403 },
-      );
-    }
-    const { data, error } = await client.rpc("nl_loss_clarification_submit", {
-      p_company: account.companyId,
-      p_month: month,
-      p_case: caseKey,
-      p_actor: accountId,
-      p_name: account.name || "Associate",
-      p_note: note,
-      p_reason: String(body.reason || "Associate clarification"),
-      p_category: String(body.category || "clarification"),
-      p_employee_ref: ref,
-      p_evidence_url: body.evidenceUrl || null,
-      p_attachments: [],
-      p_source: "associate",
-    });
-    if (error) throw new Error(error.message);
-    return NextResponse.json({ ok: true, clarification: data });
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Unable to submit clarification." },
-      { status: 400 },
-    );
-  }
+// Retire writes explicitly so older clients cannot create review holds.
+export async function POST() {
+  return NextResponse.json(
+    { error: "Loss recovery clarification is no longer available." },
+    { status: 410, headers: { "Cache-Control": "no-store" } },
+  );
 }

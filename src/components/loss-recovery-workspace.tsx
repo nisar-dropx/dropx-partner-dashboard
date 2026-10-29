@@ -4,7 +4,6 @@ import {useSearchParams} from 'next/navigation';
 import type { NlCase, LossSettings, RecoveryOutcome } from '@/lib/ops-pulse/nl-loss-policy';
 import type { LedgerLine } from '@/lib/ops-pulse/nl-recovery-ledger-view';
 import { indiaMonth, recoveryQueueState, isRecoveryApprovalRequest, RECOVERY_QUEUE_LABELS } from '@/lib/ops-pulse/loss-recovery-queue-policy';
-import { LossClarificationInbox } from "./loss-clarification-inbox";
 import { RecoveryForm } from './nl-loss-cases';
 import { TrackingDetailModal } from './tracking-detail-modal';
 import { ListPager, usePaged } from './list-pager';
@@ -32,7 +31,6 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
  const paged=usePaged(shown,25,`${period}|${filter}|${station}|${query}`);
  const scoped=shown;
  return <>
-  {approvals && canApprove ? <LossClarificationInbox/> : null}
   {approvals ? <div className={styles.toolbar} style={{padding:'8px 0'}}><strong>{scoped.filter(x=>isRecoveryApprovalRequest(x.row,x.status)).length} pending exceptions</strong><span>· {money(scoped.filter(x=>isRecoveryApprovalRequest(x.row,x.status)).reduce((sum,x)=>sum+x.outstanding,0))}</span><a href="/team-ops/losses/recovery">Recovery review ↗</a></div> : <div className={styles.metrics}>
    <div><span>Outstanding</span><strong>{money(scoped.reduce((s,x)=>s+x.outstanding,0))}</strong><small>Matching shipments · verified balance</small></div>
    <div><span>Carried forward</span><strong>{money(scoped.filter(x=>x.status==='carried').reduce((s,x)=>s+x.outstanding,0))}</strong><small>Unpaid scheduled recovery remains due</small></div>
