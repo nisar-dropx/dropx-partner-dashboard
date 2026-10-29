@@ -1,3 +1,4 @@
+import { FleetPaytapSettings } from "@/components/fleet-paytap-settings";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -51,8 +52,8 @@ export default async function WebhookSettingsPage() {
     <AppShell active="Settings" pageCode="app_settings">
       <PageHead
         eyebrow="Configuration"
-        title="Webhook"
-        subtitle="One shared callback endpoint for messaging and lead events."
+        title="Webhooks"
+        subtitle="Messaging, lead events and PayTap fuel payments."
         action={<a className="button secondary" href="/settings">Back</a>}
       />
       {data.error ? (
@@ -78,6 +79,7 @@ export default async function WebhookSettingsPage() {
           webhookVerifyToken={data.token || data.webhookKey}
         />
       ) : null}
+      <FleetPaytapSettings surface="dashboard" />
     </AppShell>
   );
 }
