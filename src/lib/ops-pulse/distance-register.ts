@@ -1,4 +1,5 @@
 import {
+  distanceNoPayoutReasons,
   kilometreRate,
   routeFuelForDay,
   type RouteDistanceContext,
@@ -46,12 +47,9 @@ export const distanceMethods: Record<string, string> = {
   pending: "Awaiting evidence",
 };
 /** Anomalous / left-on-ground days stay stored but are not ops pending. */
-export const distanceExcludedReasons = new Set([
-  "route_excluded",
-  "route_needs_review",
-  "scan_excluded",
-  "scan_location_missing",
-]);
+export const distanceExcludedReasons = distanceNoPayoutReasons;
+/** Register / Excel default: payable Ready days only (matches payroll fuel). */
+export const distanceReadyStatuses = ["Ready"] as const;
 export type DistanceViewFilters = {
   from: string;
   to: string;
@@ -68,15 +66,20 @@ export function distanceStatus(row: DistanceEntry) {
   return ["input_conflict", "identity_mismatch", "conflicting_scan", "amazon_identity_missing", "mapping_changed"].includes(row.reason || "")
     ? "Needs attention" : "Pending";
 }
-export function filterDistanceEntries(rows: DistanceEntry[], filters: DistanceViewFilters) {
+/** Date/station/search scope without status — used for No payouts sheet. */
+export function filterDistanceScope(rows: DistanceEntry[], filters: Omit<DistanceViewFilters, "statuses"> | DistanceViewFilters) {
   const query = filters.query.trim().toLowerCase();
   return rows.filter((r) => r.date >= filters.from && r.date <= filters.to &&
     (!filters.stations.length || filters.stations.includes(r.station)) &&
     (!filters.regions.length || filters.regions.includes(r.region)) &&
     (!filters.clusters.length || filters.clusters.includes(r.cluster)) &&
-    (!filters.statuses.length || filters.statuses.includes(distanceStatus(r))) &&
     (!filters.methods.length || filters.methods.includes(distanceMethods[r.method] || r.method)) &&
     (!query || [r.name, r.amazonId, r.dropxId, r.transporterId].some((value) => value.toLowerCase().includes(query))));
+}
+export function filterDistanceEntries(rows: DistanceEntry[], filters: DistanceViewFilters) {
+  // Empty status selection = Ready only (payout view); non-ready live on the No payouts export sheet.
+  const statuses = filters.statuses.length ? filters.statuses : [...distanceReadyStatuses];
+  return filterDistanceScope(rows, filters).filter((r) => statuses.includes(distanceStatus(r)));
 }
 export type DistanceAssociate = {
   key: string;
@@ -198,6 +201,12 @@ export function buildDistanceEntries(input: {
       )
         continue;
       const hasActivity = activity.some((a) => a.work_date === date);
+      const stored = input.context.rows.find(
+          (r) =>
+            r.workforce_id === m.workforce_id &&
+            r.station_id === m.station_id &&
+            r.work_date === date,
+        );
       let fuel;
       try {
         fuel = routeFuelForDay(input.context, {
@@ -220,17 +229,27 @@ export function buildDistanceEntries(input: {
           returnKm: null,
           updatedAt: null,
           routeId: null,
-          source: "calculated",
+          source: "calculated" as const,
+        };
+      }
+      // Payroll skips no-payout days; keep them for the Excel No payouts sheet (Ready UI hides them).
+      if (!fuel && stored && distanceNoPayoutReasons.has(stored.reason || "")) {
+        fuel = {
+          status: "pending" as const,
+          reason: stored.reason,
+          km: null,
+          rate,
+          amount: null,
+          departureKm: null,
+          deliveryKm: null,
+          returnKm: null,
+          updatedAt: stored.calculated_at ?? null,
+          routeId: null,
+          source: "calculated" as const,
         };
       }
       if (!fuel) continue;
-      const stored = input.context.rows.find(
-          (r) =>
-            r.workforce_id === m.workforce_id &&
-            r.station_id === m.station_id &&
-            r.work_date === date,
-        ),
-        detail = meta.get(stored?.id);
+      const detail = meta.get(stored?.id);
       const key = `${m.workforce_id}|${m.station_id}|${date}`;
       const entry: DistanceEntry = {
         key,

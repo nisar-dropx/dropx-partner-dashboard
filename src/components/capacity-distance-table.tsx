@@ -2,7 +2,7 @@
 import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download, MapPinned, X } from "lucide-react";
-import { distanceMethods, distanceStatus, filterDistanceEntries, groupDistanceAssociates, type DistanceEntry, type DistanceViewFilters } from "@/lib/ops-pulse/distance-register";
+import { distanceMethods, distanceStatus, filterDistanceEntries, filterDistanceScope, groupDistanceAssociates, type DistanceEntry, type DistanceViewFilters } from "@/lib/ops-pulse/distance-register";
 import { routePendingLabel } from "@/lib/workforce-route-distance";
 import styles from "./capacity-distance.module.css";
 import type { RouteGeometry } from "./capacity-distance-map";
@@ -18,6 +18,7 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
     [selected, setSelected] = useState<DistanceEntry | null>(null), [sort, setSort] = useState<"name" | "km">("name"),
     [exporting, setExporting] = useState(false), [exportError, setExportError] = useState("");
   const filtered = useMemo(() => filterDistanceEntries(rows, filters), [rows, filters]);
+  const scoped = useMemo(() => filterDistanceScope(rows, filters), [rows, filters]);
   const associates = useMemo(() => {
     const result = groupDistanceAssociates(filtered);
     return sort === "km" ? result.sort((a, b) => (b.km ?? -1) - (a.km ?? -1) || a.name.localeCompare(b.name)) : result;
@@ -26,6 +27,8 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
     total = ready.reduce((s, r) => s + (r.km || 0), 0), fuel = ready.reduce((s, r) => s + (r.fuel || 0), 0);
   const stationCount = new Set(filtered.map((r) => r.station)).size;
   const period = `${date(filters.from)} – ${date(filters.to)}`;
+  const readyOnlyView = !filters.statuses.length || (filters.statuses.length === 1 && filters.statuses[0] === "Ready");
+  const canExport = scoped.length > 0;
   async function download() {
     setExporting(true); setExportError("");
     try {
@@ -43,8 +46,8 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
   return <>
     <div className={styles.metrics}>
       <article><span>Recorded distance</span><strong>{number(total)} <small>km</small></strong><p>{ready.length} ready associate-{ready.length === 1 ? "day" : "days"}</p></article>
-      <article><span>Fuel allowance</span><strong>₹{number(fuel)}</strong><p>Recorded fuel in the selected period</p></article>
-      <article><span>Awaiting distance</span><strong>{filtered.length - ready.length}</strong><p>Associate-days pending or needing attention</p></article>
+      <article><span>Fuel allowance</span><strong>₹{number(fuel)}</strong><p>Payable fuel in the selected period</p></article>
+      <article><span>{readyOnlyView ? "Ready associate-days" : "Awaiting distance"}</span><strong>{readyOnlyView ? ready.length : filtered.length - ready.length}</strong><p>{readyOnlyView ? "Non-ready days hidden · see Excel No payouts" : "Associate-days pending or needing attention"}</p></article>
       <article><span>Associates</span><strong>{associates.length}</strong><p>{stationCount} {stationCount === 1 ? "station" : "stations"} in this selection</p></article>
     </div>
     <section className={styles.panel}>
@@ -52,7 +55,7 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
         <div><h2>Associate distance register</h2><span>{associates.length} {associates.length === 1 ? "associate" : "associates"} · {period}</span><p className={styles.note}>Select an associate to see their daily breakdown for this period.</p></div>
         <div className={styles.tableActions}>
           <button type="button" className={styles.sort} onClick={() => { setSort((s) => s === "name" ? "km" : "name"); setPage(0); }}><ArrowDownUp size={15}/>{sort === "name" ? "Name A–Z" : "Highest km first"}</button>
-          <button type="button" className={styles.download} onClick={download} disabled={exporting || !filtered.length}><Download size={16}/>{exporting ? "Preparing Excel…" : "Download Excel"}</button>
+          <button type="button" className={styles.download} onClick={download} disabled={exporting || !canExport}><Download size={16}/>{exporting ? "Preparing Excel…" : "Download Excel"}</button>
         </div>
       </header>
       {exportError ? <p role="alert" className={styles.notice}>{exportError}</p> : null}
@@ -66,9 +69,9 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
                 <td data-label="Amazon ID" className={styles.id}>{a.amazonIds.length ? a.amazonIds.map((id) => <strong key={id}>{id}</strong>) : <strong>Not linked</strong>}{a.transporterIds.map((id) => <small key={id}>LSC: {id}</small>)}</td>
                 <td data-label="Mapped DropX ID" className={styles.id}>{a.dropxIds.length ? a.dropxIds.map((id) => <strong key={id}>{id}</strong>) : <strong>Not mapped</strong>}</td>
                 <td data-label="Days" className={styles.numeric}><strong>{a.days} {a.days === 1 ? "day" : "days"}</strong></td>
-                <td data-label="Recorded distance" className={styles.numeric}><strong>{a.km === null ? "Pending" : `${number(a.km)} km`}</strong>{a.pendingDays && a.km !== null ? <small>Recorded days only</small> : null}</td>
-                <td data-label="Fuel allowance" className={styles.numeric}><strong>{a.fuel === null ? "Pending" : `₹${number(a.fuel)}`}</strong>{a.pendingDays && a.fuel !== null ? <small>Partial total</small> : null}</td>
-                <td data-label="Coverage"><span className={`${styles.badge} ${a.pendingDays ? styles.pending : styles.ready}`}>{a.pendingDays ? `${a.pendingDays} ${a.pendingDays === 1 ? "day" : "days"} pending` : "All days ready"}</span></td>
+                <td data-label="Recorded distance" className={styles.numeric}><strong>{a.km === null ? "—" : `${number(a.km)} km`}</strong>{!readyOnlyView && a.pendingDays && a.km !== null ? <small>Recorded days only</small> : null}</td>
+                <td data-label="Fuel allowance" className={styles.numeric}><strong>{a.fuel === null ? "—" : `₹${number(a.fuel)}`}</strong>{!readyOnlyView && a.pendingDays && a.fuel !== null ? <small>Partial total</small> : null}</td>
+                <td data-label="Coverage"><span className={`${styles.badge} ${!readyOnlyView && a.pendingDays ? styles.pending : styles.ready}`}>{readyOnlyView || !a.pendingDays ? "Ready" : `${a.pendingDays} ${a.pendingDays === 1 ? "day" : "days"} pending`}</span></td>
                 <td className={styles.expandIndicator}><ChevronDown size={17} aria-hidden="true" className={expanded === a.key ? styles.rotated : ""}/></td>
               </tr>
               {expanded === a.key ? <tr className={styles.expandedRow}><td colSpan={8}>
@@ -77,9 +80,9 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
                   <table className={styles.dailyTable}><thead><tr><th>Day / station</th><th>Distance</th><th>Rate / km</th><th>Fuel</th><th>Status / source</th><th>Route</th></tr></thead>
                     <tbody>{a.rows.map((r) => <tr key={r.key}>
                       <td><strong>{date(r.date)}</strong><small>{r.station}</small>{a.amazonIds.length > 1 ? <small>Amazon: {r.amazonId}</small> : null}</td>
-                      <td className={styles.numeric}><strong>{r.km === null ? "Pending" : `${number(r.km)} km`}</strong></td>
+                      <td className={styles.numeric}><strong>{r.km === null ? "—" : `${number(r.km)} km`}</strong></td>
                       <td className={styles.numeric}>₹{number(r.rate)}</td>
-                      <td className={styles.numeric}><strong>{r.fuel === null ? "Pending" : `₹${number(r.fuel)}`}</strong></td>
+                      <td className={styles.numeric}><strong>{r.fuel === null ? "—" : `₹${number(r.fuel)}`}</strong></td>
                       <td><span className={`${styles.badge} ${r.status === "ready" ? styles.ready : styles.pending}`}>{distanceStatus(r)}</span><small>{r.status === "ready" ? distanceMethods[r.method] || r.method : reason(r)}</small></td>
                       <td><button type="button" className={styles.open} onClick={() => setSelected(r)} aria-label={`Open distance details for ${r.name}, ${date(r.date)}, ${r.station}`}><MapPinned size={16}/>Details</button></td>
                     </tr>)}</tbody>
@@ -198,7 +201,7 @@ function DistanceDetail({
           <div>
             <span>Distance</span>
             <strong>
-              {row.km === null ? "Pending" : `${number(row.km)} km`}
+              {row.km === null ? "—" : `${number(row.km)} km`}
             </strong>
           </div>
           <div>
@@ -208,7 +211,7 @@ function DistanceDetail({
           <div>
             <span>Fuel allowance</span>
             <strong>
-              {row.fuel === null ? "Pending" : `₹${number(row.fuel)}`}
+              {row.fuel === null ? "—" : `₹${number(row.fuel)}`}
             </strong>
           </div>
         </div>

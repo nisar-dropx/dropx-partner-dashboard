@@ -6,6 +6,10 @@ export type RouteDistanceRow = {
 };
 export type RouteDistanceContext = {enabledFrom:string|null;rows:RouteDistanceRow[];manual:any[];rateOverrides:any[]};
 export type DailyRouteFuel = {date:string;stationId:string;mappingId:string;status:'ready'|'pending';reason:string|null;km:number|null;rate:number;amount:number|null;departureKm:number|null;deliveryKm:number|null;returnKm:number|null;updatedAt:string|null;source:'calculated'|'manual';routeId:string|null};
+/** Anomalous / unusable days pay no fuel — same as absent for salary (do not block payroll as pending). */
+export const distanceNoPayoutReasons = new Set([
+  'route_excluded','route_needs_review','scan_excluded','scan_location_missing','scan_date_mismatch',
+]);
 export const isKilometreField = (code:unknown) => String(code??'').trim().toUpperCase()==='KM_RUN';
 export function kilometreRate(mapping:any):number|null {
   const entry=Object.entries(mapping.payment_values??{}).find(([code])=>isKilometreField(code));
@@ -24,6 +28,8 @@ export function routeFuelForDay(context:RouteDistanceContext,input:{workforceId:
   const rate=overrides.length?Number(overrides[0].input_value):input.rate;
   if(!Number.isFinite(rate)||rate<0)throw new Error('Invalid kilometre rate. Contact Workforce.');
   const row=rows[0], imported=manual[0];
+  // Excluded / scan-mismatch days are no-payout (like absent), not open pending fuel.
+  if(!imported&&row&&distanceNoPayoutReasons.has(row.reason||''))return null;
   const ready=Boolean(imported || row?.status==='ready'&&row.mapping_id===input.mappingId);
   const value=imported?Number(imported.units):ready?Number(row.distance_km):null;
   if(value!==null&&(!Number.isFinite(value)||value<0))throw new Error('Invalid kilometre units. Contact Workforce.');

@@ -36,6 +36,15 @@ test('worked days with no route remain visible as pending, not zero; absent days
   data.activity = [];
   assert.deepEqual(buildDistanceEntries(data), []);
 });
+test('excluded / scan-mismatch days are kept for No payouts export but are not payable fuel', () => {
+  const data = input();
+  data.context.rows = [{ ...route, status: 'pending', reason: 'route_excluded', distance_km: null, departure_km: null, delivery_km: null, return_km: null }];
+  data.metadata = [];
+  const [row] = buildDistanceEntries(data);
+  assert.equal(row.status, 'pending');
+  assert.equal(row.reason, 'route_excluded');
+  assert.equal(row.km, null); assert.equal(row.fuel, null); assert.equal(row.routeId, null);
+});
 test('never borrows activity or routes from another Amazon ID, station or mapping', () => {
   const data = input(); data.context.rows = [];
   data.activity[0].provider_employee_id = 'different';

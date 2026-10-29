@@ -1170,6 +1170,11 @@ export async function loadWorkforcePayoutRows(
       missingRouteDistance ||= routeFuel?.status==='pending';
       const productionLines = productionRules.map((rule) => {
         if(isKilometreField(rule.code)&&routeFuel) return {code:rule.code,label:'Fuel allowance · calculated route km',componentType:rule.componentType,count:routeFuel.km??0,rate:routeFuel.rate,amount:routeFuel.amount??0,sortOrder:rule.sortOrder};
+        // After route distance is enabled, never fall back to provider metrics for KM_RUN (absent / excluded = ₹0 fuel).
+        if(isKilometreField(rule.code)&&routeContext.enabledFrom&&date>=routeContext.enabledFrom) {
+          const rate = kmRate ?? (Number(rule.rate) || 0);
+          return {code:rule.code,label:'Fuel allowance · no payable distance',componentType:rule.componentType,count:0,rate,amount:0,sortOrder:rule.sortOrder};
+        }
         const providerUnits = rule.customProduction
           ? 0
           : rows.reduce((sum, daily) => sum + metricValue(daily, String(rule.source ?? "")), 0);
