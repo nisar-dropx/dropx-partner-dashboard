@@ -6,6 +6,7 @@ import {
   type LossDebit,
 } from "@/lib/ops-pulse/loss-debit-review";
 import { deductionMonth, monthLabel } from "@/lib/ops-pulse/nl-loss-policy";
+import { indiaMonth } from '@/lib/ops-pulse/loss-recovery-queue-policy';
 import styles from "./nl-loss.module.css";
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -13,18 +14,19 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(n);
-export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
+export function LossDebitReview({ rows, earlierOnly = false }: { rows: LossDebit[]; earlierOnly?: boolean }) {
   const [month, setMonth] = useState(deductionMonth("current_month")!),
     [station, setStation] = useState(""),
     [person, setPerson] = useState(""),
-    [designation, setDesignation] = useState("");
+    [designation, setDesignation] = useState(""), [salaryScope, setSalaryScope] = useState(earlierOnly ? 'earlier' : 'selected');
+  const currentMonth = indiaMonth();
   const filtered = filterLossDebits(rows, {
-    month,
+    month, salaryScope, currentMonth,
     station,
     person,
     designation,
   });
-  const groups = summarizeLossDebits(filtered, station ? "person" : "station");
+  const groups = summarizeLossDebits(filtered, station || salaryScope === 'earlier' ? 'person_month' : 'station');
   const trend = summarizeLossDebits(
     filterLossDebits(rows, { station, person, designation }),
     "month",
@@ -33,7 +35,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
   const people = [
     ...new Map(options.map((r) => [r.employee_ref, r])).values(),
   ].sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
-  const params = new URLSearchParams({ month, station, person, designation });
+  const params = new URLSearchParams({ month, station, person, designation, salaryScope });
   const totals = filtered.reduce(
     (a, r) => ({
       deducted: a.deducted + (r.is_deducted ? r.amount : 0),
@@ -49,13 +51,15 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
           style={{ padding: 12, flexWrap: "wrap" }}
         >
           <label>
-            Debit month
+            Salary month
             <input
+              disabled={salaryScope === 'earlier'}
               type="month"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
             />
           </label>
+          <label>View<select disabled={earlierOnly} value={salaryScope} onChange={e => setSalaryScope(e.target.value)}><option value="selected">Selected salary month</option><option value="earlier">Earlier salary months</option></select></label>
           <label>
             Station
             <select
@@ -109,7 +113,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
       </section>
       <div className={styles.metrics}>
         <div>
-          <span>Deducted · {month ? monthLabel(month) : "all payrolls"}</span>
+          <span>Deducted · {salaryScope === 'earlier' ? 'earlier salary months' : month ? monthLabel(month) : 'all payrolls'}</span>
           <strong>{money(totals.deducted)}</strong>
         </div>
         <div>
@@ -136,15 +140,16 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
       <section className={styles.panel}>
         <div className={styles.panelHead}>
           <h2>
-            {station ? `${station} · People deductions` : "Station deductions"}
+            {salaryScope === 'earlier' ? 'Earlier salary months · person-wise deductions' : station ? `${station} · People deductions` : 'Station deductions'}
           </h2>
         </div>
         <div className={styles.tableWrap}>
           <table>
             <thead>
               <tr>
-                <th>{station ? "Person / designation" : "Station"}</th>
-                {!station && <th>People</th>}
+                <th>{station || salaryScope === 'earlier' ? 'Person / designation' : 'Station'}</th>
+                {!station && salaryScope !== 'earlier' && <th>People</th>}
+                <th>Salary month</th>
                 <th>Shipments</th>
                 <th>Deducted</th>
                 <th>Draft payroll</th>
@@ -156,9 +161,10 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
                 <tr key={g.key}>
                   <td>
                     <strong>{g.label}</strong>
-                    <small>{g.detail}</small>
+                    <small>{g.detail}{salaryScope === 'earlier' ? ` · ${g.stations}` : ''}</small>
                   </td>
-                  {!station && <td>{g.people}</td>}
+                  {!station && salaryScope !== 'earlier' && <td>{g.people}</td>}
+                  <td><span className={g.payrollMonth < currentMonth ? styles.earlierSalary : undefined}>{monthLabel(station || salaryScope === 'earlier' ? g.payrollMonth : month) || 'All months'}</span></td>
                   <td>{g.shipments}</td>
                   <td>{money(g.deducted)}</td>
                   <td>{money(g.draft)}</td>
@@ -166,10 +172,10 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
                     <button
                       className={styles.button}
                       onClick={() =>
-                        station ? setPerson(g.key) : setStation(g.key)
+                        station || salaryScope === 'earlier' ? setPerson(g.employeeRef) : setStation(g.key)
                       }
                     >
-                      {station ? "View history" : "View people"} →
+                      {station || salaryScope === 'earlier' ? 'View history' : 'View people'} →
                     </button>
                   </td>
                 </tr>
@@ -209,12 +215,12 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
                 {trend.map((t) => (
                   <tr key={t.key}>
                     <td>
-                      <button
+                      {earlierOnly ? <span className={styles.earlierSalary}>{monthLabel(t.key)}</span> : <button
                         className={styles.button}
-                        onClick={() => setMonth(t.key)}
+                        onClick={() => {setSalaryScope('selected'); setMonth(t.key);}}
                       >
                         {monthLabel(t.key)}
-                      </button>
+                      </button>}
                     </td>
                     <td>{t.shipments}</td>
                     <td>{money(t.deducted)}</td>
@@ -232,7 +238,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
                   <tr>
                     <th>Shipment ID</th>
                     <th>Loss month</th>
-                    <th>Debit month</th>
+                    <th>Salary month</th>
                     <th>Amount</th>
                     <th>Status</th>
                   </tr>
@@ -242,7 +248,7 @@ export function LossDebitReview({ rows }: { rows: LossDebit[] }) {
                     <tr key={r.recovery_key}>
                       <td>{r.shipment_id || r.case_key.replace(/^slp:/, "")}</td>
                       <td>{r.loss_month}</td>
-                      <td>{r.payroll_month}</td>
+                      <td><span className={r.payroll_month < currentMonth ? styles.earlierSalary : undefined}>{monthLabel(r.payroll_month)}</span></td>
                       <td>{money(r.amount)}</td>
                       <td>{r.is_deducted ? "Deducted" : "Draft payroll"}</td>
                     </tr>

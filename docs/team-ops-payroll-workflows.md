@@ -1,5 +1,17 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Salary-month visibility — 29 October 2026
+
+Recovery assignments display each person's saved salary month independently from the shipment's
+loss month. Saved recovery updates and actual Payroll deductions both offer an Earlier salary months
+filter and matching Excel export. Earlier means before the current IST calendar month; it does not
+change the fifth-day cutoff, approval, eligibility or payroll rules. Saved assignments show a planned
+start (including recurring schedules), never a confirmed debit. Actual payroll history uses its recorded
+salary month and keeps confirmed and draft amounts separate. The One detail opens with the planned
+salary month and retains actual month-by-month history. Export permissions and station scope match
+OpsPulse's recovery screen.
+
+
 ## September bank reconciliation — 29 October 2026
 
 The recovery master now starts at September 2026, following reconciliation of manual
@@ -608,5 +620,5 @@ redisputes and payroll deduction history remain unchanged.
 - NL / SLP Final recipients include ended People engagements at their posting during an unpaid payroll month, plus Workforce profiles with an open payable period. EDSP/XPT scope and the AOM ceiling still apply.
 - A former worker may use an unpaid earlier month while that payroll is draft/calculated (People) or unclosed (Workforce). This is independent of the loss month and the normal fifth-day default. The chosen month is explicit; multi-person allocations cannot combine different months silently.
 - Paid amounts and issued/processing bank instructions are excluded. The picker reveals only the maximum recovery capacity for former People, not gross salary or salary components. Saving rechecks payroll state and balance under bank/payroll locks. Former-worker or older-month plans still require independent approval.
-- An explicitly validated allocation receives `unpaid_open_payroll`, but the configured `payroll_start_month` is now a hard lower boundary (October 2026). Earlier unpaid months are excluded from directory eligibility, new saves and due payroll lines. October and later open unpaid months remain available after the normal fifth-day default moves forward. Existing recovery keys, locked deductions, source and redispute gates remain unchanged. Migration `20261029190100_loss_payroll_start_boundary.sql` supersedes the earlier rollout-month exception.
+- An explicitly validated allocation receives `unpaid_open_payroll`, but the configured `payroll_start_month` is now a hard lower boundary (September 2026 after the reconciliation above). Earlier unpaid months are excluded from directory eligibility, new saves and due payroll lines. October and later open unpaid months remain available after the normal fifth-day default moves forward. Existing recovery keys, locked deductions, source and redispute gates remain unchanged. Migration `20261029190100_loss_payroll_start_boundary.sql` supersedes the earlier rollout-month exception.
 - People refresh may append new whole loss lines to a partly-paid open snapshot only within its unpaid balance. It preserves all previous items/earnings, never edits issued bank files, and verifies run/bank/due hashes atomically. Workforce calculation also respects paid and processing bank amounts.

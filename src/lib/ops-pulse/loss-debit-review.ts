@@ -19,11 +19,13 @@ export function filterLossDebits(
     station?: string;
     person?: string;
     designation?: string;
+    salaryScope?: string;
+    currentMonth?: string;
   },
 ) {
   return rows.filter(
     (r) =>
-      (!f.month || r.payroll_month === f.month) &&
+      (f.salaryScope === 'earlier' ? Boolean(f.currentMonth && r.payroll_month < f.currentMonth) : !f.month || r.payroll_month === f.month) &&
       (!f.station || r.station_code === f.station) &&
       (!f.person || r.employee_ref === f.person) &&
       (!f.designation || r.designation === f.designation),
@@ -31,15 +33,18 @@ export function filterLossDebits(
 }
 export function summarizeLossDebits(
   rows: LossDebit[],
-  by: "station" | "person" | "month",
+  by: "station" | "person" | "month" | "person_month",
 ) {
   const groups = new Map<
     string,
     {
       key: string;
+      employeeRef: string;
+      payrollMonth: string;
       label: string;
       detail: string;
       people: Set<string>;
+      stations: Set<string>;
       shipments: Set<string>;
       deducted: number;
       draft: number;
@@ -49,19 +54,21 @@ export function summarizeLossDebits(
     const key =
       by === "station"
         ? r.station_code
-        : by === "person"
+        : by === 'person_month' ? `${r.employee_ref}|${r.payroll_month}` : by === "person"
           ? r.employee_ref
           : r.payroll_month;
     const g = groups.get(key) || {
-      key,
-      label: by === "person" ? r.full_name || r.employee_code : key,
-      detail: by === "person" ? `${r.employee_code} · ${r.designation}` : "",
+      key, employeeRef: r.employee_ref, payrollMonth: r.payroll_month,
+      label: (by === "person" || by === 'person_month') ? r.full_name || r.employee_code : key,
+      detail: (by === "person" || by === 'person_month') ? `${r.employee_code} · ${r.designation}` : "",
       people: new Set<string>(),
+      stations: new Set<string>(),
       shipments: new Set<string>(),
       deducted: 0,
       draft: 0,
     };
     g.people.add(r.employee_ref);
+    g.stations.add(r.station_code);
     g.shipments.add(`${r.loss_month}|${r.case_key}`);
     if (r.is_deducted) g.deducted += r.amount;
     else g.draft += r.amount;
@@ -71,6 +78,7 @@ export function summarizeLossDebits(
     .map((g) => ({
       ...g,
       people: g.people.size,
+      stations: [...g.stations].sort().join(" / "),
       shipments: g.shipments.size,
       deducted: Math.round(g.deducted * 100) / 100,
       draft: Math.round(g.draft * 100) / 100,
