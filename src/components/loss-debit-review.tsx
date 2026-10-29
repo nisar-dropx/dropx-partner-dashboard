@@ -215,12 +215,12 @@ export function LossDebitReview({ rows, earlierOnly = false }: { rows: LossDebit
                 {trend.map((t) => (
                   <tr key={t.key}>
                     <td>
-                      <button
+                      {earlierOnly ? <span className={styles.earlierSalary}>{monthLabel(t.key)}</span> : <button
                         className={styles.button}
-                        onClick={() => {if (!earlierOnly) setSalaryScope('selected'); setMonth(t.key);}}
+                        onClick={() => {setSalaryScope('selected'); setMonth(t.key);}}
                       >
                         {monthLabel(t.key)}
-                      </button>
+                      </button>}
                     </td>
                     <td>{t.shipments}</td>
                     <td>{money(t.deducted)}</td>
