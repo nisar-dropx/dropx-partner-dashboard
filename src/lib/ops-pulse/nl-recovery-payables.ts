@@ -46,7 +46,7 @@ export async function loadRecoveryPayables(
     p_station: station,
   });
   if (directory.error) throw Error("Station employees could not be loaded.");
-  // Debit targets are Station Manager and below only — never Cluster / City / AOM salaries.
+  // Include station staff and mapped Cluster Managers / AOMs; never expose People salaries.
   const people = filterLossRecoveryDebitPeople(
     ((directory.data || []) as RecoveryPerson[]).filter(
       (p) => !selectedRefs || selectedRefs.includes(p.ref),
@@ -62,7 +62,7 @@ export async function loadRecoveryPayables(
     );
     if (blocked.length)
       throw Error(
-        "Recovery can only be allocated to Station Manager and below. Cluster, City and Area managers cannot be selected.",
+        "Recovery can only be allocated to station staff and its mapped Cluster Manager or Area Operations Manager.",
       );
   }
   const employeeIds = people

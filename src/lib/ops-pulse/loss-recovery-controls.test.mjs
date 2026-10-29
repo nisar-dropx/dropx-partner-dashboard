@@ -36,11 +36,11 @@ test('already recovered is cluster and above only', () => {
   assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_SLPM' }), true);
   assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_CLM', readOnly: true }), false);
 });
-test('debit targets exclude cluster city and area managers', () => {
-  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Cluster Manager' }), true);
+test('debit targets include mapped cluster and area managers, but exclude higher roles', () => {
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Cluster Manager' }), false);
   assert.equal(isLossRecoveryManagerialTarget({ designation: 'City Manager' }), true);
-  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Area Operations Manager' }), true);
-  assert.equal(isLossRecoveryManagerialTarget({ designationCode: 'CLM', designation: 'Cluster Manager' }), true);
+  assert.equal(isLossRecoveryManagerialTarget({ designation: 'Area Operations Manager' }), false);
+  assert.equal(isLossRecoveryManagerialTarget({ designationCode: 'CLM', designation: 'Cluster Manager' }), false);
   assert.equal(isLossRecoveryManagerialTarget({ designation: 'Station Manager' }), false);
   assert.equal(isLossRecoveryManagerialTarget({ designation: 'Team Lead' }), false);
   assert.equal(isLossRecoveryManagerialTarget({ designation: 'Delivery Associate' }), false);
@@ -50,7 +50,7 @@ test('debit targets exclude cluster city and area managers', () => {
     { ref: '2', designation: 'Station Manager' },
     { ref: '3', designation: 'Delivery Associate' },
   ]);
-  assert.deepEqual(kept.map((p) => p.ref), ['2', '3']);
+  assert.deepEqual(kept.map((p) => p.ref), ['1', '2', '3']);
 });
 test('departed person needs identity and accountable follow-up', () => {
   assert.ok(departedPersonError({},'Person resigned'));

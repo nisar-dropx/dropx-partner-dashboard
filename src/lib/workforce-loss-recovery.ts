@@ -89,3 +89,13 @@ export function isMissingLossRecoveryFunction(error: { code?: string | null; mes
   const message = String(error.message ?? "");
   return error.code === "PGRST202" || error.code === "42883" || (/nl_loss_recovery_due/.test(message) && /not find|does not exist/i.test(message));
 }
+
+/** Presentation only: keep every recoveryKey in the underlying payroll snapshot. */
+export function groupWorkforceDeductionDisplay<T extends { code: string; label: string; amount: number; recoveryKey?: string }>(items: T[]) {
+  const losses = items.filter(item => item.code === LOSS_RECOVERY_CODE && item.amount !== 0);
+  return {
+    other: items.filter(item => item.code !== LOSS_RECOVERY_CODE && item.amount !== 0),
+    losses,
+    lossTotal: rounded(losses.reduce((total, item) => total + item.amount, 0)),
+  };
+}

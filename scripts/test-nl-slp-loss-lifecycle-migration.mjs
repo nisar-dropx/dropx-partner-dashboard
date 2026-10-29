@@ -489,5 +489,22 @@ await mustReject('Other plans reserve available pay',paySave('PAY-REST'));
 eq('Due RPC sends 100 percent to older payroll clients',String((await one(`select cap_percent from nl_loss_recovery_due('${C}',(select deduction_month from nl_loss_recoveries where case_key='PAY-80'),'hrms') where case_key='PAY-80'`)).cap_percent),'100');
 eq('Migration never changes paid history',(await db.query(`select amount::numeric as amount,metadata->>'recovery_key' k from hr_payroll_run_items where run_person_id='${PERSON}'`)).rows,afterClarify);
 
+
+// People assignment is independent of salary readiness; Workforce retains save-time checks.
+await db.exec(`update nl_loss_sources set recovery_policy=recovery_policy||'{"directory_ceiling_designations":["STM"],"directory_excluded_designations":["CM","CLM","AOM","NH","MP"]}'::jsonb`);
+const peopleAssignmentSql=readFileSync('supabase/migrations/20261029143000_loss_people_assignment_and_managers.sql','utf8');
+await db.exec(peopleAssignmentSql); await db.exec(peopleAssignmentSql);
+eq('Mapped managers included, higher roles excluded',(await one(`select recovery_policy->'directory_ceiling_designations' ceiling,recovery_policy->'directory_excluded_designations' excluded from nl_loss_sources`)),{ceiling:['AOM'],excluded:['MP','NH']});
+await db.exec(`update nl_recovery_payables set payable=null,gross=null,policy_updated_at=(select updated_at from nl_loss_sources),checked_at=now();
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+('${C}','nl','2026-09','PEOPLE-NO-PAY','BLR1',100,'Recoverable'),
+('${C}','nl','2026-09','WF-NO-PAY','BLR1',100,'Recoverable'),
+('${C}','nl','2026-09','PEOPLE-INACTIVE','BLR1',100,'Recoverable');`);
+await db.query(full('PEOPLE-NO-PAY',`employee:${E1}`));
+eq('People plan without salary is approved for payroll',(await one(`select approval_status from nl_loss_recoveries where case_key='PEOPLE-NO-PAY'`)).approval_status,'approved');
+await mustReject('Workforce still needs payout eligibility',full('WF-NO-PAY',`workforce:${W1}`));
+await db.exec(`update nl_recovery_payables set eligible=false where employee_ref='employee:${E1}'`);
+await mustReject('People employment check remains enforced',full('PEOPLE-INACTIVE',`employee:${E1}`));
+
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
