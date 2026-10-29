@@ -8,6 +8,10 @@ The People payroll engine enforces available take-home when deducting; unfunded 
 lines remain due. Workforce continues to check payout eligibility when saving.
 Migration `20261029143000_loss_people_assignment_and_managers.sql` restores the mapped
 Cluster Manager / AOM directory ceiling without exposing People pay amounts.
+Migration `20261029160000_loss_parent_child_recipients.sql` adds the configured active,
+same-provider EDSP/XPT parent–child scope to both the picker and save validation.
+An XPT includes its EDSP parent, not sibling XPTs. The picker shows source station codes
+and deduplicates people by recovery reference. Higher management stays excluded.
 
 Workforce and People show one expandable loss total. Underlying recovery keys remain
 individual, so history, carry-forward and exactly-once deductions are unchanged. Payslips
