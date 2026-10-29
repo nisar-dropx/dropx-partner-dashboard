@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {betaLifecycleEnabled,betaLifecycleSummary,BETA_LIFECYCLE_COMPANY as co,BETA_LIFECYCLE_CANDIDATE as ca} from './beta-lifecycle.ts';
+import {betaLifecycleEnabled,betaLifecycleSummary,betaTrainingExitAllowed,BETA_LIFECYCLE_COMPANY as co,BETA_LIFECYCLE_CANDIDATE as ca} from './beta-lifecycle.ts';
 import {betaMilestones} from './beta-onboarding-progress.ts';
 import {betaUanProgress} from './beta-uan.ts';
 import {betaSourceProgress,verifiedBetaSnapshot} from './beta-verification.ts';
@@ -13,3 +13,13 @@ test('active and inactive are different; driver ID alone never means activation'
 test('existing non-enabled beta and canonical milestone counts remain unchanged',()=>{assert.equal(betaMilestones({...data,lifecycleEnhanced:false}).length,7);assert.equal(betaMilestones({...data,isolatedBeta:false,lifecycleEnhanced:false}).length,6)});
 test('mail-only UAN confirmation survives later generic reminders',()=>{const verified={sender:'no-reply@logistics.amazon.in',subject:'Your UAN has been verified',preview:'Your Universal Account Number (UAN) has been successfully verified.',received_at:'2026-10-16T11:27:48Z'};const reminder={sender:'support@idfy.com',subject:'Action required: Complete e-Shram registration',received_at:'2026-10-20T00:00:00Z'};assert.equal(betaUanProgress(null,[verified,reminder]).status,'verified')});
 test('mismatched provider identity cannot complete progress',()=>{const snapshot={amazon_profile_id:'other',identity_email:'same@example.test',bgc_submitted_at:'2026-10-16'};const live=verifiedBetaSnapshot(snapshot,'same@example.test','correct');assert.equal(live,null);assert.equal(betaSourceProgress(live).amazonRegistrationConfirmed,false)});
+
+const now=Date.parse('2026-10-29T10:00:00Z');
+const active={...data,operationalStatus:'ACTIVE',sourceStatus:{amazonUpdatedAt:new Date(now).toISOString()}};
+test('fresh ACTIVE is prominent despite pending training and attendance',()=>{const s=betaLifecycleSummary(active,now);assert.equal(s.active,true);assert.equal(s.stage,'active');assert.equal(s.label,'Amazon ID active');assert.equal(s.milestones.find(m=>m.id==='activation').status,'action');assert.notEqual(s.milestones.find(m=>m.id==='attendance').status,'complete');assert.equal(s.workspaceStatus,'isolated_beta');assert.equal(s.registrationReviewPending,true);assert.match(s.instruction,/separately/)});
+test('stale activation is labelled last confirmed, not presented as live',()=>{for(const sourceStatus of [{amazonUpdatedAt:'2026-10-27T10:00:00Z'},{amazonUpdatedAt:null},{amazonUpdatedAt:new Date(now).toISOString(),unavailable:true},{amazonUpdatedAt:new Date(now+3600000).toISOString()}]){const s=betaLifecycleSummary({...active,sourceStatus},now);assert.equal(s.label,'Amazon ID last confirmed active');assert.notEqual(s.freshness,'fresh')}});
+test('inactive and offboarded states override an unfinished course',()=>{const s=betaLifecycleSummary({...active,operationalStatus:'INACTIVE'},now);assert.equal(s.stage,'inactive');assert.equal(s.active,false);assert.equal(s.next.id,'ready');assert.equal(betaLifecycleSummary({...active,operationalStatus:'OFFBOARDED'},now).stage,'offboarded')});
+test('archive and exit remain higher priority than prior ACTIVE evidence',()=>{assert.equal(betaLifecycleSummary({...active,closedAt:'2026-10-29'},now).active,false);assert.equal(betaLifecycleSummary({...active,offboardingRequested:true},now).stage,'exit_requested')});
+test('non-enabled beta does not gain the new activation projection',()=>{assert.notEqual(betaLifecycleSummary({...active,lifecycleEnhanced:false},now).stage,'active')});
+
+test('training-only exits reject activated, unknown and stale profiles',()=>{assert.equal(betaTrainingExitAllowed({operational_status:'ONBOARDING',lsc_observed_at:new Date(now).toISOString()},now),true);for(const status of ['ACTIVE','INACTIVE','OFFBOARDED',null])assert.equal(betaTrainingExitAllowed({operational_status:status,lsc_observed_at:new Date(now).toISOString()},now),false);for(const time of ['invalid',null,new Date(now-16*60000).toISOString(),new Date(now+10*60000).toISOString()])assert.equal(betaTrainingExitAllowed({operational_status:'ONBOARDING',lsc_observed_at:time},now),false)});
