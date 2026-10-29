@@ -13,7 +13,7 @@ export default async function CodPage() {
     redirect("/ops-pulse/cod/submission");
   }
   if (hasPermission(authorization, "cod_reports", "access")) {
-    redirect("/ops-pulse/cod/reports");
+    redirect("/ops-pulse/cod/status");
   }
   if (hasPermission(authorization, "cod_cash_in_associate", "access")) {
     redirect("/ops-pulse/cod/cash-in-associate");

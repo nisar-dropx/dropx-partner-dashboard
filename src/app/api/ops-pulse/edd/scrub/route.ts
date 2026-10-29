@@ -12,7 +12,8 @@ async function respond(refresh: boolean) {
     if (denied) return denied;
     const viewer = await loadFlashViewerStations();
     const payload = await fetchScrubNetwork(viewer.map((station) => station.code), { refresh });
-    return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
+    const allowed = new Set(viewer.map(station => station.code));
+    return NextResponse.json({...payload, stations: payload.stations.filter(station => allowed.has(station.stationCode))}, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load scrub activity.";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -54,7 +54,7 @@ test('submenu edits sync shared grants, require View for Edit, and do not change
   const h=mount();h.render();
   h.all().find(n=>n.props['aria-label']==='Expand Operations').props.onClick();h.render();
   h.all().find(n=>n.props.label==='Operations / COD Status: Edit').props.onChange(true);h.render();
-  assert.equal(h.all().find(n=>n.props.label==='Operations / COD Reports: Edit').props.checked,true);
+  assert.equal(h.all().find(n=>n.props.label==='Operations / COD Slip Review: Edit').props.checked,true);
   assert.equal(h.all().find(n=>n.props.label==='Operations / COD Slip Review: View').props.disabled,true);
   const changed=h.payload().filter(p=>p.can_view||p.can_add||p.can_edit);
   assert.deepEqual(changed,[{page_id:'cod_reports',can_view:true,can_add:false,can_edit:true}]);

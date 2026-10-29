@@ -45,7 +45,7 @@ export default async function ScorecardPage({ searchParams }: { searchParams?: {
     }
   }
   return (
-    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead eyebrow="Ops Pulse · Scorecard" title="Delivery scorecard" subtitle="Station scorecard against the previous period, with each station's DA leaderboard. From the daily shipment file, up to yesterday." />
         <EddSectionTabs active="scorecard" />

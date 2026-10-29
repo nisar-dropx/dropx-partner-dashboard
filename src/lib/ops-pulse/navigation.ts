@@ -15,6 +15,7 @@ const commonStart: NavItem[] = [
     icon: "P",
     children: [
       { code: "performance", label: "Daily Performance", href: "/performance?view=daily" },
+      { code: "edd_dashboard", label: "Live performance", href: "/edd/flash" },
       { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
       { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" },
       { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" }
@@ -140,8 +141,7 @@ function modelOperations(mode: OperatingMode): NavItem {
         { code: "ops_pulse", label: "Shift Control", href: "/?view=shift" },
         { code: "ops_pulse", label: "Hourly Performance", href: "/?view=hourly" },
         { code: "daily_submission", label: "Attendance & Reporting", href: "/daily-submission" },
-        { code: "station_audits", label: "Station Audits", href: "/audits" },
-        { code: "cod_reports", label: "Exceptions", href: "/cod/reports?client=amazon" }
+        { code: "station_audits", label: "Station Audits", href: "/audits" }
       ]
     };
   }
@@ -153,10 +153,9 @@ function modelOperations(mode: OperatingMode): NavItem {
       icon: "O",
       children: [
         networkPlanning,
-        eddDashboard,
+        scrub,
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
         { code: "station_audits", label: "Station Audits", href: "/audits" },
-        { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=flipkart" },
         { code: "cod_reports", label: "COD Slip Review", href: "/cod/pending" }
       ]
     };
@@ -168,10 +167,9 @@ function modelOperations(mode: OperatingMode): NavItem {
     icon: "O",
     children: [
       networkPlanning,
-      eddDashboard,
+      scrub,
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
-      { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
       { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
       { code: "station_audits", label: "Station Audits", href: "/audits" },
       { code: "cod_reports", label: "COD Slip Review", href: "/cod/pending" },
@@ -181,7 +179,7 @@ function modelOperations(mode: OperatingMode): NavItem {
 }
 
 const networkPlanning = { code: "service_network", label: "Network Planning", href: "/service-network" };
-const eddDashboard = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash" };
+const scrub = { code: "edd_dashboard", label: "Scrub", href: "/edd/scrub" };
 
 /** Unfiltered menu catalogue shared by the sidebar and designation editor. */
 export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {

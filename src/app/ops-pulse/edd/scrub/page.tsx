@@ -1,37 +1,30 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
-import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
-import { EddSectionTabs } from "../edd-section-tabs";
+import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
 import { ScrubReportView } from "./scrub-report-view";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-export default async function ScrubReportPage({ searchParams }: { searchParams?: { type?: string } }) {
+export default async function ScrubReportPage() {
   const authorization = await requireEddAccess();
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
+  const clusters = workerConfigured ? await loadFlashClusters(companyId, stations) : [];
 
   return (
-    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
+    <AppShell active="Scrub" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead
-          eyebrow="Ops Pulse · Scrub Report"
-          title="Scrub Report"
-          subtitle="Last In-Station and On-Road scrub per station, read live from Amazon's Station Command Center. Stations not scrubbed today are listed first."
-          action={(
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <TrackingIdSearch />
-              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>
-            </div>
-          )}
+          eyebrow="Operations"
+          title="Scrub"
+          subtitle="In-station and on-road · all stations in scope"
         />
-        <EddSectionTabs active="scrub" />
         {!workerConfigured ? (
           <section className="panel message-panel error">
             <div className="panel-body">
@@ -48,7 +41,7 @@ export default async function ScrubReportPage({ searchParams }: { searchParams?:
         {workerConfigured && stations.length ? (
           <ScrubReportView
             stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))}
-            initialType={searchParams?.type === "on-road" ? "onRoad" : "inStation"}
+            clusters={clusters}
           />
         ) : null}
       </div>
