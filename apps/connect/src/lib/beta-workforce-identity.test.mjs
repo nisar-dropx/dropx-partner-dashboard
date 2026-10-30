@@ -20,7 +20,7 @@ test('foreign candidate is rejected before any database read',async()=>{
  const f=fixture();assert.equal(await loadBetaWorkforceIdentity(f.db,company,'other'),null);assert.deepEqual(f.calls,[]);
 });
 test('mismatched email, station, biometric or archived identity cannot expose a link',async()=>{
- for(const change of [{location_id:'other'},{biometric_id:'other'},{deleted_at:'2026-10-01'},{source_profile_id:'other'}]){
+ for(const change of [{location_id:'other'},{biometric_id:'other'},{deleted_at:'2026-10-01'},{source_profile_id:'other'},{lifecycle_status:'offboarded'},{lifecycle_status:'inactive'}]){
   const f=fixture();Object.assign(f.tables.workforce[0],change);assert.equal(await loadBetaWorkforceIdentity(f.db,company,candidate),null);
  }
  const f=fixture();f.tables.workforce_amazon_portal_links[0].amazon_email='foreign@example.test';assert.equal(await loadBetaWorkforceIdentity(f.db,company,candidate),null);

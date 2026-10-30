@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { minimumAgeError } from "../lib/profile-age";
+import { ConnectAccountDetails } from "./connect-account-details";
 import { ConnectExitManagement } from "./connect-exit-management";
 import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
@@ -409,7 +410,7 @@ function ReadTile({ label, value, verified, url, full }: { label: string; value?
   </a>;
 }
 
-export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = false }: { account: AppAccount; onPhoto?: (url: string) => void; onSubmitted?: () => Promise<void> | void; readOnly?: boolean }) {
+export function ConnectProfileApp({ account, onPhoto, onSubmitted, onOnboardingHistory, onInbox, readOnly = false }: { account: AppAccount; onOnboardingHistory?: () => void; onInbox?: () => void; onPhoto?: (url: string) => void; onSubmitted?: () => Promise<void> | void; readOnly?: boolean }) {
   const executive = account.profileType !== "employee" && account.profileType !== "user";
   const isolatedPilot = Boolean(account.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
   const endpoint = isolatedPilot ? "/api/connect/pilot-profile" : executive ? "/api/connect/field-executive-profile" : "/api/connect/profile";
@@ -1285,6 +1286,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
         setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
         onPhoto?.(url);
       }} /> : null}
+      {onOnboardingHistory ? <ConnectAccountDetails account={account} onHistory={onOnboardingHistory} onInbox={onInbox} /> : null}
       {sections.map((section, sectionIndex) => <section className={sectionIndex === 0 ? "primary" : ""} key={section.name}>
         {sectionIndex ? <h2>{section.name}</h2> : null}
         <div>{Object.entries(section.values).map(([label, value]) => <ReadTile

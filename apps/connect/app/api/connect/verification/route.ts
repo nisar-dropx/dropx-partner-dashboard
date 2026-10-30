@@ -37,11 +37,11 @@ export async function GET(request: NextRequest) {
   // preview must instead use One's canonical, server-authorised target account.
   try {
     const preview = await resolveConnectPreview();
-    if (!preview) return forward(request);
     const profileType = request.nextUrl.searchParams.get("profileType") ?? "";
     const accountId = request.nextUrl.searchParams.get("accountId") ?? "";
     const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId, { allowActivationOnly: true });
-    if (!supabaseAdmin || account.companyId !== preview.companyId || account.id !== preview.id || account.profileType !== preview.profileType) {
+    if (!preview && !account.onboardingBeta) return forward(request);
+    if (!supabaseAdmin || (preview && (account.companyId !== preview.companyId || account.id !== preview.id || account.profileType !== preview.profileType))) {
       return NextResponse.json({ error: "Verification is unavailable for this preview." }, { status: 403 });
     }
     const result = await supabaseAdmin.from("connect_profile_verifications")

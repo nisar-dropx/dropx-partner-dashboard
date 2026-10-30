@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {BETA_LIFECYCLE_COMPANY as co,BETA_LIFECYCLE_CANDIDATE as ca} from './beta-lifecycle.ts';
+import * as betaWorkforceIdentity from './beta-workforce-identity.ts';
 import * as betaWorkspaceAccess from './beta-workspace-access.ts';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -63,6 +64,7 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
     '../../../../src/lib/connect-session-issuance':{},
     '../../../../src/lib/connect-account-freshness':accountFreshness,
     './beta-workspace-access':betaWorkspaceAccess,
+    './beta-workforce-identity':betaWorkforceIdentity,
     './connect-wfh-access':{connectWfhEligible:()=>false,loadConnectWfhPolicies:async()=>new Map()},
     './connect-business-trip-access':{connectBusinessTripEligible:()=>false,loadConnectBusinessTripPolicies:async()=>new Map()},
     './connect-preview':{resolveConnectPreview:async()=>null},
@@ -154,4 +156,28 @@ test('handover keeps one restricted pilot login even when canonical identity exi
  assert.equal(pilotAccounts[0].activationOnly,true);
  assert.equal(pilotAccounts[0].onboardingBeta,true);
  assert.ok(accounts.some(a=>a.id==='ordinary'&&!a.activationOnly));
+});
+
+test('verified activated pilot hands over to the same standard Workforce account and keeps its mailbox identity', async()=>{
+ const f=fixture({beta:true});
+ f.tables.companies.push({id:co,name:'DropX',is_active:true});
+ f.tables.designations.push({...f.tables.designations[0],company_id:co});
+ f.tables.designation_categories.push({...f.tables.designation_categories[0],company_id:co});
+ f.tables.workforce_amazon_email_pilot_candidates=[{...pilot(ca),company_id:co,station_id:'station',continuation_status:'continuing'}];
+ f.tables.workforce_beta_verification_snapshots=[{company_id:co,candidate_id:ca,amazon_profile_id:'provider',identity_email:'test.kbwe@example.com',operational_status:'ACTIVE',lsc_observed_at:new Date().toISOString()}];
+ f.tables.workforce_amazon_invitation_requests=[{company_id:co,email_pilot_candidate_id:ca,external_reference:'provider'}];
+ f.tables.workforce.push({...normal(ca),company_id:co,dropx_id:'DF-test',provider_employee_id:'200001',biometric_id:'beta-bio',location_id:'station',source_profile_type:'canonical',source_profile_id:ca,onboarding_status:'under_review',lifecycle_status:'onboarding',is_active:false});
+ f.tables.workforce_amazon_portal_links=[{company_id:co,workforce_id:ca,transporter_id:'DRIVER',amazon_email:'test.kbwe@example.com'}];
+ const accounts=await f.findConnectAccounts('91',mobile), account=accounts.find(a=>a.id===ca);
+ assert.equal(accounts.filter(a=>a.id===ca).length,1);
+ assert.equal(account.activationOnly,false);assert.equal(account.betaWorkspaceActive,true);
+ assert.equal(account.reference,'DF-test');assert.equal(account.status,'Active');
+ for(const page of ['dashboard','profile','earnings','rate_card','attendance','roster','connect','refer_earn'])assert.ok(account.pageAccess.includes(page),page);
+ assert.equal(account.onboardingBeta,true);assert.match(account.activationStage,/amazon_email_pilot:/);
+ assert.equal(f.tables.workforce.find(w=>w.id===ca).onboarding_status,'under_review');
+ assert.ok(!f.reads.includes('field_executive_provider_mappings'),'login must not load payout calculation data');
+ // A conflicting identity must never gain the canonical workspace.
+ f.tables.workforce_amazon_portal_links[0].amazon_email='other@example.test';
+ const conflicting=(await f.findConnectAccounts('91',mobile)).find(a=>a.id===ca);
+ assert.equal(conflicting.activationOnly,true);assert.equal(conflicting.reference,null);
 });

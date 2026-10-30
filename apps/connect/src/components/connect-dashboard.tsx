@@ -521,7 +521,7 @@ export function ConnectDashboard({
       {!workforce ? <span className="dx-live-chip"><i />Live</span> : null}
     </header>
 
-    {workforce ? <ConnectWorkforceJoining key={`${account.profileType}:${account.id}`} account={account} compact /> : null}
+    {workforce && !account.betaWorkspaceActive ? <ConnectWorkforceJoining key={`${account.profileType}:${account.id}`} account={account} compact /> : null}
     {!workforce ? <section className="dx-dashboard-card today">
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">

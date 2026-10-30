@@ -1,0 +1,13 @@
+.card { padding:20px; background:#fff; border:1px solid #e3e7ed; border-radius:18px; }
+.card header h2 { margin:0; font-size:18px; color:#182234; }
+.card p { margin:6px 0 14px; color:#657187; font-size:14px; }
+.grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:18px 0 0; }
+.grid dt { color:#657187; font-size:12px; }
+.grid dd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:5px 0 0; font-size:14px; font-weight:600; color:#182234; }
+.grid dd span { overflow-wrap:anywhere; }
+.email { grid-column:1/-1; }
+.card button { display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid #e3e7ed; background:#fff; color:#9f2853; border-radius:10px; min-height:40px; padding:8px 12px; cursor:pointer; font:inherit; font-size:14px; }
+.card button:focus-visible { outline:2px solid #b93563; outline-offset:3px; }
+.notice { display:block; color:#286951; font-size:12px; min-height:18px; margin-top:8px; }
+.card footer { display:flex; flex-wrap:wrap; gap:10px; border-top:1px solid #edf0f3; padding-top:14px; }
+@media(max-width:480px) { .grid { grid-template-columns:1fr; } .card footer button { flex:1 1 100%; justify-content:space-between; } }
