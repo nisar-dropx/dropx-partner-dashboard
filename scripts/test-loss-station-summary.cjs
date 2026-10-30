@@ -60,3 +60,26 @@ console.log('PASS loss summary: scoped filters, distinct TIDs, split allocations
 
 
 assert.equal(lossFacts([row("period",1,{details:{period:"9",case_status:"resolved"}})],[],["Recoverable"])[0].period,"2026-09","NL uses its canonical month, not the raw source month number");
+
+const {lossSummaryPeriods,filterLossSummaryPeriod}=load('src/lib/ops-pulse/loss-station-summary.ts');
+const periodFacts=lossFacts([
+ row('nl-old',100,{month:'2026-08'}),row('nl-new',0.56),
+ row('slp-old',20,{report:'slp',month:'2026-07',details:{in_final:true,period:'June-July'}}),
+ row('slp-middle',30,{report:'slp',month:'2026-08',details:{in_final:true,period:'July-Aug'}}),
+ row('slp-new',40,{report:'slp',month:'2026-09',details:{in_final:true,period:'Aug-Sep'}}),
+ row('slp-pending',50,{report:'slp',month:'2026-10',details:{in_initial:true,period:'Sep-Oct'}}),
+],[],['Recoverable']);
+assert.deepEqual(lossSummaryPeriods(periodFacts,'nl'),['2026-09','2026-08']);
+assert.deepEqual(lossSummaryPeriods(periodFacts,'slp'),['Aug-Sep','July-Aug','June-July'],'SLP sorted by source month, not alphabetical label; Initial omitted');
+const sourceSummary=recoverableLossFacts(periodFacts);
+assert.equal(totalLossFacts(filterLossSummaryPeriod(sourceSummary,'nl','2026-09')).amount,0.56);
+assert.equal(totalLossFacts(filterLossSummaryPeriod(sourceSummary,'slp','Aug-Sep')).amount,40);
+assert.equal(filterLossSummaryPeriod(sourceSummary,'slp','2026-09').length,0,'SLP calendar month cannot silently match its named file period');
+assert.equal(filterLossSummaryPeriod(sourceSummary,'nl','Aug-Sep').length,0,'NL cannot match an SLP period');
+assert.equal(totalLossFacts(filterLossSummaryPeriod(sourceSummary,'slp','')).amount,90,'All SLP excludes NL');
+assert.equal(totalLossFacts(filterLossSummaryPeriod(sourceSummary,'nl','')).amount,100.56,'All NL excludes SLP');
+const latestZero=lossFacts([row('old',100),row('new-nonrecoverable',25,{month:'2026-10',source_status:'Non-Recoverable'})],[],['Recoverable']);
+assert.equal(lossSummaryPeriods(latestZero,'nl')[0],'2026-10','Newest final period remains selectable even when no recoverable cases');
+assert.equal(filterLossSummaryPeriod(recoverableLossFacts(latestZero),'nl','2026-10').length,0);
+assert.deepEqual(lossSummaryPeriods([],'slp'),[]);
+console.log('PASS independent NL/SLP periods: chronological defaults, exact source matching, all-period isolation and empty latest period.');

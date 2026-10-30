@@ -749,3 +749,17 @@ resubmission form with reviewer and time. Resubmission preserves the previous ev
 history and follows the existing independent-review state machine. Management controls
 remain separate from station evidence; returning does not revoke redispute or release
 the payroll hold.
+
+### Independent loss summary periods — 30 October 2026
+
+Summary has an NL loss-month selector and a separate SLP file-period selector.
+Each defaults to its newest final source period (SLP ordering uses the underlying
+month, not the label). All periods is explicit per source. Shared station, current
+People ownership, region and status filters still apply to both tables. Drill-down
+links retain the source period, including an explicit all-period selection.
+
+Amounts retain paise. Needs update and Updated are distinct shipment-count/value
+columns; neither is a confirmed collection. Draft payroll is shown separately within
+the update column and remains outstanding until confirmed. If the ledger cannot load,
+recovered/outstanding values are unavailable rather than zero. These changes do not
+alter loss, payroll, approval or collection records.
