@@ -200,9 +200,10 @@ export default async function DistancePage({
         )}
         <p className={styles.note}>
           Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
-          up to 31 days per view. Defaults to Ready days only (same payable fuel
-          as workforce payroll). Excluded, scan-mismatch, and other non-ready
-          days are omitted here and listed on the Excel “No payouts” sheet.
+          up to 31 days per view.           Defaults to Ready days only (same payable fuel
+          as workforce payroll). Payable kilometres come from the Amazon GPS
+          trail (Mapbox Directions paused for cost). Excluded and other
+          non-ready days are listed on the Excel “No payouts” sheet.
           Distances sync every morning at 5:00 IST; maps load when opened.
         </p>
       </div>

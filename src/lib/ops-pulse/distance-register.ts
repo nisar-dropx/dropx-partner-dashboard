@@ -39,9 +39,9 @@ export type DistanceEntry = {
   skippedScans: number;
 };
 export const distanceMethods: Record<string, string> = {
-  amazon_gps: "Amazon GPS",
+  amazon_gps: "Amazon GPS trail",
   amazon_gps_roads: "GPS + road connections",
-  gps_trail: "GPS trail (Mapbox fallback)",
+  gps_trail: "GPS trail",
   scan_roads: "Roads between scans",
   manual: "Imported kilometres",
   pending: "Awaiting evidence",
