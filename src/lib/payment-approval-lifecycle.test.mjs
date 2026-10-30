@@ -6,6 +6,7 @@ import * as stage from './payment-stage-policy.ts';
 import * as cover from './payment-delegation-policy.ts';
 import {paymentApproverNeedsReconciliation} from './payment-approver-reconciliation-policy.ts';
 import {readAllRows} from './supabase-pagination.ts';
+import {paymentRequestUpdateAttempts} from './payment-request-status-policy.ts';
 
 function compile(path,mocks) {
   const m={exports:{}};
@@ -50,6 +51,21 @@ function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=fals
   });
   return {routing,tables,db};
 }
+
+test('payment request lifecycle writes stay canonical and never retry plain APPROVED',()=>{
+  assert.deepEqual(paymentRequestUpdateAttempts({status:'approved',approval_status:'FINAL_APPROVED'}),[
+    {status:'approved',approval_status:'FINAL_APPROVED'}
+  ]);
+  assert.deepEqual(paymentRequestUpdateAttempts({status:'APPROVED'}),[{status:'approved'}]);
+  assert.deepEqual(paymentRequestUpdateAttempts(
+    {status:'OPERATIONS_CLM_APPROVED'},
+    {status:'PENDING',approval_status:'OPERATIONS_CLM_APPROVED'}
+  ),[
+    {status:'OPERATIONS_CLM_APPROVED'},
+    {status:'pending',approval_status:'OPERATIONS_CLM_APPROVED'}
+  ]);
+});
+
 const steps=[{id:'s1',step_order:1,is_required:true,candidates:[{role_id:'cm',scope:'station'},{role_id:'aom',scope:'station'}]},{id:'s2',step_order:2,is_required:false,candidates:[{role_id:'aom',scope:'station'}]},{id:'s3',step_order:3,is_required:true,candidates:[{role_id:'bh',scope:'company'}]}];
 test('regional station route hands over CM to AOM on leave and avoids a second AOM approval',async()=>{
   const {routing}=routingFixture({leave:true});
@@ -117,6 +133,7 @@ test('approval routing failure does not write an approval or advance the request
     '@/lib/company-scope':{requireCompanyId:()=> 'co',withCompany:(row,company_id)=>({...row,company_id})},
     '@/lib/payment-approval-scope':{canActOnPaymentRequest:async()=>true},
     '@/lib/payment-email-notifications':{},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/position-access':{},
+    '@/lib/payment-request-status-policy':{paymentRequestUpdateAttempts},
     '@/lib/payment-stage-policy':stage,
     '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,paymentApprovalCoverage:async()=>({fromStepOrder:1,throughStepOrder:1}),advanceApproval:async()=>{throw Error('People unavailable');}}
   });
