@@ -262,6 +262,16 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
   const dates = useMemo(() => collectEddDates(stations, payload.businessDate), [stations, payload.businessDate]);
   const pivot = useMemo(() => eddPivot(stations, dates), [stations, dates]);
+  /** Latest Amazon fetch across stations — not the page/API response time. */
+  const fetchedAt = useMemo(() => {
+    let latest: string | null = null;
+    for (const row of payload.stations) {
+      const at = row.fetchedAt;
+      if (!at || Number.isNaN(Date.parse(at))) continue;
+      if (!latest || Date.parse(at) > Date.parse(latest)) latest = at;
+    }
+    return latest;
+  }, [payload.stations]);
   const selected = useMemo(
     () => (openStation ? stations.find((row) => row.stationCode === openStation) ?? payload.stations.find((row) => row.stationCode === openStation) ?? null : null),
     [openStation, stations, payload.stations],
@@ -523,7 +533,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           <h2>Station board</h2>
           <p>
             {formatOpsDate(payload.businessDate, payload.businessDate)}
-            {payload.asOf ? ` · updated ${formatOpsDateTime(payload.asOf, payload.asOf)}` : ""}
+            {fetchedAt ? ` · fetched ${formatOpsDateTime(fetchedAt, fetchedAt)}` : ""}
             {run?.status === "running" ? " · Ops Live refresh running" : ""}
           </p>
         </div>
