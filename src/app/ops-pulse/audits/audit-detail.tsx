@@ -1532,20 +1532,26 @@ function AuditCheck({
           <label className={styles.inputLabel}>
             Photos ·{" "}
             {item.photo_required
-              ? "mandatory for every outcome"
+              ? "mandatory image for every outcome"
               : "evidence of this finding"}
             <input
               type="file"
               name={`check_photo_${item.id}`}
               aria-label={`Photos for ${item.label}`}
-              accept="image/*,application/pdf,.xlsx,.xls,.csv"
+              accept={
+                item.photo_required
+                  ? "image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
+                  : "image/*,application/pdf,.xlsx,.xls,.csv"
+              }
               multiple
               required={!photos.length}
             />
             <small>
               {photos.length
                 ? `${photos.length} saved file(s). Add more if needed.`
-                : "Attach photos, PDF, Excel or CSV for this check. Up to 30 MB each."}
+                : item.photo_required
+                  ? "Attach a JPG, PNG, WEBP or HEIC photo for this check. Up to 30 MB each."
+                  : "Attach a photo, PDF, Excel or CSV for this finding. Up to 30 MB each."}
             </small>
           </label>
           <ChecklistPhotos photos={photos} />

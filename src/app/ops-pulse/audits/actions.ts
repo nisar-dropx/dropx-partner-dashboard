@@ -1153,19 +1153,23 @@ export async function submitStationAudit(
       .eq("audit_id", audit.id);
     if (existingProofs.error) throw new Error(existingProofs.error.message);
     const missingPhotos = missingAuditPhotos(
-      typeItems.map((item) => ({
-        ...item,
-        photo_required:
-          item.photo_required ||
-          (item.photo_on_non_compliance &&
-            responseBehaviour(item, clean(formData.get(`check_${item.id}`)))
-              .isCompliant === false),
-      })),
+      typeItems.map((item) => {
+        const failedNonCompliance =
+          item.photo_on_non_compliance &&
+          responseBehaviour(item, clean(formData.get(`check_${item.id}`)))
+            .isCompliant === false;
+        return {
+          ...item,
+          photo_required: Boolean(item.photo_required || failedNonCompliance),
+          // Excel/PDF/CSV satisfy non-compliance proof; mandatory photo checks stay image-only.
+          allowDocuments: Boolean(failedNonCompliance && !item.photo_required),
+        };
+      }),
       existingProofs.data || [],
     );
     if (missingPhotos.length)
       throw new Error(
-        `Photo required: ${missingPhotos.map((i) => i.label).join("; ")}`,
+        `Attach proof for: ${missingPhotos.map((i) => i.label).join("; ")}. Mandatory photo checks need a JPG/PNG/WEBP/HEIC image; non-compliance checks also accept PDF, Excel or CSV.`,
       );
     if (requiresEvidence && !files.length && !existingProofs.data?.length)
       throw new Error("Attach evidence for the selected checklist outcome.");

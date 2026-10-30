@@ -38,8 +38,9 @@ assert.throws(()=>parseAuditTids('Tracking ID\nTID123'),/Invalid TID/);assert.th
 assert.throws(()=>selectedAuditEmployees(['foreign'],[{ref:'local'}]),/no longer linked/);
 const item={id:'check',label:'Clean',photo_required:true};
 assert.equal(missingAuditPhotos([item],[{checklist_item_id:'other',evidence_kind_code:'checklist_photo',content_type:'image/png'}]).length,1);
-assert.equal(missingAuditPhotos([item],[{checklist_item_id:'check',evidence_kind_code:'checklist_photo',content_type:'application/pdf'}]).length,0);
+assert.equal(missingAuditPhotos([item],[{checklist_item_id:'check',evidence_kind_code:'checklist_photo',content_type:'application/pdf'}]).length,1,'mandatory photo checks reject PDF');
 assert.equal(missingAuditPhotos([item],[{checklist_item_id:'check',evidence_kind_code:'checklist_photo',content_type:'image/png'}]).length,0);
+assert.equal(missingAuditPhotos([{id:'findings',label:'Findings',photo_required:true,allowDocuments:true}],[{checklist_item_id:'findings',evidence_kind_code:'checklist_photo',content_type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}]).length,0,'non-compliance proof accepts Excel');
 const db=new PGlite();const id=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const [company,station,type,actor,audit,emp,otherStation,workforce,manager]=[1,2,3,4,5,6,7,8,9].map(id);
 await db.exec(`create role anon;create role authenticated;create role service_role;
@@ -64,7 +65,7 @@ const initial=fs.readFileSync('supabase/migrations/20261001010000_ops_station_au
 await db.exec(`insert into ops_audit_types(id,company_id,code,name,cadence_unit,required_count,scheduling_config) values('${type}','${company}','physical_station','Physical','monthly',2,'{"period_slots":[{"code":"first_half","start_day":1,"end_day":15},{"code":"second_half","start_day":16,"end_day":31}]}');
  insert into ops_audit_checklist_sections(company_id,audit_type_id,code,name) values('${company}','${type}','safety_hygiene','Hygiene'),('${company}','${type}','operations','Operations');`);
 await db.exec(`insert into ops_audit_checklist_items(company_id,audit_type_id,section_id,code,label,response_type,response_options,is_active) select company_id,audit_type_id,id,'legacy_amount','Legacy amount','amount','[]'::jsonb,false from ops_audit_checklist_sections where code='operations';`);
-for(const name of ['20261005144751_station_audit_rescheduling.sql','20261005155255_station_audit_personal_tracker.sql','20261005172541_audit_hygiene_photos.sql','20261005173417_audit_shipment_reconciliation.sql','20261005181921_physical_audit_scoring.sql','20261027120000_station_audit_directory_contractors.sql'])await db.exec(fs.readFileSync(`supabase/migrations/${name}`,'utf8'));
+for(const name of ['20261005144751_station_audit_rescheduling.sql','20261005155255_station_audit_personal_tracker.sql','20261005172541_audit_hygiene_photos.sql','20261005173417_audit_shipment_reconciliation.sql','20261005181921_physical_audit_scoring.sql','20261027120000_station_audit_directory_contractors.sql','20261030100000_station_audit_checklist_proof_types.sql'])await db.exec(fs.readFileSync(`supabase/migrations/${name}`,'utf8'));
 assert.deepEqual((await db.query("select response_options from ops_audit_checklist_items where code='legacy_amount'")).rows[0].response_options,[], 'legacy amount checks retain empty options');
 assert.equal((await db.query('select count(*) n from station_audit_employee_directory($1,$2)',[company,station])).rows[0].n,4,'base TL, contractor SSA, workforce and mapped cluster manager');
 assert.equal((await db.query("select count(*) n from station_audit_employee_directory($1,$2) where ref like 'contractor:%'",[company,station])).rows[0].n,1,'station-mapped contractor SSA is listed');
@@ -81,9 +82,9 @@ const row=async()=>(await db.query('select * from ops_station_audits where id=$1
 const patch={status_code:'awaiting_station_response',station_response_status:'requested',shipment_reconciliation:{expected:['TID123','TID456'],scanned:['TID123','TID789']},system_shipment_count:2,physical_shipment_count:2,shipment_missing_count:1,shipment_excess_count:1};
 const shipments=[{tracking_id:'TID456',discrepancy_code:'missing',remarks:'Missing from scan'},{tracking_id:'TID789',discrepancy_code:'excess',remarks:'Not in ageing'}];
 const submit=async()=>db.query('select submit_station_audit_report($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',[company,audit,(await row()).updated_at,patch,[],[],shipments,[],[],actor,'Auditor','audit@example.test','OWNER']);
-await assert.rejects(submit(),/photo/);assert.equal((await row()).completed_at,null,'photo validation precedes report commit');
+await assert.rejects(submit(),/proof|photo/i);assert.equal((await row()).completed_at,null,'photo validation precedes report commit');
 await db.query(`insert into ops_station_audit_evidence(company_id,audit_id,checklist_item_id,evidence_kind_code,content_type,media_url) select company_id,$1,id,'checklist_photo','application/pdf','storage://test/proof' from ops_audit_checklist_items where photo_required`,[audit]);
-await assert.rejects(submit(),/photo/);await db.exec("update ops_station_audit_evidence set content_type='image/png'");await submit();
+await assert.rejects(submit(),/proof|photo/i);await db.exec("update ops_station_audit_evidence set content_type='image/png'");await submit();
 assert.equal((await db.query('select cardinality(expected) n from ops_audit_shipment_lists')).rows[0].n,2,'source lists retained');
 const rows=(await db.query('select * from ops_station_audit_shipments order by tracking_id')).rows;
 let responses=rows.map(s=>({id:s.id,status:'lost',remarks:'Investigation confirms lost',employee_ref:`employee:${emp}`}));

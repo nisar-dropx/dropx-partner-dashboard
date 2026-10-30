@@ -117,6 +117,10 @@ export async function POST(request: Request) {
     if (input.phase === "prepare") {
       const requested = String(input.contentType);
       const supporting = Boolean(checkId) || input.kind === "document";
+      if (check?.photo_required && !proofTypes.has(requested))
+        throw new Error(
+          "This check needs a JPG, PNG, WEBP or HEIC photo — PDF and Excel are not accepted here.",
+        );
       if (!proofTypes.has(requested) && !(supporting && documentTypes.has(requested)))
         throw new Error(supporting ? documentTypeError : proofTypeError);
       const size = Number(input.size);
@@ -166,6 +170,10 @@ export async function POST(request: Request) {
       throw new Error("The proof upload is incomplete. Please try again.");
     const stored = String(file.metadata.mimetype);
     const supportingDocument = Boolean(checkId) || input.kind === "document";
+    if (check?.photo_required && !proofTypes.has(stored))
+      throw new Error(
+        "This check needs a JPG, PNG, WEBP or HEIC photo — PDF and Excel are not accepted here.",
+      );
     if (!proofTypes.has(stored) && !(supportingDocument && documentTypes.has(stored)))
       throw new Error(supportingDocument ? documentTypeError : proofTypeError);
     const kind = checkId
