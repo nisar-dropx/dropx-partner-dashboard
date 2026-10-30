@@ -13,6 +13,7 @@ import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
 import { resolveConnectPreview } from "./connect-preview";
+import { loadBetaWorkforceIdentity } from "./beta-workforce-identity";
 import { loadBetaWorkspaceAccess } from "./beta-workspace-access";
 import { eligibleConnectWorkforceAccount } from "../../../../src/lib/connect-account-freshness";
 
@@ -1094,6 +1095,17 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     .filter((pilot) => companyNameById.has(pilot.company_id))
     .map(async (pilot):Promise<ConnectAccount> => {
       const betaWorkspaceActive=await loadBetaWorkspaceAccess(supabaseAdmin!,pilot);
+      const canonical = resolvedAccounts.find(account => account.profileType === "workforce" && account.companyId === pilot.company_id && account.id === pilot.id);
+      // Handover uses the already authorised canonical account, never a name/phone match.
+      // Database review, pay rates and approval policies remain unchanged.
+      const identity = betaWorkspaceActive && canonical
+        ? await loadBetaWorkforceIdentity(supabaseAdmin!, pilot.company_id, pilot.id, { includePayments: false }).catch(() => null)
+        : null;
+      if (canonical && identity) return {
+        ...canonical, status: "Active", reference: identity.dropxId,
+        email: identity.email, betaWorkspaceActive: true, activationOnly: false,
+        onboardingBeta: true, activationStage: `amazon_email_pilot:${pilot.status ?? "pending"}`
+      };
       return ({
       id: pilot.id,
       companyId: pilot.company_id,
@@ -1118,9 +1130,8 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       onboardingBeta: true,
       activationStage: `amazon_email_pilot:${pilot.status ?? "pending"}`
     });}));
-  // A pilot may now own a permanent Workforce identity while its reviewed
-  // production handover is still pending. Keep one login and preserve the
-  // pilot's restricted API permissions and mailbox throughout that handover.
+  // Keep one account selector and the same private mailbox across handover.
+  // Unmatched or not-yet-active pilots retain their setup-only permissions.
   const pilotKeys = new Set(isolatedPilotAccounts.map(account => `${account.companyId}:${account.id}`));
   return [...resolvedAccounts.filter(account => account.profileType !== "workforce" || !pilotKeys.has(`${account.companyId}:${account.id}`)), ...isolatedPilotAccounts];
 }
