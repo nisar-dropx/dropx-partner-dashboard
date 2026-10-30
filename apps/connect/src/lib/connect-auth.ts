@@ -1118,7 +1118,11 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       onboardingBeta: true,
       activationStage: `amazon_email_pilot:${pilot.status ?? "pending"}`
     });}));
-  return [...resolvedAccounts, ...isolatedPilotAccounts];
+  // A pilot may now own a permanent Workforce identity while its reviewed
+  // production handover is still pending. Keep one login and preserve the
+  // pilot's restricted API permissions and mailbox throughout that handover.
+  const pilotKeys = new Set(isolatedPilotAccounts.map(account => `${account.companyId}:${account.id}`));
+  return [...resolvedAccounts.filter(account => account.profileType !== "workforce" || !pilotKeys.has(`${account.companyId}:${account.id}`)), ...isolatedPilotAccounts];
 }
 
 export function createSecretHash(value: string) {

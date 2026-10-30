@@ -1432,3 +1432,14 @@ test("multi-location migration enforces one canonical DropX owner across station
   assert.equal(afterClear.rows[0].count, 1);
   await db.close();
 });
+
+test('verified identity linking rejects duplicate, foreign station and conflicting owners', async()=>{
+ const {verifiedProviderIdentityWorker:match}=await import('./provider-first-mapping-view.ts');
+ const w={id:'w',location_id:'station',provider_employee_id:'200001',dropx_id:'DF-test'};
+ assert.equal(match([w],'station','200001',[])?.id,'w');
+ assert.equal(match([w],'other','200001',[]),null);
+ assert.equal(match([w],'station','200002',[]),null);
+ assert.equal(match([w,{...w,id:'duplicate'}],'station','200001',[]),null);
+ assert.equal(match([w],'station','200001',['another']),null);
+ assert.equal(match([w],'station','200001',['w'])?.id,'w');
+});

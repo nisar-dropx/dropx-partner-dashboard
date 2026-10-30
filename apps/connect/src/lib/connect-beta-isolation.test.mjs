@@ -145,3 +145,13 @@ test('activated pilot uses normal beta navigation without granting canonical end
  const source=readFileSync(new URL('./connect-auth.ts',import.meta.url),'utf8');
  assert.match(source,/if\s*\(account.activationOnly\s*&&\s*!options.allowActivationOnly\)/);
 });
+
+test('handover keeps one restricted pilot login even when canonical identity exists', async()=>{
+ const f=fixture({beta:true,workforce:[normal('ordinary'),normal('beta')]});
+ const accounts=await f.findConnectAccounts('91',mobile);
+ const pilotAccounts=accounts.filter(a=>a.id==='beta');
+ assert.equal(pilotAccounts.length,1);
+ assert.equal(pilotAccounts[0].activationOnly,true);
+ assert.equal(pilotAccounts[0].onboardingBeta,true);
+ assert.ok(accounts.some(a=>a.id==='ordinary'&&!a.activationOnly));
+});
