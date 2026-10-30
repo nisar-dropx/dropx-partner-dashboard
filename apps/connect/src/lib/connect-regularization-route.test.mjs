@@ -63,6 +63,22 @@ test('valid missed-both request keeps both proofs and enters manager approval, n
   assert.equal(f.state.rpc[0].args.p_attachment_path, f.state.uploaded[0]); assert.equal(f.state.rpc[0].args.p_attachment_path_out, f.state.uploaded[1]);
   assert.equal(f.state.notifications[0].recipientUserId, 'manager'); assert.equal(f.state.removed.length, 0);
 });
+test('late-in and early-out permission reasons reach the create RPC with the untouched punch kept', async () => {
+  for (const [reasonCode, requestedInTime, requestedOutTime, currentInTime, currentOutTime, expectIn, expectOut] of [
+    ['late_in_permission', '09:45', '', '09:00', '18:00', '09:45', '18:00'],
+    ['early_out_permission', '', '17:10', '09:00', '18:00', '09:00', '17:10']
+  ]) {
+    const f = fixture();
+    const response = await f.POST(request({
+      reasonCode, requestedInTime, requestedOutTime, currentInTime, currentOutTime
+    }, 1));
+    assert.equal(response.status, 200, reasonCode);
+    assert.equal(f.state.rpc[0].args.p_reason_code, reasonCode);
+    assert.equal(f.state.rpc[0].args.p_requested_in_time, expectIn);
+    assert.equal(f.state.rpc[0].args.p_requested_out_time, expectOut);
+    assert.equal(f.state.rpc[0].args.p_attachment_path_out, null);
+  }
+});
 test('missing proof and missing OUT proof still block submission', async () => {
   for (const count of [0, 1]) {
     const f = fixture(); const response = await f.POST(request({}, count));

@@ -567,7 +567,9 @@ export async function POST(request: NextRequest) {
         original_approver_person_id: step.original_approver_person_id ?? null,
         fallback_reason: step.fallback_reason ?? null
       })),
-      p_attachment_path_out: attachmentPathOut
+      // Always send the named 16th arg so PostgREST cannot fall back to a stale
+      // 15-arg overload that rejects permission reasons.
+      p_attachment_path_out: attachmentPathOut ?? null
     });
     if (createResult.error) {
       throw new Error(createResult.error.message, { cause: { code: createResult.error.code } });
