@@ -18,6 +18,6 @@ export function LossCaseRow({ station, tid, approximate, reason, value, date, up
     </button>
   </div>{historyOpen && historyCase ? <LossShipmentHistory key={date || ""} {...historyCase} tid={tid}/> : null}</>;
 }
-export function LossCaseColumns() {
-  return <div className={styles.caseColumns} aria-hidden="true"><span>Station · TID</span><div><span>Reason / period</span><span>Last updated by · date / time (IST)</span><span>Value</span><span>Status · click to update</span><span/></div></div>;
+export function LossCaseColumns({ readOnly = false }: { readOnly?: boolean } = {}) {
+  return <div className={styles.caseColumns} aria-hidden="true"><span>Station · TID</span><div><span>Reason / period</span><span>Last updated by · date / time (IST)</span><span>Value</span><span>{readOnly ? "Status · view details" : "Status · click to update"}</span><span/></div></div>;
 }
