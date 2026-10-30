@@ -6,10 +6,15 @@ import { summarizeAttendance } from "@/lib/attendance-summary";
 import { approvedLeaveDays } from "@/lib/leave-calendar-days";
 import { userFacingError } from "@/lib/user-facing-error";
 import { regularizationTimeInput } from "@/lib/regularization-input";
+import { regularizationProofExtension } from "@/lib/regularization-proof";
 import { canCancelRegularization, cancellableRegularizationStatuses, regularizationIdsWithApproval } from "@/lib/connect-regularization-cancel";
 import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
 import { notifyAttendanceApprovalRequired } from "../../../../../../src/lib/connect-attendance-notifications";
+
+function indiaTodayDate() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
 
 export const dynamic = "force-dynamic";
 
@@ -55,12 +60,6 @@ function errorResponse(error: unknown, fallback: string) {
   const status = /login|expired/i.test(message) ? 401 : 400;
   return NextResponse.json({ error: message }, { status });
 }
-
-const regularizationProofTypes = new Map([
-  ["image/jpeg", ".jpg"],
-  ["image/png", ".png"],
-  ["image/webp", ".webp"]
-]);
 
 export async function GET(request: NextRequest) {
   try {
@@ -448,7 +447,7 @@ export async function POST(request: NextRequest) {
     const currentOutTime = String(formData.get("currentOutTime") ?? "").trim();
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
-    if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
+    if (attendanceDate > indiaTodayDate()) throw new Error("Future attendance cannot be regularized.");
     if (![
       "missed_in",
       "missed_out",
@@ -460,7 +459,10 @@ export async function POST(request: NextRequest) {
     ].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
-    const { inTime: normalizedRequestedInTime, outTime: normalizedRequestedOutTime } = regularizationTimeInput({
+    const {
+      inTimeRpc: normalizedRequestedInTime,
+      outTimeRpc: normalizedRequestedOutTime
+    } = regularizationTimeInput({
       reason: reasonCode, currentIn: currentInTime, currentOut: currentOutTime,
       requestedIn: requestedInTime, requestedOut: requestedOutTime
     });
@@ -501,8 +503,8 @@ export async function POST(request: NextRequest) {
     const attachmentOut = formData.get("attachmentOut");
     stage = "upload";
     if (attachment instanceof File && attachment.size > 0) {
-      const extension = regularizationProofTypes.get(attachment.type);
-      if (!extension) throw new Error("CCTV proof must be a JPG, PNG or WebP image.");
+      const extension = regularizationProofExtension(attachment);
+      if (!extension) throw new Error("CCTV proof must be a JPG, PNG, WebP or HEIC image.");
       if (attachment.size > 5 * 1024 * 1024) throw new Error("CCTV proof must be 5 MB or smaller.");
       attachmentPath = `${worker.companyId}/${worker.profileId}/attendance-regularization-${attendanceDate}-${Date.now()}${extension}`;
       const uploadResult = await supabaseAdmin.storage
@@ -515,8 +517,8 @@ export async function POST(request: NextRequest) {
       uploadedPaths.push(attachmentPath);
     }
     if (attachmentOut instanceof File && attachmentOut.size > 0) {
-      const extension = regularizationProofTypes.get(attachmentOut.type);
-      if (!extension) throw new Error("OUT-time CCTV proof must be a JPG, PNG or WebP image.");
+      const extension = regularizationProofExtension(attachmentOut);
+      if (!extension) throw new Error("OUT-time CCTV proof must be a JPG, PNG, WebP or HEIC image.");
       if (attachmentOut.size > 5 * 1024 * 1024) throw new Error("OUT-time CCTV proof must be 5 MB or smaller.");
       attachmentPathOut = `${worker.companyId}/${worker.profileId}/attendance-regularization-out-${attendanceDate}-${Date.now()}${extension}`;
       const uploadResult = await supabaseAdmin.storage
@@ -567,9 +569,9 @@ export async function POST(request: NextRequest) {
         original_approver_person_id: step.original_approver_person_id ?? null,
         fallback_reason: step.fallback_reason ?? null
       })),
-      // Always send the named 16th arg so PostgREST cannot fall back to a stale
-      // 15-arg overload that rejects permission reasons.
-      p_attachment_path_out: attachmentPathOut ?? null
+      // Always send the named OUT-proof arg (empty string when unused) so PostgREST
+      // binds the current create function, not a stale overload without it.
+      p_attachment_path_out: attachmentPathOut || ""
     });
     if (createResult.error) {
       throw new Error(createResult.error.message, { cause: { code: createResult.error.code } });

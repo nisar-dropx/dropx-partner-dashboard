@@ -43,11 +43,31 @@ function validTime(value: string) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-const regularizationProofTypes = new Map([
-  ["image/jpeg", ".jpg"],
-  ["image/png", ".png"],
-  ["image/webp", ".webp"]
-]);
+function indiaTodayDate() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
+
+function regularizationProofExtension(file: { type?: string; name?: string }) {
+  const mime = String(file.type ?? "").trim().toLowerCase();
+  const byMime = new Map([
+    ["image/jpeg", ".jpg"],
+    ["image/jpg", ".jpg"],
+    ["image/pjpeg", ".jpg"],
+    ["image/png", ".png"],
+    ["image/webp", ".webp"],
+    ["image/heic", ".heic"],
+    ["image/heif", ".heif"]
+  ]);
+  if (byMime.has(mime)) return byMime.get(mime)!;
+  const name = String(file.name ?? "").trim().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return "";
+  const byExt = new Map([
+    [".jpg", ".jpg"], [".jpeg", ".jpg"], [".png", ".png"],
+    [".webp", ".webp"], [".heic", ".heic"], [".heif", ".heif"]
+  ]);
+  return byExt.get(name.slice(dot)) ?? "";
+}
 
 async function activeSession() {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -292,7 +312,7 @@ export async function POST(request: NextRequest) {
     const currentOutTime = String(formData.get("currentOutTime") ?? "").trim();
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
-    if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
+    if (attendanceDate > indiaTodayDate()) throw new Error("Future attendance cannot be regularized.");
     if (![
       "missed_in",
       "missed_out",
@@ -359,8 +379,8 @@ export async function POST(request: NextRequest) {
     const attachment = formData.get("attachment");
     const attachmentOut = formData.get("attachmentOut");
     if (attachment instanceof File && attachment.size > 0) {
-      const extension = regularizationProofTypes.get(attachment.type);
-      if (!extension) throw new Error("CCTV proof must be a JPG, PNG or WebP image.");
+      const extension = regularizationProofExtension(attachment);
+      if (!extension) throw new Error("CCTV proof must be a JPG, PNG, WebP or HEIC image.");
       if (attachment.size > 5 * 1024 * 1024) throw new Error("CCTV proof must be 5 MB or smaller.");
       attachmentPath = `${worker.companyId}/${worker.profileId}/attendance-regularization-${attendanceDate}-${Date.now()}${extension}`;
       uploadedPath = attachmentPath;
@@ -373,8 +393,8 @@ export async function POST(request: NextRequest) {
       if (uploadResult.error) throw new Error(uploadResult.error.message);
     }
     if (attachmentOut instanceof File && attachmentOut.size > 0) {
-      const extension = regularizationProofTypes.get(attachmentOut.type);
-      if (!extension) throw new Error("OUT-time CCTV proof must be a JPG, PNG or WebP image.");
+      const extension = regularizationProofExtension(attachmentOut);
+      if (!extension) throw new Error("OUT-time CCTV proof must be a JPG, PNG, WebP or HEIC image.");
       if (attachmentOut.size > 5 * 1024 * 1024) throw new Error("OUT-time CCTV proof must be 5 MB or smaller.");
       attachmentPathOut = `${worker.companyId}/${worker.profileId}/attendance-regularization-out-${attendanceDate}-${Date.now()}${extension}`;
       uploadedPathOut = attachmentPathOut;
@@ -411,8 +431,8 @@ export async function POST(request: NextRequest) {
       p_attendance_date: attendanceDate,
       p_current_in_time: currentInTime || null,
       p_current_out_time: currentOutTime || null,
-      p_requested_in_time: validTime(normalizedRequestedInTime) ? normalizedRequestedInTime : null,
-      p_requested_out_time: validTime(normalizedRequestedOutTime) ? normalizedRequestedOutTime : null,
+      p_requested_in_time: pairedIn ? `${pairedIn}:00` : null,
+      p_requested_out_time: pairedOut ? `${pairedOut}:00` : null,
       p_reason_code: reasonCode,
       p_remarks: remarks,
       p_attachment_path: attachmentPath,
@@ -425,9 +445,7 @@ export async function POST(request: NextRequest) {
         original_approver_person_id: step.original_approver_person_id ?? null,
         fallback_reason: step.fallback_reason ?? null
       })),
-      // Always send the named 16th arg so PostgREST cannot fall back to a stale
-      // 15-arg overload that rejects permission reasons.
-      p_attachment_path_out: attachmentPathOut ?? null
+      p_attachment_path_out: attachmentPathOut || ""
     });
     if (createResult.error) {
       if (uploadedPath) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPath]);

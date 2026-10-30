@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { regularizationTimeInput } from './regularization-input.ts';
+import { regularizationProofExtension } from './regularization-proof.ts';
 import { userFacingError } from './user-facing-error.ts';
 
 function fixture() {
@@ -32,6 +33,7 @@ function fixture() {
     '@/lib/attendance-pay-day': {}, '@/lib/leave-calendar-days': {}, '@/lib/attendance-summary': {},
     '@/lib/user-facing-error': { userFacingError },
     '@/lib/regularization-input': { regularizationTimeInput },
+    '@/lib/regularization-proof': { regularizationProofExtension },
     '@/lib/connect-regularization-cancel': {},
     '../../../../../../src/lib/biometric/attendance': {},
     '../../../../../../src/lib/attendance-regularization-workflow': { resolveAttendanceRegularizationApprovers: async () => { if (state.routeError) throw Error(state.routeError); return { steps: state.steps }; } },
@@ -59,14 +61,14 @@ test('valid missed-both request keeps both proofs and enters manager approval, n
   const f = fixture(); const response = await f.POST(request());
   assert.equal(response.status, 200); assert.equal((await response.json()).request.status, 'pending_manager');
   assert.equal(f.state.rpc[0].name, 'hr_create_attendance_regularization_with_steps');
-  assert.equal(f.state.rpc[0].args.p_requested_in_time, '09:00'); assert.equal(f.state.rpc[0].args.p_requested_out_time, '18:00');
+  assert.equal(f.state.rpc[0].args.p_requested_in_time, '09:00:00'); assert.equal(f.state.rpc[0].args.p_requested_out_time, '18:00:00');
   assert.equal(f.state.rpc[0].args.p_attachment_path, f.state.uploaded[0]); assert.equal(f.state.rpc[0].args.p_attachment_path_out, f.state.uploaded[1]);
   assert.equal(f.state.notifications[0].recipientUserId, 'manager'); assert.equal(f.state.removed.length, 0);
 });
 test('late-in and early-out permission reasons reach the create RPC with the untouched punch kept', async () => {
   for (const [reasonCode, requestedInTime, requestedOutTime, currentInTime, currentOutTime, expectIn, expectOut] of [
-    ['late_in_permission', '09:45', '', '09:00', '18:00', '09:45', '18:00'],
-    ['early_out_permission', '', '17:10', '09:00', '18:00', '09:00', '17:10']
+    ['late_in_permission', '09:45', '', '09:00', '18:00', '09:45:00', '18:00:00'],
+    ['early_out_permission', '', '17:10', '09:00', '18:00', '09:00:00', '17:10:00']
   ]) {
     const f = fixture();
     const response = await f.POST(request({
@@ -76,8 +78,21 @@ test('late-in and early-out permission reasons reach the create RPC with the unt
     assert.equal(f.state.rpc[0].args.p_reason_code, reasonCode);
     assert.equal(f.state.rpc[0].args.p_requested_in_time, expectIn);
     assert.equal(f.state.rpc[0].args.p_requested_out_time, expectOut);
-    assert.equal(f.state.rpc[0].args.p_attachment_path_out, null);
+    assert.equal(f.state.rpc[0].args.p_attachment_path_out, '');
   }
+});
+test('phone gallery image/jpg and extension-only MIME still upload as proof', async () => {
+  const f = fixture();
+  const form = new FormData();
+  for (const [key, value] of Object.entries({
+    accountId: 'worker', profileType: 'employee', attendanceDate: '2026-09-29',
+    currentInTime: '09:00', currentOutTime: '', requestedInTime: '', requestedOutTime: '18:00',
+    reasonCode: 'missed_out', remarks: 'Missed OUT punch from phone gallery'
+  })) form.set(key, value);
+  form.set('attachment', new File(['unit-test fixture'], 'CCTV_proof.JPG', { type: 'image/jpg' }));
+  const response = await f.POST(new Request('https://one.example/api/connect/attendance', { method: 'POST', body: form }));
+  assert.equal(response.status, 200);
+  assert.match(f.state.rpc[0].args.p_attachment_path, /\.jpg$/);
 });
 test('missing proof and missing OUT proof still block submission', async () => {
   for (const count of [0, 1]) {
