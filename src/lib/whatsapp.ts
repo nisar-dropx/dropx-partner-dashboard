@@ -56,12 +56,25 @@ async function nextOnboardingCampaignCode(companyId: string) {
   if (!supabaseAdmin) return `ONBOARD-${Date.now()}`;
   const result = await supabaseAdmin.rpc("next_onboarding_campaign_code");
   if (!result.error && result.data) return String(result.data);
-  const countResult = await supabaseAdmin
+  // Fallback when the sequence RPC is missing: never use COUNT(*)+1 — gaps or
+  // higher existing ONBOARD-N codes collide with whatsapp_campaigns_campaign_code_key
+  // and every onboarding WhatsApp (DropX ID / biometric) fails before Meta send.
+  const existing = await supabaseAdmin
     .from("whatsapp_campaigns")
-    .select("id", { count: "exact", head: true })
+    .select("campaign_code")
     .eq("company_id", companyId)
-    .like("campaign_code", "ONBOARD-%");
-  return `ONBOARD-${(countResult.count ?? 0) + 1}`;
+    .like("campaign_code", "ONBOARD-%")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (existing.error) return `ONBOARD-${Date.now()}`;
+  let maxNumber = 0;
+  for (const row of existing.data ?? []) {
+    const match = String(row.campaign_code ?? "").match(/^ONBOARD-(\d+)$/i);
+    if (!match) continue;
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > maxNumber) maxNumber = value;
+  }
+  return `ONBOARD-${maxNumber + 1}`;
 }
 
 async function syncAutoTriggerToInbox({
