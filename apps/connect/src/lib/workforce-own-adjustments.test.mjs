@@ -131,7 +131,7 @@ test('unbounded or unexpectedly scoped results are rejected',async()=>{
  await assert.rejects(loadOwnAdjustmentLedger(other,account,from,to),/scope/);
 });
 
-function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,routeContext={enabledFrom:null,rows:[],manual:[],rateOverrides:[]},fetchAdvance=async()=>Response.json({advanceRecoveryAmount:0})){
+function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,routeContext={enabledFrom:null,rows:[],manual:[],rateOverrides:[]},loadAdvance=async()=>0){
  const source=readFileSync(new URL('../../app/api/connect/earnings/route.ts',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
@@ -140,6 +140,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,
   '../../../../../../src/lib/workforce-route-distance':{kilometreRate,isKilometreField},
   '@/lib/own-route-fuel':{ownRouteFuel},
   '@/lib/own-loss-recovery':{ownLossRecoveryEstimate},
+  '@/lib/own-advance-deduction':{loadOwnAdvanceDeduction:loadAdvance},
   '@/lib/workforce-payment-mapping':{paymentMappingForDay:resolveMapping},
   '@/lib/workforce-payment-period':{workforcePaymentMonth:()=>({from})},
   'next/server':{NextResponse:{json:(body,init)=>new Response(JSON.stringify(body),{...init,headers:{'Content-Type':'application/json',...init?.headers}})}},
@@ -167,7 +168,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,
     hasProviderAttendanceComponents
    }
   };
- new Function('require','exports','fetch',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports,fetchAdvance);
+ new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);
  return module.exports.GET;
 }
 const request=()=>new Request('https://one.example/api/connect/earnings?accountId=person&profileType=workforce&month=2026-09');
@@ -350,26 +351,40 @@ test('earnings uses the selected payroll month and includes only own recovery on
  const failed=await earningsRoute(db)(request());assert.equal(failed.status,400);assert.doesNotMatch(JSON.stringify(await failed.json()),/PRIVATE DATABASE/);
 });
 
-test('earnings includes the canonical advance once for the authenticated worker and selected month',async()=>{
+test('earnings includes the canonical advance once for both own account and authorised preview',async()=>{
+ for(const readOnlyPreview of [false,true]){
  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='workforce_adjustments'?[row()]:[],error:null}));
  let calls=0;
- const fetchAdvance=async(url,options)=>{
+ const loadAdvance=async(...args)=>{
   calls++;
-  assert.equal(url.pathname,'/api/connect/advances');
-  assert.equal(url.searchParams.get('accountId'),'person');assert.equal(url.searchParams.get('profileType'),'workforce');
-  assert.equal(url.searchParams.get('earningsMonth'),'2026-09');assert.equal(options.headers.cookie,'session=test');
-  return Response.json({advanceRecoveryAmount:60});
+  assert.deepEqual(args,['company','person','2026-09']);
+  return 60;
  };
- const req=new Request(request(),{headers:{cookie:'session=test'}});
- const response=await earningsRoute(db,undefined,undefined,undefined,fetchAdvance)(req),body=await response.json();
+ const req=new Request(request(),{headers:{cookie:'session=original-actor'}});
+ const response=await earningsRoute(db,async()=>({...account,readOnlyPreview}),undefined,undefined,loadAdvance)(req),body=await response.json();
  assert.equal(response.status,200);assert.equal(calls,1);assert.equal(body.summary.advanceRecoveryAmount,60);
  assert.equal(body.summary.deductionAmount,60);assert.equal(body.summary.netAmount,140);
+ }
 });
 
-test('earnings fails closed when canonical advances are unavailable or invalid',async()=>{
- for(const result of [Response.json({error:'Unavailable'},{status:503}),Response.json({})]){
+test('earnings fails closed when the verified deduction lookup is unavailable',async()=>{
   const db=database(q=>({data:q.table==='workforce'?{id:'person'}:[],error:null}));
-  const response=await earningsRoute(db,undefined,undefined,undefined,async()=>result)(request());
+  const response=await earningsRoute(db,undefined,undefined,undefined,async()=>{throw Error('Your advance deductions could not be verified. Please retry.');})(request());
   assert.equal(response.status,400);assert.equal('summary' in await response.json(),false);
- }
+});
+
+test('unauthorised preview cannot reach the internal deduction service',async()=>{
+ const db=database(()=>assert.fail('must not query'));
+ const response=await earningsRoute(db,async()=>{throw Error('Preview not authorised');},undefined,undefined,async()=>assert.fail('must not call service'))(request());
+ assert.equal(response.status,400); assert.equal(db.calls.length,0);
+});
+
+test('legacy profile preview requests deductions for its resolved Workforce ID, never the actor or legacy ID',async()=>{
+ const legacy={...account,id:'legacy',profileType:'field_executive',readOnlyPreview:true};
+ const db=database(q=>({data:q.table==='workforce'?{id:'canonical',source_profile_id:'legacy',source_profile_type:'field_executive'}:[],error:null}));
+ let calls=0;
+ const response=await earningsRoute(db,async()=>legacy,undefined,undefined,async(...args)=>{
+  calls++;assert.deepEqual(args,['company','canonical','2026-09']);return 0;
+ })(new Request('https://one.example/api/connect/earnings?accountId=legacy&profileType=field_executive&month=2026-09'));
+ assert.equal(response.status,200,JSON.stringify(await response.json()));assert.equal(calls,1);
 });
