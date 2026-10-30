@@ -121,7 +121,7 @@ export default async function LossesSectionPage({
     const scopedWindows=(windows.data||[]).filter(w=>scope.has(w.month+'|'+w.case_key));
     return <main className={styles.workspace}>
       <LossHeader title="Exceptions" intro="Enable shipment exceptions and review station submissions." tabs={tabs} active="exceptions"/>
-      <nav className={styles.toolbar} aria-label="Exception views" style={{justifyContent:'flex-start'}}>{[['enable','Manage exceptions'],['redisputes','Redispute submissions'],['review','Review required']].map(([key,label])=>selected===key?<span key={key} className={`${styles.chip} ${styles.activeChip}`} aria-current="page">{label}</span>:<Link key={key} className={styles.button} href={'/team-ops/losses/exceptions?view='+key} scroll={false}>{label}</Link>)}</nav>
+      <nav className={styles.toolbar} aria-label="Exception views" style={{justifyContent:'flex-start'}}>{[['enable','Manage exceptions'],['redisputes','Redispute tracking'],['review','Review required']].map(([key,label])=>selected===key?<span key={key} className={`${styles.chip} ${styles.activeChip}`} aria-current="page">{label}</span>:<Link key={key} className={styles.button} href={'/team-ops/losses/exceptions?view='+key} scroll={false}>{label}</Link>)}</nav>
       {selected==='redisputes'?<LossRedisputeDesk rows={view.rows} windows={scopedWindows} canActivate={view.canApprove}/> : selected==='review'?<LossRecoveryWorkspace {...view} approvals/> : <LossExceptionsDesk rows={view.rows} grants={(grants.data||[]).filter(g=>scope.has(g.month+'|'+g.case_key))} windows={scopedWindows} canEdit={view.canApprove} recoverableStatuses={view.settings?.recoverable_statuses||[]}/>}
     </main>;
   }

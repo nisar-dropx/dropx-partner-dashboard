@@ -1,4 +1,5 @@
 "use client";
+import { LossCaseResponse } from "./loss-case-response";
 import { commonOpenPayrollMonths } from "@/lib/ops-pulse/loss-open-payroll";
 import { LossCaseRow, LossCaseColumns } from "./loss-case-row";
 import { useEffect, useMemo, useState } from "react";
@@ -232,6 +233,7 @@ export function RecoveryForm({
   canEdit: mayEdit,
   canRecovered,
   canApprove = false,
+  onSaved,
 }: {
   row: NlCase;
   outcomes: RecoveryOutcome[];
@@ -239,6 +241,7 @@ export function RecoveryForm({
   canEdit: boolean;
   canRecovered: boolean;
   canApprove?: boolean;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const old = row.recovery && !row.recovery.is_deleted ? row.recovery : null;
@@ -313,6 +316,7 @@ export function RecoveryForm({
   const [canPropose, setCanPropose] = useState(false);
   const [mayApproveCase,setMayApproveCase]=useState(false);
   const [canResponse, setCanResponse] = useState(false);
+  const [showRedispute, setShowRedispute] = useState(false);
   const [exceptionOptions,setExceptionOptions] = useState<{installments:boolean;next_month:string|null}>({installments:false,next_month:null});
   const [returnNote, setReturnNote] = useState("");
   useEffect(() => {
@@ -526,7 +530,7 @@ export function RecoveryForm({
       if (!res.ok) throw Error(j.error);
       setRecovery(j.recovery);
       setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. The full recovery will be included in the applicable payroll calculation.") : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
-      router.refresh();
+      if(onSaved)onSaved();else router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
     } finally {
@@ -561,7 +565,7 @@ export function RecoveryForm({
       setRemarks("");
       setDetails({});
       setSuccess(`Plan removed. History is preserved.${j.payroll_sync?.message ? " " + j.payroll_sync.message : ""}`);
-      router.refresh();
+      if(onSaved)onSaved();else router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not remove plan.");
     } finally {
@@ -570,7 +574,7 @@ export function RecoveryForm({
   }
   return (
     <div className={styles.detail}>
-      {canResponse ? <p className={styles.redisputeHint}>Redispute active · payroll paused. You can update the recovery plan. <a className={styles.responseLink} href={`/team-ops/losses/vendor-response?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(row.case_key)}`}>Manage / remove redispute ↗</a></p> : null}
+
       <details className={styles.compactDetails}><summary>Source details · {row.month}</summary>
       <div className={styles.sourceGrid}>
         <div>
@@ -634,7 +638,7 @@ export function RecoveryForm({
                     if (!res.ok) throw Error(j.error);
                     setRecovery(j.recovery);
                     setSuccess("Update approved. Scheduled balances remain outstanding until collected.");
-                    router.refresh();
+                    if(onSaved)onSaved();else router.refresh();
                   } catch (e) {
                     setError(
                       e instanceof Error
@@ -659,7 +663,7 @@ export function RecoveryForm({
           if (!recovery) return;
           setBusy(true); setError(""); try {
             const res = await fetch("/api/ops-pulse/losses/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "return_to_station", month: row.month, case_key: caseKey, version: row.lifecycle_version, note: returnNote }) });
-            const j=await res.json(); if(!res.ok) throw Error(j.error); setReturnNote(""); setRecovery({...recovery,approval_status:"returned",approval_note:returnNote}); setSuccess("Returned for correction. Resubmission needs final approval again."); router.refresh();
+            const j=await res.json(); if(!res.ok) throw Error(j.error); setReturnNote(""); setRecovery({...recovery,approval_status:"returned",approval_note:returnNote}); setSuccess("Returned for correction. Resubmission needs final approval again."); if(onSaved)onSaved();else router.refresh();
           } catch(e) {setError(e instanceof Error?e.message:"Return failed.");} finally {setBusy(false);}
         }}>Return update</button>
       </details> : null}
@@ -689,6 +693,11 @@ export function RecoveryForm({
       {!loading && directoryReady && mayEdit && !canPropose ? <p className={styles.notice}>You have view access to this recovery.</p> : null}
       {loading ? (
         <p role="status">Loading recovery…</p>
+      ) : showRedispute && canResponse ? (
+        <>
+          <label>Recovery action<select aria-label="Recovery action" value="__redispute" onChange={()=>setShowRedispute(false)}><option value="__redispute">Redispute · evidence &amp; status</option><option value="recovery">Update recovery plan</option></select></label>
+          <LossCaseResponse month={row.month} caseKey={caseKey} embedded/>
+        </>
       ) : (
         <form onSubmit={save}>
           <fieldset
@@ -700,6 +709,7 @@ export function RecoveryForm({
               <select
                 value={outcome}
                 onChange={(e) => {
+                  if(e.target.value==="__redispute"){setShowRedispute(true);return;}
                   setOutcome(e.target.value);
                   setPlan(p=>({...p,deduction_month:outcomes.find(o=>o.code===e.target.value)?.deduction_timing==="next_month" ? exceptionOptions.next_month || undefined : deductionMonths.current_month}));
                   setSuccess("");
@@ -707,6 +717,7 @@ export function RecoveryForm({
                 required
               >
                 <option value="">Select an outcome</option>
+                {canResponse?<option value="__redispute">Redispute · evidence &amp; status</option>:null}
                 {outcomes
                   .filter(
                     (o) =>

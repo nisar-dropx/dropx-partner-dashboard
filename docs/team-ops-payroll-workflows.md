@@ -662,3 +662,24 @@ rows update from the saved RPC state without a page refresh. Failed rows stay av
 for retry; version conflicts return fresh scoped state and require an explicit retry.
 Active exceptions remain revocable after the source changes. No production shipment or
 payroll amount is changed by this UI release.
+
+### Redispute tracking and bulk disable — 30 October 2026
+
+Exceptions → Redispute tracking now includes enabled shipments before station submission.
+Queues separate Awaiting station (including returned corrections), Awaiting review,
+Ticket follow-up and Closed / disabled. Station users open an enabled shipment in
+NL / SLP Final and select Recovery action → Redispute · evidence & status. Reviewers see the
+reason, supporting remarks, station ticket and CCTV link; the existing case response
+screen enforces independent approval before post-dispute ticket / outcome updates.
+Tickets are filed in the vendor portal separately; OpsPulse retains their reference.
+Select enabled rows and confirm Disable selected to revoke in place using the same
+versioned, role-checked exceptions API. Successful rows update locally; failures retain
+selection and receive fresh server versions for explicit retry. History is retained.
+No payroll rules, role grants or database migrations change in this release.
+
+The Losses header search now queries exact Shipment IDs against scoped loss records
+across months, independently of SCC delivery tracking. It returns the existing recovery
+plan and redispute status; clicking the Shipment ID separately opens SCC with the station
+hint. Final recoverable results reuse RecoveryForm. Enabled redisputes appear in its
+Recovery action dropdown and open the existing evidence/review component in place;
+its server-side scope, version, evidence and independent-review checks remain authoritative.

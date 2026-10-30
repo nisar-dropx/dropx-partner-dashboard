@@ -85,7 +85,7 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
     } catch(e) {setMessage(e instanceof Error?e.message:'Unable to read workbook.');}
   }
   return <section className={`${styles.panel} ${ui.desk}`} aria-busy={busy}>
-    <div className={styles.panelHead}><div><h2>Shipment exceptions</h2><small>Search → select → enable. Or upload an Excel list.</small></div>
+    <div className={styles.panelHead}><div><h2>Shipment exceptions</h2><small>To disable: filter Enabled → select shipments → Disable selected. Excel supports both actions.</small></div>
       <div className={styles.toolbar}><button type="button" className={styles.button} disabled={busy} onClick={()=>void template()}>Download template</button>
         {canEdit?<label className={`${styles.button} ${ui.upload}`}>Upload Excel<input aria-label="Upload exception workbook" hidden type="file" accept=".xlsx,.csv" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file);e.target.value='';}}/></label>:null}</div>
     </div>
@@ -100,7 +100,7 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
     {chosen.length?<div className={ui.actions}>
       <strong>{chosen.length} selected</strong><input aria-label="Manager note (optional)" value={reason} maxLength={2000} disabled={busy} placeholder="Manager note (optional)" onChange={e=>setReason(e.target.value)}/>
       <button type="button" className={styles.primary} disabled={busy||!enableRows.length} onClick={()=>void apply(enableRows.map(r=>update(r,true)))}>{busy?'Saving…':`Enable ${LOSS_EXCEPTION_LABELS[kind]} (${enableRows.length})`}</button>
-      {disableRows.length?<button type="button" className={styles.button} disabled={busy} onClick={()=>void apply(disableRows.map(r=>update(r,false)))}>Disable ({disableRows.length})</button>:null}
+      <button type="button" className={styles.button} disabled={busy||!disableRows.length} onClick={()=>void apply(disableRows.map(r=>update(r,false)))}>Disable selected ({disableRows.length})</button>
       <button type="button" className={styles.button} disabled={busy} onClick={()=>setSelected([])}>Clear</button>
     </div>:null}
     {message?<div role="status" className={ui.result}>{message}{failed.length?<ul>{failed.map(r=><li key={exceptionKey(r,r.kind)}>{r.case_key} · {LOSS_EXCEPTION_LABELS[r.kind]}: {r.error}</li>)}</ul>:null}</div>:null}

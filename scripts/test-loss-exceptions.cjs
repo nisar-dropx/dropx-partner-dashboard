@@ -8,6 +8,10 @@ function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';c
 },m,m.exports);return m.exports;}
 (async()=>{
  const {eligibleInstallmentCounts,hasStationSubmission}=load('src/lib/ops-pulse/loss-exceptions.ts');
+ const {redisputeStage,redisputeStatus}=load('src/lib/ops-pulse/loss-redispute-queue.ts');
+ for(const [state,want] of [['awaiting_station','station'],['returned','station'],['awaiting_review','review'],['approved','ticket'],['with_vendor','ticket'],['won','closed'],['lost','closed']])assert.equal(redisputeStage({enabled:true,workflow_status:state,followup_status:'preparing'}),want);
+ assert.equal(redisputeStage({enabled:false,workflow_status:'awaiting_station',followup_status:'preparing'}),'closed');
+ assert.equal(redisputeStatus({enabled:false,workflow_status:'awaiting_station',followup_status:'preparing'}),'Disabled');
  const policy={max_installments:24,installment_thresholds_enabled:true,installment_two_month_min:7000,installment_three_month_min:10000,installment_extra_month_step:5000};
  for(const [amount,want]of [[1640,[]],[7000,[]],[7000.01,[2]],[10000,[2]],[10000.01,[2,3]],[15000,[2,3]],[15000.01,[2,3,4]]])assert.deepEqual(eligibleInstallmentCounts([amount],policy),want);
  assert.deepEqual(eligibleInstallmentCounts([18000,7100],policy),[2]);assert.deepEqual(eligibleInstallmentCounts([NaN],policy),[]);assert.deepEqual(eligibleInstallmentCounts([],policy),[]);

@@ -44,9 +44,11 @@ const labels: Record<string, string> = {
 export function LossCaseResponse({
   month,
   caseKey,
+  embedded = false,
 }: {
   month: string;
   caseKey: string;
+  embedded?: boolean;
 }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
@@ -73,7 +75,10 @@ export function LossCaseResponse({
         return j;
       })
       .then((j) => {
+        if(controller.signal.aborted)return;
         setData(j);
+        setReason(j.window.response_details?.reason || "");
+        setEvidence(j.window.response_details?.evidence_url || "");
         setTicket(j.window.tt_reference || "");
         setTicketUrl(j.window.tt_url || "");
         const state = j.window.workflow_status;
@@ -152,12 +157,12 @@ export function LossCaseResponse({
     revoke: "Remove redispute",
   };
   return (
-    <main
+    <section
       className={styles.workspace}
-      style={{ maxWidth: 1000, margin: "0 auto" }}
+      style={{ maxWidth: 1000, margin: "0 auto", ...(embedded ? {padding:0} : {}) }}
     >
-      <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute submissions" : "Recovery"}</a>
-      <h1>Shipment redispute</h1>
+      {!embedded ? <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute tracking" : "Recovery"}</a> : null}
+      {embedded ? <h3>Redispute evidence &amp; status</h3> : <h1>Shipment redispute</h1>}
       <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>
       {error ? (
         <p role="alert" className={styles.error}>
@@ -381,6 +386,6 @@ export function LossCaseResponse({
           </details>
         </>
       )}
-    </main>
+    </section>
   );
 }
