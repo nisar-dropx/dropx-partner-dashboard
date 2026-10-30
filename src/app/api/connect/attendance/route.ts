@@ -409,7 +409,7 @@ export async function POST(request: NextRequest) {
     if (!attachmentPath) {
       throw new Error("Upload workplace CCTV proof with a visible timestamp matching the requested IN or OUT time.");
     }
-    if (reasonCode === "missed_both" && !attachmentPathOut && !existingResult.data?.attachment_path) {
+    if (reasonCode === "missed_both" && !attachmentPathOut) {
       throw new Error("Upload separate CCTV proof for both IN and OUT times.");
     }
     if (worker.profileType !== "employee" && worker.profileType !== "contractor") {

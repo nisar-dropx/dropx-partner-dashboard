@@ -49,6 +49,12 @@ type Regularization = {
   createdAt: string;
   canCancel?: boolean;
 };
+type AppliedLeave = {
+  name: string;
+  status: "pending" | "approved";
+  attendanceCode?: string;
+  attendanceLabel?: string | null;
+};
 type Row = AttendanceInsightRow & {
   date: string;
   status: string;
@@ -63,6 +69,7 @@ type Row = AttendanceInsightRow & {
   workHours: string;
   punchCount: number;
   remark: string;
+  appliedLeave?: AppliedLeave | null;
   regularization: Regularization | null;
   /** False once the regularization window for this day has closed (HRMS attendance policy). */
   regularizationOpen?: boolean;
@@ -228,6 +235,7 @@ function emptyAttendanceRow(date: string): Row {
     punchCount: 0,
     remark: "",
     workMode: "onsite",
+    appliedLeave: null,
     regularization: null,
     // A past active-service day is supplied by the API, including its policy
     // window. A client-only placeholder is outside that verified scope.
@@ -571,6 +579,11 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
             {selectedTimingIssues.map((issue) => <p className="dx-attendance-detail-row" key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}
           </section> : null}
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
+          {selected.appliedLeave ? <p className="dx-attendance-day-note dx-applied-leave" role="status">
+            <strong>{selected.appliedLeave.name}</strong>
+            {" · "}
+            {selected.appliedLeave.status === "pending" ? "Applied · pending approval" : "Approved leave"}
+          </p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
             {selected.regularization?.canCancel ? <button className="danger" disabled={withdrawing} onClick={() => void withdrawRegularization(selected.regularization!.id)} type="button">{withdrawing ? "Withdrawing…" : "Withdraw request"}</button> : null}
@@ -975,6 +988,10 @@ function RegularizationSheet({
       regularizationTimeInput({ reason, currentIn: row.inTime, currentOut: row.outTime, requestedIn: inTime, requestedOut: outTime });
     } catch (validationError) {
       setError(userFacingError(validationError));
+      return;
+    }
+    if (remarks.trim().length < 5) {
+      setError("Enter a short explanation (at least 5 characters).");
       return;
     }
     if (!attachment && !row.regularization?.hasAttachment) {

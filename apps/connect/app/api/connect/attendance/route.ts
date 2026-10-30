@@ -3,9 +3,9 @@ import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker"
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
 import { summarizeAttendance } from "@/lib/attendance-summary";
-import { approvedLeaveDays } from "@/lib/leave-calendar-days";
+import { appliedLeaveDays, approvedLeaveDays } from "@/lib/leave-calendar-days";
 import { userFacingError } from "@/lib/user-facing-error";
-import { regularizationTimeInput } from "@/lib/regularization-input";
+import { regularizationClock, regularizationTimeInput } from "@/lib/regularization-input";
 import { regularizationProofExtension } from "@/lib/regularization-proof";
 import { canCancelRegularization, cancellableRegularizationStatuses, regularizationIdsWithApproval } from "@/lib/connect-regularization-cancel";
 import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
@@ -59,6 +59,21 @@ function errorResponse(error: unknown, fallback: string) {
   const message = mapConfigError(raw);
   const status = /login|expired/i.test(message) ? 401 : 400;
   return NextResponse.json({ error: message }, { status });
+}
+
+/** Prefer the RAISE text people can act on over PostgREST/constraint wrapping. */
+function regularizationRpcMessage(message: unknown) {
+  const text = String(message ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "Unable to submit regularization request.";
+  const known = text.match(
+    /(This attendance date is outside the permitted regularization window\.|Monthly (?:permission|regularization) limit of \d+ reached for [^.]+\.|A regularization request already exists for this attendance date\.|Future attendance cannot be regularized\.|Requested IN and OUT times cannot be the same\.|Select a valid regularization reason\.|Enter a short explanation\.|Attendance regularization is available only for employees and independent contractors\.|Employee does not belong to the selected company or is inactive\.|Independent contractor does not belong to the selected company or is inactive\.)/i
+  );
+  if (known) return known[1];
+  const raised = text.match(/ERROR:\s+([^\n]+?)(?:\s+CONTEXT:|\s+DETAIL:|\s+HINT:|$)/i);
+  if (raised?.[1] && !/violates|constraint|null value|PGRST|schema cache/i.test(raised[1])) {
+    return raised[1].trim();
+  }
+  return text;
 }
 
 export async function GET(request: NextRequest) {
@@ -117,7 +132,7 @@ export async function GET(request: NextRequest) {
     }
 
     const leaveColumn = worker.profileType === "employee" ? "employee_id" : worker.profileType === "contractor" ? "contractor_id" : null;
-    const [leaveTypes, approvedLeaveRequests] = await Promise.all([
+    const [leaveTypes, leaveRequests] = await Promise.all([
       supabaseAdmin
         .from("hr_leave_types")
         .select("id,name,attendance_code,attendance_label,is_paid,balance_mode")
@@ -125,28 +140,33 @@ export async function GET(request: NextRequest) {
       leaveColumn
         ? supabaseAdmin
           .from("hr_leave_requests")
-          .select("start_date,end_date,leave_type_id")
+          .select("start_date,end_date,leave_type_id,status")
           .eq("company_id", worker.companyId)
           .eq(leaveColumn, worker.profileId)
-          .eq("status", "approved")
+          .in("status", ["approved", "pending"])
           .lte("start_date", range.toDate)
           .gte("end_date", range.fromDate)
         : Promise.resolve({ data: [], error: null })
     ]);
     if (leaveTypes.error) throw new Error(leaveTypes.error.message);
-    if (approvedLeaveRequests.error) throw new Error(approvedLeaveRequests.error.message);
+    if (leaveRequests.error) throw new Error(leaveRequests.error.message);
     const labels = new Map((leaveTypes.data ?? []).map((type) => [type.attendance_code, type]));
     const leaveTypeById = new Map((leaveTypes.data ?? []).map((type) => [type.id, type]));
-    const leaveDays = approvedLeaveDays((approvedLeaveRequests.data ?? []).flatMap((request) => {
+    const mappedLeave = (leaveRequests.data ?? []).flatMap((request) => {
       const type = leaveTypeById.get(request.leave_type_id);
+      const status = request.status === "pending" ? "pending" as const : "approved" as const;
       return type ? [{
         startDate: String(request.start_date),
         endDate: String(request.end_date),
         attendanceCode: String(type.attendance_code ?? ""),
         attendanceLabel: type.attendance_label ?? null,
-        name: String(type.name ?? "")
+        name: String(type.name ?? ""),
+        status
       }] : [];
-    }), range.fromDate, range.toDate);
+    });
+    // Payroll colour only for approved leave; pending stays visible as "applied" on the day panel.
+    const leaveDays = approvedLeaveDays(mappedLeave.filter((leave) => leave.status === "approved"), range.fromDate, range.toDate);
+    const appliedByDate = appliedLeaveDays(mappedLeave, range.fromDate, range.toDate);
 
     /** Leave-type colour/label for a day's status code (a configured leave code, or plain attendance). */
     const classifyStatus = (status: string, attendanceStatus: string, workMode: string) => {
@@ -182,6 +202,16 @@ export async function GET(request: NextRequest) {
       return { statusLabel, statusKind, isPaidLeave, payDayType };
     };
 
+    const appliedLeaveFor = (date: string) => {
+      const leave = appliedByDate.get(date);
+      if (!leave) return null;
+      return {
+        name: leave.name,
+        status: leave.status,
+        attendanceCode: leave.attendanceCode,
+        attendanceLabel: leave.attendanceLabel
+      };
+    };
     const responseRows = rows.map((row) => {
       // An approved leave day shows as that leave even when the biometric
       // import produced a row for it (approval does not touch attendance_daily).
@@ -210,6 +240,7 @@ export async function GET(request: NextRequest) {
         shiftSource: row.shiftSource,
         remark: row.remark,
         workMode: row.workMode ?? "onsite",
+        appliedLeave: appliedLeaveFor(row.punchDate),
         regularization: requestByDate.get(row.punchDate) ?? null
       };
     });
@@ -244,6 +275,7 @@ export async function GET(request: NextRequest) {
         shiftSource: "Approved leave",
         remark: "",
         workMode: "onsite" as const,
+        appliedLeave: appliedLeaveFor(date),
         regularization: requestByDate.get(date) ?? null
       });
     }
@@ -316,6 +348,7 @@ export async function GET(request: NextRequest) {
           shiftSource: row.shiftSource,
           remark: "",
           workMode: "onsite" as const,
+          appliedLeave: appliedLeaveFor(row.punchDate),
           regularization: requestByDate.get(row.punchDate) ?? null
         });
       }
@@ -333,9 +366,43 @@ export async function GET(request: NextRequest) {
           inTime: "", outTime: "", punches: [], workHours: "", punchCount: 0,
           lateMinutes: 0, earlyOutMinutes: 0, scheduledStart: "--:--", scheduledEnd: "--:--",
           scheduledMinutes: 0, shiftName: "Unassigned", shiftCode: "", shiftSource: "Unassigned",
-          remark: "", workMode: "onsite" as const, regularization
+          remark: "", workMode: "onsite" as const, appliedLeave: appliedLeaveFor(date), regularization
         });
+        attendanceDates.add(date);
       }
+    }
+    // Pending leave on a day with no attendance/roster row (often future dates
+    // inside the leave window) still needs a calendar cell so selecting it shows
+    // what was applied.
+    for (const [date, leave] of appliedByDate) {
+      if (attendanceDates.has(date) || leave.status !== "pending") continue;
+      attendanceDates.add(date);
+      responseRows.push({
+        date,
+        status: "",
+        statusLabel: null,
+        statusKind: "attendance" as const,
+        isPaidLeave: null,
+        payDayType: "no_record" as const,
+        attendanceStatus: leave.name,
+        inTime: "",
+        outTime: "",
+        punches: [],
+        workHours: "",
+        punchCount: 0,
+        lateMinutes: 0,
+        earlyOutMinutes: 0,
+        scheduledStart: "--:--",
+        scheduledEnd: "--:--",
+        scheduledMinutes: 0,
+        shiftName: leave.name,
+        shiftCode: "",
+        shiftSource: "Applied leave",
+        remark: "",
+        workMode: "onsite" as const,
+        appliedLeave: appliedLeaveFor(date),
+        regularization: requestByDate.get(date) ?? null
+      });
     }
 
     const holidayCalendar = await supabaseAdmin
@@ -466,12 +533,28 @@ export async function POST(request: NextRequest) {
       reason: reasonCode, currentIn: currentInTime, currentOut: currentOutTime,
       requestedIn: requestedInTime, requestedOut: requestedOutTime
     });
-    if (remarks.length < 5) throw new Error("Enter a short explanation.");
+    if (remarks.trim().length < 5) throw new Error("Enter a short explanation.");
+    const currentInClock = regularizationClock(currentInTime);
+    const currentOutClock = regularizationClock(currentOutTime);
 
     stage = "account";
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
     if (worker.profileType !== "employee" && worker.profileType !== "contractor") {
       throw new Error("Attendance regularization is available only for employees and independent contractors.");
+    }
+
+    stage = "window";
+    // Same gate the create RPC uses — fail before proof upload when the day is closed.
+    const windowOpen = await supabaseAdmin.rpc("hr_regularization_window_open", {
+      p_company_id: worker.companyId,
+      p_date: attendanceDate,
+      p_today: null,
+      p_profile_type: worker.profileType,
+      p_profile_id: worker.profileId
+    });
+    if (windowOpen.error) throw new Error(windowOpen.error.message);
+    if (windowOpen.data === false) {
+      throw new Error("This attendance date is outside the permitted regularization window.");
     }
 
     stage = "existing_request";
@@ -553,12 +636,12 @@ export async function POST(request: NextRequest) {
       p_biometric_id: worker.biometricId || null,
       p_full_name: worker.fullName || null,
       p_attendance_date: attendanceDate,
-      p_current_in_time: currentInTime || null,
-      p_current_out_time: currentOutTime || null,
+      p_current_in_time: currentInClock || null,
+      p_current_out_time: currentOutClock || null,
       p_requested_in_time: normalizedRequestedInTime,
       p_requested_out_time: normalizedRequestedOutTime,
       p_reason_code: reasonCode,
-      p_remarks: remarks,
+      p_remarks: remarks.trim(),
       p_attachment_path: attachmentPath,
       p_steps: approval.steps.map((step) => ({
         step_name: step.step_name,
@@ -574,7 +657,7 @@ export async function POST(request: NextRequest) {
       p_attachment_path_out: attachmentPathOut || ""
     });
     if (createResult.error) {
-      throw new Error(createResult.error.message, { cause: { code: createResult.error.code } });
+      throw new Error(regularizationRpcMessage(createResult.error.message), { cause: { code: createResult.error.code } });
     }
     const requestId = String(createResult.data ?? "");
     if (!requestId) throw new Error("Unable to create attendance regularization request.");

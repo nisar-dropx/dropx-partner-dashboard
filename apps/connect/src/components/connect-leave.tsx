@@ -179,6 +179,19 @@ export function ConnectLeave({
   const medicalProofRequired = isSickLeave && requestedDays > 1;
   const approvalRoute = data?.approvalRoute;
   const previewDays = Math.max(1, requestedDays || 1);
+  const appliedOnSelectedDates = (data?.requests ?? []).filter((request) => {
+    if (!fromDate || !toDate) return false;
+    if (!["pending", "approved"].includes(request.status)) return false;
+    if (editingRequestId && request.id === editingRequestId) return false;
+    return request.fromDate <= toDate && request.toDate >= fromDate;
+  });
+  function leaveTypeOptionLabel(type: LeaveType) {
+    if (type.balanceMode === "unlimited_unpaid") return `${type.name} · Unpaid`;
+    const parts = [`${type.available ?? 0} available`];
+    if (type.pending > 0) parts.push(`${type.pending} applied`);
+    if (type.balanceMode === "earned_balance" && (type.lapsed ?? 0) > 0) parts.push(`${type.lapsed} lapsed`);
+    return `${type.name} · ${parts.join(" · ")}`;
+  }
 
   useEffect(() => {
     if (!leaveEligible || section !== "leave" || tab !== "request" || !fromDate || !toDate) return;
@@ -289,7 +302,7 @@ export function ConnectLeave({
       {section === "leave" && leaveEligible ? <>
       <div className="dx-leave-summary">
         <div><i><CalendarDays /></i><span><small>Available</small><strong>{loading ? "—" : data?.summary.available ?? 0}</strong></span></div>
-        <div><i><Clock3 /></i><span><small>Pending</small><strong>{loading ? "—" : data?.summary.pending ?? 0}</strong></span></div>
+        <div><i><Clock3 /></i><span><small>Applied</small><strong>{loading ? "—" : data?.summary.pending ?? 0}</strong></span></div>
       </div>
 
       <div className="dx-leave-card">
@@ -306,14 +319,14 @@ export function ConnectLeave({
             Leave type
             <select disabled={!leaveMasterReady || submitting || Boolean(editingRequestId && data?.types.length === 1)} onChange={(event) => setLeaveTypeId(event.target.value)} value={leaveTypeId}>
               <option value="">{leaveMasterReady ? "Select leave type" : "No active leave types"}</option>
-              {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{type.name} · {type.balanceMode === "unlimited_unpaid" ? "Unpaid" : `${type.available} available${type.balanceMode === "earned_balance" && (type.lapsed ?? 0) > 0 ? ` · ${type.lapsed} lapsed` : ""}`}</option>)}
+              {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{leaveTypeOptionLabel(type)}</option>)}
             </select>
           </label>
           {selectedType ? <p className="dx-leave-balance">{selectedType.balanceMode === "unlimited_unpaid"
-            ? `Unpaid leave · No balance limit · ${selectedType.pending} pending`
+            ? `Unpaid leave · No balance limit${selectedType.pending > 0 ? ` · ${selectedType.pending} applied` : ""}`
             : selectedType.balanceMode === "earned_balance"
-              ? `Earned comp off · ${selectedType.available ?? 0} available${(selectedType.lapsed ?? 0) > 0 ? ` · ${selectedType.lapsed} lapsed` : ""} · ${selectedType.used} used · ${selectedType.pending} pending`
-              : `${selectedType.allowance} yearly · ${selectedType.used} used · ${selectedType.pending} pending`}</p> : null}
+              ? `Earned comp off · ${selectedType.available ?? 0} available${(selectedType.lapsed ?? 0) > 0 ? ` · ${selectedType.lapsed} lapsed` : ""} · ${selectedType.used} used${selectedType.pending > 0 ? ` · ${selectedType.pending} applied` : ""}`
+              : `${selectedType.allowance} yearly · ${selectedType.available ?? 0} available · ${selectedType.used} used${selectedType.pending > 0 ? ` · ${selectedType.pending} applied` : ""}`}</p> : null}
           {!leaveMasterReady ? <p>No active leave type is available. HR can enable one in Leave Policy.</p> : null}
           <div className="dx-leave-dates">
             <label>From date<input disabled={noDatesAvailable} max={maximumDate} min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
@@ -324,6 +337,17 @@ export function ConnectLeave({
             : selectedType && dateWindow
               ? <p className="dx-leave-balance">You can choose dates from {displayDate(dateWindow.earliest)}{dateWindow.latest ? ` to ${displayDate(dateWindow.latest)}` : " onwards"}.</p>
               : null}
+          {appliedOnSelectedDates.length ? <div className="dx-alert" role="status">
+            {appliedOnSelectedDates.map((request) => (
+              <p key={request.id}>
+                <strong>{request.leaveType}</strong>
+                {" · "}
+                {displayDate(request.fromDate)}{request.toDate !== request.fromDate ? ` – ${displayDate(request.toDate)}` : ""}
+                {" · "}
+                {request.status === "pending" ? "Applied · pending approval" : "Approved"}
+              </p>
+            ))}
+          </div> : null}
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Enter reason for leave" rows={4} value={reason} /></label>
           {isSickLeave ? <section className={`dx-leave-proof${medicalProofRequired ? " required" : ""}`}>
             <div className="dx-leave-proof-head"><span><Paperclip /><strong>Medical proof</strong></span><em>{medicalProofRequired ? "Required" : "Optional for 1 day"}</em></div>

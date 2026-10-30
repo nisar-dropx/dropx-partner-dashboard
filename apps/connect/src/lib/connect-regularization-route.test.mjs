@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { regularizationTimeInput } from './regularization-input.ts';
+import { regularizationClock, regularizationTimeInput } from './regularization-input.ts';
 import { regularizationProofExtension } from './regularization-proof.ts';
 import { userFacingError } from './user-facing-error.ts';
 
+function createCall(state) {
+  return state.rpc.find((row) => row.name === 'hr_create_attendance_regularization_with_steps');
+}
+
 function fixture() {
-  const state = { existing: null, rpcError: null, routeError: null, authError: null, uploaded: [], removed: [], rpc: [], notifications: [], logs: [], queries: [], steps: [{ step_name: 'Manager approval', approver_user_id: 'manager', approver_person_id: 'person' }] };
+  const state = { existing: null, rpcError: null, routeError: null, authError: null, windowOpen: true, uploaded: [], removed: [], rpc: [], notifications: [], logs: [], queries: [], steps: [{ step_name: 'Manager approval', approver_user_id: 'manager', approver_person_id: 'person' }] };
   const db = {
     from(table) {
       state.queries.push(table);
@@ -21,7 +25,11 @@ function fixture() {
         async remove(paths) { state.removed.push(...paths); return { error: null }; }
       };
     } },
-    async rpc(name, args) { state.rpc.push({ name, args }); return { data: state.rpcError ? null : 'request-id', error: state.rpcError }; }
+    async rpc(name, args) {
+      state.rpc.push({ name, args });
+      if (name === 'hr_regularization_window_open') return { data: state.windowOpen, error: null };
+      return { data: state.rpcError ? null : 'request-id', error: state.rpcError };
+    }
   };
   const mocks = {
     'next/server': { NextResponse: { json: (body, init) => Response.json(body, init) } },
@@ -32,7 +40,7 @@ function fixture() {
     '@/lib/supabase-admin': { supabaseAdmin: db },
     '@/lib/attendance-pay-day': {}, '@/lib/leave-calendar-days': {}, '@/lib/attendance-summary': {},
     '@/lib/user-facing-error': { userFacingError },
-    '@/lib/regularization-input': { regularizationTimeInput },
+    '@/lib/regularization-input': { regularizationTimeInput, regularizationClock },
     '@/lib/regularization-proof': { regularizationProofExtension },
     '@/lib/connect-regularization-cancel': {},
     '../../../../../../src/lib/biometric/attendance': {},
@@ -60,9 +68,10 @@ test('screenshot failure returns specific guidance before storage/RPC (also prot
 test('valid missed-both request keeps both proofs and enters manager approval, never auto-approves', async () => {
   const f = fixture(); const response = await f.POST(request());
   assert.equal(response.status, 200); assert.equal((await response.json()).request.status, 'pending_manager');
-  assert.equal(f.state.rpc[0].name, 'hr_create_attendance_regularization_with_steps');
-  assert.equal(f.state.rpc[0].args.p_requested_in_time, '09:00:00'); assert.equal(f.state.rpc[0].args.p_requested_out_time, '18:00:00');
-  assert.equal(f.state.rpc[0].args.p_attachment_path, f.state.uploaded[0]); assert.equal(f.state.rpc[0].args.p_attachment_path_out, f.state.uploaded[1]);
+  const created = createCall(f.state);
+  assert.equal(created.name, 'hr_create_attendance_regularization_with_steps');
+  assert.equal(created.args.p_requested_in_time, '09:00:00'); assert.equal(created.args.p_requested_out_time, '18:00:00');
+  assert.equal(created.args.p_attachment_path, f.state.uploaded[0]); assert.equal(created.args.p_attachment_path_out, f.state.uploaded[1]);
   assert.equal(f.state.notifications[0].recipientUserId, 'manager'); assert.equal(f.state.removed.length, 0);
 });
 test('late-in and early-out permission reasons reach the create RPC with the untouched punch kept', async () => {
@@ -75,10 +84,11 @@ test('late-in and early-out permission reasons reach the create RPC with the unt
       reasonCode, requestedInTime, requestedOutTime, currentInTime, currentOutTime
     }, 1));
     assert.equal(response.status, 200, reasonCode);
-    assert.equal(f.state.rpc[0].args.p_reason_code, reasonCode);
-    assert.equal(f.state.rpc[0].args.p_requested_in_time, expectIn);
-    assert.equal(f.state.rpc[0].args.p_requested_out_time, expectOut);
-    assert.equal(f.state.rpc[0].args.p_attachment_path_out, '');
+    const created = createCall(f.state);
+    assert.equal(created.args.p_reason_code, reasonCode);
+    assert.equal(created.args.p_requested_in_time, expectIn);
+    assert.equal(created.args.p_requested_out_time, expectOut);
+    assert.equal(created.args.p_attachment_path_out, '');
   }
 });
 test('phone gallery image/jpg and extension-only MIME still upload as proof', async () => {
@@ -92,21 +102,29 @@ test('phone gallery image/jpg and extension-only MIME still upload as proof', as
   form.set('attachment', new File(['unit-test fixture'], 'CCTV_proof.JPG', { type: 'image/jpg' }));
   const response = await f.POST(new Request('https://one.example/api/connect/attendance', { method: 'POST', body: form }));
   assert.equal(response.status, 200);
-  assert.match(f.state.rpc[0].args.p_attachment_path, /\.jpg$/);
+  assert.match(createCall(f.state).args.p_attachment_path, /\.jpg$/);
+});
+test('closed regularization window fails before proof upload', async () => {
+  const f = fixture(); f.state.windowOpen = false;
+  const response = await f.POST(request());
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /outside the permitted regularization window/);
+  assert.equal(f.state.uploaded.length, 0);
+  assert.equal(createCall(f.state), undefined);
 });
 test('missing proof and missing OUT proof still block submission', async () => {
   for (const count of [0, 1]) {
     const f = fixture(); const response = await f.POST(request({}, count));
     assert.equal(response.status, 400); assert.match((await response.json()).error, /proof/);
-    assert.equal(f.state.rpc.length, 0); assert.deepEqual(f.state.removed, f.state.uploaded);
+    assert.equal(createCall(f.state), undefined); assert.deepEqual(f.state.removed, f.state.uploaded);
   }
 });
 test('returned dual-proof request reuses both existing proofs, not only the IN proof', async () => {
   const f = fixture(); f.state.existing = { id: 'returned', status: 'returned', attachment_path: 'existing-in', attachment_path_out: 'existing-out' };
   assert.equal((await f.POST(request({}, 0))).status, 200);
-  assert.equal(f.state.rpc[0].args.p_attachment_path_out, 'existing-out');
+  assert.equal(createCall(f.state).args.p_attachment_path_out, 'existing-out');
   f.state.existing.attachment_path_out = null; f.state.rpc = [];
-  assert.equal((await f.POST(request({}, 0))).status, 400); assert.equal(f.state.rpc.length, 0);
+  assert.equal((await f.POST(request({}, 0))).status, 400); assert.equal(createCall(f.state), undefined);
 });
 test('Other (remarks only) is no longer accepted, even for a returned request', async () => {
   const f = fixture(); f.state.existing = { status: 'returned', attachment_path: 'existing-proof' };
@@ -116,8 +134,8 @@ test('Other (remarks only) is no longer accepted, even for a returned request', 
 test('duplicate pending and unauthenticated requests cannot upload or create', async () => {
   const f = fixture(); f.state.existing = { status: 'pending_manager' };
   assert.equal((await f.POST(request())).status, 400); assert.equal(f.state.uploaded.length, 0);
-  f.state.existing = null; f.state.authError = 'Login expired.';
-  assert.equal((await f.POST(request())).status, 401); assert.equal(f.state.rpc.length, 0);
+  f.state.existing = null; f.state.authError = 'Login expired.'; f.state.rpc = [];
+  assert.equal((await f.POST(request())).status, 401); assert.equal(createCall(f.state), undefined);
 });
 test('database and routing failure clean up only newly uploaded files; diagnostics omit private data', async () => {
   for (const failingStage of ['create_request', 'approval_route']) {
@@ -129,6 +147,13 @@ test('database and routing failure clean up only newly uploaded files; diagnosti
     assert.equal(f.state.logs[0][1].stage, failingStage);
     assert.doesNotMatch(JSON.stringify(f.state.logs), /Test person|missing punches|existing-proof/);
   }
+});
+test('monthly-limit RPC raise stays readable instead of a generic submit error', async () => {
+  const f = fixture();
+  f.state.rpcError = { code: 'P0001', message: 'Monthly regularization limit of 3 reached for Oct 2026.' };
+  const response = await f.POST(request());
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Monthly regularization limit of 3 reached for Oct 2026/);
 });
 test('no manager route retains existing HR queue fallback', async () => {
   const f = fixture(); f.state.steps = [];

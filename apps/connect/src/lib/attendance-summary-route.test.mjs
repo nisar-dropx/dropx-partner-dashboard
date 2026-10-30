@@ -6,7 +6,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import { summarizeAttendance } from './attendance-summary.ts';
 import { resolveAttendancePayDayType } from '../../../../src/lib/attendance-pay-day.ts';
-import { approvedLeaveDays } from './leave-calendar-days.ts';
+import { appliedLeaveDays, approvedLeaveDays } from './leave-calendar-days.ts';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const fixedNow = '2026-10-09T17:00:00Z';
@@ -69,9 +69,9 @@ function fixture() {
     '@/lib/supabase-admin': { supabaseAdmin: db },
     '@/lib/attendance-pay-day': { resolveAttendancePayDayType },
     '@/lib/attendance-summary': { summarizeAttendance },
-    '@/lib/leave-calendar-days': { approvedLeaveDays },
+    '@/lib/leave-calendar-days': { approvedLeaveDays, appliedLeaveDays },
     '@/lib/user-facing-error': { userFacingError: (e, fallback) => e.message || fallback },
-    '@/lib/regularization-input': {},
+    '@/lib/regularization-input': { regularizationClock: () => '', regularizationTimeInput: () => ({}) },
     '@/lib/regularization-proof': {},
     '@/lib/connect-regularization-cancel': { cancellableRegularizationStatuses: ['pending_manager', 'pending_hr', 'returned'], regularizationIdsWithApproval: async () => new Set(), canCancelRegularization: () => true },
     '../../../../../../src/lib/attendance-regularization-workflow': {},

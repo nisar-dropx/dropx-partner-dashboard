@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approvedLeaveDays } from "./leave-calendar-days.ts";
+import { approvedLeaveDays, appliedLeaveDays } from "./leave-calendar-days.ts";
 
 const compOff = { startDate: "2026-09-26", endDate: "2026-09-26", attendanceCode: "WOFFCOMP", attendanceLabel: "Approved week-off compensatory off", name: "Week-off Comp Off" };
 
@@ -18,4 +18,13 @@ test("a multi-day leave is clipped to the month shown", () => {
 test("leave outside the month adds nothing; a type without an attendance code is skipped", () => {
   assert.equal(approvedLeaveDays([{ ...compOff, startDate: "2026-10-01", endDate: "2026-10-01" }], "2026-09-01", "2026-09-30").size, 0);
   assert.equal(approvedLeaveDays([{ ...compOff, attendanceCode: "" }], "2026-09-01", "2026-09-30").size, 0);
+});
+
+test("applied leave prefers a pending request over an approved one on the same day", () => {
+  const days = appliedLeaveDays([
+    { ...compOff, status: "approved", name: "Sick Leave", attendanceCode: "SICK" },
+    { ...compOff, status: "pending", name: "Casual Leave", attendanceCode: "CASUAL" }
+  ], "2026-09-01", "2026-09-30");
+  assert.equal(days.get("2026-09-26")?.name, "Casual Leave");
+  assert.equal(days.get("2026-09-26")?.status, "pending");
 });

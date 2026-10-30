@@ -226,8 +226,8 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
   });
   // Ledger-backed balance (hr_resolve_leave_balance) - not a re-count of this year's requests
   // here, so it reflects any cancellation, HR adjustment or comp-off credit against the same
-  // balance, exactly like the HRMS Leave page. "pending" stays a request-list figure (days
-  // requested but not yet decided), which the ledger correctly does not touch until approval.
+  // balance, exactly like the HRMS Leave page. Pending requests are not in the ledger yet
+  // (debited on approval), so available nets them out the same way validateLeaveSubmission does.
   const types = await Promise.all(entitlements.map(async (leaveType) => {
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
@@ -247,8 +247,10 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
     if (lapseRows.error) throw new Error(lapseRows.error.message);
     const remaining = tracksBalance ? balance.remaining : null;
     // Earned comp-off: do not advertise ledger remaining when every credit has
-    // already passed its apply-by date (picker is closed).
-    const available = earned ? earnedLeaveAvailable(remaining, dateWindow) : remaining;
+    // already passed its apply-by date (picker is closed). Then subtract pending
+    // so the dropdown matches the submit guard (ledger remaining − pending).
+    const ledgerAvailable = earned ? earnedLeaveAvailable(remaining, dateWindow) : remaining;
+    const available = ledgerAvailable === null ? null : Math.max(0, ledgerAvailable - pending);
     const lapsed = earned ? earnedLeaveLapsedDays(lapseRows.data ?? []) : 0;
     return {
       id: leaveType.leave_type_id,

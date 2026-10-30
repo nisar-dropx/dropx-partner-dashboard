@@ -12235,6 +12235,15 @@ img.dx-selfie-live {
   line-height: 1.45;
 }
 
+.dx-attendance-day-note.dx-applied-leave {
+  color: #9a5a08;
+  background: #fff4df;
+}
+
+.dx-attendance-day-note.dx-applied-leave strong {
+  font-weight: 700;
+}
+
 /* DropX One — workday dashboard composition */
 .dx-dashboard-summary-card {
   position: relative;
