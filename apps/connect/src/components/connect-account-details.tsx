@@ -40,7 +40,7 @@ export function ConnectAccountDetails({ account, onHistory, onInbox }: {
     ["Biometric ID", account.biometricId],
     ["Amazon sign-in email", identity?.email || account.email]
   ];
-  return <section className={styles.card} aria-label="Work accounts">
+  return <section className={`primary ${styles.card}`} aria-label="Work accounts">
     <header><div><h2>Work accounts</h2><p>Your IDs, Amazon email and setup records.</p></div></header>
     <dl className={styles.grid}>{fields.map(([label, value]) => <div key={label} className={label === "Amazon sign-in email" ? styles.email : undefined}>
       <dt>{label}</dt><dd><span>{value || (state === "loading" ? "Loading…" : "Not available yet")}</span>{value ? <button type="button" aria-label={`Copy ${label}`} onClick={() => void copy(label!, value)}><Copy size={16} /></button> : null}</dd>
