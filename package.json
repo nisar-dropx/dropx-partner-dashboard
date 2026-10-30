@@ -49,7 +49,7 @@
     "verify:ops-app": "node scripts/verify-opspulse-app.mjs && node --test scripts/test-opspulse-service-worker.mjs src/components/ops-app-install.test.mjs",
     "test:ops-client-demo": "node scripts/test-ops-client-demo.mjs",
     "test:loss-stage-reminders": "node scripts/test-loss-stage-reminders.cjs && node scripts/test-loss-reminder-scope.cjs && node scripts/test-loss-stage-reminder-migration.mjs && node scripts/test-loss-installment-amount-rules.mjs",
-    "test:unified-advances": "node scripts/test-unified-paid-advance-ledger.mjs && node scripts/test-unified-advance-cutover.mjs && node --experimental-strip-types --test src/lib/workforce-paid-advances-allocation.test.mjs apps/connect/src/lib/connect-pay-advance-approval-data.test.mjs apps/connect/src/lib/connect-advances-route.test.mjs"
+    "test:unified-advances": "node scripts/test-unified-paid-advance-ledger.mjs && node scripts/test-unified-advance-cutover.mjs && node --experimental-strip-types --test src/lib/workforce-paid-advances-allocation.test.mjs apps/connect/src/lib/connect-pay-advance-approval-data.test.mjs apps/connect/src/lib/connect-advances-route.test.mjs src/app/api/internal/workforce-advance-deduction/route.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",
