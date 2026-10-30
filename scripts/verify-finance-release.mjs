@@ -32,6 +32,7 @@ for (const route of ['/finance/profitability', '/finance/final-pnl', '/finance/t
 if (existsSync('.vercel/project.json')) {
   const project = JSON.parse(readFileSync('.vercel/project.json', 'utf8'));
   assert.equal(project.projectId, 'prj_jGPCmnK52mKT2ejawPeKmwxgf1tL', 'This release belongs only to dropx-finance');
-  assert.equal(project.projectName, 'dropx-finance');
+  // Vercel's build container writes the project ID but may omit its display name.
+  if (project.projectName !== undefined) assert.equal(project.projectName, 'dropx-finance');
 }
 console.log(`Finance release integrity passed (${required.length} required product files).`);
