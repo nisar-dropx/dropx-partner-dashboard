@@ -67,9 +67,11 @@ export function RosterDownloadModal({
   const clearSelection = () => setSelected(new Set());
 
   const download = async () => {
-    const ids = [...selected];
+    const allowed = new Set(stations.map((station) => station.id));
+    const ids = [...selected].filter((id) => allowed.has(id));
+    if (ids.length !== selected.size) setSelected(new Set(ids));
     if (!ids.length) {
-      setError("Select at least one station in your access scope.");
+      setError("Select at least one station.");
       return;
     }
     setBusy(true);
@@ -141,7 +143,7 @@ export function RosterDownloadModal({
         <header className={styles.head}>
           <div>
             <h2>Download station rosters</h2>
-            <p>Choose stations in your OpsPulse access, then download PDF or Excel of the approved Mon–Sun pattern.</p>
+            <p>Search and select stations, then download the approved Mon–Sun pattern as PDF or Excel.</p>
           </div>
           <button type="button" aria-label="Close" onClick={() => !busy && setOpen(false)} disabled={busy}>
             <X size={16} />
@@ -160,13 +162,13 @@ export function RosterDownloadModal({
           </label>
 
           <div className={styles.toolbar}>
-            <span className={styles.count}>{selected.size} selected · {visible.length} shown · {stations.length} accessible</span>
+            <span className={styles.count}>{selected.size} selected · {visible.length} shown · {stations.length} stations</span>
             <div className={styles.toolbarActions}>
               <button type="button" className="button secondary compact" onClick={selectVisible} disabled={!visible.length || busy}>
                 Select shown
               </button>
               <button type="button" className="button secondary compact" onClick={() => setSelected(new Set(stations.map((station) => station.id)))} disabled={busy}>
-                Select all access
+                Select all
               </button>
               <button type="button" className="button secondary compact" onClick={clearSelection} disabled={!selected.size || busy}>
                 Clear
@@ -174,7 +176,7 @@ export function RosterDownloadModal({
             </div>
           </div>
 
-          <div className={styles.list} role="group" aria-label="Accessible stations">
+          <div className={styles.list} role="group" aria-label="Stations">
             {visible.length ? visible.map((station) => {
               const checked = selected.has(station.id);
               return (
@@ -210,7 +212,7 @@ export function RosterDownloadModal({
         </div>
 
         <footer className={styles.foot}>
-          {error ? <p className={styles.error}>{error}</p> : <span className={styles.count}>Only stations in your location access can be downloaded.</span>}
+          {error ? <p className={styles.error}>{error}</p> : <span className={styles.count}>Approved recurring roster for the selected stations.</span>}
           <div className={styles.actions}>
             <button type="button" className="button secondary compact" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
             <button type="button" className="button primary compact" onClick={() => void download()} disabled={busy || !selected.size}>

@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     const planId = params.get("plan")?.trim() ?? "";
 
     if (!downloadAll && !selectedIds.length && !stationId) {
-      return Response.json({ error: "Select one or more stations in your access scope." }, { status: 400 });
+      return Response.json({ error: "Select one or more stations." }, { status: 400 });
     }
     if ((downloadAll || selectedIds.length > 1) && planId) {
       return Response.json({ error: "A specific plan can only be downloaded for one station." }, { status: 400 });
@@ -73,22 +73,20 @@ export async function GET(request: Request) {
     );
     const scopedById = new Map(scoped.map((location) => [location.id, location]));
 
+    // Never expose out-of-scope stations: keep only ids the caller can already see in the picker.
     let stations = scoped;
     if (selectedIds.length) {
-      const denied = selectedIds.filter((id) => !scopedById.has(id));
-      if (denied.length) {
-        return Response.json({ error: "One or more selected stations are outside your OpsPulse location access." }, { status: 403 });
-      }
-      stations = selectedIds.map((id) => scopedById.get(id)!);
+      stations = selectedIds.flatMap((id) => {
+        const station = scopedById.get(id);
+        return station ? [station] : [];
+      });
     } else if (!downloadAll) {
-      if (!scopedById.has(stationId)) {
-        return Response.json({ error: "This station is outside your OpsPulse location access." }, { status: 403 });
-      }
-      stations = [scopedById.get(stationId)!];
+      const station = scopedById.get(stationId);
+      stations = station ? [station] : [];
     }
 
     if (!stations.length) {
-      return Response.json({ error: "No stations are available in your OpsPulse location scope." }, { status: 404 });
+      return Response.json({ error: "Select one or more stations." }, { status: 404 });
     }
 
     const today = indiaToday();
