@@ -1,6 +1,7 @@
 "use client";
 
-import { Menu, X } from "lucide-react";
+import Link from "next/link";
+import { Menu, X, House, ChartNoAxesCombined, ListChecks } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -13,6 +14,7 @@ type AppShellFrameProps = {
   mobileActions: ReactNode;
   mobileBrand?: ReactNode;
   sidebar: ReactNode;
+  financeLinks?: { href: string; label: string; icon: string }[];
   opsDesignPreview?: boolean;
   pageTitle?: string;
   trackEvents?: boolean;
@@ -21,7 +23,7 @@ type AppShellFrameProps = {
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle, trackEvents = true }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, financeLinks, opsDesignPreview = false, pageTitle, trackEvents = true }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // OpsPulse always uses the new shell, including server render and storage-restricted browsers.
   const modern = opsDesignPreview;
@@ -134,6 +136,16 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
       ) : null}
 
       {sidebar}
+
+      {financeLinks && <nav className="finance-bottom-nav" aria-label="Finance quick navigation">
+        {financeLinks.map((item) => {
+          const target = item.href.split("?")[0];
+          const selected = pathname === target && (!item.href.includes("tab=") || searchParams.get("tab") === "pnl");
+          const Icon = item.icon === "home" ? House : item.icon === "chart" ? ChartNoAxesCombined : ListChecks;
+          return <Link key={item.href} href={item.href} aria-current={selected ? "page" : undefined}><Icon size={21} /><span>{item.label}</span></Link>;
+        })}
+        <button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open all Finance sections" aria-expanded={sidebarOpen}><Menu size={21} /><span>More</span></button>
+      </nav>}
 
       <main className="main">
         <header className="topbar">

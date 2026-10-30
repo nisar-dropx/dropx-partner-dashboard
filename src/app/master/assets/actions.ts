@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import * as XLSX from "xlsx";
 import { hasPermission } from "@/lib/authorization";
 import { conditionForAssetQuantity, resolveAssetQuantities } from "@/lib/asset-quantity";
+import { editAsset, changeAssetDeleted } from "@/lib/asset-mutations";
 import { assetPrefix } from "@/lib/assets";
 import { financeContext } from "@/lib/finance/data";
 
@@ -179,10 +180,11 @@ export async function updateAssetQuantity(form: FormData) {
     if (!/^[0-9a-f-]{36}$/i.test(assetId)) throw new Error("Choose a valid asset group.");
     const quantities = resolveAssetQuantities({ trackingMode: "quantity", total: form.get("quantity_total"), faulty: form.get("quantity_faulty") });
     const asset = await context.db.from("assets")
-      .select("id,location_id,tracking_mode,quantity_total,quantity_working,quantity_faulty,condition")
+      .select("id,location_id,tracking_mode,quantity_total,quantity_working,quantity_faulty,condition,is_active")
       .eq("company_id", context.companyId).eq("id", assetId).maybeSingle();
     if (asset.error || !asset.data) throw new Error("This asset group could not be found.");
     if (!context.authorization.hasAllLocationAccess && asset.data.location_id && !context.authorization.locationScopeIds.includes(asset.data.location_id)) throw new Error("This asset group is outside your Finance scope.");
+    if (!asset.data.is_active) throw new Error("Restore this deleted asset before updating its quantity.");
     if (asset.data.tracking_mode !== "quantity") throw new Error("Quantity status is available only for quantity-group assets.");
     const condition = conditionForAssetQuantity(quantities.total, quantities.faulty);
     const updated = await context.db.from("assets").update({
@@ -236,4 +238,27 @@ export async function uploadAssetAttachment(form: FormData) {
     await context.db.from("asset_events").insert({ company_id: context.companyId, asset_id: assetId, event_type: "attachment_added", notes: `${attachmentType}: ${fileName}`, actor_user_id: context.authorization.userId, actor_name: context.authorization.fullName || context.authorization.email || "Finance" });
     revalidatePath("/master/assets"); return { ok: true as const };
   } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Unable to attach this file." }; }
+}
+
+
+export async function updateAsset(input: unknown) {
+  try {
+    const context = await financeContext("finance_assets");
+    if (!hasPermission(context.authorization, "finance_assets", "edit")) throw new Error("Your Finance role cannot edit assets.");
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Enter the asset details.");
+    const result = await editAsset(context, input as Record<string, unknown>, (category, type) => typeForInput(context, category, type));
+    revalidatePath("/master/assets"); revalidatePath("/finance"); revalidatePath("/people/assets"); revalidatePath("/assets/audits");
+    return { ok: true as const, ...result };
+  } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Unable to update this asset." }; }
+}
+
+export async function setAssetDeleted(input: unknown) {
+  try {
+    const context = await financeContext("finance_assets");
+    if (!hasPermission(context.authorization, "finance_assets", "edit")) throw new Error("Your Finance role cannot delete or restore assets.");
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Choose an asset.");
+    const result = await changeAssetDeleted(context, input as Record<string, unknown>);
+    revalidatePath("/master/assets"); revalidatePath("/finance"); revalidatePath("/people/assets"); revalidatePath("/assets/audits");
+    return { ok: true as const, ...result };
+  } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Unable to change this asset." }; }
 }

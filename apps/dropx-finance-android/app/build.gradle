@@ -1,0 +1,9 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'com.dropxlogistics.finance'
+ compileSdk 36
+ defaultConfig { applicationId 'com.dropxlogistics.finance'; minSdk 24; targetSdk 36; versionCode 10000; versionName '1.0.0' }
+ buildTypes { release { minifyEnabled true } }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+}
+dependencies { implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2' }

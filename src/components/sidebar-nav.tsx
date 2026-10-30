@@ -8,6 +8,8 @@ import { PaymentNavBadge } from "@/components/payment-notification-provider";
 import { PendingLink } from "@/components/pending-link";
 import type { NavItem } from "@/lib/app-navigation";
 
+const isFinanceReport = (href: string) => /^\/finance\/(business|profitability)(?:[/?]|$)/.test(href);
+
 type SidebarNavProps = {
   active: string;
   items: NavItem[];
@@ -99,7 +101,7 @@ export function SidebarNav({ active, items, prefetch = true, opsDesign = false }
             }}
           >
             {item.children.map((child) => child.href ? (
-              <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label} prefetch={prefetch}>
+              <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label} prefetch={prefetch && !isFinanceReport(child.href)} refresh={!isFinanceReport(child.href)}>
                 <span className="nav-label">{child.label}</span>
                 <PaymentNavBadge code={child.hideBadge || (item.code === "people_all" && child.code === "people_all") ? undefined : child.code} />
               </PendingLink>
@@ -113,7 +115,8 @@ export function SidebarNav({ active, items, prefetch = true, opsDesign = false }
           className={`nav-item ${active === item.label ? "active" : ""}`}
           disableWhenCurrent
           href={item.href}
-          prefetch={prefetch}
+          prefetch={prefetch && !isFinanceReport(item.href)}
+          refresh={!isFinanceReport(item.href)}
           key={item.label}
         >
           <Icon>{item.icon}</Icon>

@@ -1,6 +1,7 @@
 import { Download } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 import { OpsMenuClose } from "@/components/ops-menu-close";
+import { FinanceBrand } from "@/components/finance-brand";
 import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
@@ -166,12 +167,17 @@ export async function AppShell({ children, active, pageCode }: { children: React
       pageTitle={active}
       desktopActions={topActions}
       mobileActions={topActions}
-      mobileBrand={isOpsHost ? <OpsPulseBrand /> : undefined}
+      mobileBrand={isOpsHost ? <OpsPulseBrand /> : isFinanceHost ? <FinanceBrand compact /> : undefined}
+      financeLinks={isFinanceHost ? [
+        { code: "payments", label: "Home", href: "/finance", icon: "home" },
+        { code: "finance_pnl", label: "P&L", href: "/finance/business?tab=pnl", icon: "chart" },
+        { code: "payment_approvals", label: "Approvals", href: "/payments/approvals", icon: "approvals" },
+      ].filter((item) => hasPermission(authorization, item.code, "access")) : undefined}
       sidebar={(
         <aside className="sidebar">
           {isOpsHost && <OpsMenuClose />}
           <div className="brand">
-            <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />
+            {!isFinanceHost && <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />}
             {isOpsHost ? (
               <OpsPulseBrand />
             ) : isPeopleHost ? (
@@ -179,7 +185,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
                 <strong>People</strong>
               </div>
             ) : isFinanceHost ? (
-              <div className="people-brand-lockup"><strong>Finance</strong></div>
+              <FinanceBrand />
             ) : null}
           </div>
 

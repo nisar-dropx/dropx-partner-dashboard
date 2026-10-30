@@ -19,6 +19,35 @@ const auth = { companyId: "company-1", hasAllLocationAccess: true, locationScope
 const hasPermission = (user, code) => user.isMasterOwner || Boolean(user.permissions[code]?.canView || user.permissions[code]?.canAdd || user.permissions[code]?.canEdit);
 const navigation = compile("./navigation.ts", { "@/lib/authorization": { hasPermission }, "@/lib/finance/surface": surface });
 
+test("Finance permission editor and save validation include every Finance page", () => {
+  const access = compile("../access-surface.ts", {
+    "next/headers": { headers: () => new Headers({ host: "fin.dropxlogistics.com" }) },
+    "@/lib/people/surface": { isPeopleHostName: () => false },
+    "@/lib/finance/surface": surface
+  });
+  assert.equal(access.currentAdminAccessSurface(), "finance");
+  for (const code of surface.financeAccessPageCodes) assert.equal(access.pageBelongsToSurface(code, "finance"), true, code);
+  for (const code of ["people_all", "fleet", "station_audits", "developer_mode"]) assert.equal(access.pageBelongsToSurface(code, "finance"), false, code);
+  assert.equal(access.pageBelongsToSurface("finance_assets", "ops"), false);
+  assert.equal(access.pageBelongsToSurface("finance_assets", "people"), false);
+});
+
+test("Asset Master is configurable under Master Data and preserves action grants", () => {
+  const { PermissionMatrix } = compile("../../components/permission-matrix.tsx", {
+    "@/components/ops-permission-matrix": { OpsPermissionMatrix: () => { throw new Error("Finance must not render Ops permissions"); } }
+  });
+  const html = renderToStaticMarkup(require("react").createElement(PermissionMatrix, {
+    surface: "finance",
+    pages: [{ id: "assets", code: "finance_assets", name: "Asset Master" }],
+    initialPermissions: [{ page_id: "assets", can_view: true, can_add: false, can_edit: false }]
+  }));
+  assert.match(html, /Master Data/);
+  const json = html.match(/name="permissions_json"[^>]*value="([^"]+)"/)[1].replaceAll("&quot;", '"');
+  assert.deepEqual(JSON.parse(json), [{ page_id: "assets", can_view: true, can_add: false, can_edit: false }]);
+  const restricted = { ...auth, isMasterOwner: false, permissions: { finance_assets: { canView: true } } };
+  assert.equal(navigation.firstAllowedFinanceHref(restricted), "/master/assets");
+});
+
 test("Finance domains and previews select Finance without claiming other products", () => {
   for (const host of ["fin.dropxlogistics.com", "finance.dropxlogistics.com", "dropx-finance.vercel.app", "dropx-finance-abc-dropx1.vercel.app"]) assert.equal(surface.isFinanceHostName(host), true, host);
   for (const host of ["dashboard.dropxlogistics.com", "admin-panel.dropxlogistics.com", "ops.dropxlogistics.com", "people.dropxlogistics.com", "recruit.dropxlogistics.com"]) assert.equal(surface.isFinanceHostName(host), false, host);
@@ -65,12 +94,19 @@ test("Finance root redirects to Finance; main Dashboard keeps its existing rende
 test("Finance sign-in keeps authenticated and new sessions on the Finance surface", async () => {
   let user = auth;
   let signedIn = true;
+  const financeLogin = compile("../../components/finance-login-panel.tsx", {
+    "@/app/login/actions": { signInWithGoogle: "/test-signin" },
+    "@/components/submit-button": { SubmitButton: passthrough },
+    "@/components/finance-brand": { FinanceBrand: () => null },
+    "@/components/finance-install": { FinanceInstall: () => null }
+  });
   const page = compile("../../app/login/page.tsx", {
     ...rootMocks,
     "next/headers": { headers: () => new Headers({ host: "fin.dropxlogistics.com" }) },
     "@/components/document-title": { DocumentTitle: () => null },
     "@/components/ops-login-panel": { OpsLoginPanel: () => null },
     "@/components/people-login-panel": { PeopleLoginPanel: () => null },
+    "@/components/finance-login-panel": financeLogin,
     "@/components/submit-button": { SubmitButton: passthrough },
     "@/lib/authorization": { getAuthorization: async () => user, hasPermission },
     "@/lib/access-surface": { opsAccessPageCodes: [] },
@@ -89,7 +125,8 @@ test("Finance sign-in keeps authenticated and new sessions on the Finance surfac
   await assert.rejects(page({}), /redirect:\/unauthorized\?page=finance_portal/);
   signedIn = false;
   const html = renderToStaticMarkup(await page({ searchParams: { next: "//example.com" } }));
-  assert.match(html, /Sign in to DropX Finance/);
+  assert.match(html, /Your finance desk/);
+  assert.match(html, /Sign in with Google/);
   assert.match(html, /name="next"[^>]*value="\/"/);
 });
 
@@ -140,7 +177,9 @@ test('Finance groups Pricing and Rent masters under Master and both business sec
   assert.equal(master.children.find(i=>i.code==='finance_pricing').href,'/master/pricing');
   assert.equal(master.children.find(i=>i.code==='finance_rent').href,'/master/rent');
   const group=navigation.financeNavItems.find(i=>i.label==='Business Performance');
-  assert.deepEqual(group.children.map(i=>i.label),['Revenue & Billing','Profit & Loss']);
+  assert.deepEqual(group.children.map(i=>i.label),['Revenue & Billing','Live provisional P&L','Final P&L','Station Calculations','Amazon Now Units']);
+  assert.equal(group.children.find(i=>i.label==='Live provisional P&L').href,'/finance/profitability');
+  assert.equal(surface.isFinancePortalPath('/master/business'),true);
   assert.equal(surface.isFinancePortalPath('/master/pricing'),true);
   assert.equal(surface.isFinancePortalPath('/master/rent'),true);
   assert.equal(surface.isFinancePortalPath('/finance/business/export'),true);

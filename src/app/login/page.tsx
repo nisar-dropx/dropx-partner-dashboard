@@ -1,3 +1,4 @@
+import { FinanceLoginPanel } from "@/components/finance-login-panel";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { DocumentTitle } from "@/components/document-title";
@@ -93,6 +94,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       </>
     );
   }
+
+  if (isFinanceHost) return <><DocumentTitle pageName="Login" productName="DropX Finance" /><FinanceLoginPanel message={message} nextPath={safeFinanceNextPath(searchParams?.next)} /></>;
 
   return (
     <main className="login-page">

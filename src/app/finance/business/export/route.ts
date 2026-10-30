@@ -1,8 +1,12 @@
+import { loadPnl } from "@/lib/finance/pnl-data";
+import { comparisonOptions } from "@/lib/finance/pnl-comparison";
+import { exportPnlCsv, exportPnlExcel, exportPnlPdf } from "@/lib/finance/pnl-export";
 import { NextResponse } from "next/server";
 import { financeContext, loadBusiness } from "@/lib/finance/data";
 import { selectDailyRows } from "@/lib/finance/performance";
 import { csvText } from "@/lib/finance/pricing";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 export async function GET(request: Request) {
   const query = Object.fromEntries(new URL(request.url).searchParams.entries());
   const tab = query.tab === "pnl" ? "pnl" : "revenue";
@@ -10,6 +14,20 @@ export async function GET(request: Request) {
     tab === "pnl" ? "finance_pnl" : "finance_revenue",
   );
   try {
+    if (query.tab === "pnl") {
+      const r = await loadPnl(context, query);
+      const options = comparisonOptions(query);
+      const format = query.format || "csv";
+      if (!["xlsx", "pdf", "csv"].includes(format)) throw Error("Choose Excel, PDF or CSV.");
+      const body = format === "xlsx" ? await exportPnlExcel(r, options) : format === "pdf" ? await exportPnlPdf(r, options) : exportPnlCsv(r, options);
+      return new NextResponse(typeof body === "string" ? body : new Uint8Array(body).buffer, { headers: {
+        "Content-Type": format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : format === "pdf" ? "application/pdf" : "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="profit-loss-${options.view}-${r.filters.from}-to-${r.filters.to}.${format}"`,
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      } });
+    }
+
     const { rows, filters, readAt } = await loadBusiness(context, query);
     const daily = query.detail === "daily";
     const selected = selectDailyRows(
@@ -20,7 +38,7 @@ export async function GET(request: Request) {
     if (daily && query.daily && query.daily !== "all" && !selected.length)
       throw new Error("No permitted allocation matches this daily breakup.");
     const caveat =
-      "Management estimate only. Monthly MG and configured monthly fee are divided by the selected month's actual calendar days. Positive daily excess uses Amazon deliveries plus C-returns above the prorated MG volume, at the variable slab rate, plus MFN. The latest rate card effective on or before the selected month remains active until replaced. XPT uses its fixed payout plus all its Amazon deliveries and C-returns at the parent variable rate. SWA is excluded pending separate pricing. IHS/SMD settlement rules, recoveries, other fees and tax are excluded. Rent and maintenance come from effective Rent Master agreements and accrue by actual calendar days; remaining costs come from station reports. Blank or incomplete values do not produce P&L.";
+      "Management estimate only. Monthly MG and configured monthly fee are divided by the selected month's actual calendar days. Positive daily excess uses Amazon deliveries plus C-returns above the prorated MG volume, at the variable slab rate, plus MFN. The latest rate card effective on or before the selected month remains active until replaced. XPT uses its fixed payout plus all its Amazon deliveries and C-returns at the parent variable rate. SWA delivery earnings use the configured separate SWA rate; unpriced counts remain flagged. IHS/SMD settlement rules, recoveries, other fees and tax are excluded. Rent and maintenance come from effective Rent Master agreements and accrue by actual calendar days; remaining costs come from station reports. Blank or incomplete values do not produce P&L.";
     const dailyBody = daily
       ? csvText([
           [
@@ -31,7 +49,7 @@ export async function GET(request: Request) {
             "Cluster",
             "Date",
             "Deliveries",
-            "SWA deliveries (unpriced)",
+            "SWA deliveries",
             "C-returns",
             "MG billable volume",
             "Pricing model",
@@ -46,6 +64,7 @@ export async function GET(request: Request) {
             "MFN count",
             "MFN rate INR",
             "MFN earnings INR",
+            "SWA earnings INR",
             "SMD count (included in deliveries)",
             "SMD rate INR (pending separate billing)",
             "IHS count",
@@ -90,6 +109,7 @@ export async function GET(request: Request) {
               d.mfn,
               r.mfnRate,
               d.mfnRevenue,
+              d.swaRevenue ?? null,
               d.smd,
               r.smdRate,
               d.ihs,
@@ -97,12 +117,7 @@ export async function GET(request: Request) {
               r.ihsHighRate,
               d.revenue,
               ...(tab === "pnl"
-                ? [
-                    d.rentCost,
-                    d.cost,
-                    d.costComplete ? "Yes" : "No",
-                    d.profit,
-                  ]
+                ? [d.rentCost, d.cost, d.costComplete ? "Yes" : "No", d.profit]
                 : []),
               d.shipmentReported ? "Yes" : "No",
               r.revision,
@@ -127,7 +142,7 @@ export async function GET(request: Request) {
       "Month",
       "Through",
       "Deliveries",
-      "SWA deliveries (unpriced)",
+      "SWA deliveries",
       "C-returns",
       "MG billable volume",
       "Monthly MG",

@@ -310,8 +310,8 @@ export function PricingManager({
         <span className="subtle">{cards.length} rate cards</span>
       </div>
       <div className="fin-notice">
-        Amazon MG payout and volume are divided by calendar days. Daily excess
-        deliveries use the variable slab rate; MFN uses its own rate. IHS/SMD
+        Amazon MG payout and volume are divided by calendar days. Billing-period excess
+        deliveries use the variable slab rate; MFN pickups and seller returns use the MFN rate. IHS/SMD
         settlement rules, shortfall recovery, fees and tax need confirmed rules
         before final invoicing. Blank source fields remain unspecified.
       </div>
@@ -556,6 +556,23 @@ export function PricingManager({
                         rates: {
                           ...editing.rates,
                           mg_amount_including_mhe: e.target.value || null,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="fin-label">
+                  SWA delivery rate
+                  <input
+                    inputMode="decimal"
+                    value={editing.rates.swa_delivery_rate ?? ""}
+                    placeholder="Not supplied"
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        rates: {
+                          ...editing.rates,
+                          swa_delivery_rate: e.target.value || null,
                         },
                       })
                     }

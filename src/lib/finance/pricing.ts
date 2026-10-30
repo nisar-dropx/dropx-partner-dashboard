@@ -16,6 +16,7 @@ export const amazonFields = [
   ["fire_safety_equipment_fee", "Fire Safety equipment fee"],
   ["variable_slab", "Variable_Slab"],
   ["smd_rate", "SMD rate"],
+  ["swa_delivery_rate", "SWA delivery rate"],
 ] as const;
 export const isXptPricing = (
   card: { rates: Record<string, string | null> } | undefined,
@@ -306,7 +307,7 @@ export function amazonCsv(
   const normalized = headers.map((s) => s.trim());
   if (new Set(normalized).size !== normalized.length)
     throw new Error("Duplicate CSV headers.");
-  for (const key of ["station_code", ...amazonFields.map((f) => f[1])])
+  for (const key of ["station_code", ...amazonFields.filter(([key]) => key !== "swa_delivery_rate").map((f) => f[1])])
     if (!normalized.includes(key))
       throw new Error(`Missing CSV column: ${key}`);
   const seen = new Set<string>();

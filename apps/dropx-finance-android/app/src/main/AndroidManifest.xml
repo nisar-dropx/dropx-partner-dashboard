@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<application android:allowBackup="false" android:usesCleartextTraffic="false" android:icon="@mipmap/ic_launcher" android:label="DropX Finance" android:supportsRtl="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+<meta-data android:name="asset_statements" android:resource="@string/assetStatements" />
+<activity android:name=".LauncherActivity" android:exported="true" android:alwaysRetainTaskState="true" android:label="DropX Finance">
+<meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://fin.dropxlogistics.com/finance?source=android-app" />
+<meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/brand" />
+<meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/background" />
+<meta-data android:name="android.support.customtabs.trusted.SPLASH_IMAGE_DRAWABLE" android:resource="@drawable/splash" />
+<meta-data android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND_COLOR" android:resource="@color/background" />
+<meta-data android:name="android.support.customtabs.trusted.SPLASH_SCREEN_FADE_OUT_DURATION" android:value="200" />
+<meta-data android:name="android.support.customtabs.trusted.FILE_PROVIDER_AUTHORITY" android:value="com.dropxlogistics.finance.fileprovider" />
+<meta-data android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY" android:value="customtabs" />
+<intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="fin.dropxlogistics.com"/></intent-filter>
+</activity>
+<activity android:name="com.google.androidbrowserhelper.trusted.FocusActivity" />
+<provider android:name="androidx.core.content.FileProvider" android:authorities="com.dropxlogistics.finance.fileprovider" android:grantUriPermissions="true" android:exported="false"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/filepaths"/></provider>
+</application></manifest>

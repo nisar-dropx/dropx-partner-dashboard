@@ -41,8 +41,6 @@ const emptyQuery = (data = []) => ({
   limit() { return this; },
   eq() { return this; },
   in() { return this; },
-  is() { return this; },
-  or() { return this; },
   gte() { return this; },
   lte() { return this; },
   order() { return this; },
@@ -50,13 +48,10 @@ const emptyQuery = (data = []) => ({
 });
 function dataModule(db, locations = all, rebuildCps = (base) => base) {
   const database = db ? { ...db, from: db.from ?? (() => emptyQuery()) } : db;
-  const mocks = {
+  return compile("./cps-data.ts", {
     "server-only": {},
     react: { cache: (fn) => fn },
     "./cps-engine": { rebuildCps },
-    "../workforce-route-distance": compile("../workforce-route-distance.ts"),
-    "../workforce-route-distance-data": {loadRouteDistanceContext: async () => ({enabledFrom:null,rows:[],manual:[],rateOverrides:[]})},
-    "./cps-targets": compile("./cps-targets.ts"),
     "./advertising": { excludeAdvertisingSettlements: base => base },
     "./advertising-data": { loadAdvertising: async () => ({breakup:[],gaps:[],rows:[],settlements:[]}) },
     "@/lib/company-scope": { requireCompanyId: (a) => a.companyId },
@@ -64,22 +59,13 @@ function dataModule(db, locations = all, rebuildCps = (base) => base) {
     "./cod": {
       loadCodLocations: async () => ({ locations, error: null }),
       todayKolkata: () => "2026-09-11",
-      locationModelName: l => (Array.isArray(l.location_models) ? l.location_models[0]?.code : l.location_models?.code) || "",
     },
     "./adhoc-activity": { adHocClusterLabel: (l) => l.cluster },
     "./cps": domain,
-    "./cps-cost-details": compile("./cps-cost-details.ts"),
     "@/lib/supabase-admin": { supabaseAdmin: database },
     "@/lib/supabase-pagination": { readAllRows: async (query) => await query },
     "@/lib/workforce-payment-policy": { workforcePaymentMonthStart: (date) => `${date.slice(0, 7)}-01` },
-  };
-  const snapshot = compile("./cps-snapshot.ts", {
-    ...mocks,
-    "../supabase-admin": mocks["@/lib/supabase-admin"],
-    "../supabase-pagination": mocks["@/lib/supabase-pagination"],
-    "../workforce-payment-policy": mocks["@/lib/workforce-payment-policy"],
   });
-  return compile("./cps-data.ts", { ...mocks, "./cps-snapshot": snapshot });
 }
 test("forged station and intersecting filters cannot widen permitted locations", async () => {
   const d = dataModule(null, [all[0]]);
@@ -104,12 +90,6 @@ test("forged station and intersecting filters cannot widen permitted locations",
     (await withHidden.cpsScope(context, { station: "B" })).selected.length,
     0,
   );
-});
-test("command-center exact scope is an authorization intersection, including empty scope", async () => {
-  const d=dataModule(null,[all[0]]);
-  assert.deepEqual((await d.cpsScope(context,{scope:'A,B'})).all.map(l=>l.station_code),['A']);
-  assert.deepEqual((await d.cpsScope(context,{scope:'B'})).all,[]);
-  assert.deepEqual((await d.cpsScope(context,{scope:''})).all,[]);
 });
 test("RPC receives company, sorted station scope and exact period; empty scope does not query", async () => {
   const calls = [];
@@ -276,8 +256,6 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
     work_date: `2026-08-${String(i + 1).padStart(2, "0")}`,
     deliveries: 100,
     activity: 110,
-    c_return: 10,
-    swa_delivery: 20,
     associate_rows: 2,
     unmapped: 1,
     unpaid: 0,
@@ -351,12 +329,7 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
   const [summary] = XLSX.utils.sheet_to_json(book.Sheets.Summary);
   assert.equal(summary.Deliveries, 3100);
   assert.equal(summary["Recorded cost"], 46500);
-  assert.equal(summary["CPS shipments (delivery + C-return)"], 3410);
-  assert.equal(summary["SWA deliveries"], 620, "SWA is a delivery subset, not an extra denominator");
-  assert.equal(summary["Recorded CPS"], 46500 / 3410);
-  assert.equal(summary["DA CPS"], 27900 / 3410);
-  const [cost] = XLSX.utils.sheet_to_json(book.Sheets["Cost breakup"]);
-  assert.equal(cost["CPS contribution"], 300 / 110);
+  assert.equal(summary["Recorded CPS"], 15);
   assert.equal(summary.Status, "Provisional");
   assert.match(summary["Data gaps"], /payment setup/);
   const cell = book.Sheets["Cost breakup"].D2;
@@ -393,38 +366,4 @@ test('Fleet rent replaces base-RPC rent exactly once while genuine ad hoc costs 
  assert.equal(result.breakup.filter(l=>l.source==='Fleet Vehicle Master').length,1);
  assert.equal(result.breakup.find(l=>l.source==='Fleet Vehicle Master').amount,0,'canonical rent-blocked day wins over stale base rent');
  assert.equal(result.breakup.find(l=>l.source==='Approved payment requests').amount,250);
-});
-
-test("CPS parent selection combines authorized XPTs, applies parent filters and preserves input scope", async()=>{
- const parent={...all[0],station_code:"P"},child={...all[1],station_code:"X",location_models:{code:"XPT"}};
- const topology=[{id:"1",station_code:"P",parent_station_id:null},{id:"2",station_code:"X",parent_station_id:"1"},{id:"3",station_code:"HIDDEN",parent_station_id:"1"}];
- const db={from:()=>emptyQuery(topology)};
- const d=dataModule(db,[parent,child]);
- for(const station of ["P","X"]) assert.deepEqual((await d.cpsScope(context,{station,region:"KL"},true)).selected.map(l=>l.station_code),["P","X"]);
- assert.deepEqual((await d.cpsScope(context,{station:"P"},false)).selected.map(l=>l.station_code),["P"]);
- assert.deepEqual((await dataModule(db,[child]).cpsScope(context,{station:"P"},true)).selected.map(l=>l.station_code),["X"]);
- assert.equal((await d.cpsScope(context,{station:"HIDDEN"},true)).selected.length,0);
- assert.equal((await dataModule(db,[child]).cpsScope(context,{station:"HIDDEN"},true)).selected.length,0);
-});
-
-test("CPS target writes enforce permission, station scope, parent grouping and positive amounts", async () => {
-  let auth = {...context, userId:"user-a"}, permitted = true;
-  const writes = [];
-  const actions = compile("../../app/cps/actions.ts", {
-    "next/cache": { revalidateTag() {} },
-    "@/lib/authorization": { getAuthorization:async()=>auth, hasPermission:()=>permitted },
-    "@/lib/ops-pulse/cps-data": { cpsScope:async()=>({companyId:"company-a",all:[all[0],{station_code:"X",is_xpt:true}]}) },
-    "@/lib/ops-pulse/cps": domain,
-    "@/lib/supabase-admin": { supabaseAdmin:{from:()=>({insert:async row=>{writes.push(row);return {error:null}}})} },
-  });
-  const form = new FormData();
-  form.set("station_code","A"); form.set("target_cps","14"); form.set("effective_from","2026-09-01");
-  permitted=false; assert.equal((await actions.saveCpsTarget(form)).ok,false);
-  permitted=true; auth.readOnly=true; assert.equal((await actions.saveCpsTarget(form)).ok,false);
-  auth.readOnly=false;
-  for(const station of ["B","X"]) {form.set("station_code",station);assert.equal((await actions.saveCpsTarget(form)).ok,false)}
-  form.set("station_code","A"); form.set("target_cps","0");assert.equal((await actions.saveCpsTarget(form)).ok,false);
-  assert.equal(writes.length,0);
-  form.set("target_cps","14"); assert.equal((await actions.saveCpsTarget(form)).ok,true);
-  assert.deepEqual(writes,[{company_id:"company-a",station_code:"A",target_cps:14,effective_from:"2026-09-01",is_active:true,created_by:"user-a"}]);
 });

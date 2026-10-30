@@ -48,7 +48,17 @@
     "verify:ops-app": "node scripts/verify-opspulse-app.mjs && node --test scripts/test-opspulse-service-worker.mjs src/components/ops-app-install.test.mjs",
     "test:ops-client-demo": "node scripts/test-ops-client-demo.mjs",
     "test:loss-stage-reminders": "node scripts/test-loss-stage-reminders.cjs && node scripts/test-loss-reminder-scope.cjs && node scripts/test-loss-stage-reminder-migration.mjs && node scripts/test-loss-installment-amount-rules.mjs",
-    "test:unified-advances": "node scripts/test-unified-paid-advance-ledger.mjs && node scripts/test-unified-advance-cutover.mjs && node --experimental-strip-types --test src/lib/workforce-paid-advances-allocation.test.mjs apps/connect/src/lib/connect-pay-advance-approval-data.test.mjs apps/connect/src/lib/connect-advances-route.test.mjs"
+    "test:unified-advances": "node scripts/test-unified-paid-advance-ledger.mjs && node scripts/test-unified-advance-cutover.mjs && node --experimental-strip-types --test src/lib/workforce-paid-advances-allocation.test.mjs apps/connect/src/lib/connect-pay-advance-approval-data.test.mjs apps/connect/src/lib/connect-advances-route.test.mjs",
+    "test:finance-books": "node --test scripts/finance360/accounting.test.mjs",
+    "test:finance-assets": "node --experimental-strip-types --test src/lib/assets.test.mjs src/lib/asset-quantity.test.mjs src/lib/asset-mutations.test.mjs",
+    "test:finance-mobile": "node --test src/lib/finance/mobile.test.mjs",
+    "test:session-verification": "node --test scripts/test-session-verification.mjs && node scripts/verify-portal-notification-routing.mjs && node scripts/verify-portal-preview.mjs",
+    "test:finance-treasury": "node --test src/lib/finance/treasury/treasury.test.mjs",
+    "test:finance-final-pnl": "node --experimental-strip-types --test src/lib/finance/final-pnl/model.test.mjs",
+    "test:finance-cost-heads": "node --test src/lib/finance/pnl-cost-heads.test.mjs src/lib/finance/cfo-overhead.test.mjs",
+    "verify:finance-release": "node scripts/verify-finance-release.mjs",
+    "test:finance-release": "node --experimental-strip-types --test src/lib/finance/*.test.mjs src/lib/finance/billing-audit/*.test.mjs src/lib/finance/final-pnl/*.test.mjs src/lib/finance/treasury/*.test.mjs src/lib/asset*.test.mjs src/lib/ops-pulse/cps-engine.test.mjs src/lib/ops-pulse/cps-data.test.mjs src/lib/ops-pulse/production-fallback.test.mjs && pnpm run test:finance-books && pnpm run test:central-bank-response && pnpm run test:workforce-payout-bank && node scripts/verify-finance-pnl-sql.mjs",
+    "build:finance": "pnpm run verify:finance-release && pnpm run test:finance-release && next build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",

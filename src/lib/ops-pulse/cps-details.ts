@@ -1,4 +1,4 @@
-import { cpsShipmentCount, type CpsSnapshot } from "./cps";
+import type { CpsSnapshot } from "./cps";
 
 export type CpsRate = { label: string; rate: number; basis: string };
 export type CpsProductionDetail = {
@@ -12,6 +12,7 @@ export type CpsDaDay = {
   deliveries: number; customer_returns: number; seller_pickups: number; seller_returns: number;
   salary: number; variable: number; fuel: number; van: number;
   card_from: string; rates: CpsRate[]; source: string;
+  input_estimates?: (import("./production-fallback").ProductionEstimate & {label:string;rate:number})[];
   production_details?: CpsProductionDetail[];
   pending_fixed_pay?: boolean;
 };
@@ -21,7 +22,7 @@ export type CpsDaPeriod = {
   salary: number; variable: number; fuel: number; van: number;
   production_details?: CpsProductionDetail[];
 };
-export type CpsDaDetail = Omit<CpsDaDay, "date" | "worked" | "work_basis" | "card_from" | "rates" | "source" | "pending_fixed_pay" | "production_details"> & {
+export type CpsDaDetail = Omit<CpsDaDay, "date" | "worked" | "work_basis" | "card_from" | "rates" | "source" | "pending_fixed_pay" | "production_details" | "input_estimates"> & {
   work_dates: string[]; cost_dates: string[]; work_bases: string[]; periods: CpsDaPeriod[];
   pending_fixed_dates?: string[];
 };
@@ -69,10 +70,8 @@ export function daCohortTotals(rows: CpsDaDetail[], cohort: CpsDaDay["cohort"]) 
   const people=rows.filter(r=>r.cohort===cohort);
   const amount=people.reduce((n,r)=>n+r.salary+r.variable+r.fuel,0);
   const deliveries=people.reduce((n,r)=>n+r.deliveries,0);
-  const customerReturns=people.reduce((n,r)=>n+r.customer_returns,0);
-  const shipments=cpsShipmentCount(deliveries,customerReturns);
   const pending = people.some(p => p.pending_fixed_dates?.length);
-  return {people, amount, deliveries, customerReturns, shipments, pending, cps:!pending && shipments>0?amount/shipments:null};
+  return {people, amount, deliveries, pending, cps:!pending && deliveries>0?amount/deliveries:null};
 }
 export function cpsFuelTrend(snapshot: CpsSnapshot) {
   const dates=[...new Set(snapshot.daily.map(d=>d.work_date))].sort();
@@ -84,7 +83,33 @@ export function cpsFuelTrend(snapshot: CpsSnapshot) {
     }
     const amount=[...sources.values()].reduce((n,v)=>n+v,0);
     const deliveries=snapshot.daily.filter(d=>d.work_date===date).reduce((n,d)=>n+d.deliveries,0);
-    const shipments=snapshot.daily.filter(d=>d.work_date===date).reduce((n,d)=>n+cpsShipmentCount(d.deliveries,d.c_return),0);
-    return {date,amount,deliveries,shipments,cps:shipments>0?amount/shipments:null,sources:[...sources].map(([label,amount])=>({label,amount}))};
+    return {date,amount,deliveries,cps:deliveries>0?amount/deliveries:null,sources:[...sources].map(([label,amount])=>({label,amount}))};
   });
 }
+
+// Server-private calculation evidence. Never attach this to CpsSnapshot.
+// Finance authorizes its own endpoint before returning the scoped projection.
+export type CpsStaffDay = {
+  person_id: string;
+  code: string;
+  name: string;
+  role: string;
+  profile_type: string;
+  station_code: string;
+  date: string;
+  head: string;
+  group: string;
+  monthly_ctc: number;
+  card_from: string;
+  calendar_days: number;
+  daily_ctc: number;
+  allocation: string;
+  station_count: number;
+  station_weight: number;
+  total_weight: number;
+  amount: number;
+};
+export type CpsCalculationEvidence = {
+  staff: CpsStaffDay[];
+  associates: CpsDaDay[];
+};

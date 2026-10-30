@@ -299,6 +299,7 @@ const db = {
   },
 };
 const data = compile("./data.ts", {
+  "./billing-periods": compile("./billing-periods.ts"),
   "server-only": {},
   "next/headers": { headers: () => new Headers({ host }) },
   "next/navigation": {
@@ -483,6 +484,9 @@ test("Rent add, edit and delete use company-scoped atomic RPCs and active alloca
 test("Filtered CSV exports reuse the authorized loader and include estimate caveats", async () => {
   let seen;
   const route = compile("../../app/finance/business/export/route.ts", {
+    "@/lib/finance/pnl-data": { loadPnl: async () => { throw Error("Wrong export branch"); } },
+    "@/lib/finance/pnl-comparison": {},
+    "@/lib/finance/pnl-export": {},
     "next/server": {
       NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
     },
@@ -510,16 +514,15 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   });
   const response = await route.GET(
     new Request(
-      "https://fin.dropxlogistics.com/finance/business/export?tab=pnl&month=2026-08&region=KL&location=KOZA",
+      "https://fin.dropxlogistics.com/finance/business/export?tab=revenue&month=2026-08&region=KL&location=KOZA",
     ),
   );
-  assert.equal(seen.code, "finance_pnl");
+  assert.equal(seen.code, "finance_revenue");
   assert.equal(seen.q.location, "KOZA");
   assert.equal(seen.q.region, "KL");
   assert.equal(seen.context.companyId, "company-1");
   assert.match(response.headers.get("Cache-Control"), /no-store/);
   const body = await response.text();
-  assert.match(body, /623776.32/);
   assert.match(body, /Management estimate only/);
   assert.match(body, /"KOZA"/);
   const [headers, record] = pricing.parseCsv(body);
@@ -531,9 +534,6 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   assert.equal(values["Location"], "Kozhikode");
   assert.equal(values["Monthly MG"], "747233.1009887976");
   assert.equal(values["MTD revenue estimate INR"], "747233.10");
-  assert.equal(values["Known operating costs INR"], "123456.78");
-  assert.equal(values["Cost complete"], "Yes");
-  assert.equal(values["Estimated P&L INR"], "623776.32");
   const revenueResponse = await route.GET(
     new Request(
       "https://fin.dropxlogistics.com/finance/business/export?month=2026-08&location=KOZA",
@@ -608,22 +608,22 @@ test("Daily MG uses actual calendar days for 28, 29, 30 and 31 day months", () =
     );
   }
 });
-test("Daily excess never carries a shortfall forward; MFN adds earnings independently", () => {
+test("Billing-period excess offsets quiet and busy days; MFN adds earnings independently", () => {
   const { rows } = dailyFixture();
   assert.equal(rows[0].variable, "0.00");
-  assert.equal(rows[1].excessVolume, "50");
-  assert.equal(rows[1].variable, "1000.00");
+  assert.equal(rows[1].excessVolume, "0");
+  assert.equal(rows[1].variable, "0.00");
   assert.equal(rows[1].mfnRevenue, "80.00");
-  assert.equal(pricing.addAmounts(rows.map((d) => d.revenue)), "3160.00");
-  // A pooled MTD threshold would incorrectly remove this day's 50 excess shipments.
+  assert.equal(pricing.addAmounts(rows.map((d) => d.revenue)), "2160.00");
+  // 50 + 150 deliveries exactly meet the two-day MG of 200.
 });
 test("Fractional daily MG is not rounded to whole packages or money before applying the slab", () => {
   const { rows } = dailyFixture("2026-08", 2, {
     delivery_mg_volume: "3100.31",
   });
   assert.equal(rows[0].mgVolume, "100.01");
-  assert.equal(rows[1].excessVolume, "49.99");
-  assert.equal(rows[1].variable, "999.80");
+  assert.equal(rows[1].excessVolume, "0");
+  assert.equal(rows[1].variable, "0.00");
   const zero = dailyFixture("2026-08", 2, { delivery_mg_volume: "4650" })
     .rows[1];
   assert.equal(zero.excessVolume, "0");
@@ -665,7 +665,7 @@ test("Unknown positive-volume rates are not silently zero; zero-volume reports a
     mfn_rate: null,
   });
   assert.equal(rows[0].variable, "0.00");
-  assert.equal(rows[1].variable, null);
+  assert.equal(rows[1].variable, "0.00"); // No pooled excess at 200 deliveries / 200 MG.
   assert.equal(rows[1].mfnRevenue, null);
   assert.match(rows[1].issues.join(), /rate missing/);
   const { pc, snap } = dailyFixture();
@@ -699,7 +699,7 @@ test("SMD does not get charged twice and IHS is not guessed from the MFN/return 
     "2026-08-02",
     false,
   )[1];
-  assert.equal(d.revenue, "2080.00");
+  assert.equal(d.revenue, "1080.00");
   assert.equal(d.smd, "5");
   assert.equal(d.ihs, "20");
   assert.match(d.issues.join(), /separate SMD billing rule pending/);
@@ -799,7 +799,7 @@ test("Corrected source counts change live estimates without adding a second copy
     "2026-08-02",
     false,
   );
-  assert.equal(days[1].variable, "2000.00");
+  assert.equal(days[1].variable, "1000.00");
   assert.equal(days.length, 2);
 });
 
@@ -808,6 +808,9 @@ test("Daily CSV contains only the selected authorized allocation and reconciles 
   const f = { ...filters, through: "2026-08-02" };
   const rows = performance.buildBusinessRows(snap, [pc], [location], f);
   const route = compile("../../app/finance/business/export/route.ts", {
+    "@/lib/finance/pnl-data": { loadPnl: async () => { throw Error("Wrong export branch"); } },
+    "@/lib/finance/pnl-comparison": {},
+    "@/lib/finance/pnl-export": {},
     "next/server": {
       NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
     },
@@ -1221,4 +1224,74 @@ test("An XPT-only reader inherits the company/month-scoped parent rate without p
       (s) => s[0] === "eq" && s[1] === "provider" && s[2] === "Amazon",
     ),
   );
+});
+
+test('MG settlement reverses earlier excess on quiet days and is invariant to daily order',()=>{
+ const run=volumes=>{const {pc,snap}=dailyFixture('2026-09',3,{delivery_mg_volume:'3000',variable_slab:'21'});snap.daily_shipments=volumes.map((n,i)=>({...snap.daily_shipments[0],work_date:`2026-09-0${i+1}`,deliveries:String(n),mfn:'0'}));return performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-03',false);};
+ const first=run([250,0,80]),last=run([0,80,250]);
+ assert.equal(first[0].variable,'3150.00');assert.equal(first[1].variable,'-2100.00');assert.equal(first[2].variable,'-420.00');
+ assert.equal(pricing.addAmounts(first.map(d=>d.variable)),'630.00');assert.equal(pricing.addAmounts(last.map(d=>d.variable)),'630.00');
+ assert.equal(first[2].mgCumulativeEligible,'330');assert.equal(first[2].mgCumulativeThreshold,'300');assert.equal(first[2].mgCumulativeExcess,'30');
+});
+test('Missing shipment dates do not advance the pooled MG threshold; unknown excess rates remain pending',()=>{
+ const {pc,snap}=dailyFixture('2026-09',3,{delivery_mg_volume:'3000',variable_slab:null});
+ snap.daily_shipments=[{...snap.daily_shipments[0],deliveries:'250',mfn:'0'},{...snap.daily_shipments[1],work_date:'2026-09-03',deliveries:'0',mfn:'0'}];
+ const rows=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-03',false);
+ assert.equal(rows[0].variable,null);assert.match(rows[0].issues.join(),/rate missing/);
+ assert.equal(rows[1].variable,null);assert.equal(rows[2].mgReportedDays,2);assert.equal(rows[2].mgCumulativeThreshold,'200');assert.equal(rows[2].mgCumulativeExcess,'50');assert.equal(rows[2].variable,null);
+});
+test('fractional excess reversals remain valid signed decimal quantities',()=>{
+ const {pc,snap}=dailyFixture('2026-09',2,{delivery_mg_volume:'1000',variable_slab:'21'});
+ snap.daily_shipments[0].deliveries='80';snap.daily_shipments[1].deliveries='20';
+ const days=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-02',false);
+ assert.match(days[1].excessVolume,/^-13\.333333/);assert.ok(Number.isFinite(Number(days[1].excessVolume)));assert.equal(pricing.addAmounts(days.map(d=>d.variable)),'700.00');
+});
+
+test("MFN billable total is priced once and preserves pickup/return evidence; XPT inherits parent MFN rate",()=>{
+ const {pc,snap}=dailyFixture('2026-09',1,{mfn_rate:'11'});
+ snap.daily_shipments=[{...snap.daily_shipments[0],mfn:'36',mfn_pickups:'33',mfn_returns:'3'}];
+ const base=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false)[0];
+ assert.equal(base.mfnRevenue,'396.00');assert.equal(base.mfnPickups,'33');assert.equal(base.mfnReturns,'3');
+ const child=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false,{xpt:true,parentRate:'21',parentMfnRate:'8'})[0];
+ assert.equal(child.mfnRevenue,'288.00');assert.equal(child.revenue,pricing.addAmounts([child.base,child.variable,child.mfnRevenue]));
+ const pending=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false,{xpt:true,parentRate:'21'})[0];
+ assert.equal(pending.mfnRevenue,null);assert.match(pending.issues.join(),/Parent station MFN rate missing/);
+});
+
+test("Base and XPT settle one MG pool when dates align; missing XPT dates never silently join the pool",()=>{
+ const {pc,snap}=dailyFixture('2026-09',1,{delivery_mg_volume:'3000',variable_slab:'21'});
+ snap.daily_shipments=[{...snap.daily_shipments[0],deliveries:'60',returns:'0',mfn:'0'}];
+ const parentDay=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-01',false)[0];
+ const base={provider:'Amazon',station:'KOZA',parentStation:null,model:'mg',mgVolume:'3000',variableRate:'21',daily:[parentDay]};
+ const child={...base,station:'XPT',parentStation:'KOZA',model:'xpt',daily:[{...parentDay,eligibleDeliveries:'60',deliveries:'60',base:'10.00',variable:'1260.00'}]};
+ const fixed=performance.settleAlignedMgGroups([base,child]);
+ assert.equal(fixed[0].daily[0].variable,'420.00');assert.equal(fixed[1].daily[0].variable,'0.00');assert.equal(fixed[1].daily[0].variablePooledAt,'KOZA');
+ assert.equal(fixed[0].daily[0].mgCumulativeEligible,'120');assert.equal(child.daily[0].variable,'1260.00');
+ const missing=performance.settleAlignedMgGroups([base,{...child,daily:[]}]);assert.equal(missing[0].daily[0].variable,parentDay.variable);
+ const noParent=performance.settleAlignedMgGroups([child]);assert.equal(noParent[0].daily[0].variable,'1260.00');
+ const todayPartial={...base,daily:[parentDay,{...parentDay,date:'2026-09-02'}]};
+ const capped=performance.settleAlignedMgGroups([todayPartial,child],'2026-09-01');assert.equal(capped[0].daily[0].variable,'420.00');
+});
+
+test('configured XPT billing before separate reporting accrues fixed revenue, never duplicates parent shipments',()=>{
+ const {pc,snap}=dailyFixture('2026-09',3,{delivery_mg_volume:'3000',variable_slab:'21',mg_amount_including_mhe:'3000'});
+ snap.daily_shipments=[1,2,3].map(d=>({...snap.daily_shipments[0],work_date:`2026-09-0${d}`,deliveries:'80',returns:'0',mfn:'0'}));
+ const parentDays=performance.buildDailyRows(snap,'KOZA','Amazon',pc,'2026-09','2026-09-03',false);
+ const childSource={...snap,daily_shipments:[{...snap.daily_shipments[2],station_code:'XPT',deliveries:'100'}]};
+ const childDays=performance.buildDailyRows(childSource,'XPT','Amazon',pc,'2026-09','2026-09-03',false,{xpt:true,parentRate:'21',parentMfnRate:'8'});
+ const base={provider:'Amazon',station:'KOZA',parentStation:null,model:'mg',mgVolume:'3000',variableRate:'21',daily:parentDays};
+ const child={...base,station:'XPT',parentStation:'KOZA',model:'xpt',daily:childDays};
+ const periods={XPT:{station_code:'XPT',reporting_from:'2026-09-03',fixed_payout_from:'2026-09-01',prior_reporting_station:'KOZA',source:'Confirmed contract'}};
+ const result=performance.settleAlignedMgGroups(performance.applyBillingPeriods([base,child],periods,'2026-09-03'),'2026-09-03',periods);
+ assert.equal(result[1].daily[0].coverageStation,'KOZA');assert.equal(result[1].daily[0].shipmentReported,false);assert.equal(result[1].daily[0].deliveries,null);
+ assert.equal(pricing.addAmounts(result[1].daily.map(d=>d.base)),'300.00');
+ assert.equal(pricing.addAmounts(result[0].daily.map(d=>d.variable)),'840.00'); // 240+100 less one 300-unit MG threshold.
+ assert.equal(result[0].daily[2].mgCumulativeEligible,'340');assert.equal(pricing.addAmounts(result[1].daily.map(d=>d.variable)),'0.00');
+ const later={XPT:{...periods.XPT,fixed_payout_from:'2026-09-02'}};
+ const shifted=performance.applyBillingPeriods([base,child],later);assert.equal(shifted[1].daily[0].base,null);
+ assert.equal(pricing.addAmounts(shifted[1].daily.map(d=>d.base)),'200.00');
+ const missing=performance.settleAlignedMgGroups([base,{...child,daily:childDays.filter(d=>d.date!=='2026-09-03')}],'2026-09-03',periods);
+ assert.equal(missing[0].daily[2].mgGroupStations,undefined);
+ const denied=performance.applyBillingPeriods([child],periods);assert.equal(denied[0].daily[0].coverageStation,undefined);
+ assert.throws(()=>performance.applyBillingPeriods([base,{...child,daily:parentDays}],periods),/predates/);
 });

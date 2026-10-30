@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { isPeopleHostName } from "@/lib/people/surface";
-import { isFinanceHostName } from "@/lib/finance/surface";
+import { financeAccessPageCodes, isFinanceHostName } from "@/lib/finance/surface";
 
 export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
@@ -173,26 +173,7 @@ const peoplePageCodes = new Set([
   "app_settings"
 ]);
 
-const financePageCodes = new Set([
-  "finance_pricing",
-  "finance_revenue",
-  "finance_pnl",
-  "users",
-  "payments",
-  "advance_requests",
-  "expense_requests",
-  "payment_requests",
-  "payment_approvals",
-  "payment_process",
-  "workforce_payouts",
-  "payable_balance",
-  "payment_reports",
-  "payment_methods",
-  "master_payment_banks",
-  "master_payment_heads",
-  "master_contacts",
-  "payment_settings"
-]);
+const financePageCodes = new Set<string>(financeAccessPageCodes);
 
 export function currentAccessSurface(): AccessSurface {
   const host = (
@@ -217,7 +198,7 @@ export function currentAdminAccessSurface(): AdminAccessSurface {
 export function pageBelongsToSurface(code: string, surface: AdminAccessSurface) {
   if (surface === "people") return peoplePageCodes.has(code) || code.startsWith("workforce_category_");
   if (surface === "finance") return financePageCodes.has(code);
-  if (["finance_pricing", "finance_revenue", "finance_pnl"].includes(code)) return false;
+  if (["finance_pricing", "finance_revenue", "finance_pnl", "finance_books"].includes(code)) return false;
   if (sharedPageCodes.has(code)) return true;
   return surface === "ops" ? opsPageCodes.has(code) : !opsPageCodes.has(code);
 }

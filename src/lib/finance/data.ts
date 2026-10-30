@@ -1,4 +1,5 @@
 import "server-only";
+import {validateBillingPeriod, type BillingPeriod} from "./billing-periods";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import {
@@ -45,6 +46,19 @@ export async function financeContext(code: string) {
     topology.push(...(result.data ?? []));
     if ((result.data ?? []).length < 1000) break;
   }
+  const billingPeriods = new Map<string, BillingPeriod>();
+  for (let offset = 0; ; offset += 1000) {
+    const result = await supabaseAdmin.from("finance_business_master")
+      .select("key,data").eq("company_id", companyId).eq("kind", "billing_period")
+      .is("deleted_at", null).order("key").range(offset, offset + 999);
+    if (result.error) throw new Error("Unable to load confirmed billing dates.");
+    for (const record of result.data ?? []) {
+      const period=validateBillingPeriod(record.data);
+      if(period.station_code!==record.key||billingPeriods.has(record.key))throw new Error("Review duplicate billing dates in Business masters.");
+      billingPeriods.set(record.key,period);
+    }
+    if ((result.data ?? []).length < 1000) break;
+  }
   const byId = new Map(topology.map((l) => [l.id, l]));
   const byCode = new Map(topology.map((l) => [l.station_code, l]));
   const financeLocations = locations.map((l) => {
@@ -52,8 +66,12 @@ export async function financeContext(code: string) {
       ? l.location_models[0]
       : l.location_models;
     const parentId = byCode.get(l.station_code)?.parent_station_id;
+    const billingPeriod=billingPeriods.get(l.station_code)??null;
+    if(billingPeriod?.prior_reporting_station && billingPeriod.prior_reporting_station!==byId.get(parentId??'')?.station_code)
+      throw new Error("Earlier reporting must use the station's configured parent. Review Business masters.");
     return {
       ...l,
+      billing_period: billingPeriod,
       pricing_model:
         String(model?.code ?? "").toUpperCase() === "XPT" ? "xpt" : "mg",
       parent_station_code: parentId
@@ -266,7 +284,7 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
         .map((l) => l.parent_station_code!),
     ),
   ];
-  const parentRates: Record<string, { rate: string | null; revision: number }> =
+  const parentRates: Record<string, { rate: string | null; mfnRate?: string | null; revision: number }> =
     {};
   if (parents.length) {
     // Only unit rates for parents of authorized XPTs; no parent shipment, cost or P&L data is exposed.
@@ -288,6 +306,7 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
         if (!parentRates[p.station_code])
           parentRates[p.station_code] = {
             rate: p.rates?.variable_slab ?? null,
+            mfnRate: p.rates?.mfn_rate ?? null,
             revision: p.revision,
           };
       if (

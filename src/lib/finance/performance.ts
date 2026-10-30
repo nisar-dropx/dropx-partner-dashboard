@@ -1,3 +1,4 @@
+import type {BillingPeriod} from './billing-periods';
 import {
   mgEstimate,
   isXptPricing,
@@ -103,6 +104,8 @@ const providerName = (s: string) =>
       ? "Flipkart"
       : s;
 export type DailyShipment = {
+  mfn_pickups?: string | null;
+  mfn_returns?: string | null;
   mg_deliveries?: string | null;
   swa?: string | null;
   station_code: string;
@@ -124,8 +127,18 @@ export type DailyCost = {
   updated_at: string;
 };
 export type BusinessDay = {
+  coverageStation?: string;
+  variablePooledAt?: string;
+  mgGroupStations?: string[];
+  mfnPickups?: string | null;
+  mfnReturns?: string | null;
+  mgCumulativeEligible?: string | null;
+  mgCumulativeThreshold?: string | null;
+  mgCumulativeExcess?: string | null;
+  mgReportedDays?: number;
   eligibleDeliveries: string | null;
   swa: string | null;
+  swaRevenue?: string | null;
   date: string;
   deliveries: string | null;
   returns: string | null;
@@ -146,9 +159,11 @@ export type BusinessDay = {
   issues: string[];
 };
 const zero = BigInt(0);
-const units = (v: bigint) =>
-  `${v / scale}.${String(v % scale).padStart(24, "0")}`.replace(/\.?0+$/, "") ||
-  "0";
+const units = (value: bigint) => {
+  const v = value < zero ? -value : value;
+  const text = `${v / scale}.${String(v % scale).padStart(24, "0")}`.replace(/\.?0+$/, "") || "0";
+  return value < zero ? `-${text}` : text;
+};
 // Cumulative component rounding reconciles every displayed day to the displayed MTD.
 function accrual() {
   let total = zero,
@@ -170,7 +185,7 @@ export function buildDailyRows(
   month: string,
   through: string,
   sharedCost: boolean,
-  options: { xpt?: boolean; parentRate?: string | null } = {},
+  options: { xpt?: boolean; parentRate?: string | null; parentMfnRate?: string | null } = {},
 ): BusinessDay[] {
   const monthDays = BigInt(Number(monthEnd(month).slice(8)));
   const elapsed = Number(through.slice(8));
@@ -189,11 +204,13 @@ export function buildDailyRows(
   );
   const variableAccrual = accrual(),
     mfnAccrual = accrual(),
+    swaAccrual = accrual(),
     costAccrual = accrual(),
     rentAccrual = accrual();
   const rates = pricing?.rates ?? {};
   let flipkartQuantity = zero,
     flipkartPrevious = "0.00";
+  let mgQuantity = zero, mgDays = 0, previousExcess = zero, previousVariable = zero;
   return Array.from({ length: elapsed }, (_, index) => {
     const date = `${month}-${String(index + 1).padStart(2, "0")}`;
     const s = shipments.get(date),
@@ -215,7 +232,12 @@ export function buildDailyRows(
           ? addQuantities([amazonDeliveries, returns])
           : null
         : (s?.deliveries ?? null);
-    if (provider === "Amazon" && s?.swa != null && decimal(s.swa) > zero)
+    if (
+      provider === "Amazon" &&
+      s?.swa != null &&
+      decimal(s.swa) > zero &&
+      rates.swa_delivery_rate == null
+    )
       issues.push(
         "SWA revenue pending separate rates; excluded from MG and XPT variable earnings",
       );
@@ -224,6 +246,9 @@ export function buildDailyRows(
       mfnRevenue: string | null = null,
       mgVolume: string | null = null,
       excessVolume: string | null = null,
+      mgCumulativeEligible: string | null = null,
+      mgCumulativeThreshold: string | null = null,
+      mgCumulativeExcess: string | null = null,
       revenue: string | null = null;
     if (!s)
       issues.push("Shipment report pending; variable earnings incomplete");
@@ -252,11 +277,14 @@ export function buildDailyRows(
           );
         else issues.push("Parent station variable rate missing by this month");
       }
-      if (s?.mfn != null && decimal(s.mfn) > zero)
-        issues.push(
-          "XPT MFN settlement rule pending; not added to fixed-plus-delivery revenue",
-        );
-      revenue = addAmounts([base, variable]);
+      if (s?.mfn != null) {
+        if (decimal(s.mfn) === zero) mfnRevenue = mfnAccrual(zero);
+        else if (options.parentMfnRate != null)
+          mfnRevenue = mfnAccrual((decimal(s.mfn) * decimal(options.parentMfnRate)) / scale);
+        else issues.push("Parent station MFN rate missing; XPT MFN settlement pending");
+      } else if (s) issues.push("MFN count incomplete");
+      revenue = base === null && variable === null && (mfnRevenue === null || decimal(mfnRevenue) === zero)
+        ? null : addAmounts([base, variable, mfnRevenue]);
     } else if (provider === "Amazon") {
       if (rates.mg_amount_including_mhe != null) {
         const monthlyBase = addQuantities([
@@ -264,11 +292,7 @@ export function buildDailyRows(
           rates.fire_safety_equipment_fee ?? null,
         ])!;
         base = subtractAmounts(
-          mgEstimate(
-            monthlyBase,
-            index + 1,
-            Number(monthDays),
-          ),
+          mgEstimate(monthlyBase, index + 1, Number(monthDays)),
           mgEstimate(monthlyBase, index, Number(monthDays)),
         );
       }
@@ -276,14 +300,24 @@ export function buildDailyRows(
         const monthlyVolume = decimal(rates.delivery_mg_volume);
         mgVolume = units(monthlyVolume / monthDays);
         if (eligible != null) {
-          const excessNumerator = decimal(eligible) * monthDays - monthlyVolume;
+          // Amazon's billing worksheet settles excess across the operated
+          // period. A quiet day offsets a busy day; it is not a fresh daily slab.
+          // Missing shipment dates cannot advance the revenue/cost period.
+          mgQuantity += decimal(eligible);
+          mgDays += 1;
+          const excessNumerator = mgQuantity * monthDays - monthlyVolume * BigInt(mgDays);
           const positive = excessNumerator > zero ? excessNumerator : zero;
-          excessVolume = units(positive / monthDays);
-          if (positive === zero) variable = variableAccrual(zero);
-          else if (rates.variable_slab != null)
-            variable = variableAccrual(
-              (positive * decimal(rates.variable_slab)) / (monthDays * scale),
-            );
+          const cumulativeExcess = positive / monthDays;
+          excessVolume = units(cumulativeExcess - previousExcess);
+          previousExcess = cumulativeExcess;
+          mgCumulativeEligible = units(mgQuantity);
+          mgCumulativeThreshold = units(monthlyVolume * BigInt(mgDays) / monthDays);
+          mgCumulativeExcess = units(cumulativeExcess);
+          if (rates.variable_slab != null || positive === zero) {
+            const cumulative = rates.variable_slab == null ? zero : (positive * decimal(rates.variable_slab)) / (monthDays * scale);
+            variable = variableAccrual(cumulative - previousVariable);
+            previousVariable = cumulative;
+          }
           else issues.push("Excess-delivery rate missing");
         } else if (s) issues.push("Delivery count incomplete");
       } else issues.push("MG volume missing");
@@ -321,6 +355,19 @@ export function buildDailyRows(
         }
       }
     }
+    // SWA is a separate billable stream and never enters Amazon MG volume.
+    const swaRevenue =
+      provider === "Amazon" && s?.swa != null
+        ? decimal(s.swa) === zero
+          ? swaAccrual(zero)
+          : rates.swa_delivery_rate != null
+            ? swaAccrual(
+                (decimal(s.swa) * decimal(rates.swa_delivery_rate)) / scale,
+              )
+            : null
+        : null;
+    if (swaRevenue !== null && (revenue !== null || decimal(swaRevenue) > zero))
+      revenue = addAmounts([revenue, swaRevenue]);
     const cost =
       !sharedCost && c?.total != null ? costAccrual(decimal(c.total)) : null;
     const rentCost =
@@ -337,12 +384,16 @@ export function buildDailyRows(
       deliveries: s?.deliveries ?? null,
       returns,
       eligibleDeliveries: eligible,
+      mgCumulativeEligible, mgCumulativeThreshold, mgCumulativeExcess, mgReportedDays: mgDays,
       swa: s?.swa ?? null,
+      swaRevenue,
       mgVolume,
       excessVolume,
       base,
       variable,
       mfn: s?.mfn ?? null,
+      mfnPickups: s?.mfn_pickups ?? null,
+      mfnReturns: s?.mfn_returns ?? null,
       mfnRevenue,
       smd: s?.smd ?? null,
       ihs: s?.ihs ?? null,
@@ -365,7 +416,7 @@ export function buildBusinessRows(
   cards: PricingCard[],
   locations: Location[],
   filters: { month: string; through: string; provider: string },
-  parentRates: Record<string, { rate: string | null; revision: number }> = {},
+  parentRates: Record<string, { rate: string | null; mfnRate?: string | null; revision: number }> = {},
 ): BusinessRow[] {
   const places = new Map(locations.map((l) => [l.station_code, l]));
   const shipments = new Map(
@@ -421,6 +472,7 @@ export function buildBusinessRows(
         (parentCard
           ? {
               rate: parentCard.rates.variable_slab ?? null,
+              mfnRate: parentCard.rates.mfn_rate ?? null,
               revision: parentCard.revision,
             }
           : undefined))
@@ -434,7 +486,7 @@ export function buildBusinessRows(
       basis = `XPT fixed payout/calendar days + all XPT Amazon deliveries and C-returns × ${parentStation ?? "parent"} variable rate`;
     } else if (provider === "Amazon") {
       basis =
-        "Daily MG and monthly fee + daily excess Amazon deliveries and C-returns × variable slab + MFN × MFN rate";
+        "Daily MG and monthly fee + billing-period excess Amazon deliveries and C-returns × variable slab + MFN × MFN rate";
       issues.push(
         "IHS/SMD settlement rules, shortfall recovery, other fees and tax are not included",
       );
@@ -462,7 +514,9 @@ export function buildBusinessRows(
       issues.push("Shared station cost needs client allocation");
     } else if (costRow?.missing_cost_rows) {
       costComplete = false;
-      issues.push("Operating costs incomplete; known rent and reported costs are shown");
+      issues.push(
+        "Operating costs incomplete; known rent and reported costs are shown",
+      );
     }
     if (!costRow) {
       costComplete = false;
@@ -488,7 +542,7 @@ export function buildBusinessRows(
       filters.month,
       filters.through,
       (clientCounts.get(station) ?? 0) > 1,
-      { xpt, parentRate: parentRate?.rate },
+      { xpt, parentRate: parentRate?.rate, parentMfnRate: parentRate?.mfnRate },
     );
     if (provider === "Amazon")
       revenue = addAmounts(daily.map((d) => d.revenue));
@@ -510,7 +564,7 @@ export function buildBusinessRows(
         variableRate: xpt
           ? (parentRate?.rate ?? null)
           : (pricing?.rates.variable_slab ?? null),
-        mfnRate: pricing?.rates.mfn_rate ?? null,
+        mfnRate: xpt ? (parentRate?.mfnRate ?? null) : (pricing?.rates.mfn_rate ?? null),
         smdRate: pricing?.rates.smd_rate ?? null,
         ihsLowRate: pricing?.rates.ihs_rate_below_15_percent ?? null,
         ihsHighRate: pricing?.rates.ihs_rate_above_15_percent ?? null,
@@ -586,4 +640,61 @@ export function parentGroups(rows: BusinessRow[]) {
       ),
     };
   });
+}
+
+/** Fixed XPT billing can precede its separate reporting code. Parent units stay on the parent. */
+export function applyBillingPeriods(input: BusinessRow[], periods: Record<string, BillingPeriod>, through?: string): BusinessRow[] {
+ const rows=input.map(r=>({...r,daily:r.daily.map(d=>({...d,issues:[...d.issues]}))}));
+ for(const row of rows){
+  const period=periods[row.station];if(!period)continue;
+  const parent=period.prior_reporting_station?rows.find(r=>r.station===period.prior_reporting_station&&r.provider===row.provider):null;
+  for(const day of row.daily){
+   if(day.date<period.fixed_payout_from)day.base=null;
+   if(day.date<period.reporting_from){
+    // A contradictory imported row needs correction, never silent suppression.
+    if(day.shipmentReported)throw Error(`${row.station}: shipment data predates the configured reporting start. Review Business masters.`);
+    const parentDay=parent?.daily.find(d=>d.date===day.date);
+    if(row.model==='xpt'&&day.date>=period.fixed_payout_from&&(!through||day.date<=through)&&parentDay?.shipmentReported&&parentDay.deliveries!==null&&parentDay.eligibleDeliveries!==null){
+     day.coverageStation=parent!.station;day.variablePooledAt=parent!.station;
+     day.variable='0.00';day.mfnRevenue='0.00';day.swaRevenue='0.00';
+     day.issues=day.issues.filter(i=>!i.startsWith('Shipment report pending'));
+    }
+   }
+   day.revenue=addAmounts([day.base,day.variable,day.mfnRevenue,day.swaRevenue??null]);
+   day.profit=day.revenue!==null&&day.cost!==null&&day.costComplete?subtractAmounts(day.revenue,day.cost):null;
+  }
+  row.revenue=addAmounts(row.daily.map(d=>d.revenue));
+ }
+ return rows;
+}
+
+/** Settle MG once. Children may join on a confirmed reporting date; gaps after that still block settlement. */
+export function settleAlignedMgGroups(input: BusinessRow[], through?: string, periods: Record<string, BillingPeriod> = {}): BusinessRow[] {
+ const rows=input.map(r=>({...r,daily:r.daily.map(d=>({...d,issues:[...d.issues]}))}));
+ const reported=(r:BusinessRow)=>r.daily.filter(d=>(!through||d.date<=through)&&d.shipmentReported&&d.eligibleDeliveries!==null&&d.deliveries!==null);
+ for(const parent of rows.filter(r=>r.provider==='Amazon'&&r.model==='mg')){
+  const children=rows.filter(r=>r.provider==='Amazon'&&r.model==='xpt'&&r.parentStation===parent.station);
+  if(!children.length||parent.mgVolume===null||parent.variableRate===null)continue;
+  const days=reported(parent);
+  if(!days.length||children.some(c=>{
+   const period=periods[c.station];
+   const start=period?.prior_reporting_station===parent.station?period.reporting_from:null;
+   return reported(c).map(d=>d.date).join(',')!==days.filter(d=>!start||d.date>=start).map(d=>d.date).join(',');
+  }))continue;
+  const group=[parent,...children], calendar=BigInt(Number(monthEnd(days[0].date.slice(0,7)).slice(8)));
+  const mg=decimal(parent.mgVolume),rate=decimal(parent.variableRate);let quantity=zero,previousExcess=zero,previousMoney='0.00';
+  for(let i=0;i<days.length;i++){
+   const day=days[i],members=group.map(r=>r.daily.find(d=>d.date===day.date)).filter((d):d is BusinessDay=>!!d);
+   for(const d of members)if(d.shipmentReported&&d.eligibleDeliveries!==null)quantity+=decimal(d.eligibleDeliveries);
+   const numerator=quantity*calendar-mg*BigInt(i+1),positive=numerator>zero?numerator:zero;
+   const cumulative=amount(positive*rate/(calendar*scale)),excess=positive/calendar;
+   day.variable=subtractAmounts(cumulative,previousMoney);day.excessVolume=units(excess-previousExcess);
+   day.mgCumulativeEligible=units(quantity);day.mgCumulativeThreshold=units(mg*BigInt(i+1)/calendar);day.mgCumulativeExcess=units(excess);day.mgReportedDays=i+1;day.mgGroupStations=group.map(r=>r.station);
+   previousMoney=cumulative;previousExcess=excess;
+   for(const d of members.slice(1)){d.variable='0.00';d.excessVolume='0';d.variablePooledAt=parent.station;}
+   for(const d of members){d.revenue=addAmounts([d.base,d.variable,d.mfnRevenue,d.swaRevenue??null]);d.profit=d.revenue!==null&&d.cost!==null&&d.costComplete?subtractAmounts(d.revenue,d.cost):null;}
+  }
+  for(const r of group){r.revenue=addAmounts(r.daily.map(d=>d.revenue));r.profit=r.revenue!==null&&r.cost!==null&&r.costComplete?subtractAmounts(r.revenue,r.cost):null;}
+ }
+ return rows;
 }

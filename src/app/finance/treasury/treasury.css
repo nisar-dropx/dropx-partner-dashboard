@@ -1,0 +1,74 @@
+.treasury-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 22px 0;
+}
+.treasury-metrics section {
+  background: #fff;
+  border: 1px solid var(--books-line);
+  border-radius: 12px;
+  padding: 20px;
+}
+.treasury-metrics strong {
+  font-size: 30px;
+  display: block;
+  margin-top: 10px;
+}
+.treasury-balance {
+  font-size: 25px;
+  display: block;
+}
+.treasury-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+}
+.treasury-badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.treasury-badge.good {
+  background: #e7f4ec;
+  color: #21633a;
+}
+.treasury-badge.attention {
+  background: #fff0db;
+  color: #895219;
+}
+.treasury-workspace details {
+  margin-top: 10px;
+  min-width: 190px;
+}
+.treasury-workspace summary {
+  cursor: pointer;
+  color: #b94829;
+}
+.treasury-workspace details form {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.treasury-footer {
+  margin-top: 24px;
+}
+.treasury-workspace td {
+  vertical-align: top;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .treasury-metrics,
+  .treasury-stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 540px) {
+  .treasury-metrics,
+  .treasury-stages {
+    grid-template-columns: 1fr;
+  }
+}

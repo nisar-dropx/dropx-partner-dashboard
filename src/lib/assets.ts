@@ -1,4 +1,5 @@
 import "server-only";
+import { assetVersion } from "./asset-version";
 
 import type { FinanceContext } from "@/lib/finance/data";
 import type { AssetTrackingMode } from "@/lib/asset-quantity";
@@ -24,6 +25,8 @@ export type AssetRentalTerm = {
 
 export type AssetRow = {
   id: string;
+  is_active: boolean;
+  version: string;
   asset_code: string;
   barcode_value: string;
   asset_type_id: string;
@@ -79,13 +82,14 @@ export function conditionLabel(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-export async function loadAssetRegister(context: FinanceContext) {
+export async function loadAssetRegister(context: FinanceContext, includeDeleted = false) {
   const assets: Array<Record<string, unknown>> = [];
   for (let offset = 0; ; offset += 1000) {
     let query = context.db.from("assets")
-      .select("id,asset_type_id,asset_code,barcode_value,location_id,manufacturer,model,serial_number,purchase_order_number,invoice_number,purchase_date,purchase_value,gst_rate,gst_amount,total_value,warranty_expiry_date,vendor_name,ownership_type,status,condition,tracking_mode,quantity_total,quantity_working,quantity_faulty,notes,created_at")
-      .eq("company_id", context.companyId).eq("is_active", true)
+      .select("id,asset_type_id,asset_code,barcode_value,location_id,manufacturer,model,serial_number,purchase_order_number,invoice_number,purchase_date,purchase_value,gst_rate,gst_amount,total_value,warranty_expiry_date,vendor_name,ownership_type,status,condition,tracking_mode,quantity_total,quantity_working,quantity_faulty,notes,created_at,is_active")
+      .eq("company_id", context.companyId)
       .order("created_at", { ascending: false }).order("id").range(offset, offset + 999);
+    if (!includeDeleted) query = query.eq("is_active", true);
     if (!context.authorization.hasAllLocationAccess)
       query = query.in("location_id", context.locations.length ? context.locations.map((item) => item.id) : ["00000000-0000-0000-0000-000000000000"]);
     const { data, error } = await query;
@@ -107,7 +111,7 @@ export async function loadAssetRegister(context: FinanceContext) {
   }));
   const ids = assets.map((asset) => String(asset.id));
   const [attachmentResult, rentalResult, eventResult, auditItemResult] = ids.length ? await Promise.all([
-    context.db.from("asset_attachments").select("id,asset_id,attachment_type,file_name,content_type,storage_bucket,storage_path,uploaded_at").eq("company_id", context.companyId).in("asset_id", ids).order("uploaded_at", { ascending: true }),
+    context.db.from("asset_attachments").select("id,asset_id,attachment_type,file_name,content_type,storage_bucket,storage_path,created_at").eq("company_id", context.companyId).in("asset_id", ids).order("created_at", { ascending: true }),
     context.db.from("asset_rental_terms").select("id,asset_id,vendor_name,agreement_number,invoice_number,rental_rate,billing_frequency,security_deposit,starts_on,ends_on,notice_period_days,off_hire_date,status").eq("company_id", context.companyId).in("asset_id", ids).in("status", ["draft", "active", "notice_given"]).order("starts_on", { ascending: false }),
     context.db.from("asset_events").select("asset_id,event_type,notes,created_at").eq("company_id", context.companyId).in("asset_id", ids).order("created_at", { ascending: false }).limit(2000),
     context.db.from("asset_audit_items").select("asset_id,observed_condition,notes,observed_at,asset_audit_sessions(audit_number,title)").eq("company_id", context.companyId).in("asset_id", ids).order("observed_at", { ascending: false }).limit(2000),
@@ -128,7 +132,7 @@ export async function loadAssetRegister(context: FinanceContext) {
     attachmentsByAsset.set(assetId, [...(attachmentsByAsset.get(assetId) ?? []), {
       id: String(attachment.id), attachment_type: String(attachment.attachment_type), file_name: String(attachment.file_name),
       content_type: attachment.content_type ? String(attachment.content_type) : null, signed_url: attachmentUrlById.get(String(attachment.id)) ?? null,
-      uploaded_at: String(attachment.uploaded_at ?? ""),
+      uploaded_at: String(attachment.created_at ?? ""),
     }]);
   });
   const termsByAsset = new Map<string, AssetRentalTerm>();
@@ -160,6 +164,7 @@ export async function loadAssetRegister(context: FinanceContext) {
       const type = typeById.get(String(asset.asset_type_id));
       return {
         ...asset,
+        is_active: asset.is_active !== false, version: assetVersion(asset, termsByAsset.get(String(asset.id)) ?? null),
         id: String(asset.id), asset_code: String(asset.asset_code), barcode_value: String(asset.barcode_value),
         asset_type_id: String(asset.asset_type_id), location_id: asset.location_id ? String(asset.location_id) : null,
         ownership_type: (asset.ownership_type === "rented" || asset.ownership_type === "leased" ? asset.ownership_type : "owned") as AssetOwnership,

@@ -1,5 +1,30 @@
 # Finance deployment
 
+## Full-product release — 30 October 2026
+
+The Finance release branch is `fix/fin-full-dashboard-20261030`. It combines
+the verified full Finance product at `964241ae` with the bank reconciliation,
+payment status and durable refresh changes from `9d6e65f9`. The latter release
+was based on Dashboard/main and omitted Finance's P&L, books and treasury modules.
+Do not deploy a main-only checkout to Finance.
+
+Use `pnpm run build:finance`. The Finance Vercel project's build command must
+start with `node scripts/verify-finance-release.mjs`; missing product routes,
+navigation or bank handlers block the build. Stage production with domains
+unassigned, check the Finance route manifest and exact GitHub SHA, then promote.
+Keep the project linked to `prj_jGPCmnK52mKT2ejawPeKmwxgf1tL` only.
+
+Finance retains its audited cost-accrual engine, including seller payouts,
+recorded working minutes, production estimates and source evidence. Shared
+payment/payroll eligibility and bank finalization keep the current production
+implementation. This branch is a Finance release, not an OpsPulse/Dashboard
+release. No database migration or replay of bank payments is required.
+
+Release checks cover the complete Finance product, asset editing, accounting,
+treasury, provisional and final P&L, bank batches, replay safety and payment
+authorization. Confirm the deployed navigation, source-backed reports and bank
+upload dialog in the authenticated browser after promotion.
+
 ## Rental agreement documents
 
 Rent Master has Upload agreement / View agreement for each rent row. The same-page

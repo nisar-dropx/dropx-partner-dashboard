@@ -5,12 +5,13 @@ import { loadAssetRegister } from "@/lib/assets";
 import { financeContext } from "@/lib/finance/data";
 import { AssetManager } from "./asset-manager";
 import "../../finance/finance.css";
+import "../../finance/business.css";
 
 export const dynamic = "force-dynamic";
 
 export default async function AssetRegisterPage() {
   const context = await financeContext("finance_assets");
-  const register = await loadAssetRegister(context);
+  const register = await loadAssetRegister(context, true);
   const locations = context.locations.map((location) => ({ id: location.id, label: `${location.station_code} · ${location.station_name || location.city || "Location"}` }));
   return <AppShell active="Asset Register" pageCode="finance_assets">
     <PageHead eyebrow="Finance · Asset control" title="Asset master register" subtitle="Keep owned, rented and leased physical assets under one code, label and auditable lifecycle." />

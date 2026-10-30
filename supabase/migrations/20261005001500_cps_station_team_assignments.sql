@@ -8,6 +8,12 @@ where designation_code='RM' and mode='managed' and effective_from='2026-09-01';
 
 -- Private calculation input. Return the full allocation universe so selecting
 -- one station never reallocates a manager's entire CTC to that station.
+-- The contractor reader was added with an earlier generated timestamp. Preserve
+-- it when migrations are replayed in filename order; do not downgrade that reader.
+do $guard$
+begin
+  if coalesce(pg_get_functiondef(to_regprocedure('public.ops_cps_people_assignments(uuid,date,date)')), '') not like '%hr_contractor_pay_profiles%' then
+    execute $definition$
 create or replace function public.ops_cps_people_assignments(p_company uuid,p_from date,p_through date)
 returns jsonb language sql stable security invoker set search_path=public as $$
 with eligible as materialized (
@@ -66,5 +72,9 @@ select jsonb_build_object(
  )t),'[]'::jsonb)
 );
 $$;
+    $definition$;
+  end if;
+end;
+$guard$;
 revoke all on function public.ops_cps_people_assignments(uuid,date,date) from public,anon,authenticated;
 grant execute on function public.ops_cps_people_assignments(uuid,date,date) to service_role;
