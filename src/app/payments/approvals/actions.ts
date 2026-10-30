@@ -10,6 +10,7 @@ import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps, paymentApprovalCoverage } from "@/lib/payment-approval-steps";
+import { paymentRequestUpdateAttempts } from "@/lib/payment-request-status-policy";
 import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
 
 /**
@@ -365,25 +366,24 @@ async function updatePaymentRequest(
   fallbackPayload?: Record<string, unknown>
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-  const attempts = [updatePayload, fallbackPayload].filter(Boolean) as Record<string, unknown>[];
-  const expandedAttempts = attempts.flatMap((payload) => {
-    const status = typeof payload.status === "string" ? payload.status : null;
-    if (!status || status === status.toUpperCase()) return [payload];
-    return [payload, { ...payload, status: status.toUpperCase() }];
-  });
+  const attempts = paymentRequestUpdateAttempts(updatePayload, fallbackPayload);
 
+  let firstError: unknown = null;
   let lastError: unknown = null;
-  for (const payload of expandedAttempts) {
+  for (const payload of attempts) {
     const update = await supabaseAdmin
       .from("payment_requests")
       .update(payload)
       .eq("id", requestId)
       .eq("company_id", companyId);
     if (!update.error) return;
+    firstError ??= update.error;
     lastError = update.error;
   }
 
-  throw new Error(errorMessage(lastError));
+  // The first error describes the intended state transition. A compatibility
+  // fallback must never hide it with a secondary, less useful failure.
+  throw new Error(errorMessage(firstError ?? lastError));
 }
 
 export async function approvePaymentRequest(formData: FormData) {
