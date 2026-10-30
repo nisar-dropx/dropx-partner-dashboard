@@ -521,7 +521,7 @@ test("active and registration profiles can update the profile photo beside OTP e
     "utf8"
   );
   assert.equal((profileApp.match(/<VerifiedProfilePhotoUpdate/g) ?? []).length, 2);
-  assert.match(profileApp, /!readOnly && !account\.activationOnly \? <VerifiedProfilePhotoUpdate/);
+  assert.match(profileApp, /!readOnly && !account\.activationOnly && !isolatedPilot \? <VerifiedProfilePhotoUpdate/);
   assert.match(profileApp, /!readOnly && !account\.activationOnly && !editing \? <VerifiedProfilePhotoUpdate/);
 });
 
