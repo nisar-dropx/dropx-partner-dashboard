@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync as readRaw} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
+const readFileSync=(...args)=>readRaw(...args).replace(/\r\n/g,'\n');
 
 const db=new PGlite();
 const company='00000000-0000-0000-0000-000000000001', station='00000000-0000-0000-0000-000000000002', worker='00000000-0000-0000-0000-000000000003', head='00000000-0000-0000-0000-000000000004', shipment='00000000-0000-0000-0000-000000000005', actor='00000000-0000-0000-0000-000000000006', provider='00000000-0000-0000-0000-000000000007', run='00000000-0000-0000-0000-000000000008';
@@ -239,5 +240,29 @@ await db.exec('set role authenticated');
 await assert.rejects(()=>db.query('select * from payment_adhoc_da_roster($1,$2)',[company,station]),/permission denied/);
 await assert.rejects(()=>db.query('select reconcile_adhoc_da_recoveries()'),/permission denied/);
 await db.exec('reset role');
+// Bank-confirmed, explicitly reviewed supplements share one paid work day.
+await db.exec(`create table companies(id uuid primary key); insert into companies values('${company}');
+alter table payment_requests add column bank_status text, add column utr_cin text;`);
+const supplementMigration=readFileSync(new URL('../supabase/migrations/20261030061933_reviewed_adhoc_supplement.sql',import.meta.url),'utf8');
+await db.exec(supplementMigration); await db.exec(supplementMigration);
+const parent=await insert({request_no:'SUPPLEMENT-PARENT',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-20',adhoc_provider_employee_id:'001234567800',adhoc_da_name:'Extra payment',status:'processed',bank_status:'Paid',utr_cin:'BANK400',amount:400});
+const extra=await insert({request_no:'SUPPLEMENT-EXTRA',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-20',adhoc_provider_employee_id:'001234567800',adhoc_da_name:'Extra payment',status:'processing',amount:200});
+const settle=(utr='BANK200')=>db.query("update payment_requests set status='processed',bank_status='Paid',utr_cin=$1 where id=$2",[utr,extra.id]);
+await assert.rejects(()=>settle(),/already has a paid/);
+const review={payment_request_id:extra.id,original_payment_request_id:parent.id,company_id:company,amount:200,normalized_utr:'BANK200',reason:'Finance confirmed the intended supplementary payment',review_source:'Explicit user confirmation'};
+const addReview=(r=review)=>db.query(`insert into payment_adhoc_supplement_reviews(${Object.keys(r).join(',')}) values(${Object.keys(r).map((_,i)=>'$'+(i+1)).join(',')})`,Object.values(r));
+await assert.rejects(()=>addReview({...review,amount:300}),/exact amount/);
+await assert.rejects(()=>addReview({...review,company_id:actor}),/exact amount/);
+await db.exec('set role authenticated');
+await assert.rejects(()=>addReview(),/permission denied/);
+await db.exec('reset role');
+await addReview();
+await assert.rejects(()=>settle('WRONG200'),/already has a paid/);
+await settle(); await settle();
+await db.query("update payment_requests set adhoc_recovery_checked_at=now() where id in ($1,$2)",[parent.id,extra.id]);
+assert.equal((await db.query('select status from payment_requests where id=$1',[extra.id])).rows[0].status,'processed');
+assert.equal(await count(),before,'A supplement must not create another cash recovery');
+await assert.rejects(()=>db.query('delete from payment_adhoc_supplement_reviews where payment_request_id=$1',[extra.id]),/immutable/);
+await assert.rejects(()=>insert({request_no:'SUPPLEMENT-UNREVIEWED',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-20',adhoc_provider_employee_id:'001234567800',adhoc_da_name:'Extra payment',status:'processed',bank_status:'Paid',utr_cin:'BANK999'}),/already has a paid/);
 await db.close();
 console.log('PASS legacy recovery + paid work-day policy, bank confirmation before mapping, deferred reconciliation exactly once, idempotent migrations.');

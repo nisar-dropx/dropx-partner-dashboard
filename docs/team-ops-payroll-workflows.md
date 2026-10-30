@@ -1,5 +1,17 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Reviewed supplemental ad hoc payments — 30 October 2026
+
+A bank-paid supplementary payment for an already paid work date requires an
+immutable entry in `payment_adhoc_supplement_reviews`. Finance must establish the
+original request, exact supplementary amount and bank UTR, and retain the user's
+confirmation. Only trusted backend reconciliation can insert this review.
+The bank finalizer still validates account, IFSC, amount, approval and unique UTR.
+Unreviewed duplicates and finalized payroll conflicts remain blocked. Both
+requests retain the `work_day` policy, so the paid day is excluded once and no
+additional cash recovery is created. Migration:
+`20261030061933_reviewed_adhoc_supplement.sql`.
+
 ## Salary-month visibility — 29 October 2026
 
 Recovery assignments display each person's saved salary month independently from the shipment's
