@@ -126,6 +126,10 @@ function successfulBatchCoversDate(batch: ImportBatch, sourceCode: string, date:
     && batchMatchesDate(batch, date);
 }
 
+function successfulBatch(batch: ImportBatch) {
+  return ["completed", "success", "succeeded"].includes(batch.status.toLowerCase());
+}
+
 async function loadImportMaster(companyId: string | null) {
   if (!companyId || !supabaseAdmin) return { rows: [] as ReportImportMaster[], error: null as string | null };
   const { data, error } = await supabaseAdmin
@@ -257,10 +261,11 @@ export async function ReportUploadPageContent({
   dueReports.forEach((report) => {
     const reportDate = addDays(date, effectiveDayOffset(report));
     const batch = batches.find((candidate) =>
-      successfulBatchCoversDate(candidate, report.source_code, reportDate))
+      candidate.source_type === report.source_code && batchMatchesDate(candidate, reportDate))
       ?? batches.find((candidate) =>
         candidate.source_type === report.source_code
-        && (batchMatchesDate(candidate, reportDate) || createdDateInIndia(candidate.created_at) === date));
+        && !successfulBatch(candidate)
+        && createdDateInIndia(candidate.created_at) === date);
     if (batch) latestBySource.set(report.source_code, batch);
   });
   const today = todayInIndia();
