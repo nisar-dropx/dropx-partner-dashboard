@@ -45,6 +45,7 @@ export type ProviderFirstWorkerView = {
 };
 
 export type ProviderFirstMappingRowView = {
+  identityLinked?: boolean;
   outboundMonths?: string[];
   providerMemberId: string;
   providerMemberName: string;
@@ -1329,4 +1330,13 @@ export function providerMappingMonthOptions(months: string[]) {
     const label = new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T00:00:00Z`));
     return { value, label, searchText: `${label} ${value}` };
   });
+}
+
+/** Exact, persisted identity only. Multiple claimants or conflicting history require review. */
+export function verifiedProviderIdentityWorker<T extends {id:string;location_id:string;provider_employee_id?:string|null;dropx_id?:string|null}>(
+ candidates:T[], stationId:string, providerMemberId:string, historicalOwnerIds:string[]
+):T|null {
+ const matches=candidates.filter(w=>w.location_id===stationId&&w.provider_employee_id===providerMemberId&&Boolean(w.dropx_id));
+ if(matches.length!==1||historicalOwnerIds.some(id=>id!==matches[0].id))return null;
+ return matches[0];
 }
