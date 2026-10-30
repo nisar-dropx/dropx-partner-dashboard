@@ -1,0 +1,10 @@
+import {PGlite} from '@electric-sql/pglite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+await db.exec(`create table payment_requests(company_id uuid,request_no text); create table hr_payroll_bank_lines(company_id uuid,reference text);
+create function workforce_payout_bank_reference_canonical(text) returns text language sql immutable as $$select upper(trim($1))$$;`);
+const sql=readFileSync(new URL('../supabase/migrations/20261030070624_bank_response_reference_indexes.sql',import.meta.url),'utf8');
+await db.exec(sql);await db.exec(sql);
+assert.equal((await db.query("select count(*)::int n from pg_indexes where indexname like '%company_canonical_reference_idx'")).rows[0].n,2);
+await db.close();console.log('Canonical reference migration passes twice');

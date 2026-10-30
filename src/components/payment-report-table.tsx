@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Download, Eye, RefreshCw } from "lucide-react";
 import { paymentReportCsv, summarizePaymentReport } from "@/lib/payment-report-export";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
@@ -271,8 +272,19 @@ function MultiCheckFilter({
   );
 }
 
-export function PaymentReportTable({ requests }: { requests: PaymentReportRequest[] }) {
+export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentReportRequest[]; checkedAt?: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") router.refresh(); };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [router]);
   const [selectedRequest, setSelectedRequest] = useState<PaymentReportRequest | null>(null);
+  useEffect(() => {
+    setSelectedRequest(current => current ? requests.find(row => row.id === current.id) ?? null : null);
+  }, [requests]);
   const [search, setSearch] = useState("");
   const [locationsSelected, setLocationsSelected] = useState<string[]>([]);
   const [headsSelected, setHeadsSelected] = useState<string[]>([]);
@@ -346,7 +358,8 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
       </div>
       <section className="panel">
         <div className="panel-head">
-          <div><h2>Payment request report</h2><p className="subtle">{filteredRequests.length} matching records · Download includes all matching rows</p></div>
+          <div><h2>Payment request report</h2><p className="subtle">{filteredRequests.length} matching records · {checkedAt ? `Checked ${formatDateTime(checkedAt)} · ` : ""}Auto-refresh 30s</p></div>
+          <button className="button secondary" onClick={() => router.refresh()} type="button"><RefreshCw size={16} aria-hidden="true" /> Refresh</button>
           <button className="button secondary" disabled={!filteredRequests.length} onClick={downloadCsv} type="button"><Download size={16} aria-hidden="true" /> Download CSV</button>
         </div>
       <div className="payment-report-filters">

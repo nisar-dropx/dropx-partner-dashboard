@@ -25,8 +25,8 @@ test("central bank import accepts multiple bounded files and reports each file i
   assert.match(route, /totalBytes > MAX_TOTAL_BYTES/);
   assert.match(route, /file\.size > MAX_FILE_BYTES/);
   assert.match(route, /prepared\.dataRowCount === 0[\s\S]*?No payment response rows were found below the bank response headers/);
-  assert.match(route, /for \(const file of files\)[\s\S]*?processFile\(\{ authorization, bytes, companyId, file, prepared \}\)/);
-  assert.match(route, /results\.push\(\{ error: errorMessage\(error\), fileName: file\.name, ok: false \}\)/);
+  assert.match(route, /for \(const file of files\)[\s\S]*?processFile\(\{ authorization, bytes, companyId, file, prepared, deadlineAt \}\)/);
+  assert.match(route, /results\.push\(\{ error: bankResponseFileError\(errorMessage\(error\)\), fileName: file\.name, ok: false \}\)/);
 
   assert.match(panel, /fetch\("\/api\/payments\/process\/bank-response"/);
   assert.match(panel, /name="bank_response_files"/);
@@ -41,7 +41,7 @@ test("central finalization is edit-only and applies each ledger's location and f
   assert.match(route, /canEditPayouts && inLocationScope\(input\.authorization, workforce\.location_id_snapshot\)/);
   assert.match(route, /canEditPayouts && inLocationScope\(input\.authorization, helper\.location_id_snapshot\)/);
   assert.match(route, /ledger === "payroll"[\s\S]*?inLocationScope\(input\.authorization, payroll\.location_id\)/);
-  assert.match(route, /canProcessPayment\(input\.authorization, paymentRequest, owner\)/);
+  assert.match(route, /canReconcilePayment\(input\.authorization, paymentRequest, owner\)/);
   assert.match(route, /row\.ledger === "people_payroll"[\s\S]*?location_id: row\.location_id/);
   assert.match(migration, /person\.location_id/i);
   assert.match(migration, /left join public\.hr_payroll_run_people person/i);
@@ -74,18 +74,18 @@ test("ownership is resolved across all ledgers and a collision becomes a row err
   assert.match(route, /parsePreparedFedOneResponseRowsPartially\(prepared, permittedReferences, rowAliases\)/);
 });
 
-test("one partial central RPC is issued per accepted file with all four ledger subsets", () => {
+test("bounded partial central RPC calls retain all four ledger subsets", () => {
   assert.equal(route.match(/rpc\("finalize_central_bank_response_partially"/g)?.length, 1);
-  assert.match(route, /p_payment_request_rows: rowsByLedger\.payment_requests\.map\(centralBankRpcRow\)/);
-  assert.match(route, /p_workforce_rows: rowsByLedger\.workforce\.map\(centralBankRpcRow\)/);
-  assert.match(route, /p_helper_rows: rowsByLedger\.helpers\.map\(centralBankRpcRow\)/);
-  assert.match(route, /p_payroll_rows: rowsByLedger\.payroll\.map\(centralBankRpcRow\)/);
+  assert.match(route, /p_payment_request_rows: subset\("payment_requests"\)/);
+  assert.match(route, /p_workforce_rows: subset\("workforce"\)/);
+  assert.match(route, /p_helper_rows: subset\("helpers"\)/);
+  assert.match(route, /p_payroll_rows: subset\("payroll"\)/);
   assert.match(route, /databaseResult\.payment_request_events/);
   assert.match(route, /paymentRequestEvents\.map\(\(event\) => sendPaymentRequestSideEffects/);
   assert.match(route, /paidRows: resultCount\(databaseResult, "paid"\)/);
   assert.match(route, /failedRows/);
   assert.match(route, /const replayedFile = databaseResult\.replayed === true/);
-  assert.match(panel, /Already imported\. These rows were previously finalized and are counted under Skipped\./);
+  assert.match(panel, /Already recorded\. No duplicate payment was created\./);
   assert.match(route, /rejectedRows: resultCount\(databaseResult, "rejected"\)/);
   assert.match(route, /resultCount\(databaseResult, "replayed_items"\)/);
   assert.match(route, /unknownRows: resultCount\(databaseResult, "unknown"\)/);
@@ -105,13 +105,13 @@ test("mixed files return compact categorized summaries with expandable row detai
   assert.match(route, /skipped: Math\.max\(0, prepared\.dataRowCount - successfullyMatchedRows\.length\)/);
   assert.match(panel, /<details/);
   assert.match(panel, /<summary/);
-  assert.match(panel, /label: "Reconciled"/);
-  assert.match(panel, /label: "Exceptions"/);
-  assert.match(panel, /label: "Skipped"/);
-  assert.match(panel, /BANK_RESPONSE_DETAIL_PAGE_SIZE = 100/);
+  assert.match(panel, /label: "Updated"/);
+  assert.match(panel, /label: "Needs attention"/);
+  assert.match(panel, /label: "Unmatched \/ unavailable"/);
+  assert.match(panel, /BANK_RESPONSE_DETAIL_PAGE_SIZE = 20/);
   assert.match(panel, /expanded \? details\.slice\(0, visibleCount\) : \[\]/);
   assert.match(panel, /Show next \{Math\.min\(BANK_RESPONSE_DETAIL_PAGE_SIZE/);
-  assert.match(panel, /aria-live="polite" className="sr-only" role="status"/);
+  assert.match(panel, /aria-live="polite" role="status"/);
   assert.match(panel, /<strong>File error<\/strong>/);
   assert.doesNotMatch(panel, /result\.rowErrors\.map/);
 });

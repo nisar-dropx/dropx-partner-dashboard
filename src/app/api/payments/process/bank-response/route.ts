@@ -1,3 +1,5 @@
+import { finalizeBankResponseBatches } from "@/lib/bank-response-batches";
+import { bankResponseGuidance, bankResponseFileError } from "@/lib/bank-response-guidance";
 import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
 import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 import { createHash } from "node:crypto";
@@ -7,12 +9,12 @@ import { revalidatePath } from "next/cache";
 import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { centralBankRpcRow, resolveCentralBankRowOwner, type CentralBankLedger } from "@/lib/central-bank-response";
 import {
-  summarizeCentralBankResponseRows,
+  summarizeCentralBankResponseRows as summarizeRows,
   type CentralBankResponseIssue
 } from "@/lib/central-bank-response-summary";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
-import { canProcessPayment } from "@/lib/payment-processing-policy";
+import { canReconcilePayment } from "@/lib/payment-processing-policy";
 import { notifyReimbursementPayment } from "@/lib/reimbursement-payment-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -430,8 +432,21 @@ async function processFile(input: {
   companyId: string;
   file: File;
   prepared: ReturnType<typeof prepareDropxFedOneResponse>;
+  deadlineAt?: number;
 }) {
   const { bytes, prepared } = input;
+  const deadlineAt = input.deadlineAt ?? Date.now() + 150_000;
+  const summarizeCentralBankResponseRows = (value: Parameters<typeof summarizeRows>[0]) => {
+    const groups = summarizeRows(value);
+    const headers = prepared.responseSheet.rows[prepared.responseSheet.headerIndex];
+    return Object.fromEntries(Object.entries(groups).map(([key, rows]) => [key, rows.map(row => {
+      const guidance = bankResponseGuidance(row.message, row.outcome);
+      const index = guidance.column ? headers.findIndex(header => String(header).trim().toLowerCase() === guidance.column.toLowerCase()) : -1;
+      let columnLetter = "";
+      for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) columnLetter = String.fromCharCode(65 + (n - 1) % 26) + columnLetter;
+      return { ...row, ...guidance, cell: columnLetter ? `${columnLetter}${row.rowNumber}` : "" };
+    })]));
+  };
   if (prepared.dataRowCount === 0) {
     throw new Error("No payment response rows were found below the bank response headers.");
   }
@@ -488,7 +503,7 @@ async function processFile(input: {
         referenceNo: rawReference,
         rowNumber: candidate.rowNumber
       });
-    } catch {
+    } catch (error) {
       // Do not reveal whether an ambiguous reference exists outside the
       // uploader's permitted locations. Detailed bank-evidence errors are
       // returned only after this ownership and scope gate succeeds.
@@ -496,8 +511,8 @@ async function processFile(input: {
         rowErrors,
         candidate.rowNumber,
         rawReference,
-        "This reference did not match an eligible payment instruction.",
-        "skipped"
+        input.authorization.hasAllLocationAccess ? errorMessage(error) : "No matching payment instruction is available in your permitted scope.",
+        "exceptions"
       );
       continue;
     }
@@ -506,7 +521,7 @@ async function processFile(input: {
         rowErrors,
         candidate.rowNumber,
         rawReference,
-        "This reference did not match an eligible payment instruction.",
+        input.authorization.hasAllLocationAccess ? "Customer Ref. No. does not match a payment instruction." : "No matching payment instruction is available in your permitted scope.",
         "skipped"
       );
       continue;
@@ -515,7 +530,7 @@ async function processFile(input: {
     let permitted = false;
     if (ledger === "payment_requests" && paymentRequest) {
       permitted = (paymentRequest.payment_mode ?? "account_transfer") === "account_transfer"
-        && canProcessPayment(input.authorization, paymentRequest, owner);
+        && canReconcilePayment(input.authorization, paymentRequest, owner);
     } else if (ledger === "workforce" && workforce) {
       permitted = canEditPayouts && inLocationScope(input.authorization, workforce.location_id_snapshot);
     } else if (ledger === "helpers" && helper) {
@@ -528,8 +543,16 @@ async function processFile(input: {
         rowErrors,
         candidate.rowNumber,
         rawReference,
-        "This reference did not match an eligible payment instruction.",
-        "skipped"
+        !inLocationScope(input.authorization, paymentRequest?.location_id ?? payroll?.location_id ?? workforce?.location_id_snapshot ?? helper?.location_id_snapshot)
+          ? "No matching payment instruction is available in your permitted scope."
+          : ledger === "payment_requests" && paymentRequest
+            ? (paymentRequest.payment_mode ?? "account_transfer") !== "account_transfer"
+              ? "This request uses a different payment method."
+              : !owner && !(paymentRequest.payment_process_role_ids ?? []).some(id => input.authorization.effectiveRoleIds.includes(id) || id === input.authorization.roleId)
+                ? "Your current role cannot reconcile this payment."
+                : "This request is not ready for bank reconciliation. Check its approval and payment state."
+            : "Your current role cannot reconcile this payment ledger.",
+        "exceptions"
       );
       continue;
     }
@@ -547,7 +570,7 @@ async function processFile(input: {
         rowErrors,
         skipped.rowNumber,
         skipped.referenceNo,
-        "This reference did not match an eligible payment instruction.",
+        "No matching payment instruction is available in your permitted scope.",
         "skipped"
       );
     }
@@ -599,21 +622,28 @@ async function processFile(input: {
   }
 
   const rawFileSha256 = createHash("sha256").update(bytes).digest("hex");
-  const finalized = await supabaseAdmin!.rpc("finalize_central_bank_response_partially", {
-    p_actor_user_id: input.authorization.userId,
-    p_company_id: input.companyId,
-    p_file_name: input.file.name.slice(0, 240),
-    // The database stores the physical-file hash for audit and derives a
-    // canonical payload identity from the exact authorised ledger arrays.
-    p_file_sha256: rawFileSha256,
-    p_helper_rows: rowsByLedger.helpers.map(centralBankRpcRow),
-    p_operation_id: crypto.randomUUID(),
-    p_payment_request_rows: rowsByLedger.payment_requests.map(centralBankRpcRow),
-    p_payroll_rows: rowsByLedger.payroll.map(centralBankRpcRow),
-    p_workforce_rows: rowsByLedger.workforce.map(centralBankRpcRow)
+  const databaseResult = await finalizeBankResponseBatches({
+    rows: rowsForFinalization,
+    deadlineAt,
+    finalize: async (batch) => {
+      const subset = (ledger: CentralBankLedger) => batch.filter(row => ownerByRow.get(row.rowNumber) === ledger).map(centralBankRpcRow);
+      const finalized = await supabaseAdmin!.rpc("finalize_central_bank_response_partially", {
+        p_actor_user_id: input.authorization.userId,
+        p_company_id: input.companyId,
+        p_file_name: input.file.name.slice(0, 240),
+        p_file_sha256: rawFileSha256,
+        p_operation_id: crypto.randomUUID(),
+        p_helper_rows: subset("helpers"),
+        p_payment_request_rows: subset("payment_requests"),
+        p_payroll_rows: subset("payroll"),
+        p_workforce_rows: subset("workforce")
+      });
+      if (finalized.error) throw new Error(bankResponseFileError(finalized.error.message));
+      const part = resultRecord(finalized.data);
+      readDatabaseResultRows(part.rows, batch);
+      return part;
+    }
   });
-  if (finalized.error) throw new Error(finalized.error.message);
-  const databaseResult = resultRecord(finalized.data);
   const databaseRows = readDatabaseResultRows(databaseResult.rows, rowsForFinalization);
   const databaseOutcomeByRow = new Map<number, string>();
   for (const raw of databaseRows) {
@@ -636,7 +666,7 @@ async function processFile(input: {
     ? databaseResult.payment_request_events as PaymentRequestEvent[]
     : [];
   if (paymentRequestEvents.length) {
-    await Promise.all(paymentRequestEvents.map((event) => sendPaymentRequestSideEffects({
+    await Promise.allSettled(paymentRequestEvents.map((event) => sendPaymentRequestSideEffects({
         actorUserId: input.authorization.userId,
         companyId: input.companyId,
         event
@@ -712,6 +742,7 @@ export async function POST(request: Request) {
     }
 
     let totalRows = 0;
+    const deadlineAt = Date.now() + 150_000;
     const results = [] as Array<Record<string, unknown>>;
     for (const file of files) {
       try {
@@ -721,17 +752,17 @@ export async function POST(request: Request) {
         if (totalRows > MAX_RESPONSE_ROWS_PER_REQUEST) {
           throw new Error(`One upload can contain at most ${MAX_RESPONSE_ROWS_PER_REQUEST} bank response rows across all files.`);
         }
-        const result = await processFile({ authorization, bytes, companyId, file, prepared });
+        const result = await processFile({ authorization, bytes, companyId, file, prepared, deadlineAt });
         results.push(result);
       } catch (error) {
-        results.push({ error: errorMessage(error), fileName: file.name, ok: false });
+        results.push({ error: bankResponseFileError(errorMessage(error)), fileName: file.name, ok: false });
       }
     }
 
     let payrollRefresh: Awaited<ReturnType<typeof refreshLossPayroll>> | null = null;
-    if (results.some((result) => result.ok)) {
-      payrollRefresh = await refreshLossPayroll(companyId);
-      await refreshWorkforcePayoutPublicationJobs({companyId,limit:20,deadlineAtMs:Date.now()+45_000});
+    if (results.some((result) => Number(result.paidRows ?? 0) + Number(result.cancelledRows ?? 0) + Number(result.failedRows ?? 0) > 0)) {
+      payrollRefresh = await refreshLossPayroll(companyId).catch(() => null);
+      await refreshWorkforcePayoutPublicationJobs({companyId,limit:20,deadlineAtMs:Date.now()+45_000}).catch(() => null);
       revalidatePath("/payments/process");
       revalidatePath("/payments/requests");
       revalidatePath("/payments/approvals");

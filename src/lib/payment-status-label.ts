@@ -1,4 +1,6 @@
 export type PaymentStatusLike = {
+  bank_status?: string | null;
+  utr_cin?: string | null;
   status?: string | null;
   approval_status?: string | null;
   current_approver_user_id?: string | null;
@@ -21,6 +23,7 @@ export function paymentStatusLabel(request: PaymentStatusLike) {
   const currentStep = Number(request.current_step_order) || 0;
   const totalSteps = Number(request.total_steps) || 0;
 
+  if (["PROCESSED", "PAID"].includes(status) && String(request.bank_status ?? "").trim().toUpperCase() === "PAID" && request.utr_cin?.trim()) return "Paid";
   if (effectiveStatus === "RE_PENDING") return "Resubmitted - Initial Approval";
   if (effectiveStatus === "RE_CLUSTER_APPROVED") return "Resubmitted - Final Approval";
   if (effectiveStatus === "RE_APPROVED") return "Resubmitted - Payment Processing";
@@ -60,7 +63,7 @@ export function paymentApprovalStatusTone(requestOrLabel: PaymentStatusLike | st
 
   if (normalized.includes("rejected") || normalized.includes("cancelled")) return "payment-stage-stopped";
   if (normalized.includes("returned")) return "payment-stage-returned";
-  if (normalized.includes("processed")) return "payment-stage-complete";
+  if (normalized === "paid" || normalized.includes("processed")) return "payment-stage-complete";
   if (normalized.includes("processing")) return "payment-stage-processing";
   if (normalized.includes("final approved")) return "payment-stage-approved";
   if (normalized.includes("final approval")) return "payment-stage-final";
