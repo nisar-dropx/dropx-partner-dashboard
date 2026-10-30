@@ -25,10 +25,10 @@ type EarningsData={month:string;routeFuel?:DailyRouteFuel[];summary:{workDays:nu
 type Tab='earnings'|'statements'|'advances'|'rate-card';
 const money=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
 const date=(d:string)=>new Date(`${d}T00:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-export function ConnectWorkforcePayments({account}:{account:AppAccount}){
- return <WorkforcePayments key={`${account.companyId}:${account.profileType}:${account.id}:${account.pageAccess?.join(',')}`} account={account}/>;
+export function ConnectWorkforcePayments({account,readOnly=false}:{account:AppAccount;readOnly?:boolean}){
+ return <WorkforcePayments key={`${account.companyId}:${account.profileType}:${account.id}:${account.pageAccess?.join(',')}`} account={account} readOnly={readOnly}/>;
 }
-function WorkforcePayments({account}:{account:AppAccount}){
+function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boolean}){
  const searchParams=useSearchParams(),access=account.pageAccess??[];
  const earningsAllowed=access.includes('earnings'),advancesAllowed=access.includes('advances');
  // Own mapped rates are already part of the earnings permission on the server.
@@ -89,7 +89,7 @@ function WorkforcePayments({account}:{account:AppAccount}){
    {rateCardAllowed?<button className={tab==='rate-card'?'active':''} onClick={()=>changeTab('rate-card')}><WalletCards/>Rate card</button>:null}
    {advancesAllowed?<button className={tab==='advances'?'active':''} onClick={()=>changeTab('advances')}><IndianRupee/>Advances</button>:null}
   </nav>
-  {tab==='advances'&&advancesAllowed?<ConnectAdvances account={account}/>:null}
+  {tab==='advances'&&advancesAllowed?<ConnectAdvances account={account} readOnly={readOnly}/>:null}
   {payoutVisited&&earningsAllowed?<div hidden={tab!=='statements'}><AssociatePayouts accountId={account.id} profileType={account.profileType} month={month} onMonthLockChange={setPayoutLocked}/></div>:null}
   {tab==='earnings'&&earningsAllowed?<>
    {loading||(!error&&calculated?.month!==month)?<div className="dx-loader"><span/><small>Loading saved earnings…</small></div>:error?<div role="alert" className="dx-alert error">{error}<button onClick={()=>void load(true)}>Retry</button></div>:calculated?<>

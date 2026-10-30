@@ -54,7 +54,7 @@ function formatDate(value: string) {
   });
 }
 
-export function ConnectAdvances({ account, active = true }: { account: Account; active?: boolean }) {
+export function ConnectAdvances({ account, active = true, readOnly = false }: { account: Account; active?: boolean; readOnly?: boolean }) {
   const workforce = account.workspace === "workforce";
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
   const [eligibleForAdvance, setEligibleForAdvance] = useState<boolean | null>(null);
@@ -112,6 +112,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (readOnly) return;
     setSaving(true);
     setError("");
     setNotice("");
@@ -141,7 +142,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
   }
 
   async function withdraw(requestId: string) {
-    if (withdrawingId) return;
+    if (readOnly || withdrawingId) return;
     setWithdrawingId(requestId);
     setError("");
     setNotice("");
@@ -186,13 +187,14 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
             <p>{workforce ? "Request and track payment advances." : "Request and track salary advances."}</p>
           </span>
         </div>
-        <button disabled={!eligibleForAdvance || loading || capacity.maxEligibleAmount < 500} onClick={() => setShowForm(true)} type="button">
+        <button disabled={loading || Boolean(error)} onClick={() => setShowForm(true)} type="button">
           <Plus />
           New request
         </button>
       </header>
 
-      {error ? <div className="dx-alert error">{error}</div> : null}
+      {error ? <div className="dx-alert error">{error} <button type="button" onClick={() => void load()}>Retry</button></div> : null}
+      {readOnly ? <div className="dx-alert info">Read-only preview. You can review this associate’s advances, but cannot submit or withdraw requests.</div> : null}
       {notice ? <div className="dx-alert success">{notice}</div> : null}
       {!loading && !error && eligibleForAdvance === false ? (
         <div className="dx-alert info">Advance requests are available only when Profile status is Active.</div>
@@ -256,7 +258,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
                   </ol>
                 </section> : null}
                 {row.canWithdraw === true && ["pending", "returned"].includes(row.status) ? (
-                  <button className="dx-advance-withdraw" disabled={withdrawingId === row.id} onClick={() => void withdraw(row.id)} type="button">
+                  <button className="dx-advance-withdraw" disabled={readOnly || withdrawingId === row.id} onClick={() => void withdraw(row.id)} type="button">
                     {withdrawingId === row.id ? "Withdrawing…" : "Withdraw request"}
                   </button>
                 ) : null}
@@ -264,13 +266,13 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
             </article>;
           })}
         </div>
-      ) : (
+      ) : !error ? (
         <div className="dx-advance-empty">
           <IndianRupee />
           <strong>No advance requests yet</strong>
           <small>Your submitted requests will appear here.</small>
         </div>
-      )}
+      ) : null}
 
       {showForm ? (
         <div className="dx-advance-modal" role="dialog" aria-modal="true" aria-labelledby="dx-advance-request-title">
@@ -280,7 +282,8 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
               <div>
                 <small>My pay</small>
                 <h2 id="dx-advance-request-title">Advance request</h2>
-                <p>Enter the amount you need and a short purpose.</p>
+                <p>{readOnly ? "Read-only preview — submissions are disabled." : "Enter the amount you need and a short purpose."}</p>
+                <p>{eligibleForAdvance ? `Current request limit: ${money(capacity.maxEligibleAmount)}. Minimum request: ₹500. Approval is required.` : "An active profile is required to submit an advance request."}</p>
               </div>
               <button aria-label="Close" onClick={closeForm} type="button"><X /></button>
             </header>
@@ -313,7 +316,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
             </label>
             <div className="dx-advance-modal-actions">
               <button className="ghost" disabled={saving} onClick={closeForm} type="button">Cancel</button>
-              <button className="submit" disabled={saving || purpose.trim().length < 10 || !amount || Number(amount) > capacity.maxEligibleAmount} type="submit">
+              <button className="submit" disabled={readOnly || !eligibleForAdvance || saving || purpose.trim().length < 10 || !amount || Number(amount) < 500 || Number(amount) > capacity.maxEligibleAmount} type="submit">
                 {saving ? "Submitting…" : "Submit request"}
               </button>
             </div>

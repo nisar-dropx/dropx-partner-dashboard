@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 function fixture() {
   const account = {id:'gokul',companyId:'dropx',profileType:'employee',pageAccess:['advances']};
-  const state = {account,eligible:true,calls:[],authError:null,upstreamError:null,missingEligibility:false};
+  const state = {account,eligible:true,calls:[],authError:null,upstreamError:null,missingEligibility:false,preview:false};
   const tables = {
     payment_advance_requests:[{id:'11111111-1111-1111-1111-111111111111',company_id:'dropx',account_id:'gokul',purpose:'Travel',amount:500,status:'submitted',requested_at:'2026-10-01T09:00:00.000Z',updated_at:'2026-10-01T09:00:00.000Z'},
       {id:'other',company_id:'other',account_id:'gokul',amount:999}],
@@ -20,6 +20,9 @@ function fixture() {
   class NextResponse extends Response {static json(body,init){return Response.json(body,init)}}
   const mocks={
     'next/server':{NextResponse},
+    'next/headers':{cookies:()=>({get:()=>state.preview?{value:'preview'}:undefined})},
+    '../../../../src/lib/connect-preview-policy':{connectPreviewCookieName:'preview',previewReadOnlyMessage:'Preview is read-only'},
+    '../../../../src/lib/own-advance-capacity':{loadOwnAdvanceCapacity:async(companyId,id)=>{state.calls.push({capacity:[companyId,id]});return {account:{eligibleForAdvance:true,outstandingPay:2000,committedAdvance:0,eligibilityPercent:25,maxEligibleAmount:500}}}},
     '@/lib/user-facing-error':{userFacingError:e=>e.message},
     '../../../../src/lib/connect-auth':{requireConnectAccount:async(type,id)=>{if(state.authError)throw Error(state.authError);assert.equal(id,account.id);assert.equal(type,account.profileType);return account}},
     '../../../../src/lib/connect-approval-journey':{loadApprovalJourneySteps:async()=>new Map()},
@@ -36,6 +39,19 @@ function fixture() {
 }
 const getRequest=()=>new Request('https://one.dropxlogistics.com/api/connect/advances?accountId=gokul&profileType=employee',{headers:{cookie:'dropx_connect_session=test-only'}});
 const mutation=method=>new Request('https://one.dropxlogistics.com/api/connect/advances',{method,headers:{cookie:'dropx_connect_session=test-only','content-type':'application/json'},body:JSON.stringify({accountId:'gokul',profileType:'employee',amount:500,purpose:'Travel',requestId:'advance'})});
+
+test('Workforce preview reads use authorized account scope, never administrator mobile cookies',async()=>{
+  const f=fixture();f.state.account.profileType='workforce';f.state.preview=true;
+  const response=await f.GET(new Request('https://one.example/api/connect/advances?accountId=gokul&profileType=workforce'));
+  assert.equal(response.status,200);assert.equal((await response.json()).account.maxEligibleAmount,500);
+  assert.deepEqual(f.state.calls,[{capacity:['dropx','gokul']}]);
+});
+test('preview cannot submit or withdraw even if actor and selected worker share a mobile',async()=>{
+  const f=fixture();f.state.preview=true;
+  assert.equal((await f.POST(mutation('POST'))).status,403);
+  assert.equal((await f.PATCH(mutation('PATCH'))).status,403);
+  assert.equal(f.state.calls.length,0);
+});
 
 test('active account is eligible; both advances screen and My Requests contracts survive',async()=>{
   const f=fixture();const response=await f.GET(getRequest());const body=await response.json();

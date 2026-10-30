@@ -45,7 +45,7 @@ async function accountFromRequest(request: Request, body?: Record<string, unknow
   return requireConnectAccount(profileType, accountId);
 }
 
-async function loadSettings(companyId: string) {
+async function loadSettings(companyId: string, profileType?: string) {
   const result = await supabaseAdmin!
     .from("communication_channel_settings")
     .select("channel,title,subtitle,guidance,categories,sla_hours,is_active,allow_attachments,reward_enabled")
@@ -56,11 +56,12 @@ async function loadSettings(companyId: string) {
   return (["general", "connect", "integrity"] as CommunicationChannel[]).map((channel) => {
     const row = rows.get(channel);
     const fallback = defaultCommunicationSettings[channel];
+    const workforce = ["workforce", "field_executive", "worker", "vendor"].includes(profileType ?? "");
     return {
       channel,
-      title: row?.title ?? fallback.title,
-      subtitle: row?.subtitle ?? fallback.subtitle,
-      guidance: row?.guidance ?? fallback.guidance,
+      title: workforce && channel === "connect" ? "Workforce Help" : row?.title ?? fallback.title,
+      subtitle: workforce && channel === "connect" ? "Private support from your Workforce team." : row?.subtitle ?? fallback.subtitle,
+      guidance: workforce ? "Your message goes to Workforce Connect Centre in the main Dashboard, not the People portal. Replies appear here and in your app notifications." : row?.guidance ?? fallback.guidance,
       categories: row?.categories ?? fallback.categories,
       slaHours: row?.sla_hours ?? fallback.slaHours,
       active: row?.is_active ?? channel !== "general",
@@ -165,6 +166,7 @@ async function peopleRecipients(companyId: string) {
 }
 
 async function notifyPeopleTeam(input: {
+  profileType: string;
   companyId: string;
   caseId: string;
   caseNumber: string;
@@ -173,6 +175,9 @@ async function notifyPeopleTeam(input: {
   urgency: string;
   event: "submitted" | "reply";
 }) {
+  // Workforce cases are served by Dashboard's scoped inbox and attention badge.
+  // Never send their subjects or case links to People staff.
+  if (!["employee", "contractor"].includes(input.profileType)) return;
   try {
     const recipients = await peopleRecipients(input.companyId);
     if (!recipients.length) return;
@@ -261,7 +266,7 @@ export async function GET(request: Request) {
     const announcements = await announcementInbox(account);
     const unread = await loadConnectUnread(supabaseAdmin, account);
     if (!caseIds.length) {
-      return NextResponse.json({ settings: await loadSettings(account.companyId), cases: [], announcements, unread });
+      return NextResponse.json({ settings: await loadSettings(account.companyId, account.profileType), cases: [], announcements, unread });
     }
 
     const [caseResult, messageResult, attachmentResult] = await Promise.all([
@@ -288,7 +293,7 @@ export async function GET(request: Request) {
     const messages = messageResult.data ?? [];
     const attachments = attachmentResult.data ?? [];
     return NextResponse.json({
-      settings: await loadSettings(account.companyId),
+      settings: await loadSettings(account.companyId, account.profileType),
       announcements,
       unread,
       cases: (caseResult.data ?? []).map((item) => ({
@@ -321,7 +326,7 @@ export async function POST(request: Request) {
       description: form.get("description"),
       urgency: form.get("urgency")
     });
-    const channelSettings = (await loadSettings(account.companyId)).find((item) => item.channel === submission.channel);
+    const channelSettings = (await loadSettings(account.companyId, account.profileType)).find((item) => item.channel === submission.channel);
     if (!channelSettings?.active) throw new Error("This communication channel is currently unavailable.");
     if (!channelSettings.categories.includes(submission.category)) throw new Error("Select a category from the current list.");
 
@@ -393,6 +398,7 @@ export async function POST(request: Request) {
       note: "Submitted through DropX One."
     });
     await notifyPeopleTeam({
+      profileType: account.profileType,
       companyId: account.companyId,
       caseId: createdCaseId,
       caseNumber: caseResult.data.case_number,
@@ -494,6 +500,7 @@ export async function PATCH(request: Request) {
     const now = new Date().toISOString();
     await supabaseAdmin.from("communication_cases").update({ last_activity_at: now, updated_at: now }).eq("id", caseId);
     await notifyPeopleTeam({
+      profileType: account.profileType,
       companyId: account.companyId,
       caseId,
       caseNumber: caseResult.data.case_number,
