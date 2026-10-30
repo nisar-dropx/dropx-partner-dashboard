@@ -161,3 +161,14 @@ test("overlapping fuel records cannot double-pay the same route",()=>{
  a.row.dailyBreakdown[0].routeFuel={status:'ready',amount:30};b.row.dailyBreakdown[0].routeFuel={status:'ready',amount:30};
  const result=consolidateProviderPayoutSegments([a,b]);assert.deepEqual(result.conflicts,['worker-1']);assert.equal(result.rows.length,0);
 });
+
+test("pending route allowance cannot hide an incomplete configuration in another segment", () => {
+ const a=segment({id:'a',methodId:'fuel',method:'Fuel',from:1,to:1,rate:3,units:10,amount:30});
+ const b=segment({id:'b',methodId:'daily',method:'Daily',from:2,to:2,rate:100,units:1,amount:100});
+ a.row.status='Route distance pending';b.row.status='Configuration incomplete';
+ for(const segments of [[a,b],[b,a]]) assert.equal(consolidateProviderPayoutSegments(segments).rows[0].row.status,'Configuration incomplete');
+ b.row.status='Ready for review';b.row.paymentDetailsAvailable=false;
+ assert.equal(consolidateProviderPayoutSegments([a,b]).rows[0].row.paymentDetailsAvailable,false);
+ b.row.paymentDetailsAvailable=true;
+ assert.equal(consolidateProviderPayoutSegments([a,b]).rows[0].row.status,'Route distance pending');
+});

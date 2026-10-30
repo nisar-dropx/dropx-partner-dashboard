@@ -334,7 +334,9 @@ export function allocationError(
     if (capEnabled && !privatePeoplePay) {
       const limit = person.recovery_limit;
       if (limit == null)
-        return `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
+        return person.pay_detail_access === "workforce" && person.salary_source
+          ? `${person.employee_code}: ${person.salary_source}`
+          : `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
       if (monthly > Math.round(limit * 100) && person.unpaid_payroll_check)
         return `${person.employee_code}: maximum available recovery is ₹${limit.toLocaleString("en-IN")} in ${person.salary_month}. Reduce this share or select another open payroll.`;
       if (monthly > Math.round(limit * 100))

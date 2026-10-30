@@ -1,5 +1,5 @@
 const ts=require('typescript'),fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const root=process.cwd(),cache=new Map();let data={},payoutCalls=[];
+const root=process.cwd(),cache=new Map();let data={},payoutCalls=[],payoutRows=[{dropxId:'DF1',paymentDetailsAvailable:true,status:'Ready',netAmount:10000,grossPayment:12000}],payrollWindows=[];
 const db={rpc(name,args){if(name==='nl_recovery_deduction_month')return Promise.resolve({data:'2026-10',error:null});if(name==='loss_recovery_people_with_locations')return Promise.resolve({data:[{ref:'workforce:w1',employee_code:'DF1',full_name:'Station worker',designation:'DA',is_active:true,station_codes:['SPBE','JUGD']}],error:null});return Promise.resolve({data:null,error:null});},from(table){let rows=[...(data[table]||[])],single=false;const q=new Proxy({}, {get(_,k){if(k==='then')return resolve=>resolve({data:single?rows[0]||null:rows,error:null});return (...a)=>{if(k==='eq')rows=rows.filter(r=>r[a[0]]===a[1]);if(k==='in')rows=rows.filter(r=>a[1].includes(r[a[0]]));if(k==='range')rows=rows.slice(a[0],a[1]+1);if(k==='limit')rows=rows.slice(0,a[0]);if(k==='maybeSingle'||k==='single')single=true;return q;}}});return q;}};
 function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';if(cache.has(file))return cache.get(file).exports;const m={exports:{}};cache.set(file,m);const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;new Function('require','module','exports',code)(id=>{
  if(id==='server-only')return {};
@@ -7,7 +7,7 @@ function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';i
  if(id.endsWith('/authorization'))return {hasPermission:()=>true};
  if(id.endsWith('/company-scope'))return {requireCompanyId:a=>a.companyId};
  if(id.endsWith('/people-operational-hierarchy'))return {loadPeopleOperationalHierarchy:async()=>({byLocation:new Map([['a',{clusterManagers:[{personId:'cm1',name:'Cluster A'}]}],['b',{areaOperationsManagers:[{personId:'aom1',name:'Area B'}]}]]),error:null})};
- if(id.endsWith('/workforce-payout-loader'))return {loadWorkforcePayoutRows:async(...a)=>{payoutCalls.push(a);return {rows:[{dropxId:'DF1',paymentDetailsAvailable:true,status:'Ready',netAmount:10000,grossPayment:12000}],error:null};}};
+ if(id.endsWith('/workforce-payout-loader'))return {loadWorkforcePayoutRows:async(...a)=>{payoutCalls.push(a);return {rows:payoutRows,error:null};}};
  if(id.startsWith('@/'))return load(path.join(root,'src',id.slice(2)));if(id.startsWith('.'))return load(path.join(path.dirname(file),id));return require(id);
 },m,m.exports);return m.exports;}
 const auth={companyId:'co',hasAllLocationAccess:false,locationScopeIds:['a','b'],readOnly:false};
@@ -38,5 +38,19 @@ data={stations:[{id:'a',company_id:'co',station_code:'ERSE',station_name:'Statio
  const reserved=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',{...policy,salary_cap_enabled:false},'2026-10-25');
  assert.equal(reserved[0].recovery_limit,7000,'Legacy disabled policy still verifies pay and reserves other recoveries');
  payoutCalls.length=0;await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',policy,'2026-10-25',[]);assert.equal(payoutCalls.length,0,'No salary calculation for unselected employees');
+ payoutRows=[{dropxId:'DF1',paymentDetailsAvailable:true,status:'Route distance pending',netAmount:12431,grossPayment:12557}];
+ const oldRpc=db.rpc;db.rpc=(name,args)=>name==='loss_recovery_payroll_windows'?Promise.resolve({data:payrollWindows,error:null}):oldRpc(name,args);
+ payrollWindows=[{employee_ref:'workforce:w1',salary_month:'2026-10',payroll_open:true,paid:500,processing:false}];
+ const readyPolicy={...policy,workforce_payout_statuses:['Ready for review']};
+ const routePending=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',readyPolicy,'2026-10-25',['workforce:w1'],'2026-10');
+ assert.equal(routePending[0].salary_payable,11931,'Already paid money is excluded');
+ assert.equal(routePending[0].recovery_limit,8931,'Other recovery reservations remain excluded');
+ assert.match(routePending[0].salary_source,/pending route allowance excluded/);
+ payrollWindows[0].payroll_open=false;payrollWindows[0].processing=true;
+ const frozen=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',readyPolicy,'2026-10-25',['workforce:w1'],'2026-10');
+ assert.equal(frozen[0].recovery_limit,0,'Processing or closed payroll cannot be used');
+ payrollWindows[0].payroll_open=true;payrollWindows[0].processing=false;payoutRows[0].status='Configuration incomplete';
+ const invalid=await loadRecoveryPayables(auth,'co','b','2026-09','slp:1',readyPolicy,'2026-10-25',['workforce:w1'],'2026-10');
+ assert.equal(invalid[0].recovery_limit,null);assert.match(invalid[0].salary_source,/Configuration incomplete/);
  console.log('PASS actual loss loaders: scoped multi-station/cluster/reason filters, recoverable NL plans, non-recoverable exclusion, SLP Final, scoped salary calculation using full available pay.');
 })().catch(e=>{console.error(e);process.exitCode=1});

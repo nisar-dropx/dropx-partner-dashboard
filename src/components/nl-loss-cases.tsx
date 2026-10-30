@@ -851,10 +851,11 @@ export function RecoveryForm({
                           {capEnabled && p.pay_detail_access !== "restricted" && selected.includes(p.ref) ? (
                             <small className={p.recovery_limit == null ? styles.pending : styles.payFacts}>
                               {p.recovery_limit == null
-                                ? "Payout payable unavailable · review payout / mapping"
+                                ? p.salary_source || "Payout payable unavailable · review payout details"
                                 : p.unpaid_payroll_check ? `${p.salary_month ? monthLabel(p.salary_month) : "Selected payroll"} · max recovery ${money(p.recovery_limit)}` : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)} · available ${money(limitOf(p) ?? 0)}`}
                             </small>
                           ) : null}
+                          {selected.includes(p.ref) && p.pay_detail_access === "workforce" && p.recovery_limit != null && p.salary_source ? <small>{p.salary_source}</small> : null}
                           {selected.includes(p.ref) &&
                           plan.mode === "installments" ? (
                             <SchedulePreview

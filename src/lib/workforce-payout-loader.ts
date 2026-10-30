@@ -1322,7 +1322,7 @@ export async function loadWorkforcePayoutRows(
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
-    const status = paymentSetupConflict ? "Configuration incomplete" : missingRouteDistance ? "Route distance pending" : missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
+    const status = paymentSetupConflict || missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : missingRouteDistance ? "Route distance pending" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
     return [{
       workforceId: String(worker.id),
       categoryCode,
