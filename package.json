@@ -58,7 +58,7 @@
     "test:finance-cost-heads": "node --test src/lib/finance/pnl-cost-heads.test.mjs src/lib/finance/cfo-overhead.test.mjs",
     "verify:finance-release": "node scripts/verify-finance-release.mjs",
     "test:finance-release": "node --experimental-strip-types --test src/lib/finance/*.test.mjs src/lib/finance/billing-audit/*.test.mjs src/lib/finance/final-pnl/*.test.mjs src/lib/finance/treasury/*.test.mjs src/lib/asset*.test.mjs src/lib/ops-pulse/cps-engine.test.mjs src/lib/ops-pulse/cps-data.test.mjs src/lib/ops-pulse/production-fallback.test.mjs && pnpm run test:finance-books && pnpm run test:central-bank-response && pnpm run test:workforce-payout-bank && node scripts/verify-finance-pnl-sql.mjs",
-    "build:finance": "pnpm run verify:finance-release && pnpm run test:finance-release && next build"
+    "build:finance": "pnpm run verify:finance-release && pnpm run test:finance-release && NODE_OPTIONS=--max-old-space-size=8192 next build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",
