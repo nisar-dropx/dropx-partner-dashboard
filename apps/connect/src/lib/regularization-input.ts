@@ -1,7 +1,16 @@
 /** Shared by the form and API: never send missing punch times to the request RPC. */
 export function regularizationClock(value: unknown) {
-  const match = String(value ?? "").trim().match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  const raw = String(value ?? "").trim();
+  // Attendance rows use "--:--" when a punch is absent; treat that as blank.
+  if (!raw || raw === "--:--" || raw === "—") return "";
+  const match = raw.match(/^([01]?\d|2[0-3])[:.]([0-5]\d)(?::[0-5]\d)?$/);
   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
+}
+
+/** PostgREST time columns accept HH:MM:SS more reliably than HH:MM alone. */
+export function regularizationTimeForRpc(value: string) {
+  const clock = regularizationClock(value);
+  return clock ? `${clock}:00` : null;
 }
 
 export function missingPunchReason(currentIn: unknown, currentOut: unknown) {
@@ -52,6 +61,8 @@ export function regularizationTimeInput(input: {
   return {
     inTime,
     outTime,
+    inTimeRpc: `${inTime}:00`,
+    outTimeRpc: `${outTime}:00`,
     overnight: outTime < inTime
   };
 }
