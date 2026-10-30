@@ -522,7 +522,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, onOnboardingH
       setPfAnswer(registrationDraft?.data?.has_pf_uan ?? (editable.pfUan ? "yes" : ""));
       setEsiAnswer(registrationDraft?.data?.has_esi_no ?? (editable.esiNo ? "yes" : ""));
       setVerifications(isolatedPilot ? {} : Object.fromEntries((draftChecks ?? checks.verifications ?? []).map((item: Verification) => [item.kind, item])));
-      if (registrationDraft) setNotice("Draft restored.");
+      if (registrationDraft && !statusReadOnly(next.status)) setNotice("Draft restored.");
       if (next.profilePhotoUrl) onPhoto?.(next.profilePhotoUrl);
     }).catch((reason) => setError(userFacingError(reason, "Unable to load profile. Please try again.")));
   }, [account.id, account.profileType, endpoint, isolatedPilot, query]);
@@ -1216,9 +1216,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, onOnboardingH
     const sections = [
       { name: executive ? "Profile details" : "Employee details", values: {
         "Full name": read.fullName,
-        ...(account.activationOnly ? {} : { [executive ? "DropX ID" : "ID"]: read[executive ? "reference" : "employeeId"] }),
-        [account.activationOnly ? "Biometric ID · attendance only" : "Biometric ID"]: read.biometricId,
-        Email: read.email,
+        ...(account.activationOnly || onOnboardingHistory ? {} : { [executive ? "DropX ID" : "ID"]: read[executive ? "reference" : "employeeId"] }),
+        ...(onOnboardingHistory ? {} : { [account.activationOnly ? "Biometric ID · attendance only" : "Biometric ID"]: read.biometricId, Email: read.email }),
         Location: read.location,
         Designation: read.designation,
         "Date of join": read.dateOfJoin,
@@ -1282,7 +1281,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, onOnboardingH
         <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
         {canEditProfile ? <button className="dx-profile-edit-button" disabled={editLoading} onClick={() => void beginProfileEdit()} type="button"><Pencil />{editLoading ? "Loading..." : "Edit profile"}</button> : null}
       </div>
-      {!readOnly && !account.activationOnly ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
+      {!readOnly && !account.activationOnly && !isolatedPilot ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
         setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
         onPhoto?.(url);
       }} /> : null}
