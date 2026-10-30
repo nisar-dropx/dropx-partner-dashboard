@@ -2165,6 +2165,7 @@ export async function GET() {
 export async function POST(request: Request) {
   if (!supabaseAdmin) return Response.json({ error: "Supabase service key is not configured." }, { status: 500 });
   const db = supabaseAdmin;
+  const isServiceImport = Boolean((request.headers.get("x-service-key") ?? "").trim());
   let authorization: AuthorizationContext | null;
   try {
     authorization = (await getServiceAuthorization(request)) ?? (await getAuthorization());
@@ -2934,6 +2935,17 @@ export async function POST(request: Request) {
       ? audited.filter((row) => row.normalized && row.duplicateScope !== "file")
       : valid;
     const dates = factRows.map((row) => row.normalized?.workDate).filter(Boolean).sort() as string[];
+    if (sourceType === "amazon_shipments" && isServiceImport) {
+      if (!requestedReportDate) {
+        throw new Error("Automated Amazon shipment imports must include the expected D-1 report date.");
+      }
+      const latestSourceDate = dates.at(-1);
+      if (!latestSourceDate || latestSourceDate < requestedReportDate) {
+        throw new Error(
+          `Amazon shipment file is stale: expected data through ${requestedReportDate}, but the latest source date is ${latestSourceDate ?? "missing"}. The automation will retry after Amazon republishes the file.`
+        );
+      }
+    }
     const amazonWeeks = sourceType === "amazon_shipments"
       ? Array.from(new Map(factRows.map((row) => {
         const workDate = row.normalized?.workDate;

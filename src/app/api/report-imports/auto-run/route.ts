@@ -142,7 +142,17 @@ export async function POST(request: Request) {
         "/api/admin/reports/workforce-supp/ready",
         { isoWeek, reportId: sourceType }
       );
-      if (!ready.ready && !ready.alreadyUploaded) {
+      if (ready.alreadyUploaded) {
+        return Response.json({
+          ok: true,
+          sourceType,
+          ready: true,
+          isoWeek: isoWeek || ready.isoWeek,
+          alreadyUploaded: true,
+          message: `${sourceType} is already imported for ${isoWeek || ready.isoWeek} today.`
+        });
+      }
+      if (!ready.ready) {
         return Response.json(
           {
             ok: false,
@@ -158,7 +168,7 @@ export async function POST(request: Request) {
       }
       const run = await reportAutoPost<{ ok: boolean; run?: { id?: string }; isoWeek?: string }>(
         "/api/admin/reports/workforce-supp/run",
-        { isoWeek, reportId: sourceType, forceNew: true }
+        { isoWeek, reportId: sourceType, expectedReportDate: reportDate, forceNew: true }
       );
       // The worker's own runWorkforceSuppNetwork already pushes this file
       // into Import Master itself (via its DASHBOARD_IMPORT_SERVICE_KEY,
