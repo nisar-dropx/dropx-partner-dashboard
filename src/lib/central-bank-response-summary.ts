@@ -1,4 +1,4 @@
-export type CentralBankResponseCategory = "reconciled" | "exceptions" | "skipped";
+export type CentralBankResponseCategory = "reconciled" | "alreadyRecorded" | "exceptions" | "skipped";
 
 export type CentralBankResponseDetail = {
   ledger: string;
@@ -9,7 +9,7 @@ export type CentralBankResponseDetail = {
 };
 
 export type CentralBankResponseIssue = {
-  category: Exclude<CentralBankResponseCategory, "reconciled">;
+  category: "exceptions" | "skipped";
   message: string;
   referenceNo: string;
   rowNumber: number;
@@ -47,10 +47,11 @@ function replayedRows(value: unknown) {
 }
 
 function categoryForOutcome(outcome: string, replayed: boolean): CentralBankResponseCategory {
-  if (replayed) return "skipped";
+  if (replayed && RECONCILED_OUTCOMES.has(outcome)) return "alreadyRecorded";
   if (RECONCILED_OUTCOMES.has(outcome)) return "reconciled";
   if (outcome === "rejected") return "exceptions";
-  if (outcome === "replayed" || outcome === "unknown") return "skipped";
+  if (outcome === "replayed") return "alreadyRecorded";
+  if (outcome === "unknown") return "skipped";
   return "exceptions";
 }
 
@@ -121,7 +122,7 @@ export function summarizeCentralBankResponseRows({
     categorized.set(detail.rowNumber, { category: issue.category, detail });
   }
 
-  const groups: CentralBankResponseGroups = { reconciled: [], exceptions: [], skipped: [] };
+  const groups: CentralBankResponseGroups = { reconciled: [], alreadyRecorded: [], exceptions: [], skipped: [] };
   for (const { category, detail } of [...categorized.values()].sort(
     (left, right) => left.detail.rowNumber - right.detail.rowNumber
   )) {

@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
+import { bankResponseCsv } from "@/lib/bank-response-guidance";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
@@ -132,6 +133,9 @@ type Props = {
 };
 
 type BankResponseResultDetail = {
+  column?: string;
+  cell?: string;
+  action?: string;
   ledger: string;
   message: string;
   outcome: string;
@@ -140,6 +144,7 @@ type BankResponseResultDetail = {
 };
 
 type BankResponseResultGroups = {
+  alreadyRecorded: BankResponseResultDetail[];
   exceptions: BankResponseResultDetail[];
   reconciled: BankResponseResultDetail[];
   skipped: BankResponseResultDetail[];
@@ -175,30 +180,34 @@ type BankResponseImportResult = {
 };
 
 const bankResponseGroupPresentation = {
+  alreadyRecorded: {
+    background: "#f8fafc", border: "#cbd5e1", color: "#475569",
+    description: "Previously recorded bank results. No duplicate payment was created.", label: "Already recorded"
+  },
   reconciled: {
     background: "#f0fdf4",
     border: "#86efac",
     color: "#166534",
     description: "Successfully finalized as Paid, Cancelled/Returned, or Failed.",
-    label: "Reconciled"
+    label: "Updated"
   },
   exceptions: {
     background: "#fff1f2",
     border: "#fda4af",
     color: "#b91c1c",
     description: "Known payment references with mismatched or invalid response data.",
-    label: "Exceptions"
+    label: "Needs attention"
   },
   skipped: {
     background: "#fffbeb",
     border: "#fcd34d",
     color: "#a16207",
-    description: "References that were not eligible or found, or payments already finalized.",
-    label: "Skipped"
+    description: "No matching instruction was available to this login. Check the reference or Finance access.",
+    label: "Unmatched / unavailable"
   }
 } as const;
 
-const BANK_RESPONSE_DETAIL_PAGE_SIZE = 100;
+const BANK_RESPONSE_DETAIL_PAGE_SIZE = 20;
 
 function bankResponseLedgerLabel(value: string) {
   if (value === "payment_requests") return "Payment request";
@@ -242,20 +251,18 @@ function BankResponseResultGroup({
           <p className="subtle" style={{ margin: 0 }}>{presentation.description}</p>
           {details.length ? (
             <>
-              <ul style={{ margin: "8px 0 0", maxHeight: 260, overflowY: "auto", paddingLeft: 20 }}>
-                {visibleDetails.map((detail, detailIndex) => {
-                  const ledger = bankResponseLedgerLabel(detail.ledger);
-                  return (
-                    <li key={`${group}-${detail.rowNumber}-${detail.referenceNo}-${detailIndex}`} style={{ marginBottom: 6 }}>
-                      <strong>
-                        Row {detail.rowNumber}{detail.referenceNo ? ` · ${detail.referenceNo}` : ""}
-                        {ledger ? ` · ${ledger}` : ""} · {detail.outcome}
-                      </strong>
-                      <div>{detail.message}</div>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div style={{ maxHeight: 320, overflow: "auto", marginTop: 8 }}>
+                <table style={{ width: "100%", fontSize: 12 }}>
+                  <thead><tr><th>Row / cell</th><th>Reference</th><th>Result / next action</th></tr></thead>
+                  <tbody>{visibleDetails.map((detail, index) => <tr key={`${group}-${detail.rowNumber}-${index}`}>
+                    <td style={{ verticalAlign: "top", whiteSpace: "nowrap" }}><strong>{detail.rowNumber}</strong>{detail.cell ? <div>{detail.cell}</div> : null}</td>
+                    <td style={{ verticalAlign: "top" }}>{detail.referenceNo || "—"}<small style={{ display: "block" }}>{bankResponseLedgerLabel(detail.ledger)}</small></td>
+                    <td><strong>{detail.outcome}</strong>{detail.column ? ` · ${detail.column}` : ""}
+                      {group === "exceptions" || group === "skipped" ? <><div>{detail.message}</div><div style={{ marginTop: 4 }}>{detail.action}</div></> : null}
+                    </td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
               {visibleCount < details.length ? (
                 <button
                   className="button secondary compact"
@@ -317,6 +324,7 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const [finalizeError, setFinalizeError] = useState("");
+  const [finalizeProgress, setFinalizeProgress] = useState("");
   const [finalizePending, setFinalizePending] = useState(false);
   const [finalizeResults, setFinalizeResults] = useState<BankResponseImportResult[]>([]);
   const [finalizeInputKey, setFinalizeInputKey] = useState(0);
@@ -334,12 +342,13 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
   const finalizeResultAnnouncement = useMemo(() => {
     if (!finalizeResults.length) return "";
     const totals = finalizeResults.reduce((summary, result) => ({
+      alreadyRecorded: summary.alreadyRecorded + (result.resultGroups?.alreadyRecorded.length ?? 0),
       exceptions: summary.exceptions + (result.resultGroups?.exceptions.length ?? 0),
       fileErrors: summary.fileErrors + (result.ok ? 0 : 1),
       reconciled: summary.reconciled + (result.resultGroups?.reconciled.length ?? 0),
       skipped: summary.skipped + (result.resultGroups?.skipped.length ?? 0)
-    }), { exceptions: 0, fileErrors: 0, reconciled: 0, skipped: 0 });
-    return `${finalizeResults.length} ${finalizeResults.length === 1 ? "file" : "files"} processed. ${totals.reconciled} reconciled, ${totals.exceptions} exceptions, ${totals.skipped} skipped${totals.fileErrors ? `, ${totals.fileErrors} file ${totals.fileErrors === 1 ? "error" : "errors"}` : ""}.`;
+    }), { alreadyRecorded: 0, exceptions: 0, fileErrors: 0, reconciled: 0, skipped: 0 });
+    return `${finalizeResults.length} ${finalizeResults.length === 1 ? "file" : "files"} processed. ${totals.reconciled} updated, ${totals.alreadyRecorded} already recorded, ${totals.exceptions} need attention, ${totals.skipped} unmatched${totals.fileErrors ? `, ${totals.fileErrors} file ${totals.fileErrors === 1 ? "error" : "errors"}` : ""}.`;
   }, [finalizeResults]);
 
   useEffect(() => {
@@ -371,21 +380,41 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
     setFinalizeError("");
     setFinalizeResults([]);
     setFinalizePending(true);
+    const form = new FormData(event.currentTarget);
+    const files = form.getAll("bank_response_files").filter((value): value is File => value instanceof File && value.size > 0);
     try {
-      const response = await fetch("/api/payments/process/bank-response", {
-        body: new FormData(event.currentTarget),
-        method: "POST"
-      });
-      const payload = await response.json().catch(() => null) as { error?: string; results?: BankResponseImportResult[] } | null;
-      if (!response.ok) throw new Error(payload?.error || "Unable to import the selected bank response files.");
-      const results = Array.isArray(payload?.results) ? payload.results : [];
-      setFinalizeResults(results);
-      if (results.some((result) => result.ok)) router.refresh();
+      if (!files.length || files.length > 20) throw new Error("Select 1–20 bank response files.");
+      if (files.some(file => file.size > 10 * 1024 * 1024) || files.reduce((n,file) => n + file.size, 0) > 50 * 1024 * 1024) throw new Error("Use files up to 10 MB each, totalling 50 MB or less.");
+      // Separate requests retain visible progress and avoid one long multi-file timeout.
+      for (const [index, file] of files.entries()) {
+        setFinalizeProgress(`Checking file ${index + 1} of ${files.length}: ${file.name}`);
+        const body = new FormData();
+        body.append("bank_response_files", file);
+        try {
+          const response = await fetch("/api/payments/process/bank-response", { body, method: "POST" });
+          const payload = await response.json().catch(() => null) as { error?: string; results?: BankResponseImportResult[] } | null;
+          if (!response.ok || !payload?.results?.length) throw new Error(payload?.error || "The upload result could not be confirmed. Retry this file; already recorded rows are protected.");
+          setFinalizeResults(current => [...current, ...payload.results!]);
+        } catch (error) {
+          setFinalizeResults(current => [...current, { fileName: file.name, ok: false, error: error instanceof Error ? error.message : "Unable to confirm this file. Retry the same file safely." }]);
+        }
+        router.refresh();
+      }
     } catch (error) {
       setFinalizeError(error instanceof Error ? error.message : "Unable to import the selected bank response files.");
     } finally {
       setFinalizePending(false);
+      setFinalizeProgress("");
+      router.refresh();
     }
+  }
+
+  function downloadBankResults() {
+    const rows = finalizeResults.flatMap(result => result.resultGroups
+      ? Object.values(result.resultGroups).flat().map(row => ({ ...row, file: result.fileName }))
+      : [{ file: result.fileName, ledger: "", rowNumber: 0, referenceNo: "", outcome: "File error", message: result.error ?? "Unable to read file.", action: "Check the file error and retry." }]);
+    const url = URL.createObjectURL(new Blob([bankResponseCsv(rows)], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "bank-upload-results.csv"; anchor.click(); URL.revokeObjectURL(url);
   }
 
   function requestRejectConfirmation() {
@@ -669,10 +698,11 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
                 />
               </label>
               <p className="subtle" style={{ margin: 0 }}>
-                Select up to 20 Federal Bank enquiry files. Each file is summarized as Reconciled, Exceptions and Skipped; expand a group only when you need its row details.
+                Select up to 20 Federal Bank enquiry files. Re-uploading the same result will not duplicate a payment.
               </p>
               {finalizeError ? <div className="form-error" role="alert">{finalizeError}</div> : null}
-              <div aria-live="polite" className="sr-only" role="status">{finalizeResultAnnouncement}</div>
+              <div aria-live="polite" role="status">{finalizeProgress || finalizeResultAnnouncement}</div>
+              {finalizeResults.length ? <button className="button secondary compact" onClick={downloadBankResults} type="button">Download row results</button> : null}
               {finalizeResults.length ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   {finalizeResults.map((result, index) => (
@@ -690,13 +720,11 @@ export function PaymentProcessPanel({ banks, requests, awaitingDetails, canEdit,
                         <>
                           {result.replayedFile ? (
                             <p className="subtle" style={{ color: "#a16207", margin: "4px 0 0" }}>
-                              Already imported. These rows were previously finalized and are counted under Skipped.
+                              Already recorded. No duplicate payment was created.
                             </p>
                           ) : null}
                           <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                            <BankResponseResultGroup details={result.resultGroups?.reconciled ?? []} group="reconciled" />
-                            <BankResponseResultGroup details={result.resultGroups?.exceptions ?? []} group="exceptions" />
-                            <BankResponseResultGroup details={result.resultGroups?.skipped ?? []} group="skipped" />
+                            {(["exceptions", "skipped", "reconciled", "alreadyRecorded"] as const).map(group => result.resultGroups?.[group]?.length ? <BankResponseResultGroup key={group} details={result.resultGroups[group]} group={group} /> : null)}
                           </div>
                         </>
                       ) : (

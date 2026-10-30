@@ -293,6 +293,7 @@ export default async function PaymentReportPage() {
 
       {!error && pagePermission.canView ? (
             <PaymentReportTable
+              checkedAt={new Date().toISOString()}
               requests={requests.map((request) => {
                 const head = headById.get(request.payment_head_id);
                 return {

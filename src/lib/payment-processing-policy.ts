@@ -15,3 +15,9 @@ export function canProcessPayment(scope:Scope,request:Request,owner:boolean) {
   if(!owner && request.approval_status==="RE_APPROVED" && request.current_approver_user_id!==scope.userId && !(request.current_approver_role_ids ?? []).some(id=>roles.includes(id))) return false;
   return true;
 }
+
+/** Re-uploading terminal bank evidence must reach the DB's exact-match replay checks. */
+export function canReconcilePayment(scope:Scope,request:Request,owner:boolean) {
+  const terminal = ["processed", "paid", "returned", "cancelled", "failed"].includes(String(request.status ?? "").toLowerCase());
+  return canProcessPayment(scope, terminal ? { ...request, status: "processing" } : request, owner);
+}

@@ -28,16 +28,16 @@ test("central bank response rows are grouped once into reconciled, exceptions an
     [6, "Exception"], [9, "Exception"]
   ]);
   assert.deepEqual(groups.skipped.map((row) => [row.rowNumber, row.outcome]), [
-    [5, "Already finalized"], [7, "Skipped"], [8, "Skipped"]
+    [7, "Skipped"], [8, "Skipped"]
   ]);
   assert.equal(
-    groups.reconciled.length + groups.exceptions.length + groups.skipped.length,
+    groups.reconciled.length + groups.alreadyRecorded.length + groups.exceptions.length + groups.skipped.length,
     8,
     "every physical row is summarized exactly once"
   );
 });
 
-test("a replayed file reports its stored successful rows as skipped instead of newly reconciled", () => {
+test("a replayed file reports its stored successful rows as already recorded instead of newly reconciled", () => {
   const groups = summarizeCentralBankResponseRows({
     databaseRows: [
       { ledger: "workforce", message: "Payment finalized.", outcome: "paid", reference_no: "WF1", row_number: 2 },
@@ -49,10 +49,10 @@ test("a replayed file reports its stored successful rows as skipped instead of n
 
   assert.equal(groups.reconciled.length, 0);
   assert.equal(groups.exceptions.length, 0);
-  assert.deepEqual(groups.skipped.map((row) => row.outcome), ["Already finalized", "Already finalized"]);
+  assert.deepEqual(groups.alreadyRecorded.map((row) => row.outcome), ["Already finalized", "Already finalized"]);
 });
 
-test("a successful row from a replayed chunk is skipped even when another row makes the file a partial replay", () => {
+test("a successful row from a replayed chunk is already recorded even when another row makes the file a partial replay", () => {
   const groups = summarizeCentralBankResponseRows({
     databaseRows: [
       { ledger: "workforce", message: "Payment finalized.", outcome: "paid", reference_no: "WF1", row_number: 2 },
@@ -65,7 +65,7 @@ test("a successful row from a replayed chunk is skipped even when another row ma
 
   assert.equal(groups.reconciled.length, 0);
   assert.deepEqual(groups.exceptions.map((row) => [row.rowNumber, row.outcome]), [[3, "Exception"]]);
-  assert.deepEqual(groups.skipped.map((row) => [row.rowNumber, row.outcome]), [[2, "Already finalized"]]);
+  assert.deepEqual(groups.alreadyRecorded.map((row) => [row.rowNumber, row.outcome]), [[2, "Already finalized"]]);
 });
 
 test("unsupported or missing database outcomes are exceptions, not harmless skips", () => {

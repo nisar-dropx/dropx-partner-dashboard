@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { paymentApprovalStatusTone, paymentStatusLabel } from "./payment-status-label.ts";
 
+test("confirmed bank payment wins over an old processing approval label", () => {
+  assert.equal(paymentStatusLabel({ status: "processed", approval_status: "PROCESSING", bank_status: "Paid", utr_cin: "BANK123" }), "Paid");
+  assert.equal(paymentApprovalStatusTone("Paid"), "payment-stage-complete");
+  assert.equal(paymentStatusLabel({ status: "processing", approval_status: "PROCESSING", bank_status: "Paid" }), "Processing");
+});
+
 test("final assigned approval is never labelled as initial approval", () => {
   assert.equal(paymentStatusLabel({
     status: "ZONAL_HEAD_APPROVED",

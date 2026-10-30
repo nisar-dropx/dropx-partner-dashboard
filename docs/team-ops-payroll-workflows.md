@@ -1,5 +1,21 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Bank upload reconciliation — 30 October 2026
+
+The Dashboard bank uploader finalizes at most 20 rows per database transaction,
+with a request deadline. Already committed batches survive a later timeout;
+retrying the same bank evidence remains idempotent. Account, IFSC, amount, UTR,
+approval, company, location and processor-role checks still apply. Canonical
+reference indexes avoid repeated full scans during ownership/finalization.
+
+Bank reconciliation permits exact terminal-result replays through the existing
+DB validator; it does not allow processed payments to be exported for payment
+again. Results distinguish Updated, Already recorded, Needs attention and
+Unmatched/unavailable. Row diagnostics identify the original Excel row, column
+and cell where applicable, and can be downloaded. Server/access failures do not
+suggest changing bank amounts. The report refreshes on focus and every 30 seconds;
+confirmed paid records display Paid with their UTR retained.
+
 ## Reviewed supplemental ad hoc payments — 30 October 2026
 
 A bank-paid supplementary payment for an already paid work date requires an
