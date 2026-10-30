@@ -49,17 +49,19 @@ export function LossCaseResponse({
   month,
   caseKey,
   embedded = false,
+  initialAction = "",
 }: {
   month: string;
   caseKey: string;
   embedded?: boolean;
+  initialAction?: "" | "return";
 }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [revision, setRevision] = useState(0),
     [tracking, setTracking] = useState(false);
-  const [action, setAction] = useState("activate"),
+  const [action, setAction] = useState<string>(initialAction),
     [note, setNote] = useState(""),
     [reason, setReason] = useState(""),
     [evidence, setEvidence] = useState(""),
@@ -100,11 +102,7 @@ export function LossCaseResponse({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!data || !selectedAction) return;
-    if (selectedAction === "response") {
-      const validationError = stationEvidenceError({ reason, note, tt_reference: ticket,
-        evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
-      if (validationError) { setError(validationError); return; }
-    }
+    if (!canSubmit) { setError(selectedAction === "response" ? evidenceError || "Complete all required fields." : "Add a clear update (10–4000 characters)."); return; }
     setBusy(true);
     setError("");
     try {
@@ -143,9 +141,14 @@ export function LossCaseResponse({
   const actions = responseActions({enabled: !!data?.window.enabled, state,
     canManage: !!data?.canActivate, stationView, readOnly: !data || data.readOnly});
   const selectedAction = actions.includes(action) ? action : actions[0] || "";
+  const evidenceError = stationEvidenceError({ reason, note, tt_reference: ticket,
+    evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
+  const validNote = note.trim().length >= 10 && note.trim().length <= 4000;
+  const canSubmit = selectedAction === "response" ? !evidenceError : !!selectedAction && validNote;
+  const returnEvent = state === "returned" ? data?.events.find((event) => event.action === "return") : null;
   const actionNames: Record<string, string> = {
     activate: "Activate redispute",
-    response: "Submit station evidence",
+    response: state === "returned" ? "Resubmit station evidence" : "Submit station evidence",
     approve: "Approve response",
     return: "Return for correction",
     tracking: "Update post-dispute ticket",
@@ -194,6 +197,11 @@ export function LossCaseResponse({
               stationHint={data.row.station_code}
               onClose={() => setTracking(false)}
             />
+            {returnEvent ? <div className={evidenceStyles.returnNote} role="status">
+              <strong>Returned for correction</strong>
+              <p>{returnEvent.note}</p>
+              <small>{returnEvent.actor_name} · {new Date(returnEvent.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small>
+            </div> : null}
             {data.window.response_details?.reason ? (
               <details className={styles.compactDetails} open>
                 <summary>Station submission</summary>
@@ -333,7 +341,7 @@ export function LossCaseResponse({
                 <label>
                     {selectedAction === "response"
                       ? "Detailed description *"
-                      : "Decision / update"}
+                      : selectedAction === "return" ? "Correction note to station *" : "Decision / update"}
                     <textarea
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
@@ -341,16 +349,15 @@ export function LossCaseResponse({
                       minLength={10}
                       maxLength={4000}
                       required
-                      placeholder={selectedAction === "response" ? "Explain why the loss should be reconsidered and what the evidence shows." : undefined}
+                      placeholder={selectedAction === "response" ? "Explain why the loss should be reconsidered and what the evidence shows." : selectedAction === "return" ? "Tell the station exactly what to correct before resubmitting." : undefined}
                     />
                   </label>
                 <div className={styles.toolbar}>
-                  <button className={styles.primary} disabled={busy}>
+                  <button className={styles.primary} disabled={busy || !canSubmit}>
                     {busy ? "Saving…" : actionNames[selectedAction]}
                   </button>
                   <small>
-                    Recorded in OpsPulse; tickets are filed with the vendor
-                    separately.
+                    {selectedAction === "return" ? "The station will see this note and can correct and resubmit." : selectedAction === "response" && !canSubmit ? "Complete all required fields to submit." : "Recorded in OpsPulse; tickets are filed with the vendor separately."}
                   </small>
                 </div>
               </form>

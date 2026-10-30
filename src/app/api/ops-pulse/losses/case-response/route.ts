@@ -106,6 +106,8 @@ async function transition(b: Record<string, any>) {
     const validationError = stationEvidenceError(details);
     if (validationError) throw Error(validationError);
   }
+  if (b.action === "return" && (details.note.length < 10 || details.note.length > 4000))
+    throw Error("Add a correction note for the station (10–4000 characters).");
   for (const value of [details.evidence_url, details.tt_url])
     if (value) {
       const u = new URL(value);

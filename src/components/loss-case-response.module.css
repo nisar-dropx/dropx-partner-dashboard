@@ -5,3 +5,5 @@
 .help summary { cursor: pointer; color: #285d9e; width: fit-content; }
 .help span { display: block; padding-top: 5px; }
 .links { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12px; }
+.returnNote { margin: 8px 12px; padding: 10px 12px; border: 1px solid #f4d49b; border-radius: 8px; background: #fff7e8; color: #805015; font-size: 13px; }
+.returnNote p { margin: 5px 0; white-space: pre-wrap; }
