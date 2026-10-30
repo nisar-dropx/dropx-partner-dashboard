@@ -740,3 +740,12 @@ The existing service-role-only transition stores `cctv_url` and the waiver in
 Reviewers see both links or the waiver, including in submission history. Returned
 submissions restore their original evidence for correction. Existing submissions
 remain readable; the stricter requirements apply on the next station submission.
+
+Submit stays disabled until the station evidence passes validation, and becomes
+disabled again if any required field is cleared. Awaiting-review rows offer a direct
+Return for correction action for authorised reviewers. The correction note is mandatory
+(10–4000 characters) in the form and API, and appears above the station's prefilled
+resubmission form with reviewer and time. Resubmission preserves the previous event
+history and follows the existing independent-review state machine. Management controls
+remain separate from station evidence; returning does not revoke redispute or release
+the payroll hold.

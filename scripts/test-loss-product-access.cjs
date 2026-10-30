@@ -69,5 +69,12 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  assert.equal((await post({...evidence,note:'x'.repeat(4001)})).status,403);
  assert.equal((await post({...evidence,case_key:'outside'})).status,403);
  auth={...base,roleCode:'OPERATIONS_SI',readOnly:true};assert.equal((await post(evidence)).status,403);
+ auth={...base,roleCode:'OPERATIONS_SLPM'};
+ for(const note of ['', '   ', 'short', 'x'.repeat(4001)]){
+  const before=rpcCalls;assert.equal((await post({action:'return',note})).status,403);assert.equal(rpcCalls,before,'Invalid correction note never reaches database');
+ }
+ assert.equal((await post({action:'return',note:'Please add clear photos showing the return label.'})).status,200);
+ assert.equal(lastRpc.p_details.note,'Please add clear photos showing the return label.');
+ auth={...base,roleCode:'OPERATIONS_SI'};assert.equal((await post({action:'return',note:'Please correct this station evidence.'})).status,403,'Station cannot return its own evidence');
  console.log('PASS actual approval guards and redispute API: station proposals, authorised final roles including Managing Partner; GM denied, no self-approval, read-only, cross-origin, unsafe URL and station-scope denial.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

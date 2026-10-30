@@ -4,12 +4,13 @@ import { useMemo, useRef, useState } from "react";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import { redisputeStage, redisputeStatus } from "@/lib/ops-pulse/loss-redispute-queue";
 import type { NlCase } from "@/lib/ops-pulse/nl-loss-policy";
+import type { StationEvidence } from "@/lib/ops-pulse/loss-station-evidence";
 import { ListPager, usePaged } from "./list-pager";
 import styles from "./nl-loss.module.css";
 import ui from "./loss-exceptions-desk.module.css";
 export type RedisputeWindow = {
   submitted_by?: string | null;
-  response_details?: Record<string, string>;
+  response_details?: Partial<StationEvidence>;
   version: number;
   workflow_status?: string;
   recovery_month?: string;
@@ -80,10 +81,10 @@ export function LossRedisputeDesk({rows,windows,canActivate}:{rows:NlCase[];wind
       {canActivate?<td><input type="checkbox" aria-label={`Select ${w.case_key}, ${w.month}`} checked={selected.includes(keyOf(w))&&w.enabled} disabled={busy||!w.enabled||(!selected.includes(keyOf(w))&&chosen.length>=100)} onChange={e=>{setSelected(prev=>e.target.checked?[...prev,keyOf(w)]:prev.filter(k=>k!==keyOf(w)));setConfirm(false);}}/></td>:null}
       <td><Link href={href(w)}>{row?.details.tid||w.case_key}</Link><small>{row?.station_code} · {w.month}</small></td>
       <td>{redisputeStatus(w)}{w.recovery_month?<small>Payroll {w.recovery_month}</small>:null}</td>
-      <td>{response?.reason?<details><summary>{response.reason}</summary><p>{response.note}</p>{response.tt_reference?<small>Station ticket: {response.tt_reference}</small>:null}{response.evidence_url&&/^https?:\/\//i.test(response.evidence_url)?<a href={response.evidence_url} target="_blank" rel="noreferrer">Footage / CCTV ↗</a>:null}</details>:<span>Not submitted</span>}</td>
+      <td>{response?.reason?<details><summary>{response.reason}</summary><p>{response.note}</p>{response.tt_reference?<small>Cloak ticket: {response.tt_reference}</small>:null}{response.evidence_url&&/^https:\/\//i.test(response.evidence_url)?<a href={response.evidence_url} target="_blank" rel="noreferrer">Supporting files ↗</a>:null}{response.cctv_not_required === true ? <small>CCTV not required</small> : response.cctv_url && /^https:\/\//i.test(response.cctv_url) ? <small><a href={response.cctv_url} target="_blank" rel="noreferrer">CCTV footage ↗</a></small> : null}</details>:<span>Not submitted</span>}</td>
       <td>{w.tt_url&&/^https?:\/\//i.test(w.tt_url)?<a href={w.tt_url} target="_blank" rel="noreferrer">{w.tt_reference||'Open ticket'} ↗</a>:w.tt_reference||'Not filed'}</td>
       <td>{w.updated_by_name}<small>{new Date(w.updated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}</small>{w.followup_on?<small>Follow-up {w.followup_on}</small>:null}</td>
-      <td><Link className={styles.button} href={href(w)}>{redisputeStage(w)==='review'?'Review evidence':redisputeStage(w)==='ticket'?'Ticket / outcome':'View details'}</Link> <button type="button" className={styles.button} onClick={()=>setHistoryCase(w)}>History</button></td>
+      <td><Link className={styles.button} href={href(w)}>{redisputeStage(w)==='review'?'Review evidence':redisputeStage(w)==='ticket'?'Ticket / outcome':'View details'}</Link> {canActivate && redisputeStage(w)==='review' ? <Link className={styles.button} href={`${href(w)}&action=return`}>Return for correction</Link> : null} <button type="button" className={styles.button} onClick={()=>setHistoryCase(w)}>History</button></td>
     </tr>;})}</tbody></table></div>
     {!shown.length?<p className={styles.empty}>No redisputes match this view.</p>:null}
     {historyCase?<LossPidTimeline key={keyOf(historyCase)} month={historyCase.month} caseKey={historyCase.case_key} revision={current.find(w=>keyOf(w)===keyOf(historyCase))?.updated_at} initiallyOpen/>:null}
