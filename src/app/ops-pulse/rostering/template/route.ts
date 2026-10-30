@@ -4,10 +4,13 @@ import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext, operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
 import {
   buildRecurringRosterWorkbook,
+  parseRosterExportFormat,
+  parseRosterExportStationIds,
   safeRosterFilename,
   type RosterTemplateEntry,
   type RosterTemplateStationPeriod
 } from "@/lib/ops-pulse/roster-template-export";
+import { buildRecurringRosterPdf } from "@/lib/ops-pulse/roster-template-pdf";
 import { canUseRosterLocation, indiaToday, rosterMonday } from "@/lib/ops-pulse/rostering";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -43,14 +46,20 @@ export async function GET(request: Request) {
     }
 
     const params = new URL(request.url).searchParams;
+    const format = parseRosterExportFormat(params.get("format"));
     const downloadAll = params.get("all") === "1" || params.get("scope") === "all";
+    const selectedIds = parseRosterExportStationIds(params);
     const stationId = params.get("station")?.trim() ?? "";
     const planId = params.get("plan")?.trim() ?? "";
-    if (!downloadAll && !stationId) {
-      return Response.json({ error: "Select a station, or use all=1 to download every station in your scope." }, { status: 400 });
+
+    if (!downloadAll && !selectedIds.length && !stationId) {
+      return Response.json({ error: "Select one or more stations in your access scope." }, { status: 400 });
     }
-    if (downloadAll && planId) {
+    if ((downloadAll || selectedIds.length > 1) && planId) {
       return Response.json({ error: "A specific plan can only be downloaded for one station." }, { status: 400 });
+    }
+    if (selectedIds.length > 120) {
+      return Response.json({ error: "Select at most 120 stations per download." }, { status: 400 });
     }
 
     const locationResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
@@ -62,19 +71,24 @@ export async function GET(request: Request) {
       (operatingModeForLocation(location) === "amazon_now") === ds &&
       canUseRosterLocation(authorization, location.id)
     );
+    const scopedById = new Map(scoped.map((location) => [location.id, location]));
 
-    const stations = downloadAll
-      ? scoped
-      : scoped.filter((location) => location.id === stationId);
-    if (!stations.length) {
-      return Response.json({
-        error: downloadAll
-          ? "No stations are available in your OpsPulse location scope."
-          : "This station is outside your OpsPulse location access."
-      }, { status: downloadAll ? 404 : 403 });
+    let stations = scoped;
+    if (selectedIds.length) {
+      const denied = selectedIds.filter((id) => !scopedById.has(id));
+      if (denied.length) {
+        return Response.json({ error: "One or more selected stations are outside your OpsPulse location access." }, { status: 403 });
+      }
+      stations = selectedIds.map((id) => scopedById.get(id)!);
+    } else if (!downloadAll) {
+      if (!scopedById.has(stationId)) {
+        return Response.json({ error: "This station is outside your OpsPulse location access." }, { status: 403 });
+      }
+      stations = [scopedById.get(stationId)!];
     }
-    if (!downloadAll && !scoped.some((location) => location.id === stationId)) {
-      return Response.json({ error: "This station is outside your OpsPulse location access." }, { status: 403 });
+
+    if (!stations.length) {
+      return Response.json({ error: "No stations are available in your OpsPulse location scope." }, { status: 404 });
     }
 
     const today = indiaToday();
@@ -88,7 +102,7 @@ export async function GET(request: Request) {
     const periods: RosterTemplateStationPeriod[] = [];
     const entries: RosterTemplateEntry[] = [];
 
-    if (!downloadAll && planId) {
+    if (stations.length === 1 && planId) {
       const plan = await db().from("hr_roster_plans")
         .select("id,location_id,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id)")
         .eq("company_id", companyId)
@@ -112,7 +126,6 @@ export async function GET(request: Request) {
       };
       const stationIds = stations.map((station) => station.id);
       const approved: ApprovedPlan[] = [];
-      // Keep PostgREST `in()` URLs short for wide location scopes.
       for (let index = 0; index < stationIds.length; index += 80) {
         const chunk = stationIds.slice(index, index + 80);
         const chunkRows = await allPlanRows<ApprovedPlan>((offset) =>
@@ -152,7 +165,7 @@ export async function GET(request: Request) {
       }
     }
 
-    const bytes = buildRecurringRosterWorkbook({
+    const payload = {
       stations: stations.map((station) => ({
         id: station.id,
         station_code: station.station_code,
@@ -177,21 +190,29 @@ export async function GET(request: Request) {
       periods,
       today,
       fallbackPeriodStart
-    });
+    };
 
-    const filename = downloadAll
-      ? `all-stations-recurring-roster-${today}.xlsx`
-      : `${safeRosterFilename(stations[0].station_code)}-recurring-roster.xlsx`;
+    const bytes = format === "pdf"
+      ? await buildRecurringRosterPdf(payload)
+      : buildRecurringRosterWorkbook(payload);
+
+    const baseName = stations.length === 1
+      ? `${safeRosterFilename(stations[0].station_code)}-recurring-roster`
+      : `station-rosters-${stations.length}-${today}`;
+    const filename = `${baseName}.${format === "pdf" ? "pdf" : "xlsx"}`;
+    const contentType = format === "pdf"
+      ? "application/pdf"
+      : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     return new Response(new Uint8Array(bytes), {
       headers: {
         "Cache-Control": "private, no-store",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Type": contentType,
         "X-Content-Type-Options": "nosniff"
       }
     });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to generate the roster template." }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to generate the roster download." }, { status: 500 });
   }
 }

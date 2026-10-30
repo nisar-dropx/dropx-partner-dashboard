@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { OpsRosterApprovals } from "@/components/ops-roster-approvals";
 import { OpsRosterPlanner } from "@/components/ops-roster-planner";
 import rosterStyles from "@/components/ops-roster-planner.module.css";
+import { RosterDownloadModal } from "@/components/roster-download-modal";
 import { PageHead } from "@/components/page-head";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -77,16 +78,14 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
             <label style={{ display: "grid", gap: 5, flex: 1, minWidth: 220 }}><span className="field-label">Station</span><select name="station" defaultValue={selected?.station_code}>{locations.map((location) => <option key={location.id} value={location.station_code}>{location.station_code} · {location.station_name || location.city || "Station"}</option>)}</select></label>
             <button type="submit" className="button secondary compact">Load station</button>
           </form>
-          {locations.length ? (
-            <a
-              className="button secondary compact"
-              href="/rostering/template?all=1"
-              download
-              title={`Download approved recurring rosters for all ${locations.length} stations in your scope`}
-            >
-              Download all stations ({locations.length})
-            </a>
-          ) : null}
+          <RosterDownloadModal
+            stations={locations.map((location) => ({
+              id: location.id,
+              code: location.station_code,
+              name: location.station_name || location.city || location.station_code
+            }))}
+            initialSelectedIds={selected ? [selected.id] : []}
+          />
           <div className={rosterStyles.tabs} aria-label="Rostering view">
             <Link className={view === "roster" ? rosterStyles.activeTab : ""} href={`/rostering?station=${encodeURIComponent(selected?.station_code ?? "")}`}>Station roster</Link>
             <Link className={view === "approvals" ? rosterStyles.activeTab : ""} href={`/rostering?view=approvals&station=${encodeURIComponent(selected?.station_code ?? "")}`}>My approvals <span className="status-pill neutral">{approvals.length}</span></Link>

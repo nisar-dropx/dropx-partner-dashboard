@@ -38,6 +38,26 @@ export type RosterTemplateStationPeriod = {
   periodStart: string;
 };
 
+export type RosterTemplateRow = {
+  LOCATION_CODE: string;
+  STATION_NAME: string;
+  DROPX_ID: string;
+  NAME: string;
+  PEOPLE_TYPE: string;
+  DESIGNATION: string;
+  MONDAY: string;
+  TUESDAY: string;
+  WEDNESDAY: string;
+  THURSDAY: string;
+  FRIDAY: string;
+  SATURDAY: string;
+  SUNDAY: string;
+  PERIOD_START: string;
+};
+
+export const rosterExportFormats = ["xlsx", "pdf"] as const;
+export type RosterExportFormat = (typeof rosterExportFormats)[number];
+
 function isoWeekday(value: string) {
   const day = new Date(`${value}T00:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
@@ -47,17 +67,28 @@ export function safeRosterFilename(value: string) {
   return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "roster";
 }
 
-/** Build the recurring Mon–Sun workbook used by single-station and all-station downloads. */
-export function buildRecurringRosterWorkbook(input: {
+export function parseRosterExportFormat(value: string | null | undefined): RosterExportFormat {
+  const format = String(value ?? "xlsx").trim().toLowerCase();
+  if (format === "pdf") return "pdf";
+  if (format === "xlsx" || format === "excel" || format === "") return "xlsx";
+  throw new Error("Choose PDF or Excel for the roster download.");
+}
+
+/** Parse selected station ids from query (`stations=a,b` and/or repeated `stations=`). */
+export function parseRosterExportStationIds(params: URLSearchParams) {
+  const values = params.getAll("stations").flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean);
+  return [...new Set(values)];
+}
+
+export function buildRecurringRosterRows(input: {
   stations: RosterTemplateStation[];
   people: RosterTemplatePerson[];
   shifts: RosterTemplateShift[];
   entries: RosterTemplateEntry[];
   periods: RosterTemplateStationPeriod[];
-  today: string;
   fallbackPeriodStart: string;
-}) {
-  if (!input.stations.length) throw new Error("No stations are available to download.");
+}): RosterTemplateRow[] {
+  if (!input.stations.length) throw new Error("Select at least one station to download.");
 
   const shiftById = new Map(input.shifts.map((shift) => [shift.id, shift]));
   const periodByStation = new Map(input.periods.map((row) => [row.stationId, row.periodStart]));
@@ -77,38 +108,70 @@ export function buildRecurringRosterWorkbook(input: {
     return leftCode.localeCompare(rightCode) || left.name.localeCompare(right.name) || left.code.localeCompare(right.code);
   });
 
-  const headers = ["LOCATION_CODE", "DROPX_ID", "NAME", "PEOPLE_TYPE", "DESIGNATION", ...recurringRosterDays];
-  const rows = people.flatMap((person) => {
+  const rows: RosterTemplateRow[] = people.flatMap((person) => {
     const station = stationById.get(person.locationId);
     if (!station) return [];
+    const days = Object.fromEntries(recurringRosterDays.map((day, index) => [
+      day,
+      valueByPersonDay.get(`${person.locationId}:${person.workerType}:${person.id}:${index + 1}`) ?? ""
+    ])) as Pick<RosterTemplateRow, RecurringDay>;
     return [{
       LOCATION_CODE: station.station_code,
+      STATION_NAME: station.station_name || station.station_code,
       DROPX_ID: person.code,
       NAME: person.name,
       PEOPLE_TYPE: person.workerType === "employee" ? "Employee" : "Independent Contractor",
       DESIGNATION: person.designation,
-      ...Object.fromEntries(recurringRosterDays.map((day, index) => [
-        day,
-        valueByPersonDay.get(`${person.locationId}:${person.workerType}:${person.id}:${index + 1}`) ?? ""
-      ]))
+      ...days,
+      PERIOD_START: periodByStation.get(station.id) || input.fallbackPeriodStart
     }];
   });
 
-  // Stations with nobody assigned still appear so managers see coverage gaps.
   for (const station of input.stations) {
     if (rows.some((row) => row.LOCATION_CODE === station.station_code)) continue;
     rows.push({
       LOCATION_CODE: station.station_code,
+      STATION_NAME: station.station_name || station.station_code,
       DROPX_ID: "",
       NAME: "(No active people assigned)",
       PEOPLE_TYPE: "",
       DESIGNATION: "",
-      ...Object.fromEntries(recurringRosterDays.map((day) => [day, ""]))
+      MONDAY: "",
+      TUESDAY: "",
+      WEDNESDAY: "",
+      THURSDAY: "",
+      FRIDAY: "",
+      SATURDAY: "",
+      SUNDAY: "",
+      PERIOD_START: periodByStation.get(station.id) || input.fallbackPeriodStart
     });
   }
-  rows.sort((left, right) => left.LOCATION_CODE.localeCompare(right.LOCATION_CODE) || left.NAME.localeCompare(right.NAME));
 
-  const rosterSheet = XLSX.utils.json_to_sheet(rows, { header: headers });
+  return rows.sort((left, right) =>
+    left.LOCATION_CODE.localeCompare(right.LOCATION_CODE) ||
+    left.NAME.localeCompare(right.NAME) ||
+    left.DROPX_ID.localeCompare(right.DROPX_ID)
+  );
+}
+
+type RecurringDay = (typeof recurringRosterDays)[number];
+
+/** Build the recurring Mon–Sun workbook used by single-station and selected-station downloads. */
+export function buildRecurringRosterWorkbook(input: {
+  stations: RosterTemplateStation[];
+  people: RosterTemplatePerson[];
+  shifts: RosterTemplateShift[];
+  entries: RosterTemplateEntry[];
+  periods: RosterTemplateStationPeriod[];
+  today: string;
+  fallbackPeriodStart: string;
+}) {
+  const rows = buildRecurringRosterRows(input);
+  const periodByStation = new Map(input.periods.map((row) => [row.stationId, row.periodStart]));
+  const headers = ["LOCATION_CODE", "DROPX_ID", "NAME", "PEOPLE_TYPE", "DESIGNATION", ...recurringRosterDays];
+  const sheetRows = rows.map(({ STATION_NAME: _name, PERIOD_START: _period, ...row }) => row);
+
+  const rosterSheet = XLSX.utils.json_to_sheet(sheetRows, { header: headers });
   rosterSheet["!cols"] = [{ wch: 16 }, { wch: 16 }, { wch: 28 }, { wch: 22 }, { wch: 28 }, ...recurringRosterDays.map(() => ({ wch: 16 }))];
 
   const shiftSheet = XLSX.utils.json_to_sheet(input.shifts.map((shift) => ({
@@ -142,7 +205,7 @@ export function buildRecurringRosterWorkbook(input: {
     ["3", "Enter WO for a weekly off. Leave a cell blank to clear that day."],
     ["4", "Do not change LOCATION_CODE or DROPX_ID."],
     ["5", multi
-      ? "Upload stays single-station: open each station draft in Rostering and import only that station’s rows."
+      ? "Upload stays single-station: open each station draft in Rostering and import only that station's rows."
       : "Upload into an editable Ops draft. Import never publishes — submit for approval after import."],
     ["6", "Approval route: station owner → reporting manager → HR."]
   ]);
