@@ -4,7 +4,7 @@ import {loadRent} from './data';
 import {loadPnl} from './pnl-data';
 import {pnlFilters,cpsMonthSlices,type PnlQuery} from './pnl';
 import {loadBusinessMaster,loadNowVolumes,locationModel} from './business-master';
-import {loadFinanceCpsEvidence} from '../ops-pulse/cps-data';
+import {loadFinanceCpsEvidence} from './cost-data';
 import {nowRevenue,dateRange,effectiveOn,accrueMonthly,contractDaily,roundMoney,type NowRate,type NowStore,type CostContract,type OverheadRule} from './now';
 import {type CfoDay,type OverheadLine,type CfoLine} from './cfo';
 import {regionalPolicy,regionalShares,corporateShares} from './cfo-overhead';

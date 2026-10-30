@@ -1,5 +1,6 @@
-import { historicalProductionEstimate, type ProductionFallbackPolicy, type ProductionHistory, type ProductionEstimate } from "./production-fallback";
-import { summarizeDaDetails, type CpsDaDay, type CpsRate, type CpsStaffDay, type CpsCalculationEvidence } from "./cps-details";
+import { providerMappingHref } from "../provider-mapping-navigation";
+import { summarizeDaDetails, type CpsDaDay, type CpsRate } from "./cps-details";
+import { isKilometreField, kilometreRate, routeFuelForDay, routePendingLabel, type RouteDistanceContext } from '../workforce-route-distance';
 import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput, CpsStaffCost, CpsPeoplePolicy } from './cps';
 import {
   allocationActiveOn,
@@ -35,8 +36,7 @@ import { buildWorkforcePayoutInputMaps, overlayWorkforcePayoutAttendance,
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
 export type CpsFacts = {
-  production_fallback_policies?: ProductionFallbackPolicy[];
-  production_history?: ProductionHistory[];
+  route_distance?: RouteDistanceContext;
   payout_inputs?: Parameters<typeof buildWorkforcePayoutInputMaps>[0];
   shipments: RecordRow[]; volumes: RecordRow[]; mappings: RecordRow[];
   workforce: RecordRow[]; components: RecordRow[]; providers: RecordRow[];
@@ -74,7 +74,7 @@ export type CpsGap = {
 export type CpsPersonCost = {
   id: string; dropx_id: string; name: string; station_code: string;
   salary: number; variable: number; fuel: number; van: number;
-  deliveries: number; paid_days: number; zero_delivery_days: number;
+  deliveries: number; customer_returns: number; paid_days: number; zero_delivery_days: number;
 };
 export type LiveAssociate = RecordRow & {
   id: string; work_date: string; station_code: string; provider_employee_id: string;
@@ -143,11 +143,12 @@ export function calculateRateCard(
   attendanceInput?: {basis:'days'|'hours';quantity:number}
 ) {
   const cost={salary:0,variable:0,fuel:0,van:0,missing:false,production_details:[] as import("./cps-details").CpsProductionDetail[]};
-  if (r.payment_method_id && !components.length) cost.missing=true;
+  if (r.payment_method_id && !components.length && !r.route_km_only) cost.missing=true;
   const values = Object.fromEntries(Object.entries(r.payment_values ?? {}).map(([k,v])=>[key(k),v]));
   for(const c of components) {
     const code=key(c.component_code), label=key(`${code} ${c.label}`);
     // Fleet owns fixed rental accrual; payroll settlement keeps its original card.
+    if(c.cps_cost_source==='pnl_only') continue;
     if(c.cps_cost_source==='fleet' && c.component_type!=='production' && c.calculation_type!=='count_x_rate') continue;
     const raw=values[code];
     if(raw==null || String(raw).trim()==='' || !Number.isFinite(Number(raw)) || Number(raw)<0) { cost.missing=true; continue; }
@@ -181,8 +182,7 @@ export function calculateRateCard(
     const amount=isProduction
       ? thresholdAllocation?.amount ?? rate*count!
       : aggregateFixed ?? (attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate);
-    // Per-package ODCD earnings pay the associate; only fixed vehicle components are rent.
-    const bucket=/FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : isProduction ? 'variable' : /VAN|VEHICLE|DOCK/.test(label) ? 'van' : 'salary';
+    const bucket=/VAN|VEHICLE|DOCK/.test(label) ? 'van' : /FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : !isProduction ? 'salary' : 'variable';
     cost[bucket]+=amount;
     if(isProduction) cost.production_details.push({label:c.label||c.component_code,basis:String(source).replaceAll("_"," ").toLowerCase(),rate,reported_units:count!,payable_units:thresholdAllocation?.payableUnits??count!,threshold_units:thresholdAllocation?.thresholdDeducted??0,amount,bucket});
   }
@@ -198,7 +198,7 @@ export function calculateRateCard(
 }
 function detailRates(card: RecordRow, components: RecordRow[], client: string): CpsRate[] {
   const values=Object.fromEntries(Object.entries(card.payment_values??{}).map(([k,v])=>[key(k),v]));
-  if(components.length) return components.filter(c=>values[key(c.component_code)]!=null && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate')).map(c=>({
+  if(components.length) return components.filter(c=>values[key(c.component_code)]!=null && c.cps_cost_source!=='pnl_only' && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate')).map(c=>({
     label:c.label||c.component_code, rate:num(values[key(c.component_code)]),
     basis:(c.component_type==='production'||c.calculation_type==='count_x_rate')
       ? String(c.provider_calculation_sources?.[client.toLowerCase()]||c.calculation_source||c.component_code).replaceAll('_',' ').toLowerCase()
@@ -216,14 +216,20 @@ function hasFixedDaPay(card: RecordRow, cs: RecordRow[]) {
     !/VAN|VEHICLE|DOCK|FUEL|KILOMET|\bKM\b/i.test(`${c.component_code} ${c.label}`) &&
     num(Object.entries(card.payment_values??{}).find(([k])=>key(k)===key(c.component_code))?.[1])>0);
 }
-export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (evidence:CpsCalculationEvidence)=>void): CpsSnapshot & { associates: LiveAssociate[]; gaps: CpsGap[]; people: CpsPersonCost[] } {
+export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { associates: LiveAssociate[]; gaps: CpsGap[]; people: CpsPersonCost[] } {
   const policyFor = (e: RecordRow, date: string) => (facts.people_policies ?? [])
     .filter(p=>p.designation_code===e.designation && p.effective_from<=date)
     .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
+  // CPS covers deliveries (including SWA) and customer returns. Seller/MFN pay
+  // stays in payroll/P&L even when the component master has no exclusion policy.
+  const sellerSource = (source: unknown) => ['SELLERPICKUP','SLLLERRETURN','SELLERRETURN','MFN','MFNRETURN'].includes(compact(source));
   const sourceComponents = <T extends RecordRow>(rows: T[], date: string) => rows.map(c=>({...c,cps_cost_source:
-    (facts.component_policies??[]).filter(p=>key(p.component_code)===key(c.component_code) && p.effective_from<=date)
-      .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode??'workforce'}));
+    sellerSource(c.component_code) || sellerSource(c.provider_calculation_sources?.amazon || c.calculation_source)
+      ? 'pnl_only'
+      : (facts.component_policies??[]).filter(p=>key(p.component_code)===key(c.component_code) && p.effective_from<=date)
+        .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode??'workforce'}));
   const inputMaps=buildWorkforcePayoutInputMaps(facts.payout_inputs??{});
+  const routeEnabledOn=(date:string)=>Boolean(facts.route_distance?.enabledFrom && date>=facts.route_distance.enabledFrom);
   const stationById=new Map(facts.stations.map(s=>[s.id,s]));
   const selected=new Set(base.daily.map(d=>d.station_code));
   const dates=[...new Set(base.daily.map(d=>d.work_date))].sort();
@@ -271,19 +277,17 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const identities=[...new Set(matches.map(m=>m.worker?.id).filter(Boolean))];
     return identities.length===1 ? [{workforce_id:identities[0],work_date:String(row.work_date),total_delivery:num(row.total_delivery)}] : [];
   }));
-  for(const [workerDate,totalDeliveries] of shipmentDeliveries) {
-    const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
+  const attendanceDates=new Set(dates);
+  for(const workerDate of shipmentDeliveries.keys()) attendanceDates.add(workerDate.slice(workerDate.lastIndexOf('|')+1));
+  for(const workerDate of attendanceByWorkerDate.keys()) attendanceDates.add(workerDate.slice(workerDate.lastIndexOf('|')+1));
+  for(const worker of attendanceWorkforceRows) for(const date of attendanceDates) {
     const capture=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
-    if(capture.capture_method==='shipment_data') {
-      // Finance estimates retain actual worked minutes. The payroll attendance
-      // policy remains authoritative in the separate payment calculation engine.
-      const recorded=attendanceByWorkerDate.get(workerDate) as DirectPayAttendance|undefined;
-      if(recorded && ['P','HD'].includes(String(recorded.status??'').toUpperCase())) continue;
-      attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,totalDeliveries,capture,recorded) as RecordRow);
-    }
+    if(capture.capture_method!=='shipment_data') continue;
+    const workerDate=`${worker.id}|${date}`;
+    attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,shipmentDeliveries.get(workerDate)??0,capture) as RecordRow);
   }
   attendanceByWorkerDate=new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate as Map<string,DirectPayAttendance>,inputMaps.attendanceByWorkforceDate));
-  const paymentCard=(card:RecordRow,cs:RecordRow[],workerId:string,date:string,stationId=card.station_id):RecordRow=>({ ...card,exclude_seller_costs:false,
+  const paymentCard=(card:RecordRow,cs:RecordRow[],workerId:string,date:string,stationId=card.station_id):RecordRow=>({ ...card,exclude_seller_costs:true,
     payment_values:Object.fromEntries(cs.map(c=>{const code=key(c.component_code);return [code,resolveWorkforcePaymentFieldRate(inputMaps,{workforceId:workerId,stationId:String(stationId??''),paymentFieldId:c.payment_field_id,fieldCode:code,date,fallbackRate:Object.entries(card.payment_values??{}).find(([k])=>key(k)===code)?.[1]})]}))
   });
   const rangeValidation=new Map<string,boolean>();
@@ -344,7 +348,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const seen=gapDates.get(k)??new Set<string>();seen.add(date);gapDates.set(k,seen);
     if(existing) {existing.days=seen.size;existing.first_date=existing.first_date<date?existing.first_date:date;existing.last_date=existing.last_date>date?existing.last_date:date;existing.deliveries+=deliveries;existing.known_cost+=cost;return;}
     gaps.set(k,{key:k,kind,station_code:station,provider_id:id,dropx_id:dropx,name,first_date:date,last_date:date,days:1,deliveries,known_cost:cost,owner,
-      href:owner==='Workforce attendance' ? `https://dashboard.dropxlogistics.com/attendance` : owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-id-mapping?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
+      href:owner==='Workforce attendance' ? `https://dashboard.dropxlogistics.com/attendance` : owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : providerMappingHref({providerId:id,dropxId:dropx,station,firstDate:date,lastDate:date})});
   }
   const add=(station:string,date:string,head:CpsHead,sub:string,amount:number,source:string) => {
     if(selected.has(station) && amount!==0) lines.push({station_code:station,work_date:date,head,sub_head:sub,amount,source});
@@ -358,13 +362,25 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const identities=new Set(matches.map(m=>m.worker?.id).filter(Boolean));
     if(identities.size!==1 || matches.some(m=>!m.worker)) {
       row.mapping_status=matches.length ? 'Conflicting or missing DropX identity' : 'Unmapped';
-      if(num(row.total_activity)>0) gap(row.mapping_status,row.station_code,row.work_date,row.provider_employee_id,row.provider_employee_name??'','',num(row.total_delivery));
+      if(num(row.total_delivery)+num(row.c_return)>0) gap(row.mapping_status,row.station_code,row.work_date,row.provider_employee_id,row.provider_employee_name??'','',num(row.total_delivery));
       continue;
     }
     const worker=matches[0].worker!;
     row.dropx_name=worker.full_name;row.dropx_emp_code=worker.dropx_id;
     const k=`${worker.id}|${row.work_date}`, g=groups.get(k)??{worker,date:row.work_date,rows:[] as LiveAssociate[],maps:[] as RecordRow[]};
     g.rows.push(row);g.maps.push(...matches);groups.set(k,g);
+  }
+  // A completed route is work evidence even if the parcel import has not arrived.
+  // It contributes fuel cost, never invented deliveries or a changed denominator.
+  for(const route of facts.route_distance?.rows??[]) {
+    if(route.status!=='ready'||!routeEnabledOn(route.work_date)||!dates.includes(route.work_date)) continue;
+    const station=stationById.get(route.station_id)?.station_code;
+    const m=mappings.find(m=>m.id===route.mapping_id&&m.worker?.id===route.workforce_id&&m.station_id===route.station_id&&activeOn(m,route.work_date)&&kilometreRate(m)!==null);
+    if(!m?.worker||!selected.has(station)) continue;
+    const k=`${m.worker.id}|${route.work_date}`,g=groups.get(k)??{worker:m.worker,date:route.work_date,rows:[] as LiveAssociate[],maps:[] as RecordRow[]};
+    if(g.rows.some(row=>row.station_code===station)) continue;
+    const row={id:`route:${route.id}`,client:'Amazon',work_date:route.work_date,station_code:station,provider_employee_id:m.provider_member_id,provider_employee_name:m.worker.full_name,dropx_name:m.worker.full_name,dropx_emp_code:m.worker.dropx_id,pay_type:m.pay_type,total_delivery:0,total_activity:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:0,fuel_pay:0,van_pay:0,da_total_pay:0,mapping_status:'Mapped'};
+    associates.push(row);g.rows.push(row);g.maps.push(m);groups.set(k,g);
   }
   // Calendar-monthly commitments and attendance-earned fixed pay accrue even when
   // the provider upload has no row for a worker.
@@ -385,8 +401,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       associates.push(row); groups.set(k,{worker:m.worker,date,rows:[row],maps:[m]});
     }
   }
-  const estimatedInputs=new Map<string,ProductionEstimate>();
-  const estimateKey=(workerId:string,stationId:string,code:string,date:string)=>`${workerId}|${stationId}|${code}|${date}`;
   const thresholdInputs:WorkforceProductionThresholdInput[]=[];
   const thresholdInputTargets=new Map<string,{rowKey:string;groupKey:string}>();
   // A day/custom CPS view still needs production from the start of the calendar
@@ -424,12 +438,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const group=thresholdGroups.get(groupKey)??{worker,date:row.work_date,rows:[] as RecordRow[]};
     group.rows.push(row);thresholdGroups.set(groupKey,group);
   }
-  // Attendance-backed days without a provider shipment row still need custom
-  // inputs and approved historical estimates. Reuse the canonical cost rows so
-  // their fuel is calculated once through the same production allocator.
-  for(const [groupKey,group] of groups) {
-    if(!thresholdGroups.has(groupKey)) thresholdGroups.set(groupKey,{worker:group.worker,date:group.date,rows:group.rows});
-  }
   const requestedThresholdRows=new Set([...groups.values()].flatMap(group=>group.rows.map(row=>`${group.date}|${String(row.id)}`)));
   for(const g of [...thresholdGroups.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.worker.id).localeCompare(String(b.worker.id)))) {
     const candidates=thresholdMappings.filter(m=>m.worker?.id===g.worker.id && activeOn(m,g.date) && configured(m));
@@ -442,18 +450,12 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     for(const [rowIndex,row] of orderedRows.entries()) for(const [componentIndex,c] of cs.entries()) {
       const code=key(c.component_code),isProduction=c.component_type==='production'||c.calculation_type==='count_x_rate';
       if(!isProduction) continue;
+      if(routeEnabledOn(g.date)&&isKilometreField(code)) continue;
       const source=c.provider_calculation_sources?.[String(row.client??'Amazon').toLowerCase()]||c.calculation_source||code;
       const stationId=thresholdStationById.size ? [...thresholdStationById.values()].find(s=>s.station_code===row.station_code)?.id : card.station_id;
       const uploaded=findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId,paymentFieldId:c.payment_field_id,fieldCode:code,date:g.date});
       const firstAtStation=orderedRows.findIndex(r=>r.station_code===row.station_code)===rowIndex;
-      const hasActivity=orderedRows.some(r=>r.station_code===row.station_code && [r.total_activity,r.total_delivery,r.c_return,r.mfn,r.mfn_return].some(v=>num(v)>0));
-      const estimate=!uploaded && c.is_custom_production && num(values[code])>0 ? historicalProductionEstimate({
-        policies:facts.production_fallback_policies??[],history:facts.production_history??[],
-        workforceId:g.worker.id,stationId,fieldCode:code,date:g.date,
-        worked:hasActivity || directPayAttendanceUnit(attendanceByWorkerDate.get(`${g.worker.id}|${g.date}`) as DirectPayAttendance|undefined)>0
-      }):undefined;
-      if(estimate && firstAtStation) estimatedInputs.set(estimateKey(g.worker.id,stationId,code,g.date),estimate);
-      const count=uploaded ? (firstAtStation?Number(uploaded.units):0) : estimate ? (firstAtStation?estimate.units:0) : production(row,source) ?? (c.is_custom_production?0:null);
+      const count=uploaded ? (firstAtStation?Number(uploaded.units):0) : production(row,source) ?? (c.is_custom_production?0:null);
       if(count==null) continue;
       const inputId=`${card.id}|${g.date}|${String(row.id)}|${code}|${rowIndex}|${componentIndex}`;
       thresholdInputs.push({
@@ -500,85 +502,12 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   const people=new Map<string,CpsPersonCost>();
   const detailDays:CpsDaDay[]=[];
   const employeeCostDays=new Set<string>();
-  const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
-  const policyHistoryProvided=Array.isArray(facts.policy_history);
-  const paymentPolicyOn=(w:RecordRow,date:string):{
-    station_id:string|null;
-    station_code_snapshot:string|null;
-    designation_is_active:boolean;
-    is_field_operations:boolean;
-    provider_mapping_required:boolean;
-  }|null=>{
-    if(!policyHistoryProvided) return {
-      station_id:w.location_id??null,
-      station_code_snapshot:stationById.get(w.location_id)?.station_code??null,
-      designation_is_active:w.designation_is_active!==false,
-      is_field_operations:w.designation_is_active!==false&&w.is_field_operations!==false,
-      provider_mapping_required:w.designation_is_active!==false&&w.provider_mapping_required!==false,
-    };
-    const history=facts.policy_history!.filter(policy=>policy.workforce_id===w.id&&activeOn(policy,date))
-      .sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0];
-    return history ? {
-      station_id:history.station_id??null,
-      station_code_snapshot:history.station_code_snapshot??null,
-      designation_is_active:history.designation_is_active!==false,
-      is_field_operations:history.designation_is_active!==false&&history.is_field_operations===true,
-      provider_mapping_required:history.designation_is_active!==false&&history.provider_mapping_required===true,
-    } : null;
-  };
-  const operating=facts.stations.filter(s=>s.is_active && !s.hide_from_location_list && !s.is_ho && !/^HO(?:_|$)/.test(s.station_code));
-  const operatingCodes=new Set(operating.map(s=>s.station_code));
-  const peopleAllocation=(e:RecordRow,date:string,policy:CpsPeoplePolicy)=>{
-    const home=stationById.get(e.location_id);
-    const rules=facts.people_rules.filter(r=>r.employee_id===e.id && activeOn(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
-    const rule=rules[0];
-    const overhead=policy.mode==='managed';
-    const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
-    const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
-    const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
-    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||(linkedPolicy?.designation_is_active&&linkedPolicy.is_field_operations)));
-    const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
-      ??stationById.get(linkedPolicy?.station_id)?.station_code
-      ??linkedPolicy?.station_code_snapshot;
-    let codes:string[]=rule?.station_codes??[];
-    let head:CpsHead=rule?.head ?? policy.head;
-    if(!rule) {
-      if(!overhead) {
-        const homeHistory=(facts.people_assignments??[]).filter(a=>a.employee_id===e.id && (a as RecordRow).kind==='home');
-        const assigned=homeHistory.filter(a=>activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code));
-        codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):(homeHistory.length||e.has_home_assignments)
-          ? [...new Set(assigned.map(a=>a.station_code))] : operating.some(s=>s.id===home?.id)?[home!.station_code]:[];
-      }
-      else {
-        // The current People assignment history is authoritative when supplied;
-        // an expired assignment must not revive an old org-position/email scope.
-        if(facts.people_assignments) codes=[...new Set(facts.people_assignments.filter(a=>a.employee_id===e.id&&activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code)).map(a=>a.station_code))];
-        else {
-          codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
-          if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
-        }
-      }
-    }
-    return {codes:[...new Set(codes)].filter(code=>operatingCodes.has(code)),head,rule,linkedWorkforce};
-  };
-  const peopleCostAssignments=new Map<string,ReturnType<typeof peopleAllocation>&{policy:CpsPeoplePolicy;salary:RecordRow|undefined}>();
-  // Only an actual, positive, allocated People CTC can replace workforce fixed pay.
-  // Reuse the exact allocation below so a missing/expired assignment cannot erase salary.
+  // Canonical employee CTC replaces fixed DA components for that employee, so it cannot be counted twice.
   for(const e of facts.employees) for(const date of dates) {
     if(!employedOn(e,date)) continue;
-    const policy=policyFor(e,date);
-    if(!policy || policy.mode==='excluded') continue;
-    const allocation=peopleAllocation(e,date,policy);
     const salary=facts.salaries.filter(s=>s.employee_id===e.id && activeOn(s,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
-    peopleCostAssignments.set(`${e.id}|${date}`,{...allocation,policy,salary});
-    if(num(salary?.monthly_ctc)>0 && allocation.codes.length) employeeCostDays.add(`${e.id}|${date}`);
+    if(salary?.monthly_ctc!=null && policyFor(e,date)?.mode && policyFor(e,date)?.mode!=='excluded') employeeCostDays.add(`${e.id}|${date}`);
   }
-  const reviewUnallocatedCtc=(worker:RecordRow,date:string,stations:string[],knownSalary:number)=>{
-    if(worker.source_profile_type!=='employee' || knownSalary<=0) return;
-    const assignment=peopleCostAssignments.get(`${worker.source_profile_id}|${date}`);
-    if(assignment && num(assignment.salary?.monthly_ctc)>0 && !assignment.codes.length)
-      for(const station of new Set(stations)) gap('People allocation missing; workforce fixed pay retained',station,date,'','','',0,0,'People / Finance');
-  };
   for(const g of groups.values()) {
     // A single effective card belongs to the DropX identity; multiple provider IDs share fixed pay once.
     const candidates=mappings.filter(m=>m.worker?.id===g.worker.id && activeOn(m,g.date) && configured(m));
@@ -586,8 +515,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const current=latest ? candidates.filter(m=>m.effective_from===latest.effective_from) : [];
     const conflict=new Set(current.map(rateSignature)).size>1;
     let card=latest;
-    const cs=sourceComponents(card ? components.get(card.payment_method_id)??[] : [],g.date);
-    if(card)card=paymentCard(card,cs,g.worker.id,g.date);
+    const cs=sourceComponents(card ? components.get(card.payment_method_id)??[] : [],g.date)
+      .filter(c=>!routeEnabledOn(g.date)||!isKilometreField(c.component_code));
+    if(card)card=paymentCard({...card,route_km_only:routeEnabledOn(g.date)&&(components.get(card.payment_method_id)??[]).length>0&&(components.get(card.payment_method_id)??[]).every(c=>isKilometreField(c.component_code))},cs,g.worker.id,g.date);
     const aggregate:RecordRow={client:g.rows[0].client};
     for(const field of ['amazon_delivery','swa_delivery','total_delivery','total_activity','c_return','mfn','mfn_return']) aggregate[field]=g.rows.reduce((n,r)=>n+num(r[field]),0);
     const workerDateKey=`${g.worker.id}|${g.date}`;
@@ -615,7 +545,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       for(const row of g.rows) {row.mapping_status=issue;gap(issue,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));}
       if(conflict || !card || thresholdConfigurationMissing) continue;
     }
-    reviewUnallocatedCtc(g.worker,g.date,g.rows.map(row=>row.station_code),costs.salary);
     if(g.worker.source_profile_type==='employee' && employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)) costs.salary=0;
     const volumes=new Map<string,number>();g.rows.forEach(r=>volumes.set(r.station_code,(volumes.get(r.station_code)??0)+num(r.total_delivery)));
     const salaryByStation=allocateCost(costs.salary,[...volumes.keys()],volumes);
@@ -629,10 +558,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     for(const row of g.rows) {
       const rowStationId=[...stationById.values()].find(s=>s.station_code===row.station_code)?.id;
       const rowCard=paymentCard(card!,cs,g.worker.id,g.date,rowStationId);
-      const missingInputs=cs.filter(c=>c.is_custom_production
+      const missingInputs=cs.filter(c=>c.is_custom_production && c.cps_cost_source!=='pnl_only'
         && num(rowCard.payment_values[key(c.component_code)])>0
-        && !findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId:rowStationId,paymentFieldId:c.payment_field_id,fieldCode:key(c.component_code),date:g.date})
-        && !estimatedInputs.has(estimateKey(g.worker.id,rowStationId,key(c.component_code),g.date)));
+        && !findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId:rowStationId,paymentFieldId:c.payment_field_id,fieldCode:key(c.component_code),date:g.date}));
       if(num(row.total_activity)>0 || directPayAttendanceUnit(attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined)>0)
         for(const c of missingInputs)gap(`${c.label||c.component_code} input missing`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Operations uploads');
       const variable=calculateRateCard(
@@ -640,10 +568,21 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         thresholdAllocationsByRow.get(`${card!.id}|${g.date}|${String(row.id)}`)
       );
       const first=!seenStations.has(row.station_code);seenStations.add(row.station_code);
+      let routeFuel:ReturnType<typeof routeFuelForDay>=null;
+      if(first&&routeEnabledOn(g.date)&&facts.route_distance&&rowStationId) {
+        const kmMappings=mappings.filter(m=>m.worker?.id===g.worker.id&&m.station_id===rowStationId&&activeOn(m,g.date)&&kilometreRate(m)!==null);
+        const kmMapping=kmMappings.length===1?kmMappings[0]:null;
+        const kmComponent=kmMapping?sourceComponents(components.get(kmMapping.payment_method_id)??[],g.date).find(c=>isKilometreField(c.component_code)):null;
+        if(kmMapping&&kmComponent&&kmComponent.cps_cost_source!=='pnl_only') {
+          routeFuel=routeFuelForDay(facts.route_distance,{workforceId:g.worker.id,stationId:rowStationId,mappingId:kmMapping.id,date:g.date,rate:kilometreRate(kmMapping)!,hasActivity:g.rows.filter(r=>r.station_code===row.station_code).some(r=>[r.total_activity,r.total_delivery,r.c_return,r.mfn,r.mfn_return].some(v=>num(v)>0))});
+          if(routeFuel?.status==='ready') variable.production_details.push({label:kmComponent.label||'Fuel kilometres',basis:'per km',rate:routeFuel.rate,reported_units:routeFuel.km!,payable_units:routeFuel.km!,threshold_units:0,amount:routeFuel.amount!,bucket:'fuel'});
+          if(routeFuel?.status==='pending') gap(`Fuel distance pending · ${routePendingLabel(routeFuel.reason)}`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Workforce team');
+        } else if(kmMappings.length>1) gap('Fuel distance pending · conflicting kilometre mappings',row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));
+      }
       row.variable_pay=variable.variable;row.mg_pay=first?salaryByStation.get(row.station_code)??0:0;
-      row.fuel_pay=variable.fuel+(first?fuelByStation.get(row.station_code)??0:0);
+      row.fuel_pay=variable.fuel+(first?fuelByStation.get(row.station_code)??0:0)+(routeFuel?.amount??0);
       row.van_pay=first?vanByStation.get(row.station_code)??0:0;
-      row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status=issue||'Mapped';
+      row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status=issue||(routeFuel?.status==='pending'?'Route distance pending':'Mapped');
       const attendance=attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined;
       const attendanceWorked=directPayAttendanceUnit(attendance)>0;
       const worked=attendanceWorked || [row.total_activity,row.total_delivery,row.c_return,row.mfn,row.mfn_return].some(v=>num(v)>0);
@@ -660,23 +599,48 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         station_code:row.station_code,date:g.date,provider_ids:[row.provider_employee_id],
         cohort:hasFixedDaPay(card!,cs)||employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)?'guarantee':'variable',
         worked,work_basis:attendanceWorked?'attendance':worked?'shipment activity':'no work evidence',
-        deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:num(row.mfn),seller_returns:num(row.mfn_return),
+        deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:0,seller_returns:0,
         salary:row.mg_pay,variable:row.variable_pay,fuel:row.fuel_pay,van:row.van_pay,
-        input_estimates:first?cs.flatMap(c=>{const e=estimatedInputs.get(estimateKey(g.worker.id,rowStationId,key(c.component_code),g.date));return e?[{...e,label:c.label||c.component_code,rate:num(rowCard.payment_values[key(c.component_code)])}]:[]}):[],
-        production_details:variable.production_details,pending_fixed_pay:pendingFixed || Boolean(range&&!range.complete) || Boolean(issue) || missingInputs.length>0,
-        source:'Workforce rate card',card_from:card!.effective_from,rates:detailRates(rowCard,cs,String(row.client??'Amazon'))});
+        production_details:variable.production_details,pending_fixed_pay:pendingFixed || Boolean(range&&!range.complete) || Boolean(issue) || missingInputs.length>0 || routeFuel?.status==='pending',
+        source:'Workforce rate card',card_from:card!.effective_from,rates:[...detailRates(rowCard,cs,String(row.client??'Amazon')),...(routeFuel?[{label:'Fuel kilometres',rate:routeFuel.rate,basis:'per km'}]:[])]});
       add(row.station_code,g.date,'DA','Salary / minimum guarantee',row.mg_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','Variable delivery pay',row.variable_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','DA fuel',row.fuel_pay,'Workforce rate card');
       add(row.station_code,g.date,'Van','Vehicle pay from rate card',row.van_pay,'Workforce rate card');
-      const k=`${g.worker.id}|${row.station_code}`,p=people.get(k)??{id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,station_code:row.station_code,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
-      p.salary+=row.mg_pay;p.variable+=row.variable_pay;p.fuel+=row.fuel_pay;p.van+=row.van_pay;p.deliveries+=num(row.total_delivery);
+      const k=`${g.worker.id}|${row.station_code}`,p=people.get(k)??{id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,station_code:row.station_code,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
+      p.salary+=row.mg_pay;p.variable+=row.variable_pay;p.fuel+=row.fuel_pay;p.van+=row.van_pay;p.deliveries+=num(row.total_delivery);p.customer_returns+=num(row.c_return);
       if(first){p.paid_days++;if((volumes.get(row.station_code)??0)===0 && costs.salary>0)p.zero_delivery_days++;}people.set(k,p);
     }
   }
   // Providerless designations accrue from their direct, effective-dated allocation.
   // A historical provider mapping remains authoritative for its own dates; a direct
   // allocation may never overlap it because that would create duplicate pay.
+  const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
+  const policyHistoryProvided=Array.isArray(facts.policy_history);
+  const paymentPolicyOn=(w:RecordRow,date:string):{
+    station_id:string|null;
+    station_code_snapshot:string|null;
+    designation_is_active:boolean;
+    is_field_operations:boolean;
+    provider_mapping_required:boolean;
+  }|null=>{
+    if(!policyHistoryProvided) return {
+      station_id:w.location_id??null,
+      station_code_snapshot:stationById.get(w.location_id)?.station_code??null,
+      designation_is_active:w.designation_is_active!==false,
+      is_field_operations:w.designation_is_active!==false&&w.is_field_operations!==false,
+      provider_mapping_required:w.designation_is_active!==false&&w.provider_mapping_required!==false,
+    };
+    const history=facts.policy_history!.filter(policy=>policy.workforce_id===w.id&&activeOn(policy,date))
+      .sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0];
+    return history ? {
+      station_id:history.station_id??null,
+      station_code_snapshot:history.station_code_snapshot??null,
+      designation_is_active:history.designation_is_active!==false,
+      is_field_operations:history.designation_is_active!==false&&history.is_field_operations===true,
+      provider_mapping_required:history.designation_is_active!==false&&history.provider_mapping_required===true,
+    } : null;
+  };
   for(const w of facts.workforce) {
     for(const date of dates) {
       if(!employedOn(w,date)) continue;
@@ -698,7 +662,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         // Current flags are not evidence of historical policy. New source payloads
         // supply an effective-dated ledger; dates before its first honest snapshot
         // deliberately produce no policy-derived gap.
-        if(!policy?.designation_is_active || !policy.is_field_operations) continue;
+        if(!policy?.designation_is_active) continue;
         if(!policy.provider_mapping_required) gap('Direct payment allocation missing',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
         continue;
       }
@@ -709,11 +673,11 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       }
       const snapshotComponents=Array.isArray(latest.payment_components) ? latest.payment_components.filter((component:unknown)=>component&&typeof component==='object') as DirectPayComponent[] : [];
       const allDirectComponents=snapshotComponents.length ? snapshotComponents : (components.get(latest.payment_method_id)??[]) as DirectPayComponent[];
-      const directComponents=sourceComponents(allDirectComponents,date).filter(c=>(c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate'));
+      const directComponents=sourceComponents(allDirectComponents,date).filter(c=>c.cps_cost_source!=='pnl_only' && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate'));
       // A rental-only card is covered by Fleet and is not a missing pay setup.
       if(allDirectComponents.length && !directComponents.length) continue;
       const workerDateKey=`${w.id}|${date}`;
-      const captureSetting={...workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date),capture_method:'biometric' as const};
+      const captureSetting=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
       const directRange=rangeInput(w.id,latest.station_id,date);
       if(directRange&&!directRange.complete)gap(directRange.valid?'Uploaded attendance range needs full-period view':'Uploaded attendance range crosses payment setup changes',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce attendance');
       const result=directPayForDay(
@@ -735,7 +699,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         else if(line.bucket==='fuel') {fuel+=line.amount;add(station,date,'DA',line.label,line.amount,'Direct workforce allocation');}
         else if(!salaryCoveredByPeople) {salary+=line.amount;add(station,date,'DA',`Salary / ${line.label}`,line.amount,'Direct workforce allocation');}
       }
-      reviewUnallocatedCtc(w,date,[station],salary);
       if(salaryCoveredByPeople && salary===0 && fuel===0 && van===0) continue;
       if(!result.total&&!result.present&&!result.lines.some(line=>line.schedule==='per_month')) continue;
       const synthetic={id:`direct:${w.id}:${date}`,client:'Direct',work_date:date,station_code:station,provider_employee_id:'',provider_employee_name:w.full_name,dropx_name:w.full_name,dropx_emp_code:w.dropx_id,pay_type:'DIRECT',total_delivery:0,total_activity:result.present?1:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:salary,fuel_pay:fuel,van_pay:van,da_total_pay:salary+fuel,mapping_status:'Mapped'} as LiveAssociate;
@@ -744,7 +707,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         cohort:'guarantee',worked:result.present,work_basis:result.present?'attendance':'no work evidence',
         deliveries:0,customer_returns:0,seller_pickups:0,seller_returns:0,salary,variable:0,fuel,van,
         pending_fixed_pay:Boolean(directRange&&!directRange.complete),source:'Direct workforce allocation',card_from:latest.effective_from,rates:detailRates(paymentCard(latest,directComponents,w.id,date),directComponents,'Direct')});
-      const personKey=`${w.id}|${station}`,person=people.get(personKey)??{id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+      const personKey=`${w.id}|${station}`,person=people.get(personKey)??{id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
       person.salary+=salary;person.fuel+=fuel;person.van+=van;if(result.total>0){person.paid_days++;person.zero_delivery_days++;}people.set(personKey,person);
     }
   }
@@ -752,7 +715,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   const through=dates.at(-1);
   if(through) for(const w of facts.workforce) {
     const policy=paymentPolicyOn(w,through);
-    if(!policy?.designation_is_active || !policy.is_field_operations || !policy.provider_mapping_required) continue;
+    if(!policy?.designation_is_active || !policy.provider_mapping_required) continue;
     const station=stationById.get(policy.station_id)?.station_code
       ??policy.station_code_snapshot
       ??(!policyHistoryProvided?stationById.get(w.location_id)?.station_code:undefined);
@@ -762,15 +725,50 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     if(!current.some(m=>key(m.provider_member_id))) gap('Provider ID not linked',station,through,'',w.full_name,w.dropx_id);
     else if(!current.some(configured) && ![...gaps.values()].some(g=>g.dropx_id===w.dropx_id && g.kind==='Payment setup missing')) gap('Payment setup missing',station,through,current[0].provider_member_id,w.full_name,w.dropx_id);
   }
-  const staffEvidence:CpsStaffDay[]=[];
   const staff=new Map<string,CpsStaffCost>();
   const allocationNotices=new Set<string>();
   const staffed=new Set<string>(),missingCtc=new Set<string>();
+  const operating=facts.stations.filter(s=>s.is_active && !s.hide_from_location_list && !s.is_ho && !/^HO(?:_|$)/.test(s.station_code));
   for(const e of facts.employees) for(const date of dates) {
-    const assignment=peopleCostAssignments.get(`${e.id}|${date}`);
-    if(!assignment) continue;
-    const {policy,codes,head,rule,linkedWorkforce,salary}=assignment;
-    if(!codes.length || !codes.some(c=>selected.has(c))) continue;
+    if(!employedOn(e,date)) continue;
+    const policy=policyFor(e,date);
+    if(!policy) continue;
+    if(policy.mode==='excluded') continue;
+    const home=stationById.get(e.location_id);
+    const rules=facts.people_rules.filter(r=>r.employee_id===e.id && activeOn(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
+    const rule=rules[0];
+    const overhead=policy.mode==='managed';
+    const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
+    const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
+    const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
+    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||linkedPolicy?.designation_is_active));
+    const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
+      ??stationById.get(linkedPolicy?.station_id)?.station_code
+      ??linkedPolicy?.station_code_snapshot;
+    let codes:string[]=rule?.station_codes??[];
+    let head:CpsHead=rule?.head ?? policy.head;
+    if(!rule) {
+      if(!overhead) {
+        const homeHistory=(facts.people_assignments??[]).filter(a=>a.employee_id===e.id && (a as RecordRow).kind==='home');
+        const assigned=homeHistory.filter(a=>activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code));
+        codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):(homeHistory.length||e.has_home_assignments)
+          ? [...new Set(assigned.map(a=>a.station_code))] : operating.some(s=>s.id===home?.id)?[home!.station_code]:[];
+      }
+      else {
+        // The current People assignment history is authoritative when supplied;
+        // an expired assignment must not revive an old org-position/email scope.
+        if(facts.people_assignments) codes=[...new Set(facts.people_assignments.filter(a=>a.employee_id===e.id&&activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code)).map(a=>a.station_code))];
+        else {
+          codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
+          if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
+        }
+      }
+    }
+    // An unassigned role is not a station exception. Missing CTC is flagged
+    // only after a verified operating-station assignment exists.
+    if(!codes.length) continue;
+    if(!codes.some(c=>selected.has(c))) continue;
+    const salary=facts.salaries.filter(s=>s.employee_id===e.id && activeOn(s,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
     if(!salary || salary.monthly_ctc==null || num(salary.monthly_ctc)<=0) {
       for(const c of codes) {missingCtc.add(`${c}|${date}`);gap('People CTC missing',c,date,'',e.full_name,e.employee_code,0,0,'People / Finance');}continue;
     }
@@ -780,17 +778,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       add(station,date,head,policy.label,amount,'People CTC');
       if(selected.has(station)) {
         const allocation=rule?.allocation ?? policy.allocation;
-        if(capture) {
-          const weights=dailyVolumes.get(date)??new Map<string,number>();
-          const totalWeight=[...new Set(codes)].reduce((sum,c)=>sum+(weights.get(c)??0),0);
-          staffEvidence.push({person_id:e.id,code:e.employee_code??'',name:e.full_name??'',
-            role:policy.designation_name||policy.designation_code,profile_type:e.profile_type??'employee',
-            station_code:station,date,head,group:policy.label,monthly_ctc:num(salary.monthly_ctc),
-            card_from:salary.effective_from,calendar_days:new Date(Date.UTC(Number(date.slice(0,4)),Number(date.slice(5,7)),0)).getUTCDate(),
-            daily_ctc:monthlyAccrual(num(salary.monthly_ctc),date),allocation,station_count:new Set(codes).size,
-            station_weight:allocation==='delivery_share'&&totalWeight>0?(weights.get(station)??0):1,
-            total_weight:allocation==='delivery_share'&&totalWeight>0?totalWeight:new Set(codes).size,amount});
-        }
         const staffKey=`${station}|${head}|${policy.label}|${allocation}`;
         const row=staff.get(staffKey) ?? {group:policy.label,station_code:station,head,
           from_date:date,through_date:date,amount:0,allocation,roles:[]};
@@ -798,7 +785,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         row.from_date=row.from_date<date?row.from_date:date;row.through_date=row.through_date>date?row.through_date:date;row.amount+=amount;staff.set(staffKey,row);
       }
       if((head==='DA'||head==='Van') && selected.has(station)) {
-        const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+        const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
         if(head==='Van')p.van+=amount;else p.salary+=amount;people.set(k,p);
         if(head==='DA') detailDays.push({worker_id:linkedWorkforce?.id??e.id,dropx_id:linkedWorkforce?.dropx_id??e.employee_code,
           name:linkedWorkforce?.full_name??e.full_name,station_code:station,date,provider_ids:[],cohort:'guarantee',
@@ -830,9 +817,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const sum=(head:string,sub?:string)=>ledger.filter(l=>l.head===head&&(!sub||l.sub_head===sub)).reduce((n,l)=>n+num(l.amount),0);
     const daBucket=(bucket:string)=>ledger.filter(l=>l.head==='DA' && (bucket==='salary'?/salary|minimum|guarantee|\bmg\b|fixed/i.test(l.sub_head):bucket==='fuel'?/fuel/i.test(l.sub_head):!/salary|minimum|guarantee|\bmg\b|fixed|fuel/i.test(l.sub_head))).reduce((n,l)=>n+num(l.amount),0);
     const rows=associates.filter(r=>r.station_code===d.station_code&&r.work_date===d.work_date);
-    const unresolved=rows.filter(r=>r.mapping_status!=='Mapped' && num(r.total_activity)>0);
+    const unresolved=rows.filter(r=>r.mapping_status!=='Mapped' && num(r.total_delivery)+num(r.c_return)>0);
     const dayGaps=[...gaps.values()].filter(g=>g.station_code===d.station_code&&g.first_date<=d.work_date&&g.last_date>=d.work_date);
-    return {...d,da:sum('DA'),utr:sum('UTR'),van:sum('Van'),rent:sum('Rent'),overhead:sum('Overhead'),other:sum('Other'),
+    return {...d,mfn:0,mfn_return:0,activity:Math.max(0,num(d.activity)-num(d.mfn)-num(d.mfn_return)),da:sum('DA'),utr:sum('UTR'),van:sum('Van'),rent:sum('Rent'),overhead:sum('Overhead'),other:sum('Other'),
       da_salary:daBucket('salary'),da_variable:daBucket('variable'),da_fuel:daBucket('fuel'),
       total:ledger.reduce((n,l)=>n+num(l.amount),0),unmapped:unresolved.length,unpaid:0,
       exposed_deliveries:unresolved.reduce((n,r)=>n+num(r.total_delivery),0),cost_gaps:dayGaps.length+allocationNotices.size,
@@ -841,7 +828,14 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   const privateEmployees=facts.employees.filter(e=>!['DA','DCD','ODCD','WM','PTDA','DR'].includes(e.designation));
   const privateCodes=new Set(privateEmployees.map(e=>e.employee_code).filter(Boolean));
   const privateWorkerIds=new Set(facts.workforce.filter(w=>w.source_profile_type==='employee'&&privateEmployees.some(e=>e.id===w.source_profile_id)).map(w=>w.id));
-  for(const g of gaps.values()) if(privateCodes.has(g.dropx_id)) {g.name='';g.dropx_id='';g.provider_id='';}
-  capture?.({staff:staffEvidence,associates:detailDays.filter(d=>selected.has(d.station_code))});
-  return {...base,da_details:summarizeDaDetails(detailDays.filter(d=>selected.has(d.station_code)&&!privateCodes.has(d.dropx_id)&&!privateWorkerIds.has(d.worker_id))),allocation_notices:[...allocationNotices],staff:[...staff.values()].sort((a,b)=>b.amount-a.amount),daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)&&!privateCodes.has(r.dropx_emp_code)),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)&&!privateCodes.has(p.dropx_id)&&!privateWorkerIds.has(p.id)).sort((a,b)=>b.salary-a.salary)};
+  for(const g of gaps.values()) {
+    if(privateCodes.has(g.dropx_id)) {g.name='';g.dropx_id='';g.provider_id='';}
+    // Rebuild after aggregating dates, including cached gaps from older releases.
+    if(/^(?:https:\/\/dashboard\.dropxlogistics\.com)?\/provider-id-mapping(?:\?|$)/.test(g.href)) {
+      g.href=providerMappingHref({providerId:g.provider_id,dropxId:g.dropx_id,station:g.station_code,firstDate:g.first_date,lastDate:g.last_date});
+    } else if(g.href.startsWith('https://dashboard.dropxlogistics.com/provider-mapping/direct-pay')) {
+      g.href=g.href.replace('https://dashboard.dropxlogistics.com','');
+    }
+  }
+  return {...base,da_details:summarizeDaDetails(detailDays.filter(d=>selected.has(d.station_code)&&!privateCodes.has(d.dropx_id)&&!privateWorkerIds.has(d.worker_id))),allocation_notices:[...allocationNotices],staff:[...staff.values()].sort((a,b)=>b.amount-a.amount),daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)&&!privateCodes.has(r.dropx_emp_code)).map(r=>({...r,mfn:0,mfn_return:0,total_activity:Math.max(0,num(r.total_activity)-num(r.mfn)-num(r.mfn_return))})),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)&&!privateCodes.has(p.dropx_id)&&!privateWorkerIds.has(p.id)).sort((a,b)=>b.salary-a.salary)};
 }

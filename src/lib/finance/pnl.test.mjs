@@ -20,10 +20,10 @@ function compile(path, mocks = {}) {
   return m.exports;
 }
 const pricing = compile("./pricing.ts"),
-  cps = compile("../ops-pulse/cps.ts");
+  cps = compile("./cost-types.ts");
 const p = compile("./pnl.ts", {
   "./pricing": pricing,
-  "../ops-pulse/cps": cps,
+  "./cost-types": cps,
 });
 const comparison = compile("./pnl-comparison.ts", { "./pnl": p });
 const exportsPnl = compile("./pnl-export.ts", { "./pnl": p, "./pnl-comparison": comparison, "./pricing": pricing });
@@ -266,7 +266,7 @@ test("unknown station scope stays closed and does not query unrestricted source 
     "./pnl": p,
     "./pnl-comparison": comparison,
     "./pricing": pricing,
-    "../ops-pulse/cps-data": {
+    "./cost-data": {
       loadCpsSnapshot: async (company, from, to, locations) => {
         assert.deepEqual(locations, []);
         return { daily: [], breakup: [], generated_at: "" };

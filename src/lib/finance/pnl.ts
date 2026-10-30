@@ -5,7 +5,7 @@ import {
   cpsMonthSlices,
   cpsReviewItems,
   type CpsSnapshot,
-} from "../ops-pulse/cps";
+} from "./cost-types";
 import type { BusinessRow } from "./performance";
 
 export type PnlQuery = Record<string, string | string[] | undefined>;

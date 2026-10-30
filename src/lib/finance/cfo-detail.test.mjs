@@ -5,7 +5,7 @@ import {createRequire} from 'node:module';
 import ts from 'typescript';
 const require=createRequire(import.meta.url);
 function compile(path,mocks={}){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id in mocks?mocks[id]:require(id),m.exports,m);return m.exports;}
-const pricing=compile('./pricing.ts');const now=compile('./now.ts',{'./pricing':pricing,'./billing-periods':compile('./billing-periods.ts')});const cps=compile('../ops-pulse/cps.ts');const pnl=compile('./pnl.ts',{'./pricing':pricing,'../ops-pulse/cps':cps});const cfo=compile('./cfo.ts',{'./now':now});
+const pricing=compile('./pricing.ts');const now=compile('./now.ts',{'./pricing':pricing,'./billing-periods':compile('./billing-periods.ts')});const cps=compile('./cost-types.ts');const pnl=compile('./pnl.ts',{'./pricing':pricing,'./cost-types':cps});const cfo=compile('./cfo.ts',{'./now':now});
 const costHeads=compile('./pnl-cost-heads.ts');
 const {chartReport,evidenceRows,filterCfoDays,cfoComparison,cfoViewHref}=compile('./cfo-detail.ts',{'./pnl':pnl,'./cfo':cfo,'./pnl-cost-heads':costHeads});
 const d={station:'A',sourceStation:'A',name:'Station A',model:'EDSP',region:'North',city:'Different city',cluster:'Team',date:'2026-10-01',unit:'shipments',volume:10,revenue:1000,cost:700,regional:20,da:200,utr:100,van:150,rent:100,other:100,contracts:50,issues:[]};

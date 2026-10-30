@@ -8,8 +8,8 @@ import {
   type BusinessRow,
 } from "./performance";
 import { buildPnl, pnlFilters, shipmentReportingLimit, cpsMonthSlices, type PnlQuery } from "./pnl";
-import { loadCpsSnapshot } from "../ops-pulse/cps-data";
-import type { CpsSnapshot } from "../ops-pulse/cps";
+import { loadCpsSnapshot } from "./cost-data";
+import type { CpsSnapshot } from "./cost-types";
 import { addQuantities } from "./pricing";
 import { stationGroupKey } from "./pnl-comparison";
 

@@ -6,8 +6,8 @@ import ts from 'typescript';
 import {renderToStaticMarkup} from 'react-dom/server';
 const require=createRequire(import.meta.url);
 function compile(path,mocks={}){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(id=>id in mocks?mocks[id]:require(id),m.exports,m);return m.exports;}
-const pricing=compile('./pricing.ts'),details=compile('../ops-pulse/cps-details.ts');
-const {buildPnlEvidence,evidenceStations,calendarAccrual}=compile('./pnl-evidence.ts',{'./pricing':pricing,'../ops-pulse/cps-details':details});
+const pricing=compile('./pricing.ts'),details=compile('./cost-details.ts');
+const {buildPnlEvidence,evidenceStations,calendarAccrual}=compile('./pnl-evidence.ts',{'./pricing':pricing,'./cost-details':details});
 test('Finance detail scope rejects any unauthorized or empty station',()=>{
  assert.deepEqual(evidenceStations('A,A,B',['A','B']),['A','B']);
  for(const query of ['A,X','',undefined,[],','])assert.throws(()=>evidenceStations(query,['A']));
@@ -49,7 +49,7 @@ test('details API authorizes Finance before salary access and fails closed for f
   '@/lib/finance/business-master':{locationModel:l=>l.model||'EDSP'},
   '@/lib/finance/pnl':{pnlFilters:()=>({from:'2026-10-01',to:'2026-10-05'}),shipmentReportingLimit:to=>to,reportedShipmentDays:(p,from,to,codes)=>new Set(p.shipments.map(d=>d.station_code+'/'+d.work_date))},
   '@/lib/finance/pnl-evidence':{evidenceStations,buildPnlEvidence},
-  '@/lib/ops-pulse/cps-data':{loadFinanceCpsEvidence:async(company,from,to,codes)=>{calls++;assert.equal(company,'tenant');assert.deepEqual(codes,['A']);return {report:snap,evidence};}},
+  '@/lib/finance/cost-data':{loadFinanceCpsEvidence:async(company,from,to,codes)=>{calls++;assert.equal(company,'tenant');assert.deepEqual(codes,['A']);return {report:snap,evidence};}},
  });
  const invalid=await GET(new Request('https://fin.dropxlogistics.com/finance/business/details?stations=A,B'));
  assert.equal(invalid.status,400);assert.equal(calls,0);

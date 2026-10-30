@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import * as crypto from 'node:crypto';
 function compile(path,mocks={}){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>mocks[n]||{},m.exports,m);return m.exports;}
-const cps=compile('../ops-pulse/cps.ts');
+const cps=compile('./cost-types.ts');
 const reportCache=compile('./report-cache.ts');
 const overhead=compile('./cfo-overhead.ts');
 const baseMocks={'./cfo-overhead':overhead,'./pnl':cps,'./report-cache':reportCache,'node:crypto':crypto};
@@ -19,7 +19,7 @@ test('CFO reuses one complete cost snapshot for shipment P&L and HO evidence',as
   './pnl':{...cps,pnlFilters:q=>({from:q.from,to:q.to,region:'',cluster:'',location:''})},
   './data':{loadRent:async()=>[]},
   './business-master':{loadBusinessMaster:async()=>[],loadNowVolumes:async()=>[],locationModel:()=> 'EDSP'},
-  '../ops-pulse/cps-data':{loadFinanceCpsEvidence:async()=>{loads++;return {report,evidence:{staff:[],associates:[]}};}},
+  './cost-data':{loadFinanceCpsEvidence:async()=>{loads++;return {report,evidence:{staff:[],associates:[]}};}},
   './pnl-data':{loadPnl:async(c,q,shared)=>{assert.equal(await shared,report);return {days:[],costs:[],pricing:[],revenueCalculations:[]};}},
  });
  const c={companyId:'test',authorization:{userId:'u',hasAllLocationAccess:false},locations:[{station_code:'A'}]};
@@ -38,7 +38,7 @@ test('XPT contract replacement stays on its original station day and cannot borr
   './pnl':{...cps,pnlFilters:q=>({from:q.from,to:q.to,region:'',cluster:'',location:''})},
   './data':{loadRent:async()=>[]},'./pnl-comparison':{stationGroupKey:l=>l.parent_station_code||l.station_code},
   './business-master':{loadBusinessMaster:async()=>[{kind:'contract',label:'Security contract',data:contract}],loadNowVolumes:async()=>[],locationModel:()=> 'EDSP'},
-  '../ops-pulse/cps-data':{loadFinanceCpsEvidence:async()=>({report,evidence:{staff:[],associates:[]}})},
+  './cost-data':{loadFinanceCpsEvidence:async()=>({report,evidence:{staff:[],associates:[]}})},
   './pnl-data':{loadPnl:async()=>({days:[row('A',100),row('X',20)],costs:[{station_code:'X',work_date:'2026-10-01',head:'Other',sub_head:'Security',source:'Approved payment requests',amount:20},{station_code:'X',work_date:'2026-10-02',head:'Other',sub_head:'Fuel',source:'Cashbook',amount:99}],pricing:[],revenueCalculations:[]})}
  });
  const r=await loadCfo({companyId:'xpt-contract-audit',authorization:{userId:'u',hasAllLocationAccess:false},locations:[{station_code:'A'},{station_code:'X',parent_station_code:'A',pricing_model:'xpt'}]},{from:'2026-10-01',to:'2026-10-02'});
@@ -54,7 +54,7 @@ test('regional HO stops on excluded shipment dates while accrued costs stay disc
   './data':{loadRent:async()=>[{allocation_station_code:'HO_KL',monthly_rent:'310',monthly_maintenance:'0',effective_from:'2026-10-01',effective_to:null,site_code:'HO_KL',payee_name:'HO rent'}]},
   './pnl-comparison':{stationGroupKey:l=>l.station_code},
   './business-master':{loadBusinessMaster:async()=>[],loadNowVolumes:async()=>[],locationModel:()=> 'EDSP'},
-  '../ops-pulse/cps-data':{loadFinanceCpsEvidence:async()=>({report,evidence:{staff:[],associates:[]}})},
+  './cost-data':{loadFinanceCpsEvidence:async()=>({report,evidence:{staff:[],associates:[]}})},
   './pnl-data':{loadPnl:async()=>({days:[{station:'A',date:'2026-10-01',cost:100,revenue:200,deliveries:10,da:0,utr:0,van:0,rent:0,other:100,issues:[]}],costs:[],pricing:[],revenueCalculations:[],coverage:[{station:'A',limit:'2026-10-01',missingDates:[]}]})},
  });
  const c={companyId:'regional-date-audit',authorization:{userId:'u',hasAllLocationAccess:true},locations:[{station_code:'A',state:'Kerala'},{station_code:'HO_KL',is_ho:true,state:'Kerala'}],db:{rpc:async()=>({data:{people:[],salaries:[],assignments:[],breakup:[]},error:null})}};

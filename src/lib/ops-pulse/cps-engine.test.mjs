@@ -1,7 +1,11 @@
+import { providerMappingHref, providerMappingEntryFilters } from '../provider-mapping-navigation.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+import * as React from 'react';
+import * as jsxRuntime from 'react/jsx-runtime';
+import { renderToStaticMarkup } from 'react-dom/server';
 const policy={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(policy.exports,policy);
 const direct={exports:{}};
@@ -16,17 +20,67 @@ const workforceProductionThreshold={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../workforce-production-threshold.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(workforceProductionThreshold.exports,workforceProductionThreshold,(id)=>{if(id==='./production-threshold-config.ts')return productionThresholdConfig.exports;if(id==='./production-threshold-snapshot.ts')return productionThresholdSnapshot.exports;throw new Error(`Unexpected import ${id}`);});
 const payoutInputs={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payout-input-calculation.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(payoutInputs.exports,payoutInputs);
+const cps={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(cps.exports,cps);
 const details={exports:{}};
-new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
-const fallback={exports:{}};
-new Function('exports','module',ts.transpileModule(readFileSync(new URL('./production-fallback.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(fallback.exports,fallback);
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details,(id)=>{if(id==='./cps')return cps.exports;throw new Error(`Unexpected import ${id}`);});
+const routeDistance={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-route-distance.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(routeDistance.exports,routeDistance);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='./production-fallback')return fallback.exports;if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../provider-mapping-navigation')return {providerMappingHref};if(id==='../workforce-route-distance')return routeDistance.exports;if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
 const facts=()=>({shipments:[{id:'s1',client:'Amazon',work_date:'2026-09-01',station_code:'A',provider_employee_id:'AM1',provider_employee_name:'Person',amazon_delivery:80,swa_delivery:20,total_delivery:100,total_activity:100,c_return:0,mfn:0,mfn_return:0}],volumes:[{station_code:'A',work_date:'2026-09-01',deliveries:100}],mappings:[{id:'m1',workforce_id:'w1',provider_id:'amazon',provider_member_id:'AM1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'per-packet',payment_values:{DELIVERY:10},pay_type:'PER_PACKET'}],workforce:[{id:'w1',full_name:'Person',dropx_id:'D1',location_id:'station-a',date_of_join:'2026-01-01',is_active:true}],components:[{payment_method_id:'per-packet',component_code:'DELIVERY',component_type:'production',calculation_type:'count_x_rate'}],providers:[{id:'amazon',code:'AMAZON',name:'Amazon'}],stations:[{id:'station-a',station_code:'A',is_active:true,state:'KL'},{id:'station-b',station_code:'B',is_active:true,state:'KL'}],employees:[],salaries:[],people_rules:[],people_policies:[{designation_code:"SSA",mode:"home",head:"UTR",label:"Station staff CTC",allocation:"equal",effective_from:"2026-01-01"},{designation_code:"CLM",mode:"managed",head:"UTR",label:"Manager share",allocation:"equal",effective_from:"2026-01-01"},{designation_code:"DA",mode:"home",head:"DA",label:"Salary / minimum guarantee",allocation:"equal",effective_from:"2026-01-01"}]});
 const near=(a,b)=>assert.ok(Math.abs(a-b)<.000001,`${a} != ${b}`);
+function routeFacts() {
+ const f=facts(); f.shipments[0].work_date='2026-10-01';f.volumes[0].work_date='2026-10-01';
+ f.mappings[0].payment_values.KM_RUN=3;
+ f.components.push({payment_method_id:'per-packet',component_code:'KM_RUN',label:'Kilometres',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
+ f.route_distance={enabledFrom:'2026-10-01',manual:[],rateOverrides:[],rows:[{id:'r1',mapping_id:'m1',workforce_id:'w1',station_id:'station-a',work_date:'2026-10-01',status:'ready',distance_km:41.7039,departure_km:19.7952,delivery_km:1.9004,return_km:20.0083,calculated_at:'now'}]};
+ return f;
+}
+test('October CPS uses the same rounded mapped route fuel once across duplicate provider rows',()=>{
+ const f=routeFacts();f.shipments.push({...f.shipments[0],id:'s2'});
+ const r=rebuildCps(base([day('A','2026-10-01',200)]),f);
+ near(r.daily[0].da,2125.11);assert.equal(r.daily[0].deliveries,200);
+ assert.equal(r.people[0].fuel,125.11);assert.equal(r.gaps.length,0);
+ assert.deepEqual(r.associates.map(r=>r.fuel_pay),[125.11,0]);
+});
+test('CPS fuel kilometres never consume the parcel minimum',()=>{
+ const f=routeFacts();
+ f.mappings[0].production_threshold_config={period:'day',component_codes:['DELIVERY','KM_RUN'],minimum_units:110};
+ f.mappings[0].method_production_threshold_config={period:'day',component_codes:['DELIVERY','KM_RUN']};
+ const r=rebuildCps(base([day('A','2026-10-01')]),f);
+ assert.equal(r.daily[0].da,125.11);assert.equal(r.people[0].fuel,125.11);
+});
+test('CPS manual kilometres including zero and dated rate overrides match payout precedence',()=>{
+ const f=routeFacts();
+ f.route_distance.manual=[{workforce_id:'w1',station_id:'station-a',work_date:'2026-10-01',field_code_snapshot:'KM_RUN',units:12}];
+ f.route_distance.rateOverrides=[{workforce_id:'w1',station_id:'station-a',field_code_snapshot:'KM_RUN',effective_from:'2026-10-01',effective_to:'2026-10-01',input_value:4}];
+ assert.equal(rebuildCps(base([day('A','2026-10-01')]),f).people[0].fuel,48);
+ f.route_distance.manual[0].units=0;
+ assert.equal(rebuildCps(base([day('A','2026-10-01')]),f).people[0].fuel,0);
+});
+test('CPS missing or stale mapping routes stay visibly pending with known parcel pay retained',()=>{
+ for(const rows of [[],[{...routeFacts().route_distance.rows[0],mapping_id:'old'}]]) {
+ const f=routeFacts();f.route_distance.rows=rows;
+ const r=rebuildCps(base([day('A','2026-10-01')]),f);
+ assert.equal(r.daily[0].da,1000);assert.equal(r.associates[0].mapping_status,'Route distance pending');
+ assert.ok(r.gaps.some(g=>g.kind.startsWith('Fuel distance pending')));
+ }
+});
+test('CPS completed route accrues fuel while a parcel import is absent without inventing deliveries',()=>{
+ const f=routeFacts();f.shipments=[];
+ const r=rebuildCps(base([day('A','2026-10-01',0)]),f);
+ assert.equal(r.daily[0].da,125.11);assert.equal(r.daily[0].deliveries,0);
+});
+test('route fuel does not alter September or another station CPS',()=>{
+ const f=routeFacts();f.route_distance.rows[0].station_id='station-b';
+ let r=rebuildCps(base([day('A','2026-10-01')]),f);assert.equal(r.people[0].fuel,0);
+ f.shipments[0].work_date='2026-09-30';f.route_distance.rows[0].work_date='2026-09-30';
+ r=rebuildCps(base([day('A','2026-09-30')]),f);assert.equal(r.people[0].fuel,0);assert.ok(!r.gaps.some(g=>g.kind.startsWith('Fuel distance pending')));
+});
 test('monthly calendar accrual exactly conserves full CTC for February and 31-day months',()=>{
  for(const [month,count] of [['2024-02',29],['2026-08',31],['2026-09',30]])near(Array.from({length:count},(_,i)=>monthlyAccrual(23456.78,`${month}-${String(i+1).padStart(2,'0')}`)).reduce((a,b)=>a+b,0),23456.78);
 });
@@ -247,7 +301,7 @@ test('provider-required workforce gaps use the canonical ID mapping URL with enc
  const r=rebuildCps(base([day('A & B','2026-09-01',0)]),f);
  const gap=r.gaps.find(g=>g.kind==='Provider ID not linked'&&g.dropx_id==='D1 / north');
  assert.ok(gap);
- assert.equal(gap.href,'https://dashboard.dropxlogistics.com/provider-id-mapping?q=D1%20%2F%20north&station=A%20%26%20B');
+ assert.equal(gap.href,'/provider-id-mapping?q=D1%20%2F%20north&station=A%20%26%20B&month=2026-09&mapping=all');
 });
 test('historical direct cost stays on the allocation station after a workforce transfer',()=>{
  const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;f.workforce[0].location_id='station-b';
@@ -296,12 +350,17 @@ test('employee-backed CTC follows effective Workforce station after a transfer',
  r=rebuildCps(base([day('B','2026-09-01',0)]),f);
  assert.equal(r.daily[0].da_salary,0,'current station B must not receive the pre-transfer CTC');
 });
-test('effective payment policy distinguishes optional, required and non-field dates',()=>{
+test('effective payment policy is independent of the Field Operations flag',()=>{
  const policy=(is_field_operations,provider_mapping_required)=>[{workforce_id:'w1',station_id:'station-a',station_code_snapshot:'A',designation_is_active:true,effective_from:'2026-09-01',effective_to:null,is_field_operations,provider_mapping_required}];
- for(const [history,expected] of [[policy(true,false),'Direct payment allocation missing'],[policy(true,true),'Provider ID not linked'],[policy(false,false),null]]) {
+ for(const [history,expected] of [
+  [policy(true,false),'Direct payment allocation missing'],
+  [policy(false,false),'Direct payment allocation missing'],
+  [policy(true,true),'Provider ID not linked'],
+  [policy(false,true),'Provider ID not linked']
+ ]) {
   const f=facts();f.shipments=[];f.mappings=[];f.allocations=[];f.policy_history=history;
   const r=rebuildCps(base([day('A','2026-09-01',0)]),f);
-  if(expected) assert.ok(r.gaps.some(g=>g.kind===expected)); else assert.ok(!r.gaps.some(g=>g.dropx_id==='D1'));
+  assert.ok(r.gaps.some(g=>g.kind===expected&&g.dropx_id==='D1'));
  }
 });
 test('dates before the first truthful policy snapshot suppress policy-derived gaps',()=>{
@@ -377,7 +436,7 @@ test('People assignments use dated mapped stations, deduplicate duties and prese
 });
 
 
-test('DA cohorts use their own delivered count and show returns and effective rates',()=>{
+test('DA cohorts use their own delivery plus customer-return count and show effective rates',()=>{
  const f=facts(); f.shipments[0].c_return=5;
  f.components.push({payment_method_id:'per-packet',component_code:'RETURN',label:'Customer return',component_type:'production',calculation_source:'c_return'});
  f.mappings[0].payment_values.RETURN=4;
@@ -386,7 +445,7 @@ test('DA cohorts use their own delivered count and show returns and effective ra
  f.shipments.push({...f.shipments[0],id:'s2',provider_employee_id:'AM2',total_delivery:50,c_return:0});
  const r=rebuildCps(base([day('A','2026-09-01',150)]),f);
  const v=details.exports.daCohortTotals(r.da_details,'variable'),mg=details.exports.daCohortTotals(r.da_details,'guarantee');
- assert.equal(v.amount,1020);assert.equal(v.cps,10.2);assert.equal(mg.amount,600);assert.equal(mg.cps,12);
+ assert.equal(v.amount,1020);near(v.cps,1020/105);assert.equal(v.shipments,105);assert.equal(mg.amount,600);assert.equal(mg.cps,12);
  near(v.amount+mg.amount,r.daily[0].da);assert.equal(v.people[0].customer_returns,5);
  assert.deepEqual(v.people[0].periods[0].rates.find(r=>r.label==='Customer return'),{label:'Customer return',rate:4,basis:'c return'});
  assert.equal(mg.people[0].salary,200);assert.equal(mg.people[0].variable,400);
@@ -437,17 +496,6 @@ test('shipment activity remains work evidence when the attendance record is abse
  assert.equal(r.daily[0].da,1000,'displayed work evidence does not change payroll rules');
 });
 
-test('active base-location TL, SSA and sorter CTC accrues without attendance and is private',()=>{
- const f=facts();f.shipments=[];f.workforce=[];f.mappings=[];f.attendance=[];
- f.employees=['TL','SSA','SRTR'].map((designation,i)=>({id:`staff-${i}`,full_name:`PRIVATE_${i}`,employee_code:`SECRET_${i}`,location_id:'station-a',designation,is_active:true,date_of_join:'2026-08-01',has_home_assignments:true}));
- f.people_policies=['TL','SSA','SRTR'].map(designation_code=>({designation_code,mode:'home',head:'UTR',label:'Station team',allocation:'equal',effective_from:'2026-09-01'}));
- f.people_assignments=f.employees.map(e=>({employee_id:e.id,station_code:'A',kind:'home',effective_from:'2026-08-01',effective_to:null}));
- f.salaries=f.employees.map(e=>({employee_id:e.id,effective_from:'2026-08-01',monthly_ctc:30000}));
- const r=rebuildCps(base([day('A','2026-09-01',0),day('A','2026-09-02',0)]),f);
- assert.deepEqual(r.daily.map(d=>d.utr),[3000,3000]);assert.equal(r.staff.length,1);assert.equal(r.staff[0].amount,6000);
- assert.ok(!JSON.stringify(r).includes('PRIVATE_'));assert.ok(!JSON.stringify(r).includes('SECRET_'));
-});
-
 test('Fleet source rule excludes fixed rental without changing per-package, salary or fuel costs',()=>{
  const f=facts();
  f.mappings[0].payment_values={DELIVERY:10,VAN_RENT_PER_DAY:900,VAN_PACKAGE:2,FUEL:1,SALARY:300};
@@ -458,16 +506,14 @@ test('Fleet source rule excludes fixed rental without changing per-package, sala
  {payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',calculation_type:'fixed_daily',pay_schedule:'per_day'});
  f.component_policies=[{component_code:'VAN_RENT_PER_DAY',mode:'fleet',effective_from:'2026-09-01'}];
  let r=rebuildCps(base(),f);
- assert.equal(r.daily[0].van,0);assert.equal(r.daily[0].da,1600);
- assert.equal(r.da_details[0].variable,1200);assert.equal(r.da_details[0].van,0);
- assert.equal(r.daily[0].total,1600);
+ assert.equal(r.daily[0].van,200);assert.equal(r.daily[0].da,1400);
  assert.ok(!r.da_details[0].periods[0].rates.some(rate=>rate.label==='Van Rent Per Day'));
  // No rental value is needed in Workforce when Fleet owns that cost.
  delete f.mappings[0].payment_values.VAN_RENT_PER_DAY;
- r=rebuildCps(base(),f);assert.equal(r.associates[0].mapping_status,'Mapped');assert.equal(r.daily[0].van,0);assert.equal(r.daily[0].da,1600);
+ r=rebuildCps(base(),f);assert.equal(r.associates[0].mapping_status,'Mapped');assert.equal(r.daily[0].van,200);
  // Production cannot accidentally be excluded even by a malformed policy.
  f.component_policies.push({component_code:'VAN_PACKAGE',mode:'fleet',effective_from:'2026-09-01'});
- assert.equal(rebuildCps(base(),f).daily[0].da,1600);
+ assert.equal(rebuildCps(base(),f).daily[0].van,200);
 });
 
 test('rental source revisions apply by cost date and rental-only direct cards do not create false pay gaps',()=>{
@@ -484,11 +530,30 @@ test('rental source revisions apply by cost date and rental-only direct cards do
  assert.equal(r.daily[0].van,0);assert.ok(!r.gaps.some(g=>g.kind==='Direct payment allocation incomplete'));
 });
 
-test('providerless direct employees retain biometric pay when DAs use shipment attendance',()=>{
- const f=facts();f.mappings=[];f.shipments=[];f.workforce[0].provider_mapping_required=false;
- f.allocations=[{id:'direct',workforce_id:'w1',station_id:'station-a',effective_from:'2026-09-01',payment_values:{DAILY:600},payment_components:[{component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'}]}];
- f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
- const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,600);
+test('mixed fixed and packet pay exposes absent attendance without inventing wages or a low cohort CPS',()=>{
+ const f=facts();
+ f.shipments[0]={...f.shipments[0],amazon_delivery:208,swa_delivery:0,total_delivery:208,total_activity:225,c_return:17};
+ f.components=[{payment_method_id:'per-packet',component_code:'MONTHLY',component_type:'amount',label:'Fixed pay',pay_schedule:'per_month',calculation_type:'fixed_monthly',calculation_source:'attendance_eligibility'},
+ {payment_method_id:'per-packet',component_code:'DELIVERY',label:'Delivery',component_type:'production',calculation_type:'count_x_rate'},
+ {payment_method_id:'per-packet',component_code:'CRETURN',label:'Customer return',component_type:'production',calculation_type:'count_x_rate'}];
+ f.mappings[0].payment_values={MONTHLY:10000,DELIVERY:3,CRETURN:3};
+ const r=rebuildCps(base([day('A','2026-09-01',208)]),f);
+ assert.equal(r.daily[0].da,675);assert.equal(r.da_details[0].salary,0);
+ assert.deepEqual(r.da_details[0].pending_fixed_dates,['2026-09-01']);
+ assert.ok(r.gaps.some(g=>g.kind==='Fixed pay attendance missing'&&g.dropx_id==='D1'));
+ assert.equal(r.da_details[0].periods[0].production_details.reduce((n,p)=>n+p.amount,0),675);
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];
+ const complete=rebuildCps(base([day('A','2026-09-01',208)]),f);
+ assert.ok(complete.da_details[0].salary>0);assert.ok(!complete.da_details[0].pending_fixed_dates?.length);
+ f.attendance[0].status='A';
+ assert.ok(!rebuildCps(base([day('A','2026-09-01',208)]),f).da_details[0].pending_fixed_dates?.length,'explicit absence is not missing attendance');
+});
+test('flat delivery and return rate reconciles production heads to delivered-only CPS',()=>{
+ const f=facts();f.shipments[0]={...f.shipments[0],amazon_delivery:497,swa_delivery:0,total_delivery:497,total_activity:532,c_return:35};
+ f.components.push({payment_method_id:'per-packet',component_code:'CRETURN',component_type:'production',calculation_type:'count_x_rate'});f.mappings[0].payment_values={DELIVERY:15,CRETURN:15};
+ const r=rebuildCps(base([day('A','2026-09-01',497)]),f),detail=r.da_details[0];
+ assert.equal(detail.variable,7980);assert.equal((detail.variable/detail.deliveries).toFixed(2),'16.06');
+ assert.deepEqual(detail.periods[0].production_details.map(p=>[p.rate,p.payable_units,p.amount]),[[15,35,525],[15,497,7455]]);
 });
 
 test('Dashboard production uploads and dated rate overrides are included once across provider IDs',()=>{
@@ -527,19 +592,43 @@ test('low-delivery flag is configurable and never removes an eligible day pay',(
  f.attendance_capture_history[0].review_below_deliveries=10;r=rebuildCps(base(),f);assert.equal(r.daily[0].da,700);assert.ok(!r.gaps.some(g=>/Low deliveries/.test(g.kind)));
 });
 
+test('providerless direct employees follow the configured shipment attendance method',()=>{
+ const f=facts();f.mappings=[];f.shipments=[];f.workforce[0].provider_mapping_required=false;
+ f.allocations=[{id:'direct',workforce_id:'w1',station_id:'station-a',effective_from:'2026-09-01',payment_values:{DAILY:600},payment_components:[{component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'}]}];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,0);
+});
 
-test('Finance retains seller payouts despite the CPS-only exclusion master',()=>{
- const f=facts();f.shipments[0].mfn=10;f.shipments[0].mfn_return=5;f.components.push(...['SELLER_PICKUP','SLLLER_RETURN'].map(component_code=>({...f.components[0],component_code})));f.mappings[0].payment_values={DELIVERY:10,SELLER_PICKUP:4,SLLLER_RETURN:5};f.component_policies=['SELLER_PICKUP','SLLLER_RETURN'].map(component_code=>({component_code,mode:'pnl_only',effective_from:'2026-09-01'}));
- const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1065);assert.equal(r.da_details[0].seller_pickups,10);assert.equal(r.da_details[0].seller_returns,5);
+test('configured P&L-only seller heads are removed from CPS costs, counts and rates; customer returns remain',()=>{
+ const f=facts();
+ f.shipments[0]={...f.shipments[0],total_delivery:100,c_return:10,mfn:20,mfn_return:30,total_activity:160};
+ f.components.push(...['CRETURN','SELLER_PICKUP','SLLLER_RETURN'].map(code=>({...f.components[0],component_code:code})));
+ f.mappings[0].payment_values={DELIVERY:15,CRETURN:15,SELLER_PICKUP:4,SLLLER_RETURN:5};
+ f.component_policies=['SELLER_PICKUP','SLLLER_RETURN'].map(component_code=>({component_code,mode:'pnl_only',effective_from:'2026-09-01'}));
+ const r=rebuildCps(base([{...day(),mfn:20,mfn_return:30,activity:160}]),f);
+ assert.equal(r.daily[0].da,1650);assert.equal(r.daily[0].mfn,0);assert.equal(r.daily[0].mfn_return,0);assert.equal(r.daily[0].activity,110);
+ assert.equal(r.associates[0].variable_pay,1650);assert.equal(r.associates[0].mfn,0);
+ assert.equal(r.da_details[0].seller_pickups,0);assert.equal(r.da_details[0].customer_returns,10);
+ assert.deepEqual(r.da_details[0].periods[0].rates.map(r=>r.label).sort(),['CRETURN','DELIVERY']);
+ assert.deepEqual(r.da_details[0].periods[0].production_details.map(r=>r.label).sort(),['CRETURN','DELIVERY']);
+ // The original payroll facts are intact, including all seller activity/rates.
+ assert.equal(f.shipments[0].mfn,20);assert.equal(f.mappings[0].payment_values.SELLER_PICKUP,4);
+ const full=calculateRateCard(f.mappings[0],f.components,f.shipments[0],'2026-09-01',true);
+ assert.equal(full.variable,1880);
+});
+test('P&L-only exclusion ignores incomplete seller rates without suppressing known delivery cost',()=>{
+ const cs=[{component_code:'DELIVERY',component_type:'production'}, {component_code:'SELLER_PICKUP',component_type:'production',cps_cost_source:'pnl_only'}];
+ const r=calculateRateCard({payment_values:{DELIVERY:15}},cs,{total_delivery:2,mfn:30},'2026-10-01',true);
+ assert.equal(r.variable,30);assert.equal(r.missing,false);
 });
 
 
-test('shipment fallback preserves actual attendance on days with no delivery and keeps hourly minutes',()=>{
+test('shipment attendance ignores biometric minutes and leaves hourly pay incomplete',()=>{
  const f=facts();f.shipments[0].total_delivery=0;f.shipments[0].total_activity=0;
  f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',work_minutes:480}];
  f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
  f.mappings[0].payment_values={HOUR:100};f.components=[{payment_method_id:'per-packet',component_code:'HOUR',component_type:'fixed',pay_schedule:'per_hour',calculation_type:'fixed',calculation_source:'attendance_eligibility'}];
- const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,800);
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,0);assert.ok(r.gaps.some(g=>g.kind==='Rate values or production source missing'));
 });
 
 test('missing configured kilometre input is visible while known pay remains counted',()=>{
@@ -549,92 +638,74 @@ test('missing configured kilometre input is visible while known pay remains coun
 
 });
 
-test('Finance adds historical kilometres at current rate and retains actual zero',()=>{
- const f=facts();const date=f.shipments[0].work_date;const prev=new Date(date+'T00:00:00Z');prev.setUTCMonth(prev.getUTCMonth()-1);const from=prev.toISOString().slice(0,7)+'-01';
- f.components.push({payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Fuel per kilometre',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
- f.mappings[0].payment_values.KM_RUN=3;
- f.production_fallback_policies=[{field_code:'KM_RUN',mode:'associate_then_station',lookback_months:3,minimum_history_days:1,effective_from:from}];
- f.production_history=[{id:'h',workforce_id:'w1',station_id:'s1',payment_field_id:'km',field_code_snapshot:'KM_RUN',units:1200,period_from:from,period_to:from.slice(0,7)+'-28',work_days:20}];
- // Fixture identities are intentionally resolved from source data.
- f.production_history[0].workforce_id=f.workforce[0].id;f.production_history[0].station_id=f.stations[0].id;
- const r=rebuildCps(base(),f);assert.equal(r.associates[0].fuel_pay,180);assert.equal(r.da_details[0].fuel,180);
- f.payout_inputs={productionInputs:[{workforce_id:f.workforce[0].id,station_id:f.stations[0].id,payment_field_id:'km',field_code_snapshot:'KM_RUN',work_date:date,units:0}]};
- assert.equal(rebuildCps(base(),f).associates[0].fuel_pay,0);
+// The reported production incident: returns were paid but missing from the divisor.
+test('CPS lifecycle: delivery + C-return pay/count reconcile across associate, station, fuel and months',()=>{
+ const f=facts();
+ Object.assign(f.shipments[0],{total_delivery:1043,amazon_delivery:1000,swa_delivery:43,c_return:89,mfn:20,mfn_return:3,total_activity:1155});
+ f.mappings[0].payment_values={DELIVERY:17,CUSTOMER_RETURN:15,SELLER_PICKUP:12,SLLLER_RETURN:8};
+ f.components.push(...['CUSTOMER_RETURN','SELLER_PICKUP','SLLLER_RETURN'].map(component_code=>({payment_method_id:'per-packet',component_code,component_type:'production',calculation_type:'count_x_rate'})));
+ const snapshot=rebuildCps(base([{...day('A','2026-09-01',1043),amazon_delivery:1000,swa_delivery:43,c_return:89,mfn:20,mfn_return:3,activity:1155}]),f);
+ const summary=cps.exports.summarizeCps(snapshot.daily);
+ const cohort=details.exports.daCohortTotals(snapshot.da_details,'variable');
+ assert.equal(summary.shipments,1132); assert.equal(summary.deliveries,1043); assert.equal(summary.swa,43);
+ assert.equal(summary.da,19066); assert.equal(cohort.amount,19066); assert.equal(cohort.shipments,1132);
+ near(summary.cps,19066/1132);near(cohort.cps,summary.cps);assert.equal(summary.cps.toFixed(2),'16.84');
+ const ui={exports:{}};
+ new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../../components/cps-associate-breakdown.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(ui.exports,ui,(id)=>{
+   if(id==='react')return React;if(id==='react/jsx-runtime')return jsxRuntime;
+   if(id==='@/lib/ops-pulse/cps')return cps.exports;if(id==='@/lib/ops-pulse/cps-details')return details.exports;throw new Error(id);
+ });
+ const html=renderToStaticMarkup(React.createElement(ui.exports.CpsAssociateTable,{rows:snapshot.da_details}));
+ assert.match(html,/₹16.84/);assert.match(html,/1,132 CPS shipments/);assert.match(html,/1,043 deliveries \+ 89 customer returns/);assert.doesNotMatch(html,/₹18.28/);
+
+ assert.deepEqual(snapshot.da_details[0].periods[0].production_details.map(p=>p.label).sort(),['CUSTOMER_RETURN','DELIVERY']);
+ assert.equal(snapshot.people[0].customer_returns,89);
+ const fullPay=calculateRateCard(f.mappings[0],f.components,f.shipments[0],'2026-09-01',false,{});
+ assert.equal(fullPay.variable,19330,'full payroll/P&L retains the 264 seller pay');
+ assert.equal(f.shipments[0].mfn,20,'source activity is unchanged');
+ const fuel=details.exports.cpsFuelTrend({...snapshot,breakup:[{work_date:'2026-09-01',head:'DA',sub_head:'DA fuel',amount:1132}]})[0];
+ assert.equal(fuel.shipments,1132);assert.equal(fuel.cps,1);
+ const merged=cps.exports.mergeCpsMonths([snapshot,snapshot]);
+ assert.equal(merged.people[0].customer_returns,178);
+ near(cps.exports.summarizeCps(merged.daily).cps,summary.cps);
+});
+test('seller production sources and legacy MFN rates are excluded without a master policy',()=>{
+ const f=facts();f.shipments[0].mfn=10;f.shipments[0].mfn_return=5;
+ f.mappings[0].payment_values.PICKUPS=9;
+ f.components.push({payment_method_id:'per-packet',component_code:'PICKUPS',component_type:'production',calculation_source:'mfn'});
+ assert.equal(rebuildCps(base(),f).daily[0].da,1000);
+ assert.equal(calculateRateCard(f.mappings[0],f.components,f.shipments[0],'2026-09-01',false,{}).variable,1090);
+ f.mappings[0]={...f.mappings[0],payment_method_id:null,delivery_rate:10,mfn_rate:9,mfn_return_rate:7};
+ assert.equal(rebuildCps(base(),f).daily[0].da,1000);
+ assert.equal(calculateRateCard(f.mappings[0],[],f.shipments[0],'2026-09-01',false,{}).variable,1125);
 });
 
-
-test('Finance fuel fallback covers punched workdays without shipment rows and respects zero or absence',()=>{
- const f=facts();f.shipments=[];
- f.mappings[0].payment_values={SALARY:15000,KM_RUN:3};
- f.components=[
-  {payment_method_id:'per-packet',component_code:'SALARY',component_type:'fixed',pay_schedule:'per_month',calculation_type:'fixed',calculation_source:'attendance_eligibility'},
-  {payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Fuel per kilometre',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true}
- ];
- f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];
- f.production_fallback_policies=[{field_code:'KM_RUN',mode:'associate_station_company',lookback_months:3,minimum_history_days:1,effective_from:'2026-09-01'}];
- f.production_history=[{id:'h',workforce_id:'other',station_id:'other-station',payment_field_id:'km',field_code_snapshot:'KM_RUN',units:1200,period_from:'2026-08-01',period_to:'2026-08-31',work_days:20}];
- f.production_threshold_context={shipments:[],mappings:f.mappings,workforce:f.workforce,components:f.components,providers:f.providers,stations:f.stations};
- let evidence;const b=base([day('A','2026-09-01',0)]),r=rebuildCps(b,f,e=>{evidence=e;});
- assert.equal(r.daily[0].da,680);assert.equal(r.da_details[0].fuel,180);
- assert.equal(evidence.associates[0].input_estimates[0].basis,'company average');
- assert.ok(!r.gaps.some(g=>g.kind==='Fuel per kilometre input missing'));
- f.payout_inputs={productionInputs:[{workforce_id:'w1',station_id:'station-a',payment_field_id:'km',field_code_snapshot:'KM_RUN',work_date:'2026-09-01',units:0}]};
- assert.equal(rebuildCps(b,f).da_details[0].fuel,0);
- f.payout_inputs={};f.attendance[0].status='A';
- const absent=rebuildCps(b,f);assert.equal(absent.daily[0].da,0);assert.ok(absent.da_details.every(d=>d.fuel===0));
+test('unmapped CPS source links retain the exact provider, station and historical month on OpsPulse',()=>{
+ const f=facts();f.mappings=[];
+ const gap=rebuildCps(base(),f).gaps.find(g=>g.kind==='Unmapped');
+ const url=new URL(gap.href,'https://ops.dropxlogistics.com');
+ assert.equal(url.origin,'https://ops.dropxlogistics.com');
+ assert.equal(url.pathname,'/provider-id-mapping');
+ assert.equal(url.searchParams.get('q'),'AM1');
+ assert.equal(url.searchParams.get('station'),'A');
+ assert.deepEqual(providerMappingEntryFilters(Object.fromEntries(url.searchParams),'2026-10-15'),{month:'2026-09',mapping:'all'});
 });
-
-test('zero or invalid People CTC does not erase known workforce fixed pay',()=>{
- for(const monthly_ctc of [0,-100,'', 'invalid']) {
-  const f=facts();
-  f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
-  f.mappings[0].payment_values={SALARY:30000};
-  f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
-  f.employees=[{id:'e1',employee_code:'E1',full_name:'Employee',location_id:'station-a',is_active:true,designation:'DA'}];
-  f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc}];
-  const r=rebuildCps(base(),f);
-  assert.equal(r.daily[0].da_salary,1000,`known fixed pay with CTC=${monthly_ctc}`);
-  assert.ok(r.gaps.some(g=>g.kind==='People CTC missing'));
-  assert.ok(!r.breakup.some(line=>line.source==='People CTC'));
+test('a mapping gap spanning months does not hide records behind the current-month filter',()=>{
+ const f=facts();f.mappings=[];f.shipments.push({...f.shipments[0],id:'oct',work_date:'2026-10-01'});
+ const gap=rebuildCps(base([day(),day('A','2026-10-01')]),f).gaps.find(g=>g.kind==='Unmapped');
+ assert.equal(new URL(gap.href,'https://ops.dropxlogistics.com').searchParams.get('month'),'all');
+ assert.deepEqual(providerMappingEntryFilters({month:'all',mapping:'all'},'2026-10-15'),{month:'',mapping:'all'});
+});
+test('direct allocation and cached mapping gaps also stay on the current product',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].provider_mapping_required=false;f.workforce[0].is_field_operations=true;
+ const direct=rebuildCps(base(),f).gaps.find(g=>g.kind==='Direct payment allocation missing');
+ assert.equal(direct.href,'/provider-mapping/direct-pay?q=D1');
+ const cached={...direct,key:'legacy',kind:'Unmapped',provider_id:'AM1',dropx_id:'D1',href:'https://dashboard.dropxlogistics.com/provider-id-mapping?q=D1'};
+ const r=rebuildCps({...base(),gaps:[cached]},facts());
+ assert.equal(r.gaps.find(g=>g.key==='legacy').href,'/provider-id-mapping?q=AM1&station=A&month=2026-09&mapping=all');
+});
+test('plain ID mapping opens current month and Unmapped; invalid link filters cannot override those defaults',()=>{
+ for(const params of [undefined,{}, {month:'2026-99',mapping:'anything'}]) {
+  assert.deepEqual(providerMappingEntryFilters(params,'2026-10-15'),{month:'2026-10',mapping:'unmapped'});
  }
-});
-
-test('an expired People allocation cannot suppress an effective workforce salary',()=>{
- const f=facts();
- f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
- f.mappings[0].payment_values={SALARY:30000};
- f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
- f.employees=[{id:'e1',employee_code:'E1',full_name:'Manager with delivery pay',location_id:'ho',is_active:true,designation:'CLM'}];
- f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
- f.people_assignments=[{employee_id:'e1',station_code:'A',effective_from:'2026-01-01',effective_to:'2026-08-31'}];
- const r=rebuildCps(base(),f);
- assert.equal(r.daily[0].total,1000);
- assert.equal(r.daily[0].da_salary,1000);
- assert.ok(!r.breakup.some(line=>line.source==='People CTC'));
- assert.ok(r.gaps.some(g=>g.kind==='People allocation missing; workforce fixed pay retained'));
-});
-
-test('positive allocated People CTC replaces fixed pay even when its station is outside the current filter',()=>{
- const f=facts();
- f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
- f.mappings[0].payment_values={SALARY:30000};
- f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
- f.employees=[{id:'e1',employee_code:'E1',full_name:'Manager with delivery pay',location_id:'ho',is_active:true,designation:'CLM'}];
- f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
- f.people_assignments=[{employee_id:'e1',station_code:'B',effective_from:'2026-01-01',effective_to:null}];
- assert.equal(rebuildCps(base(),f).daily[0].total,0);
- const all=rebuildCps(base([day('A'),day('B')]),f);
- assert.equal(all.daily.reduce((sum,d)=>sum+d.total,0),1100);
- assert.equal(all.daily.find(d=>d.station_code==='B').utr,1100);
-});
-
-test('inactive and HO locations cannot receive or dilute explicit People cost allocations',()=>{
- const f=facts();f.shipments=[];f.mappings=[];f.workforce=[];
- f.stations[1].is_active=false;f.stations.push({id:'ho',station_code:'HO_KL',is_active:true,is_ho:true});
- f.employees=[{id:'e1',employee_code:'E1',full_name:'Manager',location_id:'station-a',is_active:true,designation:'CLM'}];
- f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:30000}];
- f.people_rules=[{employee_id:'e1',station_codes:['A','B','HO_KL'],head:'UTR',allocation:'equal',effective_from:'2026-01-01'}];
- const r=rebuildCps(base(),f);
- assert.equal(r.daily[0].utr,1000);
- assert.ok(r.breakup.every(line=>line.station_code==='A'));
 });

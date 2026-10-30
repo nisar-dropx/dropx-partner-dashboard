@@ -578,62 +578,6 @@ export function CpsCostWorkspace({
           </details>
         )}
         {head === "Van" && <CpsFuelInsights snapshot={snapshot} />}
-        {head === "Van" && (
-          <details className="cps-drilldown" open>
-            <summary>
-              Vehicle rent details{" "}
-              <span>
-                {new Set(vehicles.map((v) => v.vehicle_id)).size} vehicles
-              </span>
-            </summary>
-            <div className="cps-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Vehicle</th>
-                    <th>Allocated station</th>
-                    <th>Fleet rental rate</th>
-                    <th>Deployed days</th>
-                    <th>Period cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehicles.map((v, i) => (
-                    <tr key={`${v.vehicle_id}|${v.station_code}|${i}`}>
-                      <td>
-                        <strong>{v.vehicle_no}</strong>
-                        <small>{v.model}</small>
-                      </td>
-                      <td>{v.station_code}</td>
-                      <td>
-                        {v.daily_rent != null ? <>{money(v.daily_rent)} / day</> : v.monthly_rent == null ? (
-                          <span className="cps-missing">Setup required</span>
-                        ) : (
-                          `${money(v.monthly_rent)} / month`
-                        )}
-                      </td>
-                      <td>
-                        {v.days}
-                        <small>
-                          {v.from_date} – {v.through_date}
-                        </small>
-                      </td>
-                      <td>{money(v.amount, 2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="cps-footnote">
-              Own-vehicle rent starts from 1 September 2026. Rates and future
-              revisions are managed in{" "}
-              <a href="https://fleet.dropxlogistics.com/fleet-control?section=masters&master=vehicle_master">
-                Fleet → Masters → Vehicle Master
-              </a>
-              . Rent continues for a deployed vehicle during downtime.
-            </p>
-          </details>
-        )}
       </section>
       <details className="panel cps-drilldown">
         <summary>

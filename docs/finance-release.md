@@ -20,6 +20,10 @@ payment/payroll eligibility and bank finalization keep the current production
 implementation. This branch is a Finance release, not an OpsPulse/Dashboard
 release. No database migration or replay of bank payments is required.
 
+The Finance cost loader, engine, evidence and types are now in
+`src/lib/finance/cost-*.ts`. OpsPulse keeps its current CPS implementation;
+Finance must not import its shipment-only CPS engine as a full P&L cost source.
+
 Release checks cover the complete Finance product, asset editing, accounting,
 treasury, provisional and final P&L, bank batches, replay safety and payment
 authorization. Confirm the deployed navigation, source-backed reports and bank

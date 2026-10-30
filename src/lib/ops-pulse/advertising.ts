@@ -35,7 +35,7 @@ export function advertisingCosts(input:{rows:AdvertisingDetail[];months:Advertis
 }
 
 export type AdvertisingSettlementRule={source:string;cost_label:string;effective_from:string;is_active:boolean};
-export function excludeAdvertisingSettlements(base:CpsSnapshot,rules:AdvertisingSettlementRule[]) {
+export function excludeAdvertisingSettlements<T extends Pick<CpsSnapshot,'breakup'|'expense_periods'>>(base:T,rules:AdvertisingSettlementRule[]) {
  const same=(a:string,b:string)=>a.trim().toLowerCase()===b.trim().toLowerCase();
  const excluded=(source:string,label:string,date:string)=>rules.some(r=>r.is_active&&same(r.source,source)&&same(r.cost_label,label)&&r.effective_from<=date);
  return {...base,breakup:base.breakup.filter(l=>!excluded(l.source,l.sub_head,l.work_date)),expense_periods:base.expense_periods?.filter(b=>!excluded(b.source==='cashbook'?'Cashbook':'Approved payment requests',b.label,b.booked_on))};

@@ -4,7 +4,7 @@ import { locationModel } from '@/lib/finance/business-master';
 import { pnlFilters, shipmentReportingLimit, reportedShipmentDays } from "@/lib/finance/pnl";
 import { evidenceStations, buildPnlEvidence } from "@/lib/finance/pnl-evidence";
 import { readAllRows } from "@/lib/supabase-pagination";
-import { loadFinanceCpsEvidence } from "@/lib/ops-pulse/cps-data";
+import { loadFinanceCpsEvidence } from "@/lib/finance/cost-data";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 export async function GET(request: Request) {

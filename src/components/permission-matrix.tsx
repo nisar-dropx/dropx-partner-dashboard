@@ -107,7 +107,7 @@ function StandardPermissionMatrix({
   });
 
   const groups = useMemo(() => {
-    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : surface === "finance" ? financeGroups : dashboardGroups;
+    const definitions = surface === "people" ? peopleGroups : surface === "finance" ? financeGroups : dashboardGroups;
     const definedGroups = definitions.map((definition) => ({
       ...definition,
       pages: pages.filter((page) => definition.codes.includes(page.code) || definition.matches?.(page)),

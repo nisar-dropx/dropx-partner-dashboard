@@ -1,9 +1,9 @@
-import type { CpsSnapshot } from "../ops-pulse/cps";
+import type { CpsSnapshot } from "./cost-types";
 import {
   summarizeDaDetails,
   type CpsCalculationEvidence,
   type CpsStaffDay,
-} from "../ops-pulse/cps-details";
+} from "./cost-details";
 import type { RentRecord } from "./rent";
 import { addAmounts, mgEstimate, monthEnd, subtractAmounts } from "./pricing";
 
