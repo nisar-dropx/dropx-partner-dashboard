@@ -9,6 +9,7 @@ import {
   CRETURN_DISPLAY,
   CRETURN_SHORT,
   collectEddDates,
+  DSR_HEADERS,
   dsrHeatColor,
   eddPivot,
   eddStationTotal,
@@ -156,7 +157,16 @@ function buildShareTable(
   }
 
   const zeroOnly = view === "zero";
-  const headers = ["Station", "DA", "Del", "Fail", "Rej", "OOR", "Total", "DSR%"];
+  const headers = [
+    "Station",
+    DSR_HEADERS.da,
+    DSR_HEADERS.delivered,
+    DSR_HEADERS.failed,
+    DSR_HEADERS.rejected,
+    DSR_HEADERS.oor,
+    DSR_HEADERS.total,
+    DSR_HEADERS.dsrPct,
+  ];
   const rows: BoardShareCell[][] = [];
   const allDas: StationBoardDaDsr[] = [];
   for (const station of stations) {
@@ -261,7 +271,15 @@ function buildStationShareTable(
   return {
     title: `${zeroOnly ? "Zero deliveries" : "DA DSR"} · ${label}`,
     subtitle,
-    headers: ["DA", "Del", "Fail", "Rej", "OOR", "Total", "DSR%"],
+    headers: [
+      DSR_HEADERS.da,
+      DSR_HEADERS.delivered,
+      DSR_HEADERS.failed,
+      DSR_HEADERS.rejected,
+      DSR_HEADERS.oor,
+      DSR_HEADERS.total,
+      DSR_HEADERS.dsrPct,
+    ],
     rows,
     footerNote: "Ops Pulse Station board",
   };
@@ -790,13 +808,13 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   <thead>
                     <tr>
                       <th>Station</th>
-                      <th>DA</th>
-                      <th>Del</th>
-                      <th>Fail</th>
-                      <th>Rej</th>
-                      <th>OOR</th>
-                      <th>Total</th>
-                      <th>DSR%</th>
+                      <th>{DSR_HEADERS.da}</th>
+                      <th>{DSR_HEADERS.delivered}</th>
+                      <th>{DSR_HEADERS.failed}</th>
+                      <th>{DSR_HEADERS.rejected}</th>
+                      <th>{DSR_HEADERS.oor}</th>
+                      <th>{DSR_HEADERS.total}</th>
+                      <th>{DSR_HEADERS.dsrPct}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -966,7 +984,13 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
                   <div className={s.shareColsWide}>
-                    <span>DA</span><span>Del</span><span>Fail</span><span>Rej</span><span>OOR</span><span>Tot</span><span>DSR%</span>
+                    <span>{DSR_HEADERS.da}</span>
+                    <span>{DSR_HEADERS.delivered}</span>
+                    <span>{DSR_HEADERS.failed}</span>
+                    <span>{DSR_HEADERS.rejected}</span>
+                    <span>{DSR_HEADERS.oor}</span>
+                    <span>{DSR_HEADERS.total}</span>
+                    <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
                     {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (

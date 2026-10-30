@@ -45,11 +45,13 @@ function downloadBlob(blob: Blob, name: string) {
 
 export async function renderBoardShareImages(table: BoardShareTable): Promise<File[]> {
   await document.fonts.ready.catch(() => undefined);
-  const width = Math.min(1600, Math.max(900, 120 + table.headers.length * 88));
+  // Wider canvas when headers are full phrases (e.g. Delivery Failed / Out on Road).
+  const longestHeader = Math.max(...table.headers.map((h) => String(h || "").length), 8);
+  const width = Math.min(1800, Math.max(980, 140 + table.headers.length * Math.max(96, longestHeader * 7)));
   const margin = 28;
   const usable = width - margin * 2;
   const colCount = Math.max(1, table.headers.length);
-  const firstCol = Math.min(160, Math.max(100, usable * 0.18));
+  const firstCol = Math.min(200, Math.max(120, usable * 0.2));
   const other = (usable - firstCol) / Math.max(1, colCount - 1);
   const widths = table.headers.map((_, i) => (i === 0 ? firstCol : other));
   const maxPageHeight = 1800;

@@ -77,6 +77,17 @@ export type StationBoardNetwork = {
 
 export type StationBoardView = "edd" | "creturn" | "dsr" | "zero";
 
+/** Full DSR column labels (Excel / share image / board table — no abbreviations). */
+export const DSR_HEADERS = {
+  da: "DA's Name",
+  delivered: "Delivered",
+  failed: "Delivery Failed",
+  rejected: "Delivery Rejected",
+  oor: "Out on Road",
+  total: "Total",
+  dsrPct: "DSR%",
+} as const;
+
 /** Soft ink-friendly tint for Pickup % (avoid washed yellow). */
 export function pickupPctColor(pct: number): string {
   if (pct >= 80) return "#d9f0e3";
@@ -337,14 +348,14 @@ export function stationBoardSheets(
       station.board.daDsr.map((da) => ({
         Station: station.stationCode,
         Region: regionLabel(regionForStation(station.stationCode)),
-        "DA's Name": da.driverName || da.driverId,
+        [DSR_HEADERS.da]: da.driverName || da.driverId,
         "DA ID": da.driverId,
-        Delivered: da.delivered,
-        "Delivery Failed": da.failed,
-        "Delivery Rejected": da.rejected,
-        OOR: da.oor,
-        "Grand Total": da.total,
-        "DSR%": da.dsrPct,
+        [DSR_HEADERS.delivered]: da.delivered,
+        [DSR_HEADERS.failed]: da.failed,
+        [DSR_HEADERS.rejected]: da.rejected,
+        [DSR_HEADERS.oor]: da.oor,
+        [DSR_HEADERS.total]: da.total,
+        [DSR_HEADERS.dsrPct]: da.dsrPct,
         "Zero delivery": da.delivered === 0 ? "Yes" : "No",
       })),
     );
@@ -353,14 +364,14 @@ export function stationBoardSheets(
       dsrRows.push({
         Station: "Grand Total",
         Region: "",
-        "DA's Name": `${tot.daCount} DAs`,
+        [DSR_HEADERS.da]: `${tot.daCount} DAs`,
         "DA ID": "",
-        Delivered: tot.delivered,
-        "Delivery Failed": tot.failed,
-        "Delivery Rejected": tot.rejected,
-        OOR: tot.oor,
-        "Grand Total": tot.total,
-        "DSR%": tot.dsrPct,
+        [DSR_HEADERS.delivered]: tot.delivered,
+        [DSR_HEADERS.failed]: tot.failed,
+        [DSR_HEADERS.rejected]: tot.rejected,
+        [DSR_HEADERS.oor]: tot.oor,
+        [DSR_HEADERS.total]: tot.total,
+        [DSR_HEADERS.dsrPct]: tot.dsrPct,
         "Zero delivery": "",
       });
     }
@@ -374,26 +385,26 @@ export function stationBoardSheets(
     const zeroRows = zeroDas.map(({ station, da }) => ({
       Station: station.stationCode,
       Region: regionLabel(regionForStation(station.stationCode)),
-      "DA's Name": da.driverName || da.driverId,
-      Delivered: da.delivered,
-      "Delivery Failed": da.failed,
-      "Delivery Rejected": da.rejected,
-      OOR: da.oor,
-      "Grand Total": da.total,
-      "DSR%": da.dsrPct,
+      [DSR_HEADERS.da]: da.driverName || da.driverId,
+      [DSR_HEADERS.delivered]: da.delivered,
+      [DSR_HEADERS.failed]: da.failed,
+      [DSR_HEADERS.rejected]: da.rejected,
+      [DSR_HEADERS.oor]: da.oor,
+      [DSR_HEADERS.total]: da.total,
+      [DSR_HEADERS.dsrPct]: da.dsrPct,
     }));
     if (zeroRows.length) {
       const tot = sumDaDsr(zeroDas.map(({ da }) => da));
       zeroRows.push({
         Station: "Grand Total",
         Region: "",
-        "DA's Name": `${tot.daCount} DAs`,
-        Delivered: tot.delivered,
-        "Delivery Failed": tot.failed,
-        "Delivery Rejected": tot.rejected,
-        OOR: tot.oor,
-        "Grand Total": tot.total,
-        "DSR%": tot.dsrPct,
+        [DSR_HEADERS.da]: `${tot.daCount} DAs`,
+        [DSR_HEADERS.delivered]: tot.delivered,
+        [DSR_HEADERS.failed]: tot.failed,
+        [DSR_HEADERS.rejected]: tot.rejected,
+        [DSR_HEADERS.oor]: tot.oor,
+        [DSR_HEADERS.total]: tot.total,
+        [DSR_HEADERS.dsrPct]: tot.dsrPct,
       });
     }
     sheets.push({ name: "Zero deliveries", rows: zeroRows });

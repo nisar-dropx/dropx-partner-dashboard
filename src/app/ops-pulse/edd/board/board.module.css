@@ -380,9 +380,12 @@
 
 .table.zero td:not(:first-child):not(:nth-child(2)),
 .table.zero th:not(:first-child):not(:nth-child(2)) {
-  width: 46px;
-  min-width: 40px;
-  max-width: 54px;
+  width: 88px;
+  min-width: 72px;
+  max-width: 110px;
+  white-space: normal;
+  line-height: 1.2;
+  vertical-align: bottom;
 }
 
 .table tfoot td {
@@ -625,7 +628,7 @@
 .shareColsWide,
 .shareRowWide {
   display: grid;
-  grid-template-columns: minmax(72px, 1.4fr) repeat(6, minmax(28px, 0.7fr));
+  grid-template-columns: minmax(88px, 1.5fr) repeat(6, minmax(52px, 0.85fr));
   gap: 4px;
   align-items: center;
   padding: 6px 8px;
@@ -637,8 +640,15 @@
   background: #1f7a4d;
   color: #fff;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   font-size: 10px;
+  line-height: 1.2;
+  align-items: end;
+}
+
+.shareColsWide span {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .shareRowWide {
