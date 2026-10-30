@@ -126,9 +126,11 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
     const paymentMethodBreakdown = summarizePaymentMethodAmounts(workerSegments.flatMap((segment) =>
       segment.row.paymentMethodBreakdown.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount }))
     ));
-    const status = workerSegments.some(segment=>segment.row.status==="Route distance pending") ? "Route distance pending" : workerSegments.some((segment) => segment.row.status === "Configuration incomplete")
+    const status = workerSegments.some((segment) => segment.row.status === "Configuration incomplete")
       ? "Configuration incomplete"
-      : grossPayment > 0
+      : workerSegments.some(segment => segment.row.status === "Route distance pending")
+        ? "Route distance pending"
+        : grossPayment > 0
         ? "Ready for review"
         : workerSegments.some((segment) => ["No eligible attendance", "No eligible accrual"].includes(segment.row.status))
           ? "No eligible accrual"
@@ -145,6 +147,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
         ...first.row,
         paymentSourceIdentity: paymentSourceIdentities[0],
         paymentSourceIdentities,
+        paymentDetailsAvailable: workerSegments.every(segment => segment.row.paymentDetailsAvailable),
         id: `provider-${workforceId}-${locationId || "unassigned"}`,
         providerMemberId: joined(workerSegments.map((segment) => segment.row.providerMemberId), "-"),
         providerMemberName: joined(workerSegments.map((segment) => segment.row.providerMemberName), "-"),

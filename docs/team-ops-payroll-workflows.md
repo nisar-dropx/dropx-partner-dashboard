@@ -1,5 +1,16 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Recovery from calculated Workforce pay — 30 October 2026
+
+Pending route distance excludes only the unknown fuel allowance from calculated pay;
+it does not make an otherwise valid mapped payout unavailable for loss recovery.
+Recovery uses the payout engine's calculated net, then subtracts bank-paid amounts and
+other recovery reservations. Publication remains required for payment, not assignment.
+Configuration errors take precedence over route-pending status, including across merged
+provider segments. Missing payment details, invalid amounts, closed/processing payroll
+and the configured ready-pay policy still block use. Recovery shows the actual payout
+blocker instead of reporting every unavailable payout as missing mapping.
+
 ## Bank upload reconciliation — 30 October 2026
 
 The Dashboard bank uploader finalizes at most 20 rows per database transaction,

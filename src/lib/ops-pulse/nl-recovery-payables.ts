@@ -14,6 +14,7 @@ import {
 } from "./loss-recovery-controls";
 
 import { availablePayrollMonths, recoveryDirectoryWithPayroll, type RecoveryPayrollWindow } from "./loss-open-payroll";
+import { lossWorkforcePayable } from "./loss-workforce-payable";
 
 export async function loadRecoveryDirectory(company: string, station: string, departedOnly = false) {
   const directory = await supabaseAdmin!.rpc(departedOnly ? "loss_recovery_recent_leavers" : "loss_recovery_people_with_locations", {p_company:company,p_station:station});
@@ -228,21 +229,7 @@ export async function loadRecoveryPayables(
       const rows = payouts.rows.filter(
         (p) => p.dropxId === person.employee_code,
       );
-      if (
-        rows.length &&
-        rows.every(
-          (p) =>
-            p.paymentDetailsAvailable &&
-            policy.workforce_payout_statuses.includes(p.status),
-        )
-      ) {
-        payable = Math.max(
-          0,
-          Math.round(rows.reduce((sum, p) => sum + p.netAmount, 0) * 100) / 100,
-        );
-        gross = Math.round(rows.reduce((sum, p) => sum + p.grossPayment, 0) * 100) / 100;
-        source = "Dashboard workforce payout worksheet";
-      }
+      if (!payouts.error) ({ payable, gross, source } = lossWorkforcePayable(rows, policy.workforce_payout_statuses));
     }
     // Available money excludes paid bank instructions. An issued file freezes
     // this payroll, even if its nominal remaining balance is positive.
