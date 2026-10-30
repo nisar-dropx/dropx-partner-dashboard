@@ -6,6 +6,7 @@ import {
   mayViewLossApprovals,
 } from "@/lib/ops-pulse/loss-recovery-controls";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { stationEvidenceError } from "@/lib/ops-pulse/loss-station-evidence";
 export const dynamic = "force-dynamic";
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
@@ -92,11 +93,19 @@ async function transition(b: Record<string, any>) {
     note: String(b.note || "").trim(),
     reason: String(b.reason || "").trim(),
     evidence_url: String(b.evidence_url || "").trim(),
+    ...(b.action === "response" ? {
+      cctv_url: b.cctv_not_required === true ? "" : String(b.cctv_url || "").trim(),
+      cctv_not_required: b.cctv_not_required === true,
+    } : {}),
     tt_reference: String(b.tt_reference || "").trim(),
     tt_url: String(b.tt_url || "").trim(),
     followup_on: b.followup_on || null,
     recovery_month: b.recovery_month || null,
   };
+  if (b.action === "response") {
+    const validationError = stationEvidenceError(details);
+    if (validationError) throw Error(validationError);
+  }
   for (const value of [details.evidence_url, details.tt_url])
     if (value) {
       const u = new URL(value);

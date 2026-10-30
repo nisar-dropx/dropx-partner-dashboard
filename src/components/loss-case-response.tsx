@@ -4,6 +4,8 @@ import { TrackingDetailModal } from "./tracking-detail-modal";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 import { responseActions } from "@/lib/ops-pulse/loss-response-actions";
+import { stationEvidenceError, type StationEvidence } from "@/lib/ops-pulse/loss-station-evidence";
+import evidenceStyles from "./loss-case-response.module.css";
 type Data = {
   window: {
     version: number;
@@ -12,7 +14,7 @@ type Data = {
     tt_reference?: string;
     tt_url?: string;
     recovery_month?: string;
-    response_details?: Record<string, string>;
+    response_details?: Partial<StationEvidence>;
   };
   events: {
     id: string;
@@ -21,6 +23,7 @@ type Data = {
     evidence_url?: string;
     actor_name: string;
     created_at: string;
+    tracking?: { details?: Partial<StationEvidence> };
   }[];
   canActivate: boolean;
   readOnly: boolean;
@@ -60,6 +63,8 @@ export function LossCaseResponse({
     [note, setNote] = useState(""),
     [reason, setReason] = useState(""),
     [evidence, setEvidence] = useState(""),
+    [cctv, setCctv] = useState(""),
+    [cctvNotRequired, setCctvNotRequired] = useState(false),
     [ticket, setTicket] = useState(""),
     [ticketUrl, setTicketUrl] = useState(""),
     [due, setDue] = useState(""),
@@ -80,7 +85,10 @@ export function LossCaseResponse({
         setData(j);
         setReason(j.window.response_details?.reason || "");
         setEvidence(j.window.response_details?.evidence_url || "");
-        setTicket(j.window.tt_reference || "");
+        setCctv(j.window.response_details?.cctv_url || "");
+        setCctvNotRequired(j.window.response_details?.cctv_not_required === true);
+        setNote(embedded || !j.canActivate ? j.window.response_details?.note || "" : "");
+        setTicket((embedded || !j.canActivate ? j.window.response_details?.tt_reference : j.window.tt_reference) || "");
         setTicketUrl(j.window.tt_url || "");
 
       })
@@ -88,10 +96,15 @@ export function LossCaseResponse({
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [month, caseKey, revision]);
+  }, [month, caseKey, revision, embedded]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!data || !selectedAction) return;
+    if (selectedAction === "response") {
+      const validationError = stationEvidenceError({ reason, note, tt_reference: ticket,
+        evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
+      if (validationError) { setError(validationError); return; }
+    }
     setBusy(true);
     setError("");
     try {
@@ -106,6 +119,8 @@ export function LossCaseResponse({
           note,
           reason,
           evidence_url: evidence,
+          cctv_url: cctvNotRequired ? "" : cctv,
+          cctv_not_required: cctvNotRequired,
           tt_reference: ticket,
           tt_url: ticketUrl,
           followup_on: due,
@@ -184,16 +199,7 @@ export function LossCaseResponse({
                 <summary>Station submission</summary>
                 <strong>{data.window.response_details.reason}</strong>
                 <p>{data.window.response_details.note}</p>
-                <span>
-                  Ticket {data.window.response_details.tt_reference} ·{" "}
-                </span>
-                <a
-                  href={data.window.response_details.evidence_url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Footage / evidence ↗
-                </a>
+                <EvidenceLinks details={data.window.response_details} />
               </details>
             ) : null}
             {data.window.recovery_month ? (
@@ -227,7 +233,7 @@ export function LossCaseResponse({
                   {selectedAction === "response" ? (
                     <>
                       <label>
-                        Reason
+                        Redispute reason *
                         <input
                           value={reason}
                           onChange={(e) => setReason(e.target.value)}
@@ -237,7 +243,7 @@ export function LossCaseResponse({
                         />
                       </label>
                       <label>
-                        Ticket reference
+                        Cloak ticket ID *
                         <input
                           value={ticket}
                           onChange={(e) => setTicket(e.target.value)}
@@ -247,15 +253,33 @@ export function LossCaseResponse({
                         />
                       </label>
                       <label>
-                        Footage / CCTV evidence link
+                        Supporting photos / files link *
                         <input
                           type="url"
                           value={evidence}
                           onChange={(e) => setEvidence(e.target.value)}
                           required
-                          placeholder="https://…"
+                          maxLength={2000}
+                          placeholder="https://drive.google.com/…"
                         />
                       </label>
+                      <div className={evidenceStyles.cctv}>
+                        <label>
+                          CCTV footage / folder link{cctvNotRequired ? "" : " *"}
+                          <input type="url" value={cctv} onChange={(e) => setCctv(e.target.value)}
+                            required={!cctvNotRequired} disabled={cctvNotRequired} maxLength={2000}
+                            placeholder="https://drive.google.com/…" />
+                        </label>
+                        <label className={evidenceStyles.checkbox}>
+                          <input type="checkbox" checked={cctvNotRequired}
+                            onChange={(e) => setCctvNotRequired(e.target.checked)} />
+                          CCTV footage not required
+                        </label>
+                      </div>
+                      <details className={evidenceStyles.help}>
+                        <summary>ⓘ Sharing files</summary>
+                        <span>Upload photos/videos to Google Drive. For multiple files, share one folder. Set Share → General access → Anyone with the link → Viewer, then paste the link. The same folder can cover both fields.</span>
+                      </details>
                     </>
                   ) : null}
                   {["tracking", "won", "lost"].includes(selectedAction) ? (
@@ -308,7 +332,7 @@ export function LossCaseResponse({
                 </div>
                 <label>
                     {selectedAction === "response"
-                      ? "Supporting details"
+                      ? "Detailed description *"
                       : "Decision / update"}
                     <textarea
                       value={note}
@@ -317,6 +341,7 @@ export function LossCaseResponse({
                       minLength={10}
                       maxLength={4000}
                       required
+                      placeholder={selectedAction === "response" ? "Explain why the loss should be reconsidered and what the evidence shows." : undefined}
                     />
                   </label>
                 <div className={styles.toolbar}>
@@ -343,8 +368,9 @@ export function LossCaseResponse({
                     timeZone: "Asia/Kolkata",
                   })}
                 </small>
+                {e.action === "response" && e.tracking?.details?.reason ? <strong>{e.tracking.details.reason}</strong> : null}
                 <p>{e.note}</p>
-                {e.evidence_url ? (
+                {e.action === "response" && e.tracking?.details ? <EvidenceLinks details={e.tracking.details} /> : e.evidence_url ? (
                   <a href={e.evidence_url} target="_blank" rel="noreferrer">
                     Evidence ↗
                   </a>
@@ -356,4 +382,13 @@ export function LossCaseResponse({
       )}
     </section>
   );
+}
+
+function EvidenceLinks({ details }: { details: Partial<StationEvidence> }) {
+  return <div className={evidenceStyles.links}>
+    {details.tt_reference ? <span>Cloak ticket: {details.tt_reference}</span> : null}
+    {details.evidence_url ? <a href={details.evidence_url} target="_blank" rel="noreferrer">Supporting files ↗</a> : null}
+    {details.cctv_not_required === true ? <span>CCTV not required</span> : details.cctv_url ?
+      <a href={details.cctv_url} target="_blank" rel="noreferrer">CCTV footage ↗</a> : null}
+  </div>;
 }

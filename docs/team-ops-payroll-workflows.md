@@ -727,3 +727,16 @@ manager opens it. It has no next-action selector or activation/removal/review op
 Exceptions keeps Enable/Disable separate from Redispute tracking's review and vendor
 outcome form. Managers cannot enter station evidence from that management form;
 they inspect the submitted evidence there. Server scope and role checks are unchanged.
+
+### Mandatory station redispute evidence — 30 October 2026
+
+Station responses require a redispute reason, Cloak ticket ID, detailed description,
+supporting photos/files HTTPS link and CCTV HTTPS link. File or folder links are
+accepted; a compact hint explains Google Drive's Anyone with the link / Viewer
+setting. An explicit `cctv_not_required: true` checkbox waives only CCTV, never the
+supporting files, ticket or description. UI and authenticated API share validation.
+The existing service-role-only transition stores `cctv_url` and the waiver in
+`response_details` and immutable event `tracking.details`; no schema change is needed.
+Reviewers see both links or the waiver, including in submission history. Returned
+submissions restore their original evidence for correction. Existing submissions
+remain readable; the stricter requirements apply on the next station submission.
