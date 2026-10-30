@@ -173,31 +173,51 @@ function extractInsight(text: string, heading: RegExp): string | undefined {
   return usableStoreHealthInsight(body ? normalizeSpace(body) : undefined);
 }
 
+const KNOWN_METRIC_TARGETS = [
+  "30 s", "20/30 s", "95%", "0", "98.5%", "<1.5%", "100%", "<=2%", "TBC", "Pass", "85%+"
+] as const;
+
+/** Reject insight/wrap lines that end like a metric but are narrative (e.g. "PPI … Red 10 0 days"). */
+function isPlausibleMetricActual(actualText: string): boolean {
+  const text = actualText.trim();
+  if (!text) return false;
+  if (/^no data$/i.test(text)) return true;
+  if (/^(pass|fail(?:ed)?)\b/i.test(text)) return true;
+  // "15 / 15", "34 of 171", "1 of 2"
+  if (/^\d[\d,]*\s*(?:\/|of)\s*\d/i.test(text)) return true;
+  // Seconds, percents, plain counts, or "16.4 (18 on 1,099 orders)"
+  if (/-?[\d,]+(?:\.\d+)?/.test(text)) return true;
+  return false;
+}
+
 function parseMetricLine(line: string, definition: StoreHealthMetricDefinition): StoreHealthMetricValue | null {
   const normalized = line.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
   if (!new RegExp(`^${escapeRegExp(definition.label)}\\b`, "i").test(normalized)) return null;
+  // Metric table rows end with status + weight + points. Insight wraps do not.
   const statusMatch = normalized.match(/\b(Green|Amber|Red|Not scored)\s+(\d+(?:\.\d+)?)\s+(-|\d+(?:\.\d+)?)\s*$/i);
   if (!statusMatch || statusMatch.index == null) return null;
   const status = parseStatus(statusMatch[1]) ?? "Not scored";
   const weight = Number(statusMatch[2]);
   const points = statusMatch[3] === "-" ? null : Number(statusMatch[3]);
   const middle = normalized.slice(definition.label.length, statusMatch.index).trim();
-  // Drop leading target token(s); keep note fragments with the actual value.
-  const knownTargets = [
-    definition.targetText,
-    "30 s", "20/30 s", "95%", "0", "98.5%", "<1.5%", "100%", "<=2%", "TBC", "Pass", "85%+"
-  ];
-  let actualText = middle;
+  // Require a known target after the label so network notes cannot masquerade as rows.
+  const knownTargets = [definition.targetText, ...KNOWN_METRIC_TARGETS];
+  let actualText = "";
   let targetText = definition.targetText;
-  for (const target of [...new Set(knownTargets)]) {
+  let matchedTarget = false;
+  // Longer targets first so "20/30 s" wins over "30 s" / "0".
+  const targetsByLength = [...new Set(knownTargets)].sort((left, right) => right.length - left.length);
+  for (const target of targetsByLength) {
     const pattern = new RegExp(`^${escapeRegExp(target)}\\s+(.+)$`, "i");
     const match = middle.match(pattern);
     if (match) {
       targetText = target;
       actualText = match[1].trim();
+      matchedTarget = true;
       break;
     }
   }
+  if (!matchedTarget || !isPlausibleMetricActual(actualText)) return null;
   // Collapse parenthetical notes that were split as separate cells: "16.4 (18 on 1,099 orders)"
   actualText = actualText.replace(/\s+\(/g, " (").replace(/\s+\)/g, ")");
   const scored = status !== "Not scored";
@@ -210,6 +230,30 @@ function parseMetricLine(line: string, definition: StoreHealthMetricDefinition):
     points: scored && points != null && Number.isFinite(points) ? points : null,
     scored
   };
+}
+
+/**
+ * Prefer a real metric table row when insight/network copy wraps onto a line that
+ * also starts with a short label (e.g. "PPI 29.2 s (network), …").
+ * Exported for regression tests of wrap/collision cases.
+ */
+export function findStoreHealthMetricValue(
+  lines: string[],
+  definition: StoreHealthMetricDefinition
+): StoreHealthMetricValue | null {
+  const labelPattern = new RegExp(`^${escapeRegExp(definition.label)}\\b`, "i");
+  let fallback: StoreHealthMetricValue | null = null;
+  for (const entry of lines) {
+    const normalized = entry.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+    if (!labelPattern.test(normalized)) continue;
+    const value = parseMetricLine(normalized, definition);
+    if (!value) continue;
+    // Exact catalog weight is the table row; keep scanning so a later table row wins
+    // over an earlier coincidental parse (should be rare after target/actual checks).
+    if (value.weight === definition.weight) return value;
+    fallback ??= value;
+  }
+  return fallback;
 }
 
 function parseStorePage(pageText: string, pageNumber: number, _performanceDate: string): StoreHealthStoreRow | null {
@@ -257,9 +301,7 @@ function parseStorePage(pageText: string, pageNumber: number, _performanceDate: 
 
   const metrics: Record<string, StoreHealthMetricValue> = {};
   for (const definition of storeHealthMetricDefinitions) {
-    const line = lines.find((entry) => new RegExp(`^${escapeRegExp(definition.label)}\\b`, "i").test(entry.replace(/\|/g, " ").replace(/\s+/g, " ").trim()));
-    if (!line) continue;
-    const value = parseMetricLine(line, definition);
+    const value = findStoreHealthMetricValue(lines, definition);
     if (value) metrics[definition.key] = value;
   }
   if (Object.keys(metrics).length < 8) return null;
