@@ -650,3 +650,15 @@ redisputes and payroll deduction history remain unchanged.
 - Paid amounts and issued/processing bank instructions are excluded. The picker reveals only the maximum recovery capacity for former People, not gross salary or salary components. Saving rechecks payroll state and balance under bank/payroll locks. Former-worker or older-month plans still require independent approval.
 - An explicitly validated allocation receives `unpaid_open_payroll`, but the configured `payroll_start_month` is now a hard lower boundary (September 2026 after the reconciliation above). Earlier unpaid months are excluded from directory eligibility, new saves and due payroll lines. October and later open unpaid months remain available after the normal fifth-day default moves forward. Existing recovery keys, locked deductions, source and redispute gates remain unchanged. Migration `20261029190100_loss_payroll_start_boundary.sql` supersedes the earlier rollout-month exception.
 - People refresh may append new whole loss lines to a partly-paid open snapshot only within its unpaid balance. It preserves all previous items/earnings, never edits issued bank files, and verifies run/bank/due hashes atomically. Workforce calculation also respects paid and processing bank amounts.
+
+### Exception selection and save feedback — 30 October 2026
+
+Manage exceptions is navigation, not a save CTA. Search by Shipment ID/station/month,
+select up to 100 cases, then Enable or Disable the selected exception. Manager notes
+are optional; the API supplies an explicit audit reason when omitted. Station evidence,
+independent review, role checks, source eligibility and payroll gates are unchanged.
+Excel uses the same workflow with Enable/Disable, preview and optional notes. Successful
+rows update from the saved RPC state without a page refresh. Failed rows stay available
+for retry; version conflicts return fresh scoped state and require an explicit retry.
+Active exceptions remain revocable after the source changes. No production shipment or
+payroll amount is changed by this UI release.

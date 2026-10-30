@@ -1,9 +1,9 @@
 const ts=require('typescript'),fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-let auth,calls=[];
+let auth,calls=[], conflict=false, lookups=[];
 function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';const m={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{
  if(id.endsWith('/authorization'))return{getAuthorization:async()=>auth,hasPermission:a=>!a.denied};
  if(id.endsWith('/nl-recovery-context'))return{recoveryContext:async(month,key,edit,pending)=>{if(key==='outside'||auth.readOnly||auth.denied||key==='initial'&&!pending)throw Error('Case unavailable');return{auth,scope:{company:'C'},caseKey:key,report:key==='slp-initial'?'slp':'nl',finalSeenAt:null};}};
- if(id.endsWith('/supabase-admin'))return{supabaseAdmin:{rpc:async(name,args)=>{calls.push({name,args});return{data:{version:args.p_version+1},error:null};}}};
+ if(id.endsWith('/supabase-admin'))return{supabaseAdmin:{rpc:async(name,args)=>{calls.push({name,args});return conflict?{data:null,error:{code:'P0001',message:'This shipment changed. Reload before continuing.'}}:{data:{version:args.p_version+1},error:null};},from:table=>{const q={select:()=>q,eq:(k,v)=>{lookups.push([table,k,v]);return q;},maybeSingle:async()=>({data:{version:8,enabled:true},error:null})};return q;}}};
  if(id.startsWith('@/'))return load('src/'+id.slice(2));if(id.startsWith('.'))return load(path.join(path.dirname(file),id));return require(id);
 },m,m.exports);return m.exports;}
 (async()=>{
@@ -20,10 +20,32 @@ function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';c
  for(const roleCode of ['OPERATIONS_SLPM','FINANCE_FINMGR','OPERATIONS_NH','OPERATIONS_MP','MANAGING_PARTNER']){auth={...base,roleCode};assert.equal((await post()).status,200);}
  for(const overrides of [{readOnly:true},{denied:true}]){auth={...base,...overrides};const before=calls.length;assert.equal((await post()).status,403);assert.equal(calls.length,before);}
  auth=base;
- for(const rows of [[],[null],[row,row],[{...row,kind:'__proto__'}],[{...row,reason:''}],Array(101).fill(row)]){const before=calls.length;assert.equal((await post(rows)).status,400);assert.equal(calls.length,before);}
+ for(const rows of [[],[null],[row,row],[{...row,kind:'__proto__'}],[{...row,reason:23}],[{...row,reason:'x'.repeat(2001)}],Array(101).fill(row)]){const before=calls.length;assert.equal((await post(rows)).status,400);assert.equal(calls.length,before);}
  assert.equal((await post([row],'https://evil.example')).status,403);
  const mixed=await (await post([row,{...row,case_key:'outside'},{...row,case_key:'initial'},{...row,case_key:'slp-initial'}])).json();assert.deepEqual(mixed.results.map(r=>r.ok),[true,false,false,false]);
- await post([{...row,kind:'redispute'}]);assert.equal(calls.at(-1).name,'nl_redispute_transition');assert.equal(calls.at(-1).args.p_action,'activate');
+ await post([{...row,kind:'redispute',reason:''}]);assert.equal(calls.at(-1).args.p_details.note,'Enable Redispute · manager request');assert.equal(calls.at(-1).name,'nl_redispute_transition');assert.equal(calls.at(-1).args.p_action,'activate');
  await post([{...row,kind:'next_month',enabled:false}]);assert.equal(calls.at(-1).name,'nl_loss_exception_set');assert.equal(calls.at(-1).args.p_enabled,false);
+ for(const kind of ['redispute','next_month','installments'])for(const enabled of [true,false]){
+  const saved=await(await post([{...row,kind,enabled,reason:undefined}])).json();assert.equal(saved.results[0].ok,true);
+  assert.equal(calls.at(-1).args.p_details?.note?.length>=10||calls.at(-1).args.p_reason?.length>=10,true);
+ }
+ conflict=true;
+ const conflictResult=await(await post([{...row,kind:'redispute'}])).json();
+ assert.equal(conflictResult.results[0].ok,false);assert.equal(conflictResult.results[0].current.version,8);
+ assert.match(conflictResult.results[0].error,/refreshed status/);
+ assert.ok(lookups.some(v=>v[1]==='company_id'&&v[2]==='C'));
+ conflict=false;
+ const {parseExceptionBatch,canEnableException}=load('src/lib/ops-pulse/loss-exception-batch');
+ const sample={month:'2026-09',case_key:'515174733475',station_code:'KTUR',report:'nl',source_present:true,source_status:'Recoverable',details:{tid:'515174733475',case_status:'resolved',extra:{current_sla_stage:'Completed'}}};
+ const batch={'Loss month':'2026-09','Shipment ID':'515174733475',Station:'KTUR',Exception:'Redispute',Action:'Enable'};
+ const state=()=>({version:7,enabled:true});
+ assert.equal(canEnableException(sample,['Recoverable']),true);
+ const parsed=parseExceptionBatch([batch],[sample],['Recoverable'],state);assert.equal(parsed[0].reason,'');assert.equal(parsed[0].version,7);
+ assert.throws(()=>parseExceptionBatch([batch,batch],[sample],['Recoverable'],state),/duplicate/);
+ assert.throws(()=>parseExceptionBatch([{...batch,'Shipment ID':'515174733475s'}],[sample],['Recoverable'],state),/must match/);
+ assert.throws(()=>parseExceptionBatch([{...batch,Station:'OTHER'}],[sample],['Recoverable'],state),/must match/);
+ const removed={...sample,source_present:false};
+ assert.throws(()=>parseExceptionBatch([batch],[removed],['Recoverable'],state),/final recoverable/);
+ assert.equal(parseExceptionBatch([{...batch,Action:'Disable'}],[removed],['Recoverable'],state)[0].enabled,false);
  console.log('PASS exception roles, read-only, scope, bulk validation, redispute routing, submission filtering and amount-dependent monthly choices');
 })().catch(e=>{console.error(e);process.exitCode=1;});
