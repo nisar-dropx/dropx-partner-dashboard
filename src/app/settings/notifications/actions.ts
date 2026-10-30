@@ -9,6 +9,26 @@ import {validateDigestSettings} from '@/lib/digest-settings';
 import {validatePerformanceDataUpdateSettings} from '@/lib/performance-data-update-settings';
 import {sendCurrentCodStatus} from '@/lib/send-current-cod-status';
 import {registrationEvents} from '@/lib/registration-pendency';
+export async function saveRosterPendencyDigestSettings(form:FormData){
+ const auth=await requirePagePermission('ops_notification_settings','edit'),company=requireCompanyId(auth),db=digestDatabase();
+ const state=String(form.get('state')||''),time=String(form.get('schedule_time')||'');
+ let error='';
+ try{
+  if(!['enabled','paused','disabled'].includes(state)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(time))throw Error('Choose a valid roster reminder schedule.');
+  const old=await db.from('portal_notification_controls').select('config').eq('company_id',company).eq('portal','ops').eq('event_key','roster_pendency_morning').single();
+  if(old.error)throw Error('Roster reminder schedule unavailable.');
+  if(state==='enabled'&&old.data.config.delivery_ready!==true)throw Error('Production verification is required before enabling this schedule.');
+  const saved=await db.from('portal_notification_controls').update({
+    state,
+    paused_until:null,
+    config:{...old.data.config,schedule_time:time,day_offset:0,timezone:'Asia/Kolkata',send_zero_cases:false},
+    updated_by:auth.userId,
+    updated_at:new Date().toISOString()
+  }).eq('company_id',company).eq('portal','ops').eq('event_key','roster_pendency_morning').select('event_key').single();
+  if(saved.error)throw Error('Roster reminder schedule could not be saved.');
+ }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
+ revalidatePath('/settings/notifications');redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#roster-pendency');
+}
 export async function saveRegistrationDigestSettings(form:FormData){
  const auth=await requirePagePermission('ops_notification_settings','edit'),company=requireCompanyId(auth),db=digestDatabase();
  const event=String(form.get('event')||''),state=String(form.get('state')||''),time=String(form.get('schedule_time')||'');

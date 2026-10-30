@@ -172,6 +172,18 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      const ids=saved.data.scope_summary?.stationIds;
      if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw new Error('Recipient ID-mapping scope changed; notification held.');
     }
+    if(delivery.event_key.startsWith('roster_pendency_')){
+     const control=controlResult.data as DigestControl;
+     if(dueReportDate(control)!==delivery.report_date)throw Error('Roster reminder window ended; stale reminder held.');
+     const snapshot=await import('./roster-pendency-data').then(({loadRosterPendency})=>loadRosterPendency(db,delivery.company_id,delivery.report_date,String(control.config.email_domain||'')));
+     const recipient=snapshot.recipients.find(row=>row.email===delivery.recipient_email);
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw Error(saved.error.message);
+     const planIds=saved.data.scope_summary?.planIds;
+     const stationIds=saved.data.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(planIds)||!planIds.length||planIds.some((id:string)=>!recipient.planKeys.includes(id)))throw Error('Roster completed or manager routing changed; saved reminder held.');
+     if(!Array.isArray(stationIds)||!stationIds.length||stationIds.some((id:string)=>!recipient.stationIds.includes(id)))throw Error('Roster station scope changed; saved reminder held.');
+    }
     if(delivery.event_key.startsWith('registration_pendency_')){
      const control=controlResult.data as DigestControl;
      if(dueReportDate(control)!==delivery.report_date)throw Error('Registration reminder window ended; stale reminder held.');

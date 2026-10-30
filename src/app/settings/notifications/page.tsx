@@ -11,6 +11,7 @@ import {digestDatabase} from '@/lib/portal-digest-delivery';
 import {saveAdHocDigestSettings,saveDigestSettings,saveLossRecoveryDigestSettings,savePerformanceDataUpdateSettings} from './actions';
 import {PerformanceDataUpdateSettings} from '@/components/performance-data-update-settings';
 import {RegistrationNotificationSettings} from '@/components/registration-notification-settings';
+import {RosterNotificationSettings} from '@/components/roster-notification-settings';
 export const dynamic='force-dynamic';
 export default async function NotificationSettings({searchParams}:{searchParams?:{error?:string;saved?:string}}){
  const auth=await requirePagePermission('ops_notification_settings','access');const company=requireCompanyId(auth);const db=digestDatabase();
@@ -31,6 +32,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  <InsightNotificationSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly}/>
  <AmazonNowNotificationSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly} domain={String(control.data.config.email_domain || "")}/>
  <RegistrationNotificationSettings companyId={company} canEdit={canEdit} ownerUserId={isCompanyOwner(auth)&&!auth.isPreview&&!auth.readOnly?auth.userId:undefined} ownerEmail={auth.email}/>
+ <RosterNotificationSettings companyId={company} canEdit={canEdit}/>
  {adhoc.data?<section id="adhoc-report"><h2>Ad hoc costs · Morning report</h2><a className="button" href="/api/ops-pulse/adhoc-email-preview" target="_blank" rel="noreferrer">Preview / send sample to me</a><p>Van, Driver and DA · Previous day and MTD · Estimated vs actual Excel · Monthly replies.</p><DigestSettingsForm control={adhoc.data} action={saveAdHocDigestSettings} canEdit={canEdit} receipts={adhocHistory.data||[]}/></section>:null}
  <LossReminderSettings companyId={company} canEdit={canEdit && !auth.isPreview && !auth.readOnly}/>
  <CodNotificationSettings companyId={company} auth={auth}/>
