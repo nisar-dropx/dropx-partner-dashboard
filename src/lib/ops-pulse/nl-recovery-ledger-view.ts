@@ -3,6 +3,8 @@
 export type LedgerStatus = "redispute_pending" | "redispute_won" | "awaiting_approval" | "returned" | "scheduled" | "in_progress" | "recovered" | "needs_review" | "exit_balance" | "written_off";
 
 export type LedgerLine = {
+  write_off_enabled?: boolean;
+  funded_pending?: number;
   month: string;
   case_key: string;
   report: "nl" | "slp" | "station";

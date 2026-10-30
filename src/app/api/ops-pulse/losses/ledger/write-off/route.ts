@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const month = String(body.month ?? ""), caseKey = String(body.case_key ?? ""), ref = String(body.employee_ref ?? "");
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !caseKey || caseKey.length > 300 || !/^(employee|workforce):[0-9a-f-]{36}$/i.test(ref))
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !caseKey || caseKey.length > 300 || !/^(employee|contractor|workforce):[0-9a-f-]{36}$/i.test(ref))
       return reply({ error: "Invalid recovery line." }, 400);
     if (reason.length < 10 || reason.length > 2000)
       return reply({ error: "Give a clear write-off reason (10–2,000 characters)." }, 400);

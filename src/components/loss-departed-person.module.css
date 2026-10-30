@@ -1,0 +1,12 @@
+.panel{display:grid;gap:10px;grid-column:1/-1;padding:12px;border:1px solid #dce3ed;border-radius:10px;background:#fff}
+.fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(150px,1fr);gap:10px}
+.panel label{display:grid;gap:5px;font-size:12px;font-weight:600;min-width:0}
+.panel select,.panel textarea{width:100%;min-width:0;padding:8px;border:1px solid #dce3ed;border-radius:6px;background:white;color:#172235}
+.panel small{font-size:11px;font-weight:400;color:#607089}
+.balances{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #e4e9f0;border-radius:7px;overflow:hidden}
+.balances>div{display:grid;gap:4px;padding:8px 10px}
+.balances strong{font-size:16px}
+.funded{background:#effaf3;color:#13733b}
+.pending{background:#fff7e8;color:#a15b09}
+.panel p{margin:0;font-size:12px}
+@media(max-width:620px){.fields{grid-template-columns:1fr}.balances{grid-template-columns:1fr}.balances>div{grid-template-columns:1fr auto;align-items:center}}

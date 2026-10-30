@@ -1,5 +1,7 @@
 "use client";
 import { LossCaseResponse } from "./loss-case-response";
+
+import { LossDepartedPerson, type DepartedPayCheck } from "./loss-departed-person";
 import { commonOpenPayrollMonths } from "@/lib/ops-pulse/loss-open-payroll";
 import { LossCaseRow, LossCaseColumns } from "./loss-case-row";
 import { useEffect, useMemo, useState } from "react";
@@ -272,6 +274,7 @@ export function RecoveryForm({
     old?.recovery_details || {},
   );
   const [caseKey, setCaseKey] = useState(row.case_key);
+  const [departedCheck,setDepartedCheck]=useState<DepartedPayCheck>({loading:true,error:"",month:"",amount:0});
   const [deductionMonths, setDeductionMonths] = useState<
     Record<string, string>
   >({});
@@ -359,7 +362,7 @@ export function RecoveryForm({
   const option = outcomes.find((o) => o.code === outcome);
   const deductionPeriod = plan.deduction_month || deductionMonths[option?.deduction_timing || "current_month"];
   const [designationFilter,setDesignationFilter] = useState("");
-  const selectedKey = [...selected].sort().join(",");
+  const selectedKey = outcome === "responsible_left" ? "" : [...selected].sort().join(",");
   useEffect(() => {
     if (!directoryReady || !selectedKey || !deductionPeriod) return;
     const controller = new AbortController();
@@ -434,6 +437,7 @@ export function RecoveryForm({
         !details.cctv_public_confirmed));
   const receiptError = outcome === "already_recovered" ? receivedRecoveryError(details, Number(row.amount)) : "";
   const cannotSave = !!receiptError ||
+    (outcome === "responsible_left" && (departedCheck.loading || !!departedCheck.error)) ||
     (option?.allocation_required && (salaryLoading || !!salaryError)) ||
     !!validation ||
     !!reasonError ||
@@ -496,6 +500,7 @@ export function RecoveryForm({
           (option?.allocation_required && salaryError
             ? salaryError
             : "") ||
+          (outcome === "responsible_left" && (departedCheck.error || (departedCheck.loading ? "Wait for the unpaid salary check." : ""))) ||
           "Complete all required recovery details before saving.",
       );
       return;
@@ -512,9 +517,9 @@ export function RecoveryForm({
           case_key: caseKey,
           version: recovery?.version || 0,
           outcome,
-          split_mode: option?.allocation_required ? mode : "none",
-          allocations: option?.allocation_required ? splits : [],
-          plan: option?.allocation_required
+          split_mode: outcome === "responsible_left" && departedCheck.amount>0 ? (settings?.allow_custom_split ? "custom" : "equal") : option?.allocation_required ? mode : "none",
+          allocations: outcome === "responsible_left" && departedCheck.amount>0 ? [{employee_ref:details.employee_ref,amount:row.amount}] : option?.allocation_required ? splits : [],
+          plan: outcome === "responsible_left" && departedCheck.amount>0 ? {mode:"full",deduction_month:departedCheck.month} : option?.allocation_required
             ? plan.mode === "installments"
               ? {...plan,deduction_month:deductionPeriod}
               : {
@@ -523,7 +528,7 @@ export function RecoveryForm({
                 }
             : { mode: "full" },
           remarks,
-          recovery_details: option?.dispute_fields_enabled || ["responsible_left", "already_recovered"].includes(outcome) ? details : {},
+          recovery_details: outcome === "responsible_left" ? {...details,payroll_amount:departedCheck.amount} : option?.dispute_fields_enabled || outcome === "already_recovered" ? details : {},
         }),
       });
       const j = await res.json();
@@ -738,12 +743,7 @@ export function RecoveryForm({
               <label>Received date<input required type="date" value={details.received_date || ""} onChange={e=>setDetails({...details,received_date:e.target.value})}/></label>
               {receiptError?<small>{receiptError}</small>:<small>Submitted for independent verification; no payroll deduction is created.</small>}
             </div> : null}
-            {outcome === "responsible_left" ? <div className={styles.departedFields}>
-              <label>Employee ID<input required value={details.employee_id || ""} maxLength={80} onChange={e => setDetails({ ...details, employee_id: e.target.value })} /></label>
-              <label>Full name<input required value={details.employee_name || ""} maxLength={160} onChange={e => setDetails({ ...details, employee_name: e.target.value })} /></label>
-              <label>Recovery owner &amp; next step<textarea required rows={2} maxLength={1000} placeholder="Who will follow up, by when, and how will the balance be recovered?" value={details.follow_up || ""} onChange={e => setDetails({ ...details, follow_up: e.target.value })} /></label>
-              <small>Departure does not close the loss. The full balance remains outstanding.</small>
-            </div> : null}
+            {outcome === "responsible_left" ? <LossDepartedPerson month={row.month} caseKey={caseKey} amount={Number(row.amount)} details={details} onChange={setDetails} onCheck={setDepartedCheck} initialPayrollMonth={old?.deduction_month}/> : null}
             {option?.allocation_required ? <label>Recovery payroll month<select value={deductionPeriod || ""} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}>{[...new Set([deductionMonths.current_month, exceptionOptions.next_month, old?.deduction_month, ...commonOpenPayrollMonths(people,selected)].filter(Boolean))].sort().map(m=><option key={m} value={m!}>{monthLabel(m!)}{m===exceptionOptions.next_month ? ' · enabled exception' : m===deductionMonths.current_month ? ' · current payroll' : commonOpenPayrollMonths(people,selected).includes(m!) ? ' · unpaid payroll open' : ' · existing schedule'}</option>)}</select><small>Unpaid months remain selectable until payroll closes. Later-month recovery needs an enabled exception.</small></label> : null}
             {option?.allocation_required ? (
               <div className={styles.allocation}>

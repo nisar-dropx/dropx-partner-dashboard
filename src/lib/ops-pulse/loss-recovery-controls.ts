@@ -154,6 +154,8 @@ export function receivedRecoveryError(details: Record<string, unknown>, amount: 
 }
 
 export function departedPersonError(details: Record<string, unknown>, remarks: string) {
+  if (!/^(employee|contractor|workforce):[0-9a-f-]{36}$/i.test(String(details.employee_ref ?? "")))
+    return "Select a verified person who left in the previous two months.";
   if (String(details.employee_id ?? "").trim().length < 2 || String(details.employee_name ?? "").trim().length < 2)
     return "Enter the responsible person’s employee ID and full name.";
   if (String(details.follow_up ?? "").trim().length < 10 || remarks.trim().length < 5)

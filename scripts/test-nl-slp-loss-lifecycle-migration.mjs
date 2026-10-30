@@ -620,5 +620,95 @@ eq('Transferred bank credit no longer reduces original worker balance',Number((a
 eq('August remains outside the configured boundary',(await db.query(`select * from loss_recovery_payroll_windows('${C}') where salary_month<'2026-09'`)).rows.length,0);
 eq('Settlement fix preserves private RPC permissions',(await one(`select has_function_privilege('authenticated','loss_recovery_payroll_windows(uuid,text[])','execute') allowed`)).allowed,false);
 
+// Recent leavers are independent of payroll readiness, but funding is verified atomically.
+await db.exec(`alter table workforce add column if not exists designation text;
+alter table workforce add column if not exists designation_id uuid;`);
+const recentSql=readFileSync('supabase/migrations/20261030131516_loss_recent_departed_recovery.sql','utf8');
+await db.exec(recentSql);await db.exec(recentSql);
+const previous=(await one("select (date_trunc('month',now() at time zone 'Asia/Kolkata')-interval '1 day')::date::text d")).d;
+await db.exec(`update hr_engagements set status='ended',end_date='${previous}' where employee_id in ('${uid(11)}','${uid(12)}','${uid(13)}','${uid(14)}');
+update hr_work_assignments set effective_to='${previous}' where engagement_id in ('${uid(31)}','${uid(32)}','${uid(33)}','${uid(34)}');
+update employees set is_active=false,last_working_date='${previous}' where id in ('${uid(11)}','${uid(12)}','${uid(13)}','${uid(14)}');
+update workforce set is_active=false,last_working_date='${previous}' where id in ('${W1}','${uid(90)}');`);
+const leavers=()=>db.query(`select employee_code,designation from loss_recovery_recent_leavers('${C}','${S}')`);
+const departedNames=(await leavers()).rows.map(p=>p.designation);
+eq('Recent former station staff included without payroll',departedNames.includes('Station Associate'),true);
+eq('Former cluster manager from historical reporting included',departedNames.includes('Cluster Manager'),true);
+eq('Former AOM included',departedNames.includes('Area Operations Manager'),true);
+eq('Higher roles excluded even when departed',departedNames.includes('National Head'),false);
+eq('Workforce mirror not duplicated',(await leavers()).rows.some(p=>p.employee_code==='MIRROR'),false);
+eq('Foreign company cannot read leavers',(await db.query(`select * from loss_recovery_recent_leavers('${uid(212)}','${S}')`)).rows.length,0);
+eq('Public cannot read leavers',(await one("select has_function_privilege('authenticated','loss_recovery_recent_leavers(uuid,uuid)','execute') ok")).ok,false);
+await db.exec(`insert into hr_engagements(id,company_id,person_id,employee_id,worker_code,start_date,status)
+ values('${uid(850)}','${C}','${uid(22)}','${uid(12)}','REHIRE',(now() at time zone 'Asia/Kolkata')::date,'active')`);
+eq('Rehired person excluded',(await leavers()).rows.some(p=>p.employee_code==='P2'),false);
+await db.exec(`delete from hr_engagements where id='${uid(850)}';
+update hr_engagements set end_date=(date_trunc('month',now())-interval '2 months 1 day')::date where employee_id='${uid(12)}'`);
+eq('Older departures excluded',(await leavers()).rows.some(p=>p.employee_code==='P2'),false);
+await db.exec(`update hr_engagements set end_date='${previous}' where employee_id='${uid(12)}';
+update hr_engagements set end_date=(now() at time zone 'Asia/Kolkata')::date where employee_id='${uid(13)}'`);
+eq('Current month not in previous two completed months',(await leavers()).rows.some(p=>p.employee_code==='P3'),false);
+await db.exec(`update hr_engagements set end_date='${previous}' where employee_id='${uid(13)}';
+insert into workforce(id,company_id,dropx_id,full_name,is_active,last_working_date,location_id)
+values('${uid(851)}','${C}','XPT-LEFT','Former XPT',false,'${previous}','${uid(205)}'),
+('${uid(852)}','${C}','SIB-LEFT','Former sibling',false,'${previous}','${uid(206)}')`);
+eq('Parent includes former XPT staff',(await leavers()).rows.some(p=>p.employee_code==='XPT-LEFT'),true);
+eq('XPT does not include sibling former staff',(await db.query(`select * from loss_recovery_recent_leavers('${C}','${uid(205)}') where employee_code='SIB-LEFT'`)).rows.length,0);
+eq('XPT includes former parent staff',(await db.query(`select * from loss_recovery_recent_leavers('${C}','${uid(205)}') where employee_code='P1'`)).rows.length,1);
+
+// Use a separate person so existing reservations from earlier tests cannot affect the example.
+await db.exec(`update hr_payroll_run_people set net_pay=850 where id='${uid(502)}';
+delete from hr_payroll_bank_lines where run_id='${uid(501)}';
+update nl_loss_recoveries set is_deleted=true where case_key='DEPARTED-OPEN';
+update nl_recovery_payables set payable=850,eligible=true,checked_at=now(),policy_updated_at=(select updated_at from nl_loss_sources)
+ where employee_ref='employee:${uid(11)}' and salary_month='2026-09';
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status)
+ values('${C}','nl','2026-09','LEFT-PARTIAL','BLR1',1000,'Recoverable'),
+ ('${C}','nl','2026-09','LEFT-NO-PAY','BLR1',1000,'Recoverable'),
+ ('${C}','nl','2026-09','LEFT-CHANGED','BLR1',1000,'Recoverable');`);
+const leftSave=(key,ref,funding=850,version=0)=>`select save_nl_recovery('${C}','2026-09','${key}',${version},'responsible_left','${funding>0?'custom':'none'}','${JSON.stringify(funding>0?[{employee_ref:ref,amount:1000}]:[])}','Departure verified; CM follows up next week','${CM}','Station','${JSON.stringify({employee_ref:ref,employee_id:'forged',employee_name:'forged',follow_up:'Cluster manager follows up next week',payroll_amount:funding})}','{"mode":"full","deduction_month":"2026-09"}')`;
+await db.exec(`update hr_payroll_run_people set net_pay=750 where id='${uid(502)}'`);
+await throws('Paid balance change requires fresh review',leftSave('LEFT-PARTIAL',`employee:${uid(11)}`),/salary changed/);
+await db.exec(`update hr_payroll_run_people set net_pay=850 where id='${uid(502)}'`);
+await db.query(leftSave('LEFT-PARTIAL',`employee:${uid(11)}`));
+const partial=(await one("select allocations,recovery_details,approval_status from nl_loss_recoveries where case_key='LEFT-PARTIAL'"));
+eq('Full assigned loss preserved',Number(partial.allocations[0].amount),1000);
+eq('Only available salary funded',Number(partial.allocations[0].payroll_amount),850);
+eq('Remaining 150 preserved for follow-up',Number(partial.recovery_details.remaining_amount),150);
+eq('Saved identity is canonical',partial.recovery_details.employee_id,'P1');
+eq('Former salary adjustment requires independent approval',partial.approval_status,'proposed');
+eq('Funded recovery key amount is 850',Number((await one(`select amount from nl_recovery_alloc_keys('2026-09','LEFT-PARTIAL','${JSON.stringify(partial.allocations[0])}')`)).amount),850);
+eq('No deduction before approval',(await db.query(`select * from nl_loss_recovery_due('${C}','2026-09','hrms') where case_key='LEFT-PARTIAL'`)).rows.length,0);
+await throws('Another case cannot reuse reserved salary',leftSave('LEFT-CHANGED',`employee:${uid(11)}`),/No unpaid salary/);
+await db.query(leftSave('LEFT-NO-PAY',`employee:${uid(12)}`,0));
+eq('Leaver without pay retains full outstanding',Number((await one("select recovery_details->>'remaining_amount' amount from nl_loss_recoveries where case_key='LEFT-NO-PAY'")).amount),1000);
+await throws('Free-text identity cannot bypass directory',leftSave('LEFT-CHANGED',`employee:${E1}`,0),/verified person/);
+await db.query(`select nl_loss_recovery_approve('${C}','2026-09','LEFT-PARTIAL',1,'${SLP}','Approver','Verified unpaid balance',null)`);
+eq('Approved payroll due is only 850',Number((await one(`select amount from nl_loss_recovery_due('${C}','2026-09','hrms') where case_key='LEFT-PARTIAL'`)).amount),850);
+const waiveLeft=(key,ref)=>`select waive_nl_recovery_balance('${C}','2026-09','${key}','${ref}','Verified unrecoverable exit balance','${SLP}','Approver')`;
+const grantLeft=(key,enabled,version)=>`select nl_loss_exception_set('${C}','2026-09','${key}','write_off',${enabled},${version},'Enable reviewed exit balance write-off','${SLP}','Approver')`;
+await throws('Write-off is disabled by default',waiveLeft('LEFT-PARTIAL',`employee:${uid(11)}`),/Enable Write-off/);
+await db.query(grantLeft('LEFT-PARTIAL',true,0));
+await throws('Exception cannot erase funded salary before collection',waiveLeft('LEFT-PARTIAL',`employee:${uid(11)}`),/Complete the approved salary adjustment/);
+await db.exec(`insert into hr_payroll_run_items(company_id,run_person_id,code,item_type,amount,metadata)
+values('${C}','${uid(502)}','OPS_LOSS_RECOVERY','deduction',850,jsonb_build_object('recovery_key',nl_recovery_key('2026-09','LEFT-PARTIAL','employee:${uid(11)}')));
+update hr_payroll_runs set status='approved' where id='${uid(501)}'`);
+eq('Applied 850 leaves 150 in ledger',Number((await one(`select outstanding from nl_recovery_ledger('${C}',null,'employee:${uid(11)}') where case_key='LEFT-PARTIAL'`)).outstanding),150);
+eq('No duplicate debit after payroll applies key',(await db.query(`select * from nl_loss_recovery_due('${C}','2026-09','hrms') where case_key='LEFT-PARTIAL'`)).rows.length,0);
+await db.query(grantLeft('LEFT-PARTIAL',false,1));
+await throws('Revoking exception blocks write-off',waiveLeft('LEFT-PARTIAL',`employee:${uid(11)}`),/Enable Write-off/);
+await db.query(grantLeft('LEFT-PARTIAL',true,2));
+await db.exec("update nl_loss_month_cases set amount=1001 where case_key='LEFT-PARTIAL'");
+await throws('Source changes invalidate write-off exception',waiveLeft('LEFT-PARTIAL',`employee:${uid(11)}`),/Enable Write-off/);
+await db.exec("update nl_loss_month_cases set amount=1000 where case_key='LEFT-PARTIAL'");
+await db.query(waiveLeft('LEFT-PARTIAL',`employee:${uid(11)}`));
+eq('Only remaining 150 written off',Number((await one("select amount from nl_recovery_waivers where case_key='LEFT-PARTIAL'")).amount),150);
+eq('Recovered 850 is preserved after residual write-off',Number((await one(`select deducted from nl_recovery_ledger('${C}',null,'employee:${uid(11)}') where case_key='LEFT-PARTIAL'`)).deducted),850);
+eq('No-pay departure appears in ledger',(await db.query(`select * from nl_recovery_ledger('${C}',null,'employee:${uid(12)}') where case_key='LEFT-NO-PAY'`)).rows.length,1);
+await db.query(`select nl_loss_recovery_approve('${C}','2026-09','LEFT-NO-PAY',1,'${SLP}','Approver','Verified departure',null)`);
+await db.query(grantLeft('LEFT-NO-PAY',true,0));
+await db.query(waiveLeft('LEFT-NO-PAY',`employee:${uid(12)}`));
+eq('No-pay balance write-off uses explicit exception',Number((await one("select amount from nl_recovery_waivers where case_key='LEFT-NO-PAY'")).amount),1000);
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
+

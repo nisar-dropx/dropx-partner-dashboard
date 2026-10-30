@@ -66,7 +66,7 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
       XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['Loss month','Shipment ID','Station','Exception','Action','Reason']]),'Exceptions');
       XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([
         ['Field','Instructions'],['Loss month','YYYY-MM'],['Shipment ID','Exact Shipment ID, formatted as text'],['Station','Station code'],
-        ['Exception','Redispute / Deduct next month / Recurring debit'],['Action','Enable / Disable'],['Reason','Optional manager note; up to 2,000 characters'],
+        ['Exception','Redispute / Deduct next month / Recurring debit / Write-off'],['Action','Enable / Disable'],['Reason','Optional manager note; up to 2,000 characters'],
         ['Limit','100 updates. One row per shipment, loss month and exception. Preview before applying.'],
         ['Example (illustrative)','2026-09 | SAMPLE-SHIPMENT | SAMPLE-STATION | Redispute | Enable |'],
         ['Redispute','Enable pauses eligible recovery for station evidence. Disable revokes access and resumes eligible recovery.'],
@@ -95,7 +95,7 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
       <label>Status<select value={filter} disabled={busy} onChange={e=>{setFilter(e.target.value);setSelected([]);}}><option value="all">All statuses</option><option value="disabled">Not enabled</option><option value="enabled">Enabled</option></select></label>
       <span className={ui.count}>{shown.length} shipments · {enabledCount} enabled</span>
     </div>
-    <p className={ui.help}>{kind==='redispute'?'Enable collects evidence from the station and pauses eligible recovery. Disable revokes that access.':kind==='next_month'?'Allows the next applicable payroll month. Approved schedules stay unchanged when disabled.':'Allows instalments within the recovery rules. Approved schedules stay unchanged when disabled.'}</p>
+    <p className={ui.help}>{kind==='write_off'?'Allows an authorised approver to write off the remaining exit balance in Recovery after the salary adjustment is completed. Enabling this does not write off any amount.':kind==='redispute'?'Enable collects evidence from the station and pauses eligible recovery. Disable revokes that access.':kind==='next_month'?'Allows the next applicable payroll month. Approved schedules stay unchanged when disabled.':'Allows instalments within the recovery rules. Approved schedules stay unchanged when disabled.'}</p>
     {!canEdit?<p className={ui.help}>View only. An authorised loss manager with edit access can enable or disable exceptions.</p>:null}
     {chosen.length?<div className={ui.actions}>
       <strong>{chosen.length} selected</strong><input aria-label="Manager note (optional)" value={reason} maxLength={2000} disabled={busy} placeholder="Manager note (optional)" onChange={e=>setReason(e.target.value)}/>
