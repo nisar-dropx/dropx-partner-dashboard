@@ -84,6 +84,8 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   assert.ok(sheets.some((sheet) => sheet.name === "C-Return"));
   assert.ok(sheets.some((sheet) => sheet.name === "Zero deliveries"));
   const zero = sheets.find((sheet) => sheet.name === "Zero deliveries");
-  assert.equal(zero.rows.length, 1);
+  assert.equal(zero.rows.length, 2);
   assert.equal(zero.rows[0]["DA's Name"], "Ada");
+  assert.equal(zero.rows[1].Station, "Grand Total");
+  assert.equal(zero.rows[1]["Grand Total"], zero.rows[0]["Grand Total"]);
 });

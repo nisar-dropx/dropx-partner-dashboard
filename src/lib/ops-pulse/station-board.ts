@@ -85,6 +85,39 @@ export function pickupPctColor(pct: number): string {
   return "#f1e8e6";
 }
 
+/** Column sums + overall DSR% for DA DSR / Zero delivery tables. */
+export function sumDaDsr(rows: StationBoardDaDsr[]): {
+  delivered: number;
+  failed: number;
+  rejected: number;
+  oor: number;
+  total: number;
+  dsrPct: number;
+  daCount: number;
+} {
+  let delivered = 0;
+  let failed = 0;
+  let rejected = 0;
+  let oor = 0;
+  let total = 0;
+  for (const da of rows) {
+    delivered += Number(da.delivered) || 0;
+    failed += Number(da.failed) || 0;
+    rejected += Number(da.rejected) || 0;
+    oor += Number(da.oor) || 0;
+    total += Number(da.total) || 0;
+  }
+  return {
+    delivered,
+    failed,
+    rejected,
+    oor,
+    total,
+    dsrPct: total > 0 ? Math.round((delivered / total) * 100) : 0,
+    daCount: rows.length,
+  };
+}
+
 export function emptyBoard(): StationBoardPayload {
   return { eddByDate: {}, cReturn: {}, cReturnTotal: 0, pickupDone: 0, pickupDonePct: 0, daDsr: [], zeroDeliveries: 0 };
 }
@@ -300,45 +333,70 @@ export function stationBoardSheets(
   }
 
   if (view === "dsr" || view === "full") {
-    sheets.push({
-      name: "DA DSR",
-      rows: stations.flatMap((station) =>
-        station.board.daDsr.map((da) => ({
-          Station: station.stationCode,
-          Region: regionLabel(regionForStation(station.stationCode)),
-          "DA's Name": da.driverName || da.driverId,
-          "DA ID": da.driverId,
-          Delivered: da.delivered,
-          "Delivery Failed": da.failed,
-          "Delivery Rejected": da.rejected,
-          OOR: da.oor,
-          "Grand Total": da.total,
-          "DSR%": da.dsrPct,
-          "Zero delivery": da.delivered === 0 ? "Yes" : "No",
-        })),
-      ),
-    });
+    const dsrRows = stations.flatMap((station) =>
+      station.board.daDsr.map((da) => ({
+        Station: station.stationCode,
+        Region: regionLabel(regionForStation(station.stationCode)),
+        "DA's Name": da.driverName || da.driverId,
+        "DA ID": da.driverId,
+        Delivered: da.delivered,
+        "Delivery Failed": da.failed,
+        "Delivery Rejected": da.rejected,
+        OOR: da.oor,
+        "Grand Total": da.total,
+        "DSR%": da.dsrPct,
+        "Zero delivery": da.delivered === 0 ? "Yes" : "No",
+      })),
+    );
+    if (dsrRows.length) {
+      const tot = sumDaDsr(stations.flatMap((station) => station.board.daDsr));
+      dsrRows.push({
+        Station: "Grand Total",
+        Region: "",
+        "DA's Name": `${tot.daCount} DAs`,
+        "DA ID": "",
+        Delivered: tot.delivered,
+        "Delivery Failed": tot.failed,
+        "Delivery Rejected": tot.rejected,
+        OOR: tot.oor,
+        "Grand Total": tot.total,
+        "DSR%": tot.dsrPct,
+        "Zero delivery": "",
+      });
+    }
+    sheets.push({ name: "DA DSR", rows: dsrRows });
   }
 
   if (view === "zero" || view === "full") {
-    sheets.push({
-      name: "Zero deliveries",
-      rows: stations.flatMap((station) =>
-        station.board.daDsr
-          .filter((da) => da.delivered === 0)
-          .map((da) => ({
-            Station: station.stationCode,
-            Region: regionLabel(regionForStation(station.stationCode)),
-            "DA's Name": da.driverName || da.driverId,
-            Delivered: da.delivered,
-            "Delivery Failed": da.failed,
-            "Delivery Rejected": da.rejected,
-            OOR: da.oor,
-            "Grand Total": da.total,
-            "DSR%": da.dsrPct,
-          })),
-      ),
-    });
+    const zeroDas = stations.flatMap((station) =>
+      station.board.daDsr.filter((da) => da.delivered === 0).map((da) => ({ station, da })),
+    );
+    const zeroRows = zeroDas.map(({ station, da }) => ({
+      Station: station.stationCode,
+      Region: regionLabel(regionForStation(station.stationCode)),
+      "DA's Name": da.driverName || da.driverId,
+      Delivered: da.delivered,
+      "Delivery Failed": da.failed,
+      "Delivery Rejected": da.rejected,
+      OOR: da.oor,
+      "Grand Total": da.total,
+      "DSR%": da.dsrPct,
+    }));
+    if (zeroRows.length) {
+      const tot = sumDaDsr(zeroDas.map(({ da }) => da));
+      zeroRows.push({
+        Station: "Grand Total",
+        Region: "",
+        "DA's Name": `${tot.daCount} DAs`,
+        Delivered: tot.delivered,
+        "Delivery Failed": tot.failed,
+        "Delivery Rejected": tot.rejected,
+        OOR: tot.oor,
+        "Grand Total": tot.total,
+        "DSR%": tot.dsrPct,
+      });
+    }
+    sheets.push({ name: "Zero deliveries", rows: zeroRows });
   }
 
   return sheets.filter((sheet) => sheet.rows.length > 0);

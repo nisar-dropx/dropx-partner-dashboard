@@ -17,6 +17,8 @@ import {
   heatColor,
   pickupPctColor,
   shiftBoardDate,
+  sumDaDsr,
+  type StationBoardDaDsr,
   type StationBoardStation,
   type StationBoardView,
 } from "@/lib/ops-pulse/station-board";
@@ -156,8 +158,10 @@ function buildShareTable(
   const zeroOnly = view === "zero";
   const headers = ["Station", "DA", "Del", "Fail", "Rej", "OOR", "Total", "DSR%"];
   const rows: BoardShareCell[][] = [];
+  const allDas: StationBoardDaDsr[] = [];
   for (const station of stations) {
     const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0) : station.board.daDsr;
+    allDas.push(...das);
     for (const da of das) {
       rows.push([
         { text: station.stationCode, bold: true, align: "left" },
@@ -170,6 +174,19 @@ function buildShareTable(
         { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), align: "right" },
       ]);
     }
+  }
+  if (allDas.length) {
+    const tot = sumDaDsr(allDas);
+    rows.push([
+      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+      { text: `${tot.daCount} DA${tot.daCount === 1 ? "" : "s"}`, bold: true, align: "left", bg: "#fff4bf" },
+      { text: String(tot.delivered), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.failed), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.rejected), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.oor), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
+      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), align: "right" },
+    ]);
   }
   return {
     title: `${zeroOnly ? "Zero deliveries" : "DA DSR"} · ${regionLabel}`,
@@ -229,6 +246,18 @@ function buildStationShareTable(
     { text: String(da.total), align: "right" },
     { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), align: "right" },
   ]);
+  if (das.length) {
+    const tot = sumDaDsr(das);
+    rows.push([
+      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+      { text: String(tot.delivered), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.failed), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.rejected), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.oor), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
+      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), align: "right" },
+    ]);
+  }
   return {
     title: `${zeroOnly ? "Zero deliveries" : "DA DSR"} · ${label}`,
     subtitle,
@@ -807,6 +836,29 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       ));
                     })}
                   </tbody>
+                  {(() => {
+                    const das = group.stations.flatMap((station) =>
+                      view === "zero"
+                        ? station.board.daDsr.filter((da) => da.delivered === 0)
+                        : station.board.daDsr,
+                    );
+                    if (!das.length) return null;
+                    const tot = sumDaDsr(das);
+                    return (
+                      <tfoot>
+                        <tr>
+                          <td>Grand Total</td>
+                          <td>{tot.daCount} DA{tot.daCount === 1 ? "" : "s"}</td>
+                          <td>{tot.delivered}</td>
+                          <td>{tot.failed}</td>
+                          <td>{tot.rejected}</td>
+                          <td>{tot.oor}</td>
+                          <td>{tot.total}</td>
+                          <td className={s.heat} style={{ background: dsrHeatColor(tot.dsrPct) }}>{tot.dsrPct}%</td>
+                        </tr>
+                      </tfoot>
+                    );
+                  })()}
                 </table>
               </div>
             </div>
@@ -928,9 +980,26 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <strong style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</strong>
                       </div>
                     ))}
-                    {!(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).length ? (
-                      <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>
-                    ) : null}
+                    {(() => {
+                      const das = view === "zero"
+                        ? selected.board.daDsr.filter((da) => da.delivered === 0)
+                        : selected.board.daDsr;
+                      if (!das.length) {
+                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>;
+                      }
+                      const tot = sumDaDsr(das);
+                      return (
+                        <div className={`${s.shareRowWide} ${s.shareTotal}`}>
+                          <span>Grand Total · {tot.daCount} DA{tot.daCount === 1 ? "" : "s"}</span>
+                          <strong>{tot.delivered}</strong>
+                          <strong>{tot.failed}</strong>
+                          <strong>{tot.rejected}</strong>
+                          <strong>{tot.oor}</strong>
+                          <strong>{tot.total}</strong>
+                          <strong style={{ background: dsrHeatColor(tot.dsrPct) }}>{tot.dsrPct}%</strong>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )
