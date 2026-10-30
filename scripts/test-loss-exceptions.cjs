@@ -51,5 +51,7 @@ function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';c
  const removed={...sample,source_present:false};
  assert.throws(()=>parseExceptionBatch([batch],[removed],['Recoverable'],state),/final recoverable/);
  assert.equal(parseExceptionBatch([{...batch,Action:'Disable'}],[removed],['Recoverable'],state)[0].enabled,false);
+ assert.equal(parseExceptionBatch([{...batch,Exception:'Write-off'}],[sample],['Recoverable'],state)[0].kind,'write_off');
+ await post([{...row,kind:'write_off'}]);assert.equal(calls.at(-1).name,'nl_loss_exception_set');assert.equal(calls.at(-1).args.p_kind,'write_off');
  console.log('PASS exception roles, read-only, scope, bulk validation, redispute routing, submission filtering and amount-dependent monthly choices');
 })().catch(e=>{console.error(e);process.exitCode=1;});

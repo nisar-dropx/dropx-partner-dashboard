@@ -15,14 +15,22 @@ import {
 
 import { availablePayrollMonths, recoveryDirectoryWithPayroll, type RecoveryPayrollWindow } from "./loss-open-payroll";
 
-export async function loadRecoveryDirectory(company: string, station: string) {
-  const directory = await supabaseAdmin!.rpc("loss_recovery_people_with_locations", {p_company:company,p_station:station});
+export async function loadRecoveryDirectory(company: string, station: string, departedOnly = false) {
+  const directory = await supabaseAdmin!.rpc(departedOnly ? "loss_recovery_recent_leavers" : "loss_recovery_people_with_locations", {p_company:company,p_station:station});
   if (directory.error) throw Error("Station employees could not be loaded.");
   const people = filterLossRecoveryDebitPeople((directory.data || []) as RecoveryPerson[]);
   if (!people.length) return [];
   const windows = await supabaseAdmin!.rpc("loss_recovery_payroll_windows", {p_company:company,p_refs:people.map(p=>p.ref)});
   if (windows.error) throw Error("Open payroll months could not be checked.");
-  return recoveryDirectoryWithPayroll(people,windows.data || []);
+  const holds = departedOnly ? await readAllRows(supabaseAdmin!.from("ops_salary_holds")
+    .select("worker_type,worker_id,applied_amount")
+    .eq("company_id",company).in("worker_id",people.map(p=>p.ref.split(":")[1]))
+    .in("status",["applied","release_requested"]).order("id")) : {data:[],error:null};
+  if(holds.error) throw Error("Salary holds could not be checked.");
+  return departedOnly
+    ? people.map(p => ({...p, open_payroll_months:availablePayrollMonths(windows.data || [],p.ref), unpaid_payroll_check:true,
+      held_salary:(holds.data || []).filter(h=>h.worker_type+":"+h.worker_id===p.ref).reduce((n,h)=>n+Number(h.applied_amount || 0),0)}))
+    : recoveryDirectoryWithPayroll(people,windows.data || []);
 }
 
 export async function loadRecoveryPayables(
@@ -35,6 +43,7 @@ export async function loadRecoveryPayables(
   policyUpdated: string,
   selectedRefs?: string[],
   payrollMonth?: string,
+  departedOnly = false,
 ) {
   const db = supabaseAdmin!;
   let current = payrollMonth;
@@ -53,7 +62,7 @@ export async function loadRecoveryPayables(
   endDate.setUTCMonth(endDate.getUTCMonth() + 1);
   endDate.setUTCDate(0);
   const end = endDate.toISOString().slice(0, 10);
-  const directory = await db.rpc("loss_recovery_people_with_locations", {
+  const directory = await db.rpc(departedOnly ? "loss_recovery_recent_leavers" : "loss_recovery_people_with_locations", {
     p_company: company,
     p_station: station,
   });
@@ -245,7 +254,7 @@ export async function loadRecoveryPayables(
     if (departed || !normalEmployment) eligible = eligible && !!window?.payroll_open && payable != null && payable > 0;
     if (payable != null && !Number.isFinite(payable)) payable = null;
     if (gross != null && !Number.isFinite(gross)) gross = null;
-    const reserved = policy.reserve_other_recoveries
+    const reserved = departedOnly || policy.reserve_other_recoveries
       ? (existing.data || [])
           .filter((r) => !(r.month === caseMonth && r.case_key === caseKey))
           .flatMap((r) => r.allocations || [])
@@ -270,7 +279,7 @@ export async function loadRecoveryPayables(
       checked_at: new Date().toISOString(),
       policy_updated_at: policyUpdated,
     });
-    if (eligible || !duplicate && openMonths.length > 0)
+    if (eligible || !duplicate && (departedOnly || openMonths.length > 0))
       result.push({
         ...person,
         salary_month: month,
@@ -278,7 +287,7 @@ export async function loadRecoveryPayables(
         unpaid_payroll_check: unpaidCheck,
         salary_payable: payable,
         salary_gross: gross,
-        recovery_limit: limit,
+        recovery_limit: eligible ? limit : 0,
         override_limit: limit,
         reserved,
         salary_source: source,

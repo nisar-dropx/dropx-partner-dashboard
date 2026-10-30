@@ -79,8 +79,8 @@ export async function GET(request: Request) {
     if (!requestedPayrollMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedPayrollMonth)) throw Error("Choose a valid payroll month.");
     const [people, history, nextMonth] = await Promise.all([
       directoryOnly
-        ? loadRecoveryDirectory(scope.company, station.id)
-        : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined, requestedPayrollMonth),
+        ? loadRecoveryDirectory(scope.company, station.id, url.searchParams.get("departed") === "1")
+        : loadRecoveryPayables(auth, scope.company, station.id, month, caseKey, settings!.recovery_policy, settings!.updated_at, selectedRefs.length ? selectedRefs : undefined, requestedPayrollMonth, url.searchParams.get("departed") === "1"),
       readAllRows(
         supabaseAdmin!
           .from("nl_loss_recovery_events")
@@ -162,6 +162,11 @@ export async function POST(request: Request) {
     if (body.outcome === "responsible_left") {
       const error = departedPersonError(body.recovery_details ?? {}, body.remarks);
       if (error) return reply({ error }, 400);
+      const leavers = await loadRecoveryDirectory(scope.company, station.id, true);
+      const leaver = leavers.find(p => p.ref === body.recovery_details.employee_ref);
+      if (!leaver) return reply({error:"This person is no longer in the verified departure list. Refresh before saving."},409);
+      if (body.allocations.length && (body.allocations.length !== 1 || body.allocations[0].employee_ref !== leaver.ref))
+        return reply({error:"The salary adjustment must belong to the selected departed person."},400);
     }
     if (
       outcome.data?.restricted &&
@@ -181,12 +186,15 @@ export async function POST(request: Request) {
     const responseWindow = await supabaseAdmin!.from("nl_case_response_windows").select("enabled,workflow_status,recovery_month").eq("company_id",scope.company).eq("month",body.month).eq("case_key",caseKey).maybeSingle();
     if(responseWindow.error) throw Error("Redispute status could not be loaded.");
     if(responseWindow.data?.workflow_status === "won")return reply({error:"Recovery is paused or stopped by redispute. Open the redispute details for this shipment."},409);
+    const fundedDeparture = body.outcome === "responsible_left" && body.allocations.length === 1;
+    if (fundedDeparture && !body.plan?.deduction_month)
+      return reply({error:"Choose an open unpaid payroll month."},400);
     if (outcome.data?.allocation_required && !body.plan?.deduction_month) {
       const resolved = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {p_report:report,p_case_month:body.month,p_assigned_at:new Date().toISOString(),p_final_seen_at:finalSeenAt,p_timing:outcome.data.deduction_timing,p_cutoff_day:settings!.recovery_policy.payroll_cutoff_day || 5});
       if(resolved.error || !resolved.data) throw Error("Payroll month could not be resolved.");
       body.plan={...body.plan,deduction_month:responseWindow.data?.recovery_month && responseWindow.data.recovery_month>resolved.data ? responseWindow.data.recovery_month : resolved.data};
     }
-    if (outcome.data?.allocation_required) {
+    if (outcome.data?.allocation_required || fundedDeparture) {
       // Check who can assign recovery. Routine plans become eligible in the atomic writer without approval.
       await assertLifecycleAction(auth, station.id, "propose");
       await loadRecoveryPayables(
@@ -199,6 +207,7 @@ export async function POST(request: Request) {
         settings!.updated_at,
         body.allocations.map((a: { employee_ref: string }) => a.employee_ref),
         body.plan?.deduction_month || undefined,
+        fundedDeparture,
       );
     }
     if (JSON.stringify(body.recovery_details || {}).length > 20000)

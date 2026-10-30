@@ -55,7 +55,8 @@ test('debit targets include mapped cluster and area managers, but exclude higher
 test('departed person needs identity and accountable follow-up', () => {
   assert.ok(departedPersonError({},'Person resigned'));
   assert.ok(departedPersonError({employee_id:'D123',employee_name:'Person'},'Person resigned'));
-  assert.equal(departedPersonError({employee_id:'D123',employee_name:'Person',follow_up:'CM to collect balance by 30 October'},'Resigned on 20 October'),'');
+  assert.ok(departedPersonError({employee_id:'D123',employee_name:'Person',follow_up:'CM to collect balance by 30 October'},'Resigned on 20 October'));
+  assert.equal(departedPersonError({employee_ref:'employee:00000000-0000-0000-0000-000000000001',employee_id:'D123',employee_name:'Person',follow_up:'CM to collect balance by 30 October'},'Resigned on 20 October'),'');
 });
 test('cutoff uses India time at midnight on 25th', () => {
   assert.equal(defaultLossFilter(new Date('2026-10-24T18:29:59Z')),'');

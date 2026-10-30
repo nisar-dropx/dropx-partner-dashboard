@@ -397,7 +397,7 @@ assert.match(
 );
 assert.match(
   allocationError(1000, [{ employee_ref: "p1", amount: 1000 }], pp, true),
-  /more than the .*salary limit of ₹900/,
+  /more than the available pay of ₹900/,
 );
 assert.equal(
   allocationError(900, [{ employee_ref: "p1", amount: 900 }], pp, true),

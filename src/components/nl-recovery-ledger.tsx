@@ -180,7 +180,9 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                       </td>
                       <td>
                         {canWriteOff && l.status === "exit_balance" && l.outstanding > 0 && !l.in_payroll ? (
-                          <button className={styles.button} onClick={() => setWriting(l)}>Write off…</button>
+                          l.funded_pending ? <small>Salary adjustment pending {money(l.funded_pending)}</small> :
+                          l.write_off_enabled ? <button className={styles.button} onClick={() => setWriting(l)}>Write off…</button> :
+                          <a className={styles.button} href="/team-ops/losses/exceptions?view=enable">Enable Write-off in Exceptions</a>
                         ) : null}
                       </td>
                     </tr>

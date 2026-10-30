@@ -683,3 +683,25 @@ plan and redispute status; clicking the Shipment ID separately opens SCC with th
 hint. Final recoverable results reuse RecoveryForm. Enabled redisputes appear in its
 Recovery action dropdown and open the existing evidence/review component in place;
 its server-side scope, version, evidence and independent-review checks remain authoritative.
+### Recent departed people and residual write-off — 30 October 2026
+
+Person left uses verified recorded exits from the two completed IST calendar months
+before the update (October means August and September). The server uses historical
+People assignments, station responsibilities and reporting relationships up to AOM,
+within the existing EDSP/XPT station scope. Rehires, higher roles, sibling XPTs and
+cross-company people remain excluded. Departures without payroll remain selectable.
+
+The assigned loss stays whole. A canonical allocation may carry a separate
+`payroll_amount`, capped by available unpaid salary after paid money and reservations.
+The existing recovery key emits only that funded amount; the ledger retains the
+full assigned amount and the residual as outstanding. Zero-funded departure lines
+own the outstanding balance but never emit a payroll debit. All departed plans
+require independent approval. Existing payroll start boundaries and bank/closure
+checks remain in force. Formal applied salary holds are shown separately and are
+not counted twice as available pay; release remains in Salary holds.
+
+Write-off is disabled by default. An authorised exception manager must enable
+`write_off` for the shipment. The existing independent write-off decision still
+requires a clear reason, an approved exit plan and completed funded salary recovery.
+Enabling the option alone never changes a balance. Disable or source changes block
+the write-off; the residual remains outstanding until an authorised decision.

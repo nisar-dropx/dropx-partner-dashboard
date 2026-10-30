@@ -1,9 +1,9 @@
 import { installmentThresholdError, type RecoveryPolicy } from './nl-loss-policy';
 
-export const LOSS_EXCEPTION_LABELS = { redispute: 'Redispute', next_month: 'Deduct next month', installments: 'Recurring debit' } as const;
+export const LOSS_EXCEPTION_LABELS = { redispute: 'Redispute', next_month: 'Deduct next month', installments: 'Recurring debit', write_off: 'Write-off' } as const;
 export type LossExceptionKind = keyof typeof LOSS_EXCEPTION_LABELS;
 export type LossExceptionGrant = {
-  month: string; case_key: string; kind: 'next_month' | 'installments'; enabled: boolean;
+  month: string; case_key: string; kind: 'next_month' | 'installments' | 'write_off'; enabled: boolean;
   version: number; deduction_month: string | null; source_amount: number; source_status: string;
   reason: string; updated_by_name: string; updated_at: string;
 };

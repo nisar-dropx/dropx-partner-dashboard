@@ -17,6 +17,9 @@ export type RecoveryOutcome = {
   updated_at: string;
 };
 export type RecoveryPerson = {
+  left_on?: string;
+  held_salary?: number;
+  payroll_amount?: number;
   ref: string;
   employee_code: string;
   full_name: string;
@@ -73,6 +76,10 @@ export type RecoveryPolicy = {
 };
 export type RecoveryAttachment = { id: string; file_name: string };
 export type RecoveryDetails = {
+  employee_ref?: string;
+  left_on?: string;
+  payroll_amount?: number;
+  remaining_amount?: number;
   received_amount?: string;
   receipt_reference?: string;
   received_date?: string;
