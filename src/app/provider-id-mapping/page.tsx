@@ -259,12 +259,12 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     return { key: mapping.id, stationId: String(mapping.station_id ?? ""), stationLabel: stationLabelById.get(String(mapping.station_id ?? "")) ?? "No location", workforceId: mapping.workforce_id ?? "", dropxId: String(worker?.dropx_id ?? ""), fullName: String(worker?.full_name ?? ""), providerMemberId: mapping.provider_member_id, providerMemberName: member?.name ?? "", profileLocationLabel: stationLabelById.get(String(worker?.location_id ?? "")) ?? "Not in permitted locations", history: entry ? [entry] : [] };
   });
   for (const worker of workers) {
-    if (worker.currentMappings?.length) continue;
+    if (worker.currentMappings?.length || mappings.some(row=>row.identityLinked&&row.workforceId===worker.id)) continue;
     lookupEntries.push({ key: `worker:${worker.id}`, stationId: worker.profileStationId ?? "", stationLabel: worker.profileLocationLabel ?? "", workforceId: worker.id, dropxId: worker.dropxId, fullName: worker.fullName, providerMemberId: "", providerMemberName: "", profileLocationLabel: worker.profileLocationLabel ?? "", restrictedMapping: worker.hasRestrictedMapping, history: [] });
   }
   for (const row of mappings) {
-    if (row.workforceId) continue;
-    lookupEntries.push({ key: `provider:${providerMemberKey(row.stationId,row.providerMemberId)}`, stationId: row.stationId, stationLabel: row.stationLabel, workforceId: "", dropxId: "", fullName: "", providerMemberId: row.providerMemberId, providerMemberName: row.providerMemberName, profileLocationLabel: "", history: [] });
+    if (row.workforceId && !row.identityLinked) continue;
+    lookupEntries.push({ key: `provider:${providerMemberKey(row.stationId,row.providerMemberId)}`, stationId: row.stationId, stationLabel: row.stationLabel, workforceId: row.workforceId, dropxId: row.dropxId, fullName: row.dropxName, providerMemberId: row.providerMemberId, providerMemberName: row.providerMemberName, profileLocationLabel: "", history: [] });
   }
   const shipmentMonths = [...new Set(providerMembers.filter((member) => stationByCode.has(member.stationCode.toUpperCase())).flatMap((member) => member.shipmentMonths))];
   const requestedStation = String(searchParams?.station ?? "").trim();

@@ -29,6 +29,7 @@ function worksheet(
 ) {
   const slots = [];
   let cursor = 0;
+  let effects=[];
   const hooks = {
     useState(initial) {
       const index = cursor++;
@@ -41,10 +42,13 @@ function worksheet(
       if (!previous || deps.some((value, i) => !Object.is(value, previous.deps[i]))) slots[index] = { deps, value: fn() };
       return slots[index].value;
     },
+    useRef(value) { const index=cursor++;if(!(index in slots))slots[index]={current:value};return slots[index]; },
+    useEffect(fn,deps) { const index=cursor++;const prior=slots[index];if(!prior||deps.some((v,i)=>!Object.is(v,prior[i]))){slots[index]=deps;effects.push(fn);} },
     useDeferredValue(value) { return value; }
   };
   const boundaries = {
     react: hooks,
+    "next/navigation": {useRouter:()=>({refresh(){}})},
     '@/app/provider-mapping/actions': { clearProviderMappingPeriod: clearPeriod, saveProviderFirstMappingsInline: save },
     '@/components/provider-id-insights': { ProviderIdInsights: 'ProviderIdInsights' },
     '@/components/provider-mapping-lookup': { ProviderMappingLookup: 'MappingLookup' },
@@ -59,10 +63,10 @@ function worksheet(
     '@/lib/date-format': { formatDashboardDate }
   };
   const module = { exports: {} };
-  new Function('require', 'exports', 'module', compiled)(name => boundaries[name] ?? require(name), module.exports, module);
+  new Function('require', 'exports', 'module', 'window', 'document', compiled)(name => boundaries[name] ?? require(name), module.exports, module,{addEventListener(){},removeEventListener(){},setInterval(){return 1},clearInterval(){},location:{reload(){}}},{visibilityState:'visible'});
   const input = { initialOutboundMonth: '2026-10', canEdit: true, mappings: [row], workers: [worker], paymentMethods: [method], shipmentMonths: ['2026-09', '2026-10'], ...props };
   let tree;
-  const render = () => { cursor = 0; tree = module.exports.ProviderFirstMappingWorksheet(input); return tree; };
+  const render = () => { for(let i=0;i<2;i++){cursor=0;tree=module.exports.ProviderFirstMappingWorksheet(input);const pending=effects;effects=[];for(const effect of pending)effect();}return tree; };
   function all(predicate, root = tree) {
     if (Array.isArray(root)) return root.flatMap(child => all(predicate, child));
     if (!root || typeof root !== 'object') return [];
@@ -71,7 +75,7 @@ function worksheet(
   const one = predicate => { const found = all(predicate); assert.equal(found.length, 1); return found[0]; };
   render();
   return {
-    render, all, one,
+    render, all, one, rerender(patch){Object.assign(input,patch);render();},
     cards: () => all(node => node.type === 'div' && node.props.className?.includes('mapping-row-card')),
     filter: label => one(node => node.type === 'MappingMultiFilter' && node.props.label === label).props,
     select: name => one(node => node.type === 'SearchableSelect' && node.props.name === name).props,
@@ -620,7 +624,7 @@ test('reselecting the same new associate preserves manual fields; switching asso
 test('existing mapped rows retain their saved pay details when reselected', () => {
   const mapped = { ...row, workforceId: worker.id, dropxId: worker.dropxId, dropxName: worker.fullName, mappingId: 'saved-1', paymentMethodId: method.id, paymentValues: { DELIVERY: '15' }, effectiveFrom: '2026-10-01', effectiveTo: '2026-10-20' };
   const ui = worksheet({ mappings: [mapped] });
-  ui.filter('Mapping').setSelected(['mapped']); ui.render();
+  ui.filter('ID link').setSelected(['mapped']); ui.render();
   ui.change('provider_first_worker_0', worker.id);
   assert.equal(ui.select('provider_first_payment_method_0').value, method.id);
   assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '15');
@@ -666,14 +670,14 @@ test('previous payment templates select the latest exact identity and reject unr
 test('opens with current outbound month and Unmapped, including when that month has no imported data', () => {
   const ui = worksheet({ shipmentMonths: ['2026-09'], mappings: [{ ...row, outboundMonths: ['2026-09'] }] });
   assert.deepEqual(ui.filter('Outbound month').selected, ['2026-10']);
-  assert.deepEqual(ui.filter('Mapping').selected, ['unmapped']);
+  assert.deepEqual(ui.filter('ID link').selected, ['unmapped']);
   assert.equal(ui.filter('Outbound month').options[0].label, 'October 2026');
   assert.equal(ui.cards().length, 0);
   ui.filter('Outbound month').setSelected(['2026-09']); ui.render();
   assert.equal(ui.cards().length, 1);
   ui.one(node => node.type === 'button' && node.props.children === 'Clear').props.onClick(); ui.render();
   assert.deepEqual(ui.filter('Outbound month').selected, []);
-  assert.deepEqual(ui.filter('Mapping').selected, []);
+  assert.deepEqual(ui.filter('ID link').selected, []);
 });
 
 test('cluster multi-select uses People cluster first, AOM fallback per station, and intersects existing filters', () => {
@@ -750,7 +754,7 @@ test('associate, method, rate and date edits stay visible under all original fil
   assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '15');
   fail = false; await ui.save();
   assert.equal(ui.cards().length, 0, 'Saved row now leaves Unmapped');
-  ui.filter('Payment method').setSelected([]); ui.filter('Validation').setSelected([]); ui.filter('Mapping').setSelected(['mapped']); ui.render();
+  ui.filter('Payment method').setSelected([]); ui.filter('Validation').setSelected([]); ui.filter('ID link').setSelected(['mapped']); ui.render();
   assert.equal(ui.cards().length, 1);
   assert.equal(ui.select('provider_first_worker_0').value, worker.id);
 });
@@ -766,7 +770,7 @@ test('a transport failure retains the draft and its fields for retry', async () 
 test('clearing an existing associate stays visible in Mapped until Save', () => {
   const mapped = { ...row, workforceId: worker.id, dropxId: worker.dropxId, dropxName: worker.fullName, mappingId: 'saved-1', paymentMethodId: method.id, paymentValues: { DELIVERY: '15' }, effectiveFrom: '2026-10-01' };
   const ui = worksheet({ mappings: [mapped] });
-  ui.filter('Mapping').setSelected(['mapped']); ui.render();
+  ui.filter('ID link').setSelected(['mapped']); ui.render();
   ui.change('provider_first_worker_0', '');
   assert.equal(ui.cards().length, 1);
   assert.equal(ui.select('provider_first_worker_0').value, '');
@@ -845,7 +849,7 @@ test('CPS entry shows a historical matching provider even if it is mapped now',(
  const mapped={...row,workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName,mappingId:'saved',outboundMonths:['2026-09']};
  const ui=worksheet({mappings:[mapped,{...row,providerMemberId:'unrelated',outboundMonths:['2026-09']}],initialQuery:row.providerMemberId,initialStationId:row.stationId,initialOutboundMonth:'2026-09',initialMappingStatus:'all'});
  assert.deepEqual(ui.filter('Outbound month').selected,['2026-09']);
- assert.deepEqual(ui.filter('Mapping').selected,[]);
+ assert.deepEqual(ui.filter('ID link').selected,[]);
  assert.deepEqual(ui.filter('Location').selected,[row.stationId]);
  assert.equal(ui.cards().length,1);
  assert.equal(ui.select('provider_first_worker_0').value,worker.id);
@@ -884,4 +888,10 @@ test('provider IDs expose scoped delivery insights without submitting or changin
   assert.equal(trigger.props.memberId, row.providerMemberId);
   assert.equal(trigger.props.stationId, row.stationId);
   assert.equal(trigger.props.providerId, row.providerId);
+});
+
+test('server refresh reveals an automatic identity link without replacing unsaved edits',()=>{
+ const linked={...row,workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName,identityLinked:true,effectiveFrom:'2026-10-01'};
+ const clean=worksheet({initialMappingStatus:'all'});clean.rerender({mappings:[linked]});assert.equal(clean.select('provider_first_worker_0').value,worker.id);
+ const dirty=worksheet({initialMappingStatus:'all'});dirty.change('provider_first_worker_0',worker.id);dirty.rerender({mappings:[{...row,providerMemberName:'Server update'}]});assert.equal(dirty.select('provider_first_worker_0').value,worker.id);
 });

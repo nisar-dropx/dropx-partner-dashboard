@@ -1,4 +1,4 @@
-import { loadBetaAttendance } from "@/lib/beta-attendance";
+import { loadBetaAttendance, loadBetaSetupPunches } from "@/lib/beta-attendance";
 import { betaLifecycleEnabled, betaLifecycleSummary, betaTrainingExitAllowed } from '@/lib/beta-lifecycle';
 import { betaSourceProgress, betaInboxActions, betaChecks, betaLearning, verifiedBetaSnapshot } from "@/lib/beta-verification";
 import { betaUanProgress, loadBetaUanMail } from "@/lib/beta-uan";
@@ -81,7 +81,8 @@ export async function GET(request: NextRequest) {
       const journey=betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus,invitationAvailable:Boolean(rawInvitationUrl),bgcAction:bgcChecks.some(item=>item.status==="action")});
       const invitationUrl=journey.invitationUnlocked?rawInvitationUrl:null;
       const lifecycleEnhanced=betaLifecycleEnabled(company,account.id);
-      const lifecycle=lifecycleEnhanced?betaLifecycleSummary({isolatedBeta:true,lifecycleEnhanced,stage:journey.stage,registrationStatus,registrationReturnNote:registration.data?.return_note,continuationStatus:candidate.data.continuation_status,...betaSourceProgress(live),bgcStatus:live?.bgc_status,bgcChecks,uan,learning,driverId:live?.driver_id,inboxActions,invitationAvailable:Boolean(rawInvitationUrl),operationalStatus:live?.operational_status,verificationClosed:verificationCases.some(item=>item.status==="offboarded"),offboardingRequested,sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error?.includes("amazon_source_unavailable"))},attendanceUnavailable:Boolean(attendance.error),latestAttendance:attendance.data?{inTime:attendance.data.in_time,outTime:attendance.data.out_time,reviewRequired:"reviewRequired" in attendance.data&&Boolean(attendance.data.reviewRequired)}:null}):null;
+      const onboardingAttendanceConfirmed=lifecycleEnhanced?await loadBetaSetupPunches(db,company,candidate.data.biometric_id,candidate.data.created_at):false;
+      const lifecycle=lifecycleEnhanced?betaLifecycleSummary({isolatedBeta:true,lifecycleEnhanced,stage:journey.stage,registrationStatus,registrationReturnNote:registration.data?.return_note,continuationStatus:candidate.data.continuation_status,...betaSourceProgress(live),bgcStatus:live?.bgc_status,bgcChecks,uan,learning,driverId:live?.driver_id,inboxActions,invitationAvailable:Boolean(rawInvitationUrl),operationalStatus:live?.operational_status,verificationClosed:verificationCases.some(item=>item.status==="offboarded"),offboardingRequested,sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error?.includes("amazon_source_unavailable"))},onboardingAttendanceConfirmed,attendanceUnavailable:Boolean(attendance.error),latestAttendance:attendance.data?{inTime:attendance.data.in_time,outTime:attendance.data.out_time,reviewRequired:"reviewRequired" in attendance.data&&Boolean(attendance.data.reviewRequired)}:null}):null;
       return NextResponse.json({
         available:true,pilot:true,isolatedBeta:true,registeredMobile:candidate.data.mobile,
         stationState:(Array.isArray(candidate.data.stations)?candidate.data.stations[0]:candidate.data.stations)?.state??null,
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
         continuationStatus:candidate.data.continuation_status,continuationDecidedAt:candidate.data.continuation_decided_at,
         offboardingRequested,offboardingRequestedAt:exitRequest.data?.created_at??null,offboardingStatus:exitRequest.data?.status??null,exitReasons:exitReasons.error?[]:exitReasons.data??[],
         actionOwner:invitationReceived?"Associate":"Amazon / system",category:"amazon_email_pilot",amazonAction:null,bgcChecks,
-        attendanceUnavailable:Boolean(attendance.error),latestAttendance:!attendance.data?null:{date:attendance.data.punch_date,inTime:attendance.data.in_time,outTime:attendance.data.out_time,status:attendance.data.status,updatedAt:attendance.data.updated_at,reviewRequired:"reviewRequired" in attendance.data&&Boolean(attendance.data.reviewRequired)},
+        onboardingAttendanceConfirmed,attendanceUnavailable:Boolean(attendance.error),latestAttendance:!attendance.data?null:{date:attendance.data.punch_date,inTime:attendance.data.in_time,outTime:attendance.data.out_time,status:attendance.data.status,updatedAt:attendance.data.updated_at,reviewRequired:"reviewRequired" in attendance.data&&Boolean(attendance.data.reviewRequired)},
         configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,
         updatedAt:amazonMessage?.received_at??invitation.data?.updated_at??candidate.data.updated_at,tasks:[],training:null,paymentHolds:[]
       },{headers});

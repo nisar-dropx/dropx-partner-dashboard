@@ -33,7 +33,7 @@ export function betaLifecycleSummary(data:BetaLifecycleInput,now=Date.now()) {
   if(active)return {...base,active:true,
     betaWorkspaceActive:!data.sourceStatus?.unavailable && Number.isFinite(observed) && observed<=now+300000,
     workspaceStatus:!data.sourceStatus?.unavailable && Number.isFinite(observed) && observed<=now+300000?'active_beta':'isolated_beta',
-    workspaceDetail:'Amazon activation opens your beta Home, Work and Inbox. Registration review, attendance approval and payment setup are tracked separately.',stage:'active',label:freshness==='fresh'?'Amazon ID active':'Amazon ID last confirmed active',
+    workspaceDetail:'Your workspace is open. Attendance and payment updates are in Home and Work.',stage:'active',label:freshness==='fresh'?'Amazon ID active':'Amazon ID last confirmed active',
     instruction:'Amazon has activated your ID. Any remaining training or attendance records are shown separately below.'};
   return {...base,stage:next?.id??'complete',label:next?.label??'Work setup complete',instruction:next?.detail??'All tracked steps are confirmed.'};
 }

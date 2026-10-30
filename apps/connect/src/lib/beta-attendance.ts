@@ -44,3 +44,14 @@ export async function loadBetaAttendanceMonth(db:SupabaseClient,company:string,b
   const dates=[...new Set([...(daily.data??[]),...(punches.data??[])].map(p=>p.punch_date))].sort().reverse();
   return {days:dates.map(date=>betaAttendanceEvidence(daily.data?.find(p=>p.punch_date===date)??null,(punches.data??[]).filter(p=>p.punch_date===date),since)).filter((p):p is BetaAttendance=>Boolean(p)),truncated:(punches.data?.length??0)>3000};
 }
+
+/** Device setup is cumulative. A receipt proves enrolment, not a paid attendance day. */
+export function hasBetaSetupPunches(punches:Pick<Punch,'punch_time'|'punch_label'|'source'>[],since:string,now=Date.now()) {
+ const start=Date.parse(since);if(!Number.isFinite(start))return false;
+ return punches.some(p=>p.source==='biometric'&&/^(in|out)\d*$/i.test(p.punch_label??'')&&Number.isFinite(Date.parse(p.punch_time))&&Date.parse(p.punch_time)>=start&&Date.parse(p.punch_time)<=now);
+}
+export async function loadBetaSetupPunches(db:SupabaseClient,company:string,biometricId:string|null,since:string) {
+ if(!biometricId||!Number.isFinite(Date.parse(since)))return false;
+ const result=await db.from('attendance_punches').select('punch_time,punch_label,source').eq('company_id',company).eq('enrolment_id',biometricId).eq('source','biometric').gte('punch_time',since).lte('punch_time',new Date().toISOString()).order('punch_time',{ascending:true}).limit(100);
+ return !result.error&&hasBetaSetupPunches(result.data??[],since);
+}

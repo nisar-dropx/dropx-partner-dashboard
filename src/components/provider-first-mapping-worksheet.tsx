@@ -1,6 +1,7 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Download, FileSpreadsheet, FileText, X } from "lucide-react";
 import { clearProviderMappingPeriod, saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
@@ -246,6 +247,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   workers: ProviderFirstWorker[];
   paymentMethods: PaymentMethodOption[];
 }) {
+  const router=useRouter();
+  const appliedMappings=useRef(mappings);
   const [scheduleIndex, setScheduleIndex] = useState<number | null>(null);
   const [rows, setRows] = useState(() => mappings);
   const [baselineRows, setBaselineRows] = useState(() => mappings);
@@ -300,6 +303,16 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       && !providerFirstLocationIsAllowed(rows[index], selectedWorker);
   });
   const isSaving = savingIndexes.size > 0;
+  // Fresh server data must reach the worksheet without overwriting an operator's edits.
+  useEffect(()=>{
+    if(hasDirty||isSaving||scheduleIndex!==null||appliedMappings.current===mappings)return;
+    appliedMappings.current=mappings;setRows(mappings);setBaselineRows(mappings);setWorkerRows(workers);setErrors({});
+  },[mappings,workers,hasDirty,isSaving,scheduleIndex]);
+  useEffect(()=>{
+    const refresh=()=>{if(document.visibilityState==='visible'&&!hasDirty&&!isSaving&&scheduleIndex===null)router.refresh();};
+    window.addEventListener('focus',refresh);const timer=window.setInterval(refresh,120000);
+    return()=>{window.removeEventListener('focus',refresh);window.clearInterval(timer);};
+  },[router,hasDirty,isSaving,scheduleIndex]);
 
   // Filter persisted values: selecting an associate or changing a rate card must
   // not remove an unfinished row. A successful save updates baselineRows.
@@ -384,7 +397,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const method = paymentMethodById.get(row.paymentMethodId);
         return [
           row.providerMemberId, row.providerMemberName, row.stationLabel, row.providerId, row.dropxId, row.dropxName,
-          row.workforceId ? "Mapped" : "Unmapped", method?.name ?? "", method?.code ?? "",
+          row.identityLinked ? "ID linked · pay setup pending" : row.workforceId ? "Mapped" : "Unmapped", method?.name ?? "", method?.code ?? "",
           ...paymentKeys.map((key) => row.paymentValues?.[key] ?? ""),
           row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo, (row.outboundMonths ?? []).join(", ")
         ].map((value) => String(value ?? ""));
@@ -1098,7 +1111,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={clusterOptions} selected={clusterFilters} setSelected={(values) => { setClusterFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All records" label="ID link" options={[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
         <label className="mapping-page-size">Rows<select onChange={(event) => { const value = event.target.value; setPageSize(value === "all" ? "all" : Number(value) as ProviderFirstPageSize); resetPage(); }} value={pageSize}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="all">All</option></select></label>
         <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span><button className="button secondary compact provider-mapping-download-trigger" disabled={!rows.length} onClick={openExport} type="button"><Download aria-hidden="true" size={15} /> Download</button>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
@@ -1117,7 +1130,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
                 <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={exportFilters.stations} setSelected={(stations) => setExportFilters((current) => ({ ...current, stations }))} />
                 <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={clusterOptions} selected={exportFilters.clusters} setSelected={(clusters) => setExportFilters((current) => ({ ...current, clusters }))} />
                 <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={exportFilters.methods} setSelected={(methods) => setExportFilters((current) => ({ ...current, methods }))} />
-                <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.mapping} setSelected={(mapping) => setExportFilters((current) => ({ ...current, mapping }))} />
+                <MappingMultiFilter allLabel="All records" label="ID link" options={[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }]} selected={exportFilters.mapping} setSelected={(mapping) => setExportFilters((current) => ({ ...current, mapping }))} />
                 <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.validation} setSelected={(validation) => setExportFilters((current) => ({ ...current, validation }))} />
               </div>
               <fieldset className="provider-mapping-download-formats">
