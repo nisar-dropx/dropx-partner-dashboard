@@ -705,3 +705,14 @@ Write-off is disabled by default. An authorised exception manager must enable
 requires a clear reason, an approved exit plan and completed funded salary recovery.
 Enabling the option alone never changes a balance. Disable or source changes block
 the write-off; the residual remains outstanding until an authorised decision.
+
+### Separate search, station evidence and management — 30 October 2026
+
+Supersedes the editable search behavior above. Universal Losses search is read-only
+for every role: loss/recovery status, saved allocations with salary months, history
+and SCC tracking. It never renders recovery, redispute or management forms.
+NL/SLP Final's enabled Redispute editor is station-evidence-only, including when a
+manager opens it. It has no next-action selector or activation/removal/review options.
+Exceptions keeps Enable/Disable separate from Redispute tracking's review and vendor
+outcome form. Managers cannot enter station evidence from that management form;
+they inspect the submitted evidence there. Server scope and role checks are unchanged.

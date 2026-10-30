@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
+import { responseActions } from "@/lib/ops-pulse/loss-response-actions";
 type Data = {
   window: {
     version: number;
@@ -81,16 +82,7 @@ export function LossCaseResponse({
         setEvidence(j.window.response_details?.evidence_url || "");
         setTicket(j.window.tt_reference || "");
         setTicketUrl(j.window.tt_url || "");
-        const state = j.window.workflow_status;
-        setAction(
-          !j.window.enabled
-            ? "activate"
-            : state === "awaiting_review" && j.canActivate
-              ? "approve"
-              : ["approved", "with_vendor"].includes(state)
-                ? "tracking"
-                : "response",
-        );
+
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
@@ -99,7 +91,7 @@ export function LossCaseResponse({
   }, [month, caseKey, revision]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (!data) return;
+    if (!data || !selectedAction) return;
     setBusy(true);
     setError("");
     try {
@@ -110,7 +102,7 @@ export function LossCaseResponse({
           month,
           case_key: caseKey,
           version: data.window.version,
-          action,
+          action: selectedAction,
           note,
           reason,
           evidence_url: evidence,
@@ -130,22 +122,12 @@ export function LossCaseResponse({
       setBusy(false);
     }
   }
-  const state = data?.window.workflow_status || "legacy",
-    review = state === "awaiting_review",
-    follow = ["approved", "with_vendor"].includes(state),
-    canRespond = ["awaiting_station", "returned", "legacy"].includes(state);
-  const actions = !data?.window.enabled
-    ? []
-    : data.canActivate
-      ? [
-          ...(review ? ["approve", "return"] : []),
-          ...(follow ? ["tracking", "won", "lost"] : []),
-          ...(canRespond ? ["response"] : []),
-          "revoke",
-        ]
-      : canRespond
-        ? ["response"]
-        : [];
+  const state = data?.window.workflow_status || "legacy";
+  // Context matters even for managers: the station editor is evidence-only.
+  const stationView = embedded || !data?.canActivate;
+  const actions = responseActions({enabled: !!data?.window.enabled, state,
+    canManage: !!data?.canActivate, stationView, readOnly: !data || data.readOnly});
+  const selectedAction = actions.includes(action) ? action : actions[0] || "";
   const actionNames: Record<string, string> = {
     activate: "Activate redispute",
     response: "Submit station evidence",
@@ -236,20 +218,13 @@ export function LossCaseResponse({
             <section className={styles.panel}>
               <form onSubmit={save} className={styles.detail}>
                 <div className={styles.formGrid}>
-                  <label>
+                  {actions.length > 1 ? <label>
                     Next action
-                    <select
-                      value={action}
-                      onChange={(e) => {setAction(e.target.value);if(e.target.value === "revoke")setNote("Enabled by mistake");}}
-                    >
-                      {actions.map((a) => (
-                        <option key={a} value={a}>
-                          {actionNames[a]}
-                        </option>
-                      ))}
+                    <select value={selectedAction} onChange={(e) => setAction(e.target.value)}>
+                      {actions.map((a) => <option key={a} value={a}>{actionNames[a]}</option>)}
                     </select>
-                  </label>
-                  {action === "response" ? (
+                  </label> : null}
+                  {selectedAction === "response" ? (
                     <>
                       <label>
                         Reason
@@ -283,7 +258,7 @@ export function LossCaseResponse({
                       </label>
                     </>
                   ) : null}
-                  {["tracking", "won", "lost"].includes(action) ? (
+                  {["tracking", "won", "lost"].includes(selectedAction) ? (
                     <>
                       <label>
                         Post-dispute ticket
@@ -303,7 +278,7 @@ export function LossCaseResponse({
                           onChange={(e) => setTicketUrl(e.target.value)}
                         />
                       </label>
-                      {action === "tracking" ? (
+                      {selectedAction === "tracking" ? (
                         <label>
                           Next follow-up
                           <input
@@ -314,7 +289,7 @@ export function LossCaseResponse({
                           />
                         </label>
                       ) : null}
-                      {action === "lost" ? (
+                      {selectedAction === "lost" ? (
                         <label>
                           Recovery payroll month
                           <input
@@ -331,14 +306,8 @@ export function LossCaseResponse({
                     </>
                   ) : null}
                 </div>
-                {action === "activate" ? (
-                  <p className={styles.hint}>
-                    Enable this exceptional shipment. The station then supplies
-                    its reason, ticket and evidence for review.
-                  </p>
-                ) : action === "revoke" ? <label>Removal reason<select value={note} onChange={e=>setNote(e.target.value)}>{['Enabled by mistake','Continue with recovery','Duplicate redispute','No longer required'].map(reason=><option key={reason}>{reason}</option>)}</select><small>Eligible recovery resumes; the full history stays available.</small></label> : (
-                  <label>
-                    {action === "response"
+                <label>
+                    {selectedAction === "response"
                       ? "Supporting details"
                       : "Decision / update"}
                     <textarea
@@ -350,10 +319,9 @@ export function LossCaseResponse({
                       required
                     />
                   </label>
-                )}
                 <div className={styles.toolbar}>
                   <button className={styles.primary} disabled={busy}>
-                    {busy ? "Saving…" : actionNames[action]}
+                    {busy ? "Saving…" : actionNames[selectedAction]}
                   </button>
                   <small>
                     Recorded in OpsPulse; tickets are filed with the vendor
