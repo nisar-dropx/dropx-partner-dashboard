@@ -287,7 +287,7 @@ export async function loadRecoveryPayables(
         unpaid_payroll_check: unpaidCheck,
         salary_payable: payable,
         salary_gross: gross,
-        recovery_limit: eligible ? limit : 0,
+        recovery_limit: payable == null ? null : eligible ? limit : 0,
         override_limit: limit,
         reserved,
         salary_source: source,
