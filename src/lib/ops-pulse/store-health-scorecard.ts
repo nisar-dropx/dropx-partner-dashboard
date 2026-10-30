@@ -5,6 +5,8 @@ export const STORE_HEALTH_DAILY_SOURCE = "qc_store_health_daily" as const;
 export const STORE_HEALTH_DAILY_SOURCE_LABEL = "Store Health D-2";
 export const STORE_HEALTH_PARSER_TYPE = "qc_store_health_pdf" as const;
 export const STORE_HEALTH_FORMAT_VERSION = 1;
+/** Bump when parse output shape/content rules change so re-imports are not treated as duplicates of older broken rows. */
+export const STORE_HEALTH_PARSER_VERSION = 2;
 
 export type StoreHealthBand = "Healthy" | "Watch" | "Critical";
 export type StoreHealthMetricStatus = "Green" | "Amber" | "Red" | "Not scored";

@@ -59,6 +59,7 @@ export function PerformanceReviewExceptions({
   firstReviewerName?: string | null;
 }) {
   const [mode, setMode] = useState<"proxy" | "skip" | "undo" | null>(null);
+  const [editAccessConfirm, setEditAccessConfirm] = useState<"reopen" | "revoke" | null>(null);
   const current =
     steps.find((step) => step.step_order === review?.current_step_order && step.status === "pending") ??
     (!review ? steps.find((step) => step.status === "pending") : undefined);
@@ -147,29 +148,77 @@ export function PerformanceReviewExceptions({
           </button>
         ) : null}
         {review ? (
-          canAccessBypass ? (
+          <button
+            type="button"
+            className="button secondary"
+            disabled={!canAccessBypass}
+            title={!canAccessBypass ? noAccessReason : undefined}
+            onClick={() => {
+              if (!canAccessBypass) return;
+              setMode(null);
+              setEditAccessConfirm(reviewerEditReopened ? "revoke" : "reopen");
+            }}
+          >
+            {reviewerEditReopened
+              ? "Revoke reopened edit access"
+              : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
+          </button>
+        ) : null}
+      </div>
+      {review && editAccessConfirm && canAccessBypass ? (
+        <div
+          className="modal-backdrop confirmation-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setEditAccessConfirm(null);
+          }}
+        >
+          <section
+            aria-labelledby="review-edit-access-confirm-title"
+            aria-modal="true"
+            className="modal-panel confirmation-dialog"
+            role="alertdialog"
+          >
+            <div className="panel-head">
+              <div>
+                <h2 id="review-edit-access-confirm-title">
+                  {editAccessConfirm === "revoke" ? "Revoke reopened edit access?" : "Give edit access back?"}
+                </h2>
+                <p className="subtle">
+                  {editAccessConfirm === "revoke"
+                    ? "The original reviewer will lose the temporary edit rights that were reopened for this review."
+                    : `${firstReviewerName || "The original CM/AOM"} will be able to edit RCA, connections and actions again on this review.`}
+                </p>
+              </div>
+            </div>
+            <div className="confirmation-body">
+              <p>
+                {editAccessConfirm === "revoke"
+                  ? "Confirm only if that temporary edit window should end now."
+                  : "Use this only when oversight wants the station reviewer to continue editing after a higher level has already worked on the review."}
+              </p>
+            </div>
             <ReviewActionForm
-              key={reviewerEditReopened ? "close-reopen" : "reopen"}
-              action={reviewerEditReopened ? closeReopenedPerformanceReviewAccess : reopenPerformanceReviewForOriginalReviewer}
-              className="review-reopen-inline-form"
+              key={editAccessConfirm}
+              action={editAccessConfirm === "revoke" ? closeReopenedPerformanceReviewAccess : reopenPerformanceReviewForOriginalReviewer}
+              className="review-reopen-confirm-form"
+              onSaved={() => setEditAccessConfirm(null)}
             >
               <input type="hidden" name="review_id" value={review.id} />
               <input type="hidden" name="source_date" value={review.source_date} />
               <input type="hidden" name="station_code" value={review.station_code} />
               <input type="hidden" name="review_version" value={review.updated_at} />
-              <button type="submit" className="button secondary">
-                {reviewerEditReopened
-                  ? "Revoke reopened edit access"
-                  : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
-              </button>
+              <div className="form-actions modal-actions confirmation-actions">
+                <button type="button" className="button secondary" onClick={() => setEditAccessConfirm(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="button">
+                  {editAccessConfirm === "revoke" ? "Revoke edit access" : `Give edit access to ${firstReviewerName || "CM/AOM"}`}
+                </button>
+              </div>
             </ReviewActionForm>
-          ) : (
-            <button type="button" className="button secondary" disabled title={noAccessReason}>
-              {reviewerEditReopened ? "Revoke reopened edit access" : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
-            </button>
-          )
-        ) : null}
-      </div>
+          </section>
+        </div>
+      ) : null}
       {inactiveReason || skipHint || (!proxyEnabled && canAccessProxy) || (review?.status === "closed" && skipped.length) || !canAccessProxy || (!canAccessBypass && !canBypass) ? (
         <p id="review-exception-guidance" className="review-exception-guidance">
           {proxyHint || skipHint || inactiveReason}

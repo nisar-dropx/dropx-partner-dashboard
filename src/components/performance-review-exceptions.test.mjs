@@ -11,7 +11,19 @@ const compiled=ts.transpileModule(readFileSync(new URL('./performance-review-exc
   compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}
 }).outputText;
 const mod={exports:{}};
-new Function('require','exports','module',compiled)(name=>name.startsWith('@/')?{}:require(name),mod.exports,mod);
+const stubs={
+  '@/app/ops-pulse/performance/actions': {
+    bypassPerformanceReviewLevel: async()=>({}),
+    closeReopenedPerformanceReviewAccess: async()=>({}),
+    proxyPerformanceReview: async()=>({}),
+    reopenPerformanceReviewForOriginalReviewer: async()=>({}),
+    undoBypassPerformanceReviewLevel: async()=>({})
+  },
+  '@/components/review-action-form': {
+    ReviewActionForm: ({children,className})=>React.createElement('form',{className},children)
+  }
+};
+new Function('require','exports','module',compiled)(name=>name.startsWith('@/')?(stubs[name]||{}):require(name),mod.exports,mod);
 const render=props=>renderToStaticMarkup(React.createElement(mod.exports.PerformanceReviewExceptions,props));
 const review={id:'review',status:'in_review',current_step_order:1,source_date:'2026-09-03',station_code:'TEST',updated_at:'2026-09-03T10:00:00.000Z'};
 const steps=[{id:'step',step_order:1,status:'pending',reviewer_name:'Manager'}];
@@ -58,12 +70,25 @@ test('proxy-only editors see skip and undo, disabled, with an oversight-rights e
   assert.match(html,/Conduct proxy review/);
   assert.match(html,/Skip a level/);
   assert.match(html,/Undo skip/);
-  assert.match(html,/have oversight rights/);
+  assert.match(html,/have rights for this action/);
 });
 test('viewers with no oversight access still see both tools, disabled, with an explanation instead of nothing',()=>{
   const html=render({...base,canAccessProxy:false,canAccessBypass:false,canUndoBypass:false,canProxy:false,canBypass:false});
   assert.match(html,/Conduct proxy review/);
   assert.match(html,/Skip a level/);
-  assert.match(html,/have oversight rights/);
+  assert.match(html,/Give edit access back/);
+  assert.match(html,/have rights for this action/);
+  assert.ok(!html.includes('<form'));
+});
+test('edit-access control is a confirm button, not an immediate submit form',()=>{
+  const html=render({...base,firstReviewerName:'ANAND KURUVA'});
+  assert.match(html,/Give edit access back to ANAND KURUVA/);
+  assert.ok(!html.includes('review-reopen-inline-form'));
+  assert.ok(!html.includes('confirmation-dialog'));
+  assert.ok(!html.includes('<form'));
+});
+test('revoked-state label is shown when edit access was already reopened',()=>{
+  const html=render({...base,reviewerEditReopened:true,firstReviewerName:'ANAND KURUVA'});
+  assert.match(html,/Revoke reopened edit access/);
   assert.ok(!html.includes('<form'));
 });

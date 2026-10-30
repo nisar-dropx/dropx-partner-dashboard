@@ -15,16 +15,17 @@ import { createClient } from "@supabase/supabase-js";
 import {
   parseStoreHealthScorecardPdf,
   storeHealthValuesJson,
-  STORE_HEALTH_DAILY_SOURCE
+  STORE_HEALTH_DAILY_SOURCE,
+  STORE_HEALTH_PARSER_VERSION
 } from "../src/lib/ops-pulse/store-health-scorecard.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const fixture = join(root, "scripts/fixtures/qc-store-health-scorecard-20Oct2026.pdf");
+const fixtureName = process.env.STORE_HEALTH_FIXTURE || "qc-store-health-scorecard-20Oct2026.pdf";
+const fixture = join(root, "scripts/fixtures", fixtureName);
 const bytes = readFileSync(fixture);
 const parsed = await parseStoreHealthScorecardPdf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 
-assert.equal(parsed.performanceDate, "2026-10-20");
-assert.equal(parsed.stores.length, 5);
+assert.ok(parsed.stores.length >= 1);
 
 const summary = parsed.stores.map((store) => ({
   station: store.stationCode,
@@ -61,7 +62,7 @@ if (!matched.length) throw new Error("No fixture stores match active stations in
 const batch = await db.from("report_import_batches").insert({
   company_id: companyId,
   source_type: STORE_HEALTH_DAILY_SOURCE,
-  file_name: "qc-store-health-scorecard-20Oct2026.pdf",
+  file_name: fixtureName,
   status: "Completed",
   report_from: parsed.performanceDate,
   report_to: parsed.performanceDate,
@@ -81,7 +82,7 @@ const facts = matched.map((store) => {
     reportDate: parsed.performanceDate,
     stationCode: store.stationCode,
     values,
-    parserVersion: 1
+    parserVersion: STORE_HEALTH_PARSER_VERSION
   })).digest("hex");
   return {
     batch_id: batch.data.id,

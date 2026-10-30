@@ -17,6 +17,7 @@ import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pul
 import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
 import {
   parseStoreHealthScorecardPdf,
+  STORE_HEALTH_PARSER_VERSION,
   storeHealthValuesJson
 } from "@/lib/ops-pulse/store-health-scorecard";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -2392,7 +2393,7 @@ export async function POST(request: Request) {
           reportDate: parsed.performanceDate,
           stationCode: store.stationCode,
           values: valuesJson,
-          parserVersion: 1
+          parserVersion: STORE_HEALTH_PARSER_VERSION
         })).digest("hex");
         return [{
           batch_id: batch.data.id,
@@ -2423,9 +2424,36 @@ export async function POST(request: Request) {
       }
       const validMetrics = allMetricRows.filter((row) => !existing.has(row.row_hash));
       await importStep("Save Store Health metrics", () => insertInChunks("report_metric_facts", validMetrics, 250));
+      // Refresh older same-day rows so a corrected re-import repairs PPI/insight-wrap misses
+      // even when the desk still has a prior batch for that station/date.
+      let refreshedRows = 0;
+      if (validMetrics.length) {
+        await importStep("Refresh prior Store Health rows for this date", async () => {
+          for (const row of validMetrics) {
+            const prior = await db.from("report_metric_facts")
+              .update({
+                values_json: row.values_json,
+                raw_text: row.raw_text,
+                row_label: row.row_label,
+                page_number: row.page_number,
+                report_week: row.report_week,
+                report_year: row.report_year
+              })
+              .eq("company_id", companyId)
+              .eq("source_type", sourceType)
+              .eq("station_code", row.station_code)
+              .eq("report_date", row.report_date)
+              .neq("row_hash", row.row_hash)
+              .select("id");
+            if (prior.error) throw prior.error;
+            refreshedRows += prior.data?.length ?? 0;
+          }
+        });
+      }
       const duplicateRows = allMetricRows.length - validMetrics.length;
       const warning = unknownStations.size ? ` ${[...unknownStations].join(", ")} ignored because they are not active dark stores.` : "";
-      const message = `${validMetrics.length} Store Health store row${validMetrics.length === 1 ? "" : "s"} imported for ${parsed.performanceDate}. ${duplicateRows} duplicate${duplicateRows === 1 ? "" : "s"} ignored.${warning}`;
+      const refreshedNote = refreshedRows ? ` ${refreshedRows} earlier same-day row${refreshedRows === 1 ? "" : "s"} refreshed.` : "";
+      const message = `${validMetrics.length} Store Health store row${validMetrics.length === 1 ? "" : "s"} imported for ${parsed.performanceDate}. ${duplicateRows} duplicate${duplicateRows === 1 ? "" : "s"} ignored.${refreshedNote}${warning}`;
       await db.from("report_import_batches").update({
         completed_at: new Date().toISOString(),
         imported_row_count: validMetrics.length,
@@ -2437,7 +2465,7 @@ export async function POST(request: Request) {
         station_code: [...new Set(allMetricRows.map((row) => row.station_code))].sort().join(", "),
         status: "Completed"
       }).eq("id", batch.data.id).eq("company_id", companyId);
-      return Response.json({ duplicateRows, imported: validMetrics.length, message, skipped: duplicateRows + unknownStations.size, totalRows: parsed.stores.length });
+      return Response.json({ duplicateRows, imported: validMetrics.length, message, refreshedRows, skipped: duplicateRows + unknownStations.size, totalRows: parsed.stores.length });
     }
 
     if (masterData.parser_type === "pdf_scorecard" || masterData.parser_type === "pdf_daily_metrics") {
