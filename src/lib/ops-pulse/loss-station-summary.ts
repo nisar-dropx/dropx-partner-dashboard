@@ -71,6 +71,24 @@ export function recoverableLossFacts(rows: LossFact[]): LossFact[] {
   return rows.filter(row => row.stage === "final" && row.recoverable);
 }
 
+/** Source periods are independent: NL calendar months and SLP file periods.
+ * Sort SLP by its underlying month, never alphabetically by labels such as Aug-Sep.
+ * Include final periods with no recoverable cases so an older debt is not the default.
+ */
+export function lossSummaryPeriods(rows: LossFact[], report: LossFact["report"]): string[] {
+  const latest = new Map<string, string>();
+  for (const row of rows) {
+    if (row.report !== report || row.stage !== "final") continue;
+    if ((latest.get(row.period) || "") <= row.month) latest.set(row.period, row.month);
+  }
+  return [...latest].sort((a,b) => b[1].localeCompare(a[1]) || b[0].localeCompare(a[0])).map(([period]) => period);
+}
+
+/** Match the selected source period exactly; an SLP month must not match another file period. */
+export function filterLossSummaryPeriod(rows: LossFact[], report: LossFact["report"], period: string): LossFact[] {
+  return rows.filter(row => row.report === report && (!period || row.period === period));
+}
+
 export const LOSS_SUMMARY_STATUSES = [
   ["all", "All statuses"], ["pending_update", "Pending update"], ["updated", "Details updated"],
   ["station", "Waiting on station"], ["amazon", "Awaiting Amazon / final"],
