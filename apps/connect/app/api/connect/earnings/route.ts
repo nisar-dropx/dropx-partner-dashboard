@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
+import {loadOwnAdvanceDeduction} from '@/lib/own-advance-deduction';
 import {allocateOwnDailyCards,type DailyCardSource} from '@/lib/workforce-daily-card';
 import {ownIncentives,type IncentiveSource,type OwnCampaign} from '@/lib/workforce-own-incentives';
 import {assertNoProviderDirectOverlap} from '@/lib/direct-workforce-payment';
@@ -230,12 +231,7 @@ export async function GET(request: Request) {
     let {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due.data||[]);
     let advanceRecoveryAmount=0;
     if(workforce?.id) {
-      const target=new URL("/api/connect/advances",process.env.DASHBOARD_URL || "https://dashboard.dropxlogistics.com");
-      target.search=new URLSearchParams({accountId:workforce.id,profileType:"workforce",earningsMonth:month}).toString();
-      const response=await fetch(target,{headers:{cookie:request.headers.get("cookie")??""},cache:"no-store",signal:AbortSignal.timeout(30_000)});
-      const result=await response.json();
-      if(!response.ok || !Number.isFinite(result.advanceRecoveryAmount)) throw new Error("Your advance deductions could not be verified. Please retry.");
-      advanceRecoveryAmount=result.advanceRecoveryAmount;
+      advanceRecoveryAmount=await loadOwnAdvanceDeduction(account.companyId,workforce.id,month);
       deductionAmount=Math.round((deductionAmount+advanceRecoveryAmount)*100)/100;
       netAmount=Math.round((netAmount-advanceRecoveryAmount)*100)/100;
     }
