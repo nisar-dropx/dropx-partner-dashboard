@@ -6,11 +6,12 @@
 
 create sequence if not exists public.whatsapp_onboarding_campaign_seq;
 
+-- is_called=true so the next nextval() is max+1 (not the max itself).
 select setval(
   'public.whatsapp_onboarding_campaign_seq',
   greatest(
     coalesce((
-      select max(nullif(regexp_replace(campaign_code, '\D', '', 'g'), '')::bigint)
+      select max(substring(campaign_code from '^ONBOARD-([0-9]+)$')::bigint)
       from public.whatsapp_campaigns
       where campaign_code ~ '^ONBOARD-[0-9]+$'
     ), 0),

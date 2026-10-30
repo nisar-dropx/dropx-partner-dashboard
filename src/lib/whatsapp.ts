@@ -1,6 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { extractWhatsAppTemplateVariables, type WhatsAppTemplateComponent } from "@/lib/whatsapp-template";
 import { workforceOnboardingEventCode } from "@/lib/whatsapp-onboarding";
+import {
+  isDuplicateCampaignCodeError,
+  nextOnboardingCampaignCodeFallback
+} from "@/lib/whatsapp-onboarding-campaign-code";
 
 type OnboardingMessageData = {
   companyId: string;
@@ -56,25 +60,14 @@ async function nextOnboardingCampaignCode(companyId: string) {
   if (!supabaseAdmin) return `ONBOARD-${Date.now()}`;
   const result = await supabaseAdmin.rpc("next_onboarding_campaign_code");
   if (!result.error && result.data) return String(result.data);
-  // Fallback when the sequence RPC is missing: never use COUNT(*)+1 — gaps or
-  // higher existing ONBOARD-N codes collide with whatsapp_campaigns_campaign_code_key
-  // and every onboarding WhatsApp (DropX ID / biometric) fails before Meta send.
+  // Fallback when the sequence RPC is missing: derive max(ONBOARD-N)+1 for this company.
   const existing = await supabaseAdmin
     .from("whatsapp_campaigns")
     .select("campaign_code")
     .eq("company_id", companyId)
-    .like("campaign_code", "ONBOARD-%")
-    .order("created_at", { ascending: false })
-    .limit(200);
+    .like("campaign_code", "ONBOARD-%");
   if (existing.error) return `ONBOARD-${Date.now()}`;
-  let maxNumber = 0;
-  for (const row of existing.data ?? []) {
-    const match = String(row.campaign_code ?? "").match(/^ONBOARD-(\d+)$/i);
-    if (!match) continue;
-    const value = Number(match[1]);
-    if (Number.isFinite(value) && value > maxNumber) maxNumber = value;
-  }
-  return `ONBOARD-${maxNumber + 1}`;
+  return nextOnboardingCampaignCodeFallback((existing.data ?? []).map((row) => row.campaign_code));
 }
 
 async function syncAutoTriggerToInbox({
@@ -262,7 +255,7 @@ async function sendOnboardingWhatsApp(data: OnboardingMessageData) {
     requestPayloadForFailure = requestPayload;
     campaignProfile = { id: profile.id, profile_name: profile.profile_name, default_country_code: profile.default_country_code };
     campaignCode = await nextOnboardingCampaignCode(data.companyId);
-    const campaignResult = await supabaseAdmin.from("whatsapp_campaigns").insert({
+    const campaignRow = {
       company_id: data.companyId,
       campaign_code: campaignCode,
       source_mode: "auto_onboarding",
@@ -279,7 +272,16 @@ async function sendOnboardingWhatsApp(data: OnboardingMessageData) {
       status: "processing",
       created_by: data.triggeredBy ?? null,
       started_at: new Date().toISOString()
-    }).select("id").single();
+    };
+    let campaignResult = await supabaseAdmin.from("whatsapp_campaigns").insert(campaignRow).select("id").single();
+    // Concurrent invites can still race the fallback allocator; one unique retry
+    // keeps DropX ID / biometric WhatsApp from dying on campaign_code alone.
+    if (campaignResult.error && isDuplicateCampaignCodeError(campaignResult.error.message)) {
+      campaignCode = `ONBOARD-${Date.now()}`;
+      campaignResult = await supabaseAdmin.from("whatsapp_campaigns")
+        .insert({ ...campaignRow, campaign_code: campaignCode })
+        .select("id").single();
+    }
     if (campaignResult.error) throw new Error(campaignResult.error.message);
     campaignId = campaignResult.data.id;
 
