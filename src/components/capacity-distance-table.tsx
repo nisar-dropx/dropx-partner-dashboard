@@ -1,7 +1,8 @@
 "use client";
 import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download, MapPinned, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download, Link2Off, MapPinned, X } from "lucide-react";
 import { distanceMethods, distanceStatus, filterDistanceEntries, filterDistanceScope, groupDistanceAssociates, type DistanceEntry, type DistanceViewFilters } from "@/lib/ops-pulse/distance-register";
 import { routePendingLabel } from "@/lib/workforce-route-distance";
 import styles from "./capacity-distance.module.css";
@@ -13,10 +14,23 @@ const date = (v: string) => new Date(v + "T00:00:00Z").toLocaleDateString("en-IN
 function reason(r: DistanceEntry) {
   return r.reason === "input_conflict" ? "Conflicting kilometre inputs or overlapping mappings." : routePendingLabel(r.reason);
 }
-export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]; filters: DistanceViewFilters }) {
+export function CapacityDistanceTable({
+  rows,
+  filters,
+  mode = "register",
+  identityHref,
+  identityCount = 0,
+}: {
+  rows: DistanceEntry[];
+  filters: DistanceViewFilters;
+  mode?: "register" | "identity";
+  identityHref?: string;
+  identityCount?: number;
+}) {
   const [page, setPage] = useState(0), [expanded, setExpanded] = useState<string | null>(null),
     [selected, setSelected] = useState<DistanceEntry | null>(null), [sort, setSort] = useState<"name" | "km">("name"),
     [exporting, setExporting] = useState(false), [exportError, setExportError] = useState("");
+  const identityMode = mode === "identity";
   const filtered = useMemo(() => filterDistanceEntries(rows, filters), [rows, filters]);
   const scoped = useMemo(() => filterDistanceScope(rows, filters), [rows, filters]);
   const associates = useMemo(() => {
@@ -27,7 +41,7 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
     total = ready.reduce((s, r) => s + (r.km || 0), 0), fuel = ready.reduce((s, r) => s + (r.fuel || 0), 0);
   const stationCount = new Set(filtered.map((r) => r.station)).size;
   const period = `${date(filters.from)} – ${date(filters.to)}`;
-  const readyOnlyView = !filters.statuses.length || (filters.statuses.length === 1 && filters.statuses[0] === "Ready");
+  const readyOnlyView = !identityMode && (!filters.statuses.length || (filters.statuses.length === 1 && filters.statuses[0] === "Ready"));
   const canExport = scoped.length > 0;
   async function download() {
     setExporting(true); setExportError("");
@@ -45,15 +59,33 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
   }
   return <>
     <div className={styles.metrics}>
-      <article><span>Recorded distance</span><strong>{number(total)} <small>km</small></strong><p>{ready.length} ready associate-{ready.length === 1 ? "day" : "days"}</p></article>
-      <article><span>Fuel allowance</span><strong>₹{number(fuel)}</strong><p>Payable fuel in the selected period</p></article>
-      <article><span>{readyOnlyView ? "Ready associate-days" : "Awaiting distance"}</span><strong>{readyOnlyView ? ready.length : filtered.length - ready.length}</strong><p>{readyOnlyView ? "Non-ready days hidden · see Excel No payouts" : "Associate-days pending or needing attention"}</p></article>
-      <article><span>Associates</span><strong>{associates.length}</strong><p>{stationCount} {stationCount === 1 ? "station" : "stations"} in this selection</p></article>
+      {identityMode ? <>
+        <article><span>Unlinked associate-days</span><strong>{filtered.length}</strong><p>amazon_identity_missing in this period</p></article>
+        <article><span>Associates</span><strong>{associates.length}</strong><p>Need SCC / Flex transporter link</p></article>
+        <article><span>Stations</span><strong>{stationCount}</strong><p>{stationCount === 1 ? "station" : "stations"} in this selection</p></article>
+        <article><span>Payable distance</span><strong>—</strong><p>Settles after Amazon ID is mapped</p></article>
+      </> : <>
+        <article><span>Recorded distance</span><strong>{number(total)} <small>km</small></strong><p>{ready.length} ready associate-{ready.length === 1 ? "day" : "days"}</p></article>
+        <article><span>Fuel allowance</span><strong>₹{number(fuel)}</strong><p>Payable fuel in the selected period</p></article>
+        <article><span>{readyOnlyView ? "Ready associate-days" : "Awaiting distance"}</span><strong>{readyOnlyView ? ready.length : filtered.length - ready.length}</strong><p>{readyOnlyView ? "Non-ready days hidden · see Excel No payouts" : "Associate-days pending or needing attention"}</p></article>
+        <article><span>Associates</span><strong>{associates.length}</strong><p>{stationCount} {stationCount === 1 ? "station" : "stations"} in this selection</p></article>
+      </>}
     </div>
     <section className={styles.panel}>
       <header className={styles.tableHead}>
-        <div><h2>Associate distance register</h2><span>{associates.length} {associates.length === 1 ? "associate" : "associates"} · {period}</span><p className={styles.note}>Select an associate to see their daily breakdown for this period.</p></div>
+        <div>
+          <h2>{identityMode ? "Unlinked Amazon IDs" : "Associate distance register"}</h2>
+          <span>{associates.length} {associates.length === 1 ? "associate" : "associates"} · {period}</span>
+          <p className={styles.note}>{identityMode
+            ? "Full day list for associates not linked to an Amazon transporter ID. Link in workforce portal, then sync Distance & Fuel."
+            : "Select an associate to see their daily breakdown for this period."}</p>
+        </div>
         <div className={styles.tableActions}>
+          {!identityMode && identityHref && identityCount > 0 ? (
+            <Link href={identityHref} className={styles.identityLink}>
+              <Link2Off size={15}/>Unlinked Amazon IDs ({identityCount})
+            </Link>
+          ) : null}
           <button type="button" className={styles.sort} onClick={() => { setSort((s) => s === "name" ? "km" : "name"); setPage(0); }}><ArrowDownUp size={15}/>{sort === "name" ? "Name A–Z" : "Highest km first"}</button>
           <button type="button" className={styles.download} onClick={download} disabled={exporting || !canExport}><Download size={16}/>{exporting ? "Preparing Excel…" : "Download Excel"}</button>
         </div>
@@ -90,7 +122,7 @@ export function CapacityDistanceTable({ rows, filters }: { rows: DistanceEntry[]
                 </section>
               </td></tr> : null}
             </Fragment>)}
-            {!shown.length ? <tr><td colSpan={8}><div className={styles.empty}><MapPinned size={28}/><strong>No associates match these filters</strong><span>Try another date, station or status. Only kilometre-based fuel mappings are included.</span></div></td></tr> : null}
+            {!shown.length ? <tr><td colSpan={8}><div className={styles.empty}><MapPinned size={28}/><strong>{identityMode ? "No unlinked Amazon IDs in this selection" : "No associates match these filters"}</strong><span>{identityMode ? "Everyone in scope already has a transporter link, or widen the date / station filters." : "Try another date, station or status. Only kilometre-based fuel mappings are included."}</span></div></td></tr> : null}
           </tbody>
         </table>
       </div>

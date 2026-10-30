@@ -124,6 +124,42 @@
 .tableActions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .download { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; border: 1px solid #172c43; border-radius: 8px; background: #172c43; color: white; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .download:disabled { opacity: .5; cursor: default; }
+.identityLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border: 1px solid #c9a227;
+  border-radius: 8px;
+  background: #fff8e8;
+  color: #5c4810;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.identityLink:hover { background: #fff1cc; }
+.identityLink:focus-visible { outline: 3px solid #e6c86a; outline-offset: 4px; }
+.identityBanner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #e6d39a;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #5c4810;
+  font-size: 13px;
+}
+.identityBack {
+  font-weight: 700;
+  color: #243c55;
+  text-decoration: none;
+}
+.identityBack:hover { text-decoration: underline; }
 .associateRow { cursor: pointer; }
 .associateName { border: 0; background: transparent; color: #243c55; padding: 0; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
 .associateName:hover { color: #bb365d; text-decoration: underline; }

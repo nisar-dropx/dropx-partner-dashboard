@@ -12,6 +12,7 @@ import { allowedCapacityWorkspaceTabs } from "@/lib/ops-pulse/capacity-access";
 import {
   distanceMethods,
   distancePeriod,
+  filterDistanceScope,
   selectedDistanceStations,
 } from "@/lib/ops-pulse/distance-register";
 import { loadDistanceRegister } from "@/lib/ops-pulse/distance-register-data";
@@ -195,14 +196,30 @@ export default async function DistancePage({
           <CapacityDistanceTable
             rows={rows}
             filters={{ ...period, ...filters, statuses, methods, query: q }}
+            identityCount={filterDistanceScope(rows, {
+              ...period,
+              ...filters,
+              methods,
+              query: q,
+            }).filter((r) => r.reason === "amazon_identity_missing").length}
+            identityHref={`/ops-pulse/capacity/distance/identity?${new URLSearchParams([
+              ["from", period.from],
+              ["to", period.to],
+              ...filters.stations.map((s) => ["stations", s] as [string, string]),
+              ...filters.regions.map((s) => ["regions", s] as [string, string]),
+              ...filters.clusters.map((s) => ["clusters", s] as [string, string]),
+              ...(q ? [["q", q] as [string, string]] : []),
+            ]).toString()}`}
             key={JSON.stringify([period, filters, statuses, methods, q])}
           />
         )}
         <p className={styles.note}>
           Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
-          up to 31 days per view.           Defaults to Ready days only (same payable fuel
-          as workforce payroll). Payable kilometres come from the Amazon GPS
-          trail (Mapbox Directions paused for cost). Excluded and other
+          up to 31 days per view. Defaults to Ready days only (same payable fuel
+          as workforce payroll). Payable kilometres prefer the Amazon GPS trail;
+          when the trail is missing, free OpenStreetMap road routing (Valhalla /
+          OSRM, no API key) settles scan-to-scan distance. Mapbox stays paused.
+          Unlinked Amazon IDs open on their own page. Excluded and other
           non-ready days are listed on the Excel “No payouts” sheet.
           Distances sync every morning at 5:00 IST; maps load when opened.
         </p>

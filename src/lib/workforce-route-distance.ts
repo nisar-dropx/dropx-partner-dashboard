@@ -44,7 +44,7 @@ export function routePendingLabel(reason:string|null) {
     source_unavailable:'Waiting for Amazon route sync',
     road_routing_unavailable:'Road calculation is retrying',
     road_routing_misconfigured:'Road routing credentials need updating',
-    gps_trail_unavailable:'Waiting for Amazon GPS trail',
+    gps_trail_unavailable:'Waiting for Amazon GPS trail (OSM road fallback also unavailable)',
     route_in_progress:'Route is still in progress',
     day_in_progress:'Distance settles after the work day closes',
     route_not_received:'Waiting for delivery route',
