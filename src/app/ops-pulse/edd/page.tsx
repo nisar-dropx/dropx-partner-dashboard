@@ -43,7 +43,7 @@ export default async function EddDashboardPage() {
         <PageHead
           eyebrow="Ops Pulse · Live tracking"
           title="Live performance"
-          subtitle="Ageing: live tracking IDs bucketed by Estimated Delivery Date. Open a station for the full breakdown."
+          subtitle="Ageing: portal multi-status backlog (month lastUpdated). Open a station for State × week order-amount pivot and EAD buckets."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />

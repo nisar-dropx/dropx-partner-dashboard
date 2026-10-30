@@ -8,6 +8,7 @@ import type { EddBucketKey, EddPackage, EddStationPayload } from "@/lib/ops-puls
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
 import { EddTrendChart } from "../edd-trend-chart";
 import { EddMultiSelect } from "../edd-multi-select";
+import { AgeingWeekPivot } from "../ageing-week-pivot";
 
 const BUCKET_META: Record<EddBucketKey, { label: string; hint: string }> = {
   overdue: { label: "Overdue", hint: "EAD already passed — highest priority" },
@@ -379,6 +380,8 @@ export function EddClient({ stationCode, initialOutcome }: { stationCode: string
               );
             })}
           </section>
+
+          <AgeingWeekPivot rows={payload.byStateWeekAmount} />
 
           {Array.isArray(payload.byDate) && payload.byDate.length ? (
             <section className="panel">

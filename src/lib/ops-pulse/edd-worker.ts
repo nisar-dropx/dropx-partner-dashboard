@@ -20,6 +20,12 @@ export type EddPackage = {
   shipOption: string | null;
   packageType: string | null;
   lockerName: string | null;
+  /** Order amount INR (Ageing State × week pivot). */
+  orderAmountInr?: number | null;
+  /** PackageResults-style Ageing state label. */
+  ageingState?: string | null;
+  /** ISO week of promised delivery date (`week43`). */
+  promisedWeek?: string | null;
   /** EDD-only ledger enrichment; never used by legacy Ageing/Performance. */
   driverName?: string | null;
   sourceAt?: string;
@@ -42,6 +48,8 @@ export type EddStationPayload = {
   totalCount: number;
   buckets: Record<EddBucketKey, number>;
   byDate: Array<{ date: string; count: number }>;
+  /** State × ISO week Sum of Order Amount — Ageing let.xlsx layout. */
+  byStateWeekAmount?: Array<{ state: string; week: string; amount: number; count: number }>;
   packages: EddPackage[];
   sessionSource: string | null;
   accountKey: string | null;
@@ -154,8 +162,26 @@ function normalizePackage(raw: Record<string, unknown>): EddPackage {
     orderingOrderId: raw.orderingOrderId == null ? null : String(raw.orderingOrderId),
     shipOption: raw.shipOption == null ? null : String(raw.shipOption),
     packageType: raw.packageType == null ? null : String(raw.packageType),
-    lockerName: raw.lockerName == null ? null : String(raw.lockerName)
+    lockerName: raw.lockerName == null ? null : String(raw.lockerName),
+    orderAmountInr: raw.orderAmountInr == null ? null : Number(raw.orderAmountInr) || 0,
+    ageingState: raw.ageingState == null ? null : String(raw.ageingState),
+    promisedWeek: raw.promisedWeek == null ? null : String(raw.promisedWeek),
   };
+}
+
+function normalizeStateWeek(raw: unknown): Array<{ state: string; week: string; amount: number; count: number }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => {
+      const entry = (row ?? {}) as Record<string, unknown>;
+      return {
+        state: String(entry.state ?? "Unknown"),
+        week: String(entry.week ?? "(blank)"),
+        amount: Number(entry.amount ?? 0) || 0,
+        count: Number(entry.count ?? 0) || 0,
+      };
+    })
+    .filter((row) => row.state);
 }
 
 function normalizePayload(raw: Record<string, unknown>, stationCode: string): EddStationPayload {
@@ -171,6 +197,20 @@ function normalizePayload(raw: Record<string, unknown>, stationCode: string): Ed
         .filter((row) => row.date)
     : [];
   const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
+  let byStateWeekAmount = normalizeStateWeek(raw.byStateWeekAmount);
+  if (!byStateWeekAmount.length && packages.length) {
+    const map = new Map<string, { state: string; week: string; amount: number; count: number }>();
+    for (const pkg of packages) {
+      const state = pkg.ageingState || pkg.state || "Unknown";
+      const week = pkg.promisedWeek || "(blank)";
+      const key = `${state}\t${week}`;
+      const row = map.get(key) ?? { state, week, amount: 0, count: 0 };
+      row.count += 1;
+      row.amount += Number(pkg.orderAmountInr) || 0;
+      map.set(key, row);
+    }
+    byStateWeekAmount = [...map.values()];
+  }
 
   return {
     status: String(raw.status ?? "ok"),
@@ -181,6 +221,7 @@ function normalizePayload(raw: Record<string, unknown>, stationCode: string): Ed
     totalCount: Number(raw.totalCount ?? packages.length) || packages.length,
     buckets: normalizeBuckets(raw.buckets),
     byDate,
+    byStateWeekAmount,
     packages,
     sessionSource: raw.sessionSource == null ? null : String(raw.sessionSource),
     accountKey: raw.accountKey == null ? null : String(raw.accountKey)
