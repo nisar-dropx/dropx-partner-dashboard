@@ -72,6 +72,7 @@ function fixture() {
     '@/lib/leave-calendar-days': { approvedLeaveDays },
     '@/lib/user-facing-error': { userFacingError: (e, fallback) => e.message || fallback },
     '@/lib/regularization-input': {},
+    '@/lib/regularization-proof': {},
     '@/lib/connect-regularization-cancel': { cancellableRegularizationStatuses: ['pending_manager', 'pending_hr', 'returned'], regularizationIdsWithApproval: async () => new Set(), canCancelRegularization: () => true },
     '../../../../../../src/lib/attendance-regularization-workflow': {},
     '../../../../../../src/lib/connect-attendance-notifications': {}
