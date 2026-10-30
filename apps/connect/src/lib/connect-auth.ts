@@ -8,7 +8,7 @@ import {
   workforceLabel,
   workforceTable
 } from "@/lib/workforce-profiles";
-import { peopleDocumentsAvailable, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
+import { peopleDocumentsAvailable, requiredDropxOnePageCodes, withWorkforceSelfServicePages } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
@@ -1018,8 +1018,8 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       );
       // WFH and Business Trip are never granted via designation/category app_page_access.
       // Each is shown only when its People attendance master lists the worker's designation.
-      const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
-        .filter((page) => page !== "wfh" && page !== "business_trip");
+      const pageAccess = withWorkforceSelfServicePages(resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
+        .filter((page) => page !== "wfh" && page !== "business_trip"), { profileType: account.profile_type, workspace });
       if (peopleDocumentsAvailable({ profileType: account.profile_type, workspace }) && !pageAccess.includes("documents")) pageAccess.push("documents");
       const designationId = resolvedDesignationId;
       const designationLabel = designationId

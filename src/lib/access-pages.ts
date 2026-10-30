@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { workforceCategoryPageCode, workforceCategoryPagePrefix } from "@/lib/dynamic-workforce";
 
 export const accessPages = [
+  { code: "workforce_connect", name: "Workforce Connect Centre", sort_order: 31 },
   {code:'ops_notification_settings',name:'Ops Settings · Notifications',sort_order:133},
   { code: "finance_pricing", name: "Pricing Master", sort_order: 110 },
   { code: "finance_rent", name: "Rent Master", sort_order: 111 },

@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadPeopleExceptionCount } from "@/lib/people-exception-count";
 import { matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
 import { initialApprovalReadyIds } from "@/lib/payment-initial-approval-gate";
+import { countWorkforceConnectAttention } from "@/lib/workforce-connect";
 
 export type PaymentNotificationItem = {
   key: string;
@@ -51,6 +52,7 @@ type PaymentNotificationRequest = {
 };
 
 const EMPTY_BADGES = {
+  workforce_connect: 0,
   people_all: 0,
   people_review: 0,
   people_exceptions: 0,
@@ -214,11 +216,15 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
 async function loadPaymentNotificationSnapshotUncached(authorization: AuthorizationContext, accessSurface: ReturnType<typeof currentAccessSurface>): Promise<PaymentNotificationSnapshot> {
   const badges = { ...EMPTY_BADGES };
   const items: PaymentNotificationItem[] = [];
+  if (accessSurface === "dashboard") {
+    badges.workforce_connect = await countWorkforceConnectAttention(authorization).catch(() => 0);
+    addItem(items, "workforce_connect", "Workforce Connect", `${badges.workforce_connect} open conversation${badges.workforce_connect === 1 ? "" : "s"}`, "/workforce-connect", badges.workforce_connect);
+  }
   badges.people_review = await loadPeopleReviewCount(authorization);
   badges.people_exceptions = await loadPeopleExceptionCount(authorization);
   badges.people_all = badges.people_review + badges.people_exceptions;
   const canSeePayments = hasPermission(authorization, "payments", "access");
-  if (!canSeePayments || !supabaseAdmin) return { total: 0, badges, items };
+  if (!canSeePayments || !supabaseAdmin) return { total: badges.workforce_connect, badges, items };
 
   const { data, error } = await supabaseAdmin
     .from("payment_requests")
@@ -253,7 +259,7 @@ async function loadPaymentNotificationSnapshotUncached(authorization: Authorizat
     .order("created_at", { ascending: false })
     .limit(PAYMENT_REQUESTS_FETCH_CAP);
 
-  if (error || !data) return { total: 0, badges, items };
+  if (error || !data) return { total: badges.workforce_connect, badges, items };
 
   // The badge rules below mix several different concerns per row (own requests vs.
   // role-assigned approvals, and a different "still needs attention" definition per badge),
@@ -336,7 +342,7 @@ async function loadPaymentNotificationSnapshotUncached(authorization: Authorizat
   badges.payments = badges.expense_requests + badges.payment_requests + badges.payment_approvals + badges.payment_process;
 
   return {
-    total: badges.payments,
+    total: badges.payments + badges.workforce_connect,
     badges,
     items
   };

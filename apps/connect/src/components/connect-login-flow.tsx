@@ -966,8 +966,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         <div role="alert">Unable to check approval access. Please retry.</div>
         <button onClick={() => setReporteeAttempt((attempt) => attempt + 1)}>Retry approval access</button>
       </section> : null}
-      {step === "advances" && account && sharedSelfService(account) && allowed(account, "advances") ? <ConnectAdvances account={account} /> : null}
-      {step === "payments" && account && !isolatedBetaJourney && workforcePaymentsAvailable(account) ? <ConnectWorkforcePayments account={account} /> : null}
+      {step === "advances" && account && sharedSelfService(account) && allowed(account, "advances") ? <ConnectAdvances account={account} readOnly={userPreview} /> : null}
+      {step === "payments" && account && !isolatedBetaJourney && workforcePaymentsAvailable(account) ? <ConnectWorkforcePayments account={account} readOnly={userPreview} /> : null}
       {step === "work" && account && !isolatedBetaJourney && workforceWorkAvailable(account) ? <ConnectWorkforceWork account={account} /> : null}
       {step === "refer" && account && allowed(account, "refer_earn") ? <ConnectReferEarn account={account} /> : null}
       {step === "reimbursements" && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <ConnectReimbursements account={account} /> : null}

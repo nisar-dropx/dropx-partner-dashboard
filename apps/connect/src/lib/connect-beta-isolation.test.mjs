@@ -7,7 +7,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import * as countryCodes from './country-codes.ts';
 import * as profiles from './workforce-profiles.ts';
-import { peopleDocumentsAvailable, requiredDropxOnePageCodes } from './dropx-one-pages.ts';
+import { peopleDocumentsAvailable, requiredDropxOnePageCodes, withWorkforceSelfServicePages } from './dropx-one-pages.ts';
 import * as accountFreshness from '../../../../src/lib/connect-account-freshness.ts';
 
 const realRequire = createRequire(import.meta.url);
@@ -59,7 +59,7 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
     '@/lib/country-codes':countryCodes,
     '@/lib/india-date':{todayInIndia:()=> '2026-10-07'},
     '@/lib/supabase-admin':{supabaseAdmin:db}, '@/lib/workforce-profiles':profiles,
-    '@/lib/dropx-one-pages':{peopleDocumentsAvailable,requiredDropxOnePageCodes},
+    '@/lib/dropx-one-pages':{peopleDocumentsAvailable,requiredDropxOnePageCodes,withWorkforceSelfServicePages},
     '../../../../src/lib/connect-session-issuance':{},
     '../../../../src/lib/connect-account-freshness':accountFreshness,
     './beta-workspace-access':betaWorkspaceAccess,

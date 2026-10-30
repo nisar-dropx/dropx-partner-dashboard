@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { connectPreviewCookieName, previewReadOnlyMessage } from "../../../../src/lib/connect-preview-policy";
+import { loadOwnAdvanceCapacity } from "../../../../src/lib/own-advance-capacity";
 import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { loadApprovalJourneySteps, type ApprovalJourneyStep } from "../../../../src/lib/connect-approval-journey";
@@ -60,6 +63,7 @@ async function advanceService(request: Request, method: "GET" | "POST" | "PATCH"
 
 async function mutate(request: Request, method: "POST" | "PATCH") {
   try {
+    if (cookies().get(connectPreviewCookieName)?.value) return NextResponse.json({ error: previewReadOnlyMessage }, { status: 403 });
     const body = await request.clone().json();
     const account = await requireConnectAccount(body.profileType, clean(body.accountId));
     if (account.profileType === "user" || !account.pageAccess.includes("advances")) {
@@ -106,9 +110,9 @@ export async function GET(request: Request) {
     let eligibleForAdvance = false;
     let capacity = { outstandingPay: 0, committedAdvance: 0, eligibilityPercent: 25, maxEligibleAmount: 0, breakdown: [] };
     if (account.profileType !== "user" && account.pageAccess.includes("advances")) {
-      const response = await advanceService(request, "GET");
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to check advance eligibility.");
+      const response = account.profileType === "workforce" ? null : await advanceService(request, "GET");
+      const payload = response ? await response.json() : await loadOwnAdvanceCapacity(account.companyId, account.id);
+      if (response && !response.ok) throw new Error(payload.error || "Unable to check advance eligibility.");
       if (typeof payload.account?.eligibleForAdvance !== "boolean") {
         throw new Error("Unable to verify advance eligibility. Please retry shortly.");
       }
