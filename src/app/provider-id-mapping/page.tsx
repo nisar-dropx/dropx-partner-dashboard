@@ -264,7 +264,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   }
   for (const row of mappings) {
     if (row.workforceId && !row.identityLinked) continue;
-    lookupEntries.push({ key: `provider:${providerMemberKey(row.stationId,row.providerMemberId)}`, stationId: row.stationId, stationLabel: row.stationLabel, workforceId: row.workforceId, dropxId: row.dropxId, fullName: row.dropxName, providerMemberId: row.providerMemberId, providerMemberName: row.providerMemberName, profileLocationLabel: "", history: [] });
+    lookupEntries.push({ key: `provider:${providerMemberKey(row.stationId,row.providerMemberId)}`, stationId: row.stationId, stationLabel: row.stationLabel, workforceId: row.workforceId, dropxId: row.dropxId, fullName: row.dropxName, providerMemberId: row.providerMemberId, providerMemberName: row.providerMemberName, profileLocationLabel: row.workforceId ? workers.find(worker => worker.id === row.workforceId)?.profileLocationLabel ?? "" : "", history: [] });
   }
   const shipmentMonths = [...new Set(providerMembers.filter((member) => stationByCode.has(member.stationCode.toUpperCase())).flatMap((member) => member.shipmentMonths))];
   const requestedStation = String(searchParams?.station ?? "").trim();
