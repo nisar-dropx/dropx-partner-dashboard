@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
+import { isFinanceOrAccountsRoleCode } from "@/lib/payment-finance-role";
 import { isPeopleApprovedPaymentHead, peopleApprovedPaymentHeadMessage } from "@/lib/people-approved-payment-heads";
 import { reconcilePendingPaymentApprovers } from "@/lib/payment-approver-reconciliation";
 import { roleIdsWithPageEditAccess } from "@/lib/position-access";
@@ -69,7 +70,7 @@ export async function saveApprovalSteps(formData: FormData) {
     if ((rolesResult.data ?? []).length !== roleIds.length) throw new Error("Every approval candidate must be an active role.");
 
     const financeApprovalCodes = (rolesResult.data ?? [])
-      .filter((role) => /(^|_)(FIN|FINMGR|FINANCE|ACCOUNT|ACCOUNTS)(_|$)/.test(String(role.code ?? "").toUpperCase()))
+      .filter((role) => isFinanceOrAccountsRoleCode(role.code))
       .map((role) => role.code);
     const isDropxOneReimbursement = headResult.data.code === "EMPLOYEE_REIMBURSEMENT";
     if (financeApprovalCodes.length && !isDropxOneReimbursement) {

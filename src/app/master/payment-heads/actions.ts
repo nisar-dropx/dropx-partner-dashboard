@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { serializePaymentFileGroups } from "@/lib/payment-file-types";
+import { isFinanceOrAccountsRoleCode } from "@/lib/payment-finance-role";
 import { isPeopleApprovedPaymentHead } from "@/lib/people-approved-payment-heads";
 import { normalizePaymentModes } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -55,6 +56,29 @@ function paymentHeadErrorUrl(message: string, editId?: string | null) {
   return `/master/payment-heads?${params.toString()}`;
 }
 
+function duplicatePaymentHeadMessage(code: string, existing: { name: string; is_active: boolean }) {
+  if (!existing.is_active) {
+    return `Payment head ${code} already exists (${existing.name}) but is inactive. Set Status to Active, then save.`;
+  }
+  return `Payment head ${code} already exists (${existing.name}). Edit the existing head instead of creating a new one.`;
+}
+
+async function findPaymentHeadByCode(companyId: string, code: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const { data, error } = await supabaseAdmin
+    .from("payment_heads")
+    .select("id, name, is_active")
+    .eq("company_id", companyId)
+    .eq("code", code)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as { id: string; name: string; is_active: boolean } | null;
+}
+
+function redirectDuplicatePaymentHead(code: string, existing: { id: string; name: string; is_active: boolean }): never {
+  redirect(paymentHeadErrorUrl(duplicatePaymentHeadMessage(code, existing), existing.id));
+}
+
 async function validateRoleIds(roleIds: string[], companyId: string, field: string) {
   if (!roleIds.length) throw new Error(`${field} is required.`);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
@@ -66,6 +90,26 @@ async function validateRoleIds(roleIds: string[], companyId: string, field: stri
     .in("id", roleIds);
   if (error) throw new Error(error.message);
   if ((data ?? []).length !== roleIds.length) throw new Error(`Select active roles for ${field}.`);
+}
+
+/** Reject Finance/Accounts before insert — DB trigger would otherwise leave an orphan head row. */
+async function assertApprovalRolesAreNotFinance(roleIds: string[], companyId: string) {
+  if (!roleIds.length) return;
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("id, code")
+    .eq("company_id", companyId)
+    .in("id", roleIds);
+  if (error) throw new Error(error.message);
+  if ((data ?? []).some((role) => isFinanceOrAccountsRoleCode(role.code))) {
+    throw new Error("Finance and Accounts roles process payments and cannot be approval candidates. Put them under Payment Process User Role only.");
+  }
+}
+
+async function deleteOrphanPaymentHead(companyId: string, headId: string) {
+  if (!supabaseAdmin) return;
+  await supabaseAdmin.from("payment_heads").delete().eq("company_id", companyId).eq("id", headId);
 }
 
 function parseQuestions(formData: FormData) {
@@ -157,6 +201,12 @@ async function createPaymentHeadUnsafe(formData: FormData) {
   if ([...initialApprovalRoleIds, ...finalApprovalRoleIds].some((roleId) => paymentProcessRoleIds.includes(roleId))) {
     throw new Error("Payment-processing roles cannot also be approval roles. Finance belongs in processing only.");
   }
+  if (!peopleApproved) {
+    await assertApprovalRolesAreNotFinance([...initialApprovalRoleIds, ...finalApprovalRoleIds], companyId);
+  }
+
+  const existing = await findPaymentHeadByCode(companyId, code);
+  if (existing) redirectDuplicatePaymentHead(code, existing);
 
   const { data: head, error } = await supabaseAdmin
     .from("payment_heads")
@@ -177,40 +227,52 @@ async function createPaymentHeadUnsafe(formData: FormData) {
     }, companyId))
     .select("id")
     .single();
-  if (error) throw new Error(error.message);
-
-  const approvalSteps = peopleApproved
-    ? []
-    : [
-      ...(initialApprovalRoleIds.length ? [{
-        candidates: initialApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "station" })),
-        is_required: true
-      }] : []),
-      ...(finalApprovalRoleIds.length ? [{
-        candidates: finalApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "company" })),
-        is_required: true
-      }] : [])
-    ];
-  if (approvalSteps.length) {
-    const { error: approvalStepsError } = await supabaseAdmin.from("payment_head_approval_steps").insert(
-      approvalSteps.map((step, index) => withCompany({
-        payment_head_id: head.id,
-        step_order: index + 1,
-        candidates: step.candidates,
-        is_required: step.is_required
-      }, companyId))
-    );
-    if (approvalStepsError) throw new Error(approvalStepsError.message);
+  if (error) {
+    if (error.code === "23505") {
+      const conflict = await findPaymentHeadByCode(companyId, code);
+      if (conflict) redirectDuplicatePaymentHead(code, conflict);
+      throw new Error(`Payment head ${code} already exists. Edit the existing head instead of creating a new one.`);
+    }
+    throw new Error(error.message);
   }
 
-  if (questions.length) {
-    const { error: questionError } = await supabaseAdmin.from("payment_head_questions").insert(
-      questions.map((question) => {
-        const { id: _id, ...questionPayload } = question;
-        return withCompany({ ...questionPayload, payment_head_id: head.id }, companyId);
-      })
-    );
-    if (questionError) throw new Error(questionError.message);
+  try {
+    const approvalSteps = peopleApproved
+      ? []
+      : [
+        ...(initialApprovalRoleIds.length ? [{
+          candidates: initialApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "station" })),
+          is_required: true
+        }] : []),
+        ...(finalApprovalRoleIds.length ? [{
+          candidates: finalApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "company" })),
+          is_required: true
+        }] : [])
+      ];
+    if (approvalSteps.length) {
+      const { error: approvalStepsError } = await supabaseAdmin.from("payment_head_approval_steps").insert(
+        approvalSteps.map((step, index) => withCompany({
+          payment_head_id: head.id,
+          step_order: index + 1,
+          candidates: step.candidates,
+          is_required: step.is_required
+        }, companyId))
+      );
+      if (approvalStepsError) throw new Error(approvalStepsError.message);
+    }
+
+    if (questions.length) {
+      const { error: questionError } = await supabaseAdmin.from("payment_head_questions").insert(
+        questions.map((question) => {
+          const { id: _id, ...questionPayload } = question;
+          return withCompany({ ...questionPayload, payment_head_id: head.id }, companyId);
+        })
+      );
+      if (questionError) throw new Error(questionError.message);
+    }
+  } catch (setupError) {
+    await deleteOrphanPaymentHead(companyId, head.id);
+    throw setupError;
   }
 
   revalidatePath("/master/payment-heads");
@@ -261,6 +323,14 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
   if ([...initialApprovalRoleIds, ...finalApprovalRoleIds].some((roleId) => paymentProcessRoleIds.includes(roleId))) {
     throw new Error("Payment-processing roles cannot also be approval roles. Finance belongs in processing only.");
   }
+  if (initialApprovalRoleIds.length || finalApprovalRoleIds.length) {
+    await assertApprovalRolesAreNotFinance([...initialApprovalRoleIds, ...finalApprovalRoleIds], companyId);
+  }
+
+  const conflict = await findPaymentHeadByCode(companyId, code);
+  if (conflict && conflict.id !== id) {
+    throw new Error(duplicatePaymentHeadMessage(code, conflict));
+  }
 
   const { error } = await admin
     .from("payment_heads")
@@ -282,7 +352,10 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
     })
     .eq("id", id)
     .eq("company_id", companyId);
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === "23505") throw new Error(`Payment head ${code} already exists. Edit the existing head instead.`);
+    throw new Error(error.message);
+  }
 
   const retainedIds = await Promise.all(questions.map(async (question) => {
     const payload = {

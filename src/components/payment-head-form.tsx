@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { SearchableSelectOption } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { DEFAULT_PAYMENT_FILE_GROUPS, PAYMENT_FILE_GROUPS, normalizePaymentFileGroups } from "@/lib/payment-file-types";
+import { isFinanceOrAccountsRoleCode } from "@/lib/payment-finance-role";
 import { isPeopleApprovedPaymentHead, peopleApprovedPaymentHeadMessage } from "@/lib/people-approved-payment-heads";
 import { ALL_PAYMENT_MODES, PAYMENT_MODES, type PaymentMode } from "@/lib/payment-modes";
 
@@ -306,6 +307,7 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
   const [requestExpenseApproval, setRequestExpenseApproval] = useState(initialHead?.request_expense_approval ?? false);
   const [headCode, setHeadCode] = useState(initialHead?.code ?? "");
   const peopleApproved = isPeopleApprovedPaymentHead(headCode);
+  const approvalRoleOptions = roleOptions.filter((option) => !isFinanceOrAccountsRoleCode(option.helper));
 
   function updateQuestion(index: number, patch: Partial<Question>) {
     setQuestions((current) => current.map((question, questionIndex) => questionIndex === index ? { ...question, ...patch } : question));
@@ -511,17 +513,18 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
         <label>
           Payment Head Code
           <input
+            autoComplete="off"
             className="field uppercase-input"
             name="code"
             defaultValue={initialHead?.code ?? ""}
             onChange={(event) => setHeadCode(event.target.value)}
-            placeholder="FUEL_ADVANCE"
+            placeholder="STORE_SUPPLIES"
             required
           />
         </label>
         <label>
           Payment Head Name
-          <input className="field" name="name" defaultValue={initialHead?.name ?? ""} placeholder="Fuel advance" required />
+          <input autoComplete="off" className="field" name="name" defaultValue={initialHead?.name ?? ""} placeholder="Store supplies" required />
         </label>
         <label>
           Payment Head External ID
@@ -564,7 +567,7 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
               First Approver Role (Optional Quick Setup)
               <RoleMultiSelect
                 name="initial_approval_role_ids"
-                options={roleOptions}
+                options={approvalRoleOptions}
                 placeholder="Select first roles (optional)"
                 selectedValues={[]}
               />
@@ -573,7 +576,7 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
               Final Approval Role (Quick Setup)
               <RoleMultiSelect
                 name="final_approval_role_ids"
-                options={roleOptions}
+                options={approvalRoleOptions}
                 placeholder="Select final roles"
                 selectedValues={[]}
               />
