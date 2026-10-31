@@ -2,7 +2,6 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { isAmazonEdspXptLocation } from "@/lib/ops-pulse/operating-context";
 import {
-  cortexAmazonUrl,
   fetchCortexItinerary,
   fetchCortexSummaries,
   packageCounts,
@@ -10,6 +9,7 @@ import {
   transporterDisplayName,
   type CortexAuth,
 } from "@/lib/ops-pulse/cortex-client";
+import { asLatLng } from "@/lib/ops-pulse/cortex-geo";
 
 export type CortexStationOption = {
   id: string;
@@ -41,7 +41,6 @@ export type CortexRouteRow = {
 export type CortexBoard = {
   date: string;
   station: CortexStationOption;
-  amazonUrl: string;
   sessionOk: boolean;
   sessionError: string | null;
   routes: CortexRouteRow[];
@@ -246,13 +245,11 @@ export async function loadCortexBoard(input: {
   station: CortexStationOption;
   date: string;
 }): Promise<CortexBoard> {
-  const amazonUrl = cortexAmazonUrl(input.date, input.station.serviceAreaId);
   const authResult = await resolveCortexAuth();
   if (!authResult.ok) {
     return {
       date: input.date,
       station: input.station,
-      amazonUrl,
       sessionOk: false,
       sessionError: authResult.error,
       routes: [],
@@ -269,7 +266,6 @@ export async function loadCortexBoard(input: {
     return {
       date: input.date,
       station: input.station,
-      amazonUrl,
       sessionOk: false,
       sessionError:
         "Amazon rejected the itinerary request. Refresh the shared workforce cookie and try again.",
@@ -329,7 +325,6 @@ export async function loadCortexBoard(input: {
   return {
     date: input.date,
     station: input.station,
-    amazonUrl,
     sessionOk: true,
     sessionError: null,
     routes,
@@ -378,13 +373,11 @@ export async function loadCortexRouteDetail(input: {
 
   for (const stop of sorted) {
     const addr = addressMap.get(stop.addressId) || {};
-    const lat = addr.geocode?.latitude ?? null;
-    const lng = addr.geocode?.longitude ?? null;
+    const stopPoint = asLatLng(addr.geocode?.latitude, addr.geocode?.longitude);
     const tasks: CortexStopTask[] = (stop.tasks || []).map((task: any) => {
       const geo = task.executionGeocode;
-      if (geo?.latitude != null && geo?.longitude != null) {
-        actualPath.push([geo.latitude, geo.longitude]);
-      }
+      const taskPoint = asLatLng(geo?.latitude, geo?.longitude);
+      if (taskPoint) actualPath.push(taskPoint);
       return {
         taskId: String(task.taskId || ""),
         taskType: task.taskType || null,
@@ -392,19 +385,19 @@ export async function loadCortexRouteDetail(input: {
         orderId: task.domainMap?.orderId ?? null,
         scannableId: task.domainMap?.scannableId ?? null,
         actualExecutionTime: task.actualExecutionTime ?? null,
-        lat: geo?.latitude ?? null,
-        lng: geo?.longitude ?? null,
+        lat: taskPoint?.[0] ?? null,
+        lng: taskPoint?.[1] ?? null,
       };
     });
-    if (lat != null && lng != null) plannedPath.push([lat, lng]);
+    if (stopPoint) plannedPath.push(stopPoint);
     const address = [addr.address1, addr.address2].filter(Boolean).join(", ");
     stops.push({
       sequence: Number(stop.sequenceNumber) || 0,
       type: stop.itineraryStopType || null,
       address: address || "Address unavailable",
       city: addr.city || null,
-      lat,
-      lng,
+      lat: stopPoint?.[0] ?? null,
+      lng: stopPoint?.[1] ?? null,
       tasks,
     });
   }

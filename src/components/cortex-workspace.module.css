@@ -52,24 +52,41 @@
   margin-left: auto;
 }
 
-.amazonLink {
+.viewToggle {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid #dbe3ec;
-  border-radius: 8px;
-  color: #334155;
-  text-decoration: none;
-  font-size: 12px;
-  font-weight: 650;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
   background: #f8fafc;
+  flex-shrink: 0;
 }
 
-.amazonLink:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+.viewToggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.viewToggle button:hover {
+  color: #334155;
+  background: #fff;
+}
+
+.viewToggleActive {
+  background: #fff !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .metrics {
@@ -428,6 +445,138 @@
   font-size: 13px;
 }
 
+.mapWrap {
+  display: grid;
+  gap: 8px;
+}
+
+.mapToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mapLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.legendPlanned,
+.legendActual {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+  color: #334155;
+}
+
+.legendPlanned::before,
+.legendActual::before {
+  content: "";
+  width: 16px;
+  height: 0;
+  border-top: 3px solid #334155;
+}
+
+.legendPlanned::before {
+  border-top-style: dashed;
+}
+
+.legendActual::before {
+  border-top-color: #0f766e;
+  border-top-style: solid;
+}
+
+.mapButtons {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.mapButtons button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.mapButtons button:hover {
+  background: #f8fafc;
+}
+
+.mapViewport {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #e8eef5;
+  touch-action: none;
+}
+
+.mapCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: grab;
+  outline: none;
+  user-select: none;
+}
+
+.mapCanvas:active {
+  cursor: grabbing;
+}
+
+.mapEmpty {
+  padding: 36px 20px;
+  text-align: center;
+  color: #64748b;
+  border: 1px dashed #dbe3ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.mapEmpty strong {
+  display: block;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.mapStopCard {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+}
+
+.mapStopCard strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.mapHint,
+.mapCredit {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.mapCredit a {
+  color: #64748b;
+}
+
 @media (max-width: 1100px) {
   .metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -453,5 +602,15 @@
   }
   .detailMeta {
     grid-template-columns: 1fr;
+  }
+  .panelHead {
+    flex-direction: column;
+  }
+  .viewToggle {
+    width: 100%;
+  }
+  .viewToggle button {
+    flex: 1;
+    justify-content: center;
   }
 }

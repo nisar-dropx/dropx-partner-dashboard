@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ExternalLink, MapPinned, PackageSearch, Route as RouteIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ListTree, MapPinned, PackageSearch, Route as RouteIcon } from "lucide-react";
 import type {
   CortexBoard,
   CortexRouteDetail,
   CortexRouteRow,
   CortexStationOption,
 } from "@/lib/ops-pulse/cortex-data";
+import { CortexRouteMap } from "./cortex-route-map";
 import styles from "./cortex-workspace.module.css";
+
+type DetailView = "map" | "detail";
 
 function statusBadge(row: CortexRouteRow) {
   if (row.driverSessionEnded || row.executionStatus === "COMPLETE") {
@@ -47,6 +50,8 @@ export function CortexWorkspace({
   const [detail, setDetail] = useState<CortexRouteDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [detailView, setDetailView] = useState<DetailView>("detail");
+  const requestSeq = useRef(0);
 
   const filtered = useMemo(() => {
     const rows = board?.routes || [];
@@ -59,8 +64,17 @@ export function CortexWorkspace({
     );
   }, [board?.routes, query]);
 
+  useEffect(() => {
+    setSelectedId(null);
+    setDetail(null);
+    setDetailError("");
+    setDetailLoading(false);
+    requestSeq.current += 1;
+  }, [board?.station.id, board?.date]);
+
   async function openRoute(row: CortexRouteRow) {
     if (!board) return;
+    const seq = ++requestSeq.current;
     setSelectedId(row.itineraryId);
     setDetail(null);
     setDetailError("");
@@ -74,17 +88,25 @@ export function CortexWorkspace({
       const res = await fetch(`/api/ops-pulse/performance/cortex?${params}`, {
         cache: "no-store",
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
+      if (seq !== requestSeq.current) return;
       if (!res.ok) throw new Error(body.error || "Could not load route detail.");
+      if (!body || typeof body !== "object" || !Array.isArray(body.stops)) {
+        throw new Error("Route detail response was incomplete.");
+      }
       setDetail({
         ...body,
         name: row.workforceName || row.amazonName,
         phone: row.phone,
+        plannedPath: Array.isArray(body.plannedPath) ? body.plannedPath : [],
+        actualPath: Array.isArray(body.actualPath) ? body.actualPath : [],
+        stops: body.stops,
       });
     } catch (e) {
+      if (seq !== requestSeq.current) return;
       setDetailError(e instanceof Error ? e.message : "Could not load route detail.");
     } finally {
-      setDetailLoading(false);
+      if (seq === requestSeq.current) setDetailLoading(false);
     }
   }
 
@@ -125,17 +147,6 @@ export function CortexWorkspace({
           />
         </label>
         <div className={styles.actions}>
-          {board?.amazonUrl ? (
-            <a
-              className={styles.amazonLink}
-              href={board.amazonUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <ExternalLink size={14} />
-              Open in Amazon
-            </a>
-          ) : null}
           <button className="button compact" type="submit">
             Apply
           </button>
@@ -209,6 +220,7 @@ export function CortexWorkspace({
                   type="button"
                   className={`${styles.routeCard} ${active ? styles.routeCardActive : ""}`}
                   onClick={() => openRoute(row)}
+                  aria-pressed={active}
                 >
                   <div className={styles.routeTop}>
                     <div>
@@ -255,25 +267,48 @@ export function CortexWorkspace({
           </div>
         </section>
 
-        <section className={styles.panel} aria-label="Route detail">
+        <section className={styles.panel} aria-label="Route inspector">
           <header className={styles.panelHead}>
             <div>
-              <h2>Route detail</h2>
+              <h2>{detailView === "map" ? "Route map" : "Route detail"}</h2>
               <p>
                 {selected
-                  ? `${selected.workforceName || selected.amazonName} · stops & packages`
-                  : "Select a driver to inspect deliveries"}
+                  ? `${selected.workforceName || selected.amazonName} · ${
+                      detailView === "map" ? "planned & scan path" : "stops & packages"
+                    }`
+                  : "Select a driver to inspect the route"}
               </p>
             </div>
-            <MapPinned size={18} aria-hidden color="#94a3b8" />
+            <div className={styles.viewToggle} role="group" aria-label="Route panel view">
+              <button
+                type="button"
+                className={detailView === "map" ? styles.viewToggleActive : undefined}
+                aria-pressed={detailView === "map"}
+                onClick={() => setDetailView("map")}
+                title="Map view"
+              >
+                <MapPinned size={15} aria-hidden />
+                <span>Map</span>
+              </button>
+              <button
+                type="button"
+                className={detailView === "detail" ? styles.viewToggleActive : undefined}
+                aria-pressed={detailView === "detail"}
+                onClick={() => setDetailView("detail")}
+                title="Route detail"
+              >
+                <ListTree size={15} aria-hidden />
+                <span>Route detail</span>
+              </button>
+            </div>
           </header>
 
           {!selectedId ? (
             <div className={styles.detailEmpty}>
               <strong>Pick a route</strong>
               <span>
-                Open any driver on the left to see stop sequence, package states, and scan times
-                for that itinerary.
+                Open any driver on the left, then switch between the map and stop-by-stop route
+                detail without leaving OpsPulse.
               </span>
             </div>
           ) : null}
@@ -326,51 +361,59 @@ export function CortexWorkspace({
                   <span>
                     Attempted <b>{detail.attempted}</b>
                   </span>
-                  <span>
-                    {pct(detail.delivered, detail.total)}% complete
-                  </span>
+                  <span>{pct(detail.delivered, detail.total)}% complete</span>
                 </div>
               </div>
 
-              <div className={styles.stops}>
-                {detail.stops.map((stop) => (
-                  <article key={`${stop.sequence}-${stop.address}`} className={styles.stop}>
-                    <div className={styles.stopHead}>
-                      <strong>
-                        Stop {stop.sequence}
-                        {stop.type ? ` · ${stop.type}` : ""}
-                      </strong>
-                      <span>
-                        {stop.tasks.length} task{stop.tasks.length === 1 ? "" : "s"}
-                      </span>
+              {detailView === "map" ? (
+                <CortexRouteMap
+                  plannedPath={detail.plannedPath}
+                  actualPath={detail.actualPath}
+                  stops={detail.stops}
+                />
+              ) : (
+                <div className={styles.stops}>
+                  {detail.stops.map((stop) => (
+                    <article key={`${stop.sequence}-${stop.address}`} className={styles.stop}>
+                      <div className={styles.stopHead}>
+                        <strong>
+                          Stop {stop.sequence}
+                          {stop.type ? ` · ${stop.type}` : ""}
+                        </strong>
+                        <span>
+                          {stop.tasks.length} task{stop.tasks.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <div className={styles.stopAddress}>
+                        {stop.address}
+                        {stop.city ? `, ${stop.city}` : ""}
+                      </div>
+                      {stop.tasks.length ? (
+                        <ul className={styles.stopTasks}>
+                          {stop.tasks.map((task) => (
+                            <li
+                              key={task.taskId || `${task.scannableId}-${task.actualExecutionTime}`}
+                            >
+                              <span>
+                                {task.taskType || "Task"}
+                                {task.taskState ? ` · ${task.taskState}` : ""}
+                                {task.scannableId ? ` · ${task.scannableId}` : ""}
+                              </span>
+                              <span>{formatTime(task.actualExecutionTime)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </article>
+                  ))}
+                  {!detail.stops.length ? (
+                    <div className={styles.detailEmpty}>
+                      <strong>No stop detail yet</strong>
+                      <span>Amazon returned the itinerary without stop rows for this day.</span>
                     </div>
-                    <div className={styles.stopAddress}>
-                      {stop.address}
-                      {stop.city ? `, ${stop.city}` : ""}
-                    </div>
-                    {stop.tasks.length ? (
-                      <ul className={styles.stopTasks}>
-                        {stop.tasks.map((task) => (
-                          <li key={task.taskId || `${task.scannableId}-${task.actualExecutionTime}`}>
-                            <span>
-                              {task.taskType || "Task"}
-                              {task.taskState ? ` · ${task.taskState}` : ""}
-                              {task.scannableId ? ` · ${task.scannableId}` : ""}
-                            </span>
-                            <span>{formatTime(task.actualExecutionTime)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </article>
-                ))}
-                {!detail.stops.length ? (
-                  <div className={styles.detailEmpty}>
-                    <strong>No stop detail yet</strong>
-                    <span>Amazon returned the itinerary without stop rows for this day.</span>
-                  </div>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           ) : null}
         </section>

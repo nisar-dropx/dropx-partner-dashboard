@@ -99,7 +99,7 @@ export default async function CortexPerformancePage({
         <PageHead
           eyebrow="Performance"
           title="Cortex"
-          subtitle="Live Amazon routes for your approved stations — drivers, deliveries, and stop detail."
+            subtitle="Live Amazon routes for your approved stations — drivers, deliveries, map, and stop detail."
         />
         <PerformanceWorkspaceTabs
           active="cortex"

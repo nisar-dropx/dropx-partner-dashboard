@@ -129,16 +129,6 @@ export async function fetchCortexItinerary(
   return executionJson(auth, `/operations/execution/api/itineraries/${itineraryId}`, query);
 }
 
-export function cortexAmazonUrl(date: string, serviceAreaId: string) {
-  const params = new URLSearchParams({
-    navMenuVariant: "external",
-    provider: "ALL_DRIVERS",
-    selectedDay: date,
-    serviceAreaId,
-  });
-  return `${AMAZON}/operations/execution/itineraries?${params}`;
-}
-
 export function transporterDisplayName(t: any, id: string) {
   if (!t) return id;
   return [t.firstName, t.lastName].filter(Boolean).join(" ").trim() || id;
