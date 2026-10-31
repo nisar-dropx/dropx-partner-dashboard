@@ -1,3 +1,4 @@
+import { getPaymentProcessingAuthorization } from "@/lib/payment-processing-authorization";
 import { finalizeBankResponseBatches } from "@/lib/bank-response-batches";
 import { bankResponseGuidance, bankResponseFileError } from "@/lib/bank-response-guidance";
 import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
@@ -6,7 +7,7 @@ import { createHash } from "node:crypto";
 
 import { revalidatePath } from "next/cache";
 
-import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
+import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { centralBankRpcRow, resolveCentralBankRowOwner, type CentralBankLedger } from "@/lib/central-bank-response";
 import {
   summarizeCentralBankResponseRows as summarizeRows,
@@ -717,7 +718,7 @@ async function processFile(input: {
 export async function POST(request: Request) {
   try {
     if (!sameOrigin(request)) return errorResponse("Invalid request origin.", 403);
-    const authorization = await getAuthorization();
+    const authorization = await getPaymentProcessingAuthorization();
     if (!authorization) return errorResponse("Sign in to import bank responses.", 401);
     if (authorization.readOnly || !hasPermission(authorization, "payment_process", "edit")) {
       return errorResponse("Edit access to Payment Process is required.", 403);

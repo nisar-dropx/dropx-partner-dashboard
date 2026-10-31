@@ -1,6 +1,7 @@
+import { getPaymentProcessingAuthorization } from "@/lib/payment-processing-authorization";
 import * as XLSX from "xlsx";
 import {canProcessPayment} from "@/lib/payment-processing-policy";
-import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
+import { hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { insertPaymentApprovalLog } from "@/app/payments/approvals/actions";
@@ -133,7 +134,7 @@ async function markRequestsProcessing(companyId: string, requestIds: string[], a
 
 export async function GET(request: Request) {
   try {
-    const authorization = await getAuthorization();
+    const authorization = await getPaymentProcessingAuthorization();
     if (!authorization) return Response.json({ error: "Unauthorized" }, { status: 401 });
     if (!hasPermission(authorization, "payment_process", "edit") || authorization.readOnly) {
       return Response.json({ error: "Permission required" }, { status: 403 });
