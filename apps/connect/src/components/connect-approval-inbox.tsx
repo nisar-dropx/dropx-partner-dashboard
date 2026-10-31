@@ -15,6 +15,7 @@ import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 import { expensePolicyMessage, expensePolicyRule, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
 import { EXPECTED_EXPENSE_KEYS, sumExpectedExpenses, type ExpectedExpenses } from "@/lib/expense-request-form";
+import { regularizationWorkHoursLabel } from "@/lib/regularization-input";
 
 type ApprovalJourney = {
   submittedAt: string | null;
@@ -1150,11 +1151,16 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             <small>Current record</small>
             <p><span>IN</span><strong>{displayTime(approval.currentInTime)}</strong></p>
             <p><span>OUT</span><strong>{displayTime(approval.currentOutTime)}</strong></p>
+            <p><span>WORK</span><strong>{regularizationWorkHoursLabel(approval.currentInTime, approval.currentOutTime)}</strong></p>
           </div>
           <div className="requested">
             <small>Requested</small>
             <p><span>IN</span><strong>{displayTime(approval.requestedInTime)}</strong></p>
             <p><span>OUT</span><strong>{displayTime(approval.requestedOutTime)}</strong></p>
+            <p><span>WORK</span><strong>{regularizationWorkHoursLabel(
+              approval.requestedInTime || approval.currentInTime,
+              approval.requestedOutTime || approval.currentOutTime
+            )}</strong></p>
           </div>
         </div>
         {approval.remarks ? <p className="dx-approval-inline-note">{approval.remarks}</p> : null}

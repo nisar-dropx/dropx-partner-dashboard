@@ -33,6 +33,24 @@ export function isOvernightRegularizationPair(inTime: string, outTime: string) {
   return Boolean(inClock && outClock && outClock < inClock);
 }
 
+/** Worked minutes between two clocks; overnight OUT (< IN) adds 24h. */
+export function regularizationWorkMinutes(inTime: unknown, outTime: unknown) {
+  const inClock = regularizationClock(inTime);
+  const outClock = regularizationClock(outTime);
+  if (!inClock || !outClock || outClock === inClock) return null;
+  const [inHour, inMinute] = inClock.split(":").map(Number);
+  const [outHour, outMinute] = outClock.split(":").map(Number);
+  let minutes = outHour * 60 + outMinute - (inHour * 60 + inMinute);
+  if (minutes < 0) minutes += 24 * 60;
+  return minutes;
+}
+
+export function regularizationWorkHoursLabel(inTime: unknown, outTime: unknown) {
+  const minutes = regularizationWorkMinutes(inTime, outTime);
+  if (minutes == null) return "—";
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
 export function regularizationTimeInput(input: {
   reason: string;
   currentIn: string;

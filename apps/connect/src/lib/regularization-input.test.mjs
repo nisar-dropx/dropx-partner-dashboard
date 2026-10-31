@@ -4,7 +4,9 @@ import {
   isOvernightRegularizationPair,
   missingPunchReason,
   regularizationClock,
-  regularizationTimeInput
+  regularizationTimeInput,
+  regularizationWorkHoursLabel,
+  regularizationWorkMinutes
 } from './regularization-input.ts';
 
 const base = { reason: 'other', currentIn: '', currentOut: '', requestedIn: '', requestedOut: '' };
@@ -114,4 +116,13 @@ test('single-punch corrections and permissions retain the untouched punch', () =
   assert.equal(regularizationClock('24:00'), '');
   assert.equal(regularizationClock('--:--'), '');
   assert.equal(missingPunchReason('--:--', '--:--'), 'missed_both');
+});
+
+test('work hours label shows the span people will be scored on', () => {
+  assert.equal(regularizationWorkMinutes('07:05', '07:16'), 11);
+  assert.equal(regularizationWorkHoursLabel('07:05', '07:16'), '00:11');
+  assert.equal(regularizationWorkHoursLabel('07:00', '16:00'), '09:00');
+  assert.equal(regularizationWorkHoursLabel('21:54', '08:20'), '10:26');
+  assert.equal(regularizationWorkHoursLabel('09:00', '--:--'), '—');
+  assert.equal(regularizationWorkHoursLabel('09:00', '09:00'), '—');
 });

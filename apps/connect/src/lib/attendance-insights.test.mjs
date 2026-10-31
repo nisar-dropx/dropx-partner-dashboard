@@ -129,6 +129,29 @@ test("surfaces late and early-out consequences without replacing full-day status
   });
 });
 
+test("approved early-out permission clears early-out penalty but keeps short-day Absent", () => {
+  const short = row({
+    attendanceStatus: "Absent",
+    status: "A",
+    payDayType: "absent",
+    inTime: "07:05",
+    outTime: "07:16",
+    workHours: "00:11",
+    punchCount: 2,
+    lateMinutes: 5,
+    earlyOutMinutes: 524,
+    scheduledStart: "07:00",
+    scheduledEnd: "16:00",
+    remark: "Attendance regularized: early out permission"
+  });
+  const insight = attendanceDayInsight(short);
+  assert.equal(insight.label, "Absent");
+  assert.equal(insight.needsRegularization, false);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "absent"]);
+  assert.match(insight.detail, /early-out permission is approved/i);
+  assert.match(insight.detail, /below the half-day requirement/i);
+});
+
 test("keeps half day as the payable status while leading with the late warning", () => {
   const halfDay = row({
     attendanceStatus: "Half Day",

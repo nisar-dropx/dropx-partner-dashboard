@@ -29,7 +29,13 @@ import {
   type AttendanceInsightRow
 } from "@/lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
-import { isOvernightRegularizationPair, missingPunchReason, regularizationTimeInput } from "@/lib/regularization-input";
+import {
+  isOvernightRegularizationPair,
+  missingPunchReason,
+  regularizationClock,
+  regularizationTimeInput,
+  regularizationWorkHoursLabel
+} from "@/lib/regularization-input";
 import { isRegularizationProofFile, REGULARIZATION_PROOF_ACCEPT } from "@/lib/regularization-proof";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 import { attendanceCorrectionHint, attendanceFilterLabels, summarizeAttendance, type AttendanceFilter } from "../lib/attendance-summary";
@@ -960,6 +966,12 @@ function RegularizationSheet({
   const [saving, setSaving] = useState(false);
   const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "late_in_permission"].includes(reason);
   const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "early_out_permission"].includes(reason);
+  const recordedWorkHours = row.workHours || regularizationWorkHoursLabel(row.inTime, row.outTime);
+  const previewIn = requestsInTime ? inTime : row.inTime;
+  const previewOut = requestsOutTime ? outTime : row.outTime;
+  const requestedWorkHours = reason && regularizationClock(previewIn) && regularizationClock(previewOut)
+    ? regularizationWorkHoursLabel(previewIn, previewOut)
+    : "";
   const proofTimeLabel = !reason
     ? "requested attendance time"
     : reason === "other"
@@ -1039,8 +1051,15 @@ function RegularizationSheet({
       </header>
       <form onSubmit={submit}>
         <div className="dx-regularization-day">
-          <span><small>DATE</small><strong>{row.date.split("-").reverse().join("/")}</strong></span>
-          <em>{attendanceLabel(row)}</em>
+          <div className="dx-regularization-day-meta">
+            <span><small>DATE</small><strong>{row.date.split("-").reverse().join("/")}</strong></span>
+            <em>{attendanceLabel(row)}</em>
+          </div>
+          <div className="dx-regularization-day-clocks" aria-label="Recorded attendance">
+            <span><small>IN</small><strong>{row.inTime || "--:--"}</strong></span>
+            <span><small>OUT</small><strong>{row.outTime || "--:--"}</strong></span>
+            <span><small>WORK</small><strong>{recordedWorkHours || "00:00"}</strong></span>
+          </div>
         </div>
         <label>Reason<select required value={reason} onChange={(event) => { setReason(event.target.value); setError(""); }}>
           <option value="">Select reason</option>
@@ -1052,6 +1071,9 @@ function RegularizationSheet({
           <option value="late_in_permission">Permission – late IN</option>
           <option value="early_out_permission">Permission – early OUT</option>
         </select></label>
+        {reason === "early_out_permission" || reason === "late_in_permission"
+          ? <p className="dx-time-prompt">Permission only waives that timing penalty. The day is still scored from the work hours above — use Incorrect IN/OUT if the recorded punch time is wrong.</p>
+          : null}
         {missingReason || (restDayClaim && reason === "missed_both")
           ? <p className="dx-time-prompt">{(missingReason === "missed_both" || (restDayClaim && reason === "missed_both"))
             ? (restDayClaim
@@ -1063,6 +1085,9 @@ function RegularizationSheet({
           {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
           {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
         </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
+        {requestedWorkHours && requestedWorkHours !== "—"
+          ? <p className="dx-time-prompt">Requested work hours: <strong>{requestedWorkHours}</strong>{recordedWorkHours && recordedWorkHours !== requestedWorkHours ? ` (recorded ${recordedWorkHours || "00:00"})` : ""}</p>
+          : null}
         {reason && requestsInTime && requestsOutTime && isOvernightRegularizationPair(inTime, outTime)
           ? <p className="dx-time-prompt">OUT is earlier on the clock than IN, so this is treated as an overnight shift ending the next calendar day (for example IN 21:54 and OUT 08:20).</p>
           : null}

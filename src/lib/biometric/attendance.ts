@@ -22,6 +22,7 @@ import {
   type HistoricalBackfillPunch
 } from "./attendance-rebuild-policy";
 import { wfhCreditState, wfhCreditLabel, type WfhCreditState } from "../wfh-attendance-credit";
+import { regularizationPermissionWaivers } from "./regularization-permission-waivers";
 import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
 import {
   buildWeeklyRosterIndex,
@@ -1735,9 +1736,17 @@ async function backfillResolvedHistoricalPunches({
 function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType) {
   if (type === "present") return row.status === "P";
   if (type === "absent") return row.attendanceStatus === "Absent";
-  if (type === "late_in") return row.lateMinutes > 0 || row.remark.toLowerCase().includes("late");
-  if (type === "early_out") return row.earlyOutMinutes > 0 || row.remark.toLowerCase().includes("early out");
-  if (type === "mis_punch") return row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
+  const remark = row.remark.toLowerCase();
+  const waivers = regularizationPermissionWaivers(row.remark);
+  if (type === "late_in") {
+    if (waivers.late) return false;
+    return row.lateMinutes > 0 || (remark.includes("late") && !/late[\s_-]*in[\s_-]*permission/.test(remark));
+  }
+  if (type === "early_out") {
+    if (waivers.earlyOut) return false;
+    return row.earlyOutMinutes > 0 || (remark.includes("early out") && !/early[\s_-]*out[\s_-]*permission/.test(remark));
+  }
+  if (type === "mis_punch") return row.punchCount < 2 || !row.outTime || remark.includes("single") || remark.includes("missing");
   return true;
 }
 
@@ -2163,11 +2172,13 @@ export async function loadAttendanceReportRows({
       rules: scheduleContext.rulesFor(profileId),
       shift: schedule.shift
     });
+    const permissionWaivers = regularizationPermissionWaivers(effectiveRemark);
     // An approved business trip is attendance credit, like WFH: no punch times are recorded,
     // but the day is a full present day.
     const businessTripCredit = row.work_mode === "business_trip" && !effectiveInTime && !effectiveOutTime && effectivePunchCount === 0;
     // An approved regularization corrects the clock times only. The corrected span is
     // still scored against policy, so a short approved day shows as Half Day or Absent.
+    // Late-in / early-out *permission* waives that timing penalty without changing the day score.
     const attendanceStatus = creditState ? wfhCreditLabel(creditState) : businessTripCredit ? "Full Day" : attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: effectivePunchCount,
@@ -2199,8 +2210,8 @@ export async function loadAttendanceReportRows({
       status: creditState ? (creditState === "credited" ? "P" : "PENDING") : regularized ? "P" : row.status ?? "P",
       wfhCreditState: creditState,
       attendanceStatus,
-      lateMinutes: variance.lateMinutes,
-      earlyOutMinutes: variance.earlyOutMinutes,
+      lateMinutes: permissionWaivers.late ? 0 : variance.lateMinutes,
+      earlyOutMinutes: permissionWaivers.earlyOut ? 0 : variance.earlyOutMinutes,
       remark: effectiveRemark,
       workMode: row.work_mode === "wfh" ? "wfh" as const : row.work_mode === "business_trip" ? "business_trip" as const : "onsite" as const,
       deviceSerial: firstDevice,

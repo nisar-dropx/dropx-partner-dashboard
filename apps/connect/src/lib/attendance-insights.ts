@@ -87,6 +87,16 @@ function durationOutcomeDetail(row: AttendanceInsightRow, outcome: "Half Day" | 
   const reason = outcome === "Half Day"
     ? `You worked ${worked}, below the full-day requirement. This day is marked Half Day and the applicable deduction will be made under company HR policy.`
     : `You worked ${worked}, below the half-day requirement. This day is marked Absent and the applicable deduction will be made under company HR policy.`;
+  const remark = String(row.remark ?? "").toLowerCase();
+  if (/attendance regularized/.test(remark)) {
+    if (/early[\s_-]*out[\s_-]*permission/.test(remark)) {
+      return `${reason} Early-out permission is approved, so the early-out penalty does not apply, but the recorded hours are still below the half-day requirement.`;
+    }
+    if (/late[\s_-]*in[\s_-]*permission/.test(remark)) {
+      return `${reason} Late-in permission is approved, so the late penalty does not apply, but the recorded hours are still below the half-day requirement.`;
+    }
+    return `${reason}`;
+  }
   return `${reason} If the attendance record is wrong, request regularization.`;
 }
 
@@ -100,12 +110,14 @@ function minutesFromRemark(remark: string, kind: "late" | "early") {
 
 /** Prefer API minutes; fall back to People-style remark notes when variance is missing. */
 export function resolveLateMinutes(row: AttendanceInsightRow) {
+  if (/late[\s_-]*in[\s_-]*permission/i.test(String(row.remark ?? ""))) return 0;
   const reported = Math.max(0, Number(row.lateMinutes ?? 0));
   if (reported > 0) return reported;
   return minutesFromRemark(row.remark ?? "", "late");
 }
 
 export function resolveEarlyOutMinutes(row: AttendanceInsightRow) {
+  if (/early[\s_-]*out[\s_-]*permission/i.test(String(row.remark ?? ""))) return 0;
   const reported = Math.max(0, Number(row.earlyOutMinutes ?? 0));
   if (reported > 0) return reported;
   return minutesFromRemark(row.remark ?? "", "early");
@@ -398,10 +410,13 @@ export function attendanceDayInsight(
   }
 
   if (payDayType === "absent" || state.includes("absent") || row.status.toUpperCase() === "A") {
+    const alreadyRegularized = /attendance regularized/i.test(remark);
     issues.push({
       code: "absent",
       label: "Absent",
-      message: "Absence deduction applies. Regularize only if the recorded attendance is incorrect.",
+      message: alreadyRegularized
+        ? "Absence deduction applies from the recorded hours. Approved timing permission does not change the day score when hours stay below half-day."
+        : "Absence deduction applies. Regularize only if the recorded attendance is incorrect.",
       tone: "red"
     });
     return {
@@ -410,7 +425,7 @@ export function attendanceDayInsight(
       headline: "Absent recorded",
       issues,
       label: "Absent",
-      needsRegularization: true,
+      needsRegularization: !alreadyRegularized,
       payDayType: "absent",
       tone: "red"
     };
