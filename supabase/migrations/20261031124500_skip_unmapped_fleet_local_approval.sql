@@ -10,10 +10,8 @@ where head.id = step.payment_head_id
   and head.company_id = step.company_id
   and head.is_active = true
   and step.step_order = 1
-  and (
-    head.name ilike '%van%'
-    or head.name ilike '%vehicle%'
-  );
+  and upper(head.code) in
+    ('VAN_ADHOC', 'VAN_FUEL', 'VEHICLE_REPAIR', 'VEHICLE_SERVICE');
 
 update public.payment_requests request
 set approval_steps_snapshot = configured.steps,
@@ -35,10 +33,8 @@ from (
     on head.company_id = step.company_id
    and head.id = step.payment_head_id
   where head.is_active = true
-    and (
-      head.name ilike '%van%'
-      or head.name ilike '%vehicle%'
-    )
+    and upper(head.code) in
+      ('VAN_ADHOC', 'VAN_FUEL', 'VEHICLE_REPAIR', 'VEHICLE_SERVICE')
   group by step.company_id, step.payment_head_id
 ) configured
 where request.company_id = configured.company_id
