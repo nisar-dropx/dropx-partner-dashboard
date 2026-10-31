@@ -18,7 +18,8 @@ const commonStart: NavItem[] = [
       { code: "edd_dashboard", label: "Live performance", href: "/edd/flash" },
       { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
       { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" },
-      { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" }
+      { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" },
+      { code: "performance", label: "Cortex", href: "/performance/cortex" }
     ]
   },
   {

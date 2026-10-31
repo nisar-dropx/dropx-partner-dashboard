@@ -6,7 +6,7 @@ export function PerformanceWorkspaceTabs({
   canViewReviewStatus,
   darkStore = false
 }: {
-  active: "daily" | "sls" | "reviews" | "status";
+  active: "daily" | "sls" | "reviews" | "status" | "cortex";
   canViewReviews: boolean;
   canViewReviewStatus: boolean;
   darkStore?: boolean;
@@ -22,5 +22,6 @@ export function PerformanceWorkspaceTabs({
     {canViewReviews ? <Link className={active === "reviews" ? "active" : ""} href="/performance?view=reviews">Review desk</Link> : null}
     {canViewReviewStatus ? <Link className={active === "status" ? "active" : ""} href="/performance/review-status">Review status</Link> : null}
     <Link className={active === "sls" ? "active" : ""} href="/performance?view=sls">Amazon SLS</Link>
+    <Link className={active === "cortex" ? "active" : ""} href="/performance/cortex">Cortex</Link>
   </nav>;
 }
