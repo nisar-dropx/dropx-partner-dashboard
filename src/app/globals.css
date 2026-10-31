@@ -3671,6 +3671,42 @@ h3 {
   gap: 8px;
 }
 
+.payment-approval-models {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.payment-approval-models legend {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.payment-approval-models legend span {
+  font-weight: 500;
+}
+
+.payment-approval-model-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.payment-approval-model-options label {
+  align-items: center;
+  background: var(--surface-muted, #f6f7f9);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 5px;
+  padding: 5px 8px;
+}
+
 .form-grid label {
   display: grid;
   gap: 6px;

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { isPeopleApprovedPaymentHead, peopleApprovedPaymentHeadMessage } from "@/lib/people-approved-payment-heads";
+import { reconcilePendingPaymentApprovers } from "@/lib/payment-approver-reconciliation";
 import { roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -30,7 +31,15 @@ export async function saveApprovalSteps(formData: FormData) {
       const roleId = clean(formData.get(`steps[${stepIndex}][candidates][${candidateIndex}][role_id]`));
       if (!roleId) continue;
       const scope = clean(formData.get(`steps[${stepIndex}][candidates][${candidateIndex}][scope]`)) ?? "company";
-      candidates.push({ role_id: roleId, scope: ["station", "cluster", "company"].includes(scope) ? scope : "company" });
+      const locationModelIds = formData
+        .getAll(`steps[${stepIndex}][candidates][${candidateIndex}][location_model_ids]`)
+        .map((value) => String(value).trim())
+        .filter(Boolean);
+      candidates.push({
+        role_id: roleId,
+        scope: ["station", "cluster", "company"].includes(scope) ? scope : "company",
+        ...(locationModelIds.length ? { location_model_ids: Array.from(new Set(locationModelIds)) } : {})
+      });
     }
     if (!candidates.length) continue;
     const isRequired = formData.get(`steps[${stepIndex}][is_required]`) === "1";
@@ -70,6 +79,20 @@ export async function saveApprovalSteps(formData: FormData) {
     const editableRoleIds = await roleIdsWithPageEditAccess(companyId, roleIds, "payment_approvals");
     const unauthorizedRoleIds = roleIds.filter((roleId) => !editableRoleIds.has(roleId));
     if (unauthorizedRoleIds.length) throw new Error("Every approval candidate must have edit access to Payment Approvals.");
+  }
+
+  const locationModelIds = Array.from(new Set(steps.flatMap((step) => step.candidates.flatMap((candidate) => candidate.location_model_ids ?? []))));
+  if (locationModelIds.length) {
+    const modelsResult = await supabaseAdmin
+      .from("location_models")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .in("id", locationModelIds);
+    if (modelsResult.error) throw new Error(modelsResult.error.message);
+    if ((modelsResult.data ?? []).length !== locationModelIds.length) {
+      throw new Error("Every selected business model must be active in this company.");
+    }
   }
 
   const processorRoleIds = new Set((headResult.data.payment_process_role_ids ?? []) as string[]);
@@ -142,6 +165,11 @@ export async function saveApprovalSteps(formData: FormData) {
       .not("approval_status", "in", "(FINAL_APPROVED,PROCESSED,PROCESSING,RETURNED,REJECTED,CANCELLED)");
     if (progressResult.error) throw new Error(progressResult.error.message);
   }
+
+  // The master is authoritative for both new and open requests. Re-resolve
+  // current assignments immediately so an old role does not keep approvals or
+  // receive reminders after an administrator saves a routing change.
+  await reconcilePendingPaymentApprovers({ companyId });
 
   revalidatePath(`/settings/payment-approvals/${paymentHeadId}`);
   revalidatePath("/settings/payment-approvals");

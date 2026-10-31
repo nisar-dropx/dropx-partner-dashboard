@@ -4,7 +4,12 @@ import { paymentRoutingDay, resolvePaymentCover } from "@/lib/payment-delegation
 import { resolveInitialStage } from "@/lib/payment-stage-policy";
 import { loadPaymentReportingHierarchy } from "@/lib/payment-reporting-hierarchy";
 
-export type ApprovalStepCandidate = { role_id: string; scope: "station" | "cluster" | "company" };
+export type ApprovalStepCandidate = {
+  role_id: string;
+  scope: "station" | "cluster" | "company";
+  /** Empty/omitted means every business model. Values are configured in the approval master. */
+  location_model_ids?: string[];
+};
 export type ApprovalStepRow = {
   id: string;
   step_order: number;
@@ -253,9 +258,17 @@ async function redirectThroughDelegation(companyId: string, target: NonNullable<
  */
 export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
-  const excludedUserIds = await excludedPaymentApproverUserIds(companyId, locationId);
+  const [excludedUserIds, requestModelId] = await Promise.all([
+    excludedPaymentApproverUserIds(companyId, locationId),
+    stationLocationModelId(companyId, locationId)
+  ]);
 
-  for (const [candidateIndex, candidate] of step.candidates.entries()) {
+  const applicableCandidates = step.candidates.filter((candidate) => {
+    const configuredModelIds = candidate.location_model_ids ?? [];
+    return !configuredModelIds.length || Boolean(requestModelId && configuredModelIds.includes(requestModelId));
+  });
+
+  for (const [candidateIndex, candidate] of applicableCandidates.entries()) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
     if (positionApprover && !excludedUserIds.has(positionApprover.userId)) {
