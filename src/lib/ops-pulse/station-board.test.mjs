@@ -3,13 +3,16 @@ import test from "node:test";
 import { regionForStation, STATION_BOARD_REGIONS } from "./station-board-regions.ts";
 import {
   ageingPivot,
+  ageingStateWeekPivot,
   boardDayLabel,
+  collectAgeingWeeks,
   collectEddDates,
   cReturnStatuses,
   eddPivot,
   normalizeBoard,
   stationBoardSheets,
   sumCReturn,
+  sumDaDsr,
 } from "./station-board.ts";
 
 test("region map covers KL, AP and OD&CG station lists", () => {
@@ -111,6 +114,10 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
       "14+": { count: 3, amount: 900 },
     },
     ageingByWeek: { week43: { count: 12, amount: 1500 }, week44: { count: 4, amount: 650.5 } },
+    ageingByStateWeek: {
+      Inducted: { week43: 1200.25, week44: 100 },
+      "Delivery Failed": { week43: 299.75, week44: 550.5 },
+    },
   });
   const ageingStations = [
     { stationCode: "NLRC", hasSnapshot: true, fetchedAt: null, businessDate: "2026-10-30", board: ageingBoard },
@@ -121,6 +128,20 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   const weekPivot = ageingPivot(ageingStations, "week");
   assert.deepEqual(weekPivot.columns, ["week43", "week44"]);
   assert.equal(weekPivot.grandTotal.count, 16);
+  const weeks = collectAgeingWeeks(ageingStations);
+  assert.deepEqual(weeks, ["week43", "week44"]);
+  const stateWeek = ageingStateWeekPivot(ageingStations, weeks);
+  assert.equal(stateWeek.rows.length, 2);
+  assert.equal(stateWeek.grandTotal, 2150.5);
+  assert.equal(stateWeek.columnTotals.week43, 1500);
+  assert.equal(stateWeek.columnTotals.week44, 650.5);
+  // Empty weeks list → empty pivot, no throw.
+  assert.deepEqual(ageingStateWeekPivot(ageingStations, []).columns, []);
+  // Zero / negative amounts ignored by normalizeBoard.
+  const blankState = normalizeBoard({
+    ageingByStateWeek: { Inducted: { week43: 0, week44: -5, week45: 12.345 } },
+  });
+  assert.deepEqual(blankState.ageingByStateWeek, { Inducted: { week45: 12.35 } });
   const ageingSheets = stationBoardSheets(
     { asOf: "", businessDate: "2026-10-30", dates: [], stations: ageingStations, run: null },
     "ageing",
@@ -128,4 +149,40 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   );
   assert.ok(ageingSheets.some((sheet) => sheet.name === "Ageing by day"));
   assert.ok(ageingSheets.some((sheet) => sheet.name === "Ageing by week"));
+  assert.ok(ageingSheets.some((sheet) => sheet.name === "Ageing State x week"));
+});
+
+test("DSR / C-Return grand totals ignore empty boards and keep pickup % stable", () => {
+  const empty = {
+    stationCode: "ZZZZ",
+    hasSnapshot: false,
+    fetchedAt: null,
+    businessDate: "2026-10-30",
+    board: normalizeBoard({}),
+  };
+  const withDsr = {
+    stationCode: "KTUR",
+    hasSnapshot: true,
+    fetchedAt: null,
+    businessDate: "2026-10-30",
+    board: normalizeBoard({
+      daDsr: [
+        { driverId: "A1", driverName: "Ada", delivered: 0, failed: 2, rejected: 0, oor: 1, total: 3, dsrPct: 0 },
+        { driverId: "A2", driverName: "Ben", delivered: 4, failed: 0, rejected: 1, oor: 0, total: 5, dsrPct: 80 },
+      ],
+      zeroDeliveries: 1,
+      cReturn: { AT_STATION: 1, PICKUP_DONE: 3 },
+      cReturnTotal: 4,
+      pickupDone: 3,
+      pickupDonePct: 75,
+    }),
+  };
+  const tot = sumDaDsr(withDsr.board.daDsr);
+  assert.equal(tot.daCount, 2);
+  assert.equal(tot.delivered, 4);
+  assert.equal(tot.total, 8);
+  assert.equal(tot.dsrPct, 50);
+  const cTot = sumCReturn([empty, withDsr]);
+  assert.equal(cTot.total, 4);
+  assert.equal(cTot.pickupDonePct, 75);
 });

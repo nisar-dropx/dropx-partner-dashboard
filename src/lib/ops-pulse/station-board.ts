@@ -610,6 +610,24 @@ export function stationBoardSheets(
           },
         ],
       });
+      const stateWeek = ageingStateWeekPivot(stations, weeks);
+      if (stateWeek.rows.length) {
+        sheets.push({
+          name: "Ageing State x week",
+          rows: [
+            ...stateWeek.rows.map((row) => ({
+              State: row.state,
+              ...Object.fromEntries(weeks.map((w) => [w, row.cells[w] || ""])),
+              "Grand Total": row.total,
+            })),
+            {
+              State: "Grand Total",
+              ...Object.fromEntries(weeks.map((w) => [w, stateWeek.columnTotals[w] || ""])),
+              "Grand Total": stateWeek.grandTotal,
+            },
+          ],
+        });
+      }
     }
   }
 
