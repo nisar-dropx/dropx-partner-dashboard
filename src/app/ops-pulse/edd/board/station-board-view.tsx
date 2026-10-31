@@ -407,6 +407,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [blockBusy, setBlockBusy] = useState<Record<string, BlockBusy>>({});
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
+  const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number } | null>(null);
   const [openStation, setOpenStation] = useState<string | null>(null);
   const [tids, setTids] = useState<TidRow[] | null>(null);
   const [tidsBusy, setTidsBusy] = useState(false);
@@ -420,6 +421,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("week");
   /** Resume Refresh 7d after a proxy timeout instead of restarting from station 0. */
   const backfillCursor = useRef(0);
+  const backfillClearSeq = useRef(0);
 
   const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
@@ -507,6 +509,10 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     let startIndex = Math.max(0, backfillCursor.current);
     let guard = 0;
     let streakTimeouts = 0;
+    if (startIndex > 0) {
+      setBackfillProgress((prev) => prev ?? { done: startIndex, total: Math.max(startIndex, 1) });
+      setBackfillNote(`Resuming board pull · ${startIndex}…`);
+    }
     while (guard < 200) {
       guard += 1;
       const params = new URLSearchParams({
@@ -547,8 +553,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
       backfillCursor.current = startIndex;
       const total = Number(body.total ?? 0) || 0;
-      setBackfillNote(total ? `Pulling board data (last 7 days) · ${Math.min(startIndex, total)}/${total}` : "Pulling board data…");
+      const done = total ? Math.min(startIndex, total) : startIndex;
+      if (total > 0) setBackfillProgress({ done, total });
+      setBackfillNote(total ? `Pulling board data (last 7 days) · ${done}/${total}` : "Pulling board data…");
       if (body.done || !body.advanced) {
+        if (total > 0) setBackfillProgress({ done: total, total });
         backfillCursor.current = 0;
         break;
       }
@@ -557,21 +566,29 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   }
 
   async function refresh() {
+    const clearSeq = ++backfillClearSeq.current;
     setBusy("refresh");
     setError(null);
     setBackfillNote("Starting last 7 days board pull…");
+    setBackfillProgress((prev) => (backfillCursor.current > 0 ? prev : { done: 0, total: 0 }));
     try {
       // Kick Ops Live in the background — do not block/fail Refresh 7d on its timeout.
       void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
       await runBackfillLoop();
       await reloadBoard();
       setBackfillNote("Last 7 days board data updated.");
+      // Keep the full bar visible briefly, then clear.
+      window.setTimeout(() => {
+        if (clearSeq !== backfillClearSeq.current) return;
+        setBackfillProgress(null);
+        setBackfillNote("");
+      }, 2500);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed.";
       setError(isTimeoutMessage(message)
         ? "Board pull timed out. Click Refresh 7d again — it resumes where it left off."
         : message);
-      setBackfillNote("");
+      // Keep the progress bar + last note so the pause point stays visible.
     } finally {
       setBusy(null);
     }
@@ -808,10 +825,32 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
           </button>
         </div>
-      </div>
 
-      {error ? <p className={s.error}>{error}</p> : null}
-      {backfillNote ? <p className={s.note}>{backfillNote}</p> : null}
+        {backfillProgress || backfillNote ? (
+          <div className={s.sweep} role="status" aria-live="polite">
+            <div className={s.track}>
+              <span
+                style={{
+                  width: `${
+                    backfillProgress && backfillProgress.total > 0
+                      ? Math.min(100, Math.round((backfillProgress.done / backfillProgress.total) * 100))
+                      : busy === "refresh"
+                        ? 8
+                        : 100
+                  }%`,
+                }}
+              />
+            </div>
+            <span>
+              {backfillNote
+                || (backfillProgress && backfillProgress.total > 0
+                  ? `Pulling board data (last 7 days) · ${backfillProgress.done}/${backfillProgress.total}`
+                  : "Pulling board data…")}
+            </span>
+          </div>
+        ) : null}
+        {error ? <p className={s.error} role="alert">{error}</p> : null}
+      </div>
 
       <div className={s.kpis}>
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong><small>{regionLabel}</small></article>
