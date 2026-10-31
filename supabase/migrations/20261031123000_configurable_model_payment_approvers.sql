@@ -133,16 +133,16 @@ begin
       );
 
     -- Discover current fleet workflows from master data. Existing Fleet
-    -- Manager candidates are included, and named van/vehicle heads cover
-    -- Adhoc Van which had already been moved to CLM + AOM as two stages.
+    -- Manager candidates are authoritative. Adhoc Van is the one current
+    -- workflow that had already moved to CLM + AOM before this migration.
+    -- Do not use a fuzzy name match: "Salary advance" also contains "van".
     select coalesce(array_agg(distinct head.id), '{}'::uuid[])
     into v_fleet_heads
     from public.payment_heads head
     where head.company_id = v_company
       and head.is_active = true
       and (
-        head.name ilike '%van%'
-        or head.name ilike '%vehicle%'
+        upper(head.code) = 'VAN_ADHOC'
         or exists (
           select 1
           from public.payment_head_approval_steps fleet_step
