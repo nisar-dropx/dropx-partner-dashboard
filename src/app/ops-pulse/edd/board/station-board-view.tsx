@@ -509,16 +509,19 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     let startIndex = Math.max(0, backfillCursor.current);
     let guard = 0;
     let streakTimeouts = 0;
+    let ticksSinceReload = 0;
     if (startIndex > 0) {
       setBackfillProgress((prev) => prev ?? { done: startIndex, total: Math.max(startIndex, 1) });
       setBackfillNote(`Resuming board pull · ${startIndex}…`);
     }
-    while (guard < 200) {
+    // ~12 stations/tick → ~21 ticks for 245 jobs; keep headroom for retries.
+    while (guard < 80) {
       guard += 1;
       const params = new URLSearchParams({
         days: "7",
         startIndex: String(startIndex),
         date: payload.businessDate,
+        concurrency: "12",
       });
       let response: Response;
       try {
@@ -527,7 +530,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         const message = err instanceof Error ? err.message : "Board backfill failed.";
         if (isTimeoutMessage(message) && streakTimeouts < 4) {
           streakTimeouts += 1;
-          setBackfillNote(`Worker busy — retrying tick ${startIndex}…`);
+          setBackfillNote(`Worker busy — retrying packet at ${startIndex}…`);
           await new Promise((r) => setTimeout(r, 1500));
           continue;
         }
@@ -537,10 +540,9 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       const body = await response.json().catch(() => ({})) as { nextIndex?: number; total?: number; done?: boolean; advanced?: number; error?: string };
       if (!response.ok) {
         const message = String(body.error ?? "Board backfill failed.");
-        // One station can overrun the proxy budget; retry the same index a few times.
         if (isTimeoutMessage(message) && streakTimeouts < 4) {
           streakTimeouts += 1;
-          setBackfillNote(`Tick timed out — retrying ${startIndex}…`);
+          setBackfillNote(`Packet timed out — retrying ${startIndex}…`);
           await new Promise((r) => setTimeout(r, 1500));
           continue;
         }
@@ -561,7 +563,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         backfillCursor.current = 0;
         break;
       }
-      await reloadBoard().catch(() => undefined);
+      ticksSinceReload += 1;
+      // Reload UI every other packet so progress stays visible without slowing the sweep.
+      if (ticksSinceReload >= 2) {
+        ticksSinceReload = 0;
+        await reloadBoard().catch(() => undefined);
+      }
     }
   }
 

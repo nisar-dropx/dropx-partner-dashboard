@@ -1105,7 +1105,13 @@ export type LoadFlashBoardBackfill = {
 };
 
 /** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
-export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?: number; date?: string }): Promise<LoadFlashBoardBackfill> {
+export async function backfillLoadFlashBoard(opts?: {
+  days?: number;
+  startIndex?: number;
+  date?: string;
+  /** Parallel station×date jobs per tick (worker clamps 1–20). */
+  concurrency?: number;
+}): Promise<LoadFlashBoardBackfill> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -1114,12 +1120,13 @@ export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?
   if (opts?.days) url.searchParams.set("days", String(opts.days));
   if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
   if (opts?.date) url.searchParams.set("date", opts.date);
+  if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    // Single-station Ageing+DSR+Inducted pulls routinely need >55s; keep under route maxDuration.
-    signal: AbortSignal.timeout(90000)
+    // Concurrent packet of ~12 stations; wall clock ≈ slowest station in the batch.
+    signal: AbortSignal.timeout(110000)
   });
   const raw = await readJson(response);
   if (!response.ok) {
