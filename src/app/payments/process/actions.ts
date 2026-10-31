@@ -4,7 +4,8 @@ import * as XLSX from "xlsx";
 import {canProcessPayment} from "@/lib/payment-processing-policy";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { isCompanyOwner } from "@/lib/authorization";
+import { requirePaymentProcessingPermission } from "@/lib/payment-processing-authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { notifyReimbursementPayment } from "@/lib/reimbursement-payment-notifications";
@@ -219,7 +220,7 @@ export async function updatePaymentProcessStatus(
 ): Promise<PaymentProcessActionState> {
   const requestId = cleanFormText(formData.get("request_id"));
   try {
-    const authorization = await requirePagePermission("payment_process", "edit");
+    const authorization = await requirePaymentProcessingPermission("edit");
     const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 
@@ -396,7 +397,7 @@ export async function updatePaymentProcessStatus(
 
 export async function finalizePaymentProcess(formData: FormData) {
   try {
-    const authorization = await requirePagePermission("payment_process", "edit");
+    const authorization = await requirePaymentProcessingPermission("edit");
     const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 

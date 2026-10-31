@@ -1,7 +1,8 @@
 import { AppShell } from "@/components/app-shell";
 import { PaymentProcessPanel } from "@/components/payment-process-panel";
 import { updatePaymentProcessStatus } from "@/app/payments/process/actions";
-import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { isCompanyOwner } from "@/lib/authorization";
+import { requirePaymentProcessingPermission } from "@/lib/payment-processing-authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadPayAdvanceWorkerContexts, type PayAdvanceWorkerContext } from "@/lib/pay-advance-payment-context";
@@ -361,7 +362,7 @@ export default async function PaymentProcessPage({
 }: {
   searchParams?: { processError?: string; processNotice?: string };
 }) {
-  const authorization = await requirePagePermission("payment_process", "access");
+  const authorization = await requirePaymentProcessingPermission("access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_process;
   const canSeeAllFinalApproved = isCompanyOwner(authorization);
