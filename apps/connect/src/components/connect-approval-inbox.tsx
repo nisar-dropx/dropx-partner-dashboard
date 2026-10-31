@@ -370,7 +370,7 @@ function rosterSwapShiftLabel(shift: RosterSwapApproval["requesterShift"], dayTy
   return `${String(Number(start[1])).padStart(2, "0")}:${start[2]}–${String(Number(end[1])).padStart(2, "0")}:${end[2]}`;
 }
 function personWithLocation(name: string, stationName?: string | null, stationCode?: string | null) {
-  const place = String(stationName || stationCode || "").trim();
+  const place = String(stationCode || stationName || "").trim();
   return place ? `${name} · ${place}` : name;
 }
 

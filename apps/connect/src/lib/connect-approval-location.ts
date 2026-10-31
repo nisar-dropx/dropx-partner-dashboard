@@ -24,7 +24,7 @@ function locationLabel(station: { station_code?: string | null; station_name?: s
 
 export function approvalLocationLabel(location?: ConnectApprovalLocation | null) {
   if (!location) return "";
-  return location.stationName || location.stationCode || "";
+  return location.stationCode || location.stationName || "";
 }
 
 export function withApprovalLocationName(name: string, location?: ConnectApprovalLocation | null) {
