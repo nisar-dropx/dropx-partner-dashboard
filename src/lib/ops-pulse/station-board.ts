@@ -72,6 +72,8 @@ export type StationBoardPayload = {
   zeroDeliveries: number;
   ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
   ageingByWeek: Record<string, AgeingBucketCell>;
+  /** Ageing let.xlsx: State → ISO week → Sum of Order Amount (INR). */
+  ageingByStateWeek: Record<string, Record<string, number>>;
 };
 
 export type StationBoardStation = {
@@ -175,6 +177,7 @@ export function emptyBoard(): StationBoardPayload {
     zeroDeliveries: 0,
     ageingByDay: emptyAgeingByDay(),
     ageingByWeek: {},
+    ageingByStateWeek: {},
   };
 }
 
@@ -234,6 +237,19 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
       if (parsed.count > 0 || parsed.amount > 0) ageingByWeek[key] = parsed;
     }
   }
+  const ageingByStateWeek: Record<string, Record<string, number>> = {};
+  if (row.ageingByStateWeek && typeof row.ageingByStateWeek === "object" && !Array.isArray(row.ageingByStateWeek)) {
+    for (const [state, weeks] of Object.entries(row.ageingByStateWeek as Record<string, unknown>)) {
+      if (!weeks || typeof weeks !== "object" || Array.isArray(weeks)) continue;
+      const stateKey = String(state || "").trim() || "(blank)";
+      const weekMap: Record<string, number> = {};
+      for (const [week, amount] of Object.entries(weeks as Record<string, unknown>)) {
+        const n = Math.round((Math.max(0, Number(amount) || 0) + Number.EPSILON) * 100) / 100;
+        if (n > 0) weekMap[String(week || "").trim() || "(blank)"] = n;
+      }
+      if (Object.keys(weekMap).length) ageingByStateWeek[stateKey] = weekMap;
+    }
+  }
   return {
     eddByDate,
     cReturn,
@@ -244,6 +260,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
     ageingByDay,
     ageingByWeek,
+    ageingByStateWeek,
   };
 }
 
@@ -357,8 +374,41 @@ export function collectAgeingWeeks(stations: StationBoardStation[]): string[] {
     for (const [week, cell] of Object.entries(station.board.ageingByWeek ?? {})) {
       if ((cell?.count ?? 0) > 0 || (cell?.amount ?? 0) > 0) set.add(week);
     }
+    for (const weeks of Object.values(station.board.ageingByStateWeek ?? {})) {
+      for (const [week, amount] of Object.entries(weeks)) {
+        if ((amount ?? 0) > 0) set.add(week);
+      }
+    }
   }
   return sortAgeingWeekKeys([...set]);
+}
+
+/** Ageing let.xlsx layout: State × ISO week Sum of Order Amount (region aggregate). */
+export function ageingStateWeekPivot(stations: StationBoardStation[], weeks?: string[]) {
+  const cols = weeks ?? collectAgeingWeeks(stations);
+  const byState = new Map<string, Record<string, number>>();
+  for (const station of stations) {
+    for (const [state, weekMap] of Object.entries(station.board.ageingByStateWeek ?? {})) {
+      if (!byState.has(state)) byState.set(state, Object.fromEntries(cols.map((w) => [w, 0])));
+      const row = byState.get(state)!;
+      for (const [week, amount] of Object.entries(weekMap)) {
+        if (!(week in row)) continue;
+        row[week] = Math.round((row[week] + (Number(amount) || 0) + Number.EPSILON) * 100) / 100;
+      }
+    }
+  }
+  const states = [...byState.keys()].sort((a, b) => a.localeCompare(b));
+  const rows = states.map((state) => {
+    const cells = byState.get(state) ?? Object.fromEntries(cols.map((w) => [w, 0]));
+    const total = Math.round((cols.reduce((sum, w) => sum + (cells[w] ?? 0), 0) + Number.EPSILON) * 100) / 100;
+    return { state, cells, total };
+  });
+  const columnTotals = Object.fromEntries(
+    cols.map((w) => [w, Math.round((rows.reduce((sum, row) => sum + (row.cells[w] ?? 0), 0) + Number.EPSILON) * 100) / 100]),
+  ) as Record<string, number>;
+  const grandTotal = Math.round((rows.reduce((sum, row) => sum + row.total, 0) + Number.EPSILON) * 100) / 100;
+  const maxAmount = Math.max(0, ...rows.map((row) => row.total), grandTotal);
+  return { columns: cols, rows, columnTotals, grandTotal, maxAmount };
 }
 
 export function ageingStationTotals(board: StationBoardPayload): AgeingBucketCell {

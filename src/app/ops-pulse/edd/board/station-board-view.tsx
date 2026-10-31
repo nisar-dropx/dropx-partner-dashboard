@@ -8,6 +8,7 @@ import {
   AGEING_DAY_BUCKETS,
   AGEING_DAY_LABELS,
   ageingPivot,
+  ageingStateWeekPivot,
   boardDayLabel,
   collectAgeingWeeks,
   CRETURN_DISPLAY,
@@ -369,7 +370,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [copied, setCopied] = useState(false);
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
-  const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
+  const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("week");
 
   const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
@@ -791,14 +792,58 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       {view === "ageing" ? (
         <section className={s.panel}>
           <div className={s.panelHead}>
-            <h3>Ageing · station × {ageingMode === "day" ? "day buckets" : "ISO week"}</h3>
+            <h3>
+              {ageingMode === "day"
+                ? "Ageing · station × day buckets"
+                : "Ageing · State × ISO week (Sum of Order Amount)"}
+            </h3>
             <div className={s.segment} role="tablist" aria-label="Ageing type">
               <button type="button" aria-pressed={ageingMode === "day"} onClick={() => setAgeingMode("day")}>Date type</button>
               <button type="button" aria-pressed={ageingMode === "week"} onClick={() => setAgeingMode("week")}>Week type</button>
             </div>
           </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
-            const local = ageingPivot(group.stations, ageingMode, ageingMode === "week" ? ageingWeeks : undefined);
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : ageingMode === "week" ? groups.map((group) => {
+            const local = ageingStateWeekPivot(group.stations, ageingWeeks);
+            return (
+              <div key={group.id}>
+                <div className={s.region}>
+                  <span>{group.label}</span>
+                  {regionShareActions(group.id, group.label, group.stations)}
+                </div>
+                <div className={s.scroll}>
+                  <table className={`${s.table} ${s.ageing}`}>
+                    <thead>
+                      <tr>
+                        <th>State</th>
+                        {local.columns.map((col) => <th key={col}>{col}</th>)}
+                        <th>Grand Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {local.rows.map((row) => (
+                        <tr key={row.state}>
+                          <td className={s.clm}>{row.state}</td>
+                          {local.columns.map((col) => {
+                            const value = row.cells[col] ?? 0;
+                            return <td key={col}>{value ? inr(value) : ""}</td>;
+                          })}
+                          <td className={s.heat} style={{ background: heatColor(row.total, local.maxAmount) }}>{inr(row.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>Grand Total</td>
+                        {local.columns.map((col) => <td key={col}>{inr(local.columnTotals[col] ?? 0)}</td>)}
+                        <td>{inr(local.grandTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          }) : groups.map((group) => {
+            const local = ageingPivot(group.stations, "day");
             const cols = local.columns;
             return (
               <div key={group.id}>
@@ -814,7 +859,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <th rowSpan={2}>CLM</th>
                         {cols.map((col) => (
                           <th key={col} colSpan={2}>
-                            {ageingMode === "day" ? AGEING_DAY_LABELS[col as keyof typeof AGEING_DAY_LABELS] || col : col}
+                            {AGEING_DAY_LABELS[col as keyof typeof AGEING_DAY_LABELS] || col}
                           </th>
                         ))}
                         <th rowSpan={2}>Total Count</th>

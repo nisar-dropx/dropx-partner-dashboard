@@ -968,6 +968,7 @@ export type LoadFlashBoardPayload = {
   zeroDeliveries: number;
   ageingByDay: Record<string, LoadFlashAgeingCell>;
   ageingByWeek: Record<string, LoadFlashAgeingCell>;
+  ageingByStateWeek: Record<string, Record<string, number>>;
 };
 
 export type LoadFlashBoardStation = {
@@ -1010,6 +1011,7 @@ function emptyLoadFlashBoard(): LoadFlashBoardPayload {
     zeroDeliveries: 0,
     ageingByDay: {},
     ageingByWeek: {},
+    ageingByStateWeek: {},
   };
 }
 
@@ -1064,6 +1066,19 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
       if (parsed.count > 0 || parsed.amount > 0) ageingByWeek[key] = parsed;
     }
   }
+  const ageingByStateWeek: Record<string, Record<string, number>> = {};
+  if (row.ageingByStateWeek && typeof row.ageingByStateWeek === "object" && !Array.isArray(row.ageingByStateWeek)) {
+    for (const [state, weeks] of Object.entries(row.ageingByStateWeek as Record<string, unknown>)) {
+      if (!weeks || typeof weeks !== "object" || Array.isArray(weeks)) continue;
+      const stateKey = String(state || "").trim() || "(blank)";
+      const weekMap: Record<string, number> = {};
+      for (const [week, amount] of Object.entries(weeks as Record<string, unknown>)) {
+        const n = Math.round((Math.max(0, Number(amount) || 0) + Number.EPSILON) * 100) / 100;
+        if (n > 0) weekMap[String(week || "").trim() || "(blank)"] = n;
+      }
+      if (Object.keys(weekMap).length) ageingByStateWeek[stateKey] = weekMap;
+    }
+  }
   const cReturnTotal = Number(row.cReturnTotal ?? Object.values(cReturn).reduce((a, b) => a + b, 0)) || 0;
   const pickupDone = Number(row.pickupDone ?? cReturn.PICKUP_DONE ?? 0) || 0;
   return {
@@ -1076,6 +1091,7 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
     ageingByDay,
     ageingByWeek,
+    ageingByStateWeek,
   };
 }
 
