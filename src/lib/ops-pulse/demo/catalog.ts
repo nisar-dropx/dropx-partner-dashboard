@@ -174,6 +174,7 @@ define(
     "/performance?view=daily",
     "/performance?view=sls",
     "/performance/review-status",
+    "/performance/cortex",
     "/?view=hourly",
     "/?view=shift",
   ],
