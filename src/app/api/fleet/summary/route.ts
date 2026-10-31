@@ -1,3 +1,4 @@
+import { loadPortalFuel } from "@/lib/fleet/portal-fuel";
 export const dynamic = "force-dynamic";
 
 import { fleetVehicles } from "@/data/fleet-vehicles";
@@ -11,16 +12,18 @@ export async function GET() {
   if (!authorization) return Response.json({ error: "Login required." }, { status: 401 });
   const companyId = requireCompanyId(authorization);
   const locationAccess = await resolveFleetLocationAccess(authorization, companyId);
-  const [vehicles, locations, documentTypes, gpsLive, fuelTransactions, dailyKmRows] = await Promise.all([
+  const [vehicles, locations, documentTypes, gpsLive, fuelTransactions, dailyKmRows, portalFuel] = await Promise.all([
     loadVehicles(companyId, locationAccess.stationCodes),
     loadLocations(companyId, locationAccess.stationCodes),
     loadDocumentTypes(companyId),
     loadWheelseyeCurrentLocations(companyId),
     loadFuelTransactions(companyId),
-    loadDailyKm(companyId)
+    loadDailyKm(companyId),
+    loadPortalFuel(companyId).catch(() => ({ approved: [], pending: [], error: "Station fuel requests unavailable. Retry to load complete totals." }))
   ]);
   const visibleVehicleNos = new Set(vehicles.map((vehicle) => vehicle.vehicle_no));
-  const fuelByVehicle = sumFuelByVehicle(fuelTransactions.rows);
+  const allFuelRows = [...fuelTransactions.rows, ...portalFuel.approved];
+  const fuelByVehicle = sumFuelByVehicle(allFuelRows);
   const kmByVehicle = sumKmByVehicle(dailyKmRows.rows);
   const vehicleMetrics = vehicles.map((vehicle) => {
     const alerts = documentAlerts(vehicle);
@@ -44,16 +47,18 @@ export async function GET() {
   return Response.json({
     generatedAt: new Date().toISOString(),
     source: vehicles === fleetVehicles ? "vehicle data.xlsx" : "Supabase",
-    fuelError: fuelTransactions.error,
+    fuelError: fuelTransactions.error || ("error" in portalFuel ? portalFuel.error : null),
+    pendingFuel: portalFuel.pending.filter(row => visibleVehicleNos.has(row.vehicle_no)),
     dailyKmError: dailyKmRows.error,
     vehicles,
     locations,
     documentTypes,
     vehicleMetrics,
-    fuel: fuelTransactions.rows.filter((row) => visibleVehicleNos.has(row.vehicle_no)).map((row) => ({
+    fuel: allFuelRows.filter((row) => visibleVehicleNos.has(row.vehicle_no)).map((row) => ({
       transaction_at: row.transaction_at,
       vehicle_no: row.vehicle_no,
-      station_code: stationByVehicle.get(row.vehicle_no) ?? "UNMAPPED",
+      station_code: ("station_code" in row ? String(row.station_code) : stationByVehicle.get(row.vehicle_no)) ?? "UNMAPPED",
+      request_id: "request_id" in row ? row.request_id : null,
       source: row.provider,
       pump_name: row.station_name,
       quantity: Number(row.fuel_quantity) || 0,

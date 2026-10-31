@@ -1,3 +1,4 @@
+import { loadPortalFuel } from "./portal-fuel";
 import { type AuthorizationContext, hasPermission } from '@/lib/authorization';
 import { requireCompanyId } from '@/lib/company-scope';
 import { supabaseAdmin } from '@/lib/supabase-admin';
@@ -28,12 +29,15 @@ export async function loadDailyReport(auth: AuthorizationContext, from: string, 
   const empty = { from, to, generatedAt: new Date().toISOString(), rows: [], vehicles, latestKmDate: null, latestFuelDate: null };
   if (!vehicles.length || !supabaseAdmin) return empty;
   const vehicleNos = vehicles.map(v => v.vehicle_no);
-  const [km, fuel, latestKm, latestFuel] = await Promise.all([
+  const [km, fuel, latestKm, latestFuel, portalFuel] = await Promise.all([
     readAllRows(supabaseAdmin.from('fleet_daily_km').select('vehicle_no,movement_date,km,source,point_count,calculated_at,review_status,raw_km,accepted_point_count,rejected_point_count,stationary_point_count,algorithm_version').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('movement_date', from).lte('movement_date', to).order('movement_date').order('id')),
     readAllRows(supabaseAdmin.from('fleet_fuel_transactions').select('vehicle_no,transaction_date,fuel_quantity,fuel_amount,provider').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('transaction_date', from).lte('transaction_date', to).order('transaction_date').order('id')),
     supabaseAdmin.from('fleet_daily_km').select('movement_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('movement_date', { ascending: false }).limit(1),
-    supabaseAdmin.from('fleet_fuel_transactions').select('transaction_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('transaction_date', { ascending: false }).limit(1)
+    supabaseAdmin.from('fleet_fuel_transactions').select('transaction_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('transaction_date', { ascending: false }).limit(1),
+    loadPortalFuel(companyId)
   ]);
   if (km.error || fuel.error || latestKm.error || latestFuel.error) throw new FleetReportError('Unable to load the complete distance and fuel report. Please try again.');
-  return { ...empty, rows: buildDailyFleetRows(vehicles, km.data ?? [], fuel.data ?? [], from, to), latestKmDate: latestKm.data?.[0]?.movement_date ?? null, latestFuelDate: latestFuel.data?.[0]?.transaction_date ?? null };
+  const manual = portalFuel.approved.filter(row => vehicleNos.includes(row.vehicle_no));
+  const allFuel = [...(fuel.data ?? []), ...manual.filter(row => row.transaction_date >= from && row.transaction_date <= to)];
+  return { ...empty, rows: buildDailyFleetRows(vehicles, km.data ?? [], allFuel, from, to), latestKmDate: latestKm.data?.[0]?.movement_date ?? null, latestFuelDate: [latestFuel.data?.[0]?.transaction_date, ...manual.map(row => row.transaction_date)].filter(Boolean).sort().at(-1) ?? null };
 }

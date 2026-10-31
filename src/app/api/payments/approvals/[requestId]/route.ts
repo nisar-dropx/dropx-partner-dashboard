@@ -1,3 +1,5 @@
+import { loadSameDayFuel } from "@/lib/van-fuel-server";
+import { vanFuelDetails } from "@/lib/van-fuel";
 import { NextResponse } from "next/server";
 
 import { approvePaymentRequest, rejectPaymentRequest, returnPaymentRequest } from "@/app/payments/approvals/actions";
@@ -32,7 +34,7 @@ async function authorizedRequest(requestId: string, requireEdit = false) {
   const companyId = requireCompanyId(authorization);
   const result = await supabaseAdmin
     .from("payment_requests")
-    .select("id,request_no,location_id,location_code,payment_head_id,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,current_step_order,total_steps,adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date,stations(location_model_id),payment_heads(name,code)")
+    .select("details,id,request_no,location_id,location_code,payment_head_id,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,current_step_order,total_steps,adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date,stations(location_model_id),payment_heads(name,code)")
     .eq("company_id", companyId)
     .eq("id", requestId)
     .maybeSingle();
@@ -119,7 +121,11 @@ export async function GET(_request: Request, context: { params: { requestId: str
       .flatMap((answer) => parsePaymentTrackingIds(answer.answer_value ?? ""))).size;
     const head = relation(request.payment_heads);
 
+    const fuel = vanFuelDetails(request.details);
+    const fuelHistory = fuel ? await loadSameDayFuel(companyId, fuel.vehicle_no, fuel.fuel_date).catch(() => ({ rows: [], latestDate: null, error: "Fuel history unavailable" })) : null;
     return NextResponse.json({
+      fuelHistory,
+      fuel: vanFuelDetails(request.details),
       answers,
       attachmentCount: answers.reduce((count, answer) => count + answer.attachments.length, 0),
       locationLabel,

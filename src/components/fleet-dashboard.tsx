@@ -32,7 +32,9 @@ type FleetMetric = {
   healthScore: number;
 };
 
+type PendingFuel = { request_id: string; request_no: string; vehicle_no: string; station_code: string; transaction_date: string; fuel_amount: number; status: string };
 type FuelRow = {
+  request_id?: string | null;
   transaction_at?: string;
   vehicle_no: string;
   station_code: string;
@@ -67,6 +69,7 @@ type MaintenanceRow = {
 type FleetSummary = {
   error?: string;
   fuelError?: string | null;
+  pendingFuel?: PendingFuel[];
   dailyKmError?: string | null;
   generatedAt?: string;
   source?: string;
@@ -328,7 +331,7 @@ export function FleetDashboard({
         <div className="fleet-kpis">
           <Kpi icon={<Activity size={16} />} label="Vehicles" value={formatNumber(totals.vehicles)} hint="filtered fleet" />
           <Kpi icon={<Gauge size={16} />} label="KM" value={formatNumber(totals.km)} hint="GPS/manual" />
-          <Kpi icon={<Fuel size={16} />} label="Litres" value={formatNumber(totals.litres)} hint="card litres" />
+          <Kpi icon={<Fuel size={16} />} label="Litres" value={formatNumber(totals.litres)} hint="recorded litres" />
           <Kpi icon={<Fuel size={16} />} label="Fuel Amount" value={formatCurrency(totals.fuel)} hint="fuel spend" />
           <Kpi icon={<Gauge size={16} />} label="Mileage" value={mileage ? `${formatNumber(mileage)} km/L` : "-"} hint="available KM" />
           <Kpi icon={<TriangleAlert size={16} />} label="Cost/KM" value={costKm ? formatCurrency(costKm) : "-"} hint="fuel only" />
@@ -357,7 +360,7 @@ export function FleetDashboard({
             vehicle={vehicle}
           />
         ) : null}
-        {mode === "Fuel Log" ? <FuelLog canUpload={Boolean(tabPermissions["Fuel Log"]?.canAdd || tabPermissions["Fuel Log"]?.canEdit)} error={summary.fuelError ?? undefined} rows={fuelRows} onUploaded={refreshFleet} /> : null}
+        {mode === "Fuel Log" ? <FuelLog pending={summary.pendingFuel ?? []} canUpload={Boolean(tabPermissions["Fuel Log"]?.canAdd || tabPermissions["Fuel Log"]?.canEdit)} error={summary.fuelError ?? undefined} rows={fuelRows} onUploaded={refreshFleet} /> : null}
         {mode === "Report" ? <FleetReports fuelReports={<FleetFuelReport rows={fuelRows} />} /> : null}
         {mode === "Live GPS" ? <LiveGps rows={summary.gpsLive ?? []} /> : null}
         {mode === "Maintenance" ? <Maintenance rows={summary.maintenance ?? []} /> : null}
@@ -1352,12 +1355,14 @@ function StationView({ rows }: { rows: FleetMetric[] }) {
 }
 
 function FuelLog({
+  pending,
   canUpload,
   error,
   onUploaded,
   rows
 }: {
   canUpload: boolean;
+  pending: PendingFuel[];
   error?: string;
   onUploaded: () => Promise<void>;
   rows: FuelRow[];
@@ -1474,6 +1479,7 @@ function FuelLog({
         </form>
       ) : null}
       {error ? <div className="fleet-upload-message error">Fuel report could not load: {error}</div> : null}
+      {pending.length ? <details className="van-fuel-pending"><summary>Station fuel requests · {pending.length} pending · excluded from consumption totals</summary><DataTable headers={["Vehicle", "Station", "Fuel date", "Request", "Amount", "Status"]} rows={pending.filter(row => (!vehicles.length || vehicles.includes(row.vehicle_no)) && (!stations.length || stations.includes(row.station_code)) && (!fromDate || row.transaction_date >= fromDate) && (!toDate || row.transaction_date <= toDate)).map(row => [row.vehicle_no, row.station_code, formatDateValue(row.transaction_date), row.request_no, formatCurrency(row.fuel_amount), row.status])} numericFrom={null} /></details> : null}
       <div className="fleet-upload-count">
         {rows.length} fuel rows loaded. {filtered.length} matching current filters.
       </div>

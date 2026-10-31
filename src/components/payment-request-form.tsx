@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { VanFuelFields } from "@/components/van-fuel-fields";
 import { PaymentCostSummary } from "./payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { AdhocReasonSelector } from "./adhoc-reason-selector";
@@ -387,7 +388,8 @@ export function PaymentRequestForm({
         </>
       ) : null}
 
-      {selectedHead ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
+      {selectedHead?.code === "VAN_FUEL" ? <VanFuelFields key={selectedLocationId} locationId={selectedLocationId} actual={showBankDetails} /> : null}
+      {selectedHead && selectedHead.code !== "VAN_FUEL" ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
       {selectedHead?.code === "VAN_ADHOC" && volumeReason.trim().toLowerCase() === "high volume" ? <PaymentVolumeContext key={`${selectedLocationId}:${volumeDate}`} locationId={selectedLocationId} date={volumeDate} /> : null}
 
       {selectedHead?.payment_head_questions.length ? (
