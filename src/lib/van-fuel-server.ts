@@ -12,6 +12,8 @@ export async function loadOwnFuelVehicles(companyId: string, station: string) {
 }
 export async function prepareVanFuel(companyId: string, code: string, station: string, form: FormData, actual: boolean, existing?: unknown, preserveVehicle = false) {
   if (code !== 'VAN_FUEL') return {};
+  const amount = Number(form.get('amount'));
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a fuel amount greater than zero.');
   const saved = vanFuelDetails(existing);
   const id = preserveVehicle && saved ? saved.vehicle_id : String(form.get('fuel_vehicle_id') ?? '');
   if (!id) throw new Error('Select a company-owned vehicle mapped to this station.');

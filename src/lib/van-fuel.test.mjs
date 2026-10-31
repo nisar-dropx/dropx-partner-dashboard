@@ -16,7 +16,7 @@ test('fuel dates and actual litres reject missing, invalid, future and non-posit
 function dbMock(data) { return { from(table) { const filters=[]; const q={ table, filters, select(){return q}, eq(k,v){filters.push([k,v]);return q}, in(){return q}, not(){return q}, order(){return q}, maybeSingle(){return Promise.resolve({data: typeof data[table]==='function'? data[table](filters):data[table],error:null})}, then(resolve,reject){return Promise.resolve({data:typeof data[table]==='function'?data[table](filters):data[table],error:null}).then(resolve,reject)} };return q; } }; }
 const vehicle = {id:'own',vehicle_no:'KL11BZ0772',station_code:'KLZA',ownership_type:'own'};
 const bill = {file_path:'bill/path',file_name:'bill.jpg'};
-const form = () => {const f=new FormData();f.set('fuel_vehicle_id','own');f.set('fuel_date','2026-10-31');f.set('fuel_litres','10');return f;};
+const form = () => {const f=new FormData();f.set('amount','1000');f.set('fuel_vehicle_id','own');f.set('fuel_date','2026-10-31');f.set('fuel_litres','10');return f;};
 function server(data) {return load('./van-fuel-server.ts',{'@/lib/supabase-admin':{supabaseAdmin:dbMock(data)},'@/lib/van-fuel':policy,'@/lib/payment-volume-data':{paymentVolumeToday:()=> '2026-10-31'},'@/lib/supabase-pagination':{readAllRows:q=>q},'@/lib/payment-request-attachments':attachments});}
 test('server rejects foreign/stale mapping and enforces a bill at actual submission',async()=>{
  for (const row of [null,{...vehicle,ownership_type:'rented'},{...vehicle,station_code:'KTUR'}]) await assert.rejects(server({fleet_vehicles:row}).prepareVanFuel('company','VAN_FUEL','KLZA',form(),false));
