@@ -25,6 +25,7 @@ function fixture() {
       if(name.endsWith('connect-people-attendance-access'))return scope;
       if(name.endsWith('connect-approval-journey'))return {loadApprovalJourneySteps:async()=>new Map(),approvalJourneySummary:()=>({})};
       if(name.endsWith('connect-time-off-attachments'))return {loadTimeOffAttachments:async()=>new Map()};
+      if(name.endsWith('connect-approval-location'))return {loadConnectApprovalLocations:async()=>new Map(),connectApprovalLocationFromJoin:()=>({stationCode:'',stationName:''})};
       if(name.endsWith('expense-request-form'))return {normalizeExpectedExpenses:value=>value??{}};
       if(name.endsWith('connect-reportee-scope'))return {connectReporteeMatches:()=>false};
       return {};

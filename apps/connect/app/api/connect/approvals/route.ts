@@ -11,6 +11,7 @@ import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
 import { listConnectPayAdvanceApprovals, listConnectPayAdvanceOversight, decideConnectPayAdvanceApproval } from "../../../../src/lib/connect-pay-advance-approval-data";
 import { listConnectPaymentApprovals } from "../../../../src/lib/connect-payment-approvals";
+import { connectApprovalLocationFromJoin } from "../../../../src/lib/connect-approval-location";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -46,7 +47,7 @@ async function listLeaveApprovals(account: ConnectAccount) {
   const steps = stepResult.data ?? [];
   if (!steps.length) return [];
   const requestResult = await db().from("hr_leave_requests")
-    .select("id,employee_id,contractor_id,start_date,end_date,days,reason,status,requested_at,hr_leave_types(name,code),employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .select("id,employee_id,contractor_id,start_date,end_date,days,reason,status,requested_at,hr_leave_types(name,code),employees(full_name,employee_code,stations(station_code,station_name)),contractors(full_name,dropx_id,stations(station_code,station_name))")
     .eq("company_id", account.companyId)
     .eq("status", "pending")
     .in("id", steps.map((step) => step.request_id));
@@ -59,6 +60,7 @@ async function listLeaveApprovals(account: ConnectAccount) {
     const employee = relation(request.employees);
     const contractor = relation(request.contractors);
     const leaveType = relation(request.hr_leave_types);
+    const location = connectApprovalLocationFromJoin(employee?.stations ?? contractor?.stations);
     return [{
       id: step.id,
       requestId: request.id,
@@ -71,6 +73,8 @@ async function listLeaveApprovals(account: ConnectAccount) {
       reason: request.reason,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+      stationCode: location.stationCode,
+      stationName: location.stationName,
       profileType: request.contractor_id ? "contractor" as const : "employee" as const,
       requestedAt: request.requested_at
     }];

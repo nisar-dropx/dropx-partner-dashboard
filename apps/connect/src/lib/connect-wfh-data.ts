@@ -14,6 +14,7 @@ import { loadConnectWfhPolicies, resolveConnectWfhAccess, type ConnectWfhPolicy 
 import { notifyApproverMobile } from "./approver-mobile-notifications";
 import { supabaseAdmin } from "./supabase-admin";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
+import { loadConnectApprovalLocations } from "./connect-approval-location";
 
 export type WfhWorkerType = "employee" | "contractor";
 
@@ -472,16 +473,30 @@ export async function listConnectWfhApprovals(input: {
       reason: request.reason,
       requesterName: request.worker_name,
       requesterCode: request.worker_code ?? "",
-      profileType: request.profile_type,
+      profileType: String(request.profile_type),
+      profileId: String(request.profile_id ?? ""),
       requestedAt: request.requested_at
     }];
   });
-  const journeys = await loadApprovalJourneySteps(input.companyId, rows.map((row) => row.requestId), {
-    table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
-    actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+  const [locations, journeys, attachments] = await Promise.all([
+    loadConnectApprovalLocations(input.companyId, rows.map((row) => ({ profileType: row.profileType, profileId: row.profileId }))),
+    loadApprovalJourneySteps(input.companyId, rows.map((row) => row.requestId), {
+      table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+      actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+    }),
+    loadTimeOffAttachments(input.companyId,"wfh",rows.map(row=>row.requestId))
+  ]);
+  return rows.map((row) => {
+    const location = locations.get(`${row.profileType}:${row.profileId}`);
+    const { profileId: _profileId, ...rest } = row;
+    return {
+      ...rest,
+      stationCode: location?.stationCode ?? "",
+      stationName: location?.stationName ?? "",
+      attachment: attachments.get(row.requestId) ?? null,
+      journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? [])
+    };
   });
-  const attachments=await loadTimeOffAttachments(input.companyId,"wfh",rows.map(row=>row.requestId));
-  return rows.map((row) => ({ ...row, attachment: attachments.get(row.requestId) ?? null, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectWfhApproval(input: {
@@ -585,7 +600,8 @@ export async function listConnectWfhHrApprovals(
       reason: request.reason,
       requesterName: request.worker_name,
       requesterCode: request.worker_code ?? "",
-      profileType: request.profile_type,
+      profileType: String(request.profile_type),
+      profileId: String(request.profile_id ?? ""),
       managerName: request.manager_name,
       managerNote: request.manager_note,
       managerDecidedAt: request.manager_decided_at,
@@ -593,12 +609,25 @@ export async function listConnectWfhHrApprovals(
       queue: "hr" as const
     }];
   });
-  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
-    table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
-    actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+  const [locations, journeys, attachments] = await Promise.all([
+    loadConnectApprovalLocations(account.companyId, rows.map((row) => ({ profileType: row.profileType, profileId: row.profileId }))),
+    loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
+      table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+      actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+    }),
+    loadTimeOffAttachments(account.companyId,"wfh",rows.map(row=>row.requestId))
+  ]);
+  return rows.map((row) => {
+    const location = locations.get(`${row.profileType}:${row.profileId}`);
+    const { profileId: _profileId, ...rest } = row;
+    return {
+      ...rest,
+      stationCode: location?.stationCode ?? "",
+      stationName: location?.stationName ?? "",
+      attachment: attachments.get(row.requestId) ?? null,
+      journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? [])
+    };
   });
-  const attachments=await loadTimeOffAttachments(account.companyId,"wfh",rows.map(row=>row.requestId));
-  return rows.map((row) => ({ ...row, attachment: attachments.get(row.requestId) ?? null, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectWfhHrApproval(input: {

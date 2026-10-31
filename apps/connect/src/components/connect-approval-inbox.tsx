@@ -138,6 +138,8 @@ type LeaveApproval = {
   reason: string;
   requesterName: string;
   requesterCode: string;
+  stationCode?: string;
+  stationName?: string;
   profileType: "employee" | "contractor";
   requestedAt?: string | null;
   journey?: ApprovalJourney;
@@ -156,6 +158,8 @@ type WfhApproval = {
   reason: string;
   requesterName: string;
   requesterCode: string;
+  stationCode?: string;
+  stationName?: string;
   profileType: "employee" | "contractor";
   managerName?: string | null;
   managerNote?: string | null;
@@ -188,6 +192,8 @@ type AttendanceApproval = {
   stepOrder: number;
   workerName: string;
   workerCode: string;
+  stationCode?: string;
+  stationName?: string;
   profileType: "employee" | "contractor";
   attendanceDate: string;
   currentInTime: string | null;
@@ -275,6 +281,8 @@ type ExitApproval = {
   stepOrder: number;
   requesterName: string;
   requesterCode: string;
+  stationCode?: string;
+  stationName?: string;
   profileType: "employee" | "contractor";
   requestedLastWorkingDate: string;
   reason: string;
@@ -288,6 +296,8 @@ type ExitWithdrawalApproval = {
   caseNumber: string;
   requesterName: string;
   requesterCode: string;
+  stationCode?: string;
+  stationName?: string;
   profileType: "employee" | "contractor";
   requestedLastWorkingDate: string;
   reason: string;
@@ -358,6 +368,10 @@ function rosterSwapShiftLabel(shift: RosterSwapApproval["requesterShift"], dayTy
   const end = String(shift.end_time ?? "").match(/^(\d{1,2}):(\d{2})/);
   if (!start || !end) return "Shift not assigned";
   return `${String(Number(start[1])).padStart(2, "0")}:${start[2]}–${String(Number(end[1])).padStart(2, "0")}:${end[2]}`;
+}
+function personWithLocation(name: string, stationName?: string | null, stationCode?: string | null) {
+  const place = String(stationName || stationCode || "").trim();
+  return place ? `${name} · ${place}` : name;
 }
 
 function ApprovalHead({
@@ -1113,7 +1127,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
         eyebrow={`${regularizationReasonLabel(approval.reasonCode)} · ${approval.stepName}`}
         key={attendanceKey(approval, queue)}
         meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
-        name={approval.workerName}
+        name={personWithLocation(approval.workerName, approval.stationName, approval.stationCode)}
         onReview={() => setActiveKey(attendanceKey(approval, queue))}
         saving={saving}
       />
@@ -1122,13 +1136,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
 
   function renderAttendanceCard(approval: AttendanceApproval, queue: "manager" | "hr") {
     const noteRequired = queue === "hr";
+    const personName = personWithLocation(approval.workerName, approval.stationName, approval.stationCode);
     return (
-      <ApprovalModal onClose={closeModal} title={approval.workerName}>
+      <ApprovalModal onClose={closeModal} title={personName}>
         <ApprovalHead
           badge={<span className="dx-approval-badge">{displayDate(approval.attendanceDate)}</span>}
           eyebrow={`${regularizationReasonLabel(approval.reasonCode)} · ${approval.stepName}`}
           meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
-          name={approval.workerName}
+          name={personName}
         />
         <div className="dx-approval-time-grid">
           <div>
@@ -1287,7 +1302,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               eyebrow={`${approval.leaveType} · ${approval.stepName}`}
               key={approval.id}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-              name={approval.requesterName}
+              name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
               onReview={() => setActiveKey(`time-off:${approval.id}`)}
               saving={saving}
             />
@@ -1298,13 +1313,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const id = activeKey?.match(/^time-off:(.+)$/)?.[1];
             const approval = id ? leaveApprovals.find((item) => item.id === id) : undefined;
             if (!approval) return null;
+            const personName = personWithLocation(approval.requesterName, approval.stationName, approval.stationCode);
             return (
-              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+              <ApprovalModal onClose={closeModal} title={personName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
                   eyebrow={`${approval.leaveType} · ${approval.stepName}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personName}
                 />
                 <dl className="dx-approval-facts">
                   <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
@@ -1338,7 +1354,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   eyebrow={`${approval.requestNo} · ${approval.stepName}`}
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
                   onReview={() => setActiveKey(`wfh:manager:${approval.id}`)}
                   saving={saving}
                 />
@@ -1357,7 +1373,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   eyebrow={`${approval.requestNo} · WFH request`}
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
                   onReview={() => setActiveKey(`wfh:hr:${approval.id}`)}
                   saving={saving}
                 />
@@ -1373,13 +1389,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const [, queue, id] = match;
             const approval = (queue === "hr" ? wfhHrApprovals : wfhApprovals).find((item) => item.id === id);
             if (!approval) return null;
+            const personName = personWithLocation(approval.requesterName, approval.stationName, approval.stationCode);
             return (
-              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+              <ApprovalModal onClose={closeModal} title={personName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
                   eyebrow={queue === "hr" ? `${approval.requestNo} · WFH request` : `${approval.requestNo} · ${approval.stepName}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personName}
                 />
                 <dl className="dx-approval-facts">
                   <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
@@ -1424,7 +1441,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   eyebrow={`${approval.requestNo} · ${approval.stepName}`}
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
                   onReview={() => setActiveKey(`business-trip:manager:${approval.id}`)}
                   saving={saving}
                 />
@@ -1443,7 +1460,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   eyebrow={`${approval.requestNo} · Present · Business trip`}
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
                   onReview={() => setActiveKey(`business-trip:hr:${approval.id}`)}
                   saving={saving}
                 />
@@ -1459,13 +1476,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const [, queue, id] = match;
             const approval = (queue === "hr" ? businessTripHrApprovals : businessTripApprovals).find((item) => item.id === id);
             if (!approval) return null;
+            const personName = personWithLocation(approval.requesterName, approval.stationName, approval.stationCode);
             return (
-              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+              <ApprovalModal onClose={closeModal} title={personName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
                   eyebrow={queue === "hr" ? `${approval.requestNo} · Present · Business trip` : `${approval.requestNo} · ${approval.stepName}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personName}
                 />
                 <dl className="dx-approval-facts">
                   <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
@@ -2062,7 +2080,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               eyebrow={`${approval.caseNumber} · Withdrawal review`}
               key={`exit-withdraw:${approval.caseId}`}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-              name={approval.requesterName}
+              name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
               approveLabel="Accept withdrawal"
               onReview={() => setActiveKey(`exit-withdraw:${approval.caseId}`)}
               saving={saving}
@@ -2074,7 +2092,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
               key={approval.id}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-              name={approval.requesterName}
+              name={personWithLocation(approval.requesterName, approval.stationName, approval.stationCode)}
               onReview={() => setActiveKey(`exit:${approval.id}`)}
               saving={saving}
             />
@@ -2086,13 +2104,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const caseId = activeKey?.match(/^exit-withdraw:(.+)$/)?.[1];
             const approval = caseId ? exitWithdrawalApprovals.find((entry) => entry.caseId === caseId) : undefined;
             if (!approval) return null;
+            const personName = personWithLocation(approval.requesterName, approval.stationName, approval.stationCode);
             return (
-              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+              <ApprovalModal onClose={closeModal} title={personName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">Withdraw</span>}
                   eyebrow={`${approval.caseNumber} · Withdrawal review`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personName}
                 />
                 <dl className="dx-approval-facts">
                   <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
@@ -2116,13 +2135,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const id = activeKey?.match(/^exit:(.+)$/)?.[1];
             const approval = id ? exitApprovals.find((entry) => entry.id === id) : undefined;
             if (!approval) return null;
+            const personName = personWithLocation(approval.requesterName, approval.stationName, approval.stationCode);
             return (
-              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+              <ApprovalModal onClose={closeModal} title={personName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">Step {approval.stepOrder}</span>}
                   eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                  name={approval.requesterName}
+                  name={personName}
                 />
                 <dl className="dx-approval-facts">
                   <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>

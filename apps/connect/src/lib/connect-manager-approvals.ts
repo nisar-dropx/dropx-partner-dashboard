@@ -17,6 +17,7 @@ import { connectApproverIdentity } from "./connect-expense-data";
 import { userFacingError } from "./user-facing-error";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
 import { isHrHeadDesignation } from "./approval-designation-labels";
+import { connectApprovalLocationFromJoin, loadConnectApprovalLocations } from "./connect-approval-location";
 
 type Decision = "approved" | "returned" | "rejected";
 
@@ -217,7 +218,8 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
     stepOrder: step.step_order,
     workerName: request.full_name || "Team member",
     workerCode: request.dropx_id || "",
-    profileType: request.profile_type === "contractor" ? "contractor" : "employee",
+    profileType: request.profile_type === "contractor" ? "contractor" as const : "employee" as const,
+    profileId: String(request.profile_id ?? ""),
     attendanceDate: request.attendance_date,
     currentInTime: request.current_in_time,
     currentOutTime: request.current_out_time,
@@ -229,11 +231,21 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
     createdAt: request.created_at,
     queue: "manager" as const
   })));
+  const locations = await loadConnectApprovalLocations(account.companyId, rows.map((row) => ({ profileType: row.profileType, profileId: row.profileId })));
   const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
     table: "attendance_regularization_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
     actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
   });
-  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
+  return rows.map((row) => {
+    const location = locations.get(`${row.profileType}:${row.profileId}`);
+    const { profileId: _profileId, ...rest } = row;
+    return {
+      ...rest,
+      stationCode: location?.stationCode ?? "",
+      stationName: location?.stationName ?? "",
+      journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? [])
+    };
+  });
 }
 
 export async function listConnectAttendanceHrApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
@@ -274,7 +286,8 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     stepOrder: 0,
     workerName: request.full_name || "Team member",
     workerCode: request.dropx_id || "",
-    profileType: request.profile_type === "contractor" ? "contractor" : "employee",
+    profileType: request.profile_type === "contractor" ? "contractor" as const : "employee" as const,
+    profileId: String(request.profile_id ?? ""),
     attendanceDate: request.attendance_date,
     currentInTime: request.current_in_time,
     currentOutTime: request.current_out_time,
@@ -286,11 +299,21 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     createdAt: request.created_at,
     queue: "hr" as const
   })));
+  const locations = await loadConnectApprovalLocations(account.companyId, approvalRows.map((row) => ({ profileType: row.profileType, profileId: row.profileId })));
   const journeys = await loadApprovalJourneySteps(account.companyId, approvalRows.map((row) => row.requestId), {
     table: "attendance_regularization_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
     actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
   });
-  return approvalRows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
+  return approvalRows.map((row) => {
+    const location = locations.get(`${row.profileType}:${row.profileId}`);
+    const { profileId: _profileId, ...rest } = row;
+    return {
+      ...rest,
+      stationCode: location?.stationCode ?? "",
+      stationName: location?.stationName ?? "",
+      journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? [])
+    };
+  });
 }
 
 export async function decideConnectAttendanceHrApproval(
@@ -708,7 +731,7 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
   if (!candidates.length) return [];
   const caseIds = [...new Set(candidates.map((step) => step.case_id))];
   const [casesResult, allStepsResult] = await Promise.all([
-    db().from("hr_exit_cases").select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,employees(full_name,employee_code),contractors(full_name,dropx_id)").eq("company_id", account.companyId).in("id", caseIds),
+    db().from("hr_exit_cases").select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,employees(full_name,employee_code,stations(station_code,station_name)),contractors(full_name,dropx_id,stations(station_code,station_name))").eq("company_id", account.companyId).in("id", caseIds),
     db().from("hr_exit_approvals").select("id,case_id,step_order,status,is_required").eq("company_id", account.companyId).in("case_id", caseIds)
   ]);
   if (casesResult.error || allStepsResult.error) throw new Error(casesResult.error?.message ?? allStepsResult.error?.message ?? "Exit approvals could not be loaded.");
@@ -720,6 +743,7 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
     if (!exitCase || blocked || ["rejected", "closed", "cancelled", "withdrawn", "withdrawal_requested"].includes(exitCase.status)) return [];
     const employee = one(exitCase.employees);
     const contractor = one(exitCase.contractors);
+    const location = connectApprovalLocationFromJoin(employee?.stations ?? contractor?.stations);
     return [{
       id: step.id,
       caseId: exitCase.id,
@@ -728,6 +752,8 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
       stepOrder: step.step_order,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+      stationCode: location.stationCode,
+      stationName: location.stationName,
       profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
       requestedLastWorkingDate: exitCase.requested_last_working_date,
       reason: exitCase.employee_reason ?? "No additional comment",
@@ -786,7 +812,7 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
   const actorUserId = await approverUserId(account);
   if (!actorUserId) return [];
   const casesResult = await db().from("hr_exit_cases")
-    .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,withdrawal_requested_at,withdrawal_reviewer_user_id,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,withdrawal_requested_at,withdrawal_reviewer_user_id,employees(full_name,employee_code,stations(station_code,station_name)),contractors(full_name,dropx_id,stations(station_code,station_name))")
     .eq("company_id", account.companyId)
     .eq("status", "withdrawal_requested")
     .eq("withdrawal_reviewer_user_id", actorUserId)
@@ -795,7 +821,7 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
     if (/withdrawal_reviewer_user_id|schema cache|does not exist/i.test(casesResult.error.message)) {
       // Fallback before migration: match first approved step acted_by / assigned_user_id.
       const open = await db().from("hr_exit_cases")
-        .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+        .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,employees(full_name,employee_code,stations(station_code,station_name)),contractors(full_name,dropx_id,stations(station_code,station_name))")
         .eq("company_id", account.companyId)
         .eq("status", "withdrawal_requested")
         .order("submitted_at", { ascending: false });
@@ -819,12 +845,15 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
         if (firstApprover.get(exitCase.id) !== actorUserId) return [];
         const employee = one(exitCase.employees);
         const contractor = one(exitCase.contractors);
+        const location = connectApprovalLocationFromJoin(employee?.stations ?? contractor?.stations);
         return [{
           id: exitCase.id,
           caseId: exitCase.id,
           caseNumber: exitCase.case_number,
           requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
           requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+          stationCode: location.stationCode,
+          stationName: location.stationName,
           profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
           requestedLastWorkingDate: exitCase.requested_last_working_date,
           reason: exitCase.employee_reason ?? "No additional comment",
@@ -842,12 +871,15 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
   const approvals = (casesResult.data ?? []).map((exitCase) => {
     const employee = one(exitCase.employees);
     const contractor = one(exitCase.contractors);
+    const location = connectApprovalLocationFromJoin(employee?.stations ?? contractor?.stations);
     return {
       id: exitCase.id,
       caseId: exitCase.id,
       caseNumber: exitCase.case_number,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+      stationCode: location.stationCode,
+      stationName: location.stationName,
       profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
       requestedLastWorkingDate: exitCase.requested_last_working_date,
       reason: exitCase.employee_reason ?? "No additional comment",
