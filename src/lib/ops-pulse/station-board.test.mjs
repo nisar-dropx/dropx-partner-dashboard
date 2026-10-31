@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { regionForStation, STATION_BOARD_REGIONS } from "./station-board-regions.ts";
 import {
+  ageingPivot,
   boardDayLabel,
   collectEddDates,
   cReturnStatuses,
   eddPivot,
   normalizeBoard,
   stationBoardSheets,
+  sumCReturn,
 } from "./station-board.ts";
 
 test("region map covers KL, AP and OD&CG station lists", () => {
@@ -88,4 +90,42 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   assert.equal(zero.rows[0]["DA's Name"], "Ada");
   assert.equal(zero.rows[1].Station, "Grand Total");
   assert.equal(zero.rows[1].Total, zero.rows[0].Total);
+
+  const cTot = sumCReturn(stations);
+  assert.equal(cTot.total, 12);
+  assert.equal(cTot.byStatus.PICKUP_DONE, 9);
+
+  const ageingBoard = normalizeBoard({
+    eddByDate: {},
+    cReturn: {},
+    cReturnTotal: 0,
+    pickupDone: 0,
+    pickupDonePct: 0,
+    daDsr: [],
+    zeroDeliveries: 0,
+    ageingByDay: {
+      "1": { count: 10, amount: 1000.5 },
+      "2-3": { count: 2, amount: 200 },
+      "4-7": { count: 0, amount: 0 },
+      "8-14": { count: 1, amount: 50 },
+      "14+": { count: 3, amount: 900 },
+    },
+    ageingByWeek: { week43: { count: 12, amount: 1500 }, week44: { count: 4, amount: 650.5 } },
+  });
+  const ageingStations = [
+    { stationCode: "NLRC", hasSnapshot: true, fetchedAt: null, businessDate: "2026-10-30", board: ageingBoard },
+  ];
+  const dayPivot = ageingPivot(ageingStations, "day");
+  assert.equal(dayPivot.grandTotal.count, 16);
+  assert.equal(dayPivot.grandTotal.amount, 2150.5);
+  const weekPivot = ageingPivot(ageingStations, "week");
+  assert.deepEqual(weekPivot.columns, ["week43", "week44"]);
+  assert.equal(weekPivot.grandTotal.count, 16);
+  const ageingSheets = stationBoardSheets(
+    { asOf: "", businessDate: "2026-10-30", dates: [], stations: ageingStations, run: null },
+    "ageing",
+    ageingStations,
+  );
+  assert.ok(ageingSheets.some((sheet) => sheet.name === "Ageing by day"));
+  assert.ok(ageingSheets.some((sheet) => sheet.name === "Ageing by week"));
 });

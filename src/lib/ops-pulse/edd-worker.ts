@@ -956,6 +956,8 @@ export type LoadFlashBoardDa = {
   dsrPct: number;
 };
 
+export type LoadFlashAgeingCell = { count: number; amount: number };
+
 export type LoadFlashBoardPayload = {
   eddByDate: Record<string, number>;
   cReturn: Record<string, number>;
@@ -964,6 +966,8 @@ export type LoadFlashBoardPayload = {
   pickupDonePct: number;
   daDsr: LoadFlashBoardDa[];
   zeroDeliveries: number;
+  ageingByDay: Record<string, LoadFlashAgeingCell>;
+  ageingByWeek: Record<string, LoadFlashAgeingCell>;
 };
 
 export type LoadFlashBoardStation = {
@@ -982,8 +986,31 @@ export type LoadFlashBoardNetwork = {
   run: EddNetworkRunStatus | null;
 };
 
+function emptyAgeingCell(): LoadFlashAgeingCell {
+  return { count: 0, amount: 0 };
+}
+
+function parseAgeingCell(value: unknown): LoadFlashAgeingCell {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return emptyAgeingCell();
+  const row = value as Record<string, unknown>;
+  return {
+    count: Math.max(0, Number(row.count) || 0),
+    amount: Math.round((Math.max(0, Number(row.amount) || 0) + Number.EPSILON) * 100) / 100,
+  };
+}
+
 function emptyLoadFlashBoard(): LoadFlashBoardPayload {
-  return { eddByDate: {}, cReturn: {}, cReturnTotal: 0, pickupDone: 0, pickupDonePct: 0, daDsr: [], zeroDeliveries: 0 };
+  return {
+    eddByDate: {},
+    cReturn: {},
+    cReturnTotal: 0,
+    pickupDone: 0,
+    pickupDonePct: 0,
+    daDsr: [],
+    zeroDeliveries: 0,
+    ageingByDay: {},
+    ageingByWeek: {},
+  };
 }
 
 function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
@@ -1024,6 +1051,19 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
       });
     }
   }
+  const ageingByDay: Record<string, LoadFlashAgeingCell> = {};
+  if (row.ageingByDay && typeof row.ageingByDay === "object" && !Array.isArray(row.ageingByDay)) {
+    for (const [key, cell] of Object.entries(row.ageingByDay as Record<string, unknown>)) {
+      ageingByDay[key] = parseAgeingCell(cell);
+    }
+  }
+  const ageingByWeek: Record<string, LoadFlashAgeingCell> = {};
+  if (row.ageingByWeek && typeof row.ageingByWeek === "object" && !Array.isArray(row.ageingByWeek)) {
+    for (const [key, cell] of Object.entries(row.ageingByWeek as Record<string, unknown>)) {
+      const parsed = parseAgeingCell(cell);
+      if (parsed.count > 0 || parsed.amount > 0) ageingByWeek[key] = parsed;
+    }
+  }
   const cReturnTotal = Number(row.cReturnTotal ?? Object.values(cReturn).reduce((a, b) => a + b, 0)) || 0;
   const pickupDone = Number(row.pickupDone ?? cReturn.PICKUP_DONE ?? 0) || 0;
   return {
@@ -1033,7 +1073,9 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     pickupDone,
     pickupDonePct: Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0,
     daDsr,
-    zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0
+    zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
+    ageingByDay,
+    ageingByWeek,
   };
 }
 

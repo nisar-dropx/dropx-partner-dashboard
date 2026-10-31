@@ -49,6 +49,19 @@ export type StationBoardDaDsr = {
   dsrPct: number;
 };
 
+/** Condensed Ageing day buckets (Ops pivot image). */
+export const AGEING_DAY_BUCKETS = ["1", "2-3", "4-7", "8-14", "14+"] as const;
+export type AgeingDayBucket = (typeof AGEING_DAY_BUCKETS)[number];
+export const AGEING_DAY_LABELS: Record<AgeingDayBucket, string> = {
+  "1": "1 Day",
+  "2-3": "2-3 Days",
+  "4-7": "4-7 Days",
+  "8-14": "8-14 Days",
+  "14+": "14+ Days",
+};
+
+export type AgeingBucketCell = { count: number; amount: number };
+
 export type StationBoardPayload = {
   eddByDate: Record<string, number>;
   cReturn: Record<string, number>;
@@ -57,6 +70,8 @@ export type StationBoardPayload = {
   pickupDonePct: number;
   daDsr: StationBoardDaDsr[];
   zeroDeliveries: number;
+  ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
+  ageingByWeek: Record<string, AgeingBucketCell>;
 };
 
 export type StationBoardStation = {
@@ -75,7 +90,8 @@ export type StationBoardNetwork = {
   run: { id: string; status: string; stationsTotal: number; stationsDone: number; stationsOk: number; stationsFailed: number; startedAt: string; finishedAt: string | null } | null;
 };
 
-export type StationBoardView = "edd" | "creturn" | "dsr" | "zero";
+export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing";
+export type AgeingBoardMode = "day" | "week";
 
 /** Full DSR column labels (Excel / share image / board table — no abbreviations). */
 export const DSR_HEADERS = {
@@ -129,8 +145,37 @@ export function sumDaDsr(rows: StationBoardDaDsr[]): {
   };
 }
 
+function emptyAgeingByDay(): Record<AgeingDayBucket, AgeingBucketCell> {
+  return {
+    "1": { count: 0, amount: 0 },
+    "2-3": { count: 0, amount: 0 },
+    "4-7": { count: 0, amount: 0 },
+    "8-14": { count: 0, amount: 0 },
+    "14+": { count: 0, amount: 0 },
+  };
+}
+
+function parseAgeingCell(value: unknown): AgeingBucketCell {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { count: 0, amount: 0 };
+  const row = value as Record<string, unknown>;
+  return {
+    count: Math.max(0, Number(row.count) || 0),
+    amount: Math.round((Math.max(0, Number(row.amount) || 0) + Number.EPSILON) * 100) / 100,
+  };
+}
+
 export function emptyBoard(): StationBoardPayload {
-  return { eddByDate: {}, cReturn: {}, cReturnTotal: 0, pickupDone: 0, pickupDonePct: 0, daDsr: [], zeroDeliveries: 0 };
+  return {
+    eddByDate: {},
+    cReturn: {},
+    cReturnTotal: 0,
+    pickupDone: 0,
+    pickupDonePct: 0,
+    daDsr: [],
+    zeroDeliveries: 0,
+    ageingByDay: emptyAgeingByDay(),
+    ageingByWeek: {},
+  };
 }
 
 export function normalizeBoard(raw: unknown): StationBoardPayload {
@@ -174,6 +219,21 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
       });
     }
   }
+  const ageingByDay = emptyAgeingByDay();
+  if (row.ageingByDay && typeof row.ageingByDay === "object" && !Array.isArray(row.ageingByDay)) {
+    for (const key of AGEING_DAY_BUCKETS) {
+      const cell = (row.ageingByDay as Record<string, unknown>)[key];
+      if (cell != null) ageingByDay[key] = parseAgeingCell(cell);
+    }
+  }
+  const ageingByWeek: Record<string, AgeingBucketCell> = {};
+  if (row.ageingByWeek && typeof row.ageingByWeek === "object" && !Array.isArray(row.ageingByWeek)) {
+    for (const [week, cell] of Object.entries(row.ageingByWeek as Record<string, unknown>)) {
+      const key = String(week || "").trim() || "(blank)";
+      const parsed = parseAgeingCell(cell);
+      if (parsed.count > 0 || parsed.amount > 0) ageingByWeek[key] = parsed;
+    }
+  }
   return {
     eddByDate,
     cReturn,
@@ -182,6 +242,8 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     pickupDonePct,
     daDsr,
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
+    ageingByDay,
+    ageingByWeek,
   };
 }
 
@@ -277,6 +339,105 @@ export function eddPivot(stations: StationBoardStation[], dates: string[]) {
   return { max, columnTotals, rows, grandTotal };
 }
 
+/** Sort week39 < week40 < week9 numerically; (blank) last. */
+export function sortAgeingWeekKeys(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    if (a === "(blank)") return 1;
+    if (b === "(blank)") return -1;
+    const na = /^week(\d+)$/i.exec(a);
+    const nb = /^week(\d+)$/i.exec(b);
+    if (na && nb) return Number(na[1]) - Number(nb[1]);
+    return a.localeCompare(b);
+  });
+}
+
+export function collectAgeingWeeks(stations: StationBoardStation[]): string[] {
+  const set = new Set<string>();
+  for (const station of stations) {
+    for (const [week, cell] of Object.entries(station.board.ageingByWeek ?? {})) {
+      if ((cell?.count ?? 0) > 0 || (cell?.amount ?? 0) > 0) set.add(week);
+    }
+  }
+  return sortAgeingWeekKeys([...set]);
+}
+
+export function ageingStationTotals(board: StationBoardPayload): AgeingBucketCell {
+  let count = 0;
+  let amount = 0;
+  for (const key of AGEING_DAY_BUCKETS) {
+    const cell = board.ageingByDay?.[key] ?? { count: 0, amount: 0 };
+    count += cell.count;
+    amount += cell.amount;
+  }
+  return { count, amount: Math.round((amount + Number.EPSILON) * 100) / 100 };
+}
+
+export function ageingPivot(
+  stations: StationBoardStation[],
+  mode: AgeingBoardMode,
+  weeks?: string[],
+) {
+  const columns = mode === "day" ? [...AGEING_DAY_BUCKETS] : (weeks ?? collectAgeingWeeks(stations));
+  const rows = stations.map((station) => {
+    const cells: Record<string, AgeingBucketCell> = {};
+    let totalCount = 0;
+    let totalAmount = 0;
+    for (const col of columns) {
+      const cell =
+        mode === "day"
+          ? (station.board.ageingByDay?.[col as AgeingDayBucket] ?? { count: 0, amount: 0 })
+          : (station.board.ageingByWeek?.[col] ?? { count: 0, amount: 0 });
+      cells[col] = cell;
+      totalCount += cell.count;
+      totalAmount += cell.amount;
+    }
+    return {
+      stationCode: station.stationCode,
+      cells,
+      total: { count: totalCount, amount: Math.round((totalAmount + Number.EPSILON) * 100) / 100 },
+    };
+  });
+  const columnTotals: Record<string, AgeingBucketCell> = {};
+  for (const col of columns) {
+    let count = 0;
+    let amount = 0;
+    for (const row of rows) {
+      count += row.cells[col]?.count ?? 0;
+      amount += row.cells[col]?.amount ?? 0;
+    }
+    columnTotals[col] = { count, amount: Math.round((amount + Number.EPSILON) * 100) / 100 };
+  }
+  const grandTotal = rows.reduce(
+    (acc, row) => ({
+      count: acc.count + row.total.count,
+      amount: Math.round((acc.amount + row.total.amount + Number.EPSILON) * 100) / 100,
+    }),
+    { count: 0, amount: 0 },
+  );
+  const maxAmount = Math.max(0, ...rows.map((row) => row.total.amount), grandTotal.amount);
+  return { columns, rows, columnTotals, grandTotal, maxAmount };
+}
+
+export function sumCReturn(stations: StationBoardStation[]) {
+  const byStatus: Record<string, number> = {};
+  for (const status of CRETURN_DISPLAY) byStatus[status] = 0;
+  let total = 0;
+  let pickupDone = 0;
+  for (const station of stations) {
+    for (const status of CRETURN_DISPLAY) {
+      byStatus[status] = (byStatus[status] ?? 0) + (station.board.cReturn[status] ?? 0);
+    }
+    total += station.board.cReturnTotal || 0;
+    pickupDone += station.board.pickupDone || 0;
+  }
+  return {
+    byStatus,
+    total,
+    pickupDone,
+    pickupDonePct: total > 0 ? Math.round((pickupDone / total) * 100) : 0,
+  };
+}
+
 export function cReturnStatuses(board: StationBoardPayload): Array<{ status: string; count: number }> {
   const known = new Set<string>(CRETURN_DISPLAY);
   const rows: Array<{ status: string; count: number }> = CRETURN_DISPLAY.map((status) => ({ status, count: board.cReturn[status] ?? 0 }));
@@ -316,31 +477,90 @@ export function stationBoardSheets(
   }
 
   if (view === "creturn" || view === "full") {
+    const cReturnRows = stations.map((station) => ({
+      Station: station.stationCode,
+      Region: regionLabel(regionForStation(station.stationCode)),
+      ...Object.fromEntries(CRETURN_DISPLAY.map((status) => [CRETURN_SHORT[status], station.board.cReturn[status] ?? 0])),
+      Total: station.board.cReturnTotal || 0,
+      "Pickup Done %": station.board.cReturnTotal ? `${station.board.pickupDonePct}%` : "",
+    }));
+    if (cReturnRows.length) {
+      const tot = sumCReturn(stations);
+      cReturnRows.push({
+        Station: "Grand Total",
+        Region: "",
+        ...Object.fromEntries(CRETURN_DISPLAY.map((status) => [CRETURN_SHORT[status], tot.byStatus[status] ?? 0])),
+        Total: tot.total,
+        "Pickup Done %": tot.total ? `${tot.pickupDonePct}%` : "",
+      });
+    }
+    sheets.push({ name: "C-Return", rows: cReturnRows });
+  }
+
+  if (view === "ageing" || view === "full") {
+    const dayPivot = ageingPivot(stations, "day");
     sheets.push({
-      name: "C-Return",
-      rows: stations.flatMap((station) => {
-        const statuses = cReturnStatuses(station.board);
-        if (!station.board.cReturnTotal) {
-          return [{ Station: station.stationCode, Region: regionLabel(regionForStation(station.stationCode)), Status: "", Count: 0, "Pickup Done %": "" }];
-        }
-        return [
-          ...statuses.filter((row) => row.count > 0).map((row) => ({
-            Station: station.stationCode,
-            Region: regionLabel(regionForStation(station.stationCode)),
-            Status: row.status,
-            Count: row.count,
-            "Pickup Done %": "",
+      name: "Ageing by day",
+      rows: [
+        ...dayPivot.rows.map((row) => ({
+          Station: row.stationCode,
+          Region: regionLabel(regionForStation(row.stationCode)),
+          ...Object.fromEntries(
+            AGEING_DAY_BUCKETS.flatMap((b) => [
+              [`${AGEING_DAY_LABELS[b]} count`, row.cells[b]?.count || ""],
+              [`${AGEING_DAY_LABELS[b]} amount`, row.cells[b]?.amount || ""],
+            ]),
+          ),
+          "Total count": row.total.count,
+          "Total amount": row.total.amount,
+        })),
+        {
+          Station: "Grand Total",
+          Region: "",
+          ...Object.fromEntries(
+            AGEING_DAY_BUCKETS.flatMap((b) => [
+              [`${AGEING_DAY_LABELS[b]} count`, dayPivot.columnTotals[b]?.count || ""],
+              [`${AGEING_DAY_LABELS[b]} amount`, dayPivot.columnTotals[b]?.amount || ""],
+            ]),
+          ),
+          "Total count": dayPivot.grandTotal.count,
+          "Total amount": dayPivot.grandTotal.amount,
+        },
+      ],
+    });
+    const weeks = collectAgeingWeeks(stations);
+    if (weeks.length) {
+      const weekPivot = ageingPivot(stations, "week", weeks);
+      sheets.push({
+        name: "Ageing by week",
+        rows: [
+          ...weekPivot.rows.map((row) => ({
+            Station: row.stationCode,
+            Region: regionLabel(regionForStation(row.stationCode)),
+            ...Object.fromEntries(
+              weeks.flatMap((w) => [
+                [`${w} count`, row.cells[w]?.count || ""],
+                [`${w} amount`, row.cells[w]?.amount || ""],
+              ]),
+            ),
+            "Total count": row.total.count,
+            "Total amount": row.total.amount,
           })),
           {
-            Station: station.stationCode,
-            Region: regionLabel(regionForStation(station.stationCode)),
-            Status: "Grand Total",
-            Count: station.board.cReturnTotal,
-            "Pickup Done %": `${station.board.pickupDonePct}%`,
+            Station: "Grand Total",
+            Region: "",
+            ...Object.fromEntries(
+              weeks.flatMap((w) => [
+                [`${w} count`, weekPivot.columnTotals[w]?.count || ""],
+                [`${w} amount`, weekPivot.columnTotals[w]?.amount || ""],
+              ]),
+            ),
+            "Total count": weekPivot.grandTotal.count,
+            "Total amount": weekPivot.grandTotal.amount,
           },
-        ];
-      }),
-    });
+        ],
+      });
+    }
   }
 
   if (view === "dsr" || view === "full") {
@@ -419,7 +639,8 @@ export function stationBoardFilename(date: string, view: StationBoardView | "ful
       : view === "creturn" ? "c-return"
         : view === "dsr" ? "da-dsr"
           : view === "zero" ? "zero-deliveries"
-            : "edd";
+            : view === "ageing" ? "ageing"
+              : "edd";
   const suffix = scope.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
   return `station-board-${date}-${slug}${suffix ? `-${suffix}` : ""}.xlsx`;
 }

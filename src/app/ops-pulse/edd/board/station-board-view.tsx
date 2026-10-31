@@ -5,7 +5,11 @@ import { ArrowLeft, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, L
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import {
+  AGEING_DAY_BUCKETS,
+  AGEING_DAY_LABELS,
+  ageingPivot,
   boardDayLabel,
+  collectAgeingWeeks,
   CRETURN_DISPLAY,
   CRETURN_SHORT,
   collectEddDates,
@@ -17,8 +21,9 @@ import {
   groupStationsByRegion,
   heatColor,
   pickupPctColor,
-  shiftBoardDate,
+  sumCReturn,
   sumDaDsr,
+  type AgeingBoardMode,
   type StationBoardDaDsr,
   type StationBoardStation,
   type StationBoardView,
@@ -82,7 +87,12 @@ function asView(value: string | undefined): StationBoardView {
   if (key === "creturn") return "creturn";
   if (key === "dsr" || key === "dadsr") return "dsr";
   if (key === "zero" || key === "zerodeliveries") return "zero";
+  if (key === "ageing" || key === "aging") return "ageing";
   return "edd";
+}
+
+function inr(n: number) {
+  return (Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function asRegion(value: string | undefined): StationBoardRegionId | "ALL" {
@@ -120,6 +130,7 @@ function buildShareTable(
   stations: StationBoardStation[],
   businessDate: string,
   regionLabel: string,
+  stationNames: Record<string, string> = {},
 ): BoardShareTable {
   const subtitle = `${formatOpsDate(businessDate, businessDate)} · ${regionLabel} · DropX Logistics`;
   if (view === "edd") {
@@ -153,7 +164,45 @@ function buildShareTable(
       { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" },
       { text: `${station.board.pickupDonePct}%`, bold: true, bg: pickupPctColor(station.board.pickupDonePct), align: "right" },
     ]);
+    const tot = sumCReturn(stations);
+    rows.push([
+      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+      ...CRETURN_DISPLAY.map((status) => ({
+        text: String(tot.byStatus[status] ?? 0),
+        bold: true,
+        align: "right" as const,
+        bg: "#fff4bf",
+      })),
+      { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
+      { text: `${tot.pickupDonePct}%`, bold: true, bg: pickupPctColor(tot.pickupDonePct), align: "right" },
+    ]);
     return { title: `C-Return · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
+  }
+
+  if (view === "ageing") {
+    const pivot = ageingPivot(stations, "day");
+    const headers = ["Station", "CLM", ...AGEING_DAY_BUCKETS.flatMap((b) => [`${AGEING_DAY_LABELS[b]} #`, `${AGEING_DAY_LABELS[b]} ₹`]), "Total #", "Total ₹"];
+    const rows: BoardShareCell[][] = pivot.rows.map((row) => [
+      { text: row.stationCode, bold: true, align: "left" },
+      { text: stationNames[row.stationCode] || "", align: "left" },
+      ...AGEING_DAY_BUCKETS.flatMap((b) => [
+        { text: row.cells[b]?.count ? String(row.cells[b].count) : "", align: "right" as const },
+        { text: row.cells[b]?.amount ? inr(row.cells[b].amount) : "", align: "right" as const },
+      ]),
+      { text: String(row.total.count), bold: true, align: "right" },
+      { text: inr(row.total.amount), bold: true, bg: heatColor(row.total.amount, pivot.maxAmount), align: "right" },
+    ]);
+    rows.push([
+      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+      { text: "", bold: true, align: "left", bg: "#fff4bf" },
+      ...AGEING_DAY_BUCKETS.flatMap((b) => [
+        { text: String(pivot.columnTotals[b]?.count || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+        { text: inr(pivot.columnTotals[b]?.amount || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+      ]),
+      { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#fff4bf" },
+      { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#fff4bf" },
+    ]);
+    return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · day buckets" };
   }
 
   const zeroOnly = view === "zero";
@@ -245,6 +294,22 @@ function buildStationShareTable(
     return { title: `EDD · ${label}`, subtitle, headers: ["Promised date", "Packages"], rows, footerNote: "Ops Pulse Station board" };
   }
 
+  if (view === "ageing") {
+    const pivot = ageingPivot([station], "day");
+    const row = pivot.rows[0];
+    const rows: BoardShareCell[][] = AGEING_DAY_BUCKETS.map((b) => [
+      { text: AGEING_DAY_LABELS[b], align: "left" },
+      { text: String(row?.cells[b]?.count ?? 0), align: "right" },
+      { text: inr(row?.cells[b]?.amount ?? 0), align: "right" },
+    ]);
+    rows.push([
+      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+      { text: String(row?.total.count ?? 0), bold: true, align: "right", bg: "#fff4bf" },
+      { text: inr(row?.total.amount ?? 0), bold: true, align: "right", bg: heatColor(row?.total.amount ?? 0, pivot.maxAmount) },
+    ]);
+    return { title: `Ageing · ${label}`, subtitle, headers: ["Bucket", "Count", "Order amount"], rows, footerNote: "Ops Pulse Station board" };
+  }
+
   const zeroOnly = view === "zero";
   const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0) : station.board.daDsr;
   const rows: BoardShareCell[][] = das.map((da) => [
@@ -303,12 +368,15 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [panelMode, setPanelMode] = useState<PanelMode>("card");
   const [copied, setCopied] = useState(false);
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
-  const [otherDate, setOtherDate] = useState("");
+  const [otherDate, setOtherDate] = useState(initial.businessDate || "");
+  const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
 
   const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
   const dates = useMemo(() => collectEddDates(stations, payload.businessDate), [stations, payload.businessDate]);
   const pivot = useMemo(() => eddPivot(stations, dates), [stations, dates]);
+  const ageingWeeks = useMemo(() => collectAgeingWeeks(stations), [stations]);
+  const ageing = useMemo(() => ageingPivot(stations, ageingMode, ageingWeeks), [stations, ageingMode, ageingWeeks]);
   /** Latest Amazon fetch across stations — not the page/API response time. */
   const fetchedAt = useMemo(() => {
     let latest: string | null = null;
@@ -341,15 +409,6 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   }, [stations]);
 
   const regionLabel = region === "ALL" ? "All regions" : STATION_BOARD_REGIONS.find((r) => r.id === region)?.label ?? region;
-  const istToday = useMemo(
-    () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()),
-    [],
-  );
-  /** Quick chips: today + previous two IST days only. Older dates use the picker. */
-  const dateChoices = useMemo(
-    () => [istToday, shiftBoardDate(istToday, -1), shiftBoardDate(istToday, -2)],
-    [istToday],
-  );
 
   function goToDate(date: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
@@ -454,7 +513,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setBusyState(opts.share ? "share" : "image");
     setError(null);
     try {
-      const table = buildShareTable(view, opts.blockStations, payload.businessDate, opts.label);
+      const table = buildShareTable(view, opts.blockStations, payload.businessDate, opts.label, stationNames);
       if (!table.rows.length) throw new Error("Nothing to share for this block.");
       const fileName = `station-board-${payload.businessDate}-${view}-${opts.key.toLowerCase()}`;
       if (opts.share) {
@@ -554,6 +613,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
 
   const viewTabs = [
     ["edd", "EDD"],
+    ["ageing", "Ageing"],
     ["creturn", "C-Return"],
     ["dsr", "DSR"],
     ["zero", "Zero deliveries"],
@@ -585,23 +645,6 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           </p>
         </div>
 
-        <div className={s.segment} aria-label="Business date">
-          {dateChoices.map((date, index) => (
-            <button
-              key={date}
-              type="button"
-              aria-current={date === payload.businessDate ? "page" : undefined}
-              aria-pressed={date === payload.businessDate}
-              title={index === 0 ? "Today" : index === 1 ? "Previous day" : "Two days ago"}
-              onClick={() => goToDate(date)}
-            >
-              {boardDayLabel(date)}
-              {index === 0 ? <small className={s.dateTag}>Today</small> : null}
-              {index === 1 ? <small className={s.dateTag}>Prev</small> : null}
-            </button>
-          ))}
-        </div>
-
         <form
           className={s.otherDate}
           onSubmit={(event) => {
@@ -610,7 +653,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           }}
         >
           <label>
-            <span className={s.srOnly}>Other date</span>
+            <span>Date</span>
             <input
               type="date"
               value={otherDate || payload.businessDate}
@@ -745,13 +788,98 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         </section>
       ) : null}
 
+      {view === "ageing" ? (
+        <section className={s.panel}>
+          <div className={s.panelHead}>
+            <h3>Ageing · station × {ageingMode === "day" ? "day buckets" : "ISO week"}</h3>
+            <div className={s.segment} role="tablist" aria-label="Ageing type">
+              <button type="button" aria-pressed={ageingMode === "day"} onClick={() => setAgeingMode("day")}>Date type</button>
+              <button type="button" aria-pressed={ageingMode === "week"} onClick={() => setAgeingMode("week")}>Week type</button>
+            </div>
+          </div>
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
+            const local = ageingPivot(group.stations, ageingMode, ageingMode === "week" ? ageingWeeks : undefined);
+            const cols = local.columns;
+            return (
+              <div key={group.id}>
+                <div className={s.region}>
+                  <span>{group.label}</span>
+                  {regionShareActions(group.id, group.label, group.stations)}
+                </div>
+                <div className={s.scroll}>
+                  <table className={`${s.table} ${s.ageing}`}>
+                    <thead>
+                      <tr>
+                        <th rowSpan={2}>Station</th>
+                        <th rowSpan={2}>CLM</th>
+                        {cols.map((col) => (
+                          <th key={col} colSpan={2}>
+                            {ageingMode === "day" ? AGEING_DAY_LABELS[col as keyof typeof AGEING_DAY_LABELS] || col : col}
+                          </th>
+                        ))}
+                        <th rowSpan={2}>Total Count</th>
+                        <th rowSpan={2}>Total Sum</th>
+                      </tr>
+                      <tr>
+                        {cols.flatMap((col) => [
+                          <th key={`${col}-c`}>Count of Tracking ID</th>,
+                          <th key={`${col}-a`}>Sum of Order Amount</th>,
+                        ])}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {local.rows.map((row) => (
+                        <tr key={row.stationCode} className={s.clickRow} onClick={() => openStationPanel(row.stationCode)}>
+                          <td>
+                            <button type="button" className={s.stationBtn} onClick={(e) => { e.stopPropagation(); openStationPanel(row.stationCode); }}>
+                              {row.stationCode}
+                            </button>
+                          </td>
+                          <td className={s.clm}>{stationNames[row.stationCode] || ""}</td>
+                          {cols.flatMap((col) => {
+                            const cell = row.cells[col] ?? { count: 0, amount: 0 };
+                            return [
+                              <td key={`${col}-c`}>{count(cell.count, true)}</td>,
+                              <td key={`${col}-a`}>{cell.amount ? inr(cell.amount) : ""}</td>,
+                            ];
+                          })}
+                          <td>{count(row.total.count)}</td>
+                          <td className={s.heat} style={{ background: heatColor(row.total.amount, local.maxAmount) }}>{inr(row.total.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>Grand Total</td>
+                        <td />
+                        {cols.flatMap((col) => [
+                          <td key={`${col}-c`}>{count(local.columnTotals[col]?.count ?? 0)}</td>,
+                          <td key={`${col}-a`}>{inr(local.columnTotals[col]?.amount ?? 0)}</td>,
+                        ])}
+                        <td>{count(local.grandTotal.count)}</td>
+                        <td>{inr(local.grandTotal.amount)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          {!ageing.grandTotal.count && stations.some((row) => row.hasSnapshot) ? (
+            <p className={s.note}>If Ageing is empty, click <strong>Refresh 7d</strong> to pull portal Ageing for the selected date.</p>
+          ) : null}
+        </section>
+      ) : null}
+
       {view === "creturn" ? (
         <section className={s.panel}>
           <div className={s.panelHead}>
             <h3>C-Return · station status</h3>
             <span>Click a station for shareable card + TIDs</span>
           </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => (
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
+            const tot = sumCReturn(group.stations);
+            return (
             <div key={group.id}>
               <div className={s.region}>
                 <span>{group.label}</span>
@@ -784,10 +912,19 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr>
+                      <td>Grand Total</td>
+                      {CRETURN_DISPLAY.map((status) => <td key={status}>{count(tot.byStatus[status] ?? 0)}</td>)}
+                      <td>{count(tot.total)}</td>
+                      <td className={s.heat} style={{ background: pickupPctColor(tot.pickupDonePct) }}>{tot.pickupDonePct}%</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
-          ))}
+            );
+          })}
         </section>
       ) : null}
 
@@ -912,11 +1049,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 <button type="button" onClick={() => setPanelMode("card")}>
                   <LayoutList size={14} /> View station card
                 </button>
-              ) : (
+              ) : view !== "ageing" ? (
                 <button type="button" disabled={tidsBusy} onClick={() => void loadTids()}>
                   {tidsBusy ? <Loader2 size={14} className="spin" /> : <ListOrdered size={14} />} View TIDs
                 </button>
-              )}
+              ) : null}
             </div>
 
             {tidsError ? <p className={s.error}>{tidsError}</p> : null}
@@ -974,6 +1111,39 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       <span>Full backlog</span>
                       <strong>{count(eddStationTotal(selected))}</strong>
                     </div>
+                  </div>
+                </div>
+              ) : view === "ageing" ? (
+                <div className={s.shareCard}>
+                  <div className={s.shareCardHead}>
+                    <span>Ops Pulse · Station board</span>
+                    <strong>Ageing · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
+                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · promised-date age</small>
+                  </div>
+                  <div className={s.shareColsWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
+                    <span>Bucket</span><span>Count</span><span>Amount</span>
+                  </div>
+                  <div className={s.shareRows}>
+                    {AGEING_DAY_BUCKETS.map((b) => {
+                      const cell = selected.board.ageingByDay?.[b] ?? { count: 0, amount: 0 };
+                      return (
+                        <div key={b} className={s.shareRowWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
+                          <span>{AGEING_DAY_LABELS[b]}</span>
+                          <strong>{count(cell.count)}</strong>
+                          <strong>{inr(cell.amount)}</strong>
+                        </div>
+                      );
+                    })}
+                    {(() => {
+                      const tot = ageingPivot([selected], "day").grandTotal;
+                      return (
+                        <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
+                          <span>Grand Total</span>
+                          <strong>{count(tot.count)}</strong>
+                          <strong>{inr(tot.amount)}</strong>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ) : (
