@@ -23,7 +23,7 @@ test('same names are separate, while historical IDs for one associate remain vis
 test('explicit Pending filter still works; status/source/search filters apply before grouping', () => {
   const pending = groupDistanceAssociates(filterDistanceEntries(records, { ...filters, statuses: ['Pending'] }));
   assert.equal(pending[0].km, null); assert.equal(pending[0].fuel, null); assert.equal(pending[0].days, 1);
-  assert.equal(filterDistanceEntries(records, { ...filters, methods: ['Roads between scans'], query: 'a1test', regions: ['North'], clusters: ['A'] }).length, 2);
+  assert.equal(filterDistanceEntries(records, { ...filters, methods: ['OSM roads between scans'], query: 'a1test', regions: ['North'], clusters: ['A'] }).length, 2);
   assert.equal(filterDistanceEntries(records, { ...filters, regions: ['South'] }).length, 0);
   assert.equal(filterDistanceEntries(records, { ...filters, query: 'unknown' }).length, 0);
 });
