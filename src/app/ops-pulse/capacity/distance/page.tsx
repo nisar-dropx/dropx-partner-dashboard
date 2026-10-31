@@ -217,8 +217,8 @@ export default async function DistancePage({
           Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
           up to 31 days per view. Defaults to Ready days only (same payable fuel
           as workforce payroll). Payable kilometres prefer the Amazon GPS trail;
-          when the trail is missing, free OpenStreetMap road routing (Valhalla /
-          OSRM, no API key) settles scan-to-scan distance. Mapbox stays paused.
+          if missing: Mapbox Directions (primary + fallback tokens), then Valhalla,
+          then OSRM.
           Unlinked Amazon IDs open on their own page. Excluded and other
           non-ready days are listed on the Excel “No payouts” sheet.
           Distances sync every morning at 5:00 IST; maps load when opened.
