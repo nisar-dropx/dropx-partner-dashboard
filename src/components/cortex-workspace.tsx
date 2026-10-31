@@ -8,6 +8,7 @@ import type {
   CortexRouteRow,
   CortexStationOption,
 } from "@/lib/ops-pulse/cortex-data";
+import { completionPct } from "@/lib/ops-pulse/cortex-geo";
 import { CortexRouteMap } from "./cortex-route-map";
 import styles from "./cortex-workspace.module.css";
 
@@ -19,11 +20,6 @@ function statusBadge(row: CortexRouteRow) {
   }
   if (row.remaining > 0) return { label: "On road", className: styles.badgeOpen };
   return { label: row.executionStatus || "Open", className: styles.badgeIdle };
-}
-
-function pct(done: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.round((done / total) * 100));
 }
 
 function formatTime(epoch: number | null) {
@@ -94,14 +90,30 @@ export function CortexWorkspace({
       if (!body || typeof body !== "object" || !Array.isArray(body.stops)) {
         throw new Error("Route detail response was incomplete.");
       }
+      const delivered = Number(body.delivered) || row.delivered || 0;
+      const attempted = Number(body.attempted) || row.attempted || 0;
+      const remaining = Number(body.remaining) || row.remaining || 0;
+      const total =
+        Number(body.total) ||
+        row.total ||
+        delivered + attempted + remaining;
       setDetail({
         ...body,
         name: row.workforceName || row.amazonName,
         phone: row.phone,
+        delivered,
+        attempted,
+        remaining,
+        total,
         plannedPath: Array.isArray(body.plannedPath) ? body.plannedPath : [],
         actualPath: Array.isArray(body.actualPath) ? body.actualPath : [],
+        gpsTrail: Array.isArray(body.gpsTrail) ? body.gpsTrail : [],
+        gpsTrailError: body.gpsTrailError || null,
+        movementStart: body.movementStart ?? null,
+        movementEnd: body.movementEnd ?? null,
         stops: body.stops,
       });
+      setDetailView("map");
     } catch (e) {
       if (seq !== requestSeq.current) return;
       setDetailError(e instanceof Error ? e.message : "Could not load route detail.");
@@ -348,7 +360,14 @@ export function CortexWorkspace({
                 <div className={styles.progressTrack}>
                   <div
                     className={styles.progressFill}
-                    style={{ width: `${pct(detail.delivered, detail.total)}%` }}
+                    style={{
+                      width: `${completionPct(
+                        detail.delivered,
+                        detail.attempted,
+                        detail.remaining,
+                        detail.total,
+                      )}%`,
+                    }}
                   />
                 </div>
                 <div className={styles.progressLegend}>
@@ -361,7 +380,15 @@ export function CortexWorkspace({
                   <span>
                     Attempted <b>{detail.attempted}</b>
                   </span>
-                  <span>{pct(detail.delivered, detail.total)}% complete</span>
+                  <span>
+                    {completionPct(
+                      detail.delivered,
+                      detail.attempted,
+                      detail.remaining,
+                      detail.total,
+                    )}
+                    % complete
+                  </span>
                 </div>
               </div>
 
@@ -369,7 +396,11 @@ export function CortexWorkspace({
                 <CortexRouteMap
                   plannedPath={detail.plannedPath}
                   actualPath={detail.actualPath}
+                  gpsTrail={detail.gpsTrail || []}
+                  gpsTrailError={detail.gpsTrailError || null}
                   stops={detail.stops}
+                  movementStart={detail.movementStart}
+                  movementEnd={detail.movementEnd}
                 />
               ) : (
                 <div className={styles.stops}>

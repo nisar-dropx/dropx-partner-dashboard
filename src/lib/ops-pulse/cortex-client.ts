@@ -129,27 +129,55 @@ export async function fetchCortexItinerary(
   return executionJson(auth, `/operations/execution/api/itineraries/${itineraryId}`, query);
 }
 
+/** Dense Driver Trace used by Amazon Cortex map / playback. */
+export async function fetchCortexGpsTrail(
+  auth: CortexAuth,
+  transporterId: string,
+  itineraryId: string,
+  serviceAreaId: string,
+  date: string,
+) {
+  const start = Date.parse(`${date}T00:00:00+05:30`);
+  const query = sortedQuery({
+    historicalDay: String(historicalDay(date)),
+    transporterId,
+    epochStartTime: String(start),
+    epochEndTime: String(start + 86400000 - 1),
+    documentId: itineraryId,
+    documentType: "Itinerary",
+    serviceAreaId,
+  });
+  return executionJson(auth, "/operations/execution/api/transporters/locationsByTime", query);
+}
+
 export function transporterDisplayName(t: any, id: string) {
   if (!t) return id;
   return [t.firstName, t.lastName].filter(Boolean).join(" ").trim() || id;
 }
 
+function packageCountValue(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const n = Number(value.trim());
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return packageCountValue(record.count ?? record.value ?? record.amount);
+  }
+  return 0;
+}
+
 export function packageCounts(summary: any) {
   const s = summary || {};
-  const num = (v: unknown) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  };
-  return {
-    delivered: num(s.DELIVERED ?? s.delivered),
-    attempted: num(s.ATTEMPTED ?? s.attempted),
-    remaining: num(s.REMAINING ?? s.remaining),
-    rejected: num(s.REJECTED ?? s.rejected),
-    total:
-      num(s.TOTAL ?? s.total) ||
-      num(s.DELIVERED ?? s.delivered) +
-        num(s.ATTEMPTED ?? s.attempted) +
-        num(s.REMAINING ?? s.remaining) +
-        num(s.REJECTED ?? s.rejected),
-  };
+  const delivered = packageCountValue(s.DELIVERED ?? s.delivered);
+  const attempted = packageCountValue(
+    s.ATTEMPTED ?? s.attempted ?? s.UNDELIVERABLE ?? s.undeliverable,
+  );
+  const remaining = packageCountValue(s.REMAINING ?? s.remaining);
+  const rejected = packageCountValue(s.REJECTED ?? s.rejected);
+  const explicitTotal = packageCountValue(s.TOTAL ?? s.total);
+  const total = explicitTotal || delivered + attempted + remaining + rejected;
+  return { delivered, attempted, remaining, rejected, total };
 }

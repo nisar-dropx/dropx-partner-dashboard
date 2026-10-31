@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { isAmazonEdspXptLocation } from "@/lib/ops-pulse/operating-context";
 import {
+  fetchCortexGpsTrail,
   fetchCortexItinerary,
   fetchCortexSummaries,
   packageCounts,
@@ -9,7 +10,7 @@ import {
   transporterDisplayName,
   type CortexAuth,
 } from "@/lib/ops-pulse/cortex-client";
-import { asLatLng } from "@/lib/ops-pulse/cortex-geo";
+import { asLatLng, cleanGpsTrail, type TimedPoint } from "@/lib/ops-pulse/cortex-geo";
 
 export type CortexStationOption = {
   id: string;
@@ -76,6 +77,12 @@ export type CortexStop = {
   tasks: CortexStopTask[];
 };
 
+export type CortexGpsPoint = {
+  lat: number;
+  lng: number;
+  time: number;
+};
+
 export type CortexRouteDetail = {
   itineraryId: string;
   transporterId: string;
@@ -91,6 +98,11 @@ export type CortexRouteDetail = {
   stops: CortexStop[];
   plannedPath: [number, number][];
   actualPath: [number, number][];
+  /** Dense Amazon Driver Trace for road map + playback. */
+  gpsTrail: CortexGpsPoint[];
+  gpsTrailError: string | null;
+  movementStart: number | null;
+  movementEnd: number | null;
 };
 
 async function loadWorkforceSessionCookie(): Promise<string | null> {
@@ -218,7 +230,23 @@ async function linkWorkforce(
     map.set(tid, { id: wf.id, name: wf.full_name || "", dropxId: wf.dropx_id || "" });
   }
 
-  const missing = transporterIds.filter((id) => !map.has(id));
+  let missing = transporterIds.filter((id) => !map.has(id));
+  if (!missing.length) return map;
+
+  // Portal links are the durable Amazon transporter ↔ DropX identity.
+  const { data: portalLinks } = await supabaseAdmin
+    .from("workforce_amazon_portal_links")
+    .select("workforce_id,transporter_id,workforce(id,full_name,dropx_id)")
+    .eq("company_id", companyId)
+    .in("transporter_id", missing);
+  for (const row of portalLinks || []) {
+    const tid = String(row.transporter_id || "");
+    const wf = Array.isArray(row.workforce) ? row.workforce[0] : row.workforce;
+    if (!tid || !wf?.id || map.has(tid)) continue;
+    map.set(tid, { id: wf.id, name: wf.full_name || "", dropxId: wf.dropx_id || "" });
+  }
+
+  missing = transporterIds.filter((id) => !map.has(id));
   if (!missing.length) return map;
 
   // Fallback: provider_employee_id sometimes holds the Amazon transporter id.
@@ -361,6 +389,7 @@ export async function loadCortexRouteDetail(input: {
 
   const payload = res.data;
   const details = payload.itineraryDetails || payload;
+  const transporterId = String(details.transporterId || "");
   const addressMap = new Map<string, any>();
   for (const a of payload.addresses || []) addressMap.set(a.addressId, a);
 
@@ -370,6 +399,12 @@ export async function loadCortexRouteDetail(input: {
   const sorted = [...(details.stops || [])].sort(
     (a: any, b: any) => (a.sequenceNumber || 0) - (b.sequenceNumber || 0),
   );
+
+  const asEpochMs = (value: unknown): number | null => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n > 1e12 ? n : n * 1000;
+  };
 
   for (const stop of sorted) {
     const addr = addressMap.get(stop.addressId) || {};
@@ -384,7 +419,7 @@ export async function loadCortexRouteDetail(input: {
         taskState: task.taskState || null,
         orderId: task.domainMap?.orderId ?? null,
         scannableId: task.domainMap?.scannableId ?? null,
-        actualExecutionTime: task.actualExecutionTime ?? null,
+        actualExecutionTime: asEpochMs(task.actualExecutionTime),
         lat: taskPoint?.[0] ?? null,
         lng: taskPoint?.[1] ?? null,
       };
@@ -402,11 +437,40 @@ export async function loadCortexRouteDetail(input: {
     });
   }
 
+  let gpsTrail: TimedPoint[] = [];
+  let gpsTrailError: string | null = null;
+  if (transporterId) {
+    try {
+      const gpsRes = await fetchCortexGpsTrail(
+        authResult.auth,
+        transporterId,
+        input.itineraryId,
+        station.serviceAreaId,
+        input.date,
+      );
+      if (gpsRes.expired) {
+        gpsTrailError = "Amazon session expired while loading the GPS trail.";
+      } else if (!Array.isArray(gpsRes.data?.transporterLocations)) {
+        gpsTrailError = "Amazon returned no GPS trail for this itinerary.";
+      } else {
+        gpsTrail = cleanGpsTrail(gpsRes.data.transporterLocations, transporterId, input.date);
+        if (!gpsTrail.length) {
+          gpsTrailError = "GPS trail had no usable locations for this day.";
+        }
+      }
+    } catch (error) {
+      gpsTrailError =
+        error instanceof Error ? error.message : "Could not load Amazon GPS trail.";
+    }
+  } else {
+    gpsTrailError = "Itinerary has no transporter id for GPS trail lookup.";
+  }
+
   const pkg = packageCounts(details.packageSummary || details.ndPackageSummary);
   return {
     itineraryId: String(details.itineraryId || input.itineraryId),
-    transporterId: String(details.transporterId || ""),
-    name: transporterDisplayName(null, String(details.transporterId || "")),
+    transporterId,
+    name: transporterDisplayName(null, transporterId),
     phone: null,
     routeCode: details.routeCode || null,
     executionStatus: details.executionStatus || null,
@@ -418,5 +482,9 @@ export async function loadCortexRouteDetail(input: {
     stops,
     plannedPath,
     actualPath,
+    gpsTrail: gpsTrail.map((p) => ({ lat: p.point[0], lng: p.point[1], time: p.time })),
+    gpsTrailError,
+    movementStart: gpsTrail[0]?.time ?? null,
+    movementEnd: gpsTrail.at(-1)?.time ?? null,
   };
 }
