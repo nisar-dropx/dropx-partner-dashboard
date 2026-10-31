@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { VanFuelFields } from "@/components/van-fuel-fields";
 import { PaymentCostSummary } from "./payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { AdhocReasonSelector } from "./adhoc-reason-selector";
@@ -284,6 +285,7 @@ export function PaymentRequestForm({
           <input className="field" min="0" name="amount" onChange={(event) => setAmountText(event.target.value)} placeholder="0.00" required step="0.01" type="number" value={amountText} />
         </label>
       </div>
+      {selectedHead?.code === "VAN_FUEL" ? <VanFuelFields key={selectedLocationId} locationId={selectedLocationId} actual={showBankDetails} /> : null}
       {blockedByExpenseApproval ? <p className="payment-form-warning" role="alert">Required Expense Approval</p> : null}
       {blockedByExpenseApproval && selectedHead?.code === "ADHOC_DA" ? <p className="subtle">This head requires prior expense approval. After approval, use Submit payment details to select the DA / Provider ID. DA selection belongs to the payment step, not the initial expense request.</p> : null}
       {showBankDetails && selectedHead?.code === "ADHOC_DA" ? <AdhocDaFields key={selectedLocationId} locationId={selectedLocationId} /> : null}
@@ -387,7 +389,7 @@ export function PaymentRequestForm({
         </>
       ) : null}
 
-      {selectedHead ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
+      {selectedHead && selectedHead.code !== "VAN_FUEL" ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
       {selectedHead?.code === "VAN_ADHOC" && volumeReason.trim().toLowerCase() === "high volume" ? <PaymentVolumeContext key={`${selectedLocationId}:${volumeDate}`} locationId={selectedLocationId} date={volumeDate} /> : null}
 
       {selectedHead?.payment_head_questions.length ? (

@@ -1,3 +1,4 @@
+import { VanFuelFields } from "@/components/van-fuel-fields";
 import { PaymentResubmissionSavedDetails } from "@/components/payment-resubmission-saved-details";
 import { EvidencePreview } from "@/components/evidence-preview";
 import { PaymentResubmissionContext } from "@/components/payment-resubmission-context";
@@ -606,6 +607,7 @@ export default async function PaymentRequestsPage({
             </div>
             <form action={submitPaymentBankDetails} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={bankRequest.id} />
+              {bankHead?.code === "VAN_FUEL" ? <VanFuelFields locationId={bankRequest.location_id ?? ""} saved={bankRequest.details} actual preserveVehicle /> : null}
               <div className="form-grid three">
                 <label>
                   Location
@@ -676,6 +678,7 @@ export default async function PaymentRequestsPage({
             </div>
             <form action={resubmitPaymentRequest} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={resubmitRequest.id} />
+              {resubmitHead?.code === "VAN_FUEL" ? <VanFuelFields locationId={resubmitRequest.location_id ?? ""} saved={resubmitRequest.details} actual={hasSubmittedPaymentDetails(resubmitRequest)} /> : null}
               {resubmitContext ? <PaymentResubmissionContext context={resubmitContext} location={resubmitRequest.location_code} head={resubmitHead?.name ?? "Payment request"} amount={resubmitRequest.amount_requested ?? resubmitRequest.amount} remarks={resubmitRequest.remarks} payout={true} /> : null}
               <PaymentResubmissionSavedDetails remarks={resubmitContext?.originalRemarks || resubmitRequest.remarks} original={Boolean(resubmitContext?.originalRemarks)} answers={Array.from(answerByQuestionId.values())} questions={resubmitHead?.payment_head_questions ?? []} />
               <div className="resubmit-edit-heading"><strong>Corrections</strong><small>Saved details are kept unless changed.</small></div>

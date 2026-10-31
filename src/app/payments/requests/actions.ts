@@ -1,4 +1,6 @@
 "use server";
+
+import { prepareVanFuel } from "@/lib/van-fuel-server";
 import { resubmissionQuestions } from "@/lib/payment-resubmission";
 import { adhocDaIdentityFields } from "@/lib/adhoc-da-identity";
 import { prepareAdhocRequest, validateAdhocResubmission } from "@/lib/adhoc-vehicle-server";
@@ -330,6 +332,7 @@ export async function createExpenseRequest(formData: FormData) {
 
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
+    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, false);
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
@@ -390,6 +393,7 @@ export async function createExpenseRequest(formData: FormData) {
       .from("payment_requests")
       .insert(withCompany({
         ...adhocRequest.fields,
+        ...fuelFields,
         request_no: requestNo,
         location_id: locationResult.data.id,
         location_code: locationResult.data.station_code,
@@ -578,6 +582,7 @@ export async function createPaymentRequest(formData: FormData) {
     }
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
+    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, true);
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
@@ -641,6 +646,7 @@ export async function createPaymentRequest(formData: FormData) {
     const requestPayload = withCompany({
       ...adhocFields,
       ...adhocRequest.fields,
+        ...fuelFields,
         request_no: requestNo,
       location_id: locationResult.data.id,
       location_code: locationResult.data.station_code,
@@ -866,7 +872,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, category, amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+      .select("details, location_code, id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, category, amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -933,6 +939,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
+    const fuelFields = await prepareVanFuel(companyId, headData.code, request.location_code, formData, true, request.details, true);
     const adhocFields = headData.code === "ADHOC_DA"
       ? adhocDaIdentityFields(formData)
       : {};
@@ -998,6 +1005,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .from("payment_requests")
       .update({
         ...adhocFields,
+        ...fuelFields,
         amount: Number(amountText),
         payment_mode: paymentMode,
         payment_portal: paymentMode === "upi_payment" ? "UPI" : paymentPortal,
@@ -1065,7 +1073,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle")
+      .select("details, location_code, id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -1081,7 +1089,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
       admin.from("stations").select("id, station_code").eq("id", request.location_id).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", request.payment_head_id)
         .eq("company_id", companyId)
         .single(),
@@ -1096,6 +1104,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
+    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, false, request.details);
     const normalizedApprovalStatus = String(request.approval_status ?? "").toUpperCase();
     const normalizedStatus = String(request.status ?? "").toLowerCase();
     const latestReturnedApproval = String(returnedApprovalResult.data?.action ?? "").toLowerCase() === "returned"
@@ -1205,6 +1214,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
     const { error: updateError } = await admin
       .from("payment_requests")
       .update({
+        ...fuelFields,
         location_code: locationResult.data.station_code,
         station_code: locationResult.data.station_code,
         amount: null,
@@ -1282,7 +1292,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, processed_at, utr_cin")
+      .select("details, location_code, id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, processed_at, utr_cin")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -1312,6 +1322,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
+    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, true, request.details);
     if (!normalizePaymentModes(headResult.data.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
     }
@@ -1485,6 +1496,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     const { error: updateError } = await admin
       .from("payment_requests")
       .update({
+        ...fuelFields,
         location_code: locationResult.data.station_code,
         station_code: locationResult.data.station_code,
         amount: Number(amountText),

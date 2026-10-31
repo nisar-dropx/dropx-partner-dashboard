@@ -56,6 +56,8 @@ type ReviewLog = {
   role: string;
 };
 type ReviewDetail = {
+  fuelHistory?: { rows: { provider: string; reference: string; amount: number; litres: number }[]; latestDate: string | null; error?: string } | null;
+  fuel?: { vehicle_no: string; fuel_date: string; litres: number | null } | null;
   answers: ReviewAnswer[];
   attachmentCount: number;
   locationLabel: string;
@@ -282,6 +284,11 @@ export function PaymentApprovalReviewLauncher({
           {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
 
           {detail?.volumeDate && summary.locationId ? <PaymentVolumeContext date={detail.volumeDate} locationId={summary.locationId} /> : null}
+          {detail?.fuel ? <div className="van-fuel-review"><strong>{detail.fuel.vehicle_no}</strong><span>Fuel date · {detail.fuel.fuel_date}</span><span>{detail.fuel.litres != null ? `${detail.fuel.litres} L` : "Litres pending bill"}</span></div> : null}
+          {detail?.fuelHistory ? <details className="van-fuel-pending" open={detail.fuelHistory.rows.length > 0}><summary>{detail.fuelHistory.rows.length ? `${detail.fuelHistory.rows.length} existing fuel transaction(s) · same vehicle / day` : "Same-day provider fuel check"}</summary>
+            {detail.fuelHistory.rows.map(row => <p key={`${row.provider}:${row.reference}`}><strong>{row.provider} · ₹{row.amount.toLocaleString("en-IN")}</strong> · {row.litres} L · {row.reference}</p>)}
+            <small>{detail.fuelHistory.error || `Latest CPS import date: ${detail.fuelHistory.latestDate ?? "unavailable"}. Provider feeds may be incomplete; verify the bill before approval.`}</small>
+          </details> : null}
           {summary.paymentHeadCode === "VAN_ADHOC" ? <PaymentApprovalAdhocHistory requestId={summary.id} /> : null}
           {detail?.trackingCount ? <PaymentApprovalShipments count={detail.trackingCount} requestId={summary.id} /> : null}
 
