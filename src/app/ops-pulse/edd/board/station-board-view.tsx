@@ -132,6 +132,7 @@ function buildShareTable(
   businessDate: string,
   regionLabel: string,
   stationNames: Record<string, string> = {},
+  ageingMode: AgeingBoardMode = "week",
 ): BoardShareTable {
   const subtitle = `${formatOpsDate(businessDate, businessDate)} · ${regionLabel} · DropX Logistics`;
   if (view === "edd") {
@@ -181,6 +182,30 @@ function buildShareTable(
   }
 
   if (view === "ageing") {
+    if (ageingMode === "week") {
+      const weeks = collectAgeingWeeks(stations);
+      const pivot = ageingStateWeekPivot(stations, weeks);
+      const headers = ["State", ...pivot.columns, "Grand Total"];
+      const rows: BoardShareCell[][] = pivot.rows.map((row) => [
+        { text: row.state, bold: true, align: "left" },
+        ...pivot.columns.map((col) => ({
+          text: row.cells[col] ? inr(row.cells[col]) : "",
+          align: "right" as const,
+        })),
+        { text: inr(row.total), bold: true, bg: heatColor(row.total, pivot.maxAmount), align: "right" },
+      ]);
+      rows.push([
+        { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+        ...pivot.columns.map((col) => ({
+          text: inr(pivot.columnTotals[col] ?? 0),
+          bold: true,
+          align: "right" as const,
+          bg: "#fff4bf",
+        })),
+        { text: inr(pivot.grandTotal), bold: true, align: "right", bg: "#fff4bf" },
+      ]);
+      return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · State × ISO week" };
+    }
     const pivot = ageingPivot(stations, "day");
     const headers = ["Station", "CLM", ...AGEING_DAY_BUCKETS.flatMap((b) => [`${AGEING_DAY_LABELS[b]} #`, `${AGEING_DAY_LABELS[b]} ₹`]), "Total #", "Total ₹"];
     const rows: BoardShareCell[][] = pivot.rows.map((row) => [
@@ -262,6 +287,7 @@ function buildStationShareTable(
   station: StationBoardStation,
   businessDate: string,
   stationName: string,
+  ageingMode: AgeingBoardMode = "week",
 ): BoardShareTable {
   const label = stationName && stationName !== station.stationCode
     ? `${station.stationCode} · ${stationName}`
@@ -296,6 +322,27 @@ function buildStationShareTable(
   }
 
   if (view === "ageing") {
+    if (ageingMode === "week") {
+      const weeks = collectAgeingWeeks([station]);
+      const pivot = ageingStateWeekPivot([station], weeks);
+      const rows: BoardShareCell[][] = pivot.rows.map((row) => [
+        { text: row.state, align: "left" },
+        ...pivot.columns.map((col) => ({ text: row.cells[col] ? inr(row.cells[col]) : "", align: "right" as const })),
+        { text: inr(row.total), bold: true, align: "right", bg: heatColor(row.total, pivot.maxAmount) },
+      ]);
+      rows.push([
+        { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+        ...pivot.columns.map((col) => ({ text: inr(pivot.columnTotals[col] ?? 0), bold: true, align: "right" as const, bg: "#fff4bf" })),
+        { text: inr(pivot.grandTotal), bold: true, align: "right", bg: "#fff4bf" },
+      ]);
+      return {
+        title: `Ageing · ${label}`,
+        subtitle,
+        headers: ["State", ...pivot.columns, "Grand Total"],
+        rows,
+        footerNote: "Ops Pulse Station board · State × ISO week",
+      };
+    }
     const pivot = ageingPivot([station], "day");
     const row = pivot.rows[0];
     const rows: BoardShareCell[][] = AGEING_DAY_BUCKETS.map((b) => [
@@ -514,7 +561,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setBusyState(opts.share ? "share" : "image");
     setError(null);
     try {
-      const table = buildShareTable(view, opts.blockStations, payload.businessDate, opts.label, stationNames);
+      const table = buildShareTable(view, opts.blockStations, payload.businessDate, opts.label, stationNames, ageingMode);
       if (!table.rows.length) throw new Error("Nothing to share for this block.");
       const fileName = `station-board-${payload.businessDate}-${view}-${opts.key.toLowerCase()}`;
       if (opts.share) {
@@ -536,7 +583,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setStationShareBusy(share ? "share" : "image");
     setError(null);
     try {
-      const table = buildStationShareTable(view, selected, payload.businessDate, stationNames[selected.stationCode] || "");
+      const table = buildStationShareTable(view, selected, payload.businessDate, stationNames[selected.stationCode] || "", ageingMode);
       if (!table.rows.length) throw new Error("Nothing to share for this station.");
       const fileName = `station-board-${payload.businessDate}-${view}-${selected.stationCode.toLowerCase()}`;
       if (share) {
@@ -1163,33 +1210,66 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
                     <strong>Ageing · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
-                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · promised-date age</small>
+                    <small>
+                      {formatOpsDate(payload.businessDate, payload.businessDate)}
+                      {ageingMode === "week" ? " · State × ISO week" : " · promised-date age"}
+                    </small>
                   </div>
-                  <div className={s.shareColsWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
-                    <span>Bucket</span><span>Count</span><span>Amount</span>
-                  </div>
-                  <div className={s.shareRows}>
-                    {AGEING_DAY_BUCKETS.map((b) => {
-                      const cell = selected.board.ageingByDay?.[b] ?? { count: 0, amount: 0 };
-                      return (
-                        <div key={b} className={s.shareRowWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
-                          <span>{AGEING_DAY_LABELS[b]}</span>
-                          <strong>{count(cell.count)}</strong>
-                          <strong>{inr(cell.amount)}</strong>
+                  {ageingMode === "week" ? (() => {
+                    const local = ageingStateWeekPivot([selected], collectAgeingWeeks([selected]));
+                    const grid = `minmax(88px, 1.4fr) ${local.columns.map(() => "minmax(64px, 1fr)").join(" ")} minmax(72px, 1fr)`;
+                    return (
+                      <>
+                        <div className={s.shareColsWide} style={{ gridTemplateColumns: grid }}>
+                          <span>State</span>
+                          {local.columns.map((col) => <span key={col}>{col}</span>)}
+                          <span>Total</span>
                         </div>
-                      );
-                    })}
-                    {(() => {
-                      const tot = ageingPivot([selected], "day").grandTotal;
-                      return (
-                        <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
-                          <span>Grand Total</span>
-                          <strong>{count(tot.count)}</strong>
-                          <strong>{inr(tot.amount)}</strong>
+                        <div className={s.shareRows}>
+                          {local.rows.map((row) => (
+                            <div key={row.state} className={s.shareRowWide} style={{ gridTemplateColumns: grid }}>
+                              <span>{row.state}</span>
+                              {local.columns.map((col) => <strong key={col}>{row.cells[col] ? inr(row.cells[col]) : ""}</strong>)}
+                              <strong>{inr(row.total)}</strong>
+                            </div>
+                          ))}
+                          <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: grid }}>
+                            <span>Grand Total</span>
+                            {local.columns.map((col) => <strong key={col}>{inr(local.columnTotals[col] ?? 0)}</strong>)}
+                            <strong>{inr(local.grandTotal)}</strong>
+                          </div>
                         </div>
-                      );
-                    })()}
-                  </div>
+                      </>
+                    );
+                  })() : (
+                    <>
+                      <div className={s.shareColsWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
+                        <span>Bucket</span><span>Count</span><span>Amount</span>
+                      </div>
+                      <div className={s.shareRows}>
+                        {AGEING_DAY_BUCKETS.map((b) => {
+                          const cell = selected.board.ageingByDay?.[b] ?? { count: 0, amount: 0 };
+                          return (
+                            <div key={b} className={s.shareRowWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
+                              <span>{AGEING_DAY_LABELS[b]}</span>
+                              <strong>{count(cell.count)}</strong>
+                              <strong>{inr(cell.amount)}</strong>
+                            </div>
+                          );
+                        })}
+                        {(() => {
+                          const tot = ageingPivot([selected], "day").grandTotal;
+                          return (
+                            <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
+                              <span>Grand Total</span>
+                              <strong>{count(tot.count)}</strong>
+                              <strong>{inr(tot.amount)}</strong>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className={s.shareCard}>
