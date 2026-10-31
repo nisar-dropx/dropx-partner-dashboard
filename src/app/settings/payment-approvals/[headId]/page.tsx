@@ -11,7 +11,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { saveApprovalSteps } from "../actions";
 
 type RoleRow = { id: string; code: string; name: string; is_active: boolean };
-type StepCandidate = { role_id: string; scope: "station" | "cluster" | "company" };
+type LocationModelRow = { id: string; code: string; name: string };
+type StepCandidate = { role_id: string; scope: "station" | "cluster" | "company"; location_model_ids?: string[] };
 type StepRow = { id: string; step_order: number; candidates: StepCandidate[]; is_required: boolean };
 
 const MAX_STEPS = 5;
@@ -20,16 +21,18 @@ const SCOPE_LABELS: Record<string, string> = { station: "Requester's station", c
 
 async function loadData(companyId: string, paymentHeadId: string) {
   if (!supabaseAdmin) return null;
-  const [headResult, rolesResult, stepsResult] = await Promise.all([
+  const [headResult, rolesResult, stepsResult, modelsResult] = await Promise.all([
     supabaseAdmin.from("payment_heads").select("id, code, name").eq("id", paymentHeadId).eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("user_roles").select("id, code, name, is_active").eq("company_id", companyId).eq("is_active", true).order("name"),
-    supabaseAdmin.from("payment_head_approval_steps").select("id, step_order, candidates, is_required").eq("company_id", companyId).eq("payment_head_id", paymentHeadId).order("step_order")
+    supabaseAdmin.from("payment_head_approval_steps").select("id, step_order, candidates, is_required").eq("company_id", companyId).eq("payment_head_id", paymentHeadId).order("step_order"),
+    supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId).eq("is_active", true).order("code")
   ]);
   if (!headResult.data) return null;
   return {
     head: headResult.data,
     roles: (rolesResult.data ?? []) as RoleRow[],
-    steps: (stepsResult.data ?? []) as StepRow[]
+    steps: (stepsResult.data ?? []) as StepRow[],
+    locationModels: (modelsResult.data ?? []) as LocationModelRow[]
   };
 }
 
@@ -41,7 +44,7 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
   const pagePermission = authorization.permissions.payment_settings;
   const data = await loadData(companyId, params.headId);
   if (!data) notFound();
-  const { head, roles, steps } = data;
+  const { head, roles, steps, locationModels } = data;
   const peopleApproved = isPeopleApprovedPaymentHead(head.code);
 
   const roleOptions = roles.map((role) => ({ value: role.id, label: role.name, helper: role.code }));
@@ -128,6 +131,23 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
                               ))}
                             </select>
                           </label>
+                          <fieldset className="payment-approval-models">
+                            <legend>Business models <span>(blank = all)</span></legend>
+                            <div className="payment-approval-model-options">
+                              {locationModels.map((model) => (
+                                <label key={model.id} title={model.name}>
+                                  <input
+                                    defaultChecked={(candidate?.location_model_ids ?? []).includes(model.id)}
+                                    disabled={!pagePermission.canEdit}
+                                    name={`steps[${stepIndex}][candidates][${candidateIndex}][location_model_ids]`}
+                                    type="checkbox"
+                                    value={model.id}
+                                  />
+                                  {model.code}
+                                </label>
+                              ))}
+                            </div>
+                          </fieldset>
                         </div>
                       ))}
                     </div>
@@ -166,10 +186,14 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
                       <td>
                         {step.candidates.map((candidate, index) => {
                           const role = roleById.get(candidate.role_id);
+                          const selectedModels = (candidate.location_model_ids ?? [])
+                            .map((modelId) => locationModels.find((model) => model.id === modelId)?.code)
+                            .filter(Boolean);
                           return (
                             <div key={index}>
                               <strong>{role?.name ?? "Unknown role"}</strong>
                               <span className="subtle"> · {SCOPE_LABELS[candidate.scope] ?? candidate.scope}</span>
+                              <span className="subtle"> · {selectedModels.length ? selectedModels.join(", ") : "All business models"}</span>
                             </div>
                           );
                         })}

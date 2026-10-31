@@ -98,6 +98,18 @@ test('location payment exclusion skips an AOM while preserving the same user mem
   const next=await routing.advanceApproval('co',steps,1,'NLRE',new Set(['cluster']));
   assert.equal(next.nextStepOrder,3);assert.equal(next.approver.userId,'head');
 });
+test('business-model conditions select the configured final approver without hardcoded model names',async()=>{
+  const {routing,tables}=routingFixture();
+  const finalStep={id:'final',step_order:3,is_required:true,candidates:[
+    {role_id:'bh',scope:'company',location_model_ids:['EDSP']},
+    {role_id:'aom',scope:'company',location_model_ids:['NOW']}
+  ]};
+  assert.equal((await routing.resolveStepApprover('co',finalStep,'NLRE')).userId,'head');
+  tables.stations[0].location_model_id='NOW';
+  assert.equal((await routing.resolveStepApprover('co',finalStep,'NLRE')).userId,'area');
+  tables.stations[0].location_model_id='UNCONFIGURED';
+  assert.equal(await routing.resolveStepApprover('co',finalStep,'NLRE'),null);
+});
 test('reconciliation handles more than 250 requests and keeps reason-specific Fleet routes separate',async()=>{
   const rows=Array.from({length:520},(_,i)=>({id:String(i).padStart(4,'0'),request_no:String(i),company_id:'co',payment_head_id:'van',location_id:'NLRE',status:'pending',approval_status:'PENDING',current_step_order:1,current_approver_user_id:'old',current_approver_role_id:'old-role',updated_at:'2026-10-14',adhoc_approval_steps:i%2?[{step_order:1,candidates:[{role_id:'fleet',scope:'company'}]}]:null}));
   const db=database({payment_requests:rows}); const loaded=[];
