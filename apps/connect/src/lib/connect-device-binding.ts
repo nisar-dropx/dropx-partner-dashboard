@@ -23,8 +23,42 @@ export type DeviceBindingMutation = {
   createdBindingIds: string[];
 };
 
+/** Keep only accounts whose company has the one-phone rule explicitly on (false / missing → off). */
+export function filterAccountsForDeviceBinding(
+  accounts: ConnectAccount[],
+  settings: Array<{ company_id: string; dropx_one_device_binding_enabled?: boolean | null }>
+) {
+  const enabled = new Set(
+    settings
+      .filter((row) => row.dropx_one_device_binding_enabled === true)
+      .map((row) => row.company_id)
+  );
+  return accounts.filter((account) => enabled.has(account.companyId));
+}
+
+/**
+ * Companies that have turned on the one-phone rule. Missing column / missing row / false → off,
+ * so the rule stays disabled until HR enables it in HRMS or the partner dashboard.
+ */
+async function accountsWithDeviceBindingEnabled(accounts: ConnectAccount[]) {
+  if (!supabaseAdmin || !accounts.length) return [] as ConnectAccount[];
+  const companyIds = [...new Set(accounts.map((account) => account.companyId).filter(Boolean))];
+  if (!companyIds.length) return [];
+  const result = await supabaseAdmin
+    .from("hr_company_settings")
+    .select("company_id, dropx_one_device_binding_enabled")
+    .in("company_id", companyIds);
+  if (result.error) {
+    // Column not migrated yet — treat as off so login is never blocked by a missing flag.
+    if (/dropx_one_device_binding_enabled|schema cache|column/i.test(result.error.message)) return [];
+    throw new Error(result.error.message);
+  }
+  return filterAccountsForDeviceBinding(accounts, result.data ?? []);
+}
+
 async function loadActiveBindings(accounts: ConnectAccount[]) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  if (!accounts.length) return [] as BindingRow[];
   const result = await supabaseAdmin
     .from("connect_account_devices")
     .select("id, account_id, profile_type, device_id")
@@ -38,7 +72,7 @@ async function loadActiveBindings(accounts: ConnectAccount[]) {
 /**
  * Throws DeviceBindingError if any of these accounts is already bound to a different phone.
  * Call before anything irreversible (creating a session, changing a PIN), so a blocked phone
- * leaves no side effects behind.
+ * leaves no side effects behind. No-op while the company has device binding turned off.
  */
 export async function assertDeviceAllowed(accounts: ConnectAccount[], request: Request) {
   const { platform, deviceId } = readDeviceIdentity(request);
@@ -46,7 +80,10 @@ export async function assertDeviceAllowed(accounts: ConnectAccount[], request: R
   // that don't send a device ID yet are let through until everyone is on the updated app.
   if (platform !== "app" || !deviceId || !accounts.length) return;
 
-  const bindings = await loadActiveBindings(accounts);
+  const gated = await accountsWithDeviceBindingEnabled(accounts);
+  if (!gated.length) return;
+
+  const bindings = await loadActiveBindings(gated);
   if (bindings.some((binding) => binding.device_id !== deviceId)) {
     throw new DeviceBindingError(
       "This account is already active on another phone. Ask HR to reset your device, then sign in again."
@@ -57,7 +94,7 @@ export async function assertDeviceAllowed(accounts: ConnectAccount[], request: R
 /**
  * Records this phone as the account's bound device and signs out every other DropX One app
  * session on the same mobile number, so a phone that logged in before binding existed is cut off
- * too. Web sessions are left alone.
+ * too. Web sessions are left alone. No-op while the company has device binding turned off.
  */
 export async function bindDevice({
   accounts,
@@ -76,8 +113,13 @@ export async function bindDevice({
     return { createdBindingIds: [] } satisfies DeviceBindingMutation;
   }
 
+  const gated = await accountsWithDeviceBindingEnabled(accounts);
+  if (!gated.length) {
+    return { createdBindingIds: [] } satisfies DeviceBindingMutation;
+  }
+
   const now = new Date().toISOString();
-  const bindings = await loadActiveBindings(accounts);
+  const bindings = await loadActiveBindings(gated);
   const boundKeys = new Set(bindings.map((binding) => `${binding.account_id}:${binding.profile_type}`));
   const createdBindingIds: string[] = [];
 
@@ -89,7 +131,7 @@ export async function bindDevice({
     if (touch.error) throw new Error(touch.error.message);
   }
 
-  const missing = accounts.filter((account) => !boundKeys.has(`${account.id}:${account.profileType}`));
+  const missing = gated.filter((account) => !boundKeys.has(`${account.id}:${account.profileType}`));
   if (missing.length) {
     const insert = await supabaseAdmin
       .from("connect_account_devices")
@@ -107,7 +149,7 @@ export async function bindDevice({
       .select("id");
     // 23505: another request bound this account a moment ago. Re-check rather than fail.
     if (insert.error && insert.error.code !== "23505") throw new Error(insert.error.message);
-    if (insert.error) await assertDeviceAllowed(accounts, request);
+    if (insert.error) await assertDeviceAllowed(gated, request);
     else createdBindingIds.push(...(insert.data ?? []).map((binding) => binding.id));
   }
 

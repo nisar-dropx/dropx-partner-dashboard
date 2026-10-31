@@ -6,7 +6,8 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { deviceGroups, loadBoundDevices, type DeviceGroup } from "@/lib/dropx-one-devices";
-import { resetDropxOneDevice } from "./actions";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { resetDropxOneDevice, saveDropxOneDeviceBindingPolicy } from "./actions";
 import styles from "./devices.module.css";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,21 @@ export default async function DropxOneDevicesPage({
   const errorNotice = String(searchParams.error ?? "").trim();
 
   const { people, error: loadError } = await loadBoundDevices(companyId);
+  // Default off until HR turns the rule on (shared with HRMS).
+  let deviceBindingEnabled = false;
+  let policyError = "";
+  if (supabaseAdmin) {
+    const policyResult = await supabaseAdmin
+      .from("hr_company_settings")
+      .select("dropx_one_device_binding_enabled")
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (policyResult.error && !/dropx_one_device_binding_enabled|schema cache|column/i.test(policyResult.error.message)) {
+      policyError = policyResult.error.message;
+    } else if (!policyResult.error) {
+      deviceBindingEnabled = policyResult.data?.dropx_one_device_binding_enabled === true;
+    }
+  }
   // The search runs across every group, so an ID is found whichever tab is open.
   const matching = searchTerm
     ? people.filter((person) => `${person.name} ${person.codes.join(" ")} ${person.mobile} ${person.mobile.replace(/\D/g, "")} ${person.phone} ${person.roles.join(" ")}`.toLowerCase().includes(searchTerm))
@@ -53,25 +69,28 @@ export default async function DropxOneDevicesPage({
     { value: undefined as DeviceGroup | undefined, label: "Everyone", count: matching.length },
     ...deviceGroups.map((item) => ({ value: item.value as DeviceGroup | undefined, label: item.label, count: matching.filter((person) => person.groups.includes(item.value)).length }))
   ];
+  const pageError = errorNotice || loadError || policyError;
 
   return (
     <AppShell active="Settings" pageCode="app_settings">
       <PageHead
         eyebrow="Configuration"
         title="DropX One devices"
-        subtitle="Each person can use DropX One on one phone only. If someone changes or loses their phone, reset their device here; their old phone is signed out and their next sign-in binds the new one."
+        subtitle={deviceBindingEnabled
+          ? "One-phone rule is on. Each person can use DropX One on one phone only. If someone changes or loses their phone, reset their device here; their old phone is signed out and their next sign-in binds the new one."
+          : "One-phone rule is off. People can sign in on any phone. Turn the rule on below when you are ready to bind each person to a single device."}
         action={<a className="button secondary" href="/settings">Back</a>}
       />
 
-      {errorNotice || loadError ? (
+      {pageError ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Action required</strong>
-            <p className="subtle" style={{ marginTop: 6 }}>{errorNotice || loadError}</p>
+            <p className="subtle" style={{ marginTop: 6 }}>{pageError}</p>
           </div>
         </section>
       ) : null}
-      {notice && !errorNotice ? (
+      {notice && !pageError ? (
         <section className="panel message-panel success">
           <div className="panel-body">
             <strong>Completed</strong>
@@ -83,10 +102,37 @@ export default async function DropxOneDevicesPage({
       <section className="panel">
         <div className="panel-head">
           <div>
+            <h2>One-phone rule</h2>
+            <p className="subtle">Shared with People (HRMS). Off by default — DropX One only enforces one phone per person after you turn this on.</p>
+          </div>
+          <span className={`status-pill ${deviceBindingEnabled ? "good" : "neutral"}`}>{deviceBindingEnabled ? "On" : "Off"}</span>
+        </div>
+        <div className="panel-body">
+          {canReset ? (
+            <form action={saveDropxOneDeviceBindingPolicy} className={styles.reset}>
+              <input name="return_to" type="hidden" value={returnTo} />
+              <input name="dropx_one_device_binding_enabled" type="hidden" value={deviceBindingEnabled ? "false" : "true"} />
+              <SubmitButton className="button primary" pendingText="Saving">
+                {deviceBindingEnabled ? "Turn off one-phone rule" : "Turn on one-phone rule"}
+              </SubmitButton>
+            </form>
+          ) : <p className="subtle">View only</p>}
+          <p className="subtle" style={{ marginTop: 12 }}>
+            {deviceBindingEnabled
+              ? "Anyone already bound stays on their current phone. Reset a person below before they switch devices."
+              : "Existing bindings are kept but not checked until the rule is on again."}
+          </p>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
             <h2>Bound phones</h2>
             <p className="subtle">
               {filtered.length} {filtered.length === 1 ? "person" : "people"}
-              {searchTerm ? ` matching “${searchValue}”` : ""} — workforce, delivery associates, contractors and employees.
+              {searchTerm ? ` matching “${searchValue}”` : ""} — workforce, delivery associates, contractors and employees
+              {!deviceBindingEnabled ? " · rule off — list is historical until you turn it on" : ""}.
             </p>
           </div>
         </div>

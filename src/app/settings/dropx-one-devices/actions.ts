@@ -27,6 +27,40 @@ function withNotice(path: string, key: "notice" | "error", message: string) {
 }
 
 /**
+ * Turns the DropX One one-phone-per-person rule on or off for this company.
+ * Same column HRMS writes — both UIs stay in sync on one shared row.
+ */
+export async function saveDropxOneDeviceBindingPolicy(formData: FormData) {
+  const authorization = await requirePagePermission("app_settings", "access");
+  const companyId = requireCompanyId(authorization);
+  const next = returnPath(formData);
+  if (authorization.readOnly || !authorization.permissions.app_settings?.canEdit) {
+    redirect(withNotice(next, "error", "You do not have access to change this policy."));
+  }
+  if (!supabaseAdmin) redirect(withNotice(next, "error", "Supabase service role key is not configured."));
+
+  const enabled = clean(formData.get("dropx_one_device_binding_enabled")) === "true";
+  const update = await supabaseAdmin
+    .from("hr_company_settings")
+    .update({
+      dropx_one_device_binding_enabled: enabled,
+      updated_at: new Date().toISOString(),
+      updated_by: authorization.userId
+    })
+    .eq("company_id", companyId)
+    .select("company_id");
+  if (update.error) redirect(withNotice(next, "error", update.error.message));
+  if (!update.data?.length) {
+    redirect(withNotice(next, "error", "No company settings row exists yet — contact engineering to initialize it."));
+  }
+
+  revalidatePath(DEVICES_PATH);
+  redirect(withNotice(next, "notice", enabled
+    ? "One-phone rule is on. DropX One will bind each person to their next sign-in phone."
+    : "One-phone rule is off. People can sign in on any phone until you turn it on again."));
+}
+
+/**
  * Clears a person's bound phone so they can sign in to DropX One on a new one. Also signs out
  * every DropX One app session on their mobile number, so the old phone stops working immediately
  * instead of staying logged in on its existing session. Same behaviour as the People (HRMS)
