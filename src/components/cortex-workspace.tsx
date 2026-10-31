@@ -113,7 +113,7 @@ export function CortexWorkspace({
         movementEnd: body.movementEnd ?? null,
         stops: body.stops,
       });
-      setDetailView("map");
+      setDetailView("detail");
     } catch (e) {
       if (seq !== requestSeq.current) return;
       setDetailError(e instanceof Error ? e.message : "Could not load route detail.");

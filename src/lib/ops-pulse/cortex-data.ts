@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { isAmazonEdspXptLocation } from "@/lib/ops-pulse/operating-context";
+import { isAmazonEdspBoardStation } from "@/lib/ops-pulse/station-board-regions";
 import {
   fetchCortexGpsTrail,
   fetchCortexItinerary,
@@ -145,7 +146,11 @@ export async function loadCortexStations(
 ): Promise<CortexStationOption[]> {
   if (!supabaseAdmin) return [];
   const scope = await loadCodLocations(companyId, locationScopeIds, hasAllLocationAccess);
-  const amazonStations = scope.locations.filter(isAmazonEdspXptLocation);
+  // Only Amazon EDSP board stations (Station Reports.xlsm). Never AWEZ/ERSE or other models.
+  const amazonStations = scope.locations.filter(
+    (location) =>
+      isAmazonEdspXptLocation(location) && isAmazonEdspBoardStation(location.station_code),
+  );
   if (!amazonStations.length) return [];
 
   const { data: settings } = await supabaseAdmin

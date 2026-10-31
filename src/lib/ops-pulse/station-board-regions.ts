@@ -30,6 +30,15 @@ for (const region of STATION_BOARD_REGIONS) {
   for (const code of region.stations) REGION_BY_STATION.set(code, region.id);
 }
 
+/** Amazon EDSP/XPT operating stations (Station Reports.xlsm Stations sheet). */
+export const AMAZON_EDSP_STATION_CODES = new Set(
+  STATION_BOARD_REGIONS.flatMap((region) => region.stations),
+);
+
+export function isAmazonEdspBoardStation(stationCode: string | null | undefined): boolean {
+  return AMAZON_EDSP_STATION_CODES.has(String(stationCode || "").trim().toUpperCase());
+}
+
 export function regionForStation(stationCode: string): StationBoardRegionId {
   return REGION_BY_STATION.get(String(stationCode || "").trim().toUpperCase()) ?? "OTHER";
 }
