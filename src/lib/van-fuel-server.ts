@@ -10,7 +10,7 @@ export async function loadOwnFuelVehicles(companyId: string, station: string) {
   if (result.error) throw new Error('Unable to load station vehicles. Please retry.');
   return result.data ?? [];
 }
-export async function prepareVanFuel(companyId: string, code: string, station: string, form: FormData, actual: boolean, existing?: unknown, preserveVehicle = false) {
+export async function prepareVanFuel(companyId: string, code: string, station: string, form: FormData, actual: boolean, existing?: unknown, preserveVehicle = false): Promise<{ details?: Record<string, unknown> }> {
   if (code !== 'VAN_FUEL') return {};
   const amount = Number(form.get('amount'));
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a fuel amount greater than zero.');
