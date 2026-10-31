@@ -3,7 +3,7 @@ import { requireEddApi } from "@/lib/ops-pulse/edd-access";
 import { refreshLoadFlashNetwork } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 export async function POST() {
   try {

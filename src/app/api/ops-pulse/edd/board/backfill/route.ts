@@ -3,7 +3,7 @@ import { requireEddApi } from "@/lib/ops-pulse/edd-access";
 import { backfillLoadFlashBoard } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(request: Request) {
   try {

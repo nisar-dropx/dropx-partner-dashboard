@@ -893,7 +893,8 @@ export async function refreshLoadFlashNetwork(): Promise<EddNetworkRunStatus | n
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(20000)
+    // Kick-off only — worker continues the sweep asynchronously.
+    signal: AbortSignal.timeout(45000)
   });
   const raw = await readJson(response);
   if (!response.ok) {
@@ -1117,7 +1118,8 @@ export async function backfillLoadFlashBoard(opts?: { days?: number; startIndex?
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(55000)
+    // Single-station Ageing+DSR+Inducted pulls routinely need >55s; keep under route maxDuration.
+    signal: AbortSignal.timeout(90000)
   });
   const raw = await readJson(response);
   if (!response.ok) {
@@ -1147,7 +1149,7 @@ export async function fetchLoadFlashBoard(date?: string, stations?: string[]): P
     method: "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(30000)
+    signal: AbortSignal.timeout(55000)
   });
   const raw = await readJson(response);
   if (!response.ok) {

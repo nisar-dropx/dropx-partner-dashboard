@@ -9,7 +9,7 @@ import { EddSectionTabs } from "../edd-section-tabs";
 import { StationBoardView } from "./station-board-view";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 function todayKolkata() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());

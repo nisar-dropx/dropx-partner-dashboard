@@ -294,16 +294,6 @@ export function CortexWorkspace({
             <div className={styles.viewToggle} role="group" aria-label="Route panel view">
               <button
                 type="button"
-                className={detailView === "map" ? styles.viewToggleActive : undefined}
-                aria-pressed={detailView === "map"}
-                onClick={() => setDetailView("map")}
-                title="Map view"
-              >
-                <MapPinned size={15} aria-hidden />
-                <span>Map</span>
-              </button>
-              <button
-                type="button"
                 className={detailView === "detail" ? styles.viewToggleActive : undefined}
                 aria-pressed={detailView === "detail"}
                 onClick={() => setDetailView("detail")}
@@ -311,6 +301,16 @@ export function CortexWorkspace({
               >
                 <ListTree size={15} aria-hidden />
                 <span>Route detail</span>
+              </button>
+              <button
+                type="button"
+                className={detailView === "map" ? styles.viewToggleActive : undefined}
+                aria-pressed={detailView === "map"}
+                onClick={() => setDetailView("map")}
+                title="Map view"
+              >
+                <MapPinned size={15} aria-hidden />
+                <span>Map</span>
               </button>
             </div>
           </header>

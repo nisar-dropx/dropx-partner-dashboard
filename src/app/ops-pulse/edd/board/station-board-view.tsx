@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
@@ -418,6 +418,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
   const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("week");
+  /** Resume Refresh 7d after a proxy timeout instead of restarting from station 0. */
+  const backfillCursor = useRef(0);
 
   const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
   const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
@@ -497,23 +499,59 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setRun(next.run);
   }
 
+  function isTimeoutMessage(message: string) {
+    return /aborted due to timeout|timeout|timed out|504|524/i.test(message);
+  }
+
   async function runBackfillLoop() {
-    let startIndex = 0;
+    let startIndex = Math.max(0, backfillCursor.current);
     let guard = 0;
-    while (guard < 120) {
+    let streakTimeouts = 0;
+    while (guard < 200) {
       guard += 1;
       const params = new URLSearchParams({
         days: "7",
         startIndex: String(startIndex),
         date: payload.businessDate,
       });
-      const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
+      let response: Response;
+      try {
+        response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Board backfill failed.";
+        if (isTimeoutMessage(message) && streakTimeouts < 4) {
+          streakTimeouts += 1;
+          setBackfillNote(`Worker busy — retrying tick ${startIndex}…`);
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        backfillCursor.current = startIndex;
+        throw err instanceof Error ? err : new Error(message);
+      }
       const body = await response.json().catch(() => ({})) as { nextIndex?: number; total?: number; done?: boolean; advanced?: number; error?: string };
-      if (!response.ok) throw new Error(String(body.error ?? "Board backfill failed."));
+      if (!response.ok) {
+        const message = String(body.error ?? "Board backfill failed.");
+        // One station can overrun the proxy budget; retry the same index a few times.
+        if (isTimeoutMessage(message) && streakTimeouts < 4) {
+          streakTimeouts += 1;
+          setBackfillNote(`Tick timed out — retrying ${startIndex}…`);
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        backfillCursor.current = startIndex;
+        throw new Error(isTimeoutMessage(message)
+          ? "Board pull timed out. Click Refresh 7d again — it resumes where it left off."
+          : message);
+      }
+      streakTimeouts = 0;
       startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
+      backfillCursor.current = startIndex;
       const total = Number(body.total ?? 0) || 0;
-      setBackfillNote(total ? `Pulling C-Return / DSR for last 7 days · ${Math.min(startIndex, total)}/${total}` : "Pulling C-Return / DSR…");
-      if (body.done || !body.advanced) break;
+      setBackfillNote(total ? `Pulling board data (last 7 days) · ${Math.min(startIndex, total)}/${total}` : "Pulling board data…");
+      if (body.done || !body.advanced) {
+        backfillCursor.current = 0;
+        break;
+      }
       await reloadBoard().catch(() => undefined);
     }
   }
@@ -521,14 +559,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   async function refresh() {
     setBusy("refresh");
     setError(null);
-    setBackfillNote("Starting Ops Live refresh + last 7 days board pull…");
+    setBackfillNote("Starting last 7 days board pull…");
     try {
-      await fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" });
+      // Kick Ops Live in the background — do not block/fail Refresh 7d on its timeout.
+      void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
       await runBackfillLoop();
       await reloadBoard();
       setBackfillNote("Last 7 days board data updated.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Refresh failed.");
+      const message = err instanceof Error ? err.message : "Refresh failed.";
+      setError(isTimeoutMessage(message)
+        ? "Board pull timed out. Click Refresh 7d again — it resumes where it left off."
+        : message);
       setBackfillNote("");
     } finally {
       setBusy(null);
