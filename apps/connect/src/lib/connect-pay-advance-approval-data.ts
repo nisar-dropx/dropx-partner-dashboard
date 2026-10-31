@@ -1,6 +1,7 @@
 import {loadCurrentAdvanceCapacity} from "./connect-advance-context";
 import "server-only";
 import type { ConnectAccount } from "./connect-auth";
+import { loadConnectApprovalLocations } from "./connect-approval-location";
 import {
   adoptPendingStepForHigherManager,
   resolveConnectActorUserIds,
@@ -17,6 +18,10 @@ async function mapPayAdvanceRows(
   requests: Array<Record<string, unknown>>
 ): Promise<PayAdvanceApproval[]> {
   const month = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit"}).format(new Date()) + "-01";
+  const locations = await loadConnectApprovalLocations(
+    companyId,
+    requests.map((row) => ({ profileType: String(row.worker_type ?? ""), profileId: String(row.worker_id ?? "") }))
+  );
   return Promise.all(requests.map(async (row) => {
     const result = await db().rpc("pay_advance_worker_summary", {
       p_company: companyId, p_worker_type: row.worker_type, p_worker: row.worker_id, p_month: month
@@ -27,12 +32,15 @@ async function mapPayAdvanceRows(
     const step = steps.find((item) => item.request_id === row.id)!;
     const pay = payAdvanceApprovalPayContext(row.worker_type, row.requested_amount, row.outstanding_pay_snapshot,
       row.eligibility_percent_snapshot, row.max_eligible_amount_snapshot);
+    const location = locations.get(`${String(row.worker_type)}:${String(row.worker_id)}`);
     return {
       id: step.id,
       requestId: String(row.id),
       requestNumber: String(row.request_number),
       workerName: String(row.worker_name),
       workerCode: String(row.worker_code ?? ""),
+      stationCode: location?.stationCode ?? "",
+      stationName: location?.stationName ?? "",
       stepName: step.step_name,
       stepType: step.step_type,
       requestedAmount: Number(row.requested_amount),

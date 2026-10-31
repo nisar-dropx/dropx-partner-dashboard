@@ -1754,7 +1754,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
         <div className="dx-approval-list">
           {payAdvanceApprovals.map(approval => <ApprovalRow key={approval.id}
             badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>}
-            eyebrow={`${approval.requestNumber} · ${approval.stepName}`} name={approval.workerName}
+            eyebrow={`${approval.requestNumber} · ${approval.stepName}`}
+            name={personWithLocation(approval.workerName, approval.stationName, approval.stationCode)}
             meta={approval.workerCode || "Pay advance"} saving={saving}
             onReview={() => { setPayAdvanceError(""); setActiveKey(`pay-advance:${approval.id}`); }} />)}
           {payAdvanceOversight.length ? <section className="dx-expense-oversight">
@@ -1772,7 +1773,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>}
                   eyebrow={`${approval.requestNumber} · Team · ${approval.stepName}`}
                   meta={approval.workerCode || "Pay advance"}
-                  name={approval.workerName}
+                  name={personWithLocation(approval.workerName, approval.stationName, approval.stationCode)}
                   saving={saving}
                   onReview={() => { setPayAdvanceError(""); setActiveKey(`pay-advance-team:${approval.id}`); }}
                 />
@@ -1792,10 +1793,11 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const approval = assigned ?? team;
             if (!approval) return null;
             const fromTeam = Boolean(team);
-            return <ApprovalModal onClose={closeModal} title={approval.workerName} compactAdvance>
+            const personName = personWithLocation(approval.workerName, approval.stationName, approval.stationCode);
+            return <ApprovalModal onClose={closeModal} title={personName} compactAdvance>
               <ApprovalHead
                 eyebrow={fromTeam ? `All team · ${approval.stepName}` : `Pay advance · ${approval.stepName}`}
-                name={approval.workerName}
+                name={personName}
                 meta={`${approval.requestNumber} · ${approval.workerCode}`}
                 badge={<span className="dx-approval-badge">Requested <strong>{money(approval.requestedAmount)}</strong></span>}
               />

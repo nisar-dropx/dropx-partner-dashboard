@@ -1,5 +1,6 @@
 export type PayAdvanceApproval = {
   id: string; requestId: string; requestNumber: string; workerName: string; workerCode: string;
+  stationCode: string; stationName: string;
   stepName: string; stepType: string; requestedAmount: number; approvedAmount: number | null;
   workerType: string; outstandingPay: number | null; eligibilityPercent: number | null;
   maxEligibleAmount: number | null; eligibilityWithinLimit: boolean;

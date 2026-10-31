@@ -11,8 +11,8 @@ function fixture() {
       {id:'step-b',company_id:'company-b',request_id:'request-b',approver_user_id:'actor-a',status:'pending',step_name:'Reporting manager',step_type:'manager'},
       {id:'step-c',company_id:'company-a',request_id:'request-c',approver_user_id:'other-actor',status:'pending',step_name:'Reporting manager',step_type:'manager'}],
     hr_pay_advance_requests:[
-      {id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_type:'workforce',worker_name:'Test Person',worker_code:'W1',requested_amount:2000,outstanding_pay_snapshot:12000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'},
-      {id:'request-c',company_id:'company-a',status:'pending',request_number:'ADV003',worker_type:'employee',worker_name:'Team Member',worker_code:'E1',requested_amount:1000,outstanding_pay_snapshot:8000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:2000,recovery_mode:'one_time',requested_installments:1,reason:'Team advance'}
+      {id:'request-a',company_id:'company-a',status:'pending',request_number:'ADV001',worker_type:'workforce',worker_id:'worker-a',worker_name:'Test Person',worker_code:'W1',requested_amount:2000,outstanding_pay_snapshot:12000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:3000,recovery_mode:'one_time',requested_installments:1,reason:'Test request'},
+      {id:'request-c',company_id:'company-a',status:'pending',request_number:'ADV003',worker_type:'employee',worker_id:'employee-c',worker_name:'Team Member',worker_code:'E1',requested_amount:1000,outstanding_pay_snapshot:8000,eligibility_percent_snapshot:25,max_eligible_amount_snapshot:2000,recovery_mode:'one_time',requested_installments:1,reason:'Team advance'}
     ] };
   const db = { from(table) {
     state.reads.push(table);
@@ -23,7 +23,16 @@ function fixture() {
   }, async rpc(name,args){if(name==='pay_advance_worker_summary') return {data:{monthPaidCount:2,monthPaidAmount:3000,outstandingAdvance:1200,reservedRecovery:800},error:state.error};state.rpcCalls.push({name,args});return {data:'pending',error:state.error}} };
   const mod={exports:{}};
   const source=ts.transpileModule(fs.readFileSync(new URL('./connect-pay-advance-approval-data.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const mocks={'./connect-advance-context':{loadCurrentAdvanceCapacity:async()=>({outstandingPay:12000,maxEligibleAmount:state.liveMaximum??3000,committedAdvance:0,eligibilityPercent:25,breakdown:[{month:'2026-09',outstanding:4000},{month:'2026-10',outstanding:8000}]})},'server-only':{},'./connect-approver-identity':{
+  const mocks={'./connect-advance-context':{loadCurrentAdvanceCapacity:async()=>({outstandingPay:12000,maxEligibleAmount:state.liveMaximum??3000,committedAdvance:0,eligibilityPercent:25,breakdown:[{month:'2026-09',outstanding:4000},{month:'2026-10',outstanding:8000}]})},'server-only':{},'./connect-approval-location':{
+    loadConnectApprovalLocations:async(_company,people)=>{
+      const map=new Map();
+      for(const person of people??[]){
+        if(person?.profileType==='workforce'&&person.profileId==='worker-a') map.set('workforce:worker-a',{stationCode:'NLRE',stationName:'Nellore Hub'});
+        if(person?.profileType==='employee'&&person.profileId) map.set(`employee:${person.profileId}`,{stationCode:'KLZA',stationName:'Kozhikode'});
+      }
+      return map;
+    }
+  },'./connect-approver-identity':{
     resolveConnectActorUserIds:async()=>state.actors,
     resolveConnectVisibleApproverUserIds:async()=>state.visible,
     adoptPendingStepForHigherManager:async({parentId})=>{
@@ -47,6 +56,8 @@ test('pay advances are scoped to the authenticated company and pending assigned 
   assert.equal(rows[0].outstandingPay,12000);
   assert.equal(rows[0].maxEligibleAmount,3000);
   assert.equal(rows[0].eligibilityWithinLimit,true);
+  assert.equal(rows[0].stationCode,'NLRE');
+  assert.equal(rows[0].stationName,'Nellore Hub');
   for(const id of ['request-b','request-c','unknown']) await assert.rejects(f.decideConnectPayAdvanceApproval(account,id,'approved',''),/assigned/);
   assert.equal(f.state.rpcCalls.length,0);
   await f.decideConnectPayAdvanceApproval(account,'request-a','approved','Reviewed',1500,1);
