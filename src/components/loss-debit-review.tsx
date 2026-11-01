@@ -14,12 +14,12 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(n);
-export function LossDebitReview({ rows, earlierOnly = false }: { rows: LossDebit[]; earlierOnly?: boolean }) {
+export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows: LossDebit[]; earlierOnly?: boolean; nowMonth?: string }) {
   const [month, setMonth] = useState(deductionMonth("current_month")!),
     [station, setStation] = useState(""),
     [person, setPerson] = useState(""),
     [designation, setDesignation] = useState(""), [salaryScope, setSalaryScope] = useState(earlierOnly ? 'earlier' : 'selected');
-  const currentMonth = indiaMonth();
+  const currentMonth = nowMonth || indiaMonth();
   const filtered = filterLossDebits(rows, {
     month, salaryScope, currentMonth,
     station,

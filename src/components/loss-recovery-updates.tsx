@@ -8,9 +8,9 @@ import { ListPager, usePaged } from './list-pager';
 import styles from './nl-loss.module.css';
 
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(value);
-export function LossRecoveryUpdates({ rows, earlierOnly = false }: { rows: RecoveryUpdate[]; earlierOnly?: boolean }) {
+export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { rows: RecoveryUpdate[]; earlierOnly?: boolean; nowMonth?: string }) {
   const [station, setStation] = useState(''), [month, setMonth] = useState(''), [status, setStatus] = useState(''), [query, setQuery] = useState(''), [salaryScope, setSalaryScope] = useState(earlierOnly ? 'earlier' : 'all');
-  const currentMonth = indiaMonth();
+  const currentMonth = nowMonth || indiaMonth();
   const shown = filterRecoveryUpdates(rows, { station, month, status, query, salaryScope, currentMonth });
   const exportParams = new URLSearchParams({station, month, status, query, salaryScope});
   const totals = totalRecoveryUpdates(shown);

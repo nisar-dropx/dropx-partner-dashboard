@@ -57,7 +57,7 @@ assert.equal(updates[0].outstanding, 0);
 // Render the production component with saved data and no payroll rows: the original regression.
 const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
 const { LossRecoveryUpdates } = load('src/components/loss-recovery-updates.tsx');
-const html = renderToStaticMarkup(React.createElement(LossRecoveryUpdates, { rows: build([row('saved')]) }));
+const html = renderToStaticMarkup(React.createElement(LossRecoveryUpdates, { rows: build([row('saved')]), nowMonth: '2026-10' }));
 assert.match(html, /All months · till date/);
 assert.match(html, /Saved recovery TIDs/);
 assert.match(html, /saved/);
@@ -73,7 +73,7 @@ const {recoveryUpdateExportRows}=load('src/lib/ops-pulse/loss-recovery-updates.t
 const exported=recoveryUpdateExportRows(previous);
 assert.equal(exported[1][6],'2026-09');assert.equal(exported[1][7],100);
 assert.equal(exported.length,2,'export respects earlier payroll filter');
-const markup=renderToStaticMarkup(React.createElement(LossRecoveryUpdates,{rows:earlier}));
+const markup=renderToStaticMarkup(React.createElement(LossRecoveryUpdates,{rows:earlier,nowMonth:'2026-10'}));
 assert.match(markup,/September 2026 salary/);assert.match(markup,/October 2026 salary/);
 assert.match(markup,/Earlier payroll/);assert.match(markup,/Download Excel/);
 const {filterLossDebits,summarizeLossDebits}=load('src/lib/ops-pulse/loss-debit-review.ts');
@@ -84,7 +84,7 @@ const monthly=summarizeLossDebits(debits,'person_month');assert.equal(monthly.le
 assert.equal(monthly.find(g=>g.payrollMonth==='2026-09').deducted,50);
 assert.equal(monthly.find(g=>g.payrollMonth==='2026-10').draft,25);
 console.log('PASS salary month: individual assignment, earlier-only filter/export, monthly grouping and compact labels.');
-const earlierPage=renderToStaticMarkup(React.createElement(LossRecoveryUpdates,{rows:earlier,earlierOnly:true}));
+const earlierPage=renderToStaticMarkup(React.createElement(LossRecoveryUpdates,{rows:earlier,earlierOnly:true,nowMonth:'2026-10'}));
 assert.match(earlierPage,/Earlier salary recovery · saved assignments/);
 assert.match(earlierPage,/September 2026 salary/);
 assert.doesNotMatch(earlierPage,/October 2026 salary/);
