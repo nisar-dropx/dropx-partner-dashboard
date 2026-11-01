@@ -81,5 +81,5 @@ test('associate incentive display is compact and keeps the useful breakdown',()=
  assert.match(render(calculate([]).summary),/No eligible incentive plan/);
  const attendanceSummary=calculate([],[campaign({name:'Monthly attendance bonus',provider_id:'provider',station_id:'station',incentive_type:'attendance',cycle_type:'monthly',metric:'attendance_compliance',calculation_type:'flat_threshold',threshold_value:0,rate_value:0,flat_amount:500,minimum_activity:0,reporting_time:'07:30:00',minimum_present_days:1,allowed_late_days:0,tiers:[]})],{attendance:[{id:'p1',work_date:'2026-09-01',provider_id:'provider',location_model_id:null,station_id:'station',in_time:'2026-09-01T01:45:00Z'}]}).summary;
  const attendanceHtml=render(attendanceSummary);
- for(const text of ['Monthly attendance bonus','1/1 reporting days','0/0 late','07:30 IST'])assert.ok(attendanceHtml.includes(text),text);
+ for(const text of ['Monthly attendance bonus','1/1 present','0/0 cutoff misses','07:30 IST'])assert.ok(attendanceHtml.includes(text),text);
 });

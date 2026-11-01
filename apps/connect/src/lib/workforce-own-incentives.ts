@@ -63,6 +63,11 @@ export function ownIncentives(input: {
       minimum_activity: campaign.minimum_activity ?? 0,
       minimum_present_days: campaign.minimum_present_days ?? 0,
       allowed_late_days: campaign.allowed_late_days ?? 0,
+      attendance_required: campaign.attendance_required ?? true,
+      reporting_time_required: campaign.reporting_time_required ?? true,
+      attendance_threshold_type: campaign.attendance_threshold_type ?? "minimum_days",
+      maximum_absent_days: campaign.maximum_absent_days ?? 0,
+      attendance_reward_type: campaign.attendance_reward_type ?? "flat",
       tiers: campaign.tiers ?? []
     })) : [],
     attendance: (input.attendance ?? []).map((record) => ({

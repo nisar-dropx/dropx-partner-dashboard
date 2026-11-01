@@ -21,6 +21,11 @@ export type WorkforceIncentivePlan = {
   reporting_time?: string | null;
   minimum_present_days?: unknown;
   allowed_late_days?: unknown;
+  attendance_required?: boolean | null;
+  reporting_time_required?: boolean | null;
+  attendance_threshold_type?: "minimum_days" | "maximum_absent_days" | null;
+  maximum_absent_days?: unknown;
+  attendance_reward_type?: "flat" | "per_shipment" | null;
   tiers: unknown;
   effective_from: string;
   effective_to: string;
@@ -66,6 +71,14 @@ export type WorkforceIncentiveCycle = {
   minimumPresentDays?: number;
   allowedLateDays?: number;
   reportingTime?: string;
+  attendanceRequired?: boolean;
+  reportingTimeRequired?: boolean;
+  attendanceThresholdType?: "minimum_days" | "maximum_absent_days";
+  maximumAbsentDays?: number;
+  expectedDays?: number;
+  reportingDays?: number;
+  shipmentCount?: number;
+  rewardType?: "flat" | "per_shipment";
   status: "earned" | "in_progress" | "below_minimum" | "not_qualified";
 };
 
@@ -110,6 +123,12 @@ function dateParts(date: string) {
 
 function monthEnd(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+function daysInclusive(from: string, to: string) {
+  const start = new Date(`${from}T00:00:00.000Z`).getTime();
+  const end = new Date(`${to}T00:00:00.000Z`).getTime();
+  return Math.floor((end - start) / 86_400_000) + 1;
 }
 
 function cycleFor(date: string, cycleType: WorkforceIncentivePlan["cycle_type"]) {
@@ -245,22 +264,40 @@ export function calculateWorkforceIncentives(input: {
     const maximum = plan.maximum_amount == null ? null : number(plan.maximum_amount, "Maximum amount");
 
     if (plan.incentive_type === "attendance") {
-      const reportingTime = String(plan.reporting_time ?? "").slice(0, 8);
-      const reportingMinutes = timeMinutes(reportingTime, "Reporting time");
+      const attendanceRequired = plan.attendance_required !== false;
+      const reportingTimeRequired = plan.reporting_time_required !== false;
+      if (!attendanceRequired && !reportingTimeRequired) throw new Error("An attendance incentive plan needs at least one eligibility rule.");
+      const reportingTime = reportingTimeRequired ? String(plan.reporting_time ?? "").slice(0, 8) : "";
+      const reportingMinutes = reportingTimeRequired ? timeMinutes(reportingTime, "Reporting time") : null;
       const minimumPresentDays = wholeNumber(plan.minimum_present_days, "Minimum reporting days");
       const allowedLateDays = wholeNumber(plan.allowed_late_days, "Allowed late days");
-      if (minimumPresentDays <= 0 || flat <= 0) throw new Error("An attendance incentive plan needs Workforce review.");
+      const thresholdType = plan.attendance_threshold_type === "maximum_absent_days" ? "maximum_absent_days" : "minimum_days";
+      const maximumAbsentDays = wholeNumber(plan.maximum_absent_days, "Allowed absent days");
+      const rewardType = plan.attendance_reward_type === "per_shipment" ? "per_shipment" : "flat";
+      if ((attendanceRequired && thresholdType === "minimum_days" && minimumPresentDays <= 0)
+        || (rewardType === "flat" ? flat <= 0 : rate <= 0)) throw new Error("An attendance incentive plan needs Workforce review.");
       const eligibleAttendance = attendance.filter((record) =>
         record.workDate >= plan.effective_from && record.workDate <= plan.effective_to
         && (!plan.provider_id || plan.provider_id === record.providerId)
         && (!plan.location_model_id || plan.location_model_id === record.locationModelId)
         && (!plan.station_id || plan.station_id === record.stationId));
-      if (!eligibleAttendance.length) continue;
-      const grouped = new Map<string, { cycle: ReturnType<typeof cycleFor>; records: WorkforceIncentiveAttendance[] }>();
+      const eligibleSources = input.sources.filter((source) =>
+        source.workDate >= plan.effective_from && source.workDate <= plan.effective_to
+        && (!plan.provider_id || plan.provider_id === source.providerId)
+        && (!plan.location_model_id || plan.location_model_id === source.locationModelId)
+        && (!plan.station_id || plan.station_id === source.stationId));
+      if (!eligibleAttendance.length && !eligibleSources.length) continue;
+      const grouped = new Map<string, { cycle: ReturnType<typeof cycleFor>; records: WorkforceIncentiveAttendance[]; sources: WorkforceIncentiveSource[] }>();
       for (const record of eligibleAttendance) {
         const cycle = cycleFor(record.workDate, plan.cycle_type);
-        const current = grouped.get(cycle.key) ?? { cycle, records: [] };
+        const current = grouped.get(cycle.key) ?? { cycle, records: [], sources: [] };
         current.records.push(record);
+        grouped.set(cycle.key, current);
+      }
+      for (const source of eligibleSources) {
+        const cycle = cycleFor(source.workDate, plan.cycle_type);
+        const current = grouped.get(cycle.key) ?? { cycle, records: [], sources: [] };
+        current.sources.push(source);
         grouped.set(cycle.key, current);
       }
       const cycles: WorkforceIncentiveCycle[] = [];
@@ -273,29 +310,71 @@ export function calculateWorkforceIncentives(input: {
           if (!current || new Date(record.inTime).getTime() < new Date(current).getTime()) punches.set(record.workDate, record.inTime);
         }
         const presentDays = punches.size;
-        const lateDays = [...punches.values()].filter((inTime) => kolkataMinutes(inTime) > reportingMinutes).length;
-        const complete = group.cycle.end <= input.to;
-        const qualified = presentDays >= minimumPresentDays && lateDays <= allowedLateDays;
-        const awardCents = complete && qualified ? cents(maximum === null ? flat : Math.min(flat, maximum)) : 0;
+        const evaluationStart = [group.cycle.start, plan.effective_from, input.from].sort().at(-1) as string;
+        const evaluationEnd = [group.cycle.end, plan.effective_to].sort().at(0) as string;
+        const expectedDays = daysInclusive(evaluationStart, evaluationEnd);
+        const requiredPresentDays = attendanceRequired
+          ? thresholdType === "maximum_absent_days" ? Math.max(expectedDays - maximumAbsentDays, 0) : minimumPresentDays
+          : 0;
+        const activityDays = new Set(group.sources.filter((source) =>
+          number(source.totalActivity, "Total activity") > 0 || number(source.totalDelivery, "Total delivery") > 0).map((source) => source.workDate));
+        const reportingDays = new Set([...activityDays, ...punches.keys()]);
+        const cutoffMissDays = new Set<string>();
+        if (reportingTimeRequired && reportingMinutes !== null) {
+          for (const day of reportingDays) {
+            const punch = punches.get(day);
+            if (!punch || kolkataMinutes(punch) > reportingMinutes) cutoffMissDays.add(day);
+          }
+        }
+        const lateDays = cutoffMissDays.size;
+        const shipmentCount = group.sources.reduce((sum, source) => sum + number(source.totalDelivery, "Total delivery"), 0);
+        const complete = evaluationEnd <= input.to;
+        const attendanceQualified = !attendanceRequired || presentDays >= requiredPresentDays;
+        const reportingQualified = !reportingTimeRequired || (reportingDays.size > 0 && lateDays <= allowedLateDays);
+        const reward = rewardType === "per_shipment" ? shipmentCount * rate : flat;
+        const qualified = attendanceQualified && reportingQualified && (rewardType !== "per_shipment" || shipmentCount > 0);
+        const awardCents = complete && qualified ? cents(maximum === null ? reward : Math.min(reward, maximum)) : 0;
         const status: WorkforceIncentiveCycle["status"] = !complete
           ? "in_progress"
-          : presentDays < minimumPresentDays ? "below_minimum" : qualified ? "earned" : "not_qualified";
+          : attendanceRequired && presentDays < requiredPresentDays ? "below_minimum" : qualified ? "earned" : "not_qualified";
         cycles.push({
           amount: awardCents / 100,
           cycleEnd: group.cycle.end,
           cycleKey: group.cycle.key,
           cycleLabel: group.cycle.label,
           cycleStart: group.cycle.start,
-          denominator: minimumPresentDays,
+          denominator: attendanceRequired ? requiredPresentDays : reportingDays.size,
           metricValue: presentDays,
           numerator: presentDays,
           presentDays,
           lateDays,
-          minimumPresentDays,
+          minimumPresentDays: requiredPresentDays,
           allowedLateDays,
-          reportingTime: reportingTime.slice(0, 5),
+          reportingTime: reportingTimeRequired ? reportingTime.slice(0, 5) : undefined,
+          attendanceRequired,
+          reportingTimeRequired,
+          attendanceThresholdType: thresholdType,
+          maximumAbsentDays,
+          expectedDays,
+          reportingDays: reportingDays.size,
+          shipmentCount,
+          rewardType,
           status
         });
+        if (awardCents && group.sources.length) {
+          const weights = group.sources.map((source) => rewardType === "per_shipment"
+            ? number(source.totalDelivery, "Total delivery")
+            : Math.max(number(source.totalActivity, "Total activity"), number(source.totalDelivery, "Total delivery")));
+          const weightTotal = weights.reduce((sum, value) => sum + value, 0);
+          let distributed = 0;
+          group.sources.forEach((source, index) => {
+            const portion = index === group.sources.length - 1
+              ? awardCents - distributed
+              : Math.floor(awardCents * (weightTotal > 0 ? weights[index] / weightTotal : 1 / group.sources.length));
+            distributed += portion;
+            bySource.set(source.id, (cents(bySource.get(source.id) ?? 0) + portion) / 100);
+          });
+        }
         planCents += awardCents;
       }
       totalCents += planCents;

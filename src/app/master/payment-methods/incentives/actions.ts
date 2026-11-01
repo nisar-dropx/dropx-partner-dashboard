@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -57,8 +58,8 @@ export async function createIncentivePlan(formData: FormData) {
   const companyId = requireCompanyId(authorization);
   try {
     if (!supabaseAdmin) throw new Error("Database connection is unavailable.");
-    const code = text(formData.get("code")).toUpperCase();
     const name = text(formData.get("name"));
+    const code = (text(formData.get("code")) || `${name.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 24)}_${randomUUID().slice(0, 6)}`).toUpperCase();
     const providerId = text(formData.get("provider_id"));
     const modelId = optional(formData.get("location_model_id"));
     const stationId = optional(formData.get("station_id"));
@@ -93,19 +94,38 @@ export async function createIncentivePlan(formData: FormData) {
       tiers,
       reporting_time: null,
       minimum_present_days: 0,
-      allowed_late_days: 0
+      allowed_late_days: 0,
+      attendance_required: false,
+      reporting_time_required: false,
+      attendance_threshold_type: "minimum_days",
+      maximum_absent_days: 0,
+      attendance_reward_type: "flat"
     } : incentiveType === "attendance" ? {
+      ...(function () {
+        const attendanceRequired = formData.get("attendance_required") === "on";
+        const reportingTimeRequired = formData.get("reporting_time_required") === "on";
+        const thresholdType = text(formData.get("attendance_threshold_type")) === "maximum_absent_days" ? "maximum_absent_days" : "minimum_days";
+        const rewardType = text(formData.get("attendance_reward_type")) === "per_shipment" ? "per_shipment" : "flat";
+        if (!attendanceRequired && !reportingTimeRequired) throw new Error("Enable Attendance days, Reporting time, or both.");
+        return {
+          attendance_required: attendanceRequired,
+          reporting_time_required: reportingTimeRequired,
+          attendance_threshold_type: thresholdType,
+          minimum_present_days: attendanceRequired && thresholdType === "minimum_days" ? wholeNumber(formData.get("minimum_present_days"), "Minimum present days", 1) : 0,
+          maximum_absent_days: attendanceRequired && thresholdType === "maximum_absent_days" ? wholeNumber(formData.get("maximum_absent_days"), "Maximum absent days") : 0,
+          reporting_time: reportingTimeRequired ? reportingTime(formData.get("reporting_time")) : null,
+          allowed_late_days: reportingTimeRequired ? wholeNumber(formData.get("allowed_late_days"), "Allowed cutoff misses") : 0,
+          attendance_reward_type: rewardType,
+          rate_value: rewardType === "per_shipment" ? nonNegative(formData.get("rate_value"), "Amount per shipment") : 0,
+          flat_amount: rewardType === "flat" ? nonNegative(formData.get("flat_amount"), "Flat bonus") : 0
+        };
+      })(),
       incentive_type: "attendance",
       cycle_type: text(formData.get("cycle_type")) === "monthly" ? "monthly" : "half_monthly",
       metric: "attendance_compliance",
       calculation_type: "flat_threshold",
       threshold_value: 0,
-      rate_value: 0,
-      flat_amount: nonNegative(formData.get("flat_amount"), "Attendance bonus"),
-      tiers: [],
-      reporting_time: reportingTime(formData.get("reporting_time")),
-      minimum_present_days: wholeNumber(formData.get("minimum_present_days"), "Minimum reporting days", 1),
-      allowed_late_days: wholeNumber(formData.get("allowed_late_days"), "Allowed late days")
+      tiers: []
     } : {
       incentive_type: "performance",
       cycle_type: ["half_monthly", "monthly"].includes(text(formData.get("cycle_type"))) ? text(formData.get("cycle_type")) : "daily",
@@ -117,11 +137,18 @@ export async function createIncentivePlan(formData: FormData) {
       tiers: [],
       reporting_time: null,
       minimum_present_days: 0,
-      allowed_late_days: 0
+      allowed_late_days: 0,
+      attendance_required: false,
+      reporting_time_required: false,
+      attendance_threshold_type: "minimum_days",
+      maximum_absent_days: 0,
+      attendance_reward_type: "flat"
     };
     if (payload.calculation_type === "tiered_flat" && !tiers.length) throw new Error("Add at least one conversion slab before saving the plan.");
-    if (payload.calculation_type === "flat_threshold" && Number(payload.flat_amount) <= 0) throw new Error(incentiveType === "attendance" ? "Attendance bonus must be greater than zero." : "Flat performance plans need an amount greater than zero.");
-    if (payload.calculation_type === "per_unit_above_threshold" && Number(payload.rate_value) <= 0) throw new Error("Per-unit performance plans need a rate greater than zero.");
+    if (incentiveType === "attendance" && payload.attendance_reward_type === "flat" && Number(payload.flat_amount) <= 0) throw new Error("Flat bonus must be greater than zero.");
+    if (incentiveType === "attendance" && payload.attendance_reward_type === "per_shipment" && Number(payload.rate_value) <= 0) throw new Error("Amount per shipment must be greater than zero.");
+    if (incentiveType === "performance" && payload.calculation_type === "flat_threshold" && Number(payload.flat_amount) <= 0) throw new Error("Flat performance plans need an amount greater than zero.");
+    if (incentiveType === "performance" && payload.calculation_type === "per_unit_above_threshold" && Number(payload.rate_value) <= 0) throw new Error("Per-unit performance plans need a rate greater than zero.");
 
     const existing = await supabaseAdmin.from("workforce_incentive_campaigns")
       .select("id,provider_id,location_model_id,station_id,designation_id,incentive_type,metric,effective_from,effective_to,status")

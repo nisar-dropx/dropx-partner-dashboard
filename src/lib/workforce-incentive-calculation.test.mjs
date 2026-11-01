@@ -122,3 +122,59 @@ test("attendance bonus stays unpaid when late exceptions exceed the configured a
   assert.equal(result.amount, 0);
   assert.equal(result.plans[0].cycles[0].status, "not_qualified");
 });
+
+test("attendance and reporting time can qualify together for a per-shipment reward", () => {
+  const dates = Array.from({ length: 13 }, (_, index) => `2026-10-${String(index + 1).padStart(2, "0")}`);
+  const result = calculateWorkforceIncentives({
+    companyId: "company", designationId: "wishmaster", from: "2026-10-01", to: "2026-10-15",
+    plans: [{
+      ...attendancePlan,
+      cycle_type: "half_monthly",
+      attendance_required: true,
+      reporting_time_required: true,
+      attendance_threshold_type: "minimum_days",
+      minimum_present_days: 13,
+      allowed_late_days: 2,
+      attendance_reward_type: "per_shipment",
+      rate_value: 1,
+      flat_amount: 0
+    }],
+    attendance: dates.map((date, index) => attendance(`p-${index}`, date, `${date}T${index >= 11 ? "02:30" : "01:45"}:00.000Z`)),
+    sources: dates.map((date, index) => ({ ...source(`s-${index}`, date, 1, 1), providerId: "amazon", locationModelId: "edsp" }))
+  });
+  assert.equal(result.amount, 13);
+  assert.equal(result.plans[0].cycles[0].presentDays, 13);
+  assert.equal(result.plans[0].cycles[0].lateDays, 2);
+  assert.equal(result.plans[0].cycles[0].shipmentCount, 13);
+  assert.equal([...result.bySource.values()].reduce((sum, value) => sum + value, 0), 13);
+});
+
+test("attendance-only and reporting-time-only plans do not require the other rule", () => {
+  const attendanceOnly = calculateWorkforceIncentives({
+    companyId: "company", designationId: "wishmaster", from: "2026-10-01", to: "2026-10-31",
+    plans: [{ ...attendancePlan, attendance_required: true, reporting_time_required: false, reporting_time: null }],
+    sources: [], attendance: [attendance("a", "2026-10-01", "2026-10-01T03:00:00.000Z"), attendance("b", "2026-10-02", "2026-10-02T03:00:00.000Z")]
+  });
+  assert.equal(attendanceOnly.amount, 1200);
+  assert.equal(attendanceOnly.plans[0].cycles[0].reportingTime, undefined);
+
+  const reportingOnly = calculateWorkforceIncentives({
+    companyId: "company", designationId: "wishmaster", from: "2026-10-01", to: "2026-10-31",
+    plans: [{ ...attendancePlan, attendance_required: false, reporting_time_required: true, minimum_present_days: 0 }],
+    sources: [], attendance: [attendance("a", "2026-10-01", "2026-10-01T01:45:00.000Z"), attendance("b", "2026-10-02", "2026-10-02T02:30:00.000Z")]
+  });
+  assert.equal(reportingOnly.amount, 1200);
+  assert.equal(reportingOnly.plans[0].cycles[0].minimumPresentDays, 0);
+});
+
+test("maximum absent days derives the present-day target from the cycle length", () => {
+  const dates = Array.from({ length: 13 }, (_, index) => `2026-10-${String(index + 1).padStart(2, "0")}`);
+  const result = calculateWorkforceIncentives({
+    companyId: "company", designationId: "wishmaster", from: "2026-10-01", to: "2026-10-15",
+    plans: [{ ...attendancePlan, cycle_type: "half_monthly", reporting_time_required: false, attendance_threshold_type: "maximum_absent_days", maximum_absent_days: 2, minimum_present_days: 0 }],
+    sources: [], attendance: dates.map((date, index) => attendance(`p-${index}`, date, `${date}T01:45:00.000Z`))
+  });
+  assert.equal(result.amount, 1200);
+  assert.equal(result.plans[0].cycles[0].expectedDays, 15);
+  assert.equal(result.plans[0].cycles[0].minimumPresentDays, 13);
+});
