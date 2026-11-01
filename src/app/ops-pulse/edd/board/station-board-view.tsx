@@ -185,24 +185,24 @@ function buildShareTable(
     if (ageingMode === "week") {
       const weeks = collectAgeingWeeks(stations);
       const pivot = ageingStateWeekPivot(stations, weeks);
-      const headers = ["State", ...pivot.columns, "Grand Total"];
+      const headers = ["State", ...pivot.columns.flatMap((col) => [`${col} #`, `${col} ₹`]), "Total #", "Total ₹"];
       const rows: BoardShareCell[][] = pivot.rows.map((row) => [
         { text: row.state, bold: true, align: "left" },
-        ...pivot.columns.map((col) => ({
-          text: row.cells[col] ? inr(row.cells[col]) : "",
-          align: "right" as const,
-        })),
-        { text: inr(row.total), bold: true, bg: heatColor(row.total, pivot.maxAmount), align: "right" },
+        ...pivot.columns.flatMap((col) => [
+          { text: row.cells[col]?.count ? String(row.cells[col].count) : "", align: "right" as const },
+          { text: row.cells[col]?.amount ? inr(row.cells[col].amount) : "", align: "right" as const },
+        ]),
+        { text: String(row.total.count), bold: true, align: "right" },
+        { text: inr(row.total.amount), bold: true, bg: heatColor(row.total.amount, pivot.maxAmount), align: "right" },
       ]);
       rows.push([
         { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-        ...pivot.columns.map((col) => ({
-          text: inr(pivot.columnTotals[col] ?? 0),
-          bold: true,
-          align: "right" as const,
-          bg: "#fff4bf",
-        })),
-        { text: inr(pivot.grandTotal), bold: true, align: "right", bg: "#fff4bf" },
+        ...pivot.columns.flatMap((col) => [
+          { text: String(pivot.columnTotals[col]?.count || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+          { text: inr(pivot.columnTotals[col]?.amount || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+        ]),
+        { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#fff4bf" },
+        { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#fff4bf" },
       ]);
       return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · State × ISO week" };
     }
@@ -327,18 +327,26 @@ function buildStationShareTable(
       const pivot = ageingStateWeekPivot([station], weeks);
       const rows: BoardShareCell[][] = pivot.rows.map((row) => [
         { text: row.state, align: "left" },
-        ...pivot.columns.map((col) => ({ text: row.cells[col] ? inr(row.cells[col]) : "", align: "right" as const })),
-        { text: inr(row.total), bold: true, align: "right", bg: heatColor(row.total, pivot.maxAmount) },
+        ...pivot.columns.flatMap((col) => [
+          { text: row.cells[col]?.count ? String(row.cells[col].count) : "", align: "right" as const },
+          { text: row.cells[col]?.amount ? inr(row.cells[col].amount) : "", align: "right" as const },
+        ]),
+        { text: String(row.total.count), bold: true, align: "right" },
+        { text: inr(row.total.amount), bold: true, align: "right", bg: heatColor(row.total.amount, pivot.maxAmount) },
       ]);
       rows.push([
         { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-        ...pivot.columns.map((col) => ({ text: inr(pivot.columnTotals[col] ?? 0), bold: true, align: "right" as const, bg: "#fff4bf" })),
-        { text: inr(pivot.grandTotal), bold: true, align: "right", bg: "#fff4bf" },
+        ...pivot.columns.flatMap((col) => [
+          { text: String(pivot.columnTotals[col]?.count || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+          { text: inr(pivot.columnTotals[col]?.amount || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+        ]),
+        { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#fff4bf" },
+        { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#fff4bf" },
       ]);
       return {
         title: `Ageing · ${label}`,
         subtitle,
-        headers: ["State", ...pivot.columns, "Grand Total"],
+        headers: ["State", ...pivot.columns.flatMap((col) => [`${col} #`, `${col} ₹`]), "Total #", "Total ₹"],
         rows,
         footerNote: "Ops Pulse Station board · State × ISO week",
       };
@@ -418,7 +426,9 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [copied, setCopied] = useState(false);
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
-  const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("week");
+  const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
+  /** DSR tab filter — Zero deliveries is the same board, delivered = 0 only. */
+  const [dsrZeroOnly, setDsrZeroOnly] = useState(() => asView(initialView) === "zero");
   /** Resume Refresh 7d after a proxy timeout instead of restarting from station 0. */
   const backfillCursor = useRef(0);
   const backfillClearSeq = useRef(0);
@@ -730,8 +740,9 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     ["ageing", "Ageing"],
     ["creturn", "C-Return"],
     ["dsr", "DSR"],
-    ["zero", "Zero deliveries"],
   ] as const;
+  const dsrView = view === "dsr" || view === "zero";
+  const showZeroOnly = dsrView && (view === "zero" || dsrZeroOnly);
 
   function regionShareActions(groupId: string, groupLabel: string, groupStations: StationBoardStation[]) {
     const busyKey = blockBusy[groupId];
@@ -783,10 +794,16 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
               key={key}
               type="button"
               role="tab"
-              aria-pressed={view === key}
+              aria-pressed={key === "dsr" ? dsrView : view === key}
               onClick={() => {
-                setView(key);
-                syncUrl(key, region);
+                if (key === "dsr") {
+                  setView("dsr");
+                  setDsrZeroOnly(false);
+                  syncUrl("dsr", region);
+                } else {
+                  setView(key);
+                  syncUrl(key, region);
+                }
                 setTids(null);
               }}
             >
@@ -930,7 +947,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             <h3>
               {ageingMode === "day"
                 ? "Ageing · station × day buckets"
-                : "Ageing · State × ISO week (Sum of Order Amount)"}
+                : "Ageing · State × ISO week (count + amount)"}
             </h3>
             <div className={s.segment} role="tablist" aria-label="Ageing type">
               <button type="button" aria-pressed={ageingMode === "day"} onClick={() => setAgeingMode("day")}>Date type</button>
@@ -939,6 +956,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           </div>
           {!stations.length ? <p className={s.empty}>No stations in this region.</p> : ageingMode === "week" ? groups.map((group) => {
             const local = ageingStateWeekPivot(group.stations, ageingWeeks);
+            const cols = local.columns;
             return (
               <div key={group.id}>
                 <div className={s.region}>
@@ -949,28 +967,45 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   <table className={`${s.table} ${s.ageing}`}>
                     <thead>
                       <tr>
-                        <th>State</th>
-                        {local.columns.map((col) => <th key={col}>{col}</th>)}
-                        <th>Grand Total</th>
+                        <th rowSpan={2}>State</th>
+                        {cols.map((col) => (
+                          <th key={col} colSpan={2}>{col}</th>
+                        ))}
+                        <th rowSpan={2}>Total Count</th>
+                        <th rowSpan={2}>Total Sum</th>
+                      </tr>
+                      <tr>
+                        {cols.flatMap((col) => [
+                          <th key={`${col}-c`}>Count of Tracking ID</th>,
+                          <th key={`${col}-a`}>Sum of Order Amount</th>,
+                        ])}
                       </tr>
                     </thead>
                     <tbody>
                       {local.rows.map((row) => (
                         <tr key={row.state}>
                           <td className={s.clm}>{row.state}</td>
-                          {local.columns.map((col) => {
-                            const value = row.cells[col] ?? 0;
-                            return <td key={col}>{value ? inr(value) : ""}</td>;
+                          {cols.flatMap((col) => {
+                            const cell = row.cells[col] ?? { count: 0, amount: 0 };
+                            return [
+                              <td key={`${col}-c`}>{count(cell.count, true)}</td>,
+                              <td key={`${col}-a`}>{cell.amount ? inr(cell.amount) : ""}</td>,
+                            ];
                           })}
-                          <td className={s.heat} style={{ background: heatColor(row.total, local.maxAmount) }}>{inr(row.total)}</td>
+                          <td>{count(row.total.count)}</td>
+                          <td className={s.heat} style={{ background: heatColor(row.total.amount, local.maxAmount) }}>{inr(row.total.amount)}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr>
                         <td>Grand Total</td>
-                        {local.columns.map((col) => <td key={col}>{inr(local.columnTotals[col] ?? 0)}</td>)}
-                        <td>{inr(local.grandTotal)}</td>
+                        {cols.flatMap((col) => [
+                          <td key={`${col}-c`}>{count(local.columnTotals[col]?.count ?? 0)}</td>,
+                          <td key={`${col}-a`}>{inr(local.columnTotals[col]?.amount ?? 0)}</td>,
+                        ])}
+                        <td>{count(local.grandTotal.count)}</td>
+                        <td>{inr(local.grandTotal.amount)}</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1108,11 +1143,34 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         </section>
       ) : null}
 
-      {view === "dsr" || view === "zero" ? (
+      {dsrView ? (
         <section className={s.panel}>
           <div className={s.panelHead}>
-            <h3>{view === "zero" ? "Zero deliveries · DA DSR" : "DA DSR"}</h3>
-            <span>Click a station for shareable detail + TIDs</span>
+            <h3>{showZeroOnly ? "DA DSR · zero deliveries" : "DA DSR"}</h3>
+            <div className={s.segment} role="tablist" aria-label="DSR filter">
+              <button
+                type="button"
+                aria-pressed={!showZeroOnly}
+                onClick={() => {
+                  setView("dsr");
+                  setDsrZeroOnly(false);
+                  syncUrl("dsr", region);
+                }}
+              >
+                All DAs
+              </button>
+              <button
+                type="button"
+                aria-pressed={showZeroOnly}
+                onClick={() => {
+                  setView("zero");
+                  setDsrZeroOnly(true);
+                  syncUrl("zero", region);
+                }}
+              >
+                Zero deliveries
+              </button>
+            </div>
           </div>
           {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => (
             <div key={group.id}>
@@ -1136,7 +1194,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </thead>
                   <tbody>
                     {group.stations.flatMap((station) => {
-                      const rows = view === "zero"
+                      const rows = showZeroOnly
                         ? station.board.daDsr.filter((da) => da.delivered === 0)
                         : station.board.daDsr;
                       if (!rows.length) {
@@ -1147,7 +1205,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                                 {station.stationCode}
                               </button>
                             </td>
-                            <td colSpan={7} className={s.muted}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</td>
+                            <td colSpan={7} className={s.muted}>{showZeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</td>
                           </tr>,
                         ];
                       }
@@ -1173,7 +1231,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </tbody>
                   {(() => {
                     const das = group.stations.flatMap((station) =>
-                      view === "zero"
+                      showZeroOnly
                         ? station.board.daDsr.filter((da) => da.delivered === 0)
                         : station.board.daDsr,
                     );
@@ -1305,26 +1363,35 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </div>
                   {ageingMode === "week" ? (() => {
                     const local = ageingStateWeekPivot([selected], collectAgeingWeeks([selected]));
-                    const grid = `minmax(88px, 1.4fr) ${local.columns.map(() => "minmax(64px, 1fr)").join(" ")} minmax(72px, 1fr)`;
+                    const grid = `minmax(88px, 1.4fr) ${local.columns.flatMap(() => ["minmax(48px, 0.7fr)", "minmax(64px, 1fr)"]).join(" ")} minmax(48px, 0.7fr) minmax(72px, 1fr)`;
                     return (
                       <>
                         <div className={s.shareColsWide} style={{ gridTemplateColumns: grid }}>
                           <span>State</span>
-                          {local.columns.map((col) => <span key={col}>{col}</span>)}
-                          <span>Total</span>
+                          {local.columns.flatMap((col) => [<span key={`${col}-c`}>{col} #</span>, <span key={`${col}-a`}>{col} ₹</span>])}
+                          <span>Total #</span>
+                          <span>Total ₹</span>
                         </div>
                         <div className={s.shareRows}>
                           {local.rows.map((row) => (
                             <div key={row.state} className={s.shareRowWide} style={{ gridTemplateColumns: grid }}>
                               <span>{row.state}</span>
-                              {local.columns.map((col) => <strong key={col}>{row.cells[col] ? inr(row.cells[col]) : ""}</strong>)}
-                              <strong>{inr(row.total)}</strong>
+                              {local.columns.flatMap((col) => [
+                                <strong key={`${col}-c`}>{row.cells[col]?.count ? count(row.cells[col].count) : ""}</strong>,
+                                <strong key={`${col}-a`}>{row.cells[col]?.amount ? inr(row.cells[col].amount) : ""}</strong>,
+                              ])}
+                              <strong>{count(row.total.count)}</strong>
+                              <strong>{inr(row.total.amount)}</strong>
                             </div>
                           ))}
                           <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: grid }}>
                             <span>Grand Total</span>
-                            {local.columns.map((col) => <strong key={col}>{inr(local.columnTotals[col] ?? 0)}</strong>)}
-                            <strong>{inr(local.grandTotal)}</strong>
+                            {local.columns.flatMap((col) => [
+                              <strong key={`${col}-c`}>{count(local.columnTotals[col]?.count ?? 0)}</strong>,
+                              <strong key={`${col}-a`}>{inr(local.columnTotals[col]?.amount ?? 0)}</strong>,
+                            ])}
+                            <strong>{count(local.grandTotal.count)}</strong>
+                            <strong>{inr(local.grandTotal.amount)}</strong>
                           </div>
                         </div>
                       </>
@@ -1363,7 +1430,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 <div className={s.shareCard}>
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
-                    <strong>{view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                    <strong>{showZeroOnly ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
                   <div className={s.shareColsWide}>
@@ -1376,7 +1443,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                     <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
-                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
+                    {(showZeroOnly ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
                       <div key={da.driverId} className={s.shareRowWide}>
                         <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
                         <strong>{da.delivered}</strong>
@@ -1388,11 +1455,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       </div>
                     ))}
                     {(() => {
-                      const das = view === "zero"
+                      const das = showZeroOnly
                         ? selected.board.daDsr.filter((da) => da.delivered === 0)
                         : selected.board.daDsr;
                       if (!das.length) {
-                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>;
+                        return <p className={s.empty}>{showZeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>;
                       }
                       const tot = sumDaDsr(das);
                       return (

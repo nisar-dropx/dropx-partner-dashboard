@@ -115,8 +115,8 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
     },
     ageingByWeek: { week43: { count: 12, amount: 1500 }, week44: { count: 4, amount: 650.5 } },
     ageingByStateWeek: {
-      Inducted: { week43: 1200.25, week44: 100 },
-      "Delivery Failed": { week43: 299.75, week44: 550.5 },
+      Inducted: { week43: { count: 8, amount: 1200.25 }, week44: { count: 1, amount: 100 } },
+      "Delivery Failed": { week43: { count: 4, amount: 299.75 }, week44: { count: 3, amount: 550.5 } },
     },
   });
   const ageingStations = [
@@ -132,16 +132,19 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   assert.deepEqual(weeks, ["week43", "week44"]);
   const stateWeek = ageingStateWeekPivot(ageingStations, weeks);
   assert.equal(stateWeek.rows.length, 2);
-  assert.equal(stateWeek.grandTotal, 2150.5);
-  assert.equal(stateWeek.columnTotals.week43, 1500);
-  assert.equal(stateWeek.columnTotals.week44, 650.5);
+  assert.equal(stateWeek.grandTotal.count, 16);
+  assert.equal(stateWeek.grandTotal.amount, 2150.5);
+  assert.equal(stateWeek.columnTotals.week43.count, 12);
+  assert.equal(stateWeek.columnTotals.week43.amount, 1500);
+  assert.equal(stateWeek.columnTotals.week44.count, 4);
+  assert.equal(stateWeek.columnTotals.week44.amount, 650.5);
   // Empty weeks list → empty pivot, no throw.
   assert.deepEqual(ageingStateWeekPivot(ageingStations, []).columns, []);
-  // Zero / negative amounts ignored by normalizeBoard.
+  // Legacy bare INR amounts still parse; zero / negative ignored.
   const blankState = normalizeBoard({
     ageingByStateWeek: { Inducted: { week43: 0, week44: -5, week45: 12.345 } },
   });
-  assert.deepEqual(blankState.ageingByStateWeek, { Inducted: { week45: 12.35 } });
+  assert.deepEqual(blankState.ageingByStateWeek, { Inducted: { week45: { count: 0, amount: 12.35 } } });
   const ageingSheets = stationBoardSheets(
     { asOf: "", businessDate: "2026-10-30", dates: [], stations: ageingStations, run: null },
     "ageing",

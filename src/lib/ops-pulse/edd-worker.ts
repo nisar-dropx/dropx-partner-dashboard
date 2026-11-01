@@ -969,7 +969,7 @@ export type LoadFlashBoardPayload = {
   zeroDeliveries: number;
   ageingByDay: Record<string, LoadFlashAgeingCell>;
   ageingByWeek: Record<string, LoadFlashAgeingCell>;
-  ageingByStateWeek: Record<string, Record<string, number>>;
+  ageingByStateWeek: Record<string, Record<string, LoadFlashAgeingCell>>;
 };
 
 export type LoadFlashBoardStation = {
@@ -1067,15 +1067,21 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
       if (parsed.count > 0 || parsed.amount > 0) ageingByWeek[key] = parsed;
     }
   }
-  const ageingByStateWeek: Record<string, Record<string, number>> = {};
+  const ageingByStateWeek: Record<string, Record<string, LoadFlashAgeingCell>> = {};
   if (row.ageingByStateWeek && typeof row.ageingByStateWeek === "object" && !Array.isArray(row.ageingByStateWeek)) {
     for (const [state, weeks] of Object.entries(row.ageingByStateWeek as Record<string, unknown>)) {
       if (!weeks || typeof weeks !== "object" || Array.isArray(weeks)) continue;
       const stateKey = String(state || "").trim() || "(blank)";
-      const weekMap: Record<string, number> = {};
-      for (const [week, amount] of Object.entries(weeks as Record<string, unknown>)) {
-        const n = Math.round((Math.max(0, Number(amount) || 0) + Number.EPSILON) * 100) / 100;
-        if (n > 0) weekMap[String(week || "").trim() || "(blank)"] = n;
+      const weekMap: Record<string, LoadFlashAgeingCell> = {};
+      for (const [week, cell] of Object.entries(weeks as Record<string, unknown>)) {
+        const key = String(week || "").trim() || "(blank)";
+        if (typeof cell === "number") {
+          const amount = Math.round((Math.max(0, cell) + Number.EPSILON) * 100) / 100;
+          if (amount > 0) weekMap[key] = { count: 0, amount };
+          continue;
+        }
+        const parsed = parseAgeingCell(cell);
+        if (parsed.count > 0 || parsed.amount > 0) weekMap[key] = parsed;
       }
       if (Object.keys(weekMap).length) ageingByStateWeek[stateKey] = weekMap;
     }

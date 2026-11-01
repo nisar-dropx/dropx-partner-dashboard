@@ -72,8 +72,8 @@ export type StationBoardPayload = {
   zeroDeliveries: number;
   ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
   ageingByWeek: Record<string, AgeingBucketCell>;
-  /** Ageing let.xlsx: State → ISO week → Sum of Order Amount (INR). */
-  ageingByStateWeek: Record<string, Record<string, number>>;
+  /** Ageing let.xlsx: State → ISO week → TID count + Sum of Order Amount (INR). */
+  ageingByStateWeek: Record<string, Record<string, AgeingBucketCell>>;
 };
 
 export type StationBoardStation = {
@@ -237,15 +237,22 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
       if (parsed.count > 0 || parsed.amount > 0) ageingByWeek[key] = parsed;
     }
   }
-  const ageingByStateWeek: Record<string, Record<string, number>> = {};
+  const ageingByStateWeek: Record<string, Record<string, AgeingBucketCell>> = {};
   if (row.ageingByStateWeek && typeof row.ageingByStateWeek === "object" && !Array.isArray(row.ageingByStateWeek)) {
     for (const [state, weeks] of Object.entries(row.ageingByStateWeek as Record<string, unknown>)) {
       if (!weeks || typeof weeks !== "object" || Array.isArray(weeks)) continue;
       const stateKey = String(state || "").trim() || "(blank)";
-      const weekMap: Record<string, number> = {};
-      for (const [week, amount] of Object.entries(weeks as Record<string, unknown>)) {
-        const n = Math.round((Math.max(0, Number(amount) || 0) + Number.EPSILON) * 100) / 100;
-        if (n > 0) weekMap[String(week || "").trim() || "(blank)"] = n;
+      const weekMap: Record<string, AgeingBucketCell> = {};
+      for (const [week, cell] of Object.entries(weeks as Record<string, unknown>)) {
+        const key = String(week || "").trim() || "(blank)";
+        // Legacy boards stored a bare INR number.
+        if (typeof cell === "number") {
+          const amount = Math.round((Math.max(0, cell) + Number.EPSILON) * 100) / 100;
+          if (amount > 0) weekMap[key] = { count: 0, amount };
+          continue;
+        }
+        const parsed = parseAgeingCell(cell);
+        if (parsed.count > 0 || parsed.amount > 0) weekMap[key] = parsed;
       }
       if (Object.keys(weekMap).length) ageingByStateWeek[stateKey] = weekMap;
     }
@@ -375,39 +382,62 @@ export function collectAgeingWeeks(stations: StationBoardStation[]): string[] {
       if ((cell?.count ?? 0) > 0 || (cell?.amount ?? 0) > 0) set.add(week);
     }
     for (const weeks of Object.values(station.board.ageingByStateWeek ?? {})) {
-      for (const [week, amount] of Object.entries(weeks)) {
-        if ((amount ?? 0) > 0) set.add(week);
+      for (const [week, cell] of Object.entries(weeks)) {
+        const amount = typeof cell === "number" ? cell : (cell?.amount ?? 0);
+        const count = typeof cell === "number" ? 0 : (cell?.count ?? 0);
+        if (count > 0 || amount > 0) set.add(week);
       }
     }
   }
   return sortAgeingWeekKeys([...set]);
 }
 
-/** Ageing let.xlsx layout: State × ISO week Sum of Order Amount (region aggregate). */
+function emptyStateWeekRow(cols: string[]): Record<string, AgeingBucketCell> {
+  return Object.fromEntries(cols.map((w) => [w, { count: 0, amount: 0 }]));
+}
+
+/** Ageing let.xlsx layout: State × ISO week — TID count + Sum of Order Amount. */
 export function ageingStateWeekPivot(stations: StationBoardStation[], weeks?: string[]) {
   const cols = weeks ?? collectAgeingWeeks(stations);
-  const byState = new Map<string, Record<string, number>>();
+  const byState = new Map<string, Record<string, AgeingBucketCell>>();
   for (const station of stations) {
     for (const [state, weekMap] of Object.entries(station.board.ageingByStateWeek ?? {})) {
-      if (!byState.has(state)) byState.set(state, Object.fromEntries(cols.map((w) => [w, 0])));
+      if (!byState.has(state)) byState.set(state, emptyStateWeekRow(cols));
       const row = byState.get(state)!;
-      for (const [week, amount] of Object.entries(weekMap)) {
+      for (const [week, raw] of Object.entries(weekMap)) {
         if (!(week in row)) continue;
-        row[week] = Math.round((row[week] + (Number(amount) || 0) + Number.EPSILON) * 100) / 100;
+        const count = typeof raw === "number" ? 0 : (Number(raw.count) || 0);
+        const amount = typeof raw === "number" ? (Number(raw) || 0) : (Number(raw.amount) || 0);
+        row[week] = {
+          count: row[week].count + count,
+          amount: Math.round((row[week].amount + amount + Number.EPSILON) * 100) / 100,
+        };
       }
     }
   }
   const states = [...byState.keys()].sort((a, b) => a.localeCompare(b));
   const rows = states.map((state) => {
-    const cells = byState.get(state) ?? Object.fromEntries(cols.map((w) => [w, 0]));
-    const total = Math.round((cols.reduce((sum, w) => sum + (cells[w] ?? 0), 0) + Number.EPSILON) * 100) / 100;
+    const cells = byState.get(state) ?? emptyStateWeekRow(cols);
+    const total = {
+      count: cols.reduce((sum, w) => sum + (cells[w]?.count ?? 0), 0),
+      amount: Math.round((cols.reduce((sum, w) => sum + (cells[w]?.amount ?? 0), 0) + Number.EPSILON) * 100) / 100,
+    };
     return { state, cells, total };
   });
   const columnTotals = Object.fromEntries(
-    cols.map((w) => [w, Math.round((rows.reduce((sum, row) => sum + (row.cells[w] ?? 0), 0) + Number.EPSILON) * 100) / 100]),
-  ) as Record<string, number>;
-  const grandTotal = Math.round((rows.reduce((sum, row) => sum + row.total, 0) + Number.EPSILON) * 100) / 100;
-  const maxAmount = Math.max(0, ...rows.map((row) => row.total), grandTotal);
+    cols.map((w) => [
+      w,
+      {
+        count: rows.reduce((sum, row) => sum + (row.cells[w]?.count ?? 0), 0),
+        amount: Math.round((rows.reduce((sum, row) => sum + (row.cells[w]?.amount ?? 0), 0) + Number.EPSILON) * 100) / 100,
+      },
+    ]),
+  ) as Record<string, AgeingBucketCell>;
+  const grandTotal = {
+    count: rows.reduce((sum, row) => sum + row.total.count, 0),
+    amount: Math.round((rows.reduce((sum, row) => sum + row.total.amount, 0) + Number.EPSILON) * 100) / 100,
+  };
+  const maxAmount = Math.max(0, ...rows.map((row) => row.total.amount), grandTotal.amount);
   return { columns: cols, rows, columnTotals, grandTotal, maxAmount };
 }
 
@@ -617,13 +647,25 @@ export function stationBoardSheets(
           rows: [
             ...stateWeek.rows.map((row) => ({
               State: row.state,
-              ...Object.fromEntries(weeks.map((w) => [w, row.cells[w] || ""])),
-              "Grand Total": row.total,
+              ...Object.fromEntries(
+                weeks.flatMap((w) => [
+                  [`${w} count`, row.cells[w]?.count || ""],
+                  [`${w} amount`, row.cells[w]?.amount || ""],
+                ]),
+              ),
+              "Total count": row.total.count,
+              "Total amount": row.total.amount,
             })),
             {
               State: "Grand Total",
-              ...Object.fromEntries(weeks.map((w) => [w, stateWeek.columnTotals[w] || ""])),
-              "Grand Total": stateWeek.grandTotal,
+              ...Object.fromEntries(
+                weeks.flatMap((w) => [
+                  [`${w} count`, stateWeek.columnTotals[w]?.count || ""],
+                  [`${w} amount`, stateWeek.columnTotals[w]?.amount || ""],
+                ]),
+              ),
+              "Total count": stateWeek.grandTotal.count,
+              "Total amount": stateWeek.grandTotal.amount,
             },
           ],
         });
