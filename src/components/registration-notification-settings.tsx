@@ -11,7 +11,7 @@ export async function RegistrationNotificationSettings({companyId,canEdit,ownerU
  if(controls.error||history.error)return <section className="panel" style={{padding:24}}><h2>Registration pendency</h2><p>Registration notification settings could not be loaded. Refresh to retry.</p></section>;
  return <section id="registration-pendency" className="panel" style={{padding:24,marginTop:20}}>
   <h2>Registration pendency · People + Workforce</h2>
-  <p>Daily morning action list and afternoon follow-up, grouped by station/store for each current reporting manager. Fresh status and missing-field Excel attached. No email when there is no pendency.</p>
+  <p>Morning and afternoon updates reply in one monthly thread per recipient. Ops receives both workspaces for assigned locations; HR receives People only; Finance receives Workforce only. Each email includes a fresh, detailed Excel. No email when nothing is pending.</p>
   <a className="button" href="/api/ops-pulse/registration-email-preview" target="_blank" rel="noreferrer">Preview and check manager routing (owner)</a>
   {controls.data?.map(control=><form key={control.event_key} action={saveRegistrationDigestSettings} style={{marginTop:18,display:"flex",gap:14,alignItems:"end",flexWrap:"wrap"}}>
    <input type="hidden" name="event" value={control.event_key}/>
