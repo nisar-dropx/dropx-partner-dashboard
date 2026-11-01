@@ -11,7 +11,7 @@ import {
   type RosterTemplateStationPeriod
 } from "@/lib/ops-pulse/roster-template-export";
 import { buildRecurringRosterPdf } from "@/lib/ops-pulse/roster-template-pdf";
-import { canUseRosterLocation, indiaToday, rosterMonday } from "@/lib/ops-pulse/rostering";
+import { canUseRosterLocation, indiaToday, resolveOpsRosterLocationScopeIds, rosterMonday } from "@/lib/ops-pulse/rostering";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -62,14 +62,15 @@ export async function GET(request: Request) {
       return Response.json({ error: "Select at most 120 stations per download." }, { status: 400 });
     }
 
-    const locationResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+    const locationScopeIds = await resolveOpsRosterLocationScopeIds(authorization);
+    const locationResult = await loadCodLocations(companyId, locationScopeIds, authorization.hasAllLocationAccess);
     if (locationResult.error) throw new Error(locationResult.error);
     const ds = resolveOperatingContext(locationResult.locations).mode === "amazon_now";
     const scoped = locationResult.locations.filter((location) =>
       !location.hide_from_location_list &&
       !location.is_ho &&
       (operatingModeForLocation(location) === "amazon_now") === ds &&
-      canUseRosterLocation(authorization, location.id)
+      canUseRosterLocation(authorization, location.id, locationScopeIds)
     );
     const scopedById = new Map(scoped.map((location) => [location.id, location]));
 

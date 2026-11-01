@@ -5,10 +5,13 @@ import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { resolveRosterManagerChain } from "@/lib/ops-pulse/roster-approval-route";
 import { loadPeopleReviewGraph } from "@/lib/ops-pulse/people-review-routing";
+import { resolveOpsRosterLocationScopeIds } from "@/lib/ops-pulse/roster-manager-scope";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { normalizeRosterChangeDeadlineHour } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { mondayFor } from "@/lib/weekly-roster";
+
+export { resolveOpsRosterLocationScopeIds } from "@/lib/ops-pulse/roster-manager-scope";
 
 type WorkerType = "employee" | "contractor";
 type StageType = "level_1" | "level_2" | "hr";
@@ -257,8 +260,12 @@ export function rosterPlanLocationIds(plan: { location_id?: string | null; hr_ro
   return [...new Set(ids)];
 }
 
-export function canUseRosterLocation(authorization: AuthorizationContext, locationId: string) {
-  return authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(locationId);
+export function canUseRosterLocation(
+  authorization: AuthorizationContext,
+  locationId: string,
+  locationScopeIds: string[] = authorization.locationScopeIds
+) {
+  return authorization.hasAllLocationAccess || locationScopeIds.includes(locationId);
 }
 
 export async function loadOpsRosteringPolicy(companyId: string, locationId?: string | null): Promise<OpsRosterPolicy> {
@@ -732,7 +739,10 @@ export async function loadAssignedOpsRosterApprovals(authorization: Authorizatio
     .in("id", planIds)
     .eq("status", "pending_approval");
   if (plans.error) throw new Error(plans.error.message);
-  const scopedPlans = (plans.data ?? []).filter((plan) => rosterPlanLocationIds(plan).every((id) => canUseRosterLocation(authorization, id)));
+  const locationScopeIds = await resolveOpsRosterLocationScopeIds(authorization);
+  const scopedPlans = (plans.data ?? []).filter((plan) =>
+    rosterPlanLocationIds(plan).every((id) => canUseRosterLocation(authorization, id, locationScopeIds))
+  );
   const stationIds = [...new Set(scopedPlans.map((plan) => plan.location_id).filter(Boolean))];
   const submitterIds = [...new Set(scopedPlans.map((plan) => plan.submitted_by).filter(Boolean))];
   const [stations, submitters] = await Promise.all([

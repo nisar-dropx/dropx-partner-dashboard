@@ -15,7 +15,8 @@ import {
   loadOpsRosterCapabilities,
   loadOpsRosteringPolicy,
   loadOpsRosterWorkspace,
-  resolveOpsRosterApprovalRoute
+  resolveOpsRosterApprovalRoute,
+  resolveOpsRosterLocationScopeIds
 } from "@/lib/ops-pulse/rostering";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +30,10 @@ function cleanApprovalSummary(summary: string | null | undefined) {
 export default async function OpsRosteringPage({ searchParams }: { searchParams?: Search }) {
   const authorization = await requirePagePermission("ops_rostering", "access");
   const companyId = requireCompanyId(authorization);
-  const locationResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+  const locationScopeIds = await resolveOpsRosterLocationScopeIds(authorization);
+  const locationResult = await loadCodLocations(companyId, locationScopeIds, authorization.hasAllLocationAccess);
   const ds=resolveOperatingContext(locationResult.locations).mode==='amazon_now';
-  const locations = locationResult.locations.filter((l)=>!l.hide_from_location_list&&!l.is_ho&&(operatingModeForLocation(l)==='amazon_now')===ds&&canUseRosterLocation(authorization,l.id));
+  const locations = locationResult.locations.filter((l)=>!l.hide_from_location_list&&!l.is_ho&&(operatingModeForLocation(l)==='amazon_now')===ds&&canUseRosterLocation(authorization,l.id,locationScopeIds));
   const selected = locations.find((location) => location.station_code === String(searchParams?.station ?? "").toUpperCase()) ?? locations[0] ?? null;
   const view = searchParams?.view === "approvals" ? "approvals" : "roster";
   const [capabilities, approvals, workspace, policy] = await Promise.all([

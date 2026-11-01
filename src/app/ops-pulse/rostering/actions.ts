@@ -13,6 +13,7 @@ import {
   loadOpsRosterCapabilities,
   loadOpsRosteringPolicy,
   resolveOpsRosterApprovalRoute,
+  resolveOpsRosterLocationScopeIds,
   rosterSubmissionWindowError,
   rosterMonday,
   rosterPlanLocationIds
@@ -108,7 +109,10 @@ async function assertPlanner(authorization: AuthorizationContext) {
 }
 
 async function authorisedStation(companyId: string, authorization: AuthorizationContext, locationId: string) {
-  if (!locationId || !canUseRosterLocation(authorization, locationId)) throw new Error("This station is outside your OpsPulse location access.");
+  const locationScopeIds = await resolveOpsRosterLocationScopeIds(authorization);
+  if (!locationId || !canUseRosterLocation(authorization, locationId, locationScopeIds)) {
+    throw new Error("This station is outside your OpsPulse location access.");
+  }
   const result = await db().from("stations")
     .select("id,station_code,station_name")
     .eq("company_id", companyId)
@@ -121,13 +125,14 @@ async function authorisedStation(companyId: string, authorization: Authorization
 }
 
 async function loadPlan(companyId: string, authorization: AuthorizationContext, planId: string) {
+  const locationScopeIds = await resolveOpsRosterLocationScopeIds(authorization);
   const result = await db().from("hr_roster_plans")
     .select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
     .eq("company_id", companyId)
     .eq("id", planId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
-  if (!result.data || !rosterPlanLocationIds(result.data).every((locationId) => canUseRosterLocation(authorization, locationId))) {
+  if (!result.data || !rosterPlanLocationIds(result.data).every((locationId) => canUseRosterLocation(authorization, locationId, locationScopeIds))) {
     throw new Error("This roster is outside your OpsPulse location access.");
   }
   return result.data;
@@ -1360,7 +1365,8 @@ export async function loadOpsRosterApprovalPreview(planId: string): Promise<{ ok
       .maybeSingle();
     if (plan.error) throw new Error(plan.error.message);
     if (!plan.data?.location_id || !plan.data.period_start || !plan.data.period_end) throw new Error("That roster could not be found.");
-    if (!canUseRosterLocation(authorization, plan.data.location_id)) throw new Error("That station is outside your access.");
+    const locationScopeIds = await resolveOpsRosterLocationScopeIds(authorization);
+    if (!canUseRosterLocation(authorization, plan.data.location_id, locationScopeIds)) throw new Error("That station is outside your access.");
     const [stationResult, shiftResult] = await Promise.all([
       db().from("stations").select("id,station_code,station_name").eq("company_id", companyId).eq("id", plan.data.location_id).maybeSingle(),
       db().from("hr_shifts").select("id,code,name,start_time,end_time,color").eq("company_id", companyId).eq("is_active", true)
