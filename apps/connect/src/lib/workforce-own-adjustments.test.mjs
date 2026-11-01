@@ -15,8 +15,7 @@ const compiled=ts.transpileModule(readFileSync(new URL('./workforce-own-adjustme
 const {ownAdjustmentLedger,loadOwnAdjustmentLedger}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const dailyCompiled=ts.transpileModule(readFileSync(new URL('./workforce-daily-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {allocateOwnDailyCards}=await import(`data:text/javascript;base64,${Buffer.from(dailyCompiled).toString('base64')}`);
-const incentiveCompiled=ts.transpileModule(readFileSync(new URL('./workforce-own-incentives.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {ownIncentives}=await import(`data:text/javascript;base64,${Buffer.from(incentiveCompiled).toString('base64')}`);
+import {ownIncentives} from './workforce-own-incentives.ts';
 const personalCompiled=ts.transpileModule(readFileSync(new URL('./personal-payment-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {personalPaymentCard}=await import(`data:text/javascript;base64,${Buffer.from(personalCompiled).toString('base64')}`);
 const policyCompiled=ts.transpileModule(readFileSync(new URL('../../../../src/lib/workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;

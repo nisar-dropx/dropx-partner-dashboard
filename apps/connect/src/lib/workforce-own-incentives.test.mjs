@@ -5,8 +5,7 @@ import {createRequire} from 'node:module';
 import ts from 'typescript';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-const compiled=ts.transpileModule(readFileSync(new URL('./workforce-own-incentives.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {ownIncentives}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+import {ownIncentives} from './workforce-own-incentives.ts';
 export {ownIncentives};
 const campaign=(extra={})=>({id:'campaign',company_id:'company',name:'Approved production reward',provider_id:null,station_id:null,designation_id:null,metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:45,rate_value:12,flat_amount:0,maximum_amount:null,effective_from:'2026-09-01',effective_to:'2026-09-30',status:'active',approved_at:'2026-08-31T00:00:00Z',...extra});
 const row=(extra={})=>({id:'a',work_date:'2026-09-01',provider_id:'provider',station_id:'station',total_delivery:10,total_activity:10,amazon_delivery:10,swa_delivery:0,c_return:0,mfn:0,...extra});
@@ -51,7 +50,7 @@ test('company mismatch, duplicates, invalid dates/counts/policies fail closed',(
 test('multiple campaigns add without leaking policy scope or internal comments',()=>{
  const result=calculate([row({total_delivery:50})],[campaign({owner_note:'PRIVATE',created_by:'PRIVATE'}),campaign({id:'b',rate_value:1})]);
  assert.equal(result.summary.amount,65);assert.equal(result.bySource.get('a'),65);
- assert.deepEqual(Object.keys(result.summary.campaigns[0]).sort(),['amount','id','name','workDays']);assert.equal(JSON.stringify(result.summary).includes('PRIVATE'),false);
+ assert.deepEqual(Object.keys(result.summary.campaigns[0]).sort(),['amount','cycles','id','name','workDays']);assert.equal(JSON.stringify(result.summary).includes('PRIVATE'),false);
 });
 test('empty results are genuinely zero and excessive values fail',()=>{
  assert.deepEqual(calculate([]).summary,{amount:0,campaigns:[]});
@@ -63,7 +62,7 @@ test('associate incentive display is compact and keeps the useful breakdown',()=
  new Function('require','exports',output)(name=>name.endsWith('.module.css')?{card:'card',note:'note'}:require(name),module.exports);
  const render=value=>renderToStaticMarkup(createElement(module.exports.ConnectPayIncentives,{incentives:value}));
  const html=render(calculate([row({total_delivery:50})]).summary);
- for(const text of ['Incentives','View breakdown','₹60','1 qualifying day'])assert.ok(html.includes(text),text);
+ for(const text of ['Incentives','View calculation','₹60','1 Sep 2026'])assert.ok(html.includes(text),text);
  for(const repeatedHelp of ['Daily thresholds and caps','not payment confirmation'])assert.ok(!html.includes(repeatedHelp),repeatedHelp);
- assert.match(render(calculate([]).summary),/None this month/);
+ assert.match(render(calculate([]).summary),/No eligible incentive plan/);
 });

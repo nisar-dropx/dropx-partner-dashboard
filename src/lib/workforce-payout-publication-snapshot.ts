@@ -60,6 +60,24 @@ export function buildWorkforcePayoutPublicationSnapshot(
       rateValue: line.rateValue
     }
   }));
+  const incentiveLines = (row.incentiveBreakdown ?? [])
+    .filter((line) => line.amount > 0)
+    .map((line, index) => ({
+      id: `${row.id}:incentive:${line.planId}:${index}`,
+      source_id: `${row.id}:incentive:${line.planId}:${index}`,
+      work_date: periodEnd,
+      source_type: "incentive",
+      provider_member_id: row.providerMemberId || null,
+      base_amount: 0,
+      incentive_amount: line.amount,
+      adjustment_amount: 0,
+      net_amount: line.amount,
+      calculation_snapshot: {
+        category: line.code,
+        reason: line.label,
+        cycles: line.cycles
+      }
+    }));
   const deductionLines = row.deductionBreakdown.map((line, index) => ({
     id: `${row.id}:deduction:${line.code}:${index}`,
     source_id: `${row.id}:deduction:${line.code}:${index}`,
@@ -76,7 +94,7 @@ export function buildWorkforcePayoutPublicationSnapshot(
       reason: line.label
     }
   }));
-  const lines = [...dailyLines, ...additionLines, ...deductionLines];
+  const lines = [...dailyLines, ...incentiveLines, ...additionLines, ...deductionLines];
   return {
     schema_version: 2,
     source: "workforce_payout_worksheet",
@@ -97,7 +115,7 @@ export function buildWorkforcePayoutPublicationSnapshot(
         : [],
       work_days: row.workDays,
       base_amount: row.baseAmount,
-      incentive_amount: 0,
+      incentive_amount: Number(row.incentiveAmount ?? 0),
       adjustment_amount: row.additions,
       deduction_amount: row.deductions,
       gross_amount: row.grossPayment,
@@ -117,6 +135,7 @@ export function buildWorkforcePayoutPublicationSnapshot(
       work_days_source: row.workDaysSource,
       payment_method_breakdown: row.paymentMethodBreakdown,
       production_breakdown: row.productionBreakdown,
+      incentive_breakdown: row.incentiveBreakdown ?? [],
       additional_payment_breakdown: row.additionalPaymentBreakdown ?? [],
       deduction_breakdown: row.deductionBreakdown,
       daily_breakdown: row.dailyBreakdown,

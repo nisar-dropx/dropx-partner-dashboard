@@ -78,6 +78,10 @@ import {
   workforcePayoutDropxStatus,
   type WorkforcePayoutMappingIdentity
 } from "@/lib/workforce-payout-population";
+import {
+  calculateWorkforceIncentives,
+  type WorkforceIncentivePlan
+} from "@/lib/workforce-incentive-calculation";
 
 
 const today = todayKolkata;
@@ -149,7 +153,7 @@ export async function loadWorkforcePayoutRows(
   ]);
   let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
-  const [locationsResult, allLocationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
+  const [locationsResult, allLocationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult, incentivePlansResult] = await Promise.all([
     locationsQuery,
     readAllRows(supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId)),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason, providers(name,code), payment_methods(name,production_threshold_config)").eq("company_id", companyId).in("status", ["active", "closed"]).order("effective_from").order("id")),
@@ -157,9 +161,12 @@ export async function loadWorkforcePayoutRows(
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
     supabaseAdmin.from("workforce_deduction_heads").select("id, code, name, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).order("code").order("id"),
     supabaseAdmin.from("workforce_payment_settings").select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from"),
-    supabaseAdmin.from("workforce_attendance_capture_settings").select("id,capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from")
+    supabaseAdmin.from("workforce_attendance_capture_settings").select("id,capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from"),
+    readAllRows(supabaseAdmin.from("workforce_incentive_campaigns")
+      .select("id,company_id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,minimum_activity,tiers,effective_from,effective_to,status,approved_at")
+      .eq("company_id", companyId).neq("status", "draft").lte("effective_from", toDate).gte("effective_to", fromDate).order("effective_from").order("id"))
   ]);
-  const error = locationsResult.error?.message || allLocationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message || paymentPolicyResult.error?.message || attendanceCaptureResult.error?.message;
+  const error = locationsResult.error?.message || allLocationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message || paymentPolicyResult.error?.message || attendanceCaptureResult.error?.message || incentivePlansResult.error?.message;
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
   const locations = locationsResult.data ?? [];
   const allLocations = allLocationsResult.data ?? [];
@@ -219,13 +226,13 @@ export async function loadWorkforcePayoutRows(
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
     loadPostgrestInFilterBatches({
       values: sourceIds,
-      loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIdChunk)
+      loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, designation_id, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIdChunk)
     }),
     loadPostgrestInFilterBatches({
       values: sourceIds,
-      loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIdChunk)
+      loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, designation_id, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIdChunk)
     }),
-    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
+    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("id, provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return, delivery_assigned_count").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     loadPostgrestInFilterBatches({
       values: contractorIds,
@@ -1339,19 +1346,92 @@ export async function loadWorkforcePayoutRows(
       error: null
     };
   }
+  const incentiveInputsByIdentity = new Map<string, {
+    designationId: string | null;
+    sources: Array<{
+      id: string;
+      workDate: string;
+      providerId: string;
+      locationModelId: string | null;
+      stationId: string | null;
+      totalDelivery: unknown;
+      totalActivity: unknown;
+      amazonDelivery: unknown;
+      swaDelivery: unknown;
+      customerReturn: unknown;
+      mfn: unknown;
+      deliveryAssignedCount: unknown;
+    }>;
+  }>();
+  for (const mapping of mappings) {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
+    const worker = workerBySource.get(sourceId);
+    const location: any = allLocationById.get(mapping.station_id);
+    if (!worker?.id || !location?.id) continue;
+    const identityKey = payoutSubjectLocationKey(String(worker.id), String(location.id));
+    const group = incentiveInputsByIdentity.get(identityKey) ?? {
+      designationId: worker.designation_id ? String(worker.designation_id) : null,
+      sources: []
+    };
+    for (const daily of providerDailyRowsFor(mapping)) {
+      const workDate = String(daily.work_date ?? "");
+      if (workDate < fromDate || workDate > toDate) continue;
+      group.sources.push({
+        id: `${String(mapping.id)}:${String(daily.id)}`,
+        workDate,
+        providerId: String(mapping.provider_id),
+        locationModelId: location.location_model_id ? String(location.location_model_id) : null,
+        stationId: String(location.id),
+        totalDelivery: daily.total_delivery,
+        totalActivity: daily.total_activity,
+        amazonDelivery: daily.amazon_delivery,
+        swaDelivery: daily.swa_delivery,
+        customerReturn: daily.c_return,
+        mfn: daily.mfn,
+        deliveryAssignedCount: daily.delivery_assigned_count
+      });
+    }
+    incentiveInputsByIdentity.set(identityKey, group);
+  }
+  const incentiveByIdentity = new Map<string, ReturnType<typeof calculateWorkforceIncentives>>();
+  for (const [identityKey, input] of incentiveInputsByIdentity) {
+    incentiveByIdentity.set(identityKey, calculateWorkforceIncentives({
+      companyId,
+      designationId: input.designationId,
+      from: fromDate,
+      to: toDate,
+      plans: (incentivePlansResult.data ?? []) as WorkforceIncentivePlan[],
+      sources: input.sources
+    }));
+  }
   const payoutDeductionContextByRowId = new Map<string, DeductionWorkerContext>();
   const providerRows: WorkforcePayoutRow[] = consolidatedProvider.rows.map(({ workforceId, categoryCode, panNumber, row }) => {
     const deductionContext = { categoryCode, panNumber } satisfies DeductionWorkerContext;
+    const incentive = incentiveByIdentity.get(payoutSubjectLocationKey(workforceId, row.locationId));
+    const incentiveAmount = incentive?.amount ?? 0;
+    const grossPayment = Math.round((row.grossPayment + incentiveAmount + Number.EPSILON) * 100) / 100;
     const deductionBreakdown = row.mappingStatus === "Payment setup conflict"
       ? []
-      : calculateAutomaticDeductionLines(row.grossPayment, deductionHeads, deductionContext);
+      : calculateAutomaticDeductionLines(grossPayment, deductionHeads, deductionContext);
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
     const payoutRow = {
       ...row,
       history: historyByWorkforceId.get(workforceId) ?? [],
+      incentiveAmount,
+      incentiveBreakdown: (incentive?.plans ?? []).map((plan) => ({
+        planId: plan.id,
+        code: plan.code,
+        label: plan.name,
+        amount: plan.amount,
+        cycles: plan.cycles
+      })),
+      grossPayment,
       deductions,
       deductionBreakdown,
-      netAmount: row.grossPayment - deductions
+      netAmount: grossPayment - deductions,
+      status: incentiveAmount > 0 && ["No eligible accrual", "No eligible attendance", "Awaiting production"].includes(row.status)
+        ? "Ready for review"
+        : row.status
     } satisfies WorkforcePayoutRow;
     payoutDeductionContextByRowId.set(payoutRow.id, deductionContext);
     return payoutRow;
@@ -1678,7 +1758,7 @@ export async function loadWorkforcePayoutRows(
     const workforceId = String(row.reviewSubjectId ?? "");
     const additionalPaymentBreakdown = workforceAdditionalPaymentLines(row.baseAmount, additionalFields, values);
     const additions = workforceAdditionalPaymentTotal(additionalPaymentBreakdown);
-    const grossPayment = Math.round((row.baseAmount + additions + Number.EPSILON) * 100) / 100;
+    const grossPayment = Math.round((row.baseAmount + Number(row.incentiveAmount ?? 0) + additions + Number.EPSILON) * 100) / 100;
     const context = resolveWorkforcePayoutDeductionContext(
       row.id,
       payoutDeductionContextByRowId,

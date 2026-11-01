@@ -93,11 +93,11 @@ export async function GET(request: Request) {
     assertNoProviderDirectOverlap({allocations:direct.allocations,mappings,from,to});
     const [stationsResult, metricsResult, allocationsResult, rateCardsResult, adjustments, campaignResult, attendanceResult] = await Promise.all([
       stationIds.length ? db().from("stations").select("id,station_code,location_model_id").eq("company_id", account.companyId).in("id", stationIds) : Promise.resolve({ data: [], error: null }),
-      memberIds.length ? db().from("cps_shipment_daily").select("id,provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
+      memberIds.length ? db().from("cps_shipment_daily").select("id,provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return,delivery_assigned_count").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
       db().from("payment_field_provider_metrics").select("provider_id,provider_model_id,provider_production_metrics(source_key),payment_fields(code,label,field_type)").eq("company_id", account.companyId),
       db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`),
       loadOwnAdjustmentLedger(db(),account,from,to),
-      db().from('workforce_incentive_campaigns').select('id,company_id,name,provider_id,station_id,designation_id,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from),
+      db().from('workforce_incentive_campaigns').select('id,company_id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,minimum_activity,tiers,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from),
       workforce?.id && mappings.length ? db().from('attendance_daily').select('id,punch_date,status,in_time,out_time,work_minutes').eq('company_id',account.companyId).or(attendanceIdentityFilter(workforce)).gte('punch_date',from).lte('punch_date',to).order('punch_date') : Promise.resolve({data:[],error:null})
     ]);
     const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || rateCardsResult.error?.message || attendanceResult.error?.message; if (error) throw new Error(error);
@@ -108,7 +108,8 @@ export async function GET(request: Request) {
     if(mappings.length>=1000 || (metricsResult.data ?? []).length>=1000 || (allocationsResult.data ?? []).length>=1000 || (rateCardsResult.data ?? []).length>=1000 || (campaignResult.data??[]).length>=1000) throw new Error("Too many earning records to reconcile safely. Please contact Workforce.");
     const incentives=ownIncentives({companyId:account.companyId,canonical:Boolean(workforce?.id),designationId:workforce?.designation_id??null,from,to,campaigns:(campaignResult.data??[]) as OwnCampaign[],sources:(metricsResult.data??[]).flatMap(row=>{
       const mapping=paymentMappingForDay(mappings,row);
-      return mapping?[{...row,provider_id:mapping.provider_id,station_id:mapping.station_id} as IncentiveSource]:[];
+      const station=stationById.get(mapping?.station_id);
+      return mapping?[{...row,provider_id:mapping.provider_id,station_id:mapping.station_id,location_model_id:station?.location_model_id??null} as IncentiveSource]:[];
     })});
     const cards = (rateCardsResult.data ?? []).filter(card=>card.status==="active" || (["paused","closed"].includes(card.status) && card.approved_at && card.effective_to));
     const cardFor = (mapping: any, workDate: string) => personalPaymentCard(mapping) ?? cards

@@ -909,6 +909,8 @@ async function preserveAmazonAssignedCounts(
 type AmazonAggregateRow = {
   amazon_delivery?: number;
   assigned_count: number;
+  delivery_assigned_count?: number;
+  pickup_assigned_count?: number;
   c_return: number;
   client: string;
   company_id: string;
@@ -2840,6 +2842,8 @@ export async function POST(request: Request) {
       const flipkartFacts = production.daily.map((row) => ({
         amazon_delivery: 0,
         assigned_count: row.assignedCount,
+        delivery_assigned_count: row.deliveryAssignedCount,
+        pickup_assigned_count: row.pickupAssignedCount,
         c_return: row.customerReturn,
         client: "Flipkart",
         company_id: companyId,
@@ -2877,6 +2881,8 @@ export async function POST(request: Request) {
         ))
         .map((row) => ({
           assigned_count: row.assigned_count,
+          delivery_assigned_count: row.delivery_assigned_count,
+          pickup_assigned_count: row.pickup_assigned_count,
           c_return: row.c_return,
           c_return_rate: row.c_return_rate ?? 0,
           da_total_pay: row.da_total_pay ?? 0,
@@ -2916,6 +2922,15 @@ export async function POST(request: Request) {
         }
       ));
       if (replacement.error) throw new Error(replacement.error.message);
+      const assignedSplit = await importStep("Save Flipkart delivery and pickup assignment counts", async () => db.rpc(
+        "apply_flipkart_assigned_count_split",
+        {
+          p_batch_id: batch.data.id,
+          p_company_id: companyId,
+          p_rows: payload
+        }
+      ));
+      if (assignedSplit.error) throw new Error(assignedSplit.error.message);
 
       const invalidRows = new Set(production.issues.map((issue) => issue.rowNumber)).size;
       const historicalDuplicates = selectedAudit.filter((row) => row.duplicateScope === "existing").length;

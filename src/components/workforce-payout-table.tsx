@@ -107,6 +107,22 @@ export type WorkforcePayoutRow = {
     rateValue: number | null;
     amount: number;
   }>;
+  incentiveAmount?: number;
+  incentiveBreakdown?: Array<{
+    planId: string;
+    code: string;
+    label: string;
+    amount: number;
+    cycles: Array<{
+      cycleKey: string;
+      cycleLabel: string;
+      metricValue: number;
+      numerator: number | null;
+      denominator: number | null;
+      amount: number;
+      status: "earned" | "in_progress" | "below_minimum" | "not_qualified";
+    }>;
+  }>;
   paymentSummary?: WorkforcePayoutPaymentSummary;
   paymentSourceIdentity?: WorkforcePayoutSourceIdentity;
   paymentSourceIdentities?: WorkforcePayoutSourceIdentity[];
@@ -1274,8 +1290,14 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                                 <td className="payout-money">{item.rateValue === null ? "—" : rateMoney(item.rateValue)}</td>
                                 <td className="positive payout-money"><strong>+ {money(item.amount)}</strong></td>
                               </tr>)}
+                              {(row.incentiveBreakdown ?? []).filter((item) => item.amount !== 0).map((item) => <tr key={`incentive-${item.planId}`}>
+                                <td><strong>{item.label}</strong><small>{item.cycles.map((cycle) => cycle.denominator !== null ? `${cycle.cycleLabel}: ${cycle.numerator}/${cycle.denominator} (${cycle.metricValue.toFixed(2)}%)` : `${cycle.cycleLabel}: ${cycle.metricValue}`).join(" · ")}</small></td>
+                                <td className="payout-money">Incentive</td>
+                                <td className="payout-money">—</td>
+                                <td className="positive payout-money"><strong>+ {money(item.amount)}</strong></td>
+                              </tr>)}
                               {row.additions && !(row.additionalPaymentBreakdown ?? []).some((item) => item.amount !== 0) ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
-                              {!paymentTotals.length && !row.additions ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
+                              {!paymentTotals.length && !row.additions && !row.incentiveAmount ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
                             </tbody>
                             <tfoot><tr><th colSpan={3} scope="row">Gross payment</th><td className="payout-money"><strong>{money(row.grossPayment)}</strong></td></tr></tfoot>
                           </table>
