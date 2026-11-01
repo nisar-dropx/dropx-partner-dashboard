@@ -1,3 +1,4 @@
+import { disputeWindowDays } from "@/lib/payout-dispute-workflow-settings";
 import { waitUntil } from "@vercel/functions";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
@@ -51,7 +52,7 @@ export const maxDuration = 300;
 const noStore = { "Cache-Control": "private, no-store" };
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const REVIEW_WINDOW_DAYS = 7;
+
 const PAYOUT_DEPENDENCY_CHANGED = "Payout inputs changed after this worksheet was displayed. Refresh the page and review the recalculated amounts.";
 const MAX_DEPENDENCY_REVALIDATION_ATTEMPTS = 2;
 type PublicationSnapshot = WorkforcePayoutPublicationSnapshot;
@@ -418,6 +419,10 @@ export async function POST(request: Request) {
     }
     if (!supabaseAdmin) return responseError("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
+    const windowPolicy = await supabaseAdmin.from("workforce_payout_dispute_workflows")
+      .select("review_window_days").eq("company_id", companyId).is("station_id", null).eq("is_active", true).maybeSingle();
+    if (windowPolicy.error) return responseError("Dispute window could not be verified. Try again before publishing.", 503);
+    const reviewWindowDays = disputeWindowDays(windowPolicy.data?.review_window_days);
     const body = await request.json();
     const periodStart = String(body?.periodStart ?? "");
     const periodEnd = String(body?.periodEnd ?? "");
@@ -630,7 +635,7 @@ export async function POST(request: Request) {
         }, { headers: noStore });
       }
 
-      const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const reviewUntil = new Date(Date.now() + reviewWindowDays * 24 * 60 * 60 * 1000).toISOString();
       const snapshotsByHelper = new Map<string, PublicationSnapshot[]>();
       refreshedHelperEntries.forEach((entry) => {
         const { item, snapshot } = entry!;
@@ -849,7 +854,7 @@ export async function POST(request: Request) {
       expectedDependencyHash = refreshed.dependencyHash;
     }
 
-    const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const reviewUntil = new Date(Date.now() + reviewWindowDays * 24 * 60 * 60 * 1000).toISOString();
     const snapshotsByWorkforce = new Map<string, PublicationSnapshot[]>();
     publicationEntries.forEach(({ item, snapshot }) => {
       snapshotsByWorkforce.set(item.subject_id, [...(snapshotsByWorkforce.get(item.subject_id) ?? []), snapshot]);

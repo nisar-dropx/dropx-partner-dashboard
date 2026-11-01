@@ -85,7 +85,7 @@ test("uses friendly four-stage labels for dispute workflow states", () => {
   );
   assert.equal(payoutDisputeWorkflow("processing_blocked").blocked, true);
   assert.equal(payoutDisputeWorkflow("in_review").label, "Awaiting final approval");
-  assert.equal(payoutDisputeWorkflow("resolved", true).label, "Previous decision recorded");
+  assert.equal(payoutDisputeWorkflow("resolved", true).label, "Closed previously");
 });
 
 test("builds an associate-safe dispute view with verified payout and payment context", () => {
@@ -172,7 +172,7 @@ test("derives before and after totals from linked publications and hides unappro
     resolution: "Closed under the previous workflow",
     correction_plan: { current_value: 1, proposed_value: 2 },
   }, publications[0]);
-  assert.equal(legacy.workflow.label, "Previous decision recorded");
+  assert.equal(legacy.workflow.label, "Closed previously");
   assert.equal(legacy.correction, null);
 });
 

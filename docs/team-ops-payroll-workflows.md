@@ -763,3 +763,12 @@ columns; neither is a confirmed collection. Draft payroll is shown separately wi
 the update column and remains outstanding until confirmed. If the ledger cannot load,
 recovered/outstanding values are unavailable rather than zero. These changes do not
 alter loss, payroll, approval or collection records.
+
+### November 2026 payout dispute activation
+
+- Company default: Cluster Manager, then AOM, then National Head; Finance Manager then Owner for final approval; Operations Accounts processes. Fallbacks require an active user with station scope and page edit access. Each stage requires a different person.
+- Settings → Payout Dispute Workflow → company default configures `review_window_days` (1–30, default 2). Publishing freezes the deadline on each publication. Changed settings affect future publications; existing tickets remain reviewable after submission closes.
+- `workforce_upsert_dispute_workflow_v2` atomically saves routing and the company deadline with version checking. Station overrides change routing only.
+- Intake rejects duplicate category tickets through all active workflow stages and fails closed without a valid publication deadline.
+- One-time November 1 closure covers exactly 45 September disputes raised before October 16, confirmed previously settled by Managing Partner. Original rows are retained in immutable closure events; `legacy_resolution_unverified` is true. No payroll or payment amount is modified.
+- Both One and Ops show the same short ticket reference. Ops closed history includes earlier closures and rejected tickets. Complete history remains accessible; verified corrections still require a newer publication and the approved net delta.

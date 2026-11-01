@@ -349,7 +349,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         <section className={styles.history}>{payout.canDispute ? <h3>Dispute history</h3> : null}
           {payout.disputes.map((dispute: AssociatePayoutDispute) => {
             const decoded = decodePayoutDisputeReason(dispute.reason);
-            return <article key={dispute.id} className={styles.disputeRecord}><header><div><b>{decoded.areas.length ? decoded.areas.join(" · ") : String(dispute.category).replaceAll("_", " ")}</b><small>Raised {localTime(dispute.created_at)} IST</small></div></header>
+            return <article key={dispute.id} className={styles.disputeRecord}><header><div><b>{decoded.areas.length ? decoded.areas.join(" · ") : String(dispute.category).replaceAll("_", " ")}</b><small>Ticket {dispute.id.slice(0, 8).toUpperCase()} · Raised {localTime(dispute.created_at)} IST</small></div></header>
               {decoded.reason ? <p>{decoded.reason}</p> : null}
               <DisputeProgress dispute={dispute} />
               <DisputeCorrection dispute={dispute} />

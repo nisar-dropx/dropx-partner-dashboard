@@ -25,6 +25,7 @@ const STATUS_FILTERS: Record<string, string[] | null> = {
   final: ["in_review", "pending_final_approval"],
   processing: ["approved_for_processing", "processing", "processing_blocked"],
   resolved: ["resolved"],
+  closed: ["resolved", "rejected"],
   rejected: ["rejected"],
   all: null
 };
@@ -242,7 +243,7 @@ export async function PayoutReviewDesk({
     for (const event of events.data ?? []) {
       const key = String(event.dispute_id);
       const list = eventsByDispute.get(key) ?? [];
-      if (list.length < 8) list.push(event);
+      list.push(event);
       eventsByDispute.set(key, list);
     }
   }
@@ -285,7 +286,8 @@ export async function PayoutReviewDesk({
         <div><span>Initial review</span><strong>{count(["open"])}</strong></div>
         <div><span>Final approval</span><strong>{count(["in_review", "pending_final_approval"])}</strong></div>
         <div><span>Processing</span><strong>{count(["approved_for_processing", "processing", "processing_blocked"])}</strong></div>
-        <div className={styles.flow}>Associate raises → initial approver proposes → final approver confirms → processor applies correction → system verifies revised publication and net change</div>
+        <div><span>Closed</span><strong>{count(["resolved", "rejected"])}</strong><a href="/payments/disputes?status=closed">View history</a></div>
+        <p className={styles.flow}>Associate → Manager review → Finance approval → Accounts correction → Verified closure</p>
       </div>
       {workflowResult.error || !companyWorkflow ? (
         <div className={styles.configuration} role="status">
@@ -304,7 +306,8 @@ export async function PayoutReviewDesk({
           <option value="initial">Initial review</option>
           <option value="final">Final approval</option>
           <option value="processing">Processing</option>
-          <option value="resolved">Corrected</option>
+          <option value="closed">All closed</option>
+          <option value="resolved">Resolved / previously closed</option>
           <option value="rejected">Rejected</option>
           <option value="all">All statuses</option>
         </select>
@@ -331,7 +334,7 @@ export async function PayoutReviewDesk({
         const decoded = decodePayoutReviewReason(dispute.reason);
         const payoutPeriod = period(publication);
         const workerLabel = [worker.worker_name, worker.dropx_id].filter(Boolean).join(" · ") || "Associate";
-        const status = STATUS[dispute.status] ?? { label: String(dispute.status).replaceAll("_", " "), cls: styles.muted };
+        const status = dispute.status === "resolved" && dispute.legacy_resolution_unverified ? { label: "Closed previously", cls: styles.muted } : STATUS[dispute.status] ?? { label: String(dispute.status).replaceAll("_", " "), cls: styles.muted };
         const workflow = configFor(dispute);
         const hasWorkflow = Boolean(workflow);
         const disputeId = String(dispute.id);
@@ -357,6 +360,7 @@ export async function PayoutReviewDesk({
             <header>
               <div>
                 <h2>{workerLabel}</h2>
+                <small>Ticket {String(dispute.id).slice(0, 8).toUpperCase()} · </small>
                 <small>
                   {payoutPeriod.start && payoutPeriod.end ? `${payoutPeriod.start} – ${payoutPeriod.end} · ` : ""}
                   {[stationCode.get(dispute.station_id), decoded.areas.join(" · ") || CATEGORIES[dispute.category] || String(dispute.category).replaceAll("_", " ")].filter(Boolean).join(" · ")} · raised {when(dispute.created_at)}
@@ -390,7 +394,7 @@ export async function PayoutReviewDesk({
             ) : null}
             {dispute.status === "resolved" ? (
               <div className={styles.resolution}>
-                <p><b>{dispute.legacy_resolution_unverified ? "Legacy closure (publication and net change not system-verified)" : "Processor-applied correction · revised publication and net change system-verified"}</b></p>
+                <p><b>{dispute.legacy_resolution_unverified ? "Closed previously · no new payout adjustment" : "Processor-applied correction · revised publication and net change system-verified"}</b></p>
                 {dispute.resolution ? <p>“{dispute.resolution}”</p> : null}
                 {!dispute.legacy_resolution_unverified && result.verified_before_net_paise != null ? (
                   <p>{moneyFromPaise(result.verified_before_net_paise)} → {moneyFromPaise(result.verified_after_net_paise)} · change {moneyFromPaise(result.verified_delta_paise)}</p>
@@ -501,7 +505,7 @@ export async function PayoutReviewDesk({
 
             {events.length ? (
               <details className={styles.history}>
-                <summary>Workflow history ({events.length}{events.length === 8 ? "+" : ""})</summary>
+                <summary>Workflow history ({events.length})</summary>
                 <ol>{events.map((event) => <li key={event.id}><span>{event.message}</span><small>{event.actor_name} · {when(event.created_at)}</small></li>)}</ol>
               </details>
             ) : null}

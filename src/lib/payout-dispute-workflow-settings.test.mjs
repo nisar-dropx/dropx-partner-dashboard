@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  disputeWindowDays,
   normalizeWorkflowRoleIds,
   validateWorkflowSelection
 } from "./payout-dispute-workflow-settings.ts";
@@ -24,7 +25,7 @@ test("workflow setup is protected by Payment Settings and saves through the vers
   const actions = readFileSync(new URL("../app/settings/payout-disputes/actions.ts", import.meta.url), "utf8");
   assert.match(page, /requirePagePermission\("payment_settings", "access"\)/);
   assert.match(actions, /requirePagePermissionOrThrow\("payment_settings", "edit"\)/);
-  assert.match(actions, /rpc\("workforce_upsert_dispute_workflow"/);
+  assert.match(actions, /rpc\("workforce_upsert_dispute_workflow_v2"/);
   assert.match(actions, /p_expected_version: expectedVersion/);
   assert.match(actions, /"workforce_payout_disputes", true/);
   assert.match(actions, /"ops_workforce_payout_disputes", true/);
@@ -59,3 +60,9 @@ test("Dashboard and Ops navigation expose the shared workflow setup", () => {
   assert.match(accessSurface, /sharedPageCodes[\s\S]*?"payment_settings"/);
 });
 
+
+test("dispute deadline defaults to two days and rejects invalid settings", () => {
+  assert.equal(disputeWindowDays(null), 2);
+  for (const days of [1, 2, 7, 30]) assert.equal(disputeWindowDays(days), days);
+  for (const value of [0, -1, 31, 1.5, "invalid", ""]) assert.throws(() => disputeWindowDays(value));
+});
