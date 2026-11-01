@@ -65,6 +65,8 @@ test("parses header aliases, sheet types and hub station suffixes", () => {
     assignedCount: 15,
     customerReturn: 2,
     delivery: 10,
+      deliveryAssignedCount: 12,
+      pickupAssignedCount: 3,
     providerEmployeeId: "001234",
     providerEmployeeName: "Worker One",
     rawRowCount: 2,

@@ -59,6 +59,38 @@ test("a zero payout produces a valid frozen publication snapshot", () => {
   assert.deepEqual(snapshot.lines, []);
 });
 
+test("an incentive is frozen once as incentive money and never mixed into adjustments", () => {
+  const snapshot = buildWorkforcePayoutPublicationSnapshot(row({
+    baseAmount: 1000,
+    incentiveAmount: 500,
+    additions: 0,
+    grossPayment: 1500,
+    netAmount: 1500,
+    incentiveBreakdown: [{
+      planId: "plan-1",
+      code: "FK_CONVERSION",
+      label: "Flipkart conversion incentive",
+      amount: 500,
+      cycles: [{
+        cycleStart: "2026-09-01",
+        cycleEnd: "2026-09-15",
+        numerator: 95,
+        denominator: 100,
+        percentage: 95,
+        amount: 500,
+        status: "eligible"
+      }]
+    }]
+  }), "2026-09-01", "2026-09-30", "version-a");
+  const incentiveLines = snapshot.lines.filter((line) => line.source_type === "incentive");
+  assert.equal(snapshot.item.incentive_amount, 500);
+  assert.equal(snapshot.item.adjustment_amount, 0);
+  assert.equal(incentiveLines.length, 1);
+  assert.equal(incentiveLines[0].incentive_amount, 500);
+  assert.equal(incentiveLines[0].adjustment_amount, 0);
+  assert.equal(incentiveLines.reduce((sum, line) => sum + line.net_amount, 0), 500);
+});
+
 test("CLEAR produces a zero revision only for a synthetic input-only payout", () => {
   const previous = buildWorkforcePayoutPublicationSnapshot(row({
     id: "payout-input-00000000-0000-4000-8000-000000000002-00000000-0000-4000-8000-000000000003",

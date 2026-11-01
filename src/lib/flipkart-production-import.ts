@@ -29,6 +29,8 @@ export type FlipkartDailyProduction = {
   assignedCount: number;
   customerReturn: number;
   delivery: number;
+  deliveryAssignedCount: number;
+  pickupAssignedCount: number;
   providerEmployeeId: string;
   providerEmployeeName: string | null;
   rawRowCount: number;
@@ -342,6 +344,8 @@ export function aggregateFlipkartDailyProduction(rows: readonly FlipkartProducti
       assignedCount: 0,
       customerReturn: 0,
       delivery: 0,
+      deliveryAssignedCount: 0,
+      pickupAssignedCount: 0,
       providerEmployeeId: row.providerEmployeeId,
       providerEmployeeName: row.providerEmployeeName,
       rawRowCount: 0,
@@ -353,8 +357,13 @@ export function aggregateFlipkartDailyProduction(rows: readonly FlipkartProducti
       workDate: row.workDate
     };
     current.assignedCount += row.assigned;
-    if (row.metric === "delivery") current.delivery += row.completed;
-    else current.customerReturn += row.completed;
+    if (row.metric === "delivery") {
+      current.delivery += row.completed;
+      current.deliveryAssignedCount += row.assigned;
+    } else {
+      current.customerReturn += row.completed;
+      current.pickupAssignedCount += row.assigned;
+    }
     current.totalActivity = current.delivery + current.customerReturn;
     current.rawRowCount += 1;
     current.sheetIds.push(row.sheetId);
@@ -406,6 +415,9 @@ export function parseFlipkartProductionMatrix(
     if (!stationCode) rowIssues.push({ field: "hub_name", message: "Hub name does not end with a permitted station code.", rowNumber });
     if (completed === null) rowIssues.push({ field: "completed", message: "Completed must be a non-negative whole number.", rowNumber });
     if (assigned === null) rowIssues.push({ field: "assigned", message: "Assigned must be a non-negative whole number (use 0 when none were assigned).", rowNumber });
+    if (completed !== null && assigned !== null && completed > assigned) {
+      rowIssues.push({ field: "completed", message: "Completed cannot be greater than Assigned for the same Flipkart sheet.", rowNumber });
+    }
     if (expectedVendorKeys.size && !expectedVendorKeys.has(vendorKey(vendorName))) {
       rowIssues.push({
         field: "ODH Vendor",
