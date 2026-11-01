@@ -163,7 +163,7 @@ export async function loadWorkforcePayoutRows(
     supabaseAdmin.from("workforce_payment_settings").select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from"),
     supabaseAdmin.from("workforce_attendance_capture_settings").select("id,capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from"),
     readAllRows(supabaseAdmin.from("workforce_incentive_campaigns")
-      .select("id,company_id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,minimum_activity,tiers,effective_from,effective_to,status,approved_at")
+      .select("id,company_id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,minimum_activity,reporting_time,minimum_present_days,allowed_late_days,tiers,effective_from,effective_to,status,approved_at")
       .eq("company_id", companyId).neq("status", "draft").lte("effective_from", toDate).gte("effective_to", fromDate).order("effective_from").order("id"))
   ]);
   const error = locationsResult.error?.message || allLocationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message || paymentPolicyResult.error?.message || attendanceCaptureResult.error?.message || incentivePlansResult.error?.message;
@@ -474,6 +474,8 @@ export async function loadWorkforcePayoutRows(
   ]));
   const attendanceByWorkerStationDate = new Map<string, any>();
   const unlocatedAttendanceByWorkerDate = new Map<string, any>();
+  const biometricByWorkerStationDate = new Map<string, any>();
+  const unlocatedBiometricByWorkerDate = new Map<string, any>();
   for (const row of attendanceResult.data ?? []) {
     const sourceId = row.workforce_id || row.employee_id || row.contractor_id || row.field_executive_id;
     const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
@@ -482,10 +484,12 @@ export async function loadWorkforcePayoutRows(
       || stationIdByCode.get(normalizePayoutIdentity(row.station_code))
       || "";
     const target = stationId ? attendanceByWorkerStationDate : unlocatedAttendanceByWorkerDate;
+    const biometricTarget = stationId ? biometricByWorkerStationDate : unlocatedBiometricByWorkerDate;
     const key = stationId
       ? providerAttendanceLocationKey(canonicalWorkforceId, stationId, row.punch_date)
       : providerAttendanceWorkerDateKey(canonicalWorkforceId, row.punch_date);
     target.set(key, preferredDirectPayAttendance(target.get(key), row));
+    if (row.in_time) biometricTarget.set(key, preferredDirectPayAttendance(biometricTarget.get(key), row));
   }
   const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
   const stationCodeById = new Map(locations.map((location: any) => [String(location.id), String(location.station_code ?? "").trim().toUpperCase()]));
@@ -1348,6 +1352,14 @@ export async function loadWorkforcePayoutRows(
   }
   const incentiveInputsByIdentity = new Map<string, {
     designationId: string | null;
+    attendance: Array<{
+      id: string;
+      workDate: string;
+      providerId: string;
+      locationModelId: string | null;
+      stationId: string | null;
+      inTime: string | null;
+    }>;
     sources: Array<{
       id: string;
       workDate: string;
@@ -1371,8 +1383,31 @@ export async function loadWorkforcePayoutRows(
     const identityKey = payoutSubjectLocationKey(String(worker.id), String(location.id));
     const group = incentiveInputsByIdentity.get(identityKey) ?? {
       designationId: worker.designation_id ? String(worker.designation_id) : null,
+      attendance: [],
       sources: []
     };
+    const activeFrom = [fromDate, String(mapping.effective_from ?? fromDate)].sort().at(-1) as string;
+    const activeTo = [toDate, String(mapping.effective_to ?? toDate)].sort().at(0) as string;
+    if (activeFrom <= activeTo) {
+      for (const date of dateRange(activeFrom, activeTo)) {
+        const locatedKey = providerAttendanceLocationKey(String(worker.id), String(location.id), date);
+        const unlocatedKey = providerAttendanceWorkerDateKey(String(worker.id), date);
+        const record = biometricByWorkerStationDate.get(locatedKey)
+          ?? (unlocatedAttendanceOwnerStationOn(String(worker.id), date) === String(location.id)
+            ? unlocatedBiometricByWorkerDate.get(unlocatedKey)
+            : null);
+        group.attendance.push({
+          id: `${String(mapping.id)}:${date}`,
+          workDate: date,
+          providerId: String(mapping.provider_id),
+          locationModelId: location.location_model_id ? String(location.location_model_id) : null,
+          stationId: String(location.id),
+          // Only an actual timestamp can satisfy reporting-time eligibility.
+          // Shipment-derived and aggregate attendance intentionally remain null.
+          inTime: record?.in_time ? String(record.in_time) : null
+        });
+      }
+    }
     for (const daily of providerDailyRowsFor(mapping)) {
       const workDate = String(daily.work_date ?? "");
       if (workDate < fromDate || workDate > toDate) continue;
@@ -1401,6 +1436,7 @@ export async function loadWorkforcePayoutRows(
       from: fromDate,
       to: toDate,
       plans: (incentivePlansResult.data ?? []) as WorkforceIncentivePlan[],
+      attendance: input.attendance,
       sources: input.sources
     }));
   }

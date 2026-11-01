@@ -20,6 +20,14 @@ export type IncentiveSource = {
   mfn: unknown;
   delivery_assigned_count: unknown;
 };
+export type IncentiveAttendance = {
+  id: string;
+  work_date: string;
+  provider_id: string;
+  location_model_id: string | null;
+  station_id: string | null;
+  in_time: string | null;
+};
 export type OwnIncentiveSummary = {
   amount: number;
   campaigns: Array<{
@@ -38,6 +46,7 @@ export function ownIncentives(input: {
   from: string;
   to: string;
   sources: IncentiveSource[];
+  attendance?: IncentiveAttendance[];
   campaigns: OwnCampaign[];
 }) {
   const result = calculateWorkforceIncentives({
@@ -52,8 +61,18 @@ export function ownIncentives(input: {
       incentive_type: campaign.incentive_type ?? "performance",
       cycle_type: campaign.cycle_type ?? "daily",
       minimum_activity: campaign.minimum_activity ?? 0,
+      minimum_present_days: campaign.minimum_present_days ?? 0,
+      allowed_late_days: campaign.allowed_late_days ?? 0,
       tiers: campaign.tiers ?? []
     })) : [],
+    attendance: (input.attendance ?? []).map((record) => ({
+      id: record.id,
+      workDate: record.work_date,
+      providerId: record.provider_id,
+      locationModelId: record.location_model_id,
+      stationId: record.station_id,
+      inTime: record.in_time
+    })),
     sources: input.sources.map((source) => ({
       id: source.id,
       workDate: source.work_date,

@@ -15,6 +15,32 @@ const source = (id, date, assigned, delivered, pickup = 0) => ({
   totalDelivery: delivered, totalActivity: delivered + pickup, amazonDelivery: 0, swaDelivery: 0,
   customerReturn: pickup, mfn: 0, deliveryAssignedCount: assigned
 });
+const attendancePlan = {
+  ...plan,
+  id: "attendance-plan",
+  code: "AMZ-ATT",
+  name: "Amazon attendance bonus",
+  provider_id: "amazon",
+  location_model_id: "edsp",
+  incentive_type: "attendance",
+  cycle_type: "monthly",
+  metric: "attendance_compliance",
+  calculation_type: "flat_threshold",
+  flat_amount: 1200,
+  minimum_activity: 0,
+  reporting_time: "07:30:00",
+  minimum_present_days: 2,
+  allowed_late_days: 1,
+  tiers: []
+};
+const attendance = (id, date, inTime) => ({
+  id,
+  workDate: date,
+  providerId: "amazon",
+  locationModelId: "edsp",
+  stationId: "station",
+  inTime
+});
 
 test("Flipkart conversion uses delivery assigned only and awards the completed half-month tier", () => {
   const result = calculateWorkforceIncentives({
@@ -67,4 +93,32 @@ test("disabled incentive plans never block the existing payout calculation", () 
   assert.equal(result.amount, 0);
   assert.equal(result.plans.length, 0);
   assert.equal(result.bySource.size, 0);
+});
+
+test("attendance bonus uses distinct biometric punch-ins and the configured IST reporting time", () => {
+  const result = calculateWorkforceIncentives({
+    companyId: "company", designationId: "wishmaster", from: "2026-10-01", to: "2026-10-31",
+    plans: [attendancePlan], sources: [], attendance: [
+      attendance("a", "2026-10-01", "2026-10-01T01:50:00.000Z"),
+      attendance("b", "2026-10-02", "2026-10-02T02:15:00.000Z"),
+      attendance("missing", "2026-10-03", null)
+    ]
+  });
+  assert.equal(result.amount, 1200);
+  assert.equal(result.plans[0].cycles[0].presentDays, 2);
+  assert.equal(result.plans[0].cycles[0].lateDays, 1);
+  assert.equal(result.plans[0].cycles[0].reportingTime, "07:30");
+  assert.equal(result.bySource.size, 0);
+});
+
+test("attendance bonus stays unpaid when late exceptions exceed the configured allowance", () => {
+  const result = calculateWorkforceIncentives({
+    companyId: "company", designationId: "wishmaster", from: "2026-10-01", to: "2026-10-31",
+    plans: [attendancePlan], sources: [], attendance: [
+      attendance("a", "2026-10-01", "2026-10-01T02:15:00.000Z"),
+      attendance("b", "2026-10-02", "2026-10-02T02:20:00.000Z")
+    ]
+  });
+  assert.equal(result.amount, 0);
+  assert.equal(result.plans[0].cycles[0].status, "not_qualified");
 });

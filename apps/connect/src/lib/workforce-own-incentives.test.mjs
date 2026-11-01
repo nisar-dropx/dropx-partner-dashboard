@@ -56,6 +56,20 @@ test('empty results are genuinely zero and excessive values fail',()=>{
  assert.deepEqual(calculate([]).summary,{amount:0,campaigns:[]});
  assert.throws(()=>calculate([row({total_delivery:100})],[campaign({rate_value:Number.MAX_SAFE_INTEGER})]),/range/);
 });
+test('attendance reporting bonus is visible with biometric day and late-day progress',()=>{
+ const policy=campaign({
+  name:'Monthly attendance bonus',provider_id:'provider',station_id:'station',location_model_id:null,
+  incentive_type:'attendance',cycle_type:'monthly',metric:'attendance_compliance',calculation_type:'flat_threshold',
+  threshold_value:0,rate_value:0,flat_amount:500,minimum_activity:0,reporting_time:'07:30:00',minimum_present_days:2,allowed_late_days:1,tiers:[]
+ });
+ const attendance=[
+  {id:'p1',work_date:'2026-09-01',provider_id:'provider',location_model_id:null,station_id:'station',in_time:'2026-09-01T01:45:00Z'},
+  {id:'p2',work_date:'2026-09-02',provider_id:'provider',location_model_id:null,station_id:'station',in_time:'2026-09-02T02:15:00Z'}
+ ];
+ const result=calculate([],[policy],{attendance});
+ assert.equal(result.summary.amount,500);
+ assert.deepEqual({present:result.summary.campaigns[0].cycles[0].presentDays,late:result.summary.campaigns[0].cycles[0].lateDays},{present:2,late:1});
+});
 test('associate incentive display is compact and keeps the useful breakdown',()=>{
  const source=readFileSync(new URL('../components/connect-pay-incentives.tsx',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,module={exports:{}},require=createRequire(import.meta.url);
@@ -65,4 +79,7 @@ test('associate incentive display is compact and keeps the useful breakdown',()=
  for(const text of ['Incentives','View calculation','₹60','1 Sep 2026'])assert.ok(html.includes(text),text);
  for(const repeatedHelp of ['Daily thresholds and caps','not payment confirmation'])assert.ok(!html.includes(repeatedHelp),repeatedHelp);
  assert.match(render(calculate([]).summary),/No eligible incentive plan/);
+ const attendanceSummary=calculate([],[campaign({name:'Monthly attendance bonus',provider_id:'provider',station_id:'station',incentive_type:'attendance',cycle_type:'monthly',metric:'attendance_compliance',calculation_type:'flat_threshold',threshold_value:0,rate_value:0,flat_amount:500,minimum_activity:0,reporting_time:'07:30:00',minimum_present_days:1,allowed_late_days:0,tiers:[]})],{attendance:[{id:'p1',work_date:'2026-09-01',provider_id:'provider',location_model_id:null,station_id:'station',in_time:'2026-09-01T01:45:00Z'}]}).summary;
+ const attendanceHtml=render(attendanceSummary);
+ for(const text of ['Monthly attendance bonus','1/1 reporting days','0/0 late','07:30 IST'])assert.ok(attendanceHtml.includes(text),text);
 });

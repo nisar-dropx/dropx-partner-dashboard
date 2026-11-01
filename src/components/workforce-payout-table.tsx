@@ -119,6 +119,11 @@ export type WorkforcePayoutRow = {
       metricValue: number;
       numerator: number | null;
       denominator: number | null;
+      presentDays?: number;
+      lateDays?: number;
+      minimumPresentDays?: number;
+      allowedLateDays?: number;
+      reportingTime?: string;
       amount: number;
       status: "earned" | "in_progress" | "below_minimum" | "not_qualified";
     }>;
@@ -1291,7 +1296,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                                 <td className="positive payout-money"><strong>+ {money(item.amount)}</strong></td>
                               </tr>)}
                               {(row.incentiveBreakdown ?? []).filter((item) => item.amount !== 0).map((item) => <tr key={`incentive-${item.planId}`}>
-                                <td><strong>{item.label}</strong><small>{item.cycles.map((cycle) => cycle.denominator !== null ? `${cycle.cycleLabel}: ${cycle.numerator}/${cycle.denominator} (${cycle.metricValue.toFixed(2)}%)` : `${cycle.cycleLabel}: ${cycle.metricValue}`).join(" · ")}</small></td>
+                                <td><strong>{item.label}</strong><small>{item.cycles.map((cycle) => cycle.reportingTime ? `${cycle.cycleLabel}: ${cycle.presentDays ?? 0}/${cycle.minimumPresentDays ?? 0} reporting days · ${cycle.lateDays ?? 0}/${cycle.allowedLateDays ?? 0} late · by ${cycle.reportingTime} IST` : cycle.denominator !== null ? `${cycle.cycleLabel}: ${cycle.numerator}/${cycle.denominator} (${cycle.metricValue.toFixed(2)}%)` : `${cycle.cycleLabel}: ${cycle.metricValue}`).join(" · ")}</small></td>
                                 <td className="payout-money">Incentive</td>
                                 <td className="payout-money">—</td>
                                 <td className="positive payout-money"><strong>+ {money(item.amount)}</strong></td>
