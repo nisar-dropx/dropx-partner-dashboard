@@ -6,7 +6,7 @@ import {registrationSnapshot} from "./registration-pendency.ts";
 import {buildRegistrationMessages} from "./registration-pendency-digest.ts";
 import * as XLSX from "xlsx";
 
-const owner={id:"owner",email:"owner@example.com",full_name:"Owner",role_id:"owner-role",is_master_owner:false};
+const owner={id:"owner",email:"owner@dropxlogistics.com",full_name:"Owner",role_id:"owner-role",is_master_owner:false};
 const roles=[{id:"owner-role",code:"OWNER"},{id:"manager-role",code:"OPERATIONS_CLM"}];
 test("only opted-in current owners receive consolidated reports; product role changes revoke access",()=>{
  assert.deepEqual(resolveRegistrationSummaryRecipients([], [owner],[],roles),[]);
@@ -14,12 +14,13 @@ test("only opted-in current owners receive consolidated reports; product role ch
  assert.deepEqual(resolveRegistrationSummaryRecipients([owner.id],[owner],[{user_id:owner.id,role_id:"manager-role"}],roles),[]);
  assert.deepEqual(resolveRegistrationSummaryRecipients([owner.id],[{...owner,role_id:"manager-role"}],[],roles),[]);
  assert.deepEqual(resolveRegistrationSummaryRecipients([owner.id],[owner,{...owner,id:"duplicate"}],[],roles),[]);
- assert.deepEqual(resolveRegistrationSummaryRecipients([owner.id],[{...owner,email:"owner@example.com\r\nBcc:bad@example.com"}],[],roles),[]);
+ assert.deepEqual(resolveRegistrationSummaryRecipients([owner.id],[{...owner,email:"owner@dropxlogistics.com\r\nBcc:bad@dropxlogistics.com"}],[],roles),[]);
 });
 test("consolidated report includes all pending profiles and routing gaps without widening managers' reports",async()=>{
- const base={key:"employee:1",id:"1",workspace:"People",profileType:"employee",reference:"D1",name:"Person One",designation:"Team Lead",stationId:"s1",stationCode:"TEST1",stationName:"Test station",status:"Registration pending",stage:"pending",missing:["Photo upload"],optionalMissing:[],requiredFilled:1,requiredTotal:2,groups:"",action:"Submit",joinedAt:"",updatedAt:"",draftAt:"",ageDays:3,managerName:"Manager",managerEmail:"manager@example.com",href:"https://people.dropxlogistics.com/people/1"};
+ const base={key:"employee:1",id:"1",workspace:"People",profileType:"employee",reference:"D1",name:"Person One",designation:"Team Lead",stationId:"s1",stationCode:"TEST1",stationName:"Test station",status:"Registration pending",stage:"pending",missing:["Photo upload"],optionalMissing:[],requiredFilled:1,requiredTotal:2,groups:"",action:"Submit",joinedAt:"",updatedAt:"",draftAt:"",ageDays:3,managerName:"Manager",managerEmail:"manager@dropxlogistics.com",href:"https://people.dropxlogistics.com/people/1"};
  const snapshot=registrationSnapshot("2026-10-24","2026-10-24T04:00:00Z",[base,{...base,key:"workforce:2",id:"2",workspace:"Workforce",stationId:"s2",stationCode:"TEST2",managerName:"",managerEmail:""}]);
- const messages=await buildRegistrationMessages(snapshot,"registration_pendency_morning","Registration | {{month}} {{year}}",[{email:owner.email,name:"Owner"}]);
+ const verified=snapshot.recipients.map(r=>({...r,audience:"Ops",consolidated:false}));
+ const messages=await buildRegistrationMessages(snapshot,"registration_pendency_morning","Registration | {{month}} {{year}}",[{email:owner.email,name:"Owner"}],verified);
  const manager=messages.find(m=>m.email===base.managerEmail),summary=messages.find(m=>m.email===owner.email);
  assert.deepEqual(manager.scope.profileKeys,[base.key]);assert.equal(manager.scope.consolidated,false);
  assert.equal(summary.scope.consolidated,true);assert.equal(summary.scope.profileKeys.length,2);

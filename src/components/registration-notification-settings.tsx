@@ -11,8 +11,8 @@ export async function RegistrationNotificationSettings({companyId,canEdit,ownerU
  if(controls.error||history.error)return <section className="panel" style={{padding:24}}><h2>Registration pendency</h2><p>Registration notification settings could not be loaded. Refresh to retry.</p></section>;
  return <section id="registration-pendency" className="panel" style={{padding:24,marginTop:20}}>
   <h2>Registration pendency · People + Workforce</h2>
-  <p>Morning and afternoon updates reply in one monthly thread per recipient. Ops receives both workspaces for assigned locations; HR receives People only; Finance receives Workforce only. Each email includes a fresh, detailed Excel. No email when nothing is pending.</p>
-  <a className="button" href="/api/ops-pulse/registration-email-preview" target="_blank" rel="noreferrer">Preview and check manager routing (owner)</a>
+  <p>Morning and afternoon updates reply in one monthly thread per recipient. Location mailboxes and active Ops managers receive both workspaces within their scope; HR receives People only; Finance receives Workforce only. Only official DropX email addresses are used. Each email includes a fresh, detailed Excel. No email when nothing is pending.</p>
+  <a className="button" href="/api/ops-pulse/registration-email-preview" target="_blank" rel="noreferrer">Preview and check recipients (owner)</a>
   {controls.data?.map(control=><form key={control.event_key} action={saveRegistrationDigestSettings} style={{marginTop:18,display:"flex",gap:14,alignItems:"end",flexWrap:"wrap"}}>
    <input type="hidden" name="event" value={control.event_key}/>
    <label>{control.event_key.endsWith("_morning")?"Morning report":"Afternoon follow-up"}<select name="state" className="field" defaultValue={control.state} disabled={!canEdit}><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="disabled">Disabled</option></select></label>
@@ -22,6 +22,6 @@ export async function RegistrationNotificationSettings({companyId,canEdit,ownerU
    <small>{control.config.delivery_ready?"Server delivery ready":"Pending production verification · no mail sent"}</small>
   </form>)}
   {!controls.data?.length?<p>Schedule has not been installed.</p>:null}
-  <details style={{marginTop:20}}><summary>Recent registration email deliveries</summary><div style={{overflowX:"auto"}}><table style={{width:"100%",textAlign:"left"}}><thead><tr><th>Day</th><th>Slot</th><th>Manager</th><th>Status</th><th>Details</th></tr></thead><tbody>{history.data?.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.event_key.endsWith("_morning")?"Morning":"Follow-up"}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||"—"}</td></tr>)}</tbody></table></div>{!history.data?.length?<p>No scheduled deliveries yet.</p>:null}</details>
+  <details style={{marginTop:20}}><summary>Recent registration email deliveries</summary><div style={{overflowX:"auto"}}><table style={{width:"100%",textAlign:"left"}}><thead><tr><th>Day</th><th>Slot</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{history.data?.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.event_key.endsWith("_morning")?"Morning":"Follow-up"}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||"—"}</td></tr>)}</tbody></table></div>{!history.data?.length?<p>No scheduled deliveries yet.</p>:null}</details>
  </section>;
 }
