@@ -13,10 +13,10 @@ const grant=(user,role,stations,all=false)=>({user_id:user,role_id:role,product_
 const memberships=[grant("ops","ops",["s1"]),grant("hr","hr",[],true),grant("finance","finance",["s1"]),grant("finance","ops",["s1","s2"]),grant("developer","dev",[],true)];
 const base={profileType:"employee",reference:"TEST-1",name:"Example Person",designation:"Team lead",stationName:"Example station",status:"Registration pending",stage:"pending",missing:["Photo upload"],optionalMissing:[],requiredFilled:1,requiredTotal:2,groups:"",action:"Complete photo and submit",joinedAt:"",updatedAt:"",draftAt:"",ageDays:3,managerName:"Ops",managerEmail:"ops@dropxlogistics.com",href:"https://example.com/profile",cluster:"Example cluster",clusterManager:"Example manager"};
 const rows=[
- {...base,key:"p1",id:"p1",workspace:"People",stationId:"s1",stationCode:"TEST1"},
- {...base,key:"w1",id:"w1",workspace:"Workforce",stationId:"s1",stationCode:"TEST1"},
- {...base,key:"p2",id:"p2",workspace:"People",stationId:"s2",stationCode:"TEST2",managerEmail:"finance@dropxlogistics.com"},
- {...base,key:"w2",id:"w2",workspace:"Workforce",stationId:"s2",stationCode:"TEST2",managerEmail:"hr@dropxlogistics.com"}
+ {...base,name:"People One",key:"p1",id:"p1",workspace:"People",stationId:"s1",stationCode:"TEST1"},
+ {...base,name:"Workforce One",key:"w1",id:"w1",workspace:"Workforce",stationId:"s1",stationCode:"TEST1"},
+ {...base,name:"People Two",key:"p2",id:"p2",workspace:"People",stationId:"s2",stationCode:"TEST2",managerEmail:"finance@dropxlogistics.com"},
+ {...base,name:"Workforce Two",key:"w2",id:"w2",workspace:"Workforce",stationId:"s2",stationCode:"TEST2",managerEmail:"hr@dropxlogistics.com"}
 ];
 const snapshot=registrationSnapshot("2026-11-02","2026-11-02T04:00:00Z",rows);
 const evidence={stations:[],activeStaffUserIds:new Set(profiles.map(p=>p.id))};
@@ -50,6 +50,11 @@ test("body, Excel and recorded scope use the same recipient-specific data and in
   const book=XLSX.read(Buffer.from(message.attachments[0].content,"base64"));
   const sheet=book.Sheets["Registration pendency"],detail=XLSX.utils.sheet_to_json(sheet);
   assert.equal(detail.length,message.scope.pending);
+  for(const row of rows){
+   if(message.scope.profileKeys.includes(row.key)){
+    assert.ok(message.html.includes(row.name));assert.ok(message.text.includes(row.name));
+   }else{assert.ok(!message.html.includes(row.name));assert.ok(!message.text.includes(row.name));}
+  }
   assert.ok(sheet["!autofilter"]);
   assert.ok(detail.every(r=>r.Cluster==="Example cluster"&&r["Cluster manager"]==="Example manager"&&r["Missing required fields"]==="Photo upload"));
   if(message.scope.audience==="Finance"){
@@ -78,4 +83,21 @@ test("morning/afternoon have unique message IDs in one monthly thread, including
  assert.equal(selectDigestThread(am,[afternoon]),afternoon);
  assert.equal(selectDigestThread(am,[]),null,"next month starts a fresh root");
  assert.equal(selectDigestThread("review_digest",[morning,oldAfternoon]),oldAfternoon);
+});
+
+test("compact person table escapes names and missing fields, distinguishes review, and keeps full Excel beyond its display limit",async()=>{
+ const detailRows=Array.from({length:23},(_,i)=>({...rows[0],key:`p${i}`,id:`p${i}`,name:`Person ${String(i).padStart(2,"0")}`,ageDays:30-i}));
+ detailRows[0]={...detailRows[0],name:"Example <script> & Name",missing:["Photo <upload>","Address", "Bank proof", "Consent"]};
+ detailRows[1]={...detailRows[1],stage:"review",status:"Submitted · awaiting review",missing:["Never request resubmission"]};
+ const current=registrationSnapshot(snapshot.date,snapshot.checkedAt,detailRows);
+ const recipients=[{email:"ops@dropxlogistics.com",name:"Ops",audience:"Ops",consolidated:false,profileKeys:detailRows.map(r=>r.key)}];
+ const [mail]=await buildRegistrationMessages(current,"registration_pendency_morning","Registration | {{month}} {{year}}",[],recipients);
+ assert.match(mail.html,/Example &lt;script&gt; &amp; Name/);assert.doesNotMatch(mail.html,/<script>/);
+ assert.match(mail.html,/Photo &lt;upload&gt;, Address \+2 more/);
+ assert.match(mail.html,/Review submitted profile/);assert.doesNotMatch(mail.html,/Never request resubmission/);
+ assert.match(mail.html,/Showing 20 of 23, oldest first/);assert.match(mail.text,/Showing 20 of 23/);
+ assert.ok(!mail.html.includes("Person 22"));assert.equal(mail.scope.pending,23);
+ const book=XLSX.read(Buffer.from(mail.attachments[0].content,"base64"));
+ const detail=XLSX.utils.sheet_to_json(book.Sheets["Registration pendency"]);
+ assert.equal(detail.length,23);assert.ok(detail.some(r=>r.Name==="Person 22"));
 });
