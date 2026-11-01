@@ -59,3 +59,12 @@ export function validateWorkflowSelection(selection: PayoutDisputeWorkflowSelect
   return null;
 }
 
+
+export const DEFAULT_DISPUTE_WINDOW_DAYS = 2;
+export function disputeWindowDays(value: unknown): number {
+  const days = value == null ? DEFAULT_DISPUTE_WINDOW_DAYS : Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > 30) {
+    throw new Error("Dispute window must be between 1 and 30 days.");
+  }
+  return days;
+}

@@ -7,6 +7,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { roleIdsWithPageEditAccess } from "@/lib/position-access";
 import {
   normalizeWorkflowRoleIds,
+  disputeWindowDays,
   PAYOUT_DISPUTE_WORKFLOW_MAX_CANDIDATES,
   validateWorkflowSelection,
   type PayoutDisputeWorkflowSelection
@@ -109,7 +110,7 @@ export async function savePayoutDisputeWorkflow(formData: FormData) {
     await validateRoles(companyId, selection);
     const expectedVersion = Number(formData.get("expected_version") ?? 0);
     if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error("Refresh the page and try again.");
-    const saveResult = await supabaseAdmin.rpc("workforce_upsert_dispute_workflow", {
+    const saveResult = await supabaseAdmin.rpc("workforce_upsert_dispute_workflow_v2", {
       p_company: companyId,
       p_station: stationId,
       p_initial_role_ids: selection.initial,
@@ -117,7 +118,8 @@ export async function savePayoutDisputeWorkflow(formData: FormData) {
       p_processor_role_ids: selection.processor,
       p_actor: authorization.userId,
       p_expected_version: expectedVersion,
-      p_is_active: true
+      p_is_active: true,
+      p_review_window_days: disputeWindowDays(formData.get("review_window_days"))
     });
     if (saveResult.error) throw new Error(saveResult.error.message);
   } catch (error) {

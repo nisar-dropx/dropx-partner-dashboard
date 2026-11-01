@@ -132,7 +132,7 @@ export function payoutDisputeWorkflow(statusValue: unknown, legacyResolutionUnve
     blocked: true,
   };
   if (status === "resolved" && legacyResolutionUnverified) return {
-    label: "Previous decision recorded",
+    label: "Closed previously",
     detail: "This dispute was closed under the earlier workflow. A revised publication and net payout change were not system-verified.",
     step: 4,
     terminal: true,

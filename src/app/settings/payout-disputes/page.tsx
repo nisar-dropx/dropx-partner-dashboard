@@ -41,6 +41,7 @@ type WorkflowRow = {
   processor_role_ids: string[] | null;
   is_active: boolean;
   version: number;
+  review_window_days: number;
   updated_at: string;
 };
 
@@ -353,6 +354,11 @@ function WorkflowForm({
         </div>
       ) : null}
 
+      {!station ? <label style={{ display: "grid", gap: 6, maxWidth: 360, marginBottom: 18 }}>
+        <strong>Dispute window (days)</strong>
+        <input type="number" name="review_window_days" min={1} max={30} step={1} required disabled={!canEdit} defaultValue={workflow?.review_window_days ?? 2} />
+        <span className="subtle">From publication · applies to new payouts. Existing tickets stay reviewable.</span>
+      </label> : <input name="review_window_days" type="hidden" value="2" />}
       {PAYOUT_DISPUTE_WORKFLOW_STAGES.map((stage) => {
         const selectedRoleIds = selection[stage.code];
         return (
@@ -458,7 +464,7 @@ export default async function PayoutDisputeWorkflowSettingsPage({ searchParams }
     supabaseAdmin.from("stations").select("id, station_code, station_name, is_active")
       .eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce_payout_dispute_workflows")
-      .select("id, station_id, initial_approver_role_ids, final_approver_role_ids, processor_role_ids, is_active, version, updated_at")
+      .select("id, station_id, initial_approver_role_ids, final_approver_role_ids, processor_role_ids, is_active, version, review_window_days, updated_at")
       .eq("company_id", companyId).eq("is_active", true).order("updated_at", { ascending: false })
   ]);
   const schemaMissing = Boolean(workflowsResult.error && isMissingWorkflowSchema(workflowsResult.error));

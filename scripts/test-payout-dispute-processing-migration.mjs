@@ -698,5 +698,65 @@ row = (await db.query(`
 ok("Post-deploy cleanup permanently revokes the legacy adapter", row.executable === false);
 ok("Post-deploy cleanup applies twice", true);
 
+// Configurable intake deadline and historical administrative closure.
+const windowMigration = readFileSync("supabase/migrations/20261101115136_payout_dispute_window_and_intake.sql", "utf8");
+await db.exec(windowMigration);
+await db.exec(windowMigration);
+ok("Window migration applies twice", true);
+let policy = (await db.query(`select * from workforce_payout_dispute_workflows where company_id='${C}' and station_id is null`)).rows[0];
+ok("Default window is two days", policy.review_window_days === 2);
+const policyCall = (days, version) => `select * from workforce_upsert_dispute_workflow_v2('${C}',null,array['${R1}']::uuid[],array['${R2}']::uuid[],array['${R3}']::uuid[],'${A1}',${version},true,${days})`;
+await throws("Window cannot be zero", policyCall(0,policy.version), /between 1 and 30/);
+policy = (await db.query(policyCall(3,policy.version))).rows[0];
+ok("Window can be configured", policy.review_window_days === 3);
+await throws("Stale settings cannot overwrite", policyCall(2,0), /changed/);
+await db.exec(`
+ create table workforce(id uuid primary key,company_id uuid);
+ insert into workforce values ('${W2}','${C}');
+ alter table workforce_payroll_runs add column status text default 'review';
+ alter table workforce_payout_publications add column publication_kind text default 'worksheet', add column review_until timestamptz;
+ update workforce_payout_publications set review_until=now()+interval '2 days';
+`);
+await throws("Invalid reason rejected in database", `select workforce_raise_payout_dispute('${C}','${W2}','${P4}','other','bad')`, /10 and 2000/);
+const created = (await db.query(`select workforce_raise_payout_dispute('${C}','${W2}','${P4}','loss','A valid payment dispute') id`)).rows[0].id;
+for (const stage of ['open','pending_final_approval','approved_for_processing','processing','processing_blocked']) {
+ await db.query(`update workforce_payout_disputes set status='${stage}' where id='${created}'`);
+ await throws(`Duplicate blocked during ${stage}`, `select workforce_raise_payout_dispute('${C}','${W2}','${P4}','loss','Another valid payment dispute')`, /open dispute already exists/);
+}
+await db.exec(`update workforce_payout_disputes set status='resolved' where id='${created}'; update workforce_payout_publications set review_until=now()-interval '1 second' where id='${P4}'`);
+await throws("Deadline enforced in database", `select workforce_raise_payout_dispute('${C}','${W2}','${P4}','tds','A valid payment dispute')`, /window.*ended/);
+await db.query(`update workforce_payout_publications set review_until=null where id='${P4}'`);
+await throws("Missing deadline fails closed", `select workforce_raise_payout_dispute('${C}','${W2}','${P4}','tds','A valid payment dispute')`, /window.*ended/);
+await db.exec(`
+ update profiles set email='jamsheer@dropxlogistics.com' where id='${A1}';
+ update workforce_payout_disputes set created_at='2026-11-01';
+ insert into workforce_payout_publications(company_id,workforce_id,station_id,revision,snapshot,published_at,period_start,period_end)
+ select '${C}','${W}','${S}',100+n,'{"item":{"net_amount":100}}','2026-10-08','2026-09-01','2026-09-30' from generate_series(1,45) n;
+ insert into workforce_payout_disputes(company_id,publication_id,workforce_id,station_id,category,reason,status,created_at)
+ select company_id,id,workforce_id,station_id,'counts','Previously settled dispute','open','2026-10-10' from workforce_payout_publications where revision>100;
+`);
+const closure = readFileSync("supabase/migrations/20261101115309_close_confirmed_legacy_payout_disputes.sql", "utf8");
+const publicationsBefore = JSON.stringify((await db.query('select * from workforce_payout_publications order by id')).rows);
+await db.exec(closure);
+await db.exec(closure);
+row = (await db.query(`select count(*)::int n from workforce_payout_dispute_events where event_type='historical_closure_20261101' and metadata->'before'->>'status'='open'`)).rows[0];
+ok("Exactly 45 historical closures preserve original records and apply twice", row.n===45);
+ok("Historical closure never mutates publication or payout amounts", publicationsBefore===JSON.stringify((await db.query('select * from workforce_payout_publications order by id')).rows));
+row = (await db.query(`select count(*)::int n from workforce_payout_disputes where created_at='2026-11-01' and status not in ('resolved','rejected')`)).rows[0];
+ok("Newer disputes remain untouched", row.n>0);
+
+await db.exec(`
+ alter table role_page_permissions add column can_view boolean default false, add column can_add boolean default false, add column updated_at timestamptz;
+ create unique index test_permission_key on role_page_permissions(company_id,role_id,page_id);
+ update user_roles set code=case id when '${R1}' then 'OPERATIONS_CLM' when '${R0}' then 'OPERATIONS_AOM' when '${R4}' then 'OPERATIONS_NH' when '${R2}' then 'OPERATIONS_FINMGR' when '${R3}' then 'OPERATIONS_ACCOUNTS' when '${R5}' then 'OWNER' else code end;
+ delete from workforce_payout_dispute_workflows where station_id is null;
+`);
+const routing = readFileSync("supabase/migrations/20261101115658_activate_payout_dispute_routing.sql", "utf8");
+await db.exec(routing); await db.exec(routing);
+policy = (await db.query(`select * from workforce_payout_dispute_workflows where station_id is null`)).rows[0];
+ok("Live route configuration applies twice with two-day policy", policy.review_window_days===2 && policy.initial_approver_role_ids.length===3 && policy.final_approver_role_ids.length===2);
+row=(await db.query(`select workforce_payout_dispute_role_can_edit('${C}','${R3}','ops_workforce_payouts') allowed`)).rows[0];
+ok("Accounts processing has required payout permission", row.allowed);
+
 console.log(failures ? `${failures} FAILED` : "ALL PASSED");
 process.exit(failures ? 1 : 0);
