@@ -22,6 +22,7 @@ const checks = [
   [actions.includes("const currentWeek = rosterMonday(indiaToday())") && actions.includes("requestedStart < currentWeek ? currentWeek : requestedStart"), "OpsPulse roster corrections must never start earlier than the current week, matching People — a viewed future week may anchor the draft, but the current week is always the floor."],
   [actions.includes("rosterSubmissionWindowError") && rosterLibrary.includes("effectiveFrom > currentWeekMonday") && rosterLibrary.includes("minimumFutureRosterMonday"), "Current-week roster corrections must follow the canonical People deadline rule."],
   [page.includes("approvalRequired={Boolean(route?.approvalRequired)}") && planner.includes('approvalRequired ? "Send for approval" : "Apply roster"'), "The submission control must distinguish approval routing from direct apply, matching People."],
+  [rosterLibrary.includes("resolveRosterManagerChain") && rosterLibrary.includes("people_operational_chain"), "Weekly roster approval must follow People Cluster/City Manager lines, not station-floor ownership alone."],
   [["OPERATIONS_TL", "OPERATIONS_STM", "OPERATIONS_CLM", "OPERATIONS_AOM", "OPERATIONS_RM", "OPERATIONS_NH"].every((code) => permissions.includes(`'${code}'`)), "Roster defaults must cover the canonical Ops planning and approval roles."],
   [!["Bulk upload", "Version history", "Change logs"].some((label) => `${page}\n${planner}`.includes(label)), "The compact OpsPulse roster must not expose People administration tools."],
 ];

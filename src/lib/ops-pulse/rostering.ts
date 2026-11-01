@@ -3,6 +3,8 @@ import "server-only";
 import { isHrHeadDesignation, isHrHeadRoleCode, isOpsRosterPlannerRole, isRosterDirectPublishDesignation } from "@/lib/approval-designation-labels";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
+import { resolveRosterManagerChain } from "@/lib/ops-pulse/roster-approval-route";
+import { loadPeopleReviewGraph } from "@/lib/ops-pulse/people-review-routing";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { normalizeRosterChangeDeadlineHour } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -395,120 +397,27 @@ type ApprovalCandidate = {
   name: string;
 };
 
-async function assignmentForUser(companyId: string, userId: string) {
-  const link = await db().from("hr_user_person_links").select("person_id").eq("company_id", companyId).eq("user_id", userId).eq("status", "active").maybeSingle();
-  if (link.error) throw new Error(link.error.message);
-  if (!link.data?.person_id) return null;
-  const engagement = await db().from("hr_engagements").select("id").eq("company_id", companyId).eq("person_id", link.data.person_id).eq("status", "active").order("start_date", { ascending: false }).limit(1).maybeSingle();
-  if (engagement.error) throw new Error(engagement.error.message);
-  if (!engagement.data?.id) return null;
-  const today = indiaToday();
-  const assignment = await db().from("hr_work_assignments").select("id").eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`).order("effective_from", { ascending: false }).limit(1).maybeSingle();
-  if (assignment.error) throw new Error(assignment.error.message);
-  return assignment.data?.id ?? null;
-}
-
-async function approverFromAssignment(companyId: string, assignmentId: string): Promise<ApprovalCandidate | null> {
-  const assignment = await db().from("hr_work_assignments").select("id,engagement_id,designation_id").eq("company_id", companyId).eq("id", assignmentId).maybeSingle();
-  if (assignment.error) throw new Error(assignment.error.message);
-  if (!assignment.data?.engagement_id) return null;
-  const engagement = await db().from("hr_engagements").select("person_id").eq("company_id", companyId).eq("id", assignment.data.engagement_id).eq("status", "active").maybeSingle();
-  if (engagement.error) throw new Error(engagement.error.message);
-  if (!engagement.data?.person_id) return null;
-  const [person, link, designation] = await Promise.all([
-    db().from("hr_people").select("display_name").eq("company_id", companyId).eq("id", engagement.data.person_id).eq("status", "active").maybeSingle(),
-    db().from("hr_user_person_links").select("user_id").eq("company_id", companyId).eq("person_id", engagement.data.person_id).eq("status", "active").maybeSingle(),
-    assignment.data.designation_id
-      ? db().from("designations").select("code,name").eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null })
-  ]);
-  if (person.error || link.error || designation.error) {
-    throw new Error(person.error?.message ?? link.error?.message ?? designation.error?.message ?? "The station reporting line could not be resolved.");
-  }
-  return link.data?.user_id
-    ? {
-      assignmentId,
-      userId: link.data.user_id,
-      designationId: assignment.data.designation_id,
-      designationCode: designation.data?.code ?? null,
-      designationName: designation.data?.name ?? null,
-      name: person.data?.display_name ?? "Station manager"
-    }
-    : null;
-}
-
-async function isActiveApproverUser(companyId: string, userId: string) {
-  const profile = await db().from("profiles").select("id,is_active,company_id").eq("id", userId).maybeSingle();
-  if (profile.error) throw new Error(profile.error.message);
-  if (!profile.data?.is_active) return false;
-  if (profile.data.company_id && profile.data.company_id !== companyId) return false;
-  return true;
-}
-
 /**
- * Station roster approval follows the station line, not who clicked edit.
- * Owner first, then solid-line managers, capped at the policy level count.
- * Inactive logins are skipped. HR is added by the caller when required.
+ * Weekly roster managers follow the People operational line (same graph as
+ * performance reviews): LM Cluster Manager / DS City Manager, then solid-line
+ * reportees. Store Manager is used only when a Dark Store has no City Manager.
+ * HR is added by the caller when required.
  */
 async function locationRosterApprovalChain(authorization: AuthorizationContext, locationId: string, requiredLevels: number) {
   const companyId = authorization.companyId!;
-  const roleResult = await db().from("station_responsibility_roles").select("id,code,escalation_order,routes_approvals")
-    .eq("company_id", companyId).eq("is_active", true).order("escalation_order");
-  if (roleResult.error) throw new Error(roleResult.error.message);
-  const allRoles = roleResult.data ?? [];
-  const configuredRoles = allRoles.filter((role) => role.routes_approvals);
-  const roles = configuredRoles.length ? configuredRoles : allRoles.filter((role) => role.code === "station_manager");
-  const missingOwner = "Assign the station roster owner in People before submitting this roster.";
-  if (!roles.length) return { chain: [] as ApprovalCandidate[], error: missingOwner };
-  const order = new Map(roles.map((role) => [role.id, Number(role.escalation_order)]));
-  const now = new Date().toISOString();
-  const assignmentResult = await db().from("station_responsibility_assignments")
-    .select("responsibility_role_id,assignment_id,assignee_user_id")
-    .eq("company_id", companyId).eq("station_id", locationId).eq("is_primary", true)
-    .in("responsibility_role_id", roles.map((role) => role.id))
-    .lte("effective_from", now).or(`effective_to.is.null,effective_to.gte.${now}`);
-  if (assignmentResult.error) throw new Error(assignmentResult.error.message);
-  const owner = [...(assignmentResult.data ?? [])].sort((left, right) => (order.get(left.responsibility_role_id) ?? 9999) - (order.get(right.responsibility_role_id) ?? 9999))[0];
-  if (!owner?.assignee_user_id) return { chain: [] as ApprovalCandidate[], error: missingOwner };
-
-  const ownerAssignmentId = owner.assignment_id ?? await assignmentForUser(companyId, owner.assignee_user_id);
-  const ownerApprover = ownerAssignmentId ? await approverFromAssignment(companyId, ownerAssignmentId) : null;
-  const full: ApprovalCandidate[] = [];
-  const push = (candidate: ApprovalCandidate | null) => {
-    // Missing / unresolvable people are skipped — walk continues to the next manager.
-    if (candidate && !full.some((item) => item.userId === candidate.userId)) full.push(candidate);
-  };
-  push(ownerApprover);
-
-  let subjectAssignmentId = ownerAssignmentId;
-  const seen = new Set(subjectAssignmentId ? [subjectAssignmentId] : []);
-  const today = indiaToday();
-  for (let depth = 0; subjectAssignmentId && depth < 12; depth += 1) {
-    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
-      .eq("company_id", companyId).eq("subject_assignment_id", subjectAssignmentId)
-      .eq("relationship_type", "solid_line").eq("is_primary", true)
-      .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
-      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-    if (relationship.error) throw new Error(relationship.error.message);
-    const nextAssignmentId = relationship.data?.manager_assignment_id;
-    if (!nextAssignmentId || seen.has(nextAssignmentId)) break;
-    seen.add(nextAssignmentId);
-    subjectAssignmentId = nextAssignmentId;
-    push(await approverFromAssignment(companyId, nextAssignmentId));
-  }
-
-  const usable: ApprovalCandidate[] = [];
-  for (const candidate of full) {
-    if (!(await isActiveApproverUser(companyId, candidate.userId))) continue;
-    usable.push(candidate);
-    if (usable.length >= requiredLevels) break;
-  }
-
+  const graph = await loadPeopleReviewGraph(companyId);
+  const resolved = resolveRosterManagerChain(graph, locationId, requiredLevels);
   return {
-    chain: usable,
-    error: usable.length
-      ? null
-      : "No active station approver could be resolved. Complete the People reporting line, or ensure HR roster approval is enabled."
+    chain: resolved.chain.map((stage): ApprovalCandidate => ({
+      assignmentId: stage.assignmentId,
+      userId: stage.userId,
+      designationId: stage.designationId,
+      designationCode: null,
+      designationName: stage.role,
+      name: stage.name
+    })),
+    error: resolved.error,
+    darkStore: resolved.darkStore
   };
 }
 
@@ -541,13 +450,22 @@ export async function resolveOpsRosterApprovalRoute(
     stageNo: index + 1,
     stageType: index === 0 ? "level_1" : "level_2",
     approverUserId: approver.userId,
-    approverName: approver.name,
-    resolvedVia: "station_reporting_chain"
+    approverName: `${approver.name}${approver.designationName ? ` (${approver.designationName})` : ""}`,
+    resolvedVia: "people_operational_chain"
   }));
   const steps = policy.hrApprovalRequired
     ? [...managerSteps, { stageNo: managerSteps.length + 1, stageType: "hr" as const, approverUserId: null, approverName: "HR roster approver group" }]
     : managerSteps;
-  return { direct: false, approvalRequired: true, summary: `Approval route: ${steps.map((step) => step.approverName).join(" → ")}.`, error: null, steps };
+  const mode = resolved.darkStore ? "Dark Store (City Manager line)" : "Last Mile (Cluster Manager line)";
+  return {
+    direct: false,
+    approvalRequired: true,
+    summary: managers.length
+      ? `Approval route (${mode}): ${steps.map((step) => step.approverName).join(" → ")}.`
+      : `Approval route (${mode}): HR only — map Cluster/City Manager in People for manager stages.`,
+    error: null,
+    steps
+  };
 }
 
 function relation<T>(value: T | T[] | null | undefined): T | null {

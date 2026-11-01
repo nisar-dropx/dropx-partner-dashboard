@@ -207,7 +207,7 @@ export function buildRecurringRosterWorkbook(input: {
     ["5", multi
       ? "Upload stays single-station: open each station draft in Rostering and import only that station's rows."
       : "Upload into an editable Ops draft. Import never publishes — submit for approval after import."],
-    ["6", "Approval route: station owner → reporting manager → HR."]
+    ["6", "Approval route: Cluster/City Manager → next reporting manager → HR (Store Manager only if no City Manager)."]
   ]);
   instructions["!cols"] = [{ wch: 16 }, { wch: 100 }, { wch: 40 }];
 
