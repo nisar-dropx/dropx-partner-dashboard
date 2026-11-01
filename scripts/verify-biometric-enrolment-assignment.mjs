@@ -182,12 +182,17 @@ assert.deepEqual(current.rows, [
   { profile_type: "employee", account_id: employeeB }
 ], "clearing the Helper must retain both Employee assignments");
 
+// After clear, the Helper mapping ends yesterday. Lock that month so the
+// Processing window still overlaps closed shared-ID history on month starts.
+// Employee A may also have a newer open window that starts today after a
+// location transfer; touch every shared-ID row so the overlapping history is
+// included in the statement trigger scope.
 await db.query(`
   insert into public.helper_payout_payment_items(
     company_id, helper_id, period_start, period_end, status
   ) values (
-    $1, $2, date_trunc('month', current_date)::date,
-    (date_trunc('month', current_date) + interval '1 month - 1 day')::date,
+    $1, $2, date_trunc('month', (current_date - 1))::date,
+    (date_trunc('month', (current_date - 1)) + interval '1 month - 1 day')::date,
     'processing'
   )
 `, [company, helper]);
@@ -197,7 +202,8 @@ await db.query(`
 `, [employeeB]);
 await assert.rejects(db.query(`
   update public.biometric_enrolments set notes='shared Helper ID edit'
-  where account_id=$1 and effective_to is null
+  where account_id=$1
+    and public.normalize_people_biometric_id(enrolment_id) = '123'
 `, [employeeA]), /overlapping Helper payment is Processing/i);
 
 // A Workforce review changes is_active. The master trigger then calls the
