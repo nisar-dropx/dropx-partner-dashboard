@@ -11,7 +11,7 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {loadOwnAdvanceDeduction} from '@/lib/own-advance-deduction';
 import {allocateOwnDailyCards,type DailyCardSource} from '@/lib/workforce-daily-card';
-import {ownIncentives,type IncentiveSource,type OwnCampaign} from '@/lib/workforce-own-incentives';
+import {ownIncentives,type IncentiveAttendance,type IncentiveSource,type OwnCampaign} from '@/lib/workforce-own-incentives';
 import {assertNoProviderDirectOverlap} from '@/lib/direct-workforce-payment';
 import {attendanceIdentityFilter,loadDirectPaymentContext,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
 import {calculateProviderAttendancePayments,hasProviderAttendanceComponents,type ProviderAttendanceMapping,type ProviderAttendanceRecord} from '@/lib/provider-attendance-payment';
@@ -73,6 +73,11 @@ function validMonth(value: string | null) {
 function todayKolkata() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
+function datesBetween(from:string,to:string){
+  const dates:string[]=[];
+  for(let cursor=new Date(`${from}T00:00:00Z`);cursor<=new Date(`${to}T00:00:00Z`);cursor.setUTCDate(cursor.getUTCDate()+1))dates.push(cursor.toISOString().slice(0,10));
+  return dates;
+}
 
 export async function GET(request: Request) {
   try {
@@ -97,8 +102,8 @@ export async function GET(request: Request) {
       db().from("payment_field_provider_metrics").select("provider_id,provider_model_id,provider_production_metrics(source_key),payment_fields(code,label,field_type)").eq("company_id", account.companyId),
       db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`),
       loadOwnAdjustmentLedger(db(),account,from,to),
-      db().from('workforce_incentive_campaigns').select('id,company_id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,minimum_activity,tiers,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from),
-      workforce?.id && mappings.length ? db().from('attendance_daily').select('id,punch_date,status,in_time,out_time,work_minutes').eq('company_id',account.companyId).or(attendanceIdentityFilter(workforce)).gte('punch_date',from).lte('punch_date',to).order('punch_date') : Promise.resolve({data:[],error:null})
+      db().from('workforce_incentive_campaigns').select('id,company_id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,minimum_activity,reporting_time,minimum_present_days,allowed_late_days,tiers,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from),
+      workforce?.id && mappings.length ? db().from('attendance_daily').select('id,location_id,station_code,punch_date,status,in_time,out_time,work_minutes').eq('company_id',account.companyId).or(attendanceIdentityFilter(workforce)).gte('punch_date',from).lte('punch_date',to).order('punch_date') : Promise.resolve({data:[],error:null})
     ]);
     const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || rateCardsResult.error?.message || attendanceResult.error?.message; if (error) throw new Error(error);
     if(campaignResult.error)throw new Error('Your incentive estimate could not be verified. Refresh before relying on earnings.');
@@ -106,7 +111,23 @@ export async function GET(request: Request) {
     const stationById = new Map((stationsResult.data ?? []).map((row) => [row.id, row])); const dailyByMember = new Map<string, Array<Record<string, unknown>>>();
     (metricsResult.data ?? []).forEach((row) => dailyByMember.set(String(row.provider_employee_id), [...(dailyByMember.get(String(row.provider_employee_id)) ?? []), row as Record<string, unknown>]));
     if(mappings.length>=1000 || (metricsResult.data ?? []).length>=1000 || (allocationsResult.data ?? []).length>=1000 || (rateCardsResult.data ?? []).length>=1000 || (campaignResult.data??[]).length>=1000) throw new Error("Too many earning records to reconcile safely. Please contact Workforce.");
-    const incentives=ownIncentives({companyId:account.companyId,canonical:Boolean(workforce?.id),designationId:workforce?.designation_id??null,from,to,campaigns:(campaignResult.data??[]) as OwnCampaign[],sources:(metricsResult.data??[]).flatMap(row=>{
+    const attendanceIncentiveRows=(attendanceResult.data??[]).flatMap((record:any):IncentiveAttendance[]=>{
+      const date=String(record.punch_date??'');
+      const stationCode=String(record.station_code??'').trim().toUpperCase();
+      const matching=mappings.filter((mapping:any)=>String(mapping.effective_from??'')<=date&&(!mapping.effective_to||String(mapping.effective_to)>=date))
+        .filter((mapping:any)=>record.location_id?String(mapping.station_id)===String(record.location_id):stationCode?String(stationById.get(mapping.station_id)?.station_code??'').trim().toUpperCase()===stationCode:true);
+      if(matching.length!==1)return [];
+      const mapping:any=matching[0],station:any=stationById.get(mapping.station_id);
+      return [{id:String(record.id),work_date:date,provider_id:String(mapping.provider_id),station_id:String(mapping.station_id),location_model_id:station?.location_model_id??null,in_time:record.in_time?String(record.in_time):null}];
+    });
+    for(const mapping of mappings as any[]){
+      const activeFrom=[from,String(mapping.effective_from??from)].sort().at(-1)!;
+      const activeTo=[to,String(mapping.effective_to??to)].sort().at(0)!;
+      const station:any=stationById.get(mapping.station_id);
+      if(activeFrom>activeTo||!station)continue;
+      for(const date of datesBetween(activeFrom,activeTo))attendanceIncentiveRows.push({id:`mapping:${mapping.id}:${date}`,work_date:date,provider_id:String(mapping.provider_id),station_id:String(mapping.station_id),location_model_id:station.location_model_id??null,in_time:null});
+    }
+    const incentives=ownIncentives({companyId:account.companyId,canonical:Boolean(workforce?.id),designationId:workforce?.designation_id??null,from,to,campaigns:(campaignResult.data??[]) as OwnCampaign[],attendance:attendanceIncentiveRows,sources:(metricsResult.data??[]).flatMap(row=>{
       const mapping=paymentMappingForDay(mappings,row);
       const station=stationById.get(mapping?.station_id);
       return mapping?[{...row,provider_id:mapping.provider_id,station_id:mapping.station_id,location_model_id:station?.location_model_id??null} as IncentiveSource]:[];
