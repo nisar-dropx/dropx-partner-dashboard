@@ -46,7 +46,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const allowed = (id: string | null) => allLocations || Boolean(id && scope.has(id));
   const notice = flash();
   const today = dashboardDateInputValue();
-  const entryFilters = providerMappingEntryFilters(searchParams, today);
 
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
@@ -66,6 +65,10 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const stations = allStations.filter((station) => allowed(station.id));
   const stationByCode = new Map(stations.map((station) => [String(station.station_code ?? "").trim().toUpperCase(), station]));
   const stationById = new Map(stations.map((station) => [String(station.id), station]));
+  const activityMonths = ((providerResult.data ?? []) as ProviderMemberSource[])
+    .filter(member => stationByCode.has(String(member.station_code ?? "").trim().toUpperCase()))
+    .flatMap(member => member.outbound_months ?? []);
+  const entryFilters = providerMappingEntryFilters(searchParams, today, activityMonths);
   const stationCodeById = new Map(allStations.map((station) => [String(station.id), String(station.station_code ?? "").trim()]));
   const allMappingHistory = (mappingsResult.data ?? []) as Mapping[];
   const mappingHistory = allMappingHistory.filter((mapping) => allowed(mapping.station_id));
@@ -284,6 +287,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet clusterOptions={clusters?.options ?? []} clusterKeysByStation={clusterKeysByStation} clusterFilterUnavailable={Boolean(hierarchy.error)} lookupEntries={lookupEntries} initialOutboundMonth={entryFilters.month} initialMappingStatus={entryFilters.mapping} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet clusterOptions={clusters?.options ?? []} clusterKeysByStation={clusterKeysByStation} clusterFilterUnavailable={Boolean(hierarchy.error)} lookupEntries={lookupEntries} initialOutboundMonth={entryFilters.month} initialMappingStatus={entryFilters.mapping} shipmentMonths={[...shipmentMonths, today.slice(0, 7)]} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }

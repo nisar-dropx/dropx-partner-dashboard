@@ -10,11 +10,19 @@ export function providerMappingHref(input: {
 
 export function providerMappingEntryFilters(
   params: { month?: string; mapping?: string } | undefined,
-  today: string
+  today: string,
+  activityMonths?: readonly string[]
 ) {
   const month = params?.month === "all" ? ""
-    : /^\d{4}-(0[1-9]|1[0-2])$/.test(params?.month ?? "") ? params!.month! : today.slice(0, 7);
+    : /^\d{4}-(0[1-9]|1[0-2])$/.test(params?.month ?? "") ? params!.month! : providerMappingDefaultMonth(today, activityMonths);
   const mapping: "all" | "mapped" | "unmapped" = params?.mapping === "all" || params?.mapping === "mapped"
     ? params.mapping : "unmapped";
   return { month, mapping };
+}
+
+/** Use scoped activity, not the calendar alone, when a new month has no import yet. */
+export function providerMappingDefaultMonth(today: string, activityMonths: readonly string[] = []) {
+  const currentMonth = today.slice(0, 7);
+  return activityMonths.filter(month => /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && month <= currentMonth)
+    .sort().at(-1) ?? currentMonth;
 }

@@ -709,3 +709,13 @@ test('plain ID mapping opens current month and Unmapped; invalid link filters ca
   assert.deepEqual(providerMappingEntryFilters(params,'2026-10-15'),{month:'2026-10',mapping:'unmapped'});
  }
 });
+
+test('mapping month rolls over only when scoped activity becomes available', () => {
+  const previous = ['2026-09', '2026-10', '2027-01', 'bad'];
+  assert.equal(providerMappingEntryFilters(undefined, '2026-11-01', previous).month, '2026-10');
+  assert.equal(providerMappingEntryFilters(undefined, '2026-11-02', [...previous, '2026-11']).month, '2026-11');
+  assert.equal(providerMappingEntryFilters(undefined, '2027-01-01', ['2026-12']).month, '2026-12');
+  assert.equal(providerMappingEntryFilters(undefined, '2026-11-01', []).month, '2026-11');
+  assert.equal(providerMappingEntryFilters({month:'2026-11'}, '2026-11-01', previous).month, '2026-11');
+  assert.equal(providerMappingEntryFilters({month:'all'}, '2026-11-01', previous).month, '');
+});

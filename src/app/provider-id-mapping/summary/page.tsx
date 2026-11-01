@@ -1,3 +1,4 @@
+import {providerMappingDefaultMonth} from "@/lib/provider-mapping-navigation";
 import Link from "next/link";
 import {AppShell} from "@/components/app-shell";
 import {PageHead} from "@/components/page-head";
@@ -81,8 +82,8 @@ export default async function ProviderMappingSummaryPage() {
   }));
   const methodById = new Map(methods.map(method=>[method.id,method]));
   const today = dashboardDateInputValue();
-  const initialMonth = today.slice(0,7);
-  const availableMonths = [...new Set([initialMonth,...sourceMembers.flatMap(source=>source.outboundMonths??[])])]
+  const initialMonth = providerMappingDefaultMonth(today, sourceMembers.flatMap(source=>source.outboundMonths??[]));
+  const availableMonths = [...new Set([today.slice(0,7),initialMonth,...sourceMembers.flatMap(source=>source.outboundMonths??[])])]
     .filter(month=>/^\d{4}-(0[1-9]|1[0-2])$/.test(month)).sort().reverse();
   const summaryStations = stations.map(station=>({
     id:station.id,

@@ -818,7 +818,7 @@ test('current month uses IST at month and year boundaries and is passed by the s
   assert.match(page, /const today = dashboardDateInputValue\(\)/);
   assert.equal(page.match(/dashboardDateInputValue\(\)/g)?.length, 1, 'The request should compute the India business date once');
   assert.match(page, /providerFirstMappingIsCurrentOrScheduled\([^;]+today\)/);
-  assert.match(page, /providerMappingEntryFilters\(searchParams, today\)/);
+  assert.match(page, /providerMappingEntryFilters\(searchParams, today, activityMonths\)/);
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.match(pkg.scripts['test:provider-mapping-period'], /provider-first-mapping-worksheet\.test\.mjs/);
   assert.match(pkg.scripts.build, /test:provider-mapping-period/);

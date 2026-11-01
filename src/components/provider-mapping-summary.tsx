@@ -133,7 +133,7 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
     const regionSet = new Set(selectedRegions);
     return monthly.filter(station => {
       const issueCount = station.unmapped + station.dataIssues + station.profilePending + station.profileReview + station.profileUnknown;
-      const statusMatch = status === "all" || (status === "attention" ? issueCount > 0 : issueCount === 0);
+      const statusMatch = status === "all" || (status === "attention" ? issueCount > 0 : station.total > 0 && issueCount === 0);
       const queryMatch = !term || `${station.stationCode} ${station.stationName} ${station.cluster} ${station.region}`.toLowerCase().includes(term);
       return statusMatch && queryMatch
         && (!stationSet.size || stationSet.has(station.stationId))
@@ -169,11 +169,11 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
 
     <div className="mapping-summary-cards" aria-label="Mapping totals">
       <article><span>Stations in scope</span><button className="mapping-card-number" onClick={()=>openDetails("total")} type="button">{totals.stations}</button><small>{countButton(totals.total,"total")} provider IDs · {activeMonthLabel}</small></article>
-      <article className="is-positive"><span>Mapping ready</span><button className="mapping-card-number" onClick={()=>openDetails("ready")} type="button">{totals.ready}</button><small><button className="mapping-text-button" onClick={()=>openDetails("ready")} type="button">{totals.completionPercent}% of activity covered</button></small></article>
+      <article className={totals.total ? "is-positive" : ""}><span>Mapping ready</span><button className="mapping-card-number" onClick={()=>openDetails("ready")} type="button">{totals.ready}</button><small><button className="mapping-text-button" onClick={()=>openDetails("ready")} type="button">{totals.total ? `${totals.completionPercent}% of activity covered` : "No activity in selected period"}</button></small></article>
       <article><span>Mapped</span><button className="mapping-card-number" onClick={()=>openDetails("mapped")} type="button">{totals.mapped}</button><small>DropX ID linked</small></article>
-      <article className={totals.unmapped ? "is-negative" : "is-positive"}><span>Mapping missing</span><button className="mapping-card-number" onClick={()=>openDetails("unmapped")} type="button">{totals.unmapped}</button><small>Needs ID mapping</small></article>
-      <article className={totals.dataIssues ? "is-warning" : "is-positive"}><span>Data issues</span><button className="mapping-card-number" onClick={()=>openDetails("dataIssues")} type="button">{totals.dataIssues}</button><small>Coverage, identity, pay or source</small></article>
-      <article className={totals.profilePending ? "is-warning" : "is-positive"}><span>Associate profiles</span><div className="mapping-profile-counts">Pending {countButton(totals.profilePending,"profile_pending","","warning")}<br/>Completed {countButton(totals.profileCompleted,"profile_completed","","positive")} · Review {countButton(totals.profileReview,"profile_review")}{totals.profileUnknown ? <> · Unknown {countButton(totals.profileUnknown,"profile_unknown")}</>:null}</div><small>Unique mapped associates · current status</small></article>
+      <article className={totals.unmapped ? "is-negative" : totals.total ? "is-positive" : ""}><span>Mapping missing</span><button className="mapping-card-number" onClick={()=>openDetails("unmapped")} type="button">{totals.unmapped}</button><small>Needs ID mapping</small></article>
+      <article className={totals.dataIssues ? "is-warning" : totals.total ? "is-positive" : ""}><span>Data issues</span><button className="mapping-card-number" onClick={()=>openDetails("dataIssues")} type="button">{totals.dataIssues}</button><small>Coverage, identity, pay or source</small></article>
+      <article className={totals.profilePending ? "is-warning" : totals.total ? "is-positive" : ""}><span>Associate profiles</span><div className="mapping-profile-counts">Pending {countButton(totals.profilePending,"profile_pending","","warning")}<br/>Completed {countButton(totals.profileCompleted,"profile_completed","","positive")} · Review {countButton(totals.profileReview,"profile_review")}{totals.profileUnknown ? <> · Unknown {countButton(totals.profileUnknown,"profile_unknown")}</>:null}</div><small>Unique mapped associates · current status</small></article>
     </div>
 
     <div className="panel mapping-summary-panel">
@@ -191,14 +191,14 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
           <thead><tr><th>Station</th><th>People owner / region</th><th>Total IDs</th><th>Mapped</th><th>Ready</th><th>Mapping missing</th><th>Data issues</th><th>Profiles · associates</th><th>Mapping coverage</th><th>Details</th></tr></thead>
           <tbody>{filtered.map(station => {
             const needsAttention = station.unmapped + station.dataIssues > 0;
-            return <tr key={station.stationId} className={needsAttention ? "needs-attention" : "is-complete"}>
+            return <tr key={station.stationId} className={needsAttention ? "needs-attention" : station.total ? "is-complete" : ""}>
               <td><strong>{station.stationCode}</strong>{station.stationName ? <small>{station.stationName}</small> : null}</td>
               <td><strong>{station.cluster}</strong><small>{station.region}</small></td>
               <td>{countButton(station.total,"total",station.stationId)}</td><td>{countButton(station.mapped,"mapped",station.stationId)}</td><td>{countButton(station.ready,"ready",station.stationId,"positive")}</td>
               <td>{countButton(station.unmapped,"unmapped",station.stationId,station.unmapped?"negative":"muted")}</td>
               <td>{countButton(station.dataIssues,"dataIssues",station.stationId,station.dataIssues?"warning":"muted")}</td>
               <td className="mapping-profile-counts">Pending {countButton(station.profilePending,"profile_pending",station.stationId,"warning")} · Done {countButton(station.profileCompleted,"profile_completed",station.stationId,"positive")}<br/>Review {countButton(station.profileReview,"profile_review",station.stationId)}{station.profileUnknown ? <> · Unknown {countButton(station.profileUnknown,"profile_unknown",station.stationId)}</>:null}</td>
-              <td><button type="button" className="mapping-text-button" onClick={()=>openDetails("ready",station.stationId)}><span className="mapping-completion"><span><i style={{width:`${station.completionPercent}%`}} /></span><strong>{station.completionPercent}%</strong></span></button></td>
+              <td>{station.total ? <button type="button" className="mapping-text-button" onClick={()=>openDetails("ready",station.stationId)}><span className="mapping-completion"><span><i style={{width:`${station.completionPercent}%`}} /></span><strong>{station.completionPercent}%</strong></span></button> : <span className="subtle">No activity</span>}</td>
               <td><button className="button secondary compact" type="button" onClick={() => openDetails("total",station.stationId)}>{station.total ? "View IDs" : "View"}</button></td>
             </tr>;
           })}{!filtered.length ? <tr><td className="mapping-summary-empty" colSpan={10}>No stations match the selected filters.</td></tr> : null}</tbody>

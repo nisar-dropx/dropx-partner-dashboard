@@ -84,7 +84,7 @@ export type ProviderMappingSummaryStation = {
   dataIssues: number;
   profileCompleted: number; profilePending: number; profileReview: number; profileUnknown: number;
   profiles: MappingSummaryProfile[];
-  completionPercent: number;
+  completionPercent: number | null;
   details: ProviderMappingSummaryDetail[];
 };
 
@@ -325,7 +325,7 @@ export function buildProviderMappingSummary({
       unmapped,
       dataIssues,
       profiles, ...mappingProfileTotals(profiles),
-      completionPercent: details.length ? Math.round((ready / details.length) * 100) : 100,
+      completionPercent: details.length ? Math.round((ready / details.length) * 100) : null,
       details
     } satisfies ProviderMappingSummaryStation;
   }).sort((left, right) => {
@@ -343,7 +343,7 @@ export function providerMappingSummaryTotals(stations: ProviderMappingSummarySta
     unmapped: sum.unmapped + station.unmapped,
     dataIssues: sum.dataIssues + station.dataIssues
   }), {stations: 0, total: 0, mapped: 0, ready: 0, unmapped: 0, dataIssues: 0});
-  return {...totals, ...mappingProfileTotals(uniqueMappingProfiles(stations.flatMap(s=>s.profiles))), completionPercent: totals.total ? Math.round((totals.ready / totals.total) * 100) : 100};
+  return {...totals, ...mappingProfileTotals(uniqueMappingProfiles(stations.flatMap(s=>s.profiles))), completionPercent: totals.total ? Math.round((totals.ready / totals.total) * 100) : null};
 }
 
 export function uniqueMappingProfiles(profiles: MappingSummaryProfile[]) {
