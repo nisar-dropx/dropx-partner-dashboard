@@ -31,7 +31,7 @@ test("station summary separates ready, unmapped and incomplete data", () => {
   assert.match(qlda.details.find(detail => detail.providerMemberId === "A3").issues.join(" "), /payment value/);
 });
 
-test("saved-only mappings are visible as source-data issues and empty stations remain complete", () => {
+test("saved-only mappings are visible as source-data issues and empty stations have no coverage percentage", () => {
   const rows = buildProviderMappingSummary({stations, methods, workers, sourceMembers: [], mappings: [
     {id: "m1", stationId: "qlda", providerMemberId: "A1", workforceId: "worker-ready", paymentMethodId: "mg", paymentValues: {MG_PER_DAY: 800}}
   ]});
@@ -40,7 +40,7 @@ test("saved-only mappings are visible as source-data issues and empty stations r
   assert.equal(qlda.details[0].status, "source_missing");
   assert.equal(qlda.dataIssues, 1);
   assert.equal(kgqa.total, 0);
-  assert.equal(kgqa.completionPercent, 100);
+  assert.equal(kgqa.completionPercent, null);
   assert.deepEqual(providerMappingSummaryTotals(rows), {stations:2,total:1,mapped:1,ready:0,unmapped:0,dataIssues:1,completionPercent:0,profileCompleted:0,profilePending:0,profileReview:0,profileUnknown:1});
 });
 
@@ -120,4 +120,10 @@ test("historical mapping periods retain every associated profile in the selected
   });
   assert.equal(rows[0].profilePending,1);assert.equal(rows[0].profileCompleted,1);
   assert.equal(rows[0].details[0].profiles.length,2);
+});
+
+test("an empty month is not reported as fully covered", () => {
+  const rows = buildProviderMappingSummary({stations, methods, workers, sourceMembers: [], mappings: [], selectedMonths: ["2026-11"]});
+  assert.ok(rows.every(row => row.total === 0 && row.completionPercent === null));
+  assert.equal(providerMappingSummaryTotals(rows).completionPercent, null);
 });
