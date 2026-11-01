@@ -100,11 +100,13 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     let registrationRecipientVerified=false;
     const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
     const threadEvents=digestThreadEvents(delivery.event_key);
+    const registrationThread=delivery.event_key.startsWith('registration_pendency_');
+    const threadQuery=db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).eq("report_month",lossReminderThreadMonth(delivery.event_key,delivery.report_date)).order("last_sent_at",{ascending:false});
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
      db.from("profiles").select("id").eq("company_id",delivery.company_id).eq("is_active",true).ilike("email",delivery.recipient_email).limit(1),
-     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).eq("report_month",lossReminderThreadMonth(delivery.event_key,delivery.report_date)).order("last_sent_at",{ascending:false}).limit(threadEvents.length)
+     registrationThread?threadQuery.limit(threadEvents.length):threadQuery.limit(1).maybeSingle()
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
@@ -220,7 +222,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"Notification disabled or recipient no longer active.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
      if(skipped.error)throw new Error(skipped.error.message);summary.skipped++;return;
     }
-    const smtp=smtpResult.data,thread=selectDigestThread(delivery.event_key,threadResult.data||[]),month=lossReminderThreadMonth(delivery.event_key,delivery.report_date);
+    const smtp=smtpResult.data,thread=registrationThread?selectDigestThread(delivery.event_key,threadResult.data||[]):threadResult.data,month=lossReminderThreadMonth(delivery.event_key,delivery.report_date);
     if(!smtp.smtp_host||!smtp.smtp_from||!smtp.smtp_pass)throw new Error("Company SMTP is incomplete");
     const domain=String((controlResult.data as DigestControl).config.email_domain||"");
     if(!domain||(!registrationRecipientVerified&&!delivery.recipient_email.endsWith("@"+domain))||!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(delivery.recipient_email))throw new Error("Recipient is outside configured company email domain or is invalid");
