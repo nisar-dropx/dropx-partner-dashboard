@@ -32,7 +32,11 @@ The database migration deliberately installs both controls disabled.
   workspaces. Shared/ambiguous addresses cannot be added as team recipients.
 - Recipients receive a single scoped email per edition, never duplicate manager
   and department emails. Zero pending profiles means no message.
-- The compact body shows up to 12 stations with most pendency. The Excel includes
+- The compact body shows up to 12 stations with most pendency plus an individual
+  table with names/roles, locations, registration status and pending items. It
+  shows up to 20 people, oldest first, and explicitly labels any remaining rows.
+  Submitted profiles show review/activation actions rather than asking for re-entry.
+  The Excel includes
   every authorized pending profile, station, Location Master cluster, current
   People cluster manager, status, missing fields and next action. Missing cluster
   mapping is labelled explicitly. The reminder asks managers to complete active
