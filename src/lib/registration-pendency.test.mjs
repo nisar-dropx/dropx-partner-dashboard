@@ -7,7 +7,7 @@ import {registrationRow,registrationSnapshot,uniqueRegistrationManagerEmail} fro
 import {buildRegistrationMessages} from "./registration-pendency-digest.ts";
 const rules={dropx_one:{enabled:["gender","pincode","ifsc","pf_uan","esi_no","profile_photo","is_handicapped"],required:["gender","pincode","ifsc","pf_uan","esi_no","profile_photo","is_handicapped"]}};
 const base={profile:{id:"p1",full_name:"Test <Person>",employee_code:"D001",onboarding_status:"pending",profile_completion_status:"pending",is_active:true,pincode:"100001",ifsc:"IFSC_PRESENT",is_handicapped:false,statutory_applicability:["not_applicable"],created_at:"2026-10-01T00:00:00Z"},profileType:"employee",designation:{name:"Team Lead"},station:{id:"s1",station_code:"TEST1",station_name:"Test station"},categoryRules:rules,date:"2026-10-20"};
-test("verified managers may use a personal-domain company login; ambiguous or unsafe addresses are held",()=>{
+test("manager contact metadata may retain personal email; it is not mail recipient authorization",()=>{
  assert.equal(uniqueRegistrationManagerEmail(["Manager@gmail.com","manager@gmail.com"]),"manager@gmail.com");
  assert.equal(uniqueRegistrationManagerEmail(["manager@dropxlogistics.com"]),"manager@dropxlogistics.com");
  assert.equal(uniqueRegistrationManagerEmail(["first@gmail.com","second@gmail.com"]),null);
@@ -41,7 +41,8 @@ test("recipient reports have only their own rows; empty recipients are skipped; 
  const unmapped={...first,key:"employee:p3",id:"p3",managerEmail:"",managerName:""};
  const snapshot=registrationSnapshot("2026-10-20","2026-10-20T04:00:00Z",[first,second,unmapped]);
  assert.equal(snapshot.unrouted.length,1);
- const messages=await buildRegistrationMessages(snapshot,"registration_pendency_morning","Registration | {{month}} {{year}}");
+ const verified=snapshot.recipients.map(r=>({...r,audience:"Ops",consolidated:false}));
+ const messages=await buildRegistrationMessages(snapshot,"registration_pendency_morning","Registration | {{month}} {{year}}",[],verified);
  assert.equal(messages.length,2);assert.deepEqual(messages[0].scope.profileKeys,["employee:p1"]);
  assert.match(messages[0].html,/Morning action list/);assert.doesNotMatch(messages[0].html,/IFSC_PRESENT/);
  assert.match(messages[0].html,/Test station/);
@@ -54,7 +55,7 @@ test("recipient reports have only their own rows; empty recipients are skipped; 
  assert.ok(book.Sheets["Registration pendency"]["!autofilter"]);
  const empty=registrationSnapshot("2026-10-20","2026-10-20T10:30:00Z",[]);
  assert.deepEqual(await buildRegistrationMessages(empty,"registration_pendency_afternoon","Registration | {{month}} {{year}}"),[]);
- const pm=await buildRegistrationMessages(snapshot,"registration_pendency_afternoon","Registration follow-up | {{month}} {{year}}");
+ const pm=await buildRegistrationMessages(snapshot,"registration_pendency_afternoon","Registration follow-up | {{month}} {{year}}",[],verified);
  assert.match(pm[0].html,/fresh check/);assert.match(pm[0].attachments[0].filename,/Afternoon/);
 });
 test("migration is idempotent, installs correct times disabled, and never resets existing controls",async()=>{
@@ -74,8 +75,8 @@ test("worker protects profile-level scope, schedule window and preview never sen
  const worker=await readFile(new URL("./portal-digest-delivery.ts",import.meta.url),"utf8");
  assert.match(worker,/Registration reminder window ended/);
  assert.match(worker,/recipient\.profileKeys\.includes\(key\)/);
- assert.match(worker,/registrationRecipientVerified=true/);
- assert.match(worker,/!registrationRecipientVerified&&!delivery\.recipient_email\.endsWith/);
+ assert.doesNotMatch(worker,/registrationRecipientVerified/);
+ assert.match(worker,/!delivery\.recipient_email\.endsWith/);
  const preview=await readFile(new URL("../app/api/ops-pulse/registration-email-preview/route.ts",import.meta.url),"utf8");
  assert.match(preview,/isCompanyOwner\(auth\)/);assert.doesNotMatch(preview,/export async function POST|sendMail|sendEmail/);
 });

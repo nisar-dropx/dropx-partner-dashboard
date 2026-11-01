@@ -1,4 +1,5 @@
 import type {SupabaseClient} from "@supabase/supabase-js";
+import {isDropxRegistrationEmail,loadActiveRegistrationStaff} from "./registration-recipient-policy.ts";
 
 type Profile={id:string;email:string|null;full_name:string|null;role_id:string|null;is_master_owner:boolean|null};
 type Membership={user_id:string;role_id:string};
@@ -26,7 +27,7 @@ export function resolveRegistrationSummaryRecipients(ids:string[],profiles:Profi
   const effectiveRoles=memberRoles.length?memberRoles:profile.role_id?[profile.role_id]:[];
   if(!profile.is_master_owner&&!effectiveRoles.some(id=>owners.has(id)))continue;
   const email=String(profile.email||"").trim().toLowerCase();
-  if(!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email))continue;
+  if(!isDropxRegistrationEmail(email))continue;
   // Shared/ambiguous account addresses must not receive company-wide HR data.
   if(profiles.filter(p=>String(p.email||"").trim().toLowerCase()===email).length!==1)continue;
   result.set(email,{email,name:profile.full_name||email});
@@ -37,10 +38,12 @@ export function resolveRegistrationSummaryRecipients(ids:string[],profiles:Profi
 export async function loadRegistrationSummaryRecipients(db:SupabaseClient,company:string,config:Record<string,unknown>){
  const ids=Array.isArray(config.consolidated_owner_user_ids)?config.consolidated_owner_user_ids.filter((id):id is string=>typeof id==="string"&&/^[0-9a-f-]{36}$/i.test(id)):[];
  if(!ids.length)return [];
- const [profiles,memberships,roles]=await Promise.all([
+ const date=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+ const [profiles,memberships,roles,activeStaffUserIds]=await Promise.all([
   activeRows<Profile>(offset=>db.from("profiles").select("id,email,full_name,role_id,is_master_owner").eq("company_id",company).eq("is_active",true).order("id").range(offset,offset+999)),
   activeRows<Membership>(offset=>db.from("company_product_memberships").select("user_id,role_id").eq("company_id",company).eq("product_code","operations").eq("is_active",true).in("user_id",ids).order("id").range(offset,offset+999)),
-  activeRows<Role>(offset=>db.from("user_roles").select("id,code").eq("company_id",company).eq("is_active",true).order("id").range(offset,offset+999))
+  activeRows<Role>(offset=>db.from("user_roles").select("id,code").eq("company_id",company).eq("is_active",true).order("id").range(offset,offset+999)),
+  loadActiveRegistrationStaff(db,company,date)
  ]);
- return resolveRegistrationSummaryRecipients(ids,profiles,memberships,roles);
+ return resolveRegistrationSummaryRecipients(ids.filter(id=>activeStaffUserIds.has(id)),profiles,memberships,roles);
 }

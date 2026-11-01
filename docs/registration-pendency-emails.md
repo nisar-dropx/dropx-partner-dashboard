@@ -18,12 +18,13 @@ The database migration deliberately installs both controls disabled.
 - Required/optional missing fields are separate. PF/ESI follow statutory
   applicability. Attachment contains presence/status only, never the actual
   government identifiers, bank account details or document files.
-- Routing uses the effective primary reporting relationship first, then the
-  station's canonical Cluster/City Manager or AOM. Explicit station-scoped
-  operations manager membership is the final fallback. Blanket admin access
-  is not a fallback recipient. Ambiguous/missing/inactive managers are held.
-- Ops managers receive both workspaces for their assigned locations and canonical
-  reportees. Blanket Ops access alone does not subscribe a user company-wide.
+- Station/store reminders use the official mailbox recorded in Location Master,
+  backed by an active Location account and explicit station permissions. A shared
+  mailbox receives one combined report for its mapped stations. Station managers'
+  individual addresses are not fallback recipients; missing mailbox mappings are held.
+- Active Ops leadership and cluster/area managers receive both workspaces for
+  their assigned locations and canonical reportees. Blanket Ops access alone
+  does not subscribe a user company-wide.
 - With `team_recipients_enabled`, active HR roles receive **People only** and
   Finance/Accounts roles receive **Workforce only**, within their current location
   permissions. Department rules override direct-report and Ops-membership routing.
@@ -44,9 +45,14 @@ The database migration deliberately installs both controls disabled.
   grants a role or broadens any manager's report. The summary includes unrouted
   profiles so owner follow-up can repair missing manager mappings; its Excel
   preserves each profile's actual manager. Zero company-wide pendency sends no mail.
-- Managers use their unique active HRMS-linked account email, including personal
-  domains. The reporting relationship and active company identity authorize the
-  recipient. Other digest types retain their company-domain restriction.
+- Every recipient must use an official `@dropxlogistics.com` address. Individual
+  recipients must have a unique active People identity and current engagement
+  linked to an active employment record. Offboarding/offboarded/deleted records
+  are excluded even if their login and engagement still say active. Location
+  service mailboxes instead require the active account and explicit mapping above.
+- These checks run both when building the report and immediately before SMTP.
+  Already queued personal addresses, inactive staff and revoked location scopes
+  cannot bypass the current policy. No employment or account record is changed.
 
 ## Delivery safeguards
 
@@ -78,5 +84,5 @@ is the immediate rollback; it does not remove history or affect other digests.
 Tests:
 
 ```sh
-node --experimental-strip-types --test src/lib/registration-pendency.test.mjs src/lib/registration-summary-recipients.test.mjs src/lib/registration-mail-recipients.test.mjs src/lib/adhoc-digest.test.mjs
+node --experimental-strip-types --test src/lib/registration-pendency.test.mjs src/lib/registration-summary-recipients.test.mjs src/lib/registration-mail-recipients.test.mjs src/lib/registration-recipient-policy.test.mjs src/lib/registration-delivery.test.mjs src/lib/adhoc-digest.test.mjs
 ```
