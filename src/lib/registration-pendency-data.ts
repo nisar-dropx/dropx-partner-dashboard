@@ -15,7 +15,7 @@ async function all<T=Data>(db:SupabaseClient,company:string,table:string,columns
   throw Error(`${table} source exceeds report limit; no partial report sent.`);
 }
 const fields="id,full_name,date_of_join,location_id,is_active,created_at,updated_at,deleted_at,statutory_applicability,gender,date_of_birth,aadhaar_number,pan_number,eshram_uan,father_name,blood_group,is_handicapped,address,state_code,landmark,bank_account_no,pf_uan,pf_account_no,esi_no,driving_license_no,driving_license_exp_date,vehicle_reg_no,vehicle_reg_exp_date,vehicle_insurance_exp_date,vehicle_pollution_exp_date,emergency_contact_number,emergency_contact_name,emergency_contact_relation,aadhaar_front_path,aadhaar_back_path,pan_upload_path,dl_front_path,dl_back_path,profile_photo_path";
-type Station={id:string;station_code:string;station_name:string|null;hide_from_location_list:boolean|null};
+type Station={id:string;station_code:string;station_name:string|null;hide_from_location_list:boolean|null;cluster_name:string|null;cluster:string|null};
 type Designation={id:string;name:string;code:string;profile_field_rules:unknown;profile_destination:string|null};
 type Person={id:string;display_name:string;status:string};
 type Engagement={id:string;person_id:string;employee_id:string|null;contractor_id:string|null;workforce_id:string|null;status:string;start_date:string|null;end_date:string|null};
@@ -33,7 +33,7 @@ export async function loadRegistrationPendency(db:SupabaseClient,company:string,
     all(db,company,"employees",`${fields},employee_code,designation_id,profile_completion_status,people_lifecycle_status,pincode,ifsc`,{deleted_at:null}),
     all(db,company,"contractors",`${fields},dropx_id,designation,onboarding_status,people_lifecycle_status,postal_pin,ifsc_code`,{deleted_at:null}),
     all(db,company,"workforce",`${fields},dropx_id,designation,designation_id,onboarding_status,lifecycle_status,postal_pin,ifsc_code,migration_state,source_profile_type,source_profile_id`,{deleted_at:null}),
-    all<Station>(db,company,"stations","id,station_code,station_name,hide_from_location_list",{is_active:true}),
+    all<Station>(db,company,"stations","id,station_code,station_name,hide_from_location_list,cluster_name,cluster",{is_active:true}),
     all<Designation>(db,company,"designations","id,name,code,profile_field_rules,profile_destination",{is_active:true}),
     all<{id:string;code:string;profile_field_rules:unknown}>(db,company,"workforce_categories","id,code,profile_field_rules",{is_active:true}),
     all<{id:string;profile_type:string;account_id:string;draft_data:unknown;file_paths:unknown;updated_at:string}>(db,company,"mob_app_registration_drafts","id,profile_type,account_id,draft_data,file_paths,updated_at"),
@@ -101,6 +101,10 @@ export async function loadRegistrationPendency(db:SupabaseClient,company:string,
       const draft=draftsByKey.get(`${type}:${profile.id}`)||(type==="workforce"?draftsByKey.get(`field_executive:${profile.id}`):null);
       const row=registrationRow({profile,profileType:type,designation,categoryRules:category.profile_field_rules,station,draft,date});
       if(!row)continue;
+      row.cluster=station.cluster_name?.trim()||station.cluster?.trim()||"Not mapped";
+      const graph=hierarchy.byLocation.get(station.id);
+      row.clusterManager=graph?.hasClusterManagerConflict?"Mapping needs review":
+        [...new Set(graph?.clusterManagers.map(p=>p.name)||[])].join("; ")||"Not mapped";
       const ownPerson=own?engagementById.get(own.engagement_id)?.person_id:null;
       const direct=own?relationships.filter(r=>r.subject_assignment_id===own.id&&current(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]:null;
       const managerAssignment=direct?assignmentById.get(direct.manager_assignment_id):null;

@@ -10,6 +10,7 @@ export type RegistrationRow = {
   requiredFilled: number; requiredTotal: number; groups: string; action: string;
   joinedAt: string; updatedAt: string; draftAt: string; ageDays: number | null;
   managerName: string; managerEmail: string; href: string;
+  cluster?: string; clusterManager?: string;
 };
 export type RegistrationRecipient = { email: string; name: string; profileKeys: string[] };
 export type RegistrationSnapshot = { date: string; checkedAt: string; rows: RegistrationRow[]; recipients: RegistrationRecipient[]; unrouted: RegistrationRow[] };
