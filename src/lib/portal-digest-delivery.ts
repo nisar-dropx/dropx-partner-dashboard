@@ -1,3 +1,5 @@
+import {ADVANCE_FINANCE_EVENT} from "./advance-finance-digest-model";
+import {refreshAdvanceFinanceDelivery} from "./advance-finance-digest";
 import {lossReminderStage,lossReminderInWindow,lossReminderThreadMonth,lossReminderThreadEvent,lossReminderScheduleTime} from './loss-reminder-policy';
 import {digestThreadEvents,selectDigestThread,registrationThreadEvent,registrationMessageSuffix} from './digest-thread-policy';
 import "server-only";
@@ -100,7 +102,8 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
     const threadEvents=digestThreadEvents(delivery.event_key);
     const registrationThread=delivery.event_key.startsWith('registration_pendency_');
-    const threadQuery=db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).eq("report_month",lossReminderThreadMonth(delivery.event_key,delivery.report_date)).order("last_sent_at",{ascending:false});
+    const threadQuery=db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).order("last_sent_at",{ascending:false});
+    if(delivery.event_key!==ADVANCE_FINANCE_EVENT)threadQuery.eq("report_month",lossReminderThreadMonth(delivery.event_key,delivery.report_date));
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
@@ -219,6 +222,19 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     if(!digestEnabled(controlResult.data as DigestControl)||!smtpResult.data.is_enabled||!profileResult.data?.length) {
      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"Notification disabled or recipient no longer active.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
      if(skipped.error)throw new Error(skipped.error.message);summary.skipped++;return;
+    }
+    if(delivery.event_key===ADVANCE_FINANCE_EVENT) {
+     if(dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw Error("Advance queue edition is stale; next daily queue will include outstanding requests.");
+     const saved=await db.from("portal_digest_deliveries").select("scope_summary").eq("id",delivery.id).single();
+     if(saved.error)throw Error(saved.error.message);
+     const fresh=await refreshAdvanceFinanceDelivery(db,delivery.company_id,delivery.report_date,delivery.recipient_email,saved.data.scope_summary,String(controlResult.data.config.email_domain||""),delivery.subject);
+     if(!fresh){
+      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"All advances completed or reassigned before delivery.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
+      if(skipped.error)throw Error(skipped.error.message);summary.skipped++;return;
+     }
+     delivery.html=fresh.html;delivery.body=fresh.text;
+     const refreshed=await db.from("portal_digest_deliveries").update({html:fresh.html,body:fresh.text,scope_summary:fresh.scope}).eq("id",delivery.id).eq("status","sending");
+     if(refreshed.error)throw Error(refreshed.error.message);
     }
     const smtp=smtpResult.data,thread=registrationThread?selectDigestThread(delivery.event_key,threadResult.data||[]):threadResult.data,month=lossReminderThreadMonth(delivery.event_key,delivery.report_date);
     if(!smtp.smtp_host||!smtp.smtp_from||!smtp.smtp_pass)throw new Error("Company SMTP is incomplete");
