@@ -81,7 +81,7 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   assert.equal(pivot.columnTotals["2026-10-29"], 16);
 
   const sheets = stationBoardSheets(
-    { asOf: "", businessDate: "2026-10-29", dates: [], stations, run: null },
+    { asOf: "", refreshStartedAt: null, refreshFinishedAt: null, businessDate: "2026-10-29", dates: [], stations, run: null },
     "full",
     stations,
   );
@@ -146,7 +146,7 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   });
   assert.deepEqual(blankState.ageingByStateWeek, { Inducted: { week45: { count: 0, amount: 12.35 } } });
   const ageingSheets = stationBoardSheets(
-    { asOf: "", businessDate: "2026-10-30", dates: [], stations: ageingStations, run: null },
+    { asOf: "", refreshStartedAt: null, refreshFinishedAt: null, businessDate: "2026-10-30", dates: [], stations: ageingStations, run: null },
     "ageing",
     ageingStations,
   );

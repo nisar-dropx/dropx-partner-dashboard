@@ -982,6 +982,10 @@ export type LoadFlashBoardStation = {
 
 export type LoadFlashBoardNetwork = {
   asOf: string;
+  /** When the latest Refresh 7d run started (clear + pull). */
+  refreshStartedAt: string | null;
+  /** When the main Refresh 7d pull window finished (retries may still follow). */
+  refreshFinishedAt: string | null;
   businessDate: string;
   dates: string[];
   stations: LoadFlashBoardStation[];
@@ -1188,8 +1192,14 @@ export async function fetchLoadFlashBoard(date?: string, stations?: string[]): P
     });
   }
   const list = Array.isArray(raw.stations) ? raw.stations : [];
+  const startedRaw = raw.refreshStartedAt == null ? null : String(raw.refreshStartedAt);
+  const finishedRaw = raw.refreshFinishedAt == null ? null : String(raw.refreshFinishedAt);
   return {
     asOf: String(raw.asOf ?? new Date().toISOString()),
+    refreshStartedAt:
+      startedRaw && !Number.isNaN(Date.parse(startedRaw)) ? startedRaw : null,
+    refreshFinishedAt:
+      finishedRaw && !Number.isNaN(Date.parse(finishedRaw)) ? finishedRaw : null,
     businessDate: String(raw.businessDate ?? date ?? ""),
     dates: Array.isArray(raw.dates) ? raw.dates.map((item) => String(item).slice(0, 10)) : [],
     stations: list.map((item) => {

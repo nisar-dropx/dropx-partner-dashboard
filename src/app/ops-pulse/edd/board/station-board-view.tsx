@@ -442,16 +442,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const pivot = useMemo(() => eddPivot(stations, dates), [stations, dates]);
   const ageingWeeks = useMemo(() => collectAgeingWeeks(stations), [stations]);
   const ageing = useMemo(() => ageingPivot(stations, ageingMode, ageingWeeks), [stations, ageingMode, ageingWeeks]);
-  /** Latest Amazon fetch across stations — not the page/API response time. */
-  const fetchedAt = useMemo(() => {
-    let latest: string | null = null;
+  /** When Refresh 7d began — falls back to earliest station save if meta missing. */
+  const refreshStartedAt = useMemo(() => {
+    const fromMeta = payload.refreshStartedAt;
+    if (fromMeta && !Number.isNaN(Date.parse(fromMeta))) return fromMeta;
+    let earliest: string | null = null;
     for (const row of payload.stations) {
       const at = row.fetchedAt;
       if (!at || Number.isNaN(Date.parse(at))) continue;
-      if (!latest || Date.parse(at) > Date.parse(latest)) latest = at;
+      if (!earliest || Date.parse(at) < Date.parse(earliest)) earliest = at;
     }
-    return latest;
-  }, [payload.stations]);
+    return earliest;
+  }, [payload.refreshStartedAt, payload.stations]);
   const selected = useMemo(
     () => (openStation ? stations.find((row) => row.stationCode === openStation) ?? payload.stations.find((row) => row.stationCode === openStation) ?? null : null),
     [openStation, stations, payload.stations],
@@ -878,7 +880,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           <h2>Station board</h2>
           <p>
             {formatOpsDate(payload.businessDate, payload.businessDate)}
-            {fetchedAt ? ` · fetched ${formatOpsDateTime(fetchedAt, fetchedAt)}` : ""}
+            {refreshStartedAt ? ` · started ${formatOpsDateTime(refreshStartedAt, refreshStartedAt)}` : ""}
             {run?.status === "running" ? " · Ops Live refresh running" : ""}
           </p>
         </div>
