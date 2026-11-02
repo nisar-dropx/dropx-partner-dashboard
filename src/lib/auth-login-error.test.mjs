@@ -8,6 +8,7 @@ test("friendlyAuthLoginError maps PKCE verifier missing text", () => {
   const friendly = friendlyAuthLoginError(raw);
   assert.match(friendly, /Chrome or Safari/i);
   assert.doesNotMatch(friendly, /@supabase\/ssr/);
+  assert.doesNotMatch(friendly, /dashboard\.dropxlogistics\.com/);
 });
 
 test("friendlyAuthLoginError leaves other auth errors unchanged", () => {

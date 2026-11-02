@@ -1,5 +1,5 @@
 const PKCE_VERIFIER_MISSING =
-  "Google sign-in could not finish in this browser. Open dashboard.dropxlogistics.com in Chrome or Safari (not WhatsApp, Instagram, or another in-app browser), then tap Sign in with Google again.";
+  "Google sign-in could not finish in this browser. Open the same site again in Chrome or Safari (not WhatsApp, Instagram, or another in-app browser), then tap Sign in with Google again.";
 
 /**
  * Map raw Supabase Auth errors to instructions operators can follow.

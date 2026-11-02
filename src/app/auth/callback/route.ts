@@ -202,9 +202,17 @@ async function ensureAccessPagesForLogin(companyId: string | null | undefined) {
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const errorDescription = request.nextUrl.searchParams.get("error_description");
-  const loginUrl = new URL("/login", request.url);
   const callbackResponse = NextResponse.redirect(new URL("/dashboard", request.url));
   const returnToOps = request.cookies.get("dropx_ops_auth_return")?.value === "1";
+  // Google always returns to the dashboard callback. Failed Ops logins must bounce
+  // back to ops.dropxlogistics.com/login — otherwise the retry starts on Dashboard
+  // and never sets dropx_ops_auth_return again.
+  const loginUrl = new URL(
+    "/login",
+    returnToOps
+      ? (process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com")
+      : request.url
+  );
   const supabase = createServerSupabaseClient(callbackResponse);
 
   try {
