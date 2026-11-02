@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { sendPaymentApprovalReminder, sendPaymentLocationNotification } from "@/lib/payment-email-notifications";
-import { sendPaymentAdvanceReminder } from "@/lib/payment-advance-email-notifications";
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { isPaymentProcessingStage } from "@/lib/payment-mail-delivery";
@@ -51,13 +50,12 @@ async function processReminders(request: Request, catchUp: boolean) {
   const recovery = await supabaseAdmin.rpc("reconcile_adhoc_da_recoveries");
   if (recovery.error) console.error("Adhoc DA recovery reconciliation failed", recovery.error.message);
 
-  const [paymentDue, advanceDue, detailsDue, processedDue] = await Promise.all([
+  const [paymentDue, detailsDue, processedDue] = await Promise.all([
     supabaseAdmin.from("payment_requests").select("id, company_id, status, approval_status, current_approver_role_id, current_approver_role_ids, payment_process_role_ids")
       .not("current_approver_user_id", "is", null)
       .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
       .or(`email_next_reminder_at.is.null,email_next_reminder_at.lte.${new Date().toISOString()}`)
       .order("email_next_reminder_at", { ascending: true, nullsFirst: true }).limit(200),
-    supabaseAdmin.from("hr_pay_advance_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20),
     supabaseAdmin.from("payment_requests")
       .select("id,company_id,amount,payment_mode,payment_portal,payment_reference,bank_account_no,ifsc,account_holder_name")
       .in("approval_status", ["FINAL_APPROVED", "final_approved"])
@@ -72,25 +70,21 @@ async function processReminders(request: Request, catchUp: boolean) {
       .order("updated_at", { ascending: true })
       .limit(100)
   ]);
-  if (paymentDue.error || advanceDue.error || detailsDue.error || processedDue.error) {
-    return NextResponse.json({ error: paymentDue.error?.message ?? advanceDue.error?.message ?? detailsDue.error?.message ?? processedDue.error?.message }, { status: 500 });
+  if (paymentDue.error || detailsDue.error || processedDue.error) {
+    return NextResponse.json({ error: paymentDue.error?.message ?? detailsDue.error?.message ?? processedDue.error?.message }, { status: 500 });
   }
 
-  // Interleave the two tables (rather than draining payment_requests before
-  // ever starting payment_advance_requests) so a large batch on one table
-  // can never starve the other within this function's time budget - if the
-  // budget runs out, both tables have made partial progress, not just one.
-  const queue: Array<{ kind: "payment" | "advance" | "details" | "processed"; companyId: string; requestId: string }> = [];
+  // Advance reminders are owned by the shared People approval mail queue.
+  // Interleave payment approval, beneficiary details and processed receipts.
+  const queue: Array<{ kind: "payment" | "details" | "processed"; companyId: string; requestId: string }> = [];
   const payments = (paymentDue.data ?? []).filter(row =>
     isPendingPaymentApproval(row.status, row.approval_status) && !isPaymentProcessingStage(row)
   );
-  const advances = catchUp ? [] : advanceDue.data ?? [];
   const detailRequests = (detailsDue.data ?? []).filter((row) => !hasSubmittedPaymentDetails(row));
   const processedRequests = processedDue.data ?? [];
-  const maxLength = Math.max(payments.length, advances.length, detailRequests.length, processedRequests.length);
+  const maxLength = Math.max(payments.length, detailRequests.length, processedRequests.length);
   for (let index = 0; index < maxLength; index += 1) {
     if (payments[index]) queue.push({ kind: "payment", companyId: payments[index].company_id, requestId: payments[index].id });
-    if (advances[index]) queue.push({ kind: "advance", companyId: advances[index].company_id, requestId: advances[index].id });
     if (detailRequests[index]) queue.push({ kind: "details", companyId: detailRequests[index].company_id, requestId: detailRequests[index].id });
     if (processedRequests[index]) queue.push({ kind: "processed", companyId: processedRequests[index].company_id, requestId: processedRequests[index].id });
   }
@@ -103,9 +97,7 @@ async function processReminders(request: Request, catchUp: boolean) {
     if (Date.now() > deadline) break;
     const result = item.kind === "payment"
       ? await sendPaymentApprovalReminder(item.companyId, item.requestId, { catchUp })
-      : item.kind === "advance"
-        ? await sendPaymentAdvanceReminder(item.companyId, item.requestId)
-        : await sendPaymentLocationNotification({
+      : await sendPaymentLocationNotification({
           companyId: item.companyId,
           eventType: item.kind === "processed" ? "payment_processed" : "payment_details_required",
           requestId: item.requestId
@@ -115,5 +107,5 @@ async function processReminders(request: Request, catchUp: boolean) {
   }
 
   console.info("Payment reminders completed", JSON.stringify({ sent, skipped, queued: queue.length, catchUp, reconciliation, results }));
-  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length + detailRequests.length + processedRequests.length, reconciliation, recovery: recovery.error ? { error: recovery.error.message } : recovery.data, results });
+  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + detailRequests.length + processedRequests.length, reconciliation, recovery: recovery.error ? { error: recovery.error.message } : recovery.data, results });
 }

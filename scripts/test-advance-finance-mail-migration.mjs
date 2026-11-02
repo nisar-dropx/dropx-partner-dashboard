@@ -1,0 +1,44 @@
+import {PGlite} from '@electric-sql/pglite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+await db.exec(`
+create role anon;create role authenticated;create role service_role;
+create table companies(id uuid primary key);
+create table profiles(id uuid primary key,company_id uuid,full_name text,email text,is_active boolean);
+create table stations(id uuid primary key,company_id uuid,station_code text);
+create table payment_requests(id uuid primary key,company_id uuid,status text,paid_at timestamptz,processed_at timestamptz);
+create table hr_pay_advance_requests(id uuid primary key,company_id uuid,request_number text,worker_name text,worker_code text,requested_amount numeric,approved_amount numeric,reason text,requested_at timestamptz default now(),payment_request_id uuid,location_id uuid,status text,disbursed_at timestamptz,email_next_reminder_at timestamptz);
+create table hr_pay_advance_steps(id uuid primary key,company_id uuid,request_id uuid,step_type text,step_order int,status text,approver_user_id uuid,updated_at timestamptz default now());
+create table hr_approval_email_settings(company_id uuid primary key,is_enabled boolean,workflows text[]);
+create table email_notification_settings(company_id uuid,is_enabled boolean,smtp_from text);
+create table hr_approval_email_threads(id uuid primary key default gen_random_uuid(),company_id uuid,workflow text,request_id uuid,step_key text,recipient_user_id uuid,recipient_email text,recipient_name text,request_label text,request_summary text,status text default 'active',subject text,root_message_id text,last_message_id text,send_count int default 0,next_send_at timestamptz default now(),lease_token uuid,lease_until timestamptz,updated_at timestamptz default now(),unique(company_id,workflow,request_id,step_key,recipient_user_id,recipient_email));
+create table portal_notification_controls(company_id uuid,portal text,event_key text,state text,subject_template text,config jsonb,primary key(company_id,portal,event_key));
+create view hr_pending_manager_approval_emails as select r.company_id,'pay_advance'::text workflow,r.id request_id,s.id::text step_key,s.approver_user_id,p.email recipient_email,p.full_name recipient_name,p.is_active recipient_active,r.request_number request_label,'Amount'::text request_summary from hr_pay_advance_requests r join hr_pay_advance_steps s on s.request_id=r.id and s.company_id=r.company_id join profiles p on p.id=s.approver_user_id and p.company_id=r.company_id where r.status='pending' and s.status='pending';
+`);
+const company='00000000-0000-0000-0000-000000000001',manager='00000000-0000-0000-0000-000000000002',finance='00000000-0000-0000-0000-000000000003';
+const id=n=>'00000000-0000-0000-0000-'+String(n).padStart(12,'0');
+await db.query(`insert into companies values($1);`,[company]);
+for(const [uid,name] of [[manager,'Manager'],[finance,'Finance']])await db.query('insert into profiles values($1,$2,$3,$4,true)',[uid,company,name,name.toLowerCase()+'@example.com']);
+await db.query(`insert into hr_approval_email_settings values($1,true,ARRAY['pay_advance']);`,[company]);
+await db.query(`insert into email_notification_settings values($1,true,'notifications@example.com')`,[company]);
+for(const [n,type,status] of [[10,'manager','pending'],[11,'finance','pending'],[12,'finance','approved']]){
+ await db.query(`insert into hr_pay_advance_requests(id,company_id,request_number,worker_name,requested_amount,approved_amount,status,email_next_reminder_at) values($1,$2,$3,'Worker',2000,1800,$4,now())`,[id(n),company,'ADV-'+n,status]);
+ await db.query(`insert into hr_pay_advance_steps(id,company_id,request_id,step_type,step_order,status,approver_user_id) values($1,$2,$3,$4,1,$5,$6)`,[id(n+100),company,id(n),type,status,type==='finance'?finance:manager]);
+}
+const migration=readFileSync(new URL('../supabase/migrations/20261102062806_advance_finance_daily_digest.sql',import.meta.url),'utf8');
+await db.exec(migration);await db.exec(migration);
+assert.equal((await db.query('select * from hr_pending_manager_approval_emails')).rows.length,1,'Finance excluded from individual emails');
+assert.equal((await db.query('select * from hr_advance_finance_mail_queue')).rows.length,2,'approval and awaiting-payment included');
+assert.equal((await db.query('select * from hr_pay_advance_requests where email_next_reminder_at is not null')).rows.length,0);
+assert.equal((await db.query('select config from portal_notification_controls')).rows[0].config.delivery_ready,false);
+assert.equal((await db.query('select * from hr_claim_initial_advance_email($1,$2)',[company,id(10)])).rows.length,1);
+assert.equal((await db.query('select * from hr_claim_initial_advance_email($1,$2)',[company,id(10)])).rows.length,0,'lease stops duplicate sender');
+assert.equal((await db.query('select * from hr_claim_initial_advance_email($1,$2)',[company,id(11)])).rows.length,0,'no finance immediate email');
+await db.exec("update hr_approval_email_threads set lease_until=null,lease_token=null,send_count=1");
+assert.equal((await db.query('select * from hr_claim_initial_advance_email($1,$2)',[company,id(10)])).rows.length,0,'sent initial cannot be resent');
+await db.query("update hr_pay_advance_requests set disbursed_at=now() where id=$1",[id(12)]);
+assert.equal((await db.query('select * from hr_advance_finance_mail_queue')).rows.length,1,'paid advances removed');
+assert.equal((await db.query("select has_function_privilege('authenticated','hr_claim_initial_advance_email(uuid,uuid)','EXECUTE') allowed")).rows[0].allowed,false);
+assert.equal((await db.query("select has_table_privilege('authenticated','hr_advance_finance_mail_queue','SELECT') allowed")).rows[0].allowed,false);
+await db.close();console.log('Advance mail migration: twice-applied, scope, cutoff source, leases and permissions passed.');

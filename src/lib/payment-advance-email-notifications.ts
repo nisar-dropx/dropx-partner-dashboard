@@ -1,3 +1,4 @@
+import { sendInitialAdvanceApproval } from "./advance-approval-mail";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { approvalEmailCard } from "@/lib/approval-email-card";
@@ -46,9 +47,9 @@ async function currentApproverEmails(companyId: string, paymentRequestId: string
   const hr = await supabaseAdmin.from("hr_pay_advance_requests").select("id")
     .eq("company_id", companyId).or(`id.eq.${paymentRequestId},and(external_source.eq.payment_advance_requests,external_reference.eq.${paymentRequestId})`).maybeSingle();
   if (hr.error || !hr.data) return [];
-  const step = await supabaseAdmin.from("hr_pay_advance_steps").select("approver_user_id")
+  const step = await supabaseAdmin.from("hr_pay_advance_steps").select("approver_user_id,step_type")
     .eq("company_id", companyId).eq("request_id", hr.data.id).eq("status", "pending").order("step_order").limit(1).maybeSingle();
-  if (step.error || !step.data?.approver_user_id) return [];
+  if (step.error || !step.data?.approver_user_id || step.data.step_type === "finance") return [];
   const profile = await supabaseAdmin.from("profiles").select("email").eq("company_id", companyId).eq("id", step.data.approver_user_id).maybeSingle();
   return uniqueEmails([profile.data?.email]);
 }
@@ -174,11 +175,8 @@ async function companyName(companyId: string) {
 
 export async function sendPaymentAdvanceRequestNotification(companyId: string, requestId: string): Promise<PaymentAdvanceEmailResult> {
   try {
-    const request = await loadRequest(companyId, requestId);
-    if (!request) return skipped("Advance request not found.");
-    const to = await currentApproverEmails(companyId, requestId);
-    const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "submitted");
-    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: ["pending", "submitted", "in_review"].includes(request.status) });
+    const to = await sendInitialAdvanceApproval(companyId, requestId);
+    return to.length ? { sent: true, to, cc: [] } : skipped("Already queued or Finance receives the daily 5 p.m. queue.");
   } catch (error) {
     console.error("Advance request submission email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request submission email failed.");
@@ -211,19 +209,7 @@ export async function sendPaymentAdvanceWithdrawalNotification(companyId: string
   }
 }
 
-export async function sendPaymentAdvanceReminder(companyId: string, requestId: string): Promise<PaymentAdvanceEmailResult> {
-  try {
-    const request = await loadRequest(companyId, requestId);
-    if (!request) return skipped("Advance request not found.");
-    if (!["pending", "submitted", "in_review"].includes(request.status)) {
-      await supabaseAdmin!.from(request.table).update({ email_next_reminder_at: null }).eq("company_id", companyId).eq("id", request.id);
-      return skipped("This advance request is no longer awaiting approval.");
-    }
-    const to = await currentApproverEmails(companyId, requestId);
-    const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "reminder");
-    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: true });
-  } catch (error) {
-    console.error("Advance request reminder email failed", error);
-    return skipped(error instanceof Error ? error.message : "Advance request reminder email failed.");
-  }
+/** People owns the leased reminder queue; never restart the legacy Ops timer. */
+export async function sendPaymentAdvanceReminder(_companyId: string, _requestId: string): Promise<PaymentAdvanceEmailResult> {
+  return skipped("Advance reminders are delivered by the shared approval email queue.");
 }
