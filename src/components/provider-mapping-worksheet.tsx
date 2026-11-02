@@ -671,7 +671,9 @@ export function ProviderMappingWorksheet({
                 <div className="mapping-field mapping-payment-method-select">
                   <span className="mapping-field-label">Payment method</span>
                   <SearchableSelect
+                    allowClear={false}
                     disabled={!canEdit}
+                    maxOptions={Math.max(50, paymentMethodOptions.length)}
                     name={`rows[${index}][payment_method_id]`}
                     onValueChange={(value) => updateRow(index, "paymentMethodId", value)}
                     options={paymentMethodOptions}

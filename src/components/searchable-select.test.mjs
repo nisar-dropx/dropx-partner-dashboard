@@ -71,3 +71,26 @@ test("allowClear defaults to enabled", () => {
   assert.equal(ui.one(node => node.props?.type === "hidden").props.value, "");
   assert.deepEqual(changes, [""]);
 });
+
+test("selected option stays visible when it falls outside maxOptions", () => {
+  const many = Array.from({ length: 40 }, (_, index) => ({
+    value: `m${index}`,
+    label: `Method ${String(index).padStart(2, "0")}`,
+    helper: `CODE${index}`
+  }));
+  const ui = selectHarness({
+    name: "payment_method",
+    options: many,
+    value: "m35",
+    placeholder: "Search payment method",
+    maxOptions: 30,
+    allowClear: false
+  });
+  ui.one(node => node.props?.["aria-label"] === "Open options").props.onClick();
+  ui.render();
+  const labels = ui.all(node => node.props?.className?.includes("searchable-option"))
+    .map(node => node.props.children?.[0]?.props?.children);
+  assert.equal(labels[0], "Method 35");
+  assert.equal(labels.length, 30);
+  assert.equal(ui.all(node => node.props?.["aria-label"] === "Clear selected option").length, 0);
+});

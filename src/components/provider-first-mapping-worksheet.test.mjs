@@ -808,6 +808,8 @@ test('worksheet search defers filtering and keeps worker-option scans out of row
   assert.doesNotMatch(renderedRows, /workerOptions\.filter\(/);
   assert.match(renderedRows, /maxOptions=\{50\}/);
   assert.doesNotMatch(source, /maxOptions=\{5000\}/);
+  assert.match(renderedRows, /allowClear=\{false\}/);
+  assert.match(renderedRows, /maxOptions=\{Math\.max\(50, paymentOptions\.length\)\}/);
 });
 
 test('current month uses IST at month and year boundaries and is passed by the server', () => {

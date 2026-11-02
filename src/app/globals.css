@@ -22880,7 +22880,8 @@ td strong,
 
 .provider-first-row .mapping-payment-method-select .searchable-input {
   min-height: 34px;
-  padding: 0 5px 0 9px;
+  /* Leave room for the clear + chevron controls so the selected method stays readable. */
+  padding: 0 58px 0 9px;
 }
 
 .provider-first-row .searchable-clear,

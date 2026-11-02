@@ -20,7 +20,7 @@ import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 
 import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 
-type PaymentMethodRow = { id: string; code: string; name: string; is_active: boolean; production_threshold_config: unknown; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number }> | null };
+type PaymentMethodRow = { id: string; code: string; name: string; is_active: boolean; production_threshold_config: unknown; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number; is_active?: boolean }> | null };
 type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; production_threshold_config: unknown; effective_from: string; effective_to: string | null; status: string; reason: string | null; updated_at: string };
 type ProviderMemberSource = { provider_employee_id: unknown; provider_employee_name: unknown; station_code: unknown; work_date: unknown; shipment_months?: string[]; outbound_months?: string[] };
 
@@ -57,7 +57,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     readAllRows(supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation, provider_employee_id").eq("company_id", companyId).is("deleted_at", null).order("id")),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason, updated_at").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
-    supabaseAdmin.from("payment_methods").select("id, code, name, is_active, production_threshold_config, payment_method_components(component_code, component_type, label, sort_order)").eq("company_id", companyId).order("code"),
+    supabaseAdmin.from("payment_methods").select("id, code, name, is_active, production_threshold_config, payment_method_components(component_code, component_type, label, sort_order, is_active)").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
   const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error;
@@ -118,7 +118,20 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const designationByName = new Map((designationsResult.data ?? []).flatMap((designation) => [designation.name, designation.code].map((value) => [String(value ?? "").trim().toLowerCase(), designation] as const)));
   const stationLabelById = new Map(stations.map((station) => [station.id, station.station_code]));
   const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
-    .map((method) => ({ id: method.id, code: method.code, name: method.name, isActive: method.is_active, productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config), components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
+    .map((method) => ({
+      id: method.id,
+      code: method.code,
+      name: method.name,
+      isActive: method.is_active,
+      productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config),
+      // Live mapping edits only collect active components. History still uses the
+      // full component list below so retired rate fields remain readable.
+      components: (method.payment_method_components ?? [])
+        .filter((component) => component.is_active !== false)
+        .slice()
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((component) => ({ code: component.component_code, label: component.label, type: component.component_type }))
+    }));
   const rawMethodById = new Map(((methodsResult.data ?? []) as PaymentMethodRow[]).map((method) => [method.id, method]));
   const historyByMember = new Map<string, PaymentAllocationHistoryEntry[]>();
   const historyByProviderMember = new Map<string, PaymentAllocationHistoryEntry[]>();

@@ -250,7 +250,8 @@ export async function resolveConnectActorUserId(account: ConnectActorAccount): P
   return resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
 }
 
-async function personIdForAccount(account: ConnectActorAccount): Promise<string | null> {
+/** Active People person for the selected One account (People login or workforce engagement). */
+export async function resolveConnectActorPersonId(account: ConnectActorAccount): Promise<string | null> {
   if (account.profileType === "user") {
     const link = await db().from("hr_user_person_links").select("person_id,status")
       .eq("company_id", account.companyId).eq("user_id", account.id).eq("status", "active")
@@ -270,6 +271,10 @@ async function personIdForAccount(account: ConnectActorAccount): Promise<string 
     .eq("status", "active").limit(1).maybeSingle();
   if (engagement.error || !engagement.data?.person_id) return null;
   return engagement.data.person_id;
+}
+
+async function personIdForAccount(account: ConnectActorAccount): Promise<string | null> {
+  return resolveConnectActorPersonId(account);
 }
 
 /**

@@ -43,12 +43,15 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
     const term = query.trim().toLowerCase();
     const selected = options.find((option) => option.value === value);
     const showingSelectedLabel = selected?.label.toLowerCase() === term;
-
-    if (!term || showingSelectedLabel) return options.slice(0, maxOptions);
-
-    return options
-      .filter((option) => `${option.label} ${option.helper ?? ""}`.toLowerCase().includes(term))
-      .slice(0, maxOptions);
+    const matches = !term || showingSelectedLabel
+      ? options
+      : options.filter((option) => `${option.label} ${option.helper ?? ""}`.toLowerCase().includes(term));
+    const limited = matches.slice(0, maxOptions);
+    // Keep the current value visible even when it falls outside the capped window.
+    if (selected && !limited.some((option) => option.value === selected.value)) {
+      return [selected, ...limited.slice(0, Math.max(0, maxOptions - 1))];
+    }
+    return limited;
   }, [maxOptions, options, query, value]);
 
   function choose(option: SearchableSelectOption) {

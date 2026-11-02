@@ -142,6 +142,7 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
 type ProviderPaymentComponent = {
   component_code: string;
   label: string;
+  is_active?: boolean | null;
   payment_fields?: { calculation_source?: string | null; calculation_type?: string | null } | Array<{ calculation_source?: string | null; calculation_type?: string | null }> | null;
 };
 
@@ -324,7 +325,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, designation_id, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).eq("provider_mapping_required", true),
-      supabaseAdmin.from("payment_methods").select("id, code, production_threshold_config, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
+      supabaseAdmin.from("payment_methods").select("id, code, production_threshold_config, payment_method_components(component_code, label, is_active, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
     if (contractorError) throw new Error(contractorError.message);
@@ -336,7 +337,8 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       id: String(method.id),
       code: String(method.code ?? "").trim(),
       productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config),
-      components: (method.payment_method_components ?? []) as ProviderPaymentComponent[]
+      components: ((method.payment_method_components ?? []) as ProviderPaymentComponent[])
+        .filter((component) => component.is_active !== false)
     }]));
     const allPaymentFieldCodes = new Set(Array.from(paymentMethodByCode.values()).flatMap((method) => method.components.map((component) => normalizedHeader(component.component_code))));
 
@@ -628,7 +630,7 @@ async function saveExecutiveMappingRow(
   const productionThresholdMinimumUnits = rowValue(formData, index, "production_threshold_minimum_units");
   const { data: paymentMethod, error: methodError } = await supabaseAdmin
     .from("payment_methods")
-    .select("id, code, is_active, production_threshold_config, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
+    .select("id, code, is_active, production_threshold_config, payment_method_components (component_code, label, is_active, payment_fields(calculation_source, calculation_type))")
     .eq("id", paymentMethodId)
     .eq("company_id", companyId)
     .maybeSingle();
@@ -709,7 +711,8 @@ async function saveExecutiveMappingRow(
       throw new Error(`Row ${index + 1}: The historical Keep-all anchor is outside your allocated locations.`);
     }
   }
-  const methodComponents = (paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[];
+  const methodComponents = ((paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[])
+    .filter((component) => component.is_active !== false);
   const { data: existingThresholdMapping, error: existingThresholdMappingError } = mappingId
     ? await supabaseAdmin
       .from("field_executive_provider_mappings")

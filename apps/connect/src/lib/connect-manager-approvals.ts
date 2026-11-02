@@ -1,7 +1,13 @@
 import "server-only";
 
 import { notifyAttendanceApprovalRequired } from "../../../../src/lib/connect-attendance-notifications";
-import { resolveConnectActorUserId, resolveConnectActorUserIds } from "./connect-approver-identity";
+import {
+  adoptPendingStepForHigherManager,
+  resolveConnectActorPersonId,
+  resolveConnectActorUserId,
+  resolveConnectActorUserIds,
+  resolveConnectVisibleApproverUserIds
+} from "./connect-approver-identity";
 import { notifyApproverMobile } from "./approver-mobile-notifications";
 import {
   connectWorkforceMatches,
@@ -191,15 +197,38 @@ async function signedEvidence(path: string | null | undefined) {
 }
 
 export async function listConnectAttendanceApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
-  const actorUserIds = await approverUserIds(account);
-  if (!actorUserIds.length) return [];
+  // Include this login, linked One profiles for the same person, and reporting-line
+  // assignees (same visibility model as WFH / business trip). Person-id matching
+  // keeps steps visible after a connect-only login refresh changes approver_user_id.
+  const [selfUserIds, visibleUserIds, personId] = await Promise.all([
+    approverUserIds(account),
+    resolveConnectVisibleApproverUserIds(account),
+    resolveConnectActorPersonId(account)
+  ]);
+  const actorUserIds = [...new Set([...selfUserIds, ...visibleUserIds])];
+  if (!actorUserIds.length && !personId) return [];
   if (await isTeamLeadRegularizationApprover(account)) return [];
-  const stepsResult = await db().from("attendance_regularization_approval_steps")
-    .select("id,request_id,step_order,step_name")
-    .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending")
-    .order("created_at");
-  if (stepsResult.error) throw new Error(stepsResult.error.message);
-  const steps = stepsResult.data ?? [];
+  const [byUserResult, byPersonResult] = await Promise.all([
+    actorUserIds.length
+      ? db().from("attendance_regularization_approval_steps")
+        .select("id,request_id,step_order,step_name,approver_user_id,approver_person_id")
+        .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending")
+        .order("created_at")
+      : Promise.resolve({ data: [] as Array<{ id: string; request_id: string; step_order: number; step_name: string; approver_user_id: string | null; approver_person_id: string | null }>, error: null }),
+    personId
+      ? db().from("attendance_regularization_approval_steps")
+        .select("id,request_id,step_order,step_name,approver_user_id,approver_person_id")
+        .eq("company_id", account.companyId).eq("approver_person_id", personId).eq("status", "pending")
+        .order("created_at")
+      : Promise.resolve({ data: [] as Array<{ id: string; request_id: string; step_order: number; step_name: string; approver_user_id: string | null; approver_person_id: string | null }>, error: null })
+  ]);
+  if (byUserResult.error) throw new Error(byUserResult.error.message);
+  if (byPersonResult.error) throw new Error(byPersonResult.error.message);
+  const stepsById = new Map<string, { id: string; request_id: string; step_order: number; step_name: string }>();
+  for (const step of [...(byUserResult.data ?? []), ...(byPersonResult.data ?? [])]) {
+    if (!stepsById.has(step.id)) stepsById.set(step.id, step);
+  }
+  const steps = [...stepsById.values()];
   if (!steps.length) return [];
   const requestsResult = await db().from("attendance_regularization_requests")
     .select("id,profile_type,profile_id,dropx_id,full_name,attendance_date,current_in_time,current_out_time,requested_in_time,requested_out_time,reason_code,remarks,attachment_path,status,created_at")
@@ -384,7 +413,10 @@ export async function decideConnectAttendanceHrApproval(
 }
 
 export async function decideConnectAttendanceApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
-  const actorUserIds = await approverUserIds(account);
+  const [actorUserIds, personId] = await Promise.all([
+    approverUserIds(account),
+    resolveConnectActorPersonId(account)
+  ]);
   const actorUserId = actorUserIds[0] ?? null;
   if (!actorUserId) throw new Error("A linked People login is required to approve attendance.");
   if (await isTeamLeadRegularizationApprover(account)) {
@@ -395,20 +427,71 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   const note = clean(noteValue);
   if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "rejected", "returned"].includes(decision)) throw new Error("Choose Approve, Return or Reject.");
   if (decision === "returned" && note.length < 3) throw new Error("Add a short note explaining why the request is being returned.");
-  const assigned = await db().from("attendance_regularization_approval_steps").select("id,approver_user_id")
-    .eq("company_id", account.companyId).eq("request_id", requestId).in("approver_user_id", actorUserIds).eq("status", "pending").maybeSingle();
-  if (assigned.error || !assigned.data) throw new Error(assigned.error?.message ?? "This attendance approval is no longer assigned to you.");
-  const actingUserId = assigned.data.approver_user_id || actorUserId;
+
+  // Higher managers on the reporting line may take a subordinate's pending step
+  // (same pattern as WFH / pay advance). Harmless when this login is already assigned.
+  await adoptPendingStepForHigherManager({
+    companyId: account.companyId,
+    actorUserId,
+    table: "attendance_regularization_approval_steps",
+    parentColumn: "request_id",
+    parentId: requestId
+  });
+
+  // Match the SQL gate: either this login owns the step, or the People person matches
+  // after a connect-only login refresh changed approver_user_id.
+  let assigned = await db().from("attendance_regularization_approval_steps").select("id,approver_user_id,approver_person_id")
+    .eq("company_id", account.companyId).eq("request_id", requestId).in("approver_user_id", actorUserIds).eq("status", "pending")
+    .order("step_order").limit(1).maybeSingle();
+  if (assigned.error) throw new Error(assigned.error.message);
+  if (!assigned.data && personId) {
+    assigned = await db().from("attendance_regularization_approval_steps").select("id,approver_user_id,approver_person_id")
+      .eq("company_id", account.companyId).eq("request_id", requestId).eq("approver_person_id", personId).eq("status", "pending")
+      .order("step_order").limit(1).maybeSingle();
+    if (assigned.error) throw new Error(assigned.error.message);
+  }
+  if (!assigned.data) throw new Error("This attendance approval is no longer assigned to you.");
+
   const request = await db().from("attendance_regularization_requests").select("attachment_path")
     .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
   if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
   if (decision === "approved" && !(await signedEvidence(request.data.attachment_path))) {
     throw new Error("Approval blocked. Timestamped workplace proof is missing or unavailable.");
   }
+
+  // Manager return is handled here — the decide RPC only accepts approved/rejected.
+  if (decision === "returned") {
+    const now = new Date().toISOString();
+    const returned = await db().from("attendance_regularization_requests").update({
+      status: "returned",
+      review_remarks: note,
+      reviewed_by: actorUserId,
+      reviewed_at: now,
+      updated_at: now
+    }).eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).eq("status", "pending_manager");
+    if (returned.error) throw new Error(returned.error.message);
+    // Mark the open step as rejected-with-note (same statuses the RPC uses), then skip queued steps.
+    await db().from("attendance_regularization_approval_steps").update({
+      status: "rejected",
+      decision_note: note,
+      decided_at: now,
+      updated_at: now,
+      approver_user_id: actorUserId
+    }).eq("id", assigned.data.id);
+    await db().from("attendance_regularization_approval_steps").update({
+      status: "skipped",
+      decision_note: note,
+      decided_at: now,
+      updated_at: now
+    }).eq("company_id", account.companyId).eq("request_id", requestId).in("status", ["pending", "queued"]);
+    return "Attendance correction returned to the worker.";
+  }
+
+  // Always act as this login; the RPC remaps approver_user_id when person_id matches.
   const result = await db().rpc("hr_decide_attendance_regularization_step", {
     p_company_id: account.companyId,
     p_request_id: requestId,
-    p_actor_user_id: actingUserId,
+    p_actor_user_id: actorUserId,
     p_decision: decision,
     p_note: note
   });
