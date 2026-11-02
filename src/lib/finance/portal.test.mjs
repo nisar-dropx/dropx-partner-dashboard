@@ -42,6 +42,7 @@ test("Owners and restricted finance roles land on their first permitted page", (
 const redirect = (path) => { throw new Error(`redirect:${path}`); };
 const passthrough = ({ children }) => children;
 const rootMocks = {
+  "@/components/report-table": { ReportTable: "table" },
   "@/components/app-shell": { AppShell: passthrough },
   "@/components/page-head": { PageHead: () => null },
   "@/lib/app-navigation": { firstAllowedHref: () => "/" },

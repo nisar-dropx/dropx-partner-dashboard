@@ -652,7 +652,7 @@ test('CPS lifecycle: delivery + C-return pay/count reconcile across associate, s
  near(summary.cps,19066/1132);near(cohort.cps,summary.cps);assert.equal(summary.cps.toFixed(2),'16.84');
  const ui={exports:{}};
  new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../../components/cps-associate-breakdown.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(ui.exports,ui,(id)=>{
-   if(id==='react')return React;if(id==='react/jsx-runtime')return jsxRuntime;
+   if(id==='@/components/report-table')return {ReportTable:'table'};if(id==='react')return React;if(id==='react/jsx-runtime')return jsxRuntime;
    if(id==='@/lib/ops-pulse/cps')return cps.exports;if(id==='@/lib/ops-pulse/cps-details')return details.exports;throw new Error(id);
  });
  const html=renderToStaticMarkup(React.createElement(ui.exports.CpsAssociateTable,{rows:snapshot.da_details}));
