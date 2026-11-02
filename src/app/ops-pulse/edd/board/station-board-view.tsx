@@ -522,8 +522,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return /aborted due to timeout|timeout|timed out|504|524|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|connection dropped|network|socket/i.test(message);
   }
 
-  /** Stations per tick (EDD + C-Return + DSR + Ageing each) — keep ≤4 to avoid CF drops. */
-  const BOARD_PULL_CONCURRENCY = "4";
+  /** Stations claimed per tick — worker pulls them sequentially (shared cookie). */
+  const BOARD_PULL_CONCURRENCY = "2";
 
   async function postBackfillTick(params: URLSearchParams) {
     const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
@@ -538,12 +538,24 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return { response, body };
   }
 
-  async function runRetryPass(keys: string[], passLabel: string, streakTimeoutsRef: { n: number }) {
+  async function runRetryPass(
+    keys: string[],
+    passLabel: string,
+    streakTimeoutsRef: { n: number },
+    stationTotal: number,
+  ) {
     const stillFailed: string[] = [];
     let deferredRetries = 0;
     for (let i = 0; i < keys.length; ) {
-      const chunk = keys.slice(i, i + 4);
-      setBackfillNote(`${passLabel} · ${Math.min(i + chunk.length, keys.length)}/${keys.length}`);
+      const chunk = keys.slice(i, i + 2);
+      const recovered = Math.min(i + chunk.length, keys.length);
+      setBackfillNote(`${passLabel} · ${recovered}/${keys.length}`);
+      if (stationTotal > 0) {
+        setBackfillProgress({
+          done: Math.max(0, stationTotal - keys.length + recovered),
+          total: stationTotal,
+        });
+      }
       const params = new URLSearchParams({
         days: "1",
         date: payload.businessDate,
@@ -555,7 +567,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       try {
         ({ response, body } = await postBackfillTick(params));
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Board retry failed.";
+        const message = err instanceof Error ? err.message : "Board recovery failed.";
         if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
           await new Promise((r) => setTimeout(r, 2000));
@@ -564,7 +576,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         throw err instanceof Error ? err : new Error(message);
       }
       if (!response.ok) {
-        const message = String(body.error ?? "Board retry failed.");
+        const message = String(body.error ?? "Board recovery failed.");
         if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
           await new Promise((r) => setTimeout(r, 2000));
@@ -620,8 +632,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const streakTimeoutsRef = { n: 0 };
     let ticksSinceReload = 0;
     const failedAcc = new Set<string>();
+    let stationTotal = 0;
     // Station-centric: each job = EDD + C-Return + DSR + Ageing for the selected date.
-    while (guard < 40) {
+    // Open fleet is ~32–35 stations; progress hitting that number means the main pass
+    // finished — any "recovering" note after that is only for stations that failed mid-pull.
+    while (guard < 80) {
       guard += 1;
       const params = new URLSearchParams({
         days: "1",
@@ -663,6 +678,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       }
       const advanced = Number(body.advanced ?? 0) || 0;
       const total = Number(body.total ?? 0) || 0;
+      if (total > 0) stationTotal = total;
       if (body.done) {
         if (total > 0) setBackfillProgress({ done: total, total });
         backfillCursor.current = 0;
@@ -686,20 +702,21 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       }
     }
 
-    // End-of-run: retry failures twice more (attempt 2, then attempt 3 if still failing).
+    // End-of-run recovery: only stations that failed in the main pass (not a second full sweep).
     let pending = [...failedAcc];
     if (pending.length) {
-      pending = await runRetryPass(pending, "Retry 1 of failed pulls", streakTimeoutsRef);
+      setBackfillNote(`Main pull done · recovering ${pending.length} station${pending.length === 1 ? "" : "s"}…`);
+      pending = await runRetryPass(pending, "Recovering failed stations", streakTimeoutsRef, stationTotal);
     }
     if (pending.length) {
-      pending = await runRetryPass(pending, "Retry 2 of failed pulls", streakTimeoutsRef);
+      pending = await runRetryPass(pending, "Second recovery pass", streakTimeoutsRef, stationTotal);
     }
     if (pending.length) {
       setBackfillNote(
-        `Board pull finished · ${pending.length} station${pending.length === 1 ? "" : "s"} still failed after 2 retries`,
+        `Board pull finished · ${pending.length} station${pending.length === 1 ? "" : "s"} still failed after recovery`,
       );
     } else if (failedAcc.size) {
-      setBackfillNote("Board pull finished · all retries recovered");
+      setBackfillNote("Board pull finished · recovered all failed stations");
     }
   }
 
