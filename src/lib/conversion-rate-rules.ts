@@ -1,4 +1,19 @@
 export type ConversionRateTier = { minimum: number; rate: number };
+
+/** A single stored key remains compatible; combinations contain only validated additive keys. */
+export function conversionMetricSources(expression: string): string[] {
+  const sources = expression.split("+");
+  if (!sources.length || sources.some(source => !/^[a-z][a-z0-9_]*$/.test(source)) || new Set(sources).size !== sources.length) {
+    throw new Error("Select distinct valid metrics for each side of the conversion formula.");
+  }
+  return sources;
+}
+
+export function combineConversionMetrics(values: readonly string[]): string {
+  const expression = values.join("+");
+  conversionMetricSources(expression);
+  return expression;
+}
 export type ConversionRateRule = {
   id: string;
   company_id: string;
@@ -51,12 +66,17 @@ export function resolveConversionRate(input: {
   if (!matches.length) return fallback;
   if (matches.length !== 1) throw new Error("Overlapping conversion rate rules. Resolve the rate configuration before calculating payments.");
   const rule = matches[0];
+  const numeratorSources = conversionMetricSources(rule.numerator_source);
+  const denominatorSources = conversionMetricSources(rule.denominator_source);
   if (!input.rows.length) return fallback;
   let completedTotal = 0, baseTotal = 0;
   for (const row of input.rows) {
-    const numeratorValue = row[rule.numerator_source], denominatorValue = row[rule.denominator_source];
-    if (numeratorValue == null || denominatorValue == null || numeratorValue === "" || denominatorValue === "") return fallback;
-    const numerator = Number(numeratorValue), denominator = Number(denominatorValue);
+    const sum = (sources: string[]) => sources.reduce((total, source) => {
+      const value = row[source];
+      const number = value == null || value === "" ? NaN : Number(value);
+      return Number.isFinite(number) && number >= 0 ? total + number : NaN;
+    }, 0);
+    const numerator = sum(numeratorSources), denominator = sum(denominatorSources);
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || numerator < 0 || denominator < 0 || numerator > denominator) return fallback;
     completedTotal += numerator;
     baseTotal += denominator;

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { conversionRateTiers } from "@/lib/conversion-rate-rules";
+import { combineConversionMetrics, conversionRateTiers } from "@/lib/conversion-rate-rules";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 
 const path = "/master/payment-methods/rate-rules";
@@ -44,7 +44,8 @@ export async function createConversionRateRule(formData: FormData) {
       company_id: companyId, name: text(formData.get("name")),
       payment_method_id: text(formData.get("payment_method_id")), payment_field_id: text(formData.get("payment_field_id")),
       provider_id: station.data.provider_id, location_model_id: station.data.location_model_id, station_id: stationId,
-      numerator_source: text(formData.get("numerator_source")), denominator_source: text(formData.get("denominator_source")),
+      numerator_source: combineConversionMetrics(formData.getAll("numerator_source").map(value => text(value))),
+      denominator_source: combineConversionMetrics(formData.getAll("denominator_source").map(value => text(value))),
       effective_from: effectiveFrom, effective_to: effectiveTo, tiers
     });
     if (result.error) throw new Error(result.error.message);

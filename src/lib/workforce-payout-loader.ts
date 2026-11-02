@@ -1,6 +1,6 @@
 import { applyWorkforcePaidAdvances } from "@/lib/workforce-paid-advances";
 import "server-only";
-import { resolveConversionRate, type ConversionRateRule } from "@/lib/conversion-rate-rules";
+import { conversionMetricSources, resolveConversionRate, type ConversionRateRule } from "@/lib/conversion-rate-rules";
 import { paidAdhocDays, paidAdhocDayBreakdown } from "@/lib/adhoc-paid-days";
 import { adhocPaidDayKey } from "@/lib/adhoc-da-identity";
 import { loadRouteDistanceContext } from "@/lib/workforce-route-distance-data";
@@ -145,7 +145,7 @@ export async function loadWorkforcePayoutRows(
     return { rows: [], error: conversionRulesResult.error.message };
   }
   const conversionRules = (conversionRulesResult.data ?? []) as ConversionRateRule[];
-  const conversionColumns = [...new Set(conversionRules.flatMap(rule => [rule.numerator_source, rule.denominator_source]))];
+  const conversionColumns = [...new Set(conversionRules.flatMap(rule => [...conversionMetricSources(rule.numerator_source), ...conversionMetricSources(rule.denominator_source)]))];
   if (conversionColumns.some(column => !/^[a-z][a-z0-9_]*$/.test(column))) return { rows: [], error: "Invalid conversion input configuration." };
   const conversionSelect = conversionColumns.length ? `,${conversionColumns.join(",")}` : "";
   const scopeEnabled = scope.workforceIds !== undefined;

@@ -1,11 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveConversionRate, conversionRateTiers } from "./conversion-rate-rules.ts";
+import { resolveConversionRate, conversionRateTiers, conversionMetricSources, combineConversionMetrics } from "./conversion-rate-rules.ts";
 import { buildWorkforcePayoutInputMaps, resolveWorkforcePaymentFieldRate } from "./workforce-payout-input-calculation.ts";
 import { allocateCombinedProductionThresholds } from "./workforce-production-threshold.ts";
 
 const rule = { id: "r", company_id: "c", provider_id: "p", payment_method_id: "m", payment_field_id: "f", location_model_id: "model", station_id: "s", numerator_source: "total_delivery", denominator_source: "delivery_assigned_count", effective_from: "2027-01-01", effective_to: "2027-01-31", tiers: [{ minimum: 0, rate: 12 }, { minimum: 80, rate: 14 }, { minimum: 90, rate: 16 }] };
 const input = { rules: [rule], companyId: "c", providerId: "p", paymentMethodId: "m", paymentFieldId: "f", modelId: "model", stationId: "s", date: "2027-01-02", fallbackRate: 11, rows: [{ total_delivery: 85, delivery_assigned_count: 100 }] };
+
+test("sums multiple numerator and denominator metrics before selecting a slab", () => {
+  const result = resolveConversionRate({ ...input, rules: [{ ...rule, numerator_source: "total_delivery+c_return", denominator_source: "delivery_assigned_count+pickup_assigned_count" }],
+    rows: [{ total_delivery: 70, c_return: 20, delivery_assigned_count: 80, pickup_assigned_count: 20 }] });
+  assert.equal(result.rate, 16);
+  assert.equal(result.conversion, 90);
+});
+test("a missing or invalid member of a sum retains the configured fixed rate", () => {
+  for (const c_return of [undefined, null, "", -1, "invalid"]) assert.equal(resolveConversionRate({ ...input,
+    rules: [{ ...rule, numerator_source: "total_delivery+c_return" }], rows: [{ ...input.rows[0], c_return }] }).rate, 11);
+});
+test("formula selections preserve legacy sources and reject duplicates and executable expressions", () => {
+  assert.deepEqual(conversionMetricSources("total_delivery"), ["total_delivery"]);
+  assert.equal(combineConversionMetrics(["total_delivery", "c_return"]), "total_delivery+c_return");
+  for (const expression of ["", "total_delivery+total_delivery", "total_delivery++c_return", "total_delivery/c_return", "total_delivery;drop", "total_delivery+ c_return"]) assert.throws(() => conversionMetricSources(expression));
+});
 
 test("selects the slab at exact boundaries without rounding conversion", () => {
   for (const [count, expected] of [[0, 12], [79.999, 12], [80, 14], [89.999, 14], [90, 16], [100, 16]]) {
