@@ -422,11 +422,17 @@
   width: 48px;
 }
 
-.table.creturn th:last-child,
+.table.creturn th:last-child {
+  width: 54px;
+  font-weight: 700;
+  /* Dark-green header ink used to match the cell tint and disappear — force white. */
+  color: #ffffff !important;
+  background: #1f9d57;
+}
+
 .table.creturn td:last-child {
   width: 54px;
   font-weight: 700;
-  color: #1f5b3f;
 }
 
 .table.zero th:nth-child(2),

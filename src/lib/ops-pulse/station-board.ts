@@ -106,12 +106,20 @@ export const DSR_HEADERS = {
   dsrPct: "DSR%",
 } as const;
 
-/** Soft ink-friendly tint for Pickup % (avoid washed yellow). */
+/**
+ * Soft tint for Pickup % cells. High values use a deeper green so white text stays readable
+ * (header + cell share the C-Return green ink otherwise).
+ */
 export function pickupPctColor(pct: number): string {
-  if (pct >= 80) return "#d9f0e3";
+  if (pct >= 80) return "#1f9d57";
   if (pct >= 50) return "#e7f3ec";
   if (pct > 0) return "#f3ece2";
   return "#f1e8e6";
+}
+
+/** Text on pickupPctColor — white on deep green, dark ink on light tints. */
+export function pickupPctTextColor(pct: number): string {
+  return pct >= 80 ? "#ffffff" : "#1f5b3f";
 }
 
 /** Column sums + overall DSR% for DA DSR / Zero delivery tables. */
@@ -282,10 +290,22 @@ export function heatColor(value: number, max: number): string {
   return `rgba(${r}, ${g}, ${b}, ${0.22 + t * 0.55})`;
 }
 
-/** DSR%: 100 green → mid yellow → 0 red. */
+/**
+ * DSR%: 100 solid green → mid yellow → 0 red.
+ * heatColor(0) is transparent — that made perfect DSR look white/blank.
+ */
 export function dsrHeatColor(pct: number): string {
-  const t = Math.max(0, Math.min(1, 1 - pct / 100));
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  // Opaque green — translucent heat at the top end read as white on the board.
+  if (p >= 95) return "#1f9d57";
+  if (p <= 0) return "rgba(207, 31, 53, 0.55)";
+  const t = Math.max(0.05, 1 - p / 100);
   return heatColor(t * 100, 100);
+}
+
+/** Text on dsrHeatColor — white on deep green (high DSR), dark otherwise. */
+export function dsrPctTextColor(pct: number): string {
+  return pct >= 85 ? "#ffffff" : "inherit";
 }
 
 /** Shift a YYYY-MM-DD by N calendar days (UTC date math — safe for IST board dates). */

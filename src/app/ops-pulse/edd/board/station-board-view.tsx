@@ -16,12 +16,14 @@ import {
   collectEddDates,
   DSR_HEADERS,
   dsrHeatColor,
+  dsrPctTextColor,
   eddPivot,
   eddStationTotal,
   filterStationsByRegion,
   groupStationsByRegion,
   heatColor,
   pickupPctColor,
+  pickupPctTextColor,
   sumCReturn,
   sumDaDsr,
   type AgeingBoardMode,
@@ -164,7 +166,7 @@ function buildShareTable(
         align: "right" as const,
       })),
       { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" },
-      { text: `${station.board.pickupDonePct}%`, bold: true, bg: pickupPctColor(station.board.pickupDonePct), align: "right" },
+      { text: `${station.board.pickupDonePct}%`, bold: true, bg: pickupPctColor(station.board.pickupDonePct), color: pickupPctTextColor(station.board.pickupDonePct), align: "right" },
     ]);
     const tot = sumCReturn(stations);
     rows.push([
@@ -176,7 +178,7 @@ function buildShareTable(
         bg: "#fff4bf",
       })),
       { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
-      { text: `${tot.pickupDonePct}%`, bold: true, bg: pickupPctColor(tot.pickupDonePct), align: "right" },
+      { text: `${tot.pickupDonePct}%`, bold: true, bg: pickupPctColor(tot.pickupDonePct), color: pickupPctTextColor(tot.pickupDonePct), align: "right" },
     ]);
     return { title: `C-Return · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
   }
@@ -256,7 +258,7 @@ function buildShareTable(
         { text: String(da.rejected || 0), align: "right" },
         { text: String(da.oor || 0), align: "right" },
         { text: String(da.total), align: "right" },
-        { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), align: "right" },
+        { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct), align: "right" },
       ]);
     }
   }
@@ -270,7 +272,7 @@ function buildShareTable(
       { text: String(tot.rejected), bold: true, align: "right", bg: "#fff4bf" },
       { text: String(tot.oor), bold: true, align: "right", bg: "#fff4bf" },
       { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
-      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), align: "right" },
+      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
     ]);
   }
   return {
@@ -301,7 +303,10 @@ function buildStationShareTable(
     ]);
     rows.push(
       [{ text: "Grand Total", bold: true, align: "left" }, { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" }],
-      [{ text: "Pickup Done %", bold: true, align: "left", bg: pickupPctColor(station.board.pickupDonePct) }, { text: `${station.board.pickupDonePct}%`, bold: true, align: "right", bg: pickupPctColor(station.board.pickupDonePct) }],
+      [
+        { text: "Pickup Done %", bold: true, align: "left", bg: pickupPctColor(station.board.pickupDonePct), color: pickupPctTextColor(station.board.pickupDonePct) },
+        { text: `${station.board.pickupDonePct}%`, bold: true, align: "right", bg: pickupPctColor(station.board.pickupDonePct), color: pickupPctTextColor(station.board.pickupDonePct) },
+      ],
     );
     return { title: `C-Return · ${label}`, subtitle, headers: ["Status", "Count"], rows, footerNote: "Ops Pulse Station board" };
   }
@@ -375,7 +380,7 @@ function buildStationShareTable(
     { text: String(da.rejected || 0), align: "right" },
     { text: String(da.oor || 0), align: "right" },
     { text: String(da.total), align: "right" },
-    { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), align: "right" },
+    { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct), align: "right" },
   ]);
   if (das.length) {
     const tot = sumDaDsr(das);
@@ -386,7 +391,7 @@ function buildStationShareTable(
       { text: String(tot.rejected), bold: true, align: "right", bg: "#fff4bf" },
       { text: String(tot.oor), bold: true, align: "right", bg: "#fff4bf" },
       { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
-      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), align: "right" },
+      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
     ]);
   }
   return {
@@ -427,8 +432,6 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
   const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
-  /** DSR tab filter — Zero deliveries is the same board, delivered = 0 only. */
-  const [dsrZeroOnly, setDsrZeroOnly] = useState(() => asView(initialView) === "zero");
   /** Resume Refresh 7d after a proxy timeout instead of restarting from station 0. */
   const backfillCursor = useRef(0);
   const backfillClearSeq = useRef(0);
@@ -515,27 +518,42 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return /aborted due to timeout|timeout|timed out|504|524/i.test(message);
   }
 
+  async function postBackfillTick(params: URLSearchParams) {
+    const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
+    const body = await response.json().catch(() => ({})) as {
+      nextIndex?: number;
+      total?: number;
+      done?: boolean;
+      advanced?: number;
+      failed?: string[];
+      error?: string;
+    };
+    return { response, body };
+  }
+
   async function runBackfillLoop() {
     let startIndex = Math.max(0, backfillCursor.current);
     let guard = 0;
     let streakTimeouts = 0;
     let ticksSinceReload = 0;
+    const failedAcc = new Set<string>();
     if (startIndex > 0) {
       setBackfillProgress((prev) => prev ?? { done: startIndex, total: Math.max(startIndex, 1) });
       setBackfillNote(`Resuming board pull · ${startIndex}…`);
     }
-    // ~12 stations/tick → ~21 ticks for 245 jobs; keep headroom for retries.
-    while (guard < 80) {
+    // ~25 stations/tick → ~10 ticks for 245 jobs; keep headroom for retries.
+    while (guard < 40) {
       guard += 1;
       const params = new URLSearchParams({
         days: "7",
         startIndex: String(startIndex),
         date: payload.businessDate,
-        concurrency: "12",
+        concurrency: "25",
       });
       let response: Response;
+      let body: { nextIndex?: number; total?: number; done?: boolean; advanced?: number; failed?: string[]; error?: string };
       try {
-        response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
+        ({ response, body } = await postBackfillTick(params));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Board backfill failed.";
         if (isTimeoutMessage(message) && streakTimeouts < 4) {
@@ -547,7 +565,6 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         backfillCursor.current = startIndex;
         throw err instanceof Error ? err : new Error(message);
       }
-      const body = await response.json().catch(() => ({})) as { nextIndex?: number; total?: number; done?: boolean; advanced?: number; error?: string };
       if (!response.ok) {
         const message = String(body.error ?? "Board backfill failed.");
         if (isTimeoutMessage(message) && streakTimeouts < 4) {
@@ -562,23 +579,96 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           : message);
       }
       streakTimeouts = 0;
-      startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
-      backfillCursor.current = startIndex;
+      for (const key of body.failed ?? []) {
+        if (key) failedAcc.add(String(key));
+      }
+      const advanced = Number(body.advanced ?? 0) || 0;
       const total = Number(body.total ?? 0) || 0;
-      const done = total ? Math.min(startIndex, total) : startIndex;
-      if (total > 0) setBackfillProgress({ done, total });
-      setBackfillNote(total ? `Pulling board data (last 7 days) · ${done}/${total}` : "Pulling board data…");
-      if (body.done || !body.advanced) {
+      if (body.done) {
         if (total > 0) setBackfillProgress({ done: total, total });
         backfillCursor.current = 0;
         break;
       }
+      // Soft miss (budget / warm-up): retry same index — never mark the week done.
+      if (!advanced) {
+        setBackfillNote(`Worker deferred packet at ${startIndex} — retrying…`);
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
+      backfillCursor.current = startIndex;
+      const done = total ? Math.min(startIndex, total) : startIndex;
+      if (total > 0) setBackfillProgress({ done, total });
+      setBackfillNote(total ? `Pulling board data (last 7 days) · ${done}/${total}` : "Pulling board data…");
       ticksSinceReload += 1;
-      // Reload UI every other packet so progress stays visible without slowing the sweep.
       if (ticksSinceReload >= 2) {
         ticksSinceReload = 0;
         await reloadBoard().catch(() => undefined);
       }
+    }
+
+    // One final pass: each failed station-day is attempted exactly once more.
+    const retryList = [...failedAcc];
+    const stillFailed: string[] = [];
+    let deferredRetries = 0;
+    for (let i = 0; i < retryList.length; ) {
+      const chunk = retryList.slice(i, i + 25);
+      setBackfillNote(`Retrying failed pulls · ${Math.min(i + chunk.length, retryList.length)}/${retryList.length}`);
+      const params = new URLSearchParams({
+        days: "7",
+        date: payload.businessDate,
+        concurrency: "25",
+        retryJobs: chunk.join(","),
+      });
+      let response: Response;
+      let body: { failed?: string[]; error?: string; advanced?: number; done?: boolean };
+      try {
+        ({ response, body } = await postBackfillTick(params));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Board retry failed.";
+        if (isTimeoutMessage(message) && streakTimeouts < 4) {
+          streakTimeouts += 1;
+          await new Promise((r) => setTimeout(r, 1500));
+          continue; // same chunk again
+        }
+        throw err instanceof Error ? err : new Error(message);
+      }
+      if (!response.ok) {
+        const message = String(body.error ?? "Board retry failed.");
+        if (isTimeoutMessage(message) && streakTimeouts < 4) {
+          streakTimeouts += 1;
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        throw new Error(message);
+      }
+      streakTimeouts = 0;
+      const advanced = Number(body.advanced ?? 0) || 0;
+      if (!advanced) {
+        deferredRetries += 1;
+        if (deferredRetries > 8) {
+          // Give up on this chunk rather than hang — treat as still failed.
+          stillFailed.push(...chunk);
+          i += chunk.length;
+          deferredRetries = 0;
+          continue;
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      deferredRetries = 0;
+      const failedAgain = new Set((body.failed ?? []).map(String).filter(Boolean));
+      for (const key of chunk) {
+        if (failedAgain.has(key)) stillFailed.push(key);
+      }
+      i += chunk.length;
+    }
+    if (stillFailed.length) {
+      setBackfillNote(
+        `Board pull finished · ${stillFailed.length} station-day${stillFailed.length === 1 ? "" : "s"} still failed after retry`,
+      );
+    } else if (retryList.length) {
+      setBackfillNote("Board pull finished · all retries recovered");
     }
   }
 
@@ -740,9 +830,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     ["ageing", "Ageing"],
     ["creturn", "C-Return"],
     ["dsr", "DSR"],
+    ["zero", "Zero deliveries"],
   ] as const;
-  const dsrView = view === "dsr" || view === "zero";
-  const showZeroOnly = dsrView && (view === "zero" || dsrZeroOnly);
 
   function regionShareActions(groupId: string, groupLabel: string, groupStations: StationBoardStation[]) {
     const busyKey = blockBusy[groupId];
@@ -794,16 +883,10 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
               key={key}
               type="button"
               role="tab"
-              aria-pressed={key === "dsr" ? dsrView : view === key}
+              aria-pressed={view === key}
               onClick={() => {
-                if (key === "dsr") {
-                  setView("dsr");
-                  setDsrZeroOnly(false);
-                  syncUrl("dsr", region);
-                } else {
-                  setView(key);
-                  syncUrl(key, region);
-                }
+                setView(key);
+                syncUrl(key, region);
                 setTids(null);
               }}
             >
@@ -1123,7 +1206,15 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           return <td key={status}>{count(value)}</td>;
                         })}
                         <td>{count(station.board.cReturnTotal)}</td>
-                        <td className={s.heat} style={{ background: pickupPctColor(station.board.pickupDonePct) }}>{station.board.pickupDonePct}%</td>
+                        <td
+                          className={s.heat}
+                          style={{
+                            background: pickupPctColor(station.board.pickupDonePct),
+                            color: pickupPctTextColor(station.board.pickupDonePct),
+                          }}
+                        >
+                          {station.board.pickupDonePct}%
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1132,7 +1223,15 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       <td>Grand Total</td>
                       {CRETURN_DISPLAY.map((status) => <td key={status}>{count(tot.byStatus[status] ?? 0)}</td>)}
                       <td>{count(tot.total)}</td>
-                      <td className={s.heat} style={{ background: pickupPctColor(tot.pickupDonePct) }}>{tot.pickupDonePct}%</td>
+                      <td
+                        className={s.heat}
+                        style={{
+                          background: pickupPctColor(tot.pickupDonePct),
+                          color: pickupPctTextColor(tot.pickupDonePct),
+                        }}
+                      >
+                        {tot.pickupDonePct}%
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1143,36 +1242,32 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         </section>
       ) : null}
 
-      {dsrView ? (
+      {view === "dsr" || view === "zero" ? (
         <section className={s.panel}>
           <div className={s.panelHead}>
-            <h3>{showZeroOnly ? "DA DSR · zero deliveries" : "DA DSR"}</h3>
-            <div className={s.segment} role="tablist" aria-label="DSR filter">
-              <button
-                type="button"
-                aria-pressed={!showZeroOnly}
-                onClick={() => {
-                  setView("dsr");
-                  setDsrZeroOnly(false);
-                  syncUrl("dsr", region);
-                }}
-              >
-                All DAs
-              </button>
-              <button
-                type="button"
-                aria-pressed={showZeroOnly}
-                onClick={() => {
-                  setView("zero");
-                  setDsrZeroOnly(true);
-                  syncUrl("zero", region);
-                }}
-              >
-                Zero deliveries
-              </button>
-            </div>
+            <h3>{view === "zero" ? "Zero deliveries · DA DSR" : "DA DSR"}</h3>
+            <span>Click a station for shareable detail + TIDs</span>
           </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => (
+          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
+            const zeroRows = view === "zero"
+              ? group.stations.flatMap((station) =>
+                  station.board.daDsr
+                    .filter((da) => da.delivered === 0)
+                    .map((da) => ({ station, da })),
+                )
+              : null;
+            if (view === "zero" && zeroRows && !zeroRows.length) {
+              return (
+                <div key={group.id}>
+                  <div className={s.region}>
+                    <span>{group.label}</span>
+                    {regionShareActions(group.id, group.label, group.stations)}
+                  </div>
+                  <p className={s.empty}>No zero-delivery DAs in this block.</p>
+                </div>
+              );
+            }
+            return (
             <div key={group.id}>
               <div className={s.region}>
                 <span>{group.label}</span>
@@ -1194,10 +1289,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </thead>
                   <tbody>
                     {group.stations.flatMap((station) => {
-                      const rows = showZeroOnly
+                      const rows = view === "zero"
                         ? station.board.daDsr.filter((da) => da.delivered === 0)
                         : station.board.daDsr;
+                      // Zero tab only lists DAs with 0 delivered — skip quiet stations.
                       if (!rows.length) {
+                        if (view === "zero") return [];
                         return [
                           <tr key={`${station.stationCode}-empty`} className={s.clickRow} onClick={() => openStationPanel(station.stationCode)}>
                             <td>
@@ -1205,7 +1302,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                                 {station.stationCode}
                               </button>
                             </td>
-                            <td colSpan={7} className={s.muted}>{showZeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</td>
+                            <td colSpan={7} className={s.muted}>No DA DSR yet — Refresh 7d</td>
                           </tr>,
                         ];
                       }
@@ -1224,14 +1321,19 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           <td>{da.rejected || 0}</td>
                           <td>{da.oor || 0}</td>
                           <td>{da.total}</td>
-                          <td className={s.heat} style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</td>
+                          <td
+                            className={s.heat}
+                            style={{ background: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct) }}
+                          >
+                            {da.dsrPct}%
+                          </td>
                         </tr>
                       ));
                     })}
                   </tbody>
                   {(() => {
                     const das = group.stations.flatMap((station) =>
-                      showZeroOnly
+                      view === "zero"
                         ? station.board.daDsr.filter((da) => da.delivered === 0)
                         : station.board.daDsr,
                     );
@@ -1247,7 +1349,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           <td>{tot.rejected}</td>
                           <td>{tot.oor}</td>
                           <td>{tot.total}</td>
-                          <td className={s.heat} style={{ background: dsrHeatColor(tot.dsrPct) }}>{tot.dsrPct}%</td>
+                          <td
+                            className={s.heat}
+                            style={{ background: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct) }}
+                          >
+                            {tot.dsrPct}%
+                          </td>
                         </tr>
                       </tfoot>
                     );
@@ -1255,7 +1362,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 </table>
               </div>
             </div>
-          ))}
+            );
+          })}
         </section>
       ) : null}
 
@@ -1430,7 +1538,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 <div className={s.shareCard}>
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
-                    <strong>{showZeroOnly ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                    <strong>{view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
                   <div className={s.shareColsWide}>
@@ -1443,7 +1551,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                     <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
-                    {(showZeroOnly ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
+                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
                       <div key={da.driverId} className={s.shareRowWide}>
                         <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
                         <strong>{da.delivered}</strong>
@@ -1451,15 +1559,15 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <strong>{da.rejected || 0}</strong>
                         <strong>{da.oor || 0}</strong>
                         <strong>{da.total}</strong>
-                        <strong style={{ background: dsrHeatColor(da.dsrPct) }}>{da.dsrPct}%</strong>
+                        <strong style={{ background: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct) }}>{da.dsrPct}%</strong>
                       </div>
                     ))}
                     {(() => {
-                      const das = showZeroOnly
+                      const das = view === "zero"
                         ? selected.board.daDsr.filter((da) => da.delivered === 0)
                         : selected.board.daDsr;
                       if (!das.length) {
-                        return <p className={s.empty}>{showZeroOnly ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>;
+                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>;
                       }
                       const tot = sumDaDsr(das);
                       return (
@@ -1470,7 +1578,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                           <strong>{tot.rejected}</strong>
                           <strong>{tot.oor}</strong>
                           <strong>{tot.total}</strong>
-                          <strong style={{ background: dsrHeatColor(tot.dsrPct) }}>{tot.dsrPct}%</strong>
+                          <strong style={{ background: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct) }}>{tot.dsrPct}%</strong>
                         </div>
                       );
                     })()}

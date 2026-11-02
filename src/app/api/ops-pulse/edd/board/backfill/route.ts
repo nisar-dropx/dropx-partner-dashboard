@@ -13,12 +13,17 @@ export async function POST(request: Request) {
     const days = Number(url.searchParams.get("days") ?? 7) || 7;
     const startIndex = Number(url.searchParams.get("startIndex") ?? 0) || 0;
     const date = String(url.searchParams.get("date") ?? "").trim();
-    const concurrency = Math.max(1, Math.min(20, Number(url.searchParams.get("concurrency") ?? 12) || 12));
+    const concurrency = Math.max(1, Math.min(25, Number(url.searchParams.get("concurrency") ?? 25) || 25));
+    const retryRaw = String(url.searchParams.get("retryJobs") ?? "").trim();
+    const retryJobs = retryRaw
+      ? retryRaw.split(",").map((part) => part.trim()).filter(Boolean)
+      : undefined;
     const outcome = await backfillLoadFlashBoard({
       days,
       startIndex,
       date: date || undefined,
       concurrency,
+      retryJobs,
     });
     return NextResponse.json(outcome);
   } catch (error) {

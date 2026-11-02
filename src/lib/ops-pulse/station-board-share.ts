@@ -6,6 +6,8 @@
 export type BoardShareCell = {
   text: string;
   bg?: string;
+  /** Override ink (e.g. white on deep green DSR / Pickup %). */
+  color?: string;
   bold?: boolean;
   align?: "left" | "right" | "center";
 };
@@ -124,7 +126,7 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
           ctx.fillRect(x + 1, y + 1, widths[i]! - 2, h - 2);
         }
         lines.forEach((line, j) => {
-          ctx.fillStyle = "#223642";
+          ctx.fillStyle = cell?.color || "#223642";
           ctx.font = `${cell?.bold || isTotal || i === 0 ? 700 : 400} 13px Arial, sans-serif`;
           const align = cell?.align ?? (i === 0 ? "left" : "right");
           const tw = ctx.measureText(line).width;

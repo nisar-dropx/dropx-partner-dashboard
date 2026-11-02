@@ -1108,6 +1108,8 @@ export type LoadFlashBoardBackfill = {
   nextIndex: number;
   total: number;
   done: boolean;
+  /** Station|date keys that failed this tick (for a final retry pass). */
+  failed: string[];
 };
 
 /** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
@@ -1115,8 +1117,10 @@ export async function backfillLoadFlashBoard(opts?: {
   days?: number;
   startIndex?: number;
   date?: string;
-  /** Parallel station×date jobs per tick (worker clamps 1–20). */
+  /** Parallel station×date jobs per tick (worker clamps 1–25). */
   concurrency?: number;
+  /** Explicit failure list for one final retry pass (`STATION|YYYY-MM-DD`). */
+  retryJobs?: string[];
 }): Promise<LoadFlashBoardBackfill> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
@@ -1127,12 +1131,13 @@ export async function backfillLoadFlashBoard(opts?: {
   if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
   if (opts?.date) url.searchParams.set("date", opts.date);
   if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
+  if (opts?.retryJobs?.length) url.searchParams.set("retryJobs", opts.retryJobs.join(","));
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    // Concurrent packet of ~12 stations; wall clock ≈ slowest station in the batch.
-    signal: AbortSignal.timeout(110000)
+    // Concurrent packet of ~25 stations; wall clock ≈ slowest station in the batch.
+    signal: AbortSignal.timeout(120000)
   });
   const raw = await readJson(response);
   if (!response.ok) {
@@ -1140,12 +1145,16 @@ export async function backfillLoadFlashBoard(opts?: {
       code: raw.code == null ? null : String(raw.code)
     });
   }
+  const failed = Array.isArray(raw.failed)
+    ? raw.failed.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
   return {
     days: Number(raw.days ?? opts?.days ?? 7) || 7,
     advanced: Number(raw.advanced ?? 0) || 0,
     nextIndex: Number(raw.nextIndex ?? 0) || 0,
     total: Number(raw.total ?? 0) || 0,
-    done: Boolean(raw.done)
+    done: Boolean(raw.done),
+    failed,
   };
 }
 
