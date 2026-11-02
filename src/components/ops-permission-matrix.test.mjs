@@ -20,7 +20,13 @@ function mount(extra={}) {
   const state=[];let cursor=0,tree;
   const hooks={Fragment:'fragment',useState(initial){const i=cursor++;if(!(i in state))state[i]=typeof initial==='function'?initial():initial;return[state[i],value=>state[i]=typeof value==='function'?value(state[i]):value]},useMemo:fn=>fn(),useRef:()=>({current:null}),useEffect:()=>{}};
   const jsx=(type,props)=>({type,props});
-  const {OpsPermissionMatrix}=compile('./ops-permission-matrix.tsx',{'react':hooks,'react/jsx-runtime':{jsx,jsxs:jsx},'@/lib/ops-pulse/permission-navigation':grouping});
+  const {OpsPermissionMatrix}=compile('./ops-permission-matrix.tsx',{
+    'react':hooks,
+    'react/jsx-runtime':{jsx,jsxs:jsx},
+    '@/lib/ops-pulse/permission-navigation':grouping,
+    // ReportTable only wraps the same table markup for Excel/sort chrome; tests assert the permission tree.
+    '@/components/report-table':{ReportTable:({className,children})=>({type:'table',props:{className,children}})},
+  });
   const props={pages,navigationViews:views,initialNavigationView:'amazon_edsp',...extra};
   return {render(){cursor=0;tree=OpsPermissionMatrix(props);return tree},all(){return nodes(tree)},payload(){return JSON.parse(nodes(tree).find(n=>n.props.name==='permissions_json').props.value)}};
 }
