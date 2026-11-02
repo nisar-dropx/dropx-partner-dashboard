@@ -243,9 +243,9 @@ function emptyAttendanceRow(date: string): Row {
     workMode: "onsite",
     appliedLeave: null,
     regularization: null,
-    // A past active-service day is supplied by the API, including its policy
-    // window. A client-only placeholder is outside that verified scope.
-    regularizationOpen: false
+    // Client placeholders still need a request path for “No record” days. The
+    // submit API enforces the HRMS regularization window.
+    regularizationOpen: true
   };
 }
 
@@ -601,6 +601,7 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
               && !["paid-leave", "leave"].includes(selectedInsight.calendarClass)
               && (selectedInsight.needsRegularization
                 || selectedInsight.issues.length > 0
+                || selectedInsight.payDayType === "no_record"
                 || selectedInsight.payDayType === "week_off"
                 || selectedInsight.payDayType === "paid_holiday"
                 || selectedInsight.calendarClass === "week-off")
@@ -614,6 +615,7 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
               : null}
             {selected.regularizationOpen === false && canSubmitRegularization(selected) && (selectedInsight.needsRegularization
               || selectedInsight.issues.length > 0
+              || selectedInsight.payDayType === "no_record"
               || selectedInsight.payDayType === "week_off"
               || selectedInsight.payDayType === "paid_holiday"
               || selectedInsight.calendarClass === "week-off")
