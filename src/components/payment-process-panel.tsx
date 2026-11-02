@@ -806,7 +806,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                 </div>
                 {processRequest.payment_details.length ? (
                   <div className="table-wrap" style={{ marginTop: 16 }}>
-                    <ReportTable>
+                    <ReportTable reportHeaders={["Field", "Value / attachment"]}>
                       <tbody>
                         {processRequest.payment_details.map((detail) => (
                           <tr key={detail.id}>

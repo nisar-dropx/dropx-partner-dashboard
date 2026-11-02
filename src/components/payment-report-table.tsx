@@ -471,7 +471,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
                   <div className="section-divider" />
                   <h3>Request details</h3>
                   <div className="table-wrap">
-                    <ReportTable>
+                    <ReportTable reportHeaders={["Field", "Response / attachment"]}>
                       <tbody>
                         {selectedRequest.answers.map((answer) => (
                           <tr key={answer.id}>
@@ -504,7 +504,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
               <div className="section-divider" />
               <h3>History</h3>
               <div className="table-wrap">
-                <ReportTable>
+                <ReportTable reportHeaders={["Status", "Updated by", "Role", "Comments", "Updated at"]}>
                   <tbody>
                     {history.length ? history.map((item) => (
                       <tr key={item.id}>

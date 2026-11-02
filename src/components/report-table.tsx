@@ -137,6 +137,7 @@ type Props = TableHTMLAttributes<HTMLTableElement> & {
   /** Pass a dataset export for paginated reports; it must use the same authorised, filtered rows. */
   reportExport?: () => ExcelReport | Promise<ExcelReport>;
   reportCanExport?: boolean;
+  reportHeaders?: string[];
 };
 
 function renderedTableValues(table: HTMLTableElement) {
@@ -151,7 +152,7 @@ function renderedTableValues(table: HTMLTableElement) {
   return next;
 }
 
-export function ReportTable({ children, reportTitle, reportExport, reportCanExport = true, ...props }: Props) {
+export function ReportTable({ children, reportTitle, reportExport, reportCanExport = true, reportHeaders, ...props }: Props) {
   const enabled = useOpsDesign();
   const mayExport = useOpsReportExport() && reportCanExport;
   const ref = useRef<HTMLTableElement>(null);
@@ -209,6 +210,10 @@ export function ReportTable({ children, reportTitle, reportExport, reportCanExpo
     }));
   }
   const parts = nodes(children);
+  if (reportHeaders?.length && !parts.some(n => element(n) && n.type === "thead")) {
+    const body = parts.findIndex(n => element(n) && n.type === "tbody");
+    parts.splice(body < 0 ? 0 : body, 0, <thead key="report-head"><tr>{reportHeaders.map((label, index) => <th key={index}>{label}</th>)}</tr></thead>);
+  }
   const caption = parts.find(n => element(n) && n.type === "caption") as Element | undefined;
   let bodyIndex = 0;
   return <table {...props} ref={ref} data-report-table="true" onClickCapture={event => {
