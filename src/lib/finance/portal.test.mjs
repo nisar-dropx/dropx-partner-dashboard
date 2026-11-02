@@ -78,6 +78,7 @@ test("Finance sign-in keeps authenticated and new sessions on the Finance surfac
     "@/lib/ops-pulse/auth": {},
     "@/lib/ops-pulse/navigation": {},
     "@/lib/people/auth": {},
+    "@/lib/auth-login-error": { friendlyAuthLoginError: (message) => message ?? "" },
     "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: signedIn ? { id: "user" } : null } }) } }) },
     "@/lib/with-timeout": { withTimeout: promise => promise },
     "./actions": { signInWithGoogle: "/test-signin" }

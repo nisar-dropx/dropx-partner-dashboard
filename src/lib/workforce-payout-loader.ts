@@ -1,5 +1,6 @@
 import { applyWorkforcePaidAdvances } from "@/lib/workforce-paid-advances";
 import "server-only";
+import { resolveConversionRate, type ConversionRateRule } from "@/lib/conversion-rate-rules";
 import { paidAdhocDays, paidAdhocDayBreakdown } from "@/lib/adhoc-paid-days";
 import { adhocPaidDayKey } from "@/lib/adhoc-da-identity";
 import { loadRouteDistanceContext } from "@/lib/workforce-route-distance-data";
@@ -136,6 +137,17 @@ export async function loadWorkforcePayoutRows(
     return { ...result, rows: result.rows.filter(row => row.locationId && visible.has(row.locationId)) };
   }
   const admin = supabaseAdmin;
+  const conversionRulesResult = await readAllRows(admin.from("payment_conversion_rate_rules")
+    .select("id,company_id,payment_method_id,payment_field_id,provider_id,location_model_id,station_id,numerator_source,denominator_source,effective_from,effective_to,tiers")
+    .eq("company_id", companyId).lte("effective_from", toDate).gte("effective_to", workforcePaymentMonthStart(fromDate)).order("id"));
+  // Rolling deployment: only a genuinely absent new table means no rules yet.
+  if (conversionRulesResult.error && !["42P01", "PGRST205"].includes(conversionRulesResult.error.code ?? "")) {
+    return { rows: [], error: conversionRulesResult.error.message };
+  }
+  const conversionRules = (conversionRulesResult.data ?? []) as ConversionRateRule[];
+  const conversionColumns = [...new Set(conversionRules.flatMap(rule => [rule.numerator_source, rule.denominator_source]))];
+  if (conversionColumns.some(column => !/^[a-z][a-z0-9_]*$/.test(column))) return { rows: [], error: "Invalid conversion input configuration." };
+  const conversionSelect = conversionColumns.length ? `,${conversionColumns.join(",")}` : "";
   const scopeEnabled = scope.workforceIds !== undefined;
   const scopedWorkforceIds = [...new Set((scope.workforceIds ?? []).map(String).map((id) => id.trim()).filter(Boolean))];
   if (scopeEnabled && !scopedWorkforceIds.length) return { rows: [] as WorkforcePayoutRow[], error: null as string | null };
@@ -232,7 +244,7 @@ export async function loadWorkforcePayoutRows(
       values: sourceIds,
       loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, designation_id, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIdChunk)
     }),
-    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("id, provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return, delivery_assigned_count").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
+    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("id, provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return, delivery_assigned_count" + conversionSelect).eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     loadPostgrestInFilterBatches({
       values: contractorIds,
@@ -374,7 +386,7 @@ export async function loadWorkforcePayoutRows(
     .filter(Boolean))];
   const hiddenThresholdMetricsResult = hiddenThresholdStationCodes.length
     ? await readAllRows(supabaseAdmin.from("cps_shipment_daily")
-      .select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return")
+      .select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return" + conversionSelect)
       .eq("company_id", companyId)
       .in("station_code", hiddenThresholdStationCodes)
       .gte("work_date", thresholdHistoryStart)
@@ -1059,6 +1071,11 @@ export async function loadWorkforcePayoutRows(
   };
   const providerDailyRowsFor = (mapping: any) => shipmentRowsByMappingId.get(String(mapping.id)) ?? [];
   const thresholdDailyRowsFor = (mapping: any) => thresholdShipmentRowsByMappingId.get(String(mapping.id)) ?? [];
+  const conversionRateFor = (mapping: any, location: any, rule: ProviderProductionRule, date: string, rows: any[]) =>
+    resolveConversionRate({ rules: conversionRules, companyId, paymentMethodId: String(mapping.payment_method_id),
+      paymentFieldId: rule.paymentFieldId, providerId: String(mapping.provider_id),
+      modelId: String(location?.location_model_id ?? ""), stationId: String(mapping.station_id),
+      date, rows, fallbackRate: rule.rate }).rate;
   const productionThresholdInputId = (mappingId: unknown, date: string, rule: ProviderProductionRule) =>
     `${String(mappingId)}|${date}|${rule.allocationKey}`;
   const thresholdInputs = thresholdMappings
@@ -1101,7 +1118,7 @@ export async function loadWorkforcePayoutRows(
             paymentFieldId: rule.paymentFieldId,
             fieldCode: rule.code,
             date,
-            fallbackRate: rule.rate
+            fallbackRate: conversionRateFor(mapping, location, rule, date, rows)
           }));
           return {
             id: productionThresholdInputId(mapping.id, date, rule),
@@ -1210,7 +1227,7 @@ export async function loadWorkforcePayoutRows(
           paymentFieldId: rule.paymentFieldId,
           fieldCode: rule.code,
           date,
-          fallbackRate: rule.rate
+          fallbackRate: conversionRateFor(mapping, location, rule, date, rows)
         }));
         const allocation = thresholdAllocationById.get(productionThresholdInputId(mapping.id, date, rule));
         if (allocation?.thresholdApplied) {
