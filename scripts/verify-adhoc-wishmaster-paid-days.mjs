@@ -264,5 +264,21 @@ assert.equal((await db.query('select status from payment_requests where id=$1',[
 assert.equal(await count(),before,'A supplement must not create another cash recovery');
 await assert.rejects(()=>db.query('delete from payment_adhoc_supplement_reviews where payment_request_id=$1',[extra.id]),/immutable/);
 await assert.rejects(()=>insert({request_no:'SUPPLEMENT-UNREVIEWED',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-20',adhoc_provider_employee_id:'001234567800',adhoc_da_name:'Extra payment',status:'processed',bank_status:'Paid',utr_cin:'BANK999'}),/already has a paid/);
+// Bank-paid evidence records an actual transfer despite duplicate or closed-payroll conditions.
+const bankPaidMigration=readFileSync(new URL('../supabase/migrations/20261102100628_bank_paid_adhoc_reconciliation.sql',import.meta.url),'utf8');
+await db.exec(bankPaidMigration); await db.exec(bankPaidMigration);
+const confirmed=await insert({request_no:'BANK-PAID-DUP',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-20',adhoc_provider_employee_id:'001234567800',adhoc_da_name:'Extra payment',status:'processing'});
+await db.query("update payment_requests set status='processed',bank_status='Paid',utr_cin='BANK-CONFIRMED' where id=$1",[confirmed.id]);
+const recorded=(await db.query('select * from payment_requests where id=$1',[confirmed.id])).rows[0];
+assert.equal(recorded.status,'processed'); assert.equal(recorded.utr_cin,'BANK-CONFIRMED');
+assert.equal(recorded.adhoc_adjustment_id,null);
+const afterConfirmed=await bumpCount();
+await db.query("update payment_requests set status='processed' where id=$1",[confirmed.id]);
+assert.equal(await bumpCount(),afterConfirmed,'Retry must not apply paid-day effects twice');
+await assert.rejects(()=>insert({request_no:'NO-EVIDENCE-DUP',adhoc_shipment_id:null,adhoc_payout_policy:'work_day',adhoc_work_date:'2026-10-20',adhoc_provider_employee_id:'001234567800',adhoc_da_name:'Extra payment',status:'processed',bank_status:'Paid',utr_cin:' '}),/already has a paid/);
+await db.query("update payment_requests set status='processed',bank_status='Paid',utr_cin='BANK-CLOSED-PAYROLL' where id=$1",[imported.id]);
+assert.equal((await db.query('select status from payment_requests where id=$1',[imported.id])).rows[0].status,'processed');
+await assert.rejects(()=>db.query('update payment_requests set amount=999 where id=$1',[confirmed.id]),/cannot be changed/);
+assert.equal(await count(),before,'Bank confirmation never adds a second cash recovery');
 await db.close();
 console.log('PASS legacy recovery + paid work-day policy, bank confirmation before mapping, deferred reconciliation exactly once, idempotent migrations.');

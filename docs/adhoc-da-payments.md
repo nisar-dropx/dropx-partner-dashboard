@@ -1,3 +1,12 @@
+## Bank-paid reconciliation — 2 November 2026
+
+A completed bank payment (bank status Paid with a nonempty UTR) can be recorded
+as processed even if the associate/date already has an ad hoc payment or finalized
+Workforce payroll. Existing bank matching, authorization, paid-record immutability,
+paid-day exclusion and dependency refresh remain. No second cash recovery is created.
+The prior duplicate/payroll checks still apply without bank-paid evidence.
+Migration: 20261102100628_bank_paid_adhoc_reconciliation.sql.
+
 # Adhoc DA / Wishmaster payments
 
 ## Current work-date policy (25 October 2026)
