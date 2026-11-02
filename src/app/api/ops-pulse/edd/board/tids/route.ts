@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireEddApi } from "@/lib/ops-pulse/edd-access";
-import { fetchEddStation, fetchLoadFlashTracking } from "@/lib/ops-pulse/edd-worker";
+import { fetchLoadFlashTracking } from "@/lib/ops-pulse/edd-worker";
 import { loadFlashViewerStations } from "@/lib/ops-pulse/load-flash-access";
 import { CRETURN_PICKED_UP_BUCKET } from "@/lib/ops-pulse/station-board";
 
@@ -11,7 +11,8 @@ type Kind = "edd" | "creturn" | "dsr" | "zero";
 
 /**
  * Station-wise tracking IDs for Station board drill-down.
- * EDD → ageing packages; C-Return / DSR / Zero → Ops Live flash package rows.
+ * EDD → board Inducted×promised rows (same as eddByDate counts).
+ * C-Return / DSR / Zero → board / Ops Live flash package rows.
  */
 export async function GET(request: Request) {
   try {
@@ -33,22 +34,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Station access required." }, { status: 403 });
     }
 
+    const flash = (await fetchLoadFlashTracking(date || undefined, [station])).filter((row) => row.stationCode === station);
+
     if (kind === "edd") {
-      const result = await fetchEddStation({ stationCode: station });
-      if (result.status !== "ok") {
-        return NextResponse.json({ station, kind, rows: [] }, { headers: { "Cache-Control": "no-store" } });
-      }
-      const rows = result.payload.packages.map((pkg) => ({
-        trackingId: pkg.trackingId,
-        status: pkg.state || "",
-        edd: pkg.ead || "",
-        driverId: "",
-        driverName: "",
-      })).filter((row) => row.trackingId);
+      const rows = flash
+        .filter((row) => row.bucket === "EDD")
+        .map((row) => ({
+          trackingId: row.trackingId,
+          status: row.state || "Inducted",
+          edd: row.edd || "",
+          driverId: row.driverId,
+          driverName: row.driverName,
+        }))
+        .filter((row) => row.trackingId);
       return NextResponse.json({ station, kind, rows }, { headers: { "Cache-Control": "no-store" } });
     }
-
-    const flash = (await fetchLoadFlashTracking(date || undefined, [station])).filter((row) => row.stationCode === station);
     if (kind === "creturn") {
       const rows = flash
         .filter((row) => row.bucket === "Pickup")
