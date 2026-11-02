@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import {CodSlipCheckDetails} from '@/components/cod-slip-check-details';
 import {CodSlipView} from '@/components/cod-slip-view';
@@ -215,7 +217,7 @@ export function CodSubmissionRegister({
         </section>
       ) : null}
       <div className="table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Submitted</th>
@@ -290,7 +292,7 @@ export function CodSubmissionRegister({
               <tr><td className="empty-cell" colSpan={11}>No COD submissions found for this filter.</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
 
       {preview ? (

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { SubmitButton } from "@/components/submit-button";
 import type { ReviewOversightRole } from "@/lib/ops-pulse/review-oversight-roles";
 
@@ -35,7 +37,7 @@ export function PerformanceReviewOversightMaster({
       </div>
       {error ? <p className="message-panel error">{error}</p> : null}
       <div className="table-wrap">
-        <table className="performance-target-master">
+        <ReportTable className="performance-target-master">
           <thead>
             <tr><th>Designation</th><th>Tier</th><th>Status</th><th>Actions</th></tr>
           </thead>
@@ -72,7 +74,7 @@ export function PerformanceReviewOversightMaster({
             ))}
             {!rows.length ? <tr><td colSpan={4}>No oversight roles configured yet.</td></tr> : null}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       <form action={addAction} className="review-oversight-add">
         <label>

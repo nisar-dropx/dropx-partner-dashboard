@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import {useMemo,useState,type FormEvent} from "react";
 import Link from "next/link";
 import {buildTemplatePayload,bodyVariables,templateLanguages,type TemplateDraft} from "@/lib/whatsapp-template-builder";
@@ -93,10 +95,10 @@ export function WhatsAppTemplateManager({profiles,templates:initial,canEdit,send
         <div className={styles.actions}>{confirm?<><button type="button" className="button secondary" disabled={busy} onClick={()=>setConfirm(false)}>Back to edit</button><button type="button" className="button" disabled={busy} onClick={submit}>{busy?"Submitting…":"Confirm submission"}</button></>:<button className="button" disabled={busy} type="submit">Review submission</button>}</div>
       </form>:<div className={styles.tableWrap}>
         <p className={styles.help}>{visible.length} templates · Only Approved can be sent. Refresh status to check Meta’s latest decision.</p>
-        <table><thead><tr><th>Template</th><th>Language / category</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+        <ReportTable><thead><tr><th>Template</th><th>Language / category</th><th>Status</th><th>Actions</th></tr></thead><tbody>
           {visible.map(row=><tr key={row.template_id}><td><strong>{row.name}</strong><details><summary>View message</summary><div className={styles.body}>{row.components.map((c,i)=><p key={i}>{c.text||c.buttons?.map(b=>b.text).join(" · ")||c.format}</p>)}</div></details></td><td>{row.language}<div className={styles.meta}>{row.category}</div></td><td><span className={styles.badge+" "+(row.status==="APPROVED"?styles.approved:row.status==="REJECTED"?styles.rejected:styles.pending)}>{row.status}</span>{row.rejected_reason?<p className={styles.help}>{row.rejected_reason}</p>:null}{row.synced_at?<div className={styles.meta}>Checked {new Date(row.synced_at).toLocaleString("en-IN")}</div>:null}</td><td><div className={styles.toolbar}>{row.status==="APPROVED"?<Link className="button secondary compact" href={sendPath+"?profile="+encodeURIComponent(profileId)+"&template="+encodeURIComponent(row.template_id)}>Use template</Link>:null}{canEdit?<button type="button" className="button secondary compact" disabled={busy} onClick={()=>duplicate(row)}>Copy as new</button>:null}</div></td></tr>)}
           {!visible.length?<tr><td colSpan={4}>No matching templates. {canEdit?"Refresh status or create a template.":"Ask a settings administrator to sync templates."}</td></tr>:null}
-        </tbody></table>
+        </tbody></ReportTable>
       </div>}
     </section>
   </div>;

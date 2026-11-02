@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
@@ -241,7 +243,7 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
       <Card title="Today's reports" icon={<CalendarCheck size={18} aria-hidden />} description="One row per group and report due today. Reminders stop as soon as the report photo arrives." flush>
         {rows.length ? (
           <div className={s.tableWrap}>
-            <table className={`${s.table} ${s.dueReports}`}>
+            <ReportTable className={`${s.table} ${s.dueReports}`}>
               <thead><tr><th>Group</th><th>Report</th><th>Due</th><th>Reminders</th><th>Status</th><th>Result</th>{canEdit ? <th><span className="sr-only">Actions</span></th> : null}</tr></thead>
               <tbody>
                 {rows.map((row) => {
@@ -272,7 +274,7 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
                   );
                 })}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         ) : (
           <Empty icon={<CalendarCheck size={28} aria-hidden />} title={settings.mode === "off" ? "The bot is off" : "Nothing due today"}>
@@ -308,7 +310,7 @@ async function BotMessagesToday({ companyId, groupIds, lookup, timeZone }: { com
     <Card title="Bot messages in the last 24 hours" icon={<Send size={18} aria-hidden />} description="Each reminder and reply the bot queued, and whether it was posted. A reminder that wasn't posted shows why (for example, the report had already arrived)." flush action={<span className={`${s.count} ${s.countMuted}`}>{rows.length}</span>}>
       {rows.length ? (
         <div className={s.tableWrap}>
-          <table className={s.table}>
+          <ReportTable className={s.table}>
             <thead><tr><th>Queued</th><th>Group</th><th>Message</th><th>Status</th><th>Posted</th></tr></thead>
             <tbody>
               {rows.map((row) => {
@@ -327,7 +329,7 @@ async function BotMessagesToday({ companyId, groupIds, lookup, timeZone }: { com
                 );
               })}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       ) : <Empty icon={<Send size={28} aria-hidden />} title="No bot messages yet">Reminders and replies appear here when they are queued.</Empty>}
     </Card>
@@ -339,7 +341,7 @@ function SubmissionTable({ rows, lookup, timeZone, title, emptyText }: { rows: S
     <Card title={title} icon={<Inbox size={18} aria-hidden />} flush action={<span className={`${s.count} ${s.countMuted}`}>{rows.length}</span>}>
       {rows.length ? (
         <div className={s.tableWrap}>
-          <table className={s.table}>
+          <ReportTable className={s.table}>
             <thead><tr><th>Time</th><th>Group</th><th>Sender</th><th>Report</th><th>Status</th><th>Result</th><th><span className="sr-only">Image</span></th></tr></thead>
             <tbody>
               {rows.map((row) => {
@@ -357,7 +359,7 @@ function SubmissionTable({ rows, lookup, timeZone, title, emptyText }: { rows: S
                 );
               })}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       ) : <Empty icon={<Inbox size={28} aria-hidden />} title="No photos yet">{emptyText}</Empty>}
     </Card>
@@ -533,7 +535,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
       {attentionRows.length ? (
         <Card title="Needs attention" icon={<AlertTriangle size={18} aria-hidden />} description="Photos that couldn't be checked, or replies that couldn't be sent. Fix the cause shown, then retry." flush action={<span className={`${s.count} ${s.countMuted}`}>{attentionRows.length}</span>}>
           <div className={s.tableWrap}>
-            <table className={s.table}>
+            <ReportTable className={s.table}>
               <thead><tr><th>Time</th><th>Group</th><th>Sender</th><th>Problem</th>{canEdit ? <th><span className="sr-only">Actions</span></th> : null}</tr></thead>
               <tbody>
                 {attentionRows.map((row) => (
@@ -554,7 +556,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </Card>
       ) : null}
@@ -675,7 +677,7 @@ async function ActionsTab({ companyId, groupIds, lookup, settings, canEdit }: { 
     <Card title="Open actions" icon={<AlertTriangle size={18} aria-hidden />} description="Incidents, shortages, expiry and tickets extracted from the group. Close with confirmation when evidence arrives." flush>
       {rows.length ? (
         <div className={s.tableWrap}>
-          <table className={s.table}>
+          <ReportTable className={s.table}>
             <thead><tr><th>Opened</th><th>Group</th><th>Action</th><th>Owner</th><th>Status</th>{canEdit ? <th></th> : null}</tr></thead>
             <tbody>
               {rows.map((row) => (
@@ -697,7 +699,7 @@ async function ActionsTab({ companyId, groupIds, lookup, settings, canEdit }: { 
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       ) : <Empty icon={<CheckCircle2 size={28} aria-hidden />} title="No open actions">Tracked follow-ups from the Testing group appear here.</Empty>}
     </Card>

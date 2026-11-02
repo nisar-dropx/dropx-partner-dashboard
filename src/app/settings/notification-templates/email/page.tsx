@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -122,7 +124,7 @@ export default async function EmailNotificationTemplatesPage() {
           <span className="status-pill">{enabledCount} enabled</span>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Notification</th>
@@ -146,7 +148,7 @@ export default async function EmailNotificationTemplatesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

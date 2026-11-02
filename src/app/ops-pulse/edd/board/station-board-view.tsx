@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
@@ -1010,7 +1012,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   {regionShareActions(group.id, group.label, group.stations)}
                 </div>
                 <div className={s.scroll}>
-                  <table className={`${s.table} ${s.edd}`}>
+                  <ReportTable className={`${s.table} ${s.edd}`}>
                     <thead>
                       <tr>
                         <th>Station</th>
@@ -1045,7 +1047,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <td>{count(local.grandTotal)}</td>
                       </tr>
                     </tfoot>
-                  </table>
+                  </ReportTable>
                 </div>
               </div>
             );
@@ -1076,7 +1078,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   {regionShareActions(group.id, group.label, group.stations)}
                 </div>
                 <div className={s.scroll}>
-                  <table className={`${s.table} ${s.ageing}`}>
+                  <ReportTable className={`${s.table} ${s.ageing}`}>
                     <thead>
                       <tr>
                         <th rowSpan={2}>State</th>
@@ -1120,7 +1122,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <td>{inr(local.grandTotal.amount)}</td>
                       </tr>
                     </tfoot>
-                  </table>
+                  </ReportTable>
                 </div>
               </div>
             );
@@ -1134,7 +1136,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   {regionShareActions(group.id, group.label, group.stations)}
                 </div>
                 <div className={s.scroll}>
-                  <table className={`${s.table} ${s.ageing}`}>
+                  <ReportTable className={`${s.table} ${s.ageing}`}>
                     <thead>
                       <tr>
                         <th rowSpan={2}>Station</th>
@@ -1187,7 +1189,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         <td>{inr(local.grandTotal.amount)}</td>
                       </tr>
                     </tfoot>
-                  </table>
+                  </ReportTable>
                 </div>
               </div>
             );
@@ -1213,7 +1215,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 {regionShareActions(group.id, group.label, group.stations)}
               </div>
               <div className={s.scroll}>
-                <table className={`${s.table} ${s.creturn}`}>
+                <ReportTable className={`${s.table} ${s.creturn}`}>
                   <thead>
                     <tr>
                       <th>Station</th>
@@ -1263,7 +1265,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       </td>
                     </tr>
                   </tfoot>
-                </table>
+                </ReportTable>
               </div>
             </div>
             );
@@ -1303,7 +1305,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 {regionShareActions(group.id, group.label, group.stations)}
               </div>
               <div className={s.scroll}>
-                <table className={`${s.table} ${s.zero}`}>
+                <ReportTable className={`${s.table} ${s.zero}`}>
                   <thead>
                     <tr>
                       <th>Station</th>
@@ -1388,7 +1390,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       </tfoot>
                     );
                   })()}
-                </table>
+                </ReportTable>
               </div>
             </div>
             );

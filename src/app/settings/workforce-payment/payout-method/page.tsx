@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -236,7 +238,7 @@ export default async function WorkforcePaymentSettingsPage() {
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Effective month</th>
@@ -272,7 +274,7 @@ export default async function WorkforcePaymentSettingsPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

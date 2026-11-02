@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -333,7 +335,7 @@ export function NlRecoveryMaster({
           ) : null}
         </div>
         <div className={styles.tableWrap}>
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Outcome</th>
@@ -387,7 +389,7 @@ export function NlRecoveryMaster({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {editing ? (
           <form

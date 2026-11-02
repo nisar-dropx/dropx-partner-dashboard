@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import {
   useState,
   useEffect,
@@ -2156,7 +2158,7 @@ export function StoreAuditWorkspace(p: Props) {
         </div>
       ) : (
         <div className={`${styles.tableWrap} ${styles.auditRegister}`}>
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Store / audit</th>
@@ -2222,7 +2224,7 @@ export function StoreAuditWorkspace(p: Props) {
               );
               })}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       )}
     </div>
@@ -2242,7 +2244,7 @@ export function StoreAuditWorkspace(p: Props) {
             Stores with no completed self-audit in the last 7 days are flagged.
           </p>
           <div className={styles.tableWrap}>
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Store</th>
@@ -2273,13 +2275,13 @@ export function StoreAuditWorkspace(p: Props) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
         <section className={styles.card}>
           <h2>Top failed questions (30d)</h2>
           <div className={styles.tableWrap}>
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Question</th>
@@ -2298,13 +2300,13 @@ export function StoreAuditWorkspace(p: Props) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
         <section className={styles.card}>
           <h2>Open corrective actions</h2>
           <div className={styles.tableWrap}>
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Store</th>
@@ -2326,13 +2328,13 @@ export function StoreAuditWorkspace(p: Props) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
         <section className={styles.card}>
           <h2>Mock vs Amazon (lenient &gt;10 pts)</h2>
           <div className={styles.tableWrap}>
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Store</th>
@@ -2361,13 +2363,13 @@ export function StoreAuditWorkspace(p: Props) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
         <section className={styles.card}>
           <h2>Repeat failures (last 3 audits)</h2>
           <div className={styles.tableWrap}>
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Store</th>
@@ -2384,7 +2386,7 @@ export function StoreAuditWorkspace(p: Props) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </div>

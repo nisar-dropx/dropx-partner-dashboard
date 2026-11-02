@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { DesignationForm } from "@/components/designation-form";
@@ -331,7 +333,7 @@ export default async function DesignationsPage({
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Code</th>
@@ -401,7 +403,7 @@ export default async function DesignationsPage({
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 10 : 9}>No designations found.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

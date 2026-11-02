@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -83,7 +85,7 @@ export default async function PayAdvanceRegisterPage() {
       {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Pay advance register unavailable</strong><p className="subtle" style={{ marginTop: 6 }}>{error}</p></div></section> : null}
       {!error ? <section className="panel">
         <div className="panel-head"><div><h2>Pay advance register</h2><p className="subtle">{rows.length} records · open Process to pay one</p></div><a className="button secondary" href="/payments/process">Open payment process</a></div>
-        <div className="table-wrap"><table><thead><tr><th>Person</th><th>ID</th><th>Station</th><th>Applying month</th><th>Working days</th><th>Monthly CTC</th><th>Monthly gross</th><th>Advance</th><th>Payment</th><th>Request</th><th>Sent</th></tr></thead>
+        <div className="table-wrap"><ReportTable><thead><tr><th>Person</th><th>ID</th><th>Station</th><th>Applying month</th><th>Working days</th><th>Monthly CTC</th><th>Monthly gross</th><th>Advance</th><th>Payment</th><th>Request</th><th>Sent</th></tr></thead>
           <tbody>{rows.length ? rows.map((row) => {
             const context = contexts.get(row.id);
             return <tr key={row.id}>
@@ -100,7 +102,7 @@ export default async function PayAdvanceRegisterPage() {
               <td>{formatDashboardDateTime(row.created_at)}</td>
             </tr>;
           }) : <tr><td className="empty-cell" colSpan={11}>No pay advance has been sent to Payments.</td></tr>}</tbody>
-        </table></div>
+        </ReportTable></div>
       </section> : null}
     </AppShell>
   );

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -92,7 +94,7 @@ export function CapacityDistanceTable({
       </header>
       {exportError ? <p role="alert" className={styles.notice}>{exportError}</p> : null}
       <div className={styles.tableWrap}>
-        <table className={`${styles.table} ${styles.associateTable}`}>
+        <ReportTable className={`${styles.table} ${styles.associateTable}`}>
           <thead><tr><th>Associate / station</th><th>Amazon ID</th><th>Mapped DropX ID</th><th>Days</th><th>Recorded distance</th><th>Fuel allowance</th><th>Coverage</th><th><span className={styles.srOnly}>Daily breakdown</span></th></tr></thead>
           <tbody>
             {shown.map((a) => <Fragment key={a.key}>
@@ -109,7 +111,7 @@ export function CapacityDistanceTable({
               {expanded === a.key ? <tr className={styles.expandedRow}><td colSpan={8}>
                 <section id={`days-${a.key}`} aria-label={`Daily breakdown for ${a.name}`} className={styles.dailyPanel}>
                   <header className={styles.dailyHead}><div><h3>{a.name} · Daily breakdown</h3><span>{period} · {a.days} {a.days === 1 ? "day" : "days"} matching the applied filters</span></div><button type="button" className={styles.close} aria-label={`Collapse daily breakdown for ${a.name}`} onClick={() => setExpanded(null)}><X size={17}/></button></header>
-                  <table className={styles.dailyTable}><thead><tr><th>Day / station</th><th>Distance</th><th>Rate / km</th><th>Fuel</th><th>Status / source</th><th>Route</th></tr></thead>
+                  <ReportTable className={styles.dailyTable}><thead><tr><th>Day / station</th><th>Distance</th><th>Rate / km</th><th>Fuel</th><th>Status / source</th><th>Route</th></tr></thead>
                     <tbody>{a.rows.map((r) => <tr key={r.key}>
                       <td><strong>{date(r.date)}</strong><small>{r.station}</small>{a.amazonIds.length > 1 ? <small>Amazon: {r.amazonId}</small> : null}</td>
                       <td className={styles.numeric}><strong>{r.km === null ? "—" : `${number(r.km)} km`}</strong></td>
@@ -118,13 +120,13 @@ export function CapacityDistanceTable({
                       <td><span className={`${styles.badge} ${r.status === "ready" ? styles.ready : styles.pending}`}>{distanceStatus(r)}</span><small>{r.status === "ready" ? distanceMethods[r.method] || r.method : reason(r)}</small></td>
                       <td><button type="button" className={styles.open} onClick={() => setSelected(r)} aria-label={`Open distance details for ${r.name}, ${date(r.date)}, ${r.station}`}><MapPinned size={16}/>Details</button></td>
                     </tr>)}</tbody>
-                  </table>
+                  </ReportTable>
                 </section>
               </td></tr> : null}
             </Fragment>)}
             {!shown.length ? <tr><td colSpan={8}><div className={styles.empty}><MapPinned size={28}/><strong>{identityMode ? "No unlinked Amazon IDs in this selection" : "No associates match these filters"}</strong><span>{identityMode ? "Everyone in scope already has a transporter link, or widen the date / station filters." : "Try another date, station or status. Only kilometre-based fuel mappings are included."}</span></div></td></tr> : null}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       <footer className={styles.pagination}><span>{associates.length ? `${page * 50 + 1}–${Math.min((page + 1) * 50, associates.length)} of ${associates.length} associates` : "0 associates"}</span><div>
         <button type="button" aria-label="Previous page" disabled={page === 0} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={18}/></button>

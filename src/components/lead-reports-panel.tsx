@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { formatDashboardDate } from "@/lib/date-format";
@@ -257,7 +259,7 @@ export function LeadReportsPanel({ ads, leads }: LeadReportsPanelProps) {
             <button className="button secondary" type="button" onClick={downloadReport} disabled={!currentRows.length}>Download</button>
           </div>
           <div className="table-wrap">
-            <table className="lead-table">
+            <ReportTable className="lead-table">
               <thead>
                 {reportType === "ad_spend" ? (
                   <tr>
@@ -306,7 +308,7 @@ export function LeadReportsPanel({ ads, leads }: LeadReportsPanelProps) {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           {totalPages > 1 ? (
             <div className="pagination">

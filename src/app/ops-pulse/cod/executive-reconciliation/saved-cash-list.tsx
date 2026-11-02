@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -255,7 +257,7 @@ function PendingReconDetails({ row }: { row: ExecutiveReconciliationViewRow }) {
       <div className="scc-pending-panel">
         <p className="subtle">Open pending items from the latest SCC reconciliation snapshot.</p>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Tracking ID</th>
@@ -276,7 +278,7 @@ function PendingReconDetails({ row }: { row: ExecutiveReconciliationViewRow }) {
                 <tr><td className="empty-cell" colSpan={4}>No SCC pending details available.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </div>
     </details>

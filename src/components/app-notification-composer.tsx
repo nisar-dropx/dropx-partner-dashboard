@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ChevronDown, Link2, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -244,7 +246,7 @@ export function AppNotificationComposer({
           <button className="button ghost compact" disabled={!sendList.length && !checked.length} onClick={clearAll} type="button">Clear</button>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead><tr><th><input aria-label="Select visible recipients" checked={visible.length > 0 && visible.every((row) => checkedSet.has(keyFor(row)))} onChange={() => visible.every((row) => checkedSet.has(keyFor(row))) ? setCheckedKeys((current) => current.filter((key) => !visible.some((row) => keyFor(row) === key))) : selectCurrent()} type="checkbox" /></th><th>Name</th><th>Mobile</th><th>Source</th><th>Location</th><th>Status</th></tr></thead>
             <tbody>
               {visible.map((recipient) => <tr key={keyFor(recipient)}>
@@ -256,7 +258,7 @@ export function AppNotificationComposer({
               </tr>)}
               {!visible.length ? <tr><td className="empty-cell" colSpan={6}>No recipients found.</td></tr> : null}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {totalPages > 1 ? <div className="panel-foot pagination"><button className="pager-button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} type="button">Prev</button><span>Page {currentPage} of {totalPages}</span><button className="pager-button" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)} type="button">Next</button></div> : null}
         <div className="bulk-send-list">

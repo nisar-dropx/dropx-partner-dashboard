@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -292,7 +294,7 @@ export default async function BiometricMonitorPage() {
             <strong>Duplicate biometric enrolment IDs found</strong>
             <p className="subtle" style={{ marginTop: 6 }}>These IDs will not be auto-linked until only one active worker has that enrolment ID.</p>
             <div className="table-wrap" style={{ marginTop: 12 }}>
-              <table>
+              <ReportTable>
                 <thead><tr><th>Enrolment ID</th><th>Workers using this ID</th></tr></thead>
                 <tbody>
                   {data.duplicates.map((duplicate) => (
@@ -302,7 +304,7 @@ export default async function BiometricMonitorPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </div>
         </section>
@@ -316,7 +318,7 @@ export default async function BiometricMonitorPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Device no.</th>
@@ -343,7 +345,7 @@ export default async function BiometricMonitorPage() {
                 <tr><td className="empty-cell" colSpan={7}>No devices are mapped yet.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
 
@@ -356,7 +358,7 @@ export default async function BiometricMonitorPage() {
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead><tr><th>Received</th><th>Event</th><th>Device</th><th>Enrolment</th><th>Punch time</th><th>Trans ID</th></tr></thead>
               <tbody>
                 {data.events.length ? data.events.map((event, index) => (
@@ -372,7 +374,7 @@ export default async function BiometricMonitorPage() {
                   <tr><td className="empty-cell" colSpan={6}>No raw events received yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
 
@@ -384,7 +386,7 @@ export default async function BiometricMonitorPage() {
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead><tr><th>Time</th><th>Device</th><th>Enrolment</th><th>Label</th><th>Worker status</th><th>Calculated</th></tr></thead>
               <tbody>
                 {data.punches.length ? data.punches.map((punch, index) => (
@@ -400,7 +402,7 @@ export default async function BiometricMonitorPage() {
                   <tr><td className="empty-cell" colSpan={6}>No calculated punches yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </section>
@@ -413,7 +415,7 @@ export default async function BiometricMonitorPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead><tr><th>Time</th><th>Severity</th><th>Type</th><th>Enrolment</th><th>Message</th></tr></thead>
             <tbody>
               {data.alerts.length ? data.alerts.map((alert, index) => (
@@ -428,7 +430,7 @@ export default async function BiometricMonitorPage() {
                 <tr><td className="empty-cell" colSpan={5}>No open biometric alerts.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

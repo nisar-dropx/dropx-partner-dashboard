@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
@@ -252,7 +254,7 @@ function BankResponseResultGroup({
           {details.length ? (
             <>
               <div style={{ maxHeight: 320, overflow: "auto", marginTop: 8 }}>
-                <table style={{ width: "100%", fontSize: 12 }}>
+                <ReportTable style={{ width: "100%", fontSize: 12 }}>
                   <thead><tr><th>Row / cell</th><th>Reference</th><th>Result / next action</th></tr></thead>
                   <tbody>{visibleDetails.map((detail, index) => <tr key={`${group}-${detail.rowNumber}-${index}`}>
                     <td style={{ verticalAlign: "top", whiteSpace: "nowrap" }}><strong>{detail.rowNumber}</strong>{detail.cell ? <div>{detail.cell}</div> : null}</td>
@@ -261,7 +263,7 @@ function BankResponseResultGroup({
                       {group === "exceptions" || group === "skipped" ? <><div>{detail.message}</div><div style={{ marginTop: 4 }}>{detail.action}</div></> : null}
                     </td>
                   </tr>)}</tbody>
-                </table>
+                </ReportTable>
               </div>
               {visibleCount < details.length ? (
                 <button
@@ -582,7 +584,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>
@@ -636,7 +638,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                 <tr><td className="empty-cell" colSpan={9}>No final approved payment requests ready for processing.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
 
@@ -804,7 +806,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                 </div>
                 {processRequest.payment_details.length ? (
                   <div className="table-wrap" style={{ marginTop: 16 }}>
-                    <table>
+                    <ReportTable>
                       <tbody>
                         {processRequest.payment_details.map((detail) => (
                           <tr key={detail.id}>
@@ -813,7 +815,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </ReportTable>
                   </div>
                 ) : null}
                 {processRequest.payment_history.length ? (
@@ -821,7 +823,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                     <div className="section-divider" />
                     <h3>Request history</h3>
                     <div className="table-wrap">
-                      <table>
+                      <ReportTable>
                         <thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Remarks</th><th>Date</th></tr></thead>
                         <tbody>
                           {processRequest.payment_history.map((entry) => (
@@ -834,7 +836,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </ReportTable>
                     </div>
                   </>
                 ) : null}

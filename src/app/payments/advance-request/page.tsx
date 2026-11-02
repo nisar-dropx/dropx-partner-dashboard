@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { AdvanceRequestInlineActions } from "@/components/advance-request-inline-actions";
@@ -143,7 +145,7 @@ export default async function AdvanceRequestPage({
             {["pending", "approved", "rejected", "all"].map((filter) => <a key={filter} className={`button compact ${status === filter ? "" : "secondary"}`} href={`/payments/advance-request${filter === "pending" ? "" : `?status=${filter}`}`}>{filter.charAt(0).toUpperCase() + filter.slice(1)}</a>)}
           </div>
         </div>
-        <div className="table-wrap"><table className="advance-request-table"><thead><tr><th>Requester</th><th>Designation</th><th>Station</th><th>Requested Amt</th><th>Purpose</th><th>Status</th><th>Requested</th><th>Approved Amt</th><th>Remarks</th><th>Action</th></tr></thead>
+        <div className="table-wrap"><ReportTable className="advance-request-table"><thead><tr><th>Requester</th><th>Designation</th><th>Station</th><th>Requested Amt</th><th>Purpose</th><th>Status</th><th>Requested</th><th>Approved Amt</th><th>Remarks</th><th>Action</th></tr></thead>
           <tbody>{requests.length ? requests.map((request) => <tr key={request.id}>
             <td><strong>{request.requester_name || request.account_code || "-"}</strong>{request.requester_name && request.account_code ? <div className="subtle">{request.account_code}</div> : null}</td>
             <td>{exactDesignations.get(`${request.profile_type}:${request.account_id}`) || request.designation || "-"}</td>
@@ -155,7 +157,7 @@ export default async function AdvanceRequestPage({
                 : <AdvanceRequestInlineActions requestId={request.id} requestedAmount={Number(request.amount)} requesterLabel={request.requester_name || request.account_code || "request"} />}</td>
             </> : <><td>{request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td><td>{request.decision_comment || "-"}</td><td>-</td></>}
           </tr>) : <tr><td className="empty-cell" colSpan={10}>No advance requests found.</td></tr>}</tbody>
-        </table></div>
+        </ReportTable></div>
       </section> : null}
     </AppShell>
   );

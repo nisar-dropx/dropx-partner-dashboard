@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { ExternalLink, Search } from "lucide-react";
@@ -106,7 +108,7 @@ export function WorkforceOnboardingDesk({
         </div>
       </div>
       <div className="table-wrap workforce-onboarding-table-wrap">
-        <table className="workforce-onboarding-table">
+        <ReportTable className="workforce-onboarding-table">
           <thead><tr><th>Associate</th><th>Station</th><th>Journey</th><th>Next action</th><th>Last activity</th><th>Action</th></tr></thead>
           <tbody>
             {visibleRows.map((row) => {
@@ -127,7 +129,7 @@ export function WorkforceOnboardingDesk({
             })}
             {!visibleRows.length ? <tr><td className="empty-cell" colSpan={6}>{emptyLabel}</td></tr> : null}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </section>
   );

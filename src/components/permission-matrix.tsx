@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { Fragment, useMemo, useState } from "react";
 import { OpsPermissionMatrix } from "@/components/ops-permission-matrix";
@@ -210,7 +212,7 @@ function StandardPermissionMatrix({
         <span className="subtle">{term ? `${filteredPages.length} matches` : `${filteredPages.length} permissions`}</span>
       </div>
       <div className="table-wrap">
-        <table className="permission-table">
+        <ReportTable className="permission-table">
           <thead>
             <tr>
               <th>Page name</th>
@@ -245,7 +247,7 @@ function StandardPermissionMatrix({
             })}
             {!filteredPages.length ? <tr><td className="empty-cell" colSpan={5}>No pages found.</td></tr> : null}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       <input name="permissions_json" type="hidden" value={JSON.stringify(pages.map((page) => ({
         page_id: page.id,

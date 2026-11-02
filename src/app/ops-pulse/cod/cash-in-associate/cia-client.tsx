@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -528,7 +530,7 @@ export function CiaNetworkClient({
           </div>
         </div>
         <div className="panel-body table-wrap">
-          <table className="cia-table">
+          <ReportTable className="cia-table">
             <thead>
               <tr>
                 <th>Station</th>
@@ -591,7 +593,7 @@ export function CiaNetworkClient({
                 );
               })}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {totalPages > 1 ? (
           <div className="panel-body cia-pagination">
@@ -825,7 +827,7 @@ export function CiaDriverPanel({
                       ))}
                     </div>
                     <div className="table-wrap">
-                      <table className="cia-table compact">
+                      <ReportTable className="cia-table compact">
                         <thead>
                           <tr>
                             <th>Date</th>
@@ -848,7 +850,7 @@ export function CiaDriverPanel({
                               </tr>
                             ))}
                         </tbody>
-                      </table>
+                      </ReportTable>
                     </div>
                   </div>
                 ) : null}

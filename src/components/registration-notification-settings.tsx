@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import {digestDatabase} from "@/lib/portal-digest-delivery";
 import {registrationEvents} from "@/lib/registration-pendency";
 import {saveRegistrationDigestSettings} from "@/app/settings/notifications/actions";
@@ -22,6 +24,6 @@ export async function RegistrationNotificationSettings({companyId,canEdit,ownerU
    <small>{control.config.delivery_ready?"Server delivery ready":"Pending production verification · no mail sent"}</small>
   </form>)}
   {!controls.data?.length?<p>Schedule has not been installed.</p>:null}
-  <details style={{marginTop:20}}><summary>Recent registration email deliveries</summary><div style={{overflowX:"auto"}}><table style={{width:"100%",textAlign:"left"}}><thead><tr><th>Day</th><th>Slot</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{history.data?.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.event_key.endsWith("_morning")?"Morning":"Follow-up"}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||"—"}</td></tr>)}</tbody></table></div>{!history.data?.length?<p>No scheduled deliveries yet.</p>:null}</details>
+  <details style={{marginTop:20}}><summary>Recent registration email deliveries</summary><div style={{overflowX:"auto"}}><ReportTable style={{width:"100%",textAlign:"left"}}><thead><tr><th>Day</th><th>Slot</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{history.data?.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.event_key.endsWith("_morning")?"Morning":"Follow-up"}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||"—"}</td></tr>)}</tbody></ReportTable></div>{!history.data?.length?<p>No scheduled deliveries yet.</p>:null}</details>
  </section>;
 }

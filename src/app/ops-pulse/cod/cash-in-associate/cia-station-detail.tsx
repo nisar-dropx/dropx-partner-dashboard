@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -471,7 +473,7 @@ function CiaDriverView({
                       ))}
                     </div>
                     <div className="table-wrap">
-                      <table className="cia-table compact">
+                      <ReportTable className="cia-table compact">
                         <thead>
                           <tr>
                             <th>Day cash was held</th>
@@ -492,7 +494,7 @@ function CiaDriverView({
                               </tr>
                             ))}
                         </tbody>
-                      </table>
+                      </ReportTable>
                     </div>
                   </div>
                 ) : null}
@@ -614,7 +616,7 @@ function CiaDateView({
                           <span className="cia-money positive">₹{formatAmount(driver.amount)}</span>
                         </div>
                         <div className="table-wrap">
-                          <table className="cia-table compact">
+                          <ReportTable className="cia-table compact">
                             <thead>
                               <tr>
                                 <th>Tracking number</th>
@@ -631,7 +633,7 @@ function CiaDateView({
                                 </tr>
                               ))}
                             </tbody>
-                          </table>
+                          </ReportTable>
                         </div>
                       </div>
                     ))}
@@ -735,7 +737,7 @@ function CiaStationLedgerView({
         </div>
 
         <div className="table-wrap">
-          <table className="cia-table">
+          <ReportTable className="cia-table">
             <thead>
               <tr>
                 <th>Day</th>
@@ -778,7 +780,7 @@ function CiaStationLedgerView({
                 ))
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
 
         {totalPages > 1 ? (

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronRight, Package, Search, Store, User } from "lucide-react";
@@ -68,7 +70,7 @@ export function FlashDrivers({ drivers, onOpen, state }: {
       </div>
       {!people.length ? <p className={s.note}>No driver is recorded against this station’s parcels yet. Drivers appear after the station’s next refresh.</p> : null}
       <div className={s.tableWrap}>
-        <table className={`${s.table} ${s.fit} ${s.dense}`}>
+        <ReportTable className={`${s.table} ${s.fit} ${s.dense}`}>
           <thead>
             <tr>
               {header("name", "Driver", false)}
@@ -109,7 +111,7 @@ export function FlashDrivers({ drivers, onOpen, state }: {
               );
             })}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {people.length && !rows.length ? <p className={s.empty}>No driver matches “{query}”.</p> : null}
       {unassigned ? (
@@ -165,7 +167,7 @@ export function FlashParcels({ parcels, title, subtitle, onBack, showHandler = f
         ))}
       </div>
       <div className={s.tableWrap}>
-        <table className={`${s.table} ${s.dense}`}>
+        <ReportTable className={`${s.table} ${s.dense}`}>
           <thead>
             <tr>
               <th scope="col">Tracking ID</th>
@@ -193,7 +195,7 @@ export function FlashParcels({ parcels, title, subtitle, onBack, showHandler = f
               );
             })}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {!rows.length ? <p className={s.empty}>No tracking IDs match.</p> : null}
       {rows.length > PAGE_SIZE ? (

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -48,7 +50,7 @@ export default async function IncentivePlansPage({ searchParams }: { searchParam
     </section> : null}
     <section className="panel">
       <div className="panel-head"><div><h2>Configured plans</h2><p className="subtle">{(plans.data ?? []).length} plan{(plans.data ?? []).length === 1 ? "" : "s"}</p></div></div>
-      <div className="table-wrap"><table>
+      <div className="table-wrap"><ReportTable>
         <thead><tr><th>Plan</th><th>Scope</th><th>Rule</th><th>Effective</th><th>Status</th>{permission.canEdit ? <th>Action</th> : null}</tr></thead>
         <tbody>{(plans.data ?? []).length ? (plans.data ?? []).map((plan: any) => <tr key={plan.id}>
           <td><strong>{plan.name}</strong><small>{plan.code}</small></td>
@@ -58,7 +60,7 @@ export default async function IncentivePlansPage({ searchParams }: { searchParam
           <td><StatusPill status={plan.status} /></td>
           {permission.canEdit ? <td><form action={updateIncentivePlanStatus}><input type="hidden" name="id" value={plan.id} /><select aria-label={`Status for ${plan.name}`} name="status" defaultValue={plan.status}><option value="draft">Draft</option><option value="active">Active</option><option value="paused">Paused</option><option value="closed">Closed</option></select><SubmitButton className="button secondary compact">Update</SubmitButton></form></td> : null}
         </tr>) : <tr><td className="empty-cell" colSpan={permission.canEdit ? 6 : 5}>No plans configured. No incentive is paid until a plan is activated.</td></tr>}</tbody>
-      </table></div>
+      </ReportTable></div>
     </section>
   </AppShell>;
 }

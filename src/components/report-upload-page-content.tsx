@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -333,7 +335,7 @@ export async function ReportUploadPageContent({
             </form>
           </div>
           <div className="table-wrap shipment-checklist-table">
-            <table>
+            <ReportTable>
               <thead><tr><th>Station</th><th>Delivered data</th><th>Inbound data</th></tr></thead>
               <tbody>
                 {stationCoverage.map((row) => (
@@ -354,7 +356,7 @@ export async function ReportUploadPageContent({
                 ))}
                 {!stationCoverage.length ? <tr><td className="empty-cell" colSpan={3}>No eligible Amazon DSP or EDSP parent stations are available.</td></tr> : null}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </ShipmentCoverageVisibility>
@@ -366,7 +368,7 @@ export async function ReportUploadPageContent({
             <StatusPill status={`${coverageGaps.length} reports need attention`} />
           </summary>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead><tr><th>Report</th><th>Frequency</th><th>Missing periods</th><th>Action</th></tr></thead>
               <tbody>
                 {coverageGaps.map(({ report, missing }) => (
@@ -378,7 +380,7 @@ export async function ReportUploadPageContent({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </details>
       ) : (
@@ -400,7 +402,7 @@ export async function ReportUploadPageContent({
           </form>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr><th>Report</th><th>Upload time</th><th>Frequency</th><th>Report day</th><th>Status</th><th>File</th><th>Rows</th></tr>
             </thead>
@@ -423,7 +425,7 @@ export async function ReportUploadPageContent({
               })}
               {!dueReports.length ? <tr><td className="empty-cell" colSpan={7}>No reports due on this date.</td></tr> : null}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
 
@@ -435,7 +437,7 @@ export async function ReportUploadPageContent({
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead><tr><th>Uploaded</th><th>Report</th><th>Report period</th><th>Result</th><th>Rows</th><th>File</th></tr></thead>
             <tbody>
               {recentBatches.map((batch) => {
@@ -458,7 +460,7 @@ export async function ReportUploadPageContent({
               })}
               {!recentBatches.length ? <tr><td className="empty-cell" colSpan={6}>No upload activity yet.</td></tr> : null}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

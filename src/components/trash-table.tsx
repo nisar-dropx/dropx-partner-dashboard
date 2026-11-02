@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { Download, Eye } from "lucide-react";
@@ -49,7 +51,7 @@ export function TrashTable({ items, canEdit, action }: { items: TrashItem[]; can
           </div>
         ) : null}
         <div className="table-wrap">
-          <table className="trash-table">
+          <ReportTable className="trash-table">
             <thead>
               <tr>
                 {canEdit ? (
@@ -105,7 +107,7 @@ export function TrashTable({ items, canEdit, action }: { items: TrashItem[]; can
                 <tr><td className="empty-cell" colSpan={canEdit ? 10 : 9}>Trash is empty.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </form>

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -106,7 +108,7 @@ function RemittanceRowsTable({
         <em>{rows.length}</em>
       </div>
       <div className="table-wrap remittance-table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Code</th>
@@ -136,7 +138,7 @@ function RemittanceRowsTable({
               <tr><td className="empty-cell" colSpan={7}>{emptyLabel}</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </div>
   );
@@ -277,7 +279,7 @@ function LedgerModal({
                       <em>₹{currency(driver.amount)}</em>
                     </div>
                     <div className="table-wrap remittance-table-wrap">
-                      <table>
+                      <ReportTable>
                         <thead>
                           <tr>
                             <th>Tracking</th>
@@ -310,7 +312,7 @@ function LedgerModal({
                             <tr><td className="empty-cell" colSpan={8}>No shipment rows for this driver.</td></tr>
                           )}
                         </tbody>
-                      </table>
+                      </ReportTable>
                     </div>
                   </div>
                 )) : (

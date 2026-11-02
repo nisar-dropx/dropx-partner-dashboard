@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -117,13 +119,13 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
           <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}>{FILTERS.map(f=><option key={f.key} value={f.key}>{f.label} · {counts[f.key]||0}</option>)}</select>
           {drillRefs ? <button className={styles.button} onClick={()=>setDrillRefs(null)}>Clear drill-down</button> : null}
         </div>
-        {group!=='cases' ? <div className={styles.tableWrap}><table className={styles.ledgerTable}>
+        {group!=='cases' ? <div className={styles.tableWrap}><ReportTable className={styles.ledgerTable}>
           <thead><tr><th>{group==='station'?'Station':group==='person'?'Person':'Designation'}</th><th>Cases / people</th><th>Assigned</th><th>Deducted</th><th>Draft payroll</th><th>Outstanding</th><th>Pending review</th><th /></tr></thead>
           <tbody>{groupPage.rows.map(g=><tr key={g.key}><td><strong>{g.label}</strong><small>{g.detail}</small></td><td>{g.cases} / {g.people}</td><td>{money(g.assigned)}</td><td>{money(g.deducted)}</td><td>{money(g.draft)}</td><td><strong>{money(g.outstanding)}</strong></td><td>{money(g.pending)}</td><td><button className={styles.button} onClick={()=>{setStation(g.station);setDrillRefs(g.lineKeys);setGroup('cases');}}>View cases</button></td></tr>)}</tbody>
-        </table>{!grouped.length?<p className={styles.empty}>No recovery lines match these filters.</p>:null}<ListPager page={groupPage.page} pages={groupPage.pages} size={groupPage.size} total={groupPage.total} onPage={groupPage.setPage} onSize={groupPage.setSize} label="groups"/></div> : <>
+        </ReportTable>{!grouped.length?<p className={styles.empty}>No recovery lines match these filters.</p>:null}<ListPager page={groupPage.page} pages={groupPage.pages} size={groupPage.size} total={groupPage.total} onPage={groupPage.setPage} onSize={groupPage.setSize} label="groups"/></div> : <>
         {shown.length ? (
           <div className={styles.tableWrap}>
-            <table className={styles.ledgerTable}>
+            <ReportTable className={styles.ledgerTable}>
               <thead>
                 <tr>
                   <th>Person</th>
@@ -189,7 +191,7 @@ export function NlRecoveryLedger({ lines, canWriteOff }: { lines: LedgerLine[]; 
                   );
                 })}
               </tbody>
-            </table>
+            </ReportTable>
             <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="lines" />
           </div>
         ) : (

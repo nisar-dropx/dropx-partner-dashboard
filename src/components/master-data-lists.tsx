@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -527,7 +529,7 @@ export function MasterDataLists({
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Code</th>
@@ -589,7 +591,7 @@ export function MasterDataLists({
                 <tr><td colSpan={canEdit ? 11 : 10} className="empty-cell">No locations found.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         <div className="panel-foot">
           <PaginationControls currentPage={paginatedLocations.page} onPageChange={setLocationsPage} totalPages={paginatedLocations.totalPages} />
@@ -609,7 +611,7 @@ export function MasterDataLists({
             </div>
           </div>
           <div className="table-wrap">
-            <table style={{ minWidth: 560 }}>
+            <ReportTable style={{ minWidth: 560 }}>
               <thead>
                 <tr>
                   <th>Code</th>
@@ -630,7 +632,7 @@ export function MasterDataLists({
                   <tr><td colSpan={canEdit ? 4 : 3} className="empty-cell">No providers found.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           <div className="panel-foot">
             <PaginationControls currentPage={paginatedProviders.page} onPageChange={setProvidersPage} totalPages={paginatedProviders.totalPages} />
@@ -649,7 +651,7 @@ export function MasterDataLists({
             </div>
           </div>
           <div className="table-wrap">
-            <table style={{ minWidth: 520 }}>
+            <ReportTable style={{ minWidth: 520 }}>
               <thead>
                 <tr>
                   <th>Code</th>
@@ -674,7 +676,7 @@ export function MasterDataLists({
                   <tr><td colSpan={canEdit ? 6 : 5} className="empty-cell">No models found.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           <div className="panel-foot">
             <PaginationControls currentPage={paginatedModels.page} onPageChange={setModelsPage} totalPages={paginatedModels.totalPages} />

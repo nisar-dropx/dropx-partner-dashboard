@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -441,7 +443,7 @@ export function WorkforcePayoutManualEditor({
 
               {catalogBusy ? <p className="subtle workforce-payout-manual-loading">Loading configured payout fields…</p> : null}
               <div className="table-wrap workforce-payout-manual-table-wrap">
-                <table className="workforce-payout-manual-table">
+                <ReportTable className="workforce-payout-manual-table">
                   <thead>
                     <tr>
                       <th>{subjectLabel} payout</th>
@@ -596,7 +598,7 @@ export function WorkforcePayoutManualEditor({
                       );
                     })}
                   </tbody>
-                </table>
+                </ReportTable>
               </div>
 
               {error ? <div className="compensation-import-message error" role="alert"><strong>Changes blocked</strong><span>{error}</span></div> : null}

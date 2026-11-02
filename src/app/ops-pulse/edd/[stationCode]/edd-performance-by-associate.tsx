@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
@@ -123,7 +125,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
         {open ? (
           <div className="edd-driver-body">
             <div className="edd-table-wrap">
-              <table className="edd-table compact">
+              <ReportTable className="edd-table compact">
                 <thead>
                   <tr>
                     <th>Tracking ID</th>
@@ -144,7 +146,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </div>
         ) : null}

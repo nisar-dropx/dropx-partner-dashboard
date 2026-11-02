@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 
@@ -57,9 +59,9 @@ export function ReviewPersonHistory({ personId }: { personId: string }) {
     <div className="review-operation-summary"><span className={counts.repeated?"review-operation-pending":""}><b>{counts.late}/{counts.reported}</b> reported shifts late</span><span>Unplanned absence <b>{counts.unplanned}</b></span><span>Week-off worked <b>{counts.weekOffWorked}</b></span>{counts.unchecked ? <span>Needs checking <b>{counts.unchecked}</b></span>:null}</div>
     {counts.repeated ? <p className="review-repeat-note">{counts.allReportedLate ? "Late on every reported shift in this period." : `Repeated lateness · ${counts.late} days in this period.`} Flag starts at 2 late days; approved shift grace is respected.</p> : null}
     <div className="review-operation-table review-person-history-table" role="region" aria-label={`${person.name} daily in and out, scroll for all dates`} tabIndex={0}>
-      <table><thead><tr><th>Date</th><th>Shift</th><th>In</th><th>Out</th><th>Worked</th><th>Status / detail</th></tr></thead><tbody>
+      <ReportTable><thead><tr><th>Date</th><th>Shift</th><th>In</th><th>Out</th><th>Worked</th><th>Status / detail</th></tr></thead><tbody>
         {[...days].reverse().map(day=><tr key={day.date}><th scope="row">{formatDashboardDate(day.date)}</th><td>{day.shift??"—"}</td><td>{reviewClock(day.inTime)}</td><td>{day.outTime?reviewClock(day.outTime):day.inTime?"Missing out":"—"}</td><td>{hours(day.workMinutes)}</td><td><b className={["late","unplanned_absence"].includes(day.status)?"review-operation-pending":""}>{historyStatusLabels[day.status]}{day.status==="late"?` · ${day.lateMinutes} min`:""}</b><small>{day.note}</small></td></tr>)}
-      </tbody></table>
+      </tbody></ReportTable>
     </div>
     <p className="review-operation-note">All times IST. Only service dates at this station are shown. “Reported shifts” excludes leave, roster-off and missing-shift days. Missing punches are not proof of leave; worked hours are not pay or overtime approval.</p>
   </section>;
@@ -98,10 +100,10 @@ export function UtrAttendanceDrilldown({ discipline: d }: { discipline: UtrDisci
     <div className="review-attendance-filters"><input aria-label="Search UTR staff" type="search" placeholder="Search name, code or role" value={query} onChange={e=>setQuery(e.target.value)}/><select aria-label="Filter UTR reporting" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">All staff</option><option value="repeat">Repeated lateness</option><option value="late">Late on review day</option></select><select aria-label="Sort UTR staff" value={sort} onChange={e=>setSort(e.target.value)}><option value="late">Most late days first</option><option value="name">Name A–Z</option></select>{history?.data?<button type="button" className="review-attendance-button" onClick={history.retry}>Refresh history</button>:null}</div>
     {!history?.data?<HistoryState/>:null}
     <div className="review-operation-table review-utr-table" role="region" aria-label="UTR staff attendance, scroll for all people and columns" tabIndex={0}>
-      <table><thead><tr><th>Person / role</th><th>Shift</th><th>Reported</th><th>Left</th><th>Worked</th><th>Review day</th><th>{period==="mtd"?"MTD":"7-day"} pattern</th></tr></thead><tbody>
+      <ReportTable><thead><tr><th>Person / role</th><th>Shift</th><th>Reported</th><th>Left</th><th>Worked</th><th>Review day</th><th>{period==="mtd"?"MTD":"7-day"} pattern</th></tr></thead><tbody>
         {items.map(({row,counts})=><tr key={row.id}><th scope="row"><button type="button" className="review-person-link" onClick={()=>setPersonId(row.id)}>{row.name} ›</button><small>{row.role} · {row.code}</small></th><td>{row.shift||"Not linked"}</td><td>{reviewClock(row.inTime)}</td><td>{row.outTime?reviewClock(row.outTime):row.inTime?"Missing out":"—"}</td><td>{hours(row.workMinutes)}</td><td>{row.status}{row.locationNote?<small>{row.locationNote}</small>:null}</td><td>{counts?<><button type="button" onClick={()=>setPersonId(row.id)} aria-label={`${row.name}: ${counts.late} of ${counts.reported} reported shifts late — view history`} className={`review-person-link ${counts.repeated?"review-repeat-badge":""}`}>Late {counts.late}/{counts.reported} reported</button>{counts.allReportedLate?<small>Every reported shift late</small>:null}</>:"—"}</td></tr>)}
         {!items.length?<tr><td colSpan={7}>{d.rows.length?"No staff match these filters.":"No station People staff found."}</td></tr>:null}
-      </tbody></table>
+      </tbody></ReportTable>
     </div>
   </>;
 }
@@ -119,10 +121,10 @@ export function ReviewAttendanceExceptionsCard() {
       <header><div><b>Attendance exceptions · {history?formatDashboardDate(history.date):""}</b><p>Selected review day · People staff</p></div></header>
       {!history?.data?<HistoryState/>:personId?<><button type="button" className="review-attendance-button" onClick={()=>setPersonId(null)}>← Attendance exceptions</button><ReviewPersonHistory key={personId} personId={personId}/></>:<>
         <div className="review-attendance-filters"><label>Show <select aria-label="Filter attendance exceptions" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">All exceptions</option><option value="unplanned_absence">Unplanned absence</option><option value="week_off_worked">Worked on week-off / holiday</option><option value="check">Needs checking</option><option value="leave_pending">Leave requested</option></select></label></div>
-        <div className="review-operation-table review-utr-table" role="region" aria-label="Attendance exceptions, scroll for all staff" tabIndex={0}><table><thead><tr><th>Person / role</th><th>Status</th><th>In / out</th><th>Worked</th></tr></thead><tbody>
+        <div className="review-operation-table review-utr-table" role="region" aria-label="Attendance exceptions, scroll for all staff" tabIndex={0}><ReportTable><thead><tr><th>Person / role</th><th>Status</th><th>In / out</th><th>Worked</th></tr></thead><tbody>
           {items.filter(i=>filter==="all"||(filter==="week_off_worked"&&["week_off_worked","holiday_worked"].includes(i.day.status))||i.day.status===filter||filter==="check"&&["absence_unconfirmed","attendance_conflict"].includes(i.day.status)).map(({person,day})=><tr key={person.id}><th scope="row"><button type="button" className="review-person-link" onClick={()=>setPersonId(person.id)}>{person.name} ›</button><small>{person.role} · {person.code}</small></th><td>{historyStatusLabels[day.status]}<small>{day.note}</small></td><td>{reviewClock(day.inTime)} / {reviewClock(day.outTime)}</td><td>{hours(day.workMinutes)}</td></tr>)}
           {!items.some(i=>filter==="all"||(filter==="week_off_worked"&&["week_off_worked","holiday_worked"].includes(i.day.status))||i.day.status===filter||filter==="check"&&["absence_unconfirmed","attendance_conflict"].includes(i.day.status))?<tr><td colSpan={4}>No matching attendance exceptions.</td></tr>:null}
-        </tbody></table></div>
+        </tbody></ReportTable></div>
         <p className="review-operation-note">Unplanned absence requires a recorded absence after a scheduled shift ends, without an active leave application. Missing punches alone stay under “Needs checking”. A week-off punch does not authorize overtime. Click any person for 7-day / MTD details.</p>
       </>}
     </div>

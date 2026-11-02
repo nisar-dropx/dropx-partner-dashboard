@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import type {ProofExtraction} from '@/lib/ops-pulse/cod-proof-policy';
 import {formatDashboardDateTime as formatDateTime} from '@/lib/date-format';
 const cellStyle={whiteSpace:'normal' as const,overflowWrap:'anywhere' as const};
@@ -18,7 +20,7 @@ export function CodSlipCheckDetails({result,checkedAt,amount,status}:Props){
  ].map(row=>row[0]==='Deposited amount'&&uncertain.includes('amount')?[...row.slice(0,3),'Amount unclear']:row);
  return <details style={{margin:'12px 0',whiteSpace:'normal'}}><summary style={{cursor:'pointer',fontWeight:600,color:seal==='Seal visible'?'#15803d':'#b91c1c'}}>Slip checks · 3 controls</summary>
   <p><strong>Checked:</strong> {formatDateTime(checkedAt)} · Slip version {String(result?.proof_version??'—')}</p>
-  <div className="table-wrap"><table style={{width:'100%',minWidth:0,tableLayout:'fixed'}}><thead><tr><th style={cellStyle}>Check</th><th style={cellStyle}>Submitted / required</th><th style={cellStyle}>Read from slip</th><th style={cellStyle}>Result</th></tr></thead><tbody>{rows.map(([label,expected,read,outcome])=><tr key={label}><td style={cellStyle}>{label}</td><td style={cellStyle}>{expected}</td><td style={cellStyle}>{read}</td><td style={{...cellStyle,color:/Mismatch|Missing|Seal missing|Seal unclear|Insufficient/.test(outcome)?'#b91c1c':undefined}}>{outcome}</td></tr>)}</tbody></table></div>
+  <div className="table-wrap"><ReportTable style={{width:'100%',minWidth:0,tableLayout:'fixed'}}><thead><tr><th style={cellStyle}>Check</th><th style={cellStyle}>Submitted / required</th><th style={cellStyle}>Read from slip</th><th style={cellStyle}>Result</th></tr></thead><tbody>{rows.map(([label,expected,read,outcome])=><tr key={label}><td style={cellStyle}>{label}</td><td style={cellStyle}>{expected}</td><td style={cellStyle}>{read}</td><td style={{...cellStyle,color:/Mismatch|Missing|Seal missing|Seal unclear|Insufficient/.test(outcome)?'#b91c1c':undefined}}>{outcome}</td></tr>)}</tbody></ReportTable></div>
   <p><strong>Seal evidence:</strong> {v.seal_evidence||'No identifiable bank / CMS seal could be read.'}</p>
   <p className="subtle">Only document type, deposited amount and a medium-or-better bank/CMS seal decide the result. Date, station handwriting and reference fields are context only.</p>
  </details>;

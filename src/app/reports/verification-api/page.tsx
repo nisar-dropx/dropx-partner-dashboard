@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -296,7 +298,7 @@ export default async function VerificationApiReportPage({
           </div>
         </div>
         <div className="table-wrap verification-api-report-table">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Date and time</th>
@@ -366,7 +368,7 @@ export default async function VerificationApiReportPage({
                 <tr><td className="empty-cell" colSpan={9}>No verification API calls match these filters.</td></tr>
               ) : null}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {total > 0 ? (
           <nav className="verification-api-pagination" aria-label="Verification API report pages">

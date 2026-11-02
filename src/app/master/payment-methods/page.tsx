@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentMethodForm } from "@/components/payment-method-form";
@@ -278,7 +280,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Method ID</th>
@@ -319,7 +321,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 5 : 4}>No payment methods added yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

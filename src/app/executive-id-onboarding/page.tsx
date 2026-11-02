@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { OnboardingScopeFilter } from "@/components/onboarding-scope-filter";
 import { PageHead } from "@/components/page-head";
@@ -91,10 +93,10 @@ export default async function ExecutiveIdOnboardingPage({ searchParams }: { sear
       <article><span>Latest upload</span><strong>{formatDashboardDate(latestBatch?.created_at, "—")}</strong><small>{latestBatch?.file_name || "No matching batch"}</small></article>
     </section>
     <section className="panel"><div className="panel-head"><div><h2>Onboarding action register</h2><p className="subtle">{latestBatch ? `${sourceRows.length} records from the latest daily upload` : "No onboarding upload was identified in the recent report batches."}</p></div></div>
-      <div className="table-wrap"><table className="onboarding-table"><thead><tr><th>DA</th><th>Email</th><th>Transporter ID</th><th>Station / Cluster</th><th>Pending since</th><th>Upload status</th><th>Action item</th><th>Closure</th></tr></thead><tbody>
+      <div className="table-wrap"><ReportTable className="onboarding-table"><thead><tr><th>DA</th><th>Email</th><th>Transporter ID</th><th>Station / Cluster</th><th>Pending since</th><th>Upload status</th><th>Action item</th><th>Closure</th></tr></thead><tbody>
         {sourceRows.map(({ row, station, daName, email, transporterId, pendingSince, sourceStatus, actionItem, opsStatus }) => { const location = locationMap.get(station); return <tr key={row.id}><td><strong>{daName || "—"}</strong></td><td>{email || "—"}</td><td><strong>{transporterId || "—"}</strong></td><td><strong>{station}</strong><small>{location?.cluster || "Unassigned cluster"}</small></td><td>{pendingSince}<small>{daysSince(pendingSince)} days</small></td><td><span className="status-badge warning">{sourceStatus}</span></td><td>{actionItem}</td><td><form action={updateOnboardingStatus} className="inline-status-form onboarding-action-form"><input type="hidden" name="id" value={row.id}/><input type="hidden" name="station_code" value={station}/><select name="status" defaultValue={opsStatus}><option value="pending">Not cleared</option><option value="cleared">Cleared</option></select><input name="action_item" defaultValue={actionItem} aria-label={`Action item for ${daName}`}/><button>Save</button></form></td></tr>; })}
         {!sourceRows.length ? <tr><td colSpan={8} className="empty-cell">No onboarding records match this scope and status.</td></tr> : null}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
     </section>
   </div></AppShell>;
 }

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import {
   useCallback,
@@ -1082,7 +1084,7 @@ export function OpsRosterPlanner({
     {message ? <div className={`message-panel ${message.tone === "error" ? "error" : "success"}`} role="status">{message.text}</div> : null}
 
     <div className={`${styles.calendarWrap}${isLoadingWeek ? ` ${styles.calendarLoading}` : ""}`} aria-busy={isLoadingWeek || undefined}>
-      <table className={styles.calendar}>
+      <ReportTable className={styles.calendar}>
         <thead><tr><th className={styles.personColumn}><label><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedPeople(allVisibleSelected ? new Set() : new Set(visiblePeople.map(personKey)))} /> Person</label></th>{dates.map((date) => {
           const dayCoverage = coverage.get(date);
           const holiday = holidayByDate.get(date);
@@ -1102,7 +1104,7 @@ export function OpsRosterPlanner({
             <button type="button" aria-label={cellLabel} title={reason ?? undefined} aria-haspopup={editingEnabled && Boolean(assignment) && !reason ? "dialog" : undefined} aria-expanded={pickerOpen || undefined} disabled={!interactionAllowed} draggable={interactionAllowed && !reason && Boolean(assignmentPayload)} onDragStart={(event) => { if (assignmentPayload && !reason) beginNativeDrag(event, assignmentPayload, assignmentLabel); else event.preventDefault(); }} onDragEnd={finishNativeDrag} onPointerDown={(event) => { if (assignmentPayload && !reason) beginPointerDrag(event, assignmentPayload, assignmentLabel); }} onClick={(event) => void handleCellClick(person, date, assignment, event)} onContextMenu={(event) => handleCellContextMenu(person, date, event)} className={`${styles.cell} ${assignment?.dayType === "weekly_off" ? styles.cellOff : shift ? styles.working : styles.emptyCell}${pickerOpen ? ` ${styles.pickerOpen}` : ""}${reason ? ` ${styles.lockedCell}` : ""}`} style={shift ? { "--shift-color": shift.color || "#cb4b65" } as CSSProperties : undefined}>{assignmentPayload && !reason ? <span className={styles.cellDragGrip} data-roster-drag-handle aria-hidden="true"><GripVertical size={11} /></span> : null}{assignment?.dayType === "weekly_off" ? <><strong>Week Off</strong><small>{reason ? "Locked" : "Rest day"}</small></> : shift ? <><strong>{shift.code}</strong><small>{reason ? "Locked" : `${compactTime(shift.startTime)}–${compactTime(shift.endTime)}`}</small></> : <><span>{reason ? "–" : "+"}</span><small>{reason ? "Locked" : "Assign"}</small></>}</button>
           </td>;
         })}</tr>) : <tr><td colSpan={Math.max(2, dates.length + 1)} className={styles.empty}>{workerType === "employee" ? "No active employees are assigned to this station. Independent contractors are listed under Employees & contractors." : workerType === "contractor" ? "No active independent contractors are assigned to this station." : "No active people are assigned to this station."}</td></tr>}</tbody>
-      </table>
+      </ReportTable>
     </div>
 
     <div className={styles.legend}><span><i className={styles.workingLegend} /> Working shift</span><span><i className={styles.offLegend} /> Week off</span><span><i className={styles.holidayLegend} /> Holiday</span><span><i className={styles.dirtyLegend} /> Unsaved change</span>{dirtyKeys.size ? <strong><Check size={13} /> Review and save {dirtyKeys.size} changes</strong> : editingEnabled ? <strong>No unsaved changes</strong> : <strong>Saved roster pattern</strong>}</div>

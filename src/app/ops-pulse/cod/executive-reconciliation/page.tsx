@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
@@ -487,7 +489,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                     Recon pending — {stationCashExceptions.length} associate{stationCashExceptions.length === 1 ? "" : "s"} will submit cash later
                   </strong>
                   <div className="table-wrap">
-                    <table>
+                    <ReportTable>
                       <thead>
                         <tr><th>Associate</th><th>Expected</th><th>Reason</th><th>Raised by</th><th></th></tr>
                       </thead>
@@ -502,7 +504,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </ReportTable>
                   </div>
                   <p className="subtle recon-pending-checklist-note">
                     {activeStep === 2
@@ -517,7 +519,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                     Tech issue — {stationTechIssues.length} associate{stationTechIssues.length === 1 ? "" : "s"} on hold
                   </strong>
                   <div className="table-wrap">
-                    <table>
+                    <ReportTable>
                       <thead>
                         <tr><th>Associate</th><th>Opened</th><th>Remarks</th><th>Raised by</th><th>Photo</th><th></th></tr>
                       </thead>
@@ -541,7 +543,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </ReportTable>
                   </div>
                   <p className="subtle recon-pending-checklist-note">
                     These associates&apos; cash is on hold and does not block any step. It carries forward every day until resolved — the station&apos;s reporting manager has been notified.
@@ -765,7 +767,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                 <details className="reconciliation-support-panel">
                   <summary>Manager notifications ({managerNotifications.length})</summary>
                   <div className="table-wrap">
-                  <table>
+                  <ReportTable>
                     <thead><tr><th>Created</th><th>Manager notification</th><th>Portal</th><th>Email</th></tr></thead>
                     <tbody>
                       {managerNotifications.map((notification) => (
@@ -777,7 +779,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </ReportTable>
                   </div>
                 </details>
               ) : null}
@@ -809,7 +811,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                 <a className="button secondary" href={`/api/ops-pulse/cod/audit-export?date=${encodeURIComponent(result.businessDate)}${defaultLocationId ? `&location=${encodeURIComponent(defaultLocationId)}` : ""}`}>Download CSV</a>
               </div>
               <div className="table-wrap">
-                <table>
+                <ReportTable>
                   <thead><tr><th>Time</th><th>Station</th><th>Associate</th><th>Action</th><th>Changed fields</th><th>Performed by</th></tr></thead>
                   <tbody>
                     {auditRows.length ? auditRows.map((audit) => (
@@ -825,7 +827,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                       <tr><td className="empty-cell" colSpan={6}>No audited COD activity for this selection yet.</td></tr>
                     )}
                   </tbody>
-                </table>
+                </ReportTable>
               </div>
             </details>
           ) : null}

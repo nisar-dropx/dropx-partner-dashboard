@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import { cpsReviewItems, type CpsPlace, type CpsSnapshot } from "@/lib/ops-pulse/cps";
 import { SearchableSelect } from "./searchable-select";
@@ -28,10 +30,10 @@ export function CpsAttention({ snapshot, places, initialStation, canResolve, onO
       <button type="button" className="button" onClick={()=>{setRegion("");setCluster("");setStation("");setSearch("");setSection("All issues");}}>Reset</button>
     </div>
     <div className="cps-issue-switch">{categories.map(c=><button type="button" className="button" aria-pressed={section===c} onClick={()=>setSection(c)} key={c}>{c} ({c==="All issues"?scoped.length:scoped.filter(i=>category(i.kind)===c).length})</button>)}</div>
-    <div className="cps-table-wrap"><table><thead><tr><th>Station</th><th>Associate / reference</th><th>Needs attention</th><th>Affected dates</th><th>Action</th></tr></thead><tbody>{visible.map(i=><tr key={i.key}>
+    <div className="cps-table-wrap"><ReportTable><thead><tr><th>Station</th><th>Associate / reference</th><th>Needs attention</th><th>Affected dates</th><th>Action</th></tr></thead><tbody>{visible.map(i=><tr key={i.key}>
       <td><button className="cps-cell-link" onClick={()=>onOpen(i.station)}>{i.station}</button><small>{placeFor(i.station)?.cluster}</small></td>
       <td>{i.name||"Station cost"}<small>{[i.id,i.provider].filter(Boolean).join(" · ")}</small></td><td>{i.kind}<small>{i.owner}</small></td><td>{i.from} – {i.to}</td><td>{i.bill?<button className="button" onClick={()=>onOpen(i.station,"Other")}>Review bill</button>:canResolve?<a className="button" href={i.href}>{/attendance|low deliveries/i.test(i.kind)?"Review attendance":/mapping|unmapped|identity/i.test(i.kind)?"Complete mapping":"Review source"}</a>:<span>Contact {i.owner}</span>}</td>
-    </tr>)}</tbody></table></div>
+    </tr>)}</tbody></ReportTable></div>
     {!visible.length&&<p className="panel-body">No pending items match these filters.</p>}
   </section>;
 }

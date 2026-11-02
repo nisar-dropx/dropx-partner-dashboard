@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { saveDirectPaymentAllocation } from "@/app/provider-mapping/direct-pay/actions";
@@ -170,7 +172,7 @@ export function DirectPaymentAllocationWorksheet({
         </div> : null}
       </div>
       <div className="table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>DropX ID</th>
@@ -196,7 +198,7 @@ export function DirectPaymentAllocationWorksheet({
               <AllocationCells audience={audience} canEdit={canEdit} formId={`direct-allocation-${audience}-${row.personId}`} methods={methods} permissionScope={permissionScope} row={row} />
             </tr>) : <tr><td className="empty-cell" colSpan={11}>No direct-pay {subjectLabel} records match this search.</td></tr>}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </section>
   );

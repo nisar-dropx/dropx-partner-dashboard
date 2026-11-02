@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { AttendanceMultiSelect } from "@/components/attendance-multi-select";
 import { DateRangeField } from "@/components/date-range-field";
@@ -343,7 +345,7 @@ export default async function AttendanceReportsPage({
           <StatusPill status={`${rows.length} records`} />
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Date</th>
@@ -386,7 +388,7 @@ export default async function AttendanceReportsPage({
                 <tr><td className="empty-cell" colSpan={reportType === "in_out" ? 29 : 14}>No attendance rows found.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

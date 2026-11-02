@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { digestDatabase } from "@/lib/portal-digest-delivery";
 import { rosterPendencyEvents } from "@/lib/roster-pendency";
 import { saveRosterPendencyDigestSettings } from "@/app/settings/notifications/actions";
@@ -57,7 +59,7 @@ export async function RosterNotificationSettings({
       <details style={{ marginTop: 20 }}>
         <summary>Recent roster reminder deliveries</summary>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", textAlign: "left" }}>
+          <ReportTable style={{ width: "100%", textAlign: "left" }}>
             <thead><tr><th>Day</th><th>Manager</th><th>Status</th><th>Details</th></tr></thead>
             <tbody>
               {history.data?.map((row) => (
@@ -69,7 +71,7 @@ export async function RosterNotificationSettings({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {!history.data?.length ? <p>No scheduled deliveries yet.</p> : null}
       </details>

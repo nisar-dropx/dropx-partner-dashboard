@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import type { BusinessRow } from "@/lib/finance/performance";
 import { addAmounts } from "@/lib/finance/pricing";
 const money = (v: string | null) =>
@@ -116,7 +118,7 @@ export function BillingCoverage({ rows }: { rows: BusinessRow[] }) {
           </div>
         </summary>
         <div className="fin-table-wrap">
-          <table className="fin-table">
+          <ReportTable className="fin-table">
             <thead>
               <tr>
                 <th>Invoice item</th>
@@ -137,7 +139,7 @@ export function BillingCoverage({ rows }: { rows: BusinessRow[] }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         <p className="fin-footnote">
           Reference: supplied KGQA invoices for April and August 2026. Invoice

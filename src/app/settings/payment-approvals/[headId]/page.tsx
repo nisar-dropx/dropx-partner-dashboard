@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -171,7 +173,7 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Step</th>
@@ -204,7 +206,7 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
                     <tr><td className="empty-cell" colSpan={3}>No approval steps added yet.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

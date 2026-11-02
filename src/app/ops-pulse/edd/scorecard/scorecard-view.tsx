@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { stationScore, type ScorecardStation } from "./scorecard-math";
@@ -89,7 +91,7 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
         </div>
       ) : null}
       <div className={styles.tableWrap}>
-        <table className={styles.table}>
+        <ReportTable className={styles.table}>
           <thead><tr><th>Station</th>{(["delivered", "successPct", "change", "das", "perDa", "returnRate"] as const).map((k) => <th key={k} className={styles.num}><button className={styles.sort} onClick={() => sortBy(k)} aria-sort={sort === k ? (asc ? "ascending" : "descending") : "none"}>{SORTS[k]}{arrow(k)}</button></th>)}<th>Daily trend</th><th /></tr></thead>
           <tbody>
             {rows.map((s) => (
@@ -107,14 +109,14 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
                 </tr>
                 {open === s.station ? (
                   <tr><td colSpan={9} className={styles.drill}>
-                    <table className={styles.inner}>
+                    <ReportTable className={styles.inner}>
                       <thead><tr><th>#</th><th>DA</th><th className={styles.num}>Days</th><th className={styles.num}>Deliveries</th><th className={styles.num}>Success</th><th className={styles.num}>Per day</th><th className={styles.num}>Returns</th><th>Last worked</th></tr></thead>
                       <tbody>{(dasBy.get(s.station) ?? []).map((d, i) => {
                         const perDay = d.days ? d.delivered / d.days : 0;
                         const daSuccess = d.assigned > 0 ? (d.delivered / d.assigned) * 100 : null;
                         return <tr key={d.id} className={perDay < s.perDa * 0.6 ? styles.low : undefined}><td>{i + 1}</td><td>{d.name ?? "—"} <small>{d.dropx_id ?? d.id}</small></td><td className={styles.num}>{d.days}</td><td className={styles.num}>{n0(d.delivered)}</td><td className={styles.num}>{successLabel(daSuccess)}</td><td className={styles.num}>{n1(perDay)}</td><td className={styles.num}>{n0(d.returns)}</td><td>{d.last_day}</td></tr>;
                       })}</tbody>
-                    </table>
+                    </ReportTable>
                     <p className={styles.muted}>Highlighted DAs deliver under 60% of the station&apos;s per-DA average. Delivery success needs an assigned count from the source file.</p>
                   </td></tr>
                 ) : null}
@@ -122,7 +124,7 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
             ))}
             {!rows.length ? <tr><td colSpan={9} className={styles.muted}>No deliveries in this period.</td></tr> : null}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </section>
   );

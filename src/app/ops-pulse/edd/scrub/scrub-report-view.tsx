@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
@@ -70,7 +72,7 @@ export function ScrubReportView({stationNames, clusters}: {stationNames: Record<
       <div className={s.actions}><button type="button" onClick={exportCsv} disabled={!data || !visible.length}><Download size={14} /> CSV</button><button type="button" onClick={() => void load(true)} disabled={busy}><RefreshCw size={14} /> {busy ? 'Loading…' : 'Fetch now'}</button></div>
     </div>
     {error ? <p className={s.error} role="alert">{error} {data ? 'Showing the last loaded results.' : ''} <button type="button" onClick={() => void load(false)} disabled={busy}>Retry</button></p> : null}
-    {data ? <><div className={s.scroll}><table className={s.table}>
+    {data ? <><div className={s.scroll}><ReportTable className={s.table}>
       <thead><tr><th>Station</th><th>In-station scrub</th><th>On-road scrub</th><th>Fetched · IST</th></tr></thead>
       <tbody>{visible.map(row => {
         const expanded = openStation === row.stationCode;
@@ -80,7 +82,7 @@ export function ScrubReportView({stationNames, clusters}: {stationNames: Record<
           <td className={s.fetched}>{row.fetchedAt ? shortTime(row.fetchedAt) : 'Not fetched'}</td>
         </tr>{expanded ? <tr id={`scrub-${row.stationCode}`}><td colSpan={4} className={s.expansion}><ScrubHistory row={row} now={now} onClose={() => setOpenStation(null)} /></td></tr> : null}</Fragment>;
       })}{!visible.length ? <tr><td colSpan={4} className={s.empty}>No stations match. <button type="button" onClick={reset}>Reset filters</button></td></tr> : null}</tbody>
-    </table></div><p className={s.legend}>Pending = days since last scrub · 7+ = none in the available 7-day log · click a status for times and operators · IST</p></> : null}
+    </ReportTable></div><p className={s.legend}>Pending = days since last scrub · 7+ = none in the available 7-day log · click a status for times and operators · IST</p></> : null}
   </section>;
 }
 
@@ -94,13 +96,13 @@ function ScrubHistory({row, now, onClose}: {row: ScrubStationRow; now: Date; onC
   return <div className={s.history}>
     <div className={s.historyHead}><strong>{row.stationCode} · Last 7 days</strong><button type="button" onClick={onClose} aria-label={`Close ${row.stationCode} history`}>Close</button></div>
     {scrubTypes.map(type => row[type].error || ['stale', 'unavailable'].includes(row[type].status) ? <p key={type} className={s.historyNotice}>{labels[type]}: {row[type].error || 'Refresh to confirm today’s status.'}{row.fetchedAt ? ` Last fetched ${formatOpsDateTime(row.fetchedAt)}.` : ''}</p> : null)}
-    <table className={s.historyTable}><thead><tr><th>Day · IST</th><th>In-station · time / operator</th><th>On-road · time / operator</th></tr></thead><tbody>
+    <ReportTable className={s.historyTable}><thead><tr><th>Day · IST</th><th>In-station · time / operator</th><th>On-road · time / operator</th></tr></thead><tbody>
       {scrubDays(now).map(day => <tr key={day}><th scope="row">{day === scrubDay(now) ? 'Today' : new Date(`${day}T12:00:00Z`).toLocaleDateString('en-IN', {day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata'})}</th>
         {scrubTypes.map(type => {
           const value = row[type]; const items = value.invocations.filter(item => scrubDay(item.at) === day);
           const observed = row.fetchedAt && day <= scrubDay(row.fetchedAt) && !value.error;
           return <td key={type}>{items.length ? items.map((item, index) => <div key={`${item.at}-${index}`} className={s.invocation}><time dateTime={item.at}>{new Date(item.at).toLocaleTimeString('en-IN', {timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit'})}</time> · {item.operator ?? 'Unknown operator'}</div>) : <span className={observed ? s.pending : s.stale}>{observed ? 'Not scrubbed' : 'Not confirmed'}</span>}</td>;
         })}</tr>)}
-    </tbody></table>
+    </tbody></ReportTable>
   </div>;
 }

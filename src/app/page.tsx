@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { firstAllowedHref } from "@/lib/app-navigation";
@@ -89,7 +91,7 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Priority</th>
@@ -105,7 +107,7 @@ export default async function DashboardPage() {
                   <td colSpan={6} className="empty-cell">No work queue items.</td>
                 </tr>
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </div>
 
@@ -127,7 +129,7 @@ export default async function DashboardPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>File</th>
@@ -145,7 +147,7 @@ export default async function DashboardPage() {
                 <td colSpan={8} className="empty-cell">No provider imports found.</td>
               </tr>
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

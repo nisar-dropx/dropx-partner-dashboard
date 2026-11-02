@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { useEffect, useId, useRef, useState } from "react";
@@ -72,7 +74,7 @@ export function FuelVehicleTable({
         role="region"
         aria-label="Vehicle fuel daily table, scroll for all dates"
       >
-        <table>
+        <ReportTable>
           <caption>
             {data.station} · {dayLabel(dates[0])}–{dayLabel(data.date)} · MTD
             starts {dayLabel(month[0])}
@@ -127,7 +129,7 @@ export function FuelVehicleTable({
               );
             })}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {!groups.length ? (
         <p>No vehicle fuel entries recorded in this period or month.</p>
@@ -260,7 +262,7 @@ export function FuelHistory({ data }: { data: ReviewFuel }) {
         role="region"
         aria-label="Daily fuel amounts"
       >
-        <table>
+        <ReportTable>
           <caption>Daily values · {data.station} · newest first</caption>
           <thead>
             <tr>
@@ -285,7 +287,7 @@ export function FuelHistory({ data }: { data: ReviewFuel }) {
               );
             })}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       <div className="review-fuel-pattern">
         <span>
@@ -322,7 +324,7 @@ export function FuelHistory({ data }: { data: ReviewFuel }) {
           role="region"
           aria-label="Fuel source records"
         >
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th scope="col">Date / reference</th>
@@ -348,7 +350,7 @@ export function FuelHistory({ data }: { data: ReviewFuel }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </ReviewDetails>
       <p className="review-fuel-note">

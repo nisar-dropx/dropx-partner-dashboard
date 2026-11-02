@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { EventLogDetails } from "@/components/event-log-details";
@@ -57,10 +59,10 @@ export default async function EventLogPage({ searchParams = {} }: { searchParams
       <div className="event-log-filter-actions"><button className="button" type="submit">Apply</button><Link className="button secondary" href="/reports/event-log">Clear</Link></div>
     </form></section>
     <section className="panel"><div className="panel-head"><div><h2>Event history</h2><p className="subtle">{total ? `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, total)} of ${total} records.` : "No matching records."} Newest events are shown first.</p></div></div>
-      <div className="table-wrap verification-api-report-table"><table><thead><tr><th>Date and time</th><th>Event</th><th>Module</th><th>Performed by</th><th>Platform</th><th>Subject</th><th>Result</th><th>Route</th><th>Data</th></tr></thead><tbody>
+      <div className="table-wrap verification-api-report-table"><ReportTable><thead><tr><th>Date and time</th><th>Event</th><th>Module</th><th>Performed by</th><th>Platform</th><th>Subject</th><th>Result</th><th>Route</th><th>Data</th></tr></thead><tbody>
         {rows.map((row) => <tr key={row.id}><td>{formatDashboardDateTime(row.created_at)}</td><td><strong>{row.event_code.replaceAll("_", " ")}</strong><small>{row.action}</small></td><td>{row.module}</td><td><strong>{row.actor_label || "-"}</strong><small>{row.actor_identifier || ""}</small></td><td>{platforms[row.platform] ?? row.platform}</td><td><strong>{row.subject_label || "-"}</strong><small>{row.subject_code || ""}</small></td><td><StatusPill status={row.outcome} /></td><td>{row.route || "-"}</td><td><EventLogDetails metadata={row.metadata} /></td></tr>)}
         {!rows.length ? <tr><td className="empty-cell" colSpan={9}>No event records found.</td></tr> : null}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
       <div className="verification-api-pagination"><Link aria-disabled={page <= 1} className={page <= 1 ? "button secondary disabled" : "button secondary"} href={page <= 1 ? "#" : href(searchParams, page - 1)}>Previous</Link><span>Page {Math.min(page, totalPages)} of {totalPages}</span><Link aria-disabled={page >= totalPages} className={page >= totalPages ? "button secondary disabled" : "button secondary"} href={page >= totalPages ? "#" : href(searchParams, page + 1)}>Next</Link></div>
     </section>
   </AppShell>;

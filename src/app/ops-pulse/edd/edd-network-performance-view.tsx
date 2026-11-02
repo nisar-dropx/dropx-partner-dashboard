@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -383,7 +385,7 @@ export function EddNetworkPerformanceView({
           ) : null}
 
           <div className="edd-table-wrap">
-            <table className="edd-table">
+            <ReportTable className="edd-table">
               <thead>
                 <tr>
                   {COLUMNS.map((column) => {
@@ -448,7 +450,7 @@ export function EddNetworkPerformanceView({
                   );
                 })}
               </tbody>
-            </table>
+            </ReportTable>
             {!pagedRows.length ? <p className="subtle" style={{ marginTop: 10 }}>No stations match this search.</p> : null}
           </div>
 

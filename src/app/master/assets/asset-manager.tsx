@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -157,7 +159,7 @@ export function AssetManager({ assets, locations, canAdd, canEdit }: { assets: a
       <span className="subtle">{totalUnits(shown)} units · {shown.length} records</span>
     </div>
 
-    <section className="panel"><div className="fin-table-wrap"><table className="fin-table">
+    <section className="panel"><div className="fin-table-wrap"><ReportTable className="fin-table">
       <thead><tr><th>Asset / label</th><th>Category</th><th>Location</th><th>Ownership</th><th>Quantity / condition</th><th>Commercial record</th><th>Evidence & history</th></tr></thead>
       <tbody>{shown.map((asset) => <tr key={asset.id}>
         <td><button className="asset-history-trigger" type="button" onClick={() => setHistory(asset)}><strong>{asset.type_name}{asset.tracking_mode === "quantity" ? ` × ${asset.quantity_total}` : ""}</strong><small>{asset.manufacturer || "Manufacturer not recorded"}{asset.model ? ` · ${asset.model}` : ""}{asset.serial_number ? ` · S/N ${asset.serial_number}` : ""}</small></button><div className="asset-label-row"><Barcode code={asset.barcode_value} /><button className="button secondary small" type="button" onClick={() => setLabel(asset)}>Reprint</button></div></td>
@@ -168,7 +170,7 @@ export function AssetManager({ assets, locations, canAdd, canEdit }: { assets: a
         <td>{asset.ownership_type === "owned" ? <><strong>{money(asset.total_value || asset.purchase_value)}</strong><small>Base {money(asset.purchase_value)}{asset.gst_amount ? ` · GST ${money(asset.gst_amount)}` : ""}<br />{asset.invoice_number || "Invoice not recorded"}</small></> : <><strong>{money(asset.rental_term?.rental_rate || null)} / {asset.rental_term?.billing_frequency || "term"}</strong><small>Deposit {money(asset.rental_term?.security_deposit || null)}</small></>}</td>
         <td><button className="asset-history-trigger subtle" type="button" onClick={() => setHistory(asset)}>{asset.attachments.length} files · {asset.history.length} events<br /><span>View photos, invoices & audit remarks →</span></button></td>
       </tr>)}{!shown.length && <tr><td className="fin-empty" colSpan={7}>No assets match this register view.</td></tr>}</tbody>
-    </table></div></section>
+    </ReportTable></div></section>
 
     {editing && <Modal title="Register asset" onClose={() => !pending && setEditing(false)}><form onSubmit={submit}>
       <div className="fin-notice"><strong>Choose how this asset is counted.</strong> Use an individual item for separately identified assets such as laptops or vehicles. Use a quantity group for interchangeable assets such as CCTV cameras, chairs, or tools. A quantity group receives one register code and tracks total, working, and faulty units.</div>

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { VanFuelFields } from "@/components/van-fuel-fields";
 import { PaymentResubmissionSavedDetails } from "@/components/payment-resubmission-saved-details";
 import { EvidencePreview } from "@/components/evidence-preview";
@@ -427,7 +429,7 @@ export default async function ExpenseRequestPage({
             </div>
           </div>
           <div className="table-wrap payment-responsive-list">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Request</th>
@@ -462,7 +464,7 @@ export default async function ExpenseRequestPage({
                   <tr><td className="empty-cell" colSpan={pagePermission.canAdd ? 7 : 6}>No expense requests added yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

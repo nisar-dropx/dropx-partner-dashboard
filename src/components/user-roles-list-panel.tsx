@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState } from "react";
 import { PendingLink } from "@/components/pending-link";
@@ -45,7 +47,7 @@ export function UserRolesListPanel({
         {canAdd ? <PendingLink className="button" href="/users?section=roles&addRole=1" scroll={false}>Add user role</PendingLink> : null}
       </div>
       <div className="table-wrap">
-        <table style={{ minWidth: 760 }}>
+        <ReportTable style={{ minWidth: 760 }}>
           <thead>
             <tr>
               <th>Designation code</th>
@@ -82,7 +84,7 @@ export function UserRolesListPanel({
               </tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {totalPages > 1 ? (
         <div className="pagination">

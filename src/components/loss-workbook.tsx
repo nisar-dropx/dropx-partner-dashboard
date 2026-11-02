@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { recoveryCsv } from "@/lib/ops-pulse/nl-loss-policy";
@@ -180,7 +182,7 @@ export function LossWorkbook({
           </div>
           {failed.length ? (
             <div className={styles.tableWrap}>
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Excel row</th>
@@ -199,7 +201,7 @@ export function LossWorkbook({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           ) : null}
           {failed.length > 50 ? (

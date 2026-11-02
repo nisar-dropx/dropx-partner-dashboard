@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { EvidencePreview } from "@/components/evidence-preview";
 import { useMemo, useState } from "react";
@@ -102,7 +104,7 @@ export function BusinessDocumentsTable({ allFilteredIds, canEdit, rows }: Props)
       </div>
       {error ? <div className="business-doc-bulk-error">{error}</div> : null}
       <div className="table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th className="select-cell">
@@ -158,7 +160,7 @@ export function BusinessDocumentsTable({ allFilteredIds, canEdit, rows }: Props)
               <tr><td className="empty-cell" colSpan={canEdit ? 10 : 9}>No business documents found.</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {dialogOpen ? (
         <div className="modal-backdrop">

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -1362,7 +1364,7 @@ function MonthlyPlan({
         </div>
       </div>
       <div className={styles.tableScroll}>
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Station</th>
@@ -1456,7 +1458,7 @@ function MonthlyPlan({
               </tr>
             ))}
           </tbody>
-        </table>
+        </ReportTable>
         {!stations.length && (
           <p className={styles.empty}>No stations match your selection.</p>
         )}

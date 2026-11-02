@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -251,7 +253,7 @@ export function EddPerformanceByDate({
 
               {found.length > 1 ? (
                 <div className="edd-table-wrap" style={{ marginTop: 14 }}>
-                  <table className="edd-table compact">
+                  <ReportTable className="edd-table compact">
                     <thead>
                       <tr>
                         <th>Date</th>
@@ -280,7 +282,7 @@ export function EddPerformanceByDate({
                         );
                       })}
                     </tbody>
-                  </table>
+                  </ReportTable>
                 </div>
               ) : null}
             </>

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AdhocHistory } from '@/lib/payment-adhoc-history';
 import { optionalPaymentEvidence } from '@/lib/optional-payment-evidence';
@@ -36,7 +38,7 @@ function History({requestId}:{requestId:string}) {
       {status==='error'?<p role="status">History unavailable. Review actions remain available. <button type="button" onClick={()=>void load()}>Retry</button></p>:null}
       {data?<><div className={styles.pins}><span><strong>7 days</strong>{data.seven.count} requests · {money(data.seven.amount)}</span><span><strong>MTD</strong>{data.mtd.count} requests · {money(data.mtd.amount)}</span></div>
         <label>Daily breakdown <select value={period} onChange={e=>setPeriod(e.currentTarget.value)}><option value="seven">Previous 7 days</option><option value="mtd">Month to date</option></select></label>
-        <div className={styles.table} style={{maxHeight:240}}><table><thead><tr><th>Date</th><th>Requests</th><th>Amount</th><th>Pending</th></tr></thead><tbody>{days.map(day=><tr key={day.date}><td>{day.date}</td><td>{day.count}</td><td>{money(day.amount)}{day.missingAmounts?` · ${day.missingAmounts} unpriced`:''}</td><td>{day.pending}</td></tr>)}</tbody></table></div>
+        <div className={styles.table} style={{maxHeight:240}}><ReportTable><thead><tr><th>Date</th><th>Requests</th><th>Amount</th><th>Pending</th></tr></thead><tbody>{days.map(day=><tr key={day.date}><td>{day.date}</td><td>{day.count}</td><td>{money(day.amount)}{day.missingAmounts?` · ${day.missingAmounts} unpriced`:''}</td><td>{day.pending}</td></tr>)}</tbody></ReportTable></div>
         {!days.length?<p>No previous ad hoc van requests in this period.</p>:null}
         <p>{data.station} · through {data.through}. Submitted requests only; rejected, returned and cancelled excluded. Amount: approved, otherwise recorded amount or estimate. Pending amounts are not settled spend.</p>
       </>:null}

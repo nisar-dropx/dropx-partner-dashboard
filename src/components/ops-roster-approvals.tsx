@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState, useTransition } from "react";
 import { Check, Eye, RotateCcw, X } from "lucide-react";
@@ -51,7 +53,7 @@ function RosterPreviewModal({
         {error ? <p className={styles.rosterModalStatus} role="alert">{error}</p> : null}
         {preview && !loading ? (
           <div className={styles.rosterModalGridWrap}>
-            <table className={styles.rosterModalGrid}>
+            <ReportTable className={styles.rosterModalGrid}>
               <thead>
                 <tr>
                   <th>Person</th>
@@ -84,7 +86,7 @@ function RosterPreviewModal({
                   </tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         ) : null}
       </div>

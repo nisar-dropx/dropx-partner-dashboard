@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
@@ -352,7 +354,7 @@ export default async function PlatformAdminPage({
             <PendingLink className="button compact" href="/platform-admin?addUser=1" scroll={false}>Add user</PendingLink>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Name</th>
@@ -375,7 +377,7 @@ export default async function PlatformAdminPage({
                   <tr><td className="empty-cell" colSpan={4}>No control panel users added yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}
@@ -397,7 +399,7 @@ export default async function PlatformAdminPage({
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Company</th>
@@ -437,7 +439,7 @@ export default async function PlatformAdminPage({
                   <tr><td className="empty-cell" colSpan={7}>No companies found.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

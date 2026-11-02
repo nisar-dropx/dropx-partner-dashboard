@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from 'next/link';
 import {AppShell} from './app-shell';
 import {SearchableSelect} from './searchable-select';
@@ -95,14 +97,14 @@ export async function WorkforceMileageDesk({pageCode,active,path,params={},submi
    <h2>Mapped Workforce payout rates</h2>
    <p>Station ₹/km terms already stored on provider mappings as <code>KM_RUN</code>. These power automatic route fuel in Workforce payout and Distance &amp; Fuel. They are not exceptional claim policies.</p>
    {!mappedTerms.length&&!error?<p>No mapped KM_RUN rates in your station scope. Configure pay mapping in Workforce before automatic fuel can calculate.</p>:null}
-   {mappedTerms.length?<div className={styles.table}><table><thead><tr><th>Station</th><th>₹/km</th><th>Mapped people</th><th>Effective window</th></tr></thead><tbody>
+   {mappedTerms.length?<div className={styles.table}><ReportTable><thead><tr><th>Station</th><th>₹/km</th><th>Mapped people</th><th>Effective window</th></tr></thead><tbody>
     {mappedTerms.map(term=><tr key={term.stationId}>
      <td>{stationNames.get(term.stationId)??term.stationId}</td>
      <td>{money(term.ratePerKm)}/km{term.rateConflict?<><br/><small>Conflict: {term.rates.map(rate=>money(rate)).join(' · ')}</small></>:null}</td>
      <td>{term.mappedCount}</td>
      <td>{term.effectiveFrom} → {through(term.effectiveTo)}</td>
     </tr>)}
-   </tbody></table></div>:null}
+   </tbody></ReportTable></div>:null}
    <p><Link href="/capacity/distance">Open Distance &amp; Fuel</Link> · <a href="https://dashboard.dropxlogistics.com/provider-id-mapping">Open workforce pay setup</a></p>
   </section>
 
@@ -119,7 +121,7 @@ export async function WorkforceMileageDesk({pageCode,active,path,params={},submi
     <label>Approved terms / agreement reference<input name="policy_reference" minLength={3} maxLength={1000} required/></label>
     <div><p>Saved versions are immutable. Verify the agreed terms before saving. No claim or payment is created.</p><SubmitButton pendingText="Saving policy" confirmTitle="Save approved mileage terms?" confirmMessage="Confirm these are the station’s agreed terms. This policy version cannot be edited.">Save station policy</SubmitButton></div>
    </form></details>:null}
-   {!policies.length&&!error?<p>No exceptional claim policy configured yet. Mapped KM_RUN rates above already cover automatic route fuel.</p>:policies.length?<details open><summary>{policies.length} policy version{policies.length===1?'':'s'}</summary><div className={styles.table}><table><thead><tr><th>Station / policy</th><th>Terms</th><th>Effective dates</th><th>Approval reference</th><th>Created</th></tr></thead><tbody>{policies.map(p=><tr key={p.id}><td>{stationNames.get(p.station_id)}<br/>{p.name}</td><td>{money(p.rate_per_km)}/km<br/>{p.maximum_daily_km} km/day limit</td><td>{p.effective_from} → {p.effective_to}</td><td>{p.policy_reference}</td><td>{actors.get(p.created_by)??p.created_by}<br/>{time(p.created_at)} IST</td></tr>)}</tbody></table></div></details>:null}
+   {!policies.length&&!error?<p>No exceptional claim policy configured yet. Mapped KM_RUN rates above already cover automatic route fuel.</p>:policies.length?<details open><summary>{policies.length} policy version{policies.length===1?'':'s'}</summary><div className={styles.table}><ReportTable><thead><tr><th>Station / policy</th><th>Terms</th><th>Effective dates</th><th>Approval reference</th><th>Created</th></tr></thead><tbody>{policies.map(p=><tr key={p.id}><td>{stationNames.get(p.station_id)}<br/>{p.name}</td><td>{money(p.rate_per_km)}/km<br/>{p.maximum_daily_km} km/day limit</td><td>{p.effective_from} → {p.effective_to}</td><td>{p.policy_reference}</td><td>{actors.get(p.created_by)??p.created_by}<br/>{time(p.created_at)} IST</td></tr>)}</tbody></ReportTable></div></details>:null}
   </section>
 
   {canSubmit?<section className={styles.panel}><details><summary>Submit distance evidence</summary><form action={submit} className={styles.form}>

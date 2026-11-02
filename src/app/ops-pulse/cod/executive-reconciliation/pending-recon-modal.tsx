@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import type { CashReconPendingBreakdown } from "@/lib/ops-pulse/cash-recon-types";
 
@@ -57,7 +59,7 @@ export function PendingReconModal({
             Ask the associate to complete pending recon or hand over the full cash so pending becomes zero, then return here to count denominations.
           </p>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Tracking ID</th>
@@ -78,7 +80,7 @@ export function PendingReconModal({
                   <tr><td className="empty-cell" colSpan={4}>No tracking-level breakdown returned.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           <label style={{ display: "grid", gap: 6, marginTop: 14 }}>
             Manual override remarks

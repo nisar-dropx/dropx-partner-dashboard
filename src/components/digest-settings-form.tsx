@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 type Control={state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
 type Receipt={id:string;recipient_email:string;report_date:string;status:string;error:string|null;completed_at:string|null};
 export function DigestSettingsForm({control,action,canEdit,receipts}:{control:Control;action:(form:FormData)=>Promise<void>;canEdit:boolean;receipts:Receipt[]}){
@@ -19,6 +21,6 @@ export function DigestSettingsForm({control,action,canEdit,receipts}:{control:Co
  <p><small>{control.config.delivery_ready===true?'Server delivery is ready. Changes apply to the next eligible run.':'Delivery is not activated until production verification is complete.'} Pausing or disabling stops unsent emails; accepted emails are never resent automatically.</small></p>
  </form>
  <section className="panel" style={{padding:24,marginTop:20}}><h2>Recent deliveries</h2><p>“Accepted” means the mail server accepted the message; it does not confirm it was read. A sending or uncertain result is held for verification, never blindly retried.</p>
- <div style={{overflowX:'auto'}}><table style={{width:'100%',textAlign:'left'}}><thead><tr><th>Report day</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{receipts.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||'—'}</td></tr>)}</tbody></table></div>{!receipts.length?<p>No scheduled deliveries yet.</p>:null}</section>
+ <div style={{overflowX:'auto'}}><ReportTable style={{width:'100%',textAlign:'left'}}><thead><tr><th>Report day</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{receipts.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||'—'}</td></tr>)}</tbody></ReportTable></div>{!receipts.length?<p>No scheduled deliveries yet.</p>:null}</section>
  </>;
 }

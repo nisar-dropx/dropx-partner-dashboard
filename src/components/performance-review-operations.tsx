@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useState } from "react";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
@@ -84,12 +86,12 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
         {latest && (latest.counts.todayUnverified > 0 || latest.counts.movement?.unmapped) ? <p role="status" className="review-operation-note">Source/history reconciliation is incomplete. Actual station stock stays visible; fresh pending and clearance are provisional. Details below.</p> : null}
         <p className="review-operation-note">Click a number for its recorded tracking IDs and Excel download. At station = INDUCTED / RECEIVED, including returned parcels; it does not mean every parcel is fresh EDD pending. All groups cover shipments with the selected EDD date, including earlier attempts and completed deliveries. {t.baselineAt ? `Day-start stays fixed from ${reviewClock(t.baselineAt)}.` : "The morning baseline was not recorded; a later count is never substituted."}</p>
         <div className="review-operation-table" role="region" aria-label="EDD half-hour history, scroll for all times and columns" tabIndex={0}>
-          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>EDD total</th>{EDD_MOVEMENT_GROUPS.map(([key,label]) => <th key={key}>{label}</th>)}<th>Observation</th></tr></thead>
+          <ReportTable><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>EDD total</th>{EDD_MOVEMENT_GROUPS.map(([key,label]) => <th key={key}>{label}</th>)}<th>Observation</th></tr></thead>
             <tbody>{t.rows.map(row => { const c = row.state === "Recorded" && row.point?.counts.hasSnapshot ? row.point.counts : null; return <tr key={row.label} className={c ? "" : "review-operation-muted"}>
               <th scope="row">{row.label}</th><td>{c ? number(t.dayStartAll, t.baselinePoint, "all", "Day-start EDD") : "—"}</td><td>{number(c?.todayTotal, row.point, "all", "All EDDs")}</td>
               {EDD_MOVEMENT_GROUPS.map(([key,label]) => <td key={key}>{number(c?.movement?.[key] ?? (key === "atStation" ? c?.todayObservedAtStation : key === "onRoad" ? c?.todayOnRoad : key === "delivered" ? c?.todayDelivered : null), row.point, key, label)}</td>)}
               <td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}{c && !c.packageDetailsRecorded ? " · totals only" : ""}</small><small>Stock {reviewClock(row.point.backlogAt)} · outcomes {reviewClock(row.point.performanceAt)}</small>{c?.movement?.unmapped ? <small>{number(c.movement.unmapped, row.point, "unmapped", "Source status exceptions")} source status exceptions</small> : null}</> : row.state}</td>
-            </tr>; })}</tbody></table>
+            </tr>; })}</tbody></ReportTable>
         </div>
         {checkpoint && stationCode ? <ReviewEddCheckpoint key={`${stationCode}:${day}:${checkpoint.observedAt}:${checkpoint.group}`} station={stationCode} day={day} {...checkpoint} onClose={() => setCheckpoint(null)}/> : null}
         <ReviewDetails className="review-edd-explanation"><summary>Pending, returns and source details</summary><ReviewDetailsClose label="Close EDD definitions"/>
@@ -97,7 +99,7 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
           <p className="review-operation-note">Fresh pending excludes every known previous dispatch or attempt. HFR/HCR parcels remain in their actual current source movement group, never in fresh pending. CASH_IN_ASSOCIATE and CASH_AT_STATION count as delivered. Inbound / returns includes manifested, inter-station, return-to-station and return-to-FC movements; generic transit is on road only with customer dispatch evidence.</p>
           {latest && (latest.counts.todayUnverified || latest.counts.missingDate) ? <p role="status" className="review-operation-note">Data quality: {count(latest.counts.todayUnverified)} parcels need history or station reconciliation; {count(latest.counts.missingDate)} have no EDD date. These are not shipment statuses. Station stock stays visible, but fresh pending and clearance cannot be certified complete yet.</p> : null}
           <p className="review-operation-note">{t.summary}. Missing checkpoints and old tracking-ID lists cannot be reconstructed from current statuses.</p>
-          {latest?.counts.movement ? <div className="review-operation-table"><table><thead><tr><th>Actual source status</th><th>Tracking IDs</th></tr></thead><tbody>{latest.counts.movement.statuses.map(row => <tr key={row.status}><td>{row.status}</td><td>{count(row.count)}</td></tr>)}</tbody></table></div> : null}
+          {latest?.counts.movement ? <div className="review-operation-table"><ReportTable><thead><tr><th>Actual source status</th><th>Tracking IDs</th></tr></thead><tbody>{latest.counts.movement.statuses.map(row => <tr key={row.status}><td>{row.status}</td><td>{count(row.count)}</td></tr>)}</tbody></ReportTable></div> : null}
           {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatOpsDateTime(t.latest.backlogAt)} · outcomes {formatOpsDateTime(t.latest.performanceAt)} IST.</p> : null}
         </ReviewDetails>
         <p className="review-operation-note"><a href="/edd/edds">Multi-station / multi-status Excel exports →</a></p>
@@ -106,7 +108,7 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
         <div className="review-operation-summary"><span>Total out on road <b>{count(route?.routeDispatched)}</b></span><span>Physical at station <b>{count(route?.routeAtStation)}</b></span><span>Still out / held <b>{count(route?.routeOutOnRoad)}</b></span><span>Delivered <b>{count(route?.routeDelivered)}</b></span><span>Returned <b>{count(route?.routeReturned)}</b></span></div>
         <p className="review-operation-note">This view covers every package assigned by Amazon on the selected date, regardless of EDD. Total out on road reconciles exactly to delivered + still out/held + returned. Physical at station means not yet assigned and sits outside that total.</p>
         <div className="review-operation-table" role="region" aria-label="All out-on-road half-hour history, scroll for all times and columns" tabIndex={0}>
-          <table><thead><tr><th>Checkpoint</th><th>Physical at station</th><th>Total out on road</th><th>Still out / held</th><th>Delivered</th><th>Returned</th><th>Observation</th></tr></thead>
+          <ReportTable><thead><tr><th>Checkpoint</th><th>Physical at station</th><th>Total out on road</th><th>Still out / held</th><th>Delivered</th><th>Returned</th><th>Observation</th></tr></thead>
             <tbody>{t.rows.map(row => {
               const pointCounts = row.routeState === "Recorded" ? row.point?.counts : null;
               const final = row.label === "EOD" && t.routeFinal ? t.routeFinal : null;
@@ -117,7 +119,7 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
                 <th scope="row">{row.label}</th><td>{count(c?.routeAtStation)}</td><td>{count(c?.routeDispatched)}</td><td>{count(c?.routeOutOnRoad)}</td><td>{count(c?.routeDelivered)}</td><td>{count(c?.routeReturned)}</td>
                 <td>{observedAt ? <>{reviewClock(observedAt)}<small>{state}</small></> : state}</td>
               </tr>;
-            })}</tbody></table>
+            })}</tbody></ReportTable>
         </div>
         <p className="review-operation-note">Half-hour route checkpoints are recorded from this release onward. Earlier review dates retain the authoritative final daily total at EOD; missing past checkpoints are not reconstructed from later data.</p>
         {route ? <p className="review-operation-note">Latest complete route source: {reviewClock(route.observedAt)} IST{route.source === "daily" ? " · Amazon daily snapshot" : ""}.</p> : <p className="review-operation-note">No complete route snapshot is available for this station and date.</p>}

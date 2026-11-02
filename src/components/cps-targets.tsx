@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveCpsTarget } from "@/app/cps/actions";
@@ -80,7 +82,7 @@ export function CpsTargets({targets, stations, today, canAdd}: {
             Add a dated revision to change a target without overwriting earlier periods. When a period spans revisions, targets are weighted by deliveries + customer returns.
           </p>
           <div className="cps-table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Location</th>
@@ -99,7 +101,7 @@ export function CpsTargets({targets, stations, today, canAdd}: {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           {!targets.length && <p>No station targets configured.</p>}
         </div>

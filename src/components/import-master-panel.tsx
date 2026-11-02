@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -72,7 +74,7 @@ export function ImportMasterPanel({ reports }: { reports: ReportImportMaster[] }
         <button className="button secondary compact" onClick={() => edit()} type="button">Add report</button>
       </div>
       <div className="table-wrap">
-        <table>
+        <ReportTable>
           <thead><tr><th>Report</th><th>Schedule</th><th>File type</th><th>Parser</th><th>Duplicate keys</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {reports.map((report) => (
@@ -87,7 +89,7 @@ export function ImportMasterPanel({ reports }: { reports: ReportImportMaster[] }
               </tr>
             ))}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
 
       <div className="panel-body stacked" style={{ borderTop: "1px solid var(--border)" }}>

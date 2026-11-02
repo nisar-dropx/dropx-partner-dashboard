@@ -1,4 +1,6 @@
 'use client';
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownUp, Download, RefreshCw, Search, Route, Fuel, Gauge, CircleAlert } from 'lucide-react';
@@ -141,7 +143,7 @@ export function DailyFleetReportView() {
       <p className="daily-freshness">Latest saved distance: {dateLabel(report.latestKmDate)} · Latest fuel date: {dateLabel(report.latestFuelDate)}. GPS refresh covers the filtered vehicles for up to 7 days at a time, within the last 31 days.</p>
       {syncMessage ? <div className="daily-sync-message" role="status" aria-live="polite">{syncMessage}</div> : null}
       {!rows.length ? <div className="daily-loading">No vehicle-days match these filters. Try another date range or clear the filters.</div> : <>
-        <div className="daily-table-scroll" tabIndex={0} aria-label="Daily vehicle kilometre and mileage table"><table className="daily-table"><thead><tr>{columns.map(column => <th key={column.key} aria-sort={sort.column === column.key ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'}><button type="button" onClick={() => sortColumn(column.key)}>{column.label}<ArrowDownUp size={12} /><small>{column.unit ?? ' '}</small></button></th>)}<th>Data availability</th><th>Details</th></tr></thead><tbody>{pageRows.map(row => <DailyRow key={`${row.vehicle_no}|${row.date}`} row={row} />)}</tbody></table></div>
+        <div className="daily-table-scroll" tabIndex={0} aria-label="Daily vehicle kilometre and mileage table"><ReportTable className="daily-table"><thead><tr>{columns.map(column => <th key={column.key} aria-sort={sort.column === column.key ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'}><button type="button" onClick={() => sortColumn(column.key)}>{column.label}<ArrowDownUp size={12} /><small>{column.unit ?? ' '}</small></button></th>)}<th>Data availability</th><th>Details</th></tr></thead><tbody>{pageRows.map(row => <DailyRow key={`${row.vehicle_no}|${row.date}`} row={row} />)}</tbody></ReportTable></div>
         <footer className="daily-pagination"><span>Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, rows.length)} of {rows.length}</span><label>Rows per page<select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}>{[25, 50, 100].map(size => <option key={size}>{size}</option>)}</select></label><div><button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Previous</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Next</button></div></footer>
       </>}
     </> : null}

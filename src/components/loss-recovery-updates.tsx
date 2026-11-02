@@ -1,4 +1,6 @@
 'use client';
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from 'react';
 import { filterRecoveryUpdates, totalRecoveryUpdates, type RecoveryUpdate } from '@/lib/ops-pulse/loss-recovery-updates';
 import { RECOVERY_QUEUE_LABELS, indiaMonth } from '@/lib/ops-pulse/loss-recovery-queue-policy';
@@ -40,13 +42,13 @@ export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { r
     </div>
     <section className={styles.panel}>
       <div className={styles.panelHead}><div><h2>{earlierOnly ? 'Earlier salary recovery · saved assignments' : 'Station recovery updates'}</h2><small>Salary month = planned payroll; loss month = shipment loss period. See Payroll deductions for actual debits.</small></div></div>
-      <div className={styles.tableWrap}><table><thead><tr><th>Station</th><th>TIDs / people</th><th>Loss value</th><th>Assigned</th><th>Recovered</th><th>Pending collection</th><th>Draft payroll</th><th>Last update</th></tr></thead>
-        <tbody>{groups.map(group => <tr key={group.code}><td><button className={styles.button} onClick={() => setStation(group.code)}>{group.code}</button></td><td>{group.count} / {group.people}</td><td>{money(group.amount)}</td><td>{money(group.assigned)}</td><td>{money(group.collected)}</td><td>{money(group.outstanding)}</td><td>{money(group.draft)}</td><td>{group.updatedAt ? formatOpsDate(group.updatedAt) : '—'}</td></tr>)}</tbody></table></div>
+      <div className={styles.tableWrap}><ReportTable><thead><tr><th>Station</th><th>TIDs / people</th><th>Loss value</th><th>Assigned</th><th>Recovered</th><th>Pending collection</th><th>Draft payroll</th><th>Last update</th></tr></thead>
+        <tbody>{groups.map(group => <tr key={group.code}><td><button className={styles.button} onClick={() => setStation(group.code)}>{group.code}</button></td><td>{group.count} / {group.people}</td><td>{money(group.amount)}</td><td>{money(group.assigned)}</td><td>{money(group.collected)}</td><td>{money(group.outstanding)}</td><td>{money(group.draft)}</td><td>{group.updatedAt ? formatOpsDate(group.updatedAt) : '—'}</td></tr>)}</tbody></ReportTable></div>
       {!shown.length ? <p className={styles.empty}>No saved recovery updates match this selection. Open Pending recovery updates to assign final cases.</p> : null}
     </section>
     {shown.length ? <section className={styles.panel}>
       <div className={styles.panelHead}><h2>Updated shipments · {shown.length}</h2>{station ? <button className={styles.button} onClick={() => setStation('')}>All stations</button> : null}</div>
-      <div className={styles.tableWrap}><table><thead><tr><th>Shipment / loss month</th><th>Person · salary month / assigned</th><th>Status</th><th>Loss value</th><th>Recovered</th><th>Pending collection</th><th>Updated</th></tr></thead><tbody>
+      <div className={styles.tableWrap}><ReportTable><thead><tr><th>Shipment / loss month</th><th>Person · salary month / assigned</th><th>Status</th><th>Loss value</th><th>Recovered</th><th>Pending collection</th><th>Updated</th></tr></thead><tbody>
         {paged.rows.map(row => <tr key={row.key}>
           <td><a href={`/team-ops/losses/recovery-updates?case=${encodeURIComponent(row.caseKey)}&month=${encodeURIComponent(row.month)}`}>{row.tid}</a><small>{row.station} · {row.report.toUpperCase()} · {monthLabel(row.month)}</small></td>
           <td>{row.people.length ? row.people.map(person => <div key={person.ref}><strong>{person.name || person.code}</strong><small>{person.code} · {person.designation}</small><small className={person.salaryMonth && person.salaryMonth < currentMonth ? styles.earlierSalary : undefined}>{person.salaryMonth ? `${monthLabel(person.salaryMonth)} salary${row.recurring ? ' · starts' : ''}` : 'Salary month not recorded'} · {money(person.amount)}{person.salaryMonth && person.salaryMonth < currentMonth ? ' · Earlier payroll' : ''}</small></div>) : 'No payroll allocation'}<small>{row.outcome}</small></td>
@@ -54,7 +56,7 @@ export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { r
           <td>{money(row.amount)}</td><td>{money(row.collected)}</td><td>{money(row.outstanding)}{row.waived > 0 ? <small>{money(row.waived)} written off</small> : null}</td>
           <td>{row.updatedAt ? formatOpsDate(row.updatedAt) : '—'}<small>{row.updatedBy}</small></td>
         </tr>)}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
       <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="shipments"/>
     </section> : null}
   </>;

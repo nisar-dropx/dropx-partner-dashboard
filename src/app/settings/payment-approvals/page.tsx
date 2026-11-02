@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -60,7 +62,7 @@ export default async function PaymentApprovalsSettingsPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Payment Head</th>
@@ -89,7 +91,7 @@ export default async function PaymentApprovalsSettingsPage() {
                 <tr><td className="empty-cell" colSpan={4}>No payment heads found.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { Fragment, useState } from "react";
 import type {
   StationAudit,
@@ -44,7 +46,7 @@ export function AuditMonthTracker({
         </div>
       </div>
       <div className={styles.tableScroll}>
-        <table className={styles.tracker}>
+        <ReportTable className={styles.tracker}>
           <thead>
             <tr>
               <th>Station</th>
@@ -215,7 +217,7 @@ export function AuditMonthTracker({
               );
             })}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </section>
   );

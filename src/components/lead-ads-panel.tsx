@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { bulkMetaLeadAdAction, changeMetaLeadAdStatus, deleteMetaLeadAd, removeLocalLeadAd } from "@/app/leads/actions";
@@ -329,7 +331,7 @@ export function LeadAdsPanel({ ads, canEdit }: { ads: LeadAdRow[]; canEdit: bool
       </div>
 
       <div className="table-wrap">
-        <table className="lead-table lead-ads-table">
+        <ReportTable className="lead-table lead-ads-table">
           <thead>
             <tr>
               {canEdit ? (
@@ -382,7 +384,7 @@ export function LeadAdsPanel({ ads, canEdit }: { ads: LeadAdRow[]; canEdit: bool
               <tr><td colSpan={canEdit ? 10 : 9}><EmptyState>No ad data for selected filters.</EmptyState></td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
 
       <div className="panel-foot pagination">

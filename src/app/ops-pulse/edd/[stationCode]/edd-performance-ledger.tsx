@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, Loader2 } from "lucide-react";
@@ -96,7 +98,7 @@ export function EddPerformanceLedger({
           <p className="subtle">No archived days yet — click &ldquo;Backfill last 30 days&rdquo; above, or wait for the 15-minute sweep to start filling today in.</p>
         ) : (
           <div className="edd-table-wrap">
-            <table className="edd-table">
+            <ReportTable className="edd-table">
               <thead>
                 <tr>
                   <th><button type="button" className="edd-sort-btn" onClick={() => toggleSort("date")}>Date {sortIcon("date")}</button></th>
@@ -124,7 +126,7 @@ export function EddPerformanceLedger({
                   );
                 })}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         )}
 

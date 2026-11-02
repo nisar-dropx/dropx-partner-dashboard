@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
@@ -173,7 +175,7 @@ export default async function AmazonConnectorPage() {
                   <h3>Automation coverage</h3>
                   <p className="subtle">Enabled tasks use these source URLs when Ops Pulse portal checks run through the browser worker.</p>
                   <div className="table-wrap">
-                    <table>
+                    <ReportTable>
                       <thead>
                         <tr>
                           <th>Task</th>
@@ -211,7 +213,7 @@ export default async function AmazonConnectorPage() {
                           );
                         })}
                       </tbody>
-                    </table>
+                    </ReportTable>
                   </div>
                   {connector?.last_error_message ? <p className="field-hint">Last error: {connector.last_error_message}</p> : null}
                 </div>

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { digestDatabase } from "@/lib/portal-digest-delivery";
 import { defaultNowControl, loadNowMailScope, nowDigestEvents } from "@/lib/amazon-now-digest";
 import { saveAmazonNowDigestSettings, sendAmazonNowAdditionalRecipients } from "@/app/settings/notifications/actions";
@@ -15,7 +17,7 @@ export async function AmazonNowNotificationSettings({ companyId, canEdit, domain
   return <details key={event} className="panel" style={{padding:16,marginTop:12}}><summary><strong>{event==="now_review_digest"?"Store review · D−2":"Activities & handover · previous day"}</strong> · {String(control.config.schedule_time)} IST · {control.state}</summary>
    <p>Only Amazon Now stores, configured operations roles and explicitly added active OpsPulse accounts. Accounts, departments and location access are rechecked before delivery. No individual’s name is hardcoded.</p>
    <a className="button secondary" href={`/api/ops-pulse/amazon-now-digest-preview?event=${event}`} target="_blank" rel="noreferrer">Preview current email</a>
-   {'error' in scope?<p role="alert">{scope.error}</p>:<details><summary>{scope.recipients.length} recipients · {scope.stations.length} stores</summary><table><thead><tr><th>Recipient</th><th>Stores</th></tr></thead><tbody>{scope.recipients.map(r=><tr key={r.email}><td>{r.name}<br/><small>{r.email}</small></td><td>{scope.stations.filter(s=>r.stationIds.includes(s.id)).map(s=>s.station_code).join(", ")}</td></tr>)}</tbody></table></details>}
+   {'error' in scope?<p role="alert">{scope.error}</p>:<details><summary>{scope.recipients.length} recipients · {scope.stations.length} stores</summary><ReportTable><thead><tr><th>Recipient</th><th>Stores</th></tr></thead><tbody>{scope.recipients.map(r=><tr key={r.email}><td>{r.name}<br/><small>{r.email}</small></td><td>{scope.stations.filter(s=>r.stationIds.includes(s.id)).map(s=>s.station_code).join(", ")}</td></tr>)}</tbody></ReportTable></details>}
    <DigestSettingsForm control={{...control,config:{...control.config,additional_recipient_emails:control.config.additional_recipient_emails || [],additional_recipient_help:"Active OpsPulse accounts only. Each recipient receives their existing permitted Amazon Now stores. Comma-separated emails; clear to remove."}}} canEdit={canEdit} action={saveAmazonNowDigestSettings.bind(null,event)} receipts={receipts.data || []}/>
    {canEdit && event === "now_activity_digest" ? <form action={sendAmazonNowAdditionalRecipients}><p>After the morning run, send a fresh copy to added recipients who have not received today’s handover. Existing deliveries are never repeated.</p><button className="button secondary" type="submit">Send today’s handover to added recipients</button></form> : null}
   </details>;

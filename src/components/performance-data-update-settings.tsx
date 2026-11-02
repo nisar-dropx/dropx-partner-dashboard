@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 type Control={state:string;paused_until:string|null;subject_template:string|null;body_template:string|null;config:Record<string,unknown>};
 type Receipt={id:string;recipient_email:string;report_date:string;status:string;error:string|null};
 export function PerformanceDataUpdateSettings({control,action,canEdit,receipts}:{control:Control;action:(form:FormData)=>Promise<void>;canEdit:boolean;receipts:Receipt[]}) {
@@ -14,6 +16,6 @@ export function PerformanceDataUpdateSettings({control,action,canEdit,receipts}:
    <div style={{gridColumn:'1 / -1'}}><button className="button primary" type="submit">Save data update notification</button></div>
   </fieldset></form>
   <p><small>Checked by the portal server every minute; no laptop required. Failed, incomplete and duplicate-only imports do not trigger a notice. No historical import backfill is sent on activation. SMTP-accepted messages are not automatically resent.</small></p>
-  <details><summary>Recent data update deliveries ({receipts.length})</summary><div className="table-wrap"><table><thead><tr><th>Performance day</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{receipts.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||'—'}</td></tr>)}</tbody></table></div>{!receipts.length?<p>No data update notifications sent yet.</p>:null}</details>
+  <details><summary>Recent data update deliveries ({receipts.length})</summary><div className="table-wrap"><ReportTable><thead><tr><th>Performance day</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{receipts.map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||'—'}</td></tr>)}</tbody></ReportTable></div>{!receipts.length?<p>No data update notifications sent yet.</p>:null}</details>
  </section>;
 }

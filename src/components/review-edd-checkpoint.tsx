@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import "./review-edd-checkpoint.css";
 import { useEffect, useRef, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
@@ -41,9 +43,9 @@ export function ReviewEddCheckpoint({ station, day, observedAt, group, label, on
     </div>
     {error ? <div><p role="alert">{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>Retry checkpoint</button></div> : loading ? <p role="status">Loading tracking IDs…</p> : <>
       <p>{data?.total.toLocaleString("en-IN")} tracking IDs · Status below is the recorded checkpoint status, not a later live scan.</p>
-      <div className="review-operation-table" tabIndex={0} role="region" aria-label="Checkpoint package list"><table><thead><tr><th>Tracking ID</th><th>Status at checkpoint</th><th>Associate</th><th>Attempt category</th></tr></thead><tbody>
+      <div className="review-operation-table" tabIndex={0} role="region" aria-label="Checkpoint package list"><ReportTable><thead><tr><th>Tracking ID</th><th>Status at checkpoint</th><th>Associate</th><th>Attempt category</th></tr></thead><tbody>
         {data?.rows.map(row => <tr key={row[0]}><td><button type="button" className="review-edd-number" onClick={() => setTid(row[0])}>{row[0]}</button></td><td>{row[1] || "No current source observation"}</td><td>{row[3] || "—"}</td><td>{row[5] === "none" ? "—" : row[5] === "unknown" ? "History incomplete" : row[5].toUpperCase()}</td></tr>)}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
       <div className="review-edd-checkpoint-controls"><button type="button" disabled={page === 1} onClick={() => setPage(page-1)}>Previous</button><span>Page {page} of {Math.max(1, Math.ceil((data?.total ?? 0)/100))}</span><button type="button" disabled={page*100 >= (data?.total ?? 0)} onClick={() => setPage(page+1)}>Next</button></div>
     </>}
     <TrackingDetailModal trackingId={tid} stationHint={station} onClose={() => setTid(null)}/>

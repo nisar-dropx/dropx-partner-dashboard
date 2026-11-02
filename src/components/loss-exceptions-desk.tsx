@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useRef, useState } from 'react';
 import { LOSS_EXCEPTION_LABELS, type LossExceptionKind, type LossExceptionGrant } from '@/lib/ops-pulse/loss-exceptions';
 import { canEnableException, exceptionKey, parseExceptionBatch, type ExceptionUpdate } from '@/lib/ops-pulse/loss-exception-batch';
@@ -106,9 +108,9 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
     {message?<div role="status" className={ui.result}>{message}{failed.length?<ul>{failed.map(r=><li key={exceptionKey(r,r.kind)}>{r.case_key} · {LOSS_EXCEPTION_LABELS[r.kind]}: {r.error}</li>)}</ul>:null}</div>:null}
     {preview.length?<div className={ui.preview}>
       <div className={ui.actions}><strong>Review {preview.length} updates</strong><button type="button" className={styles.primary} disabled={busy||!canEdit} onClick={()=>void apply(preview)}>{busy?'Saving…':`Apply ${preview.length} updates`}</button><button type="button" className={styles.button} disabled={busy} onClick={()=>setPreview([])}>Cancel</button></div>
-      <div className={ui.previewScroll}><table className={styles.ledgerTable}><thead><tr><th>Shipment / station</th><th>Loss month</th><th>Exception</th><th>Action</th><th>Note</th></tr></thead><tbody>{preview.map(r=><tr key={exceptionKey(r,r.kind)}><td>{r.case_key}<small>{r.station}</small></td><td>{r.month}</td><td>{LOSS_EXCEPTION_LABELS[r.kind]}</td><td>{r.enabled?'Enable':'Disable'}</td><td>{r.reason||'—'}</td></tr>)}</tbody></table></div>
+      <div className={ui.previewScroll}><ReportTable className={styles.ledgerTable}><thead><tr><th>Shipment / station</th><th>Loss month</th><th>Exception</th><th>Action</th><th>Note</th></tr></thead><tbody>{preview.map(r=><tr key={exceptionKey(r,r.kind)}><td>{r.case_key}<small>{r.station}</small></td><td>{r.month}</td><td>{LOSS_EXCEPTION_LABELS[r.kind]}</td><td>{r.enabled?'Enable':'Disable'}</td><td>{r.reason||'—'}</td></tr>)}</tbody></ReportTable></div>
     </div>:null}
-    <div className={styles.tableWrap}><table className={styles.ledgerTable}><thead><tr>
+    <div className={styles.tableWrap}><ReportTable className={styles.ledgerTable}><thead><tr>
       <th>{canEdit?<input type="checkbox" aria-label="Select this page" disabled={busy||!paged.rows.length} checked={!!paged.rows.length&&paged.rows.every(r=>selected.includes(exceptionKey(r)))} onChange={e=>setSelected(e.target.checked?paged.rows.map(r=>exceptionKey(r)):[])}/>:null}</th>
       <th>Shipment ID / loss month</th><th>Station</th><th>Loss value</th><th>{LOSS_EXCEPTION_LABELS[kind]}</th><th>Other enabled options</th>
     </tr></thead><tbody>{paged.rows.map(r=>{const state=current(r,kind);return <tr key={exceptionKey(r)} className={selected.includes(exceptionKey(r))?ui.selected:undefined}>
@@ -116,7 +118,7 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
       <td><strong>{r.details?.tid||r.case_key}</strong><small>{r.month}</small></td><td>{r.station_code}</td><td>{money(r.amount)}</td>
       <td><span className={state?.enabled?ui.enabled:ui.disabled}>{state?.enabled?'Enabled':'Not enabled'}</span>{state?.updated_by_name?<small>{state.updated_by_name}</small>:null}{state&&'deduction_month'in state&&state.deduction_month?<small>Payroll {state.deduction_month}</small>:null}{!canEnableException(r,recoverableStatuses)?<small>Source changed · disable only</small>:null}</td>
       <td>{kinds.filter(k=>k!==kind&&current(r,k)?.enabled).map(k=>LOSS_EXCEPTION_LABELS[k]).join(' · ')||'—'}</td>
-    </tr>;})}</tbody></table></div>
+    </tr>;})}</tbody></ReportTable></div>
     {!shown.length?<p className={styles.empty}>No matching final recoverable shipments. Check the Shipment ID and status filter.</p>:null}
     <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="shipments"/>
   </section>;

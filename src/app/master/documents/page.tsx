@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -374,7 +376,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams?: {
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Code</th>
@@ -412,7 +414,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams?: {
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 11 : 10}>No documents found.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

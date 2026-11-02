@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
@@ -125,7 +127,7 @@ export default async function PayableBalancePage({
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead><tr><th>Source</th><th>Records</th><th>Grand total</th><th>Paid amount</th><th>Payable balance</th></tr></thead>
                 <tbody>{bySource.map((row) => <tr key={row.source}>
                   <td><strong>{PAYABLE_BALANCE_SOURCE_LABELS[row.source]}</strong></td>
@@ -135,7 +137,7 @@ export default async function PayableBalancePage({
                   <td className="payable-balance-value"><strong>{currency(row.payableBalance)}</strong></td>
                 </tr>)}</tbody>
                 <tfoot><tr><th>Total</th><th>{total.recordCount.toLocaleString("en-IN")}</th><th>{currency(total.grandTotal)}</th><th>{currency(total.actualPaidAmount)}</th><th>{currency(total.payableBalance)}</th></tr></tfoot>
-              </table>
+              </ReportTable>
             </div>
           </section>
 
@@ -147,7 +149,7 @@ export default async function PayableBalancePage({
               </div>
             </div>
             {byMonth.length ? <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead><tr><th>Month</th><th>Source</th><th>Pending records</th><th>Grand total</th><th>Paid amount</th><th>Payable balance</th></tr></thead>
                 <tbody>{byMonth.map((row) => <tr key={`${row.month}-${row.source}`}>
                   <td><strong>{payableBalanceMonthLabel(row.month)}</strong></td>
@@ -157,7 +159,7 @@ export default async function PayableBalancePage({
                   <td>{currency(row.actualPaidAmount)}</td>
                   <td className="payable-balance-value"><strong>{currency(row.payableBalance)}</strong></td>
                 </tr>)}</tbody>
-              </table>
+              </ReportTable>
             </div> : <div className="panel-body"><p className="empty-cell">No pending payable balance is available.</p></div>}
           </section> : null}
         </>}

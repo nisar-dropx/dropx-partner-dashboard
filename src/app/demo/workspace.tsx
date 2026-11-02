@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -598,7 +600,7 @@ export function DemoWorkspace({
                   </select>
                 </div>
                 <div className={s.tableScroll}>
-                  <table className={s.table}>
+                  <ReportTable className={s.table}>
                     <thead>
                       <tr>
                         <th>Location</th>
@@ -637,7 +639,7 @@ export function DemoWorkspace({
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </ReportTable>
                 </div>
                 <div className={s.mobileRecords}>
                   {rows.map((row) => (

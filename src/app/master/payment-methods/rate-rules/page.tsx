@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -60,10 +62,10 @@ export default async function ConversionRateRulesPage({ searchParams }: { search
         <p className="subtle">Rules cannot overlap for the same method, field and location. Saved rules are immutable; use a new date range for later rates.</p>
         <SubmitButton className="button">Save conversion rule</SubmitButton>
       </form></section> : null}
-    <section className="panel"><div className="panel-head"><h2>Configured conversion rules</h2></div><div className="table-wrap"><table>
+    <section className="panel"><div className="panel-head"><h2>Configured conversion rules</h2></div><div className="table-wrap"><ReportTable>
       <thead><tr><th>Rule</th><th>Payment method / field</th><th>Model / location</th><th>Conversion</th><th>Slabs</th><th>Work dates</th></tr></thead>
       <tbody>{(rules.data ?? []).map(row => <tr key={row.id}><td>{row.name}</td><td>{methodNames.get(row.payment_method_id) ?? row.payment_method_id}<br />{fieldNames.get(row.payment_field_id) ?? row.payment_field_id}</td><td>{modelNames.get(row.location_model_id) ?? row.location_model_id}<br />{stationNames.get(row.station_id) ?? row.station_id}</td><td>({conversionMetricSources(row.numerator_source).map(source => metricNames.get(source) ?? source).join(" + ")}) ÷ ({conversionMetricSources(row.denominator_source).map(source => metricNames.get(source) ?? source).join(" + ")}) × 100</td><td>{conversionRateTiers(row.tiers).map(tier => `${tier.minimum}% → ₹${tier.rate}`).join(" · ")}</td><td>{row.effective_from} to {row.effective_to}</td></tr>)}
         {!rules.data?.length ? <tr><td colSpan={6} className="empty-cell">No conversion rules. Existing fixed rates continue to apply.</td></tr> : null}
-      </tbody></table></div></section>
+      </tbody></ReportTable></div></section>
   </AppShell>;
 }
