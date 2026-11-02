@@ -106,6 +106,7 @@ assert.ok(read("src/components/performance-rca-actions.tsx").includes("ReviewPer
 const React=require("react"), {renderToStaticMarkup}=require("react-dom/server");
 const operations=compile("src/lib/ops-pulse/review-operations.ts");
 const historyUi=compile("src/components/review-attendance-history.tsx",{
+  "@/components/report-table":{ReportTable:"table"},
   "@/components/review-details":compile("src/components/review-details.tsx"),
   react:{...React,useContext:()=>({date,data:{station:"GDRD",date,people:[person]},error:null,retry(){}})},
   "@/lib/date-format":{formatDashboardDate:d=>d},"@/lib/ops-pulse/review-operations":operations,"@/lib/ops-pulse/review-attendance-history":logic

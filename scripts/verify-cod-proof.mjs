@@ -20,7 +20,7 @@ assert.equal(policy.proofVerdict({...extracted,seal_clarity:'medium',seal_issuer
 assert.throws(()=>policy.proofVerdict({...extracted,seal_status:'maybe'},expected));
 assert.throws(()=>policy.proofVerdict({readable:true},expected));
 assert.throws(()=>policy.emailList('someone@example.com\nmalformed'));
-const {CodSlipCheckDetails}=compile('src/components/cod-slip-check-details.tsx',{'@/lib/date-format':compile('src/lib/date-format.ts')});
+const {CodSlipCheckDetails}=compile('src/components/cod-slip-check-details.tsx',{'@/components/report-table':{ReportTable:'table'},'@/lib/date-format':compile('src/lib/date-format.ts')});
 const view=require('react-dom/server').renderToStaticMarkup(require('react').createElement(CodSlipCheckDetails,{result:{policy_version:4,proof_version:1,extracted:{...extracted,seal_clarity:'medium',seal_issuer:null}},checkedAt:'2026-09-26T12:00:00Z',amount:100,date:expected.date,station:'NLRC',reference:'AC123'}));
 assert.match(view,/Slip checks/);assert.match(view,/Seal visible/);assert.match(view,/medium/i);assert.match(view,/Radiant text/);
 
