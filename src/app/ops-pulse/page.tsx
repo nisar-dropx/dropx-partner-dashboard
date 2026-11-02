@@ -35,7 +35,7 @@ export default async function OpsPulsePage({searchParams = {}}:{searchParams?:Se
   if (!context.availableModes.length && searchParams.view !== 'manpower') redirect('/unauthorized?page=ops_portal&reason=location');
   if (context.mode==='amazon_now' && searchParams.view!=='manpower') return <DarkStoreHome authorization={authorization} locations={context.selectedLocations} searchParams={searchParams}/>;
   return <AppShell active={active} pageCode={pageCode}><Suspense fallback={<CommandLoading label="Loading your command center"/>}>
-    {searchParams.view==='manpower' ? <Manpower authorization={authorization} context={context} searchParams={searchParams}/> : <LastMile authorization={authorization} context={context} searchParams={searchParams}/>}
+    {searchParams.view==='manpower' ? <Manpower authorization={authorization} availableLocations={locationsResult.locations} context={context} searchParams={searchParams}/> : <LastMile authorization={authorization} context={context} searchParams={searchParams}/>}
   </Suspense></AppShell>;
 }
 type ContentProps = {authorization:Awaited<ReturnType<typeof requirePagePermission>>;context:ReturnType<typeof resolveOperatingContext>;searchParams:SearchParams};
@@ -73,11 +73,12 @@ async function LastMileSnapshots({result,period,codes}:{result:ReturnType<typeof
   return <OpsCommandCenter {...await result} period={period} codes={codes}/>;
 }
 
-async function Manpower({authorization:a,context,searchParams}:ContentProps) {
+async function Manpower({authorization:a,availableLocations,context,searchParams}:ContentProps & {availableLocations:Awaited<ReturnType<typeof loadCodLocations>>['locations']}) {
   const companyId = requireCompanyId(a), today=todayKolkata();
   const date = isoDate(searchParams.date) && searchParams.date<=today ? searchParams.date : today;
-  const available = context.modeLocations;
-  const location = available.find(l=>l.id===searchParams.location) ?? context.selectedLocations[0] ?? null;
+  // Attendance spans providers and offices; the loader already enforces user location access.
+  const available = availableLocations;
+  const location = available.find(l=>l.id===searchParams.location) ?? available.find(l=>l.id===context.selectedLocations[0]?.id) ?? available[0] ?? null;
   const locations = location ? [location] : [];
   let manpower:Awaited<ReturnType<typeof loadOpsStationManpower>>={asOf:date,people:[]};
   let error='';
