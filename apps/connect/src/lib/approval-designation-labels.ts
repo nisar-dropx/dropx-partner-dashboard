@@ -91,6 +91,22 @@ export function isBusinessOrNationalHeadDesignation(designation: DesignationLabe
     || name.includes("business head");
 }
 
+/** Area / Head Operations seats that sit above Cluster Managers on the Org Chart. */
+export function isOperationsHeadDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  if (isBusinessOrNationalHeadDesignation(designation)) return true;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase().replaceAll("-", " ").replace(/\s+/g, " ").trim();
+  return code === "HLM"
+    || code === "AOM"
+    || code === "HEAD_OPERATIONS"
+    || code === "HEAD_OF_OPERATIONS"
+    || code === "AREA_OPERATIONS_MANAGER"
+    || name.includes("head operations")
+    || name.includes("head of operations")
+    || name.includes("area operations manager");
+}
+
 export function isFinanceHeadDesignation(designation: DesignationLabel | null | undefined) {
   if (!designation) return false;
   const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");

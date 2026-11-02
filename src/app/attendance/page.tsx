@@ -247,9 +247,12 @@ export default async function AttendanceReportsPage({
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
-            <strong>Database setup needed</strong>
+            <strong>{/does not exist|schema cache|relation .* missing|column .* missing/i.test(error) ? "Database setup needed" : "Unable to load attendance"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
-              {error} Run `scripts/biometric_attendance_upgrade_existing_tables.sql` in Supabase SQL Editor, then refresh this page.
+              {error}
+              {/does not exist|schema cache|relation .* missing|column .* missing/i.test(error)
+                ? " Run `scripts/biometric_attendance_upgrade_existing_tables.sql` in Supabase SQL Editor, then refresh this page."
+                : null}
             </p>
           </div>
         </section>

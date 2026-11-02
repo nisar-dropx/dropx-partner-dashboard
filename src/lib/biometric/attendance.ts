@@ -30,6 +30,9 @@ import {
   weeklyRosterValueForDate,
   type WeeklyRosterVersion
 } from "../weekly-roster";
+import { chunkedValues } from "../bounded-concurrency";
+import { loadPostgrestInFilterBatches } from "../postgrest-in-filter-batching";
+import { readAllRows } from "../supabase-pagination";
 
 export type AttendanceReportType =
   | "performance"
@@ -158,6 +161,44 @@ function isMissingColumnError(error: { message?: string; code?: string } | null 
   if (!error) return false;
   const message = error.message?.toLowerCase() ?? "";
   return error.code === "42703" || message.includes("does not exist") || message.includes("schema cache");
+}
+
+/** Dual `.in()` filters on UUID lists routinely exceed PostgREST/gateway URL limits (~16KB). */
+const ROSTER_PLAN_IN_BATCH_SIZE = 25;
+const ROSTER_WORKER_IN_BATCH_SIZE = 80;
+
+async function loadWeeklyRosterEntriesForWorkers({
+  companyId,
+  planIds,
+  workerIds,
+  shiftColumns
+}: {
+  companyId: string;
+  planIds: string[];
+  workerIds: string[];
+  shiftColumns: string;
+}) {
+  if (!supabaseAdmin || !planIds.length || !workerIds.length) {
+    return { data: [] as Array<Record<string, unknown>>, error: null as { message: string } | null };
+  }
+  const admin = supabaseAdmin;
+  const rows: Array<Record<string, unknown>> = [];
+  for (const planChunk of chunkedValues(planIds, ROSTER_PLAN_IN_BATCH_SIZE)) {
+    const batch = await loadPostgrestInFilterBatches({
+      values: workerIds,
+      batchSize: ROSTER_WORKER_IN_BATCH_SIZE,
+      loadBatch: (workerChunk) =>
+        admin
+          .from("hr_roster_entries")
+          .select(`plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(${shiftColumns})`)
+          .eq("company_id", companyId)
+          .in("plan_id", planChunk)
+          .in("worker_id", workerChunk)
+    });
+    if (batch.error) return { data: rows, error: batch.error };
+    rows.push(...((batch.data ?? []) as unknown as Array<Record<string, unknown>>));
+  }
+  return { data: rows, error: null as { message: string } | null };
 }
 
 function normalizeDailyRows(rows: Partial<DailyRow>[]): DailyRow[] {
@@ -339,11 +380,12 @@ export async function loadWorkerShiftWindow({
   workDate: string;
 }): Promise<ShiftWindow | null> {
   if (!supabaseAdmin) return null;
+  const admin = supabaseAdmin;
   const isEmployee = profileType === "employee" || Boolean(employeeId);
   const workerId = isEmployee ? employeeId : (accountId ?? fieldExecutiveId);
   if (!workerId) return null;
 
-  const roster = await supabaseAdmin
+  const roster = await admin
     .from("hr_roster_entries")
     .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
     .eq("company_id", companyId)
@@ -369,7 +411,7 @@ export async function loadWorkerShiftWindow({
     }
   }
 
-  const plans = await supabaseAdmin
+  const plans = await admin
     .from("hr_roster_plans")
     .select("id,effective_from,superseded_at,revision_no")
     .eq("company_id", companyId)
@@ -381,12 +423,17 @@ export async function loadWorkerShiftWindow({
     .filter((plan) => !plan.superseded_at || workDate < plan.superseded_at);
   const planIds = versions.map((plan) => plan.id);
   if (!planIds.length) return null;
-  const weekly = await supabaseAdmin
-    .from("hr_roster_entries")
-    .select("plan_id,worker_type,worker_id,day_type,roster_date,hr_shifts(start_time,end_time,break_minutes)")
-    .eq("company_id", companyId)
-    .eq("worker_id", workerId)
-    .in("plan_id", planIds);
+  const weekly = await loadPostgrestInFilterBatches({
+    values: planIds,
+    batchSize: ROSTER_PLAN_IN_BATCH_SIZE,
+    loadBatch: (planChunk) =>
+      admin
+        .from("hr_roster_entries")
+        .select("plan_id,worker_type,worker_id,day_type,roster_date,hr_shifts(start_time,end_time,break_minutes)")
+        .eq("company_id", companyId)
+        .eq("worker_id", workerId)
+        .in("plan_id", planChunk)
+  });
   if (weekly.error) return null;
   const index = buildWeeklyRosterIndex(
     versions,
@@ -679,27 +726,33 @@ async function loadAttendanceScheduleContext({
   workers: Array<{ profileId: string; profileType: BiometricWorkerLookup["profileType"] }>;
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const admin = supabaseAdmin;
   const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
   const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
 
   const [settingsResult, rosterResult, recurringPlanResult, calendarResult] = await Promise.all([
-    supabaseAdmin
+    admin
       .from("hr_company_settings")
       .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
       .eq("company_id", companyId)
       .maybeSingle(),
     workerIds.length
-      ? supabaseAdmin
-        .from("hr_roster_entries")
-        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)`)
-        .eq("company_id", companyId)
-        .eq("hr_roster_plans.status", "approved")
-        .eq("hr_roster_plans.roster_kind", "dated")
-        .gte("roster_date", fromDate)
-        .lte("roster_date", toDate)
-        .in("worker_id", workerIds)
+      ? loadPostgrestInFilterBatches({
+        values: workerIds,
+        batchSize: ROSTER_WORKER_IN_BATCH_SIZE,
+        loadBatch: (workerChunk) =>
+          admin
+            .from("hr_roster_entries")
+            .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)`)
+            .eq("company_id", companyId)
+            .eq("hr_roster_plans.status", "approved")
+            .eq("hr_roster_plans.roster_kind", "dated")
+            .gte("roster_date", fromDate)
+            .lte("roster_date", toDate)
+            .in("worker_id", workerChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
-    supabaseAdmin
+    admin
       .from("hr_roster_plans")
       .select("id,effective_from,superseded_at,revision_no")
       .eq("company_id", companyId)
@@ -707,7 +760,7 @@ async function loadAttendanceScheduleContext({
       .eq("roster_kind", "recurring_weekly")
       .lte("effective_from", toDate)
       .order("effective_from", { ascending: false }),
-    supabaseAdmin
+    admin
       .from("hr_payroll_calendar_days")
       .select("calendar_date,day_type,name,location_id")
       .eq("company_id", companyId)
@@ -752,14 +805,12 @@ async function loadAttendanceScheduleContext({
   const recurringVersions = ((recurringPlanResult.data ?? []) as WeeklyRosterVersion[])
     .filter((plan) => !plan.superseded_at || plan.superseded_at > fromDate);
   const recurringPlanIds = recurringVersions.map((plan) => plan.id);
-  const weeklyEntriesResult = recurringPlanIds.length && workerIds.length
-    ? await supabaseAdmin
-      .from("hr_roster_entries")
-      .select(`plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(${shiftColumns})`)
-      .eq("company_id", companyId)
-      .in("plan_id", recurringPlanIds)
-      .in("worker_id", workerIds)
-    : { data: [], error: null };
+  const weeklyEntriesResult = await loadWeeklyRosterEntriesForWorkers({
+    companyId,
+    planIds: recurringPlanIds,
+    workerIds,
+    shiftColumns
+  });
   if (weeklyEntriesResult.error) throw new Error(weeklyEntriesResult.error.message);
   const weeklyIndex = buildWeeklyRosterIndex(
     recurringVersions,
@@ -775,9 +826,21 @@ async function loadAttendanceScheduleContext({
 
   // Part-time workers among these profiles (one lookup per report, not per row).
   const [partTimeEmployees, partTimeContractors] = workerIds.length ? await Promise.all([
-    supabaseAdmin.from("employees").select("id,employment_type,location_id,last_working_date,people_lifecycle_status,designations(code,name)").eq("company_id", companyId).in("id", workerIds),
-    supabaseAdmin.from("contractors").select("id,employment_type,location_id,last_working_date,people_lifecycle_status,designation").eq("company_id", companyId).in("id", workerIds)
+    loadPostgrestInFilterBatches({
+      values: workerIds,
+      batchSize: ROSTER_WORKER_IN_BATCH_SIZE,
+      loadBatch: (workerChunk) =>
+        admin.from("employees").select("id,employment_type,location_id,last_working_date,people_lifecycle_status,designations(code,name)").eq("company_id", companyId).in("id", workerChunk)
+    }),
+    loadPostgrestInFilterBatches({
+      values: workerIds,
+      batchSize: ROSTER_WORKER_IN_BATCH_SIZE,
+      loadBatch: (workerChunk) =>
+        admin.from("contractors").select("id,employment_type,location_id,last_working_date,people_lifecycle_status,designation").eq("company_id", companyId).in("id", workerChunk)
+    })
   ]) : [{ data: [], error: null }, { data: [], error: null }];
+  if (partTimeEmployees.error) throw new Error(partTimeEmployees.error.message);
+  if (partTimeContractors.error) throw new Error(partTimeContractors.error.message);
   const partTimeIds = new Set<string>();
   const locationByWorker = new Map<string, string | null>();
   const lastWorkingDateByWorker = new Map<string, string | null>();
@@ -1916,24 +1979,38 @@ export async function loadAttendanceReportRows({
     remark
   `;
   const runDailyQuery = async (selectColumns: string, includeLocationFilter: boolean) => {
-    let query = admin
-      .from("attendance_daily")
-      .select(selectColumns)
-      .eq("company_id", companyId)
-      .order("punch_date", { ascending: false })
-      .order("enrolment_id", { ascending: true });
-
-    if (fromDate && toDate) {
-      query = query.gte("punch_date", fromDate).lte("punch_date", toDate);
-    } else if (date) {
-      query = query.eq("punch_date", date);
-    }
-
     const enrolmentVariants = biometricIdVariants(requestedEnrolmentIds ?? []);
-    if (enrolmentVariants.length) query = query.in("enrolment_id", enrolmentVariants);
+    const locationChunks = includeLocationFilter && locationIds?.length
+      ? chunkedValues(locationIds, ROSTER_WORKER_IN_BATCH_SIZE)
+      : [null as string[] | null];
+    const enrolmentChunks = enrolmentVariants.length
+      ? chunkedValues(enrolmentVariants, ROSTER_WORKER_IN_BATCH_SIZE)
+      : [null as string[] | null];
+    const rows: Array<Record<string, unknown>> = [];
+    for (const locationChunk of locationChunks) {
+      for (const enrolmentChunk of enrolmentChunks) {
+        let query = admin
+          .from("attendance_daily")
+          .select(selectColumns)
+          .eq("company_id", companyId)
+          .order("punch_date", { ascending: false })
+          .order("enrolment_id", { ascending: true });
 
-    if (includeLocationFilter && locationIds?.length) query = query.in("location_id", locationIds);
-    return query;
+        if (fromDate && toDate) {
+          query = query.gte("punch_date", fromDate).lte("punch_date", toDate);
+        } else if (date) {
+          query = query.eq("punch_date", date);
+        }
+
+        if (enrolmentChunk?.length) query = query.in("enrolment_id", enrolmentChunk);
+        if (locationChunk?.length) query = query.in("location_id", locationChunk);
+
+        const page = await readAllRows(query);
+        if (page.error) return page;
+        rows.push(...((page.data ?? []) as Array<Record<string, unknown>>));
+      }
+    }
+    return { data: rows, error: null as { message: string; code?: string } | null };
   };
 
   let dailyResult = await runDailyQuery(baseSelect, true);
@@ -1955,74 +2032,74 @@ export async function loadAttendanceReportRows({
   ]);
   const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult, biometricHelperResult, biometricPickerResult] = await Promise.all([
     employeeIds.length
-      ? supabaseAdmin
-        .from("employees")
-        .select("id, employee_code, full_name, designation_id, org_position_id")
-        .eq("company_id", companyId)
-        .in("id", employeeIds)
+      ? loadPostgrestInFilterBatches({
+        values: employeeIds,
+        loadBatch: (idChunk) =>
+          admin.from("employees").select("id, employee_code, full_name, designation_id, org_position_id").eq("company_id", companyId).in("id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     executiveIds.length
-      ? supabaseAdmin
-        .from("workforce")
-        .select("id, dropx_id, full_name, designation")
-        .eq("company_id", companyId)
-        .in("id", executiveIds)
+      ? loadPostgrestInFilterBatches({
+        values: executiveIds,
+        loadBatch: (idChunk) =>
+          admin.from("workforce").select("id, dropx_id, full_name, designation").eq("company_id", companyId).in("id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     dailyLocationIds.length
-      ? supabaseAdmin
-        .from("stations")
-        .select("id, station_code, station_name")
-        .eq("company_id", companyId)
-        .in("id", dailyLocationIds)
+      ? loadPostgrestInFilterBatches({
+        values: dailyLocationIds,
+        loadBatch: (idChunk) =>
+          admin.from("stations").select("id, station_code, station_name").eq("company_id", companyId).in("id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("employees")
-        .select("id, employee_code, full_name, biometric_id, designation_id, location_id, org_position_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("employees").select("id, employee_code, full_name, biometric_id, designation_id, location_id, org_position_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("workforce")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("workforce").select("id, dropx_id, full_name, biometric_id, designation, location_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("contractors")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("contractors").select("id, dropx_id, full_name, biometric_id, designation, location_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("vendors")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("vendors").select("id, dropx_id, full_name, biometric_id, designation, location_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("helpers")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("helpers").select("id, dropx_id, full_name, biometric_id, designation, location_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("workforce_helpers")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("workforce_helpers").select("id, dropx_id, full_name, biometric_id, designation, location_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
-      ? supabaseAdmin
-        .from("workforce_pickers")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
+      ? loadPostgrestInFilterBatches({
+        values: biometricVariants,
+        loadBatch: (idChunk) =>
+          admin.from("workforce_pickers").select("id, dropx_id, full_name, biometric_id, designation, location_id").eq("company_id", companyId).in("biometric_id", idChunk)
+      })
       : Promise.resolve({ data: [], error: null })
   ]);
   if (employeeResult.error) throw new Error(employeeResult.error.message);
@@ -2067,18 +2144,31 @@ export async function loadAttendanceReportRows({
   let punchesByKey = new Map<string, PunchRow[]>();
 
   if (biometricVariants.length && punchFilterDates.length) {
-    let punchQuery = supabaseAdmin
-      .from("attendance_punches")
-      .select("enrolment_id, punch_date, punch_time, punch_label, device_serial, calculated")
-      .eq("company_id", companyId)
-      .eq("calculated", true)
-      .in("enrolment_id", biometricVariants)
-      .in("punch_date", punchFilterDates)
-      .order("punch_time", { ascending: true });
-    if (locationIds?.length) punchQuery = punchQuery.in("location_id", locationIds);
-    const punchResult = await punchQuery;
-    if (punchResult.error && !isMissingColumnError(punchResult.error)) throw new Error(punchResult.error.message);
-    punchesByKey = ((punchResult.data ?? []) as PunchRow[]).reduce((map, punch) => {
+    const punchRows: PunchRow[] = [];
+    const locationChunks = locationIds?.length ? chunkedValues(locationIds, ROSTER_WORKER_IN_BATCH_SIZE) : [null as string[] | null];
+    const dateChunks = chunkedValues(punchFilterDates, ROSTER_WORKER_IN_BATCH_SIZE);
+    for (const locationChunk of locationChunks) {
+      for (const dateChunk of dateChunks) {
+        const punchResult = await loadPostgrestInFilterBatches({
+          values: biometricVariants,
+          loadBatch: async (enrolmentChunk) => {
+            let punchQuery = admin
+              .from("attendance_punches")
+              .select("enrolment_id, punch_date, punch_time, punch_label, device_serial, calculated")
+              .eq("company_id", companyId)
+              .eq("calculated", true)
+              .in("enrolment_id", enrolmentChunk)
+              .in("punch_date", dateChunk)
+              .order("punch_time", { ascending: true });
+            if (locationChunk?.length) punchQuery = punchQuery.in("location_id", locationChunk);
+            return punchQuery;
+          }
+        });
+        if (punchResult.error && !isMissingColumnError(punchResult.error)) throw new Error(punchResult.error.message);
+        if (!punchResult.error) punchRows.push(...((punchResult.data ?? []) as PunchRow[]));
+      }
+    }
+    punchesByKey = punchRows.reduce((map, punch) => {
       const key = `${punch.enrolment_id}:${punch.punch_date}`;
       const rows = map.get(key) ?? [];
       rows.push(punch);

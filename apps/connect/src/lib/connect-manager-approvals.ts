@@ -196,13 +196,13 @@ async function signedEvidence(path: string | null | undefined) {
   return result.data?.signedUrl ?? null;
 }
 
-export async function listConnectAttendanceApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
-  // Include this login, linked One profiles for the same person, and reporting-line
-  // assignees (same visibility model as WFH / business trip). Person-id matching
-  // keeps steps visible after a connect-only login refresh changes approver_user_id.
+export async function listConnectAttendanceApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
+  // Immediate reportees: only steps assigned to this login / person.
+  // Entire team: also include pending steps assigned to managers below on the Org Chart.
+  const includeReportingLine = reportees.scope === "team";
   const [selfUserIds, visibleUserIds, personId] = await Promise.all([
     approverUserIds(account),
-    resolveConnectVisibleApproverUserIds(account),
+    includeReportingLine ? resolveConnectVisibleApproverUserIds(account) : Promise.resolve([] as string[]),
     resolveConnectActorPersonId(account)
   ]);
   const actorUserIds = [...new Set([...selfUserIds, ...visibleUserIds])];
@@ -215,6 +215,7 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
         .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending")
         .order("created_at")
       : Promise.resolve({ data: [] as Array<{ id: string; request_id: string; step_order: number; step_name: string; approver_user_id: string | null; approver_person_id: string | null }>, error: null }),
+    // Person-id matching is for this login only (not the reporting-line expansion).
     personId
       ? db().from("attendance_regularization_approval_steps")
         .select("id,request_id,step_order,step_name,approver_user_id,approver_person_id")
@@ -235,7 +236,6 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
     .eq("company_id", account.companyId).is("request_kind", null).eq("status", "pending_manager")
     .in("id", [...new Set(steps.map((step) => step.request_id))]);
   if (requestsResult.error) throw new Error(requestsResult.error.message);
-  // Explicit step assignment — show regardless of reporting-tree toggle.
   const requestById = new Map((requestsResult.data ?? []).map((request) => [request.id, request]));
   const rows = await Promise.all(steps.flatMap((step) => {
     const request = requestById.get(step.request_id);

@@ -94,14 +94,18 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const approverUserIds = await resolveConnectVisibleApproverUserIds(account);
+    // Immediate = steps assigned to this login only. Entire team also surfaces
+    // pending steps assigned to managers below this person on the Org Chart.
+    const selfApproverUserIds = await resolveConnectActorUserIds(account);
+    const approverUserIds = scope === "team"
+      ? await resolveConnectVisibleApproverUserIds(account)
+      : selfApproverUserIds;
     const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals, payAdvanceOversight, paymentApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
         ? listConnectWfhApprovals({
             companyId: account.companyId,
             approverUserIds,
-            // Explicit step assignment — show regardless of reporting-tree toggle.
             matchesReportee: () => true
           })
         : Promise.resolve([]),
@@ -123,7 +127,7 @@ export async function GET(request: Request) {
       listConnectExitApprovals(account),
       listConnectExitWithdrawalApprovals(account),
       listConnectPayAdvanceApprovals(account),
-      listConnectPayAdvanceOversight(account),
+      scope === "team" ? listConnectPayAdvanceOversight(account) : Promise.resolve([]),
       listConnectPaymentApprovals(account.companyId, approverUserIds)
     ]);
     return NextResponse.json({

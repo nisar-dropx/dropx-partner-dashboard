@@ -1245,8 +1245,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
           </button>
         </div>
         <p>{reporteeScope === "immediate"
-          ? "Assigned requests and authorised HR reviews. Team filters apply to oversight only."
-          : "Your full reporting team, plus requests assigned to you."}</p>
+          ? "Only requests assigned to you. Open Entire team to see pending items waiting with managers below you."
+          : "Your assigned requests plus pending items waiting with managers in your reporting team."}</p>
       </div>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
@@ -1764,11 +1764,11 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             name={personWithLocation(approval.workerName, approval.stationName, approval.stationCode)}
             meta={approval.workerCode || "Pay advance"} saving={saving}
             onReview={() => { setPayAdvanceError(""); setActiveKey(`pay-advance:${approval.id}`); }} />)}
-          {payAdvanceOversight.length ? <section className="dx-expense-oversight">
+          {reporteeScope === "team" && payAdvanceOversight.length ? <section className="dx-expense-oversight">
             <header>
               <span>
                 <strong>All team · pay advances</strong>
-                <small>Waiting with a manager below you. You can still review and decide here — these do not appear in your assigned list.</small>
+                <small>Waiting with a manager below you. You can still review and decide here — these do not appear in Immediate reportees.</small>
               </span>
               <em>{payAdvanceOversight.length} pending</em>
             </header>
@@ -1786,7 +1786,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               ))}
             </div>
           </section> : null}
-          {!payAdvanceApprovals.length && !payAdvanceOversight.length ? (
+          {!payAdvanceApprovals.length && !(reporteeScope === "team" && payAdvanceOversight.length) ? (
             <div className="dx-empty"><Clock3 /><strong>No pay advances waiting</strong><small>No pay advance approval steps are assigned to you right now.</small></div>
           ) : null}
           {(() => {
@@ -1894,7 +1894,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             />
           ))}
           <ReimbursementApprovalHistory account={account} />
-          {expenseOversight.length ? <section className="dx-expense-oversight">
+          {reporteeScope === "team" && expenseOversight.length ? <section className="dx-expense-oversight">
             <header><span><strong>Organisation reimbursement visibility</strong><small>Read-only access · approval is available only when you are the assigned reporting-manager layer.</small></span><em>{expenseOversight.length} recent</em></header>
             <div>
               {expenseOversight.map((claim) => <ApprovalRow
@@ -1908,7 +1908,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               />)}
             </div>
           </section> : null}
-          {preRequestOversight.length ? <section className="dx-expense-oversight">
+          {reporteeScope === "team" && preRequestOversight.length ? <section className="dx-expense-oversight">
             <header><span><strong>All team · pre-request visibility</strong><small>Read-only here · approval happens only when you are this requester's reporting manager.</small></span><em>{preRequestOversight.length} recent</em></header>
             <div>
               {preRequestOversight.map((request) => <ApprovalRow
@@ -1922,7 +1922,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               />)}
             </div>
           </section> : null}
-          {!preRequestApprovals.length && !reimbursements.length && !expenseOversight.length && !preRequestOversight.length ? (
+          {!preRequestApprovals.length && !reimbursements.length && !(reporteeScope === "team" && (expenseOversight.length || preRequestOversight.length)) ? (
             <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No reimbursement requests or claims are assigned to you right now.</small></div>
           ) : null}
           {(() => {

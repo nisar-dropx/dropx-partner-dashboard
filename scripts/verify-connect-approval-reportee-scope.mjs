@@ -11,6 +11,8 @@ const approvals = read("apps/connect/app/api/connect/approvals/route.ts");
 const reimbursements = read("apps/connect/app/api/connect/reimbursements/route.ts");
 const attendance = read("apps/connect/src/lib/connect-manager-approvals.ts");
 const location = read("apps/connect/src/lib/connect-location-integrity.ts");
+const resignation = read("apps/connect/src/lib/exit-resignation-route.ts");
+const designations = read("apps/connect/src/lib/approval-designation-labels.ts");
 
 function extractExport(source, name) {
   const start = source.indexOf(`export async function ${name}`);
@@ -27,35 +29,50 @@ const checks = [
   [component.includes('useState<ReporteeScope>("immediate")'), "Approval Inbox always opens with immediate reportees"],
   [component.includes("Immediate reportees") && component.includes("Entire team"), "the user-controlled scope switch is present"],
   [component.includes("reporteeScope })"), "all Approval Inbox fetches send the selected reportee scope"],
+  [component.includes('reporteeScope === "team" && payAdvanceOversight.length'), "pay-advance team oversight stays off Immediate reportees"],
+  [component.includes('reporteeScope === "team" && expenseOversight.length'), "expense team oversight stays off Immediate reportees"],
   [scope.includes('=== "team" ? "team" : "immediate"'), "unknown or missing scope values safely default to immediate"],
   [scope.includes('relationship_type", "solid_line"') && scope.includes('is_primary", true'), "scope follows active primary solid-line Org Chart relationships"],
   [reportingTree.includes("while (queue.length)"), "Entire team recursively traverses the reporting tree"],
   [approvals.includes("loadConnectReporteeAccess(account, scope)"), "leave, attendance and location APIs load one shared reportee scope"],
   [
-    attendanceManagerList.includes('.in("approver_user_id", actorUserIds)')
-      && attendanceManagerList.includes("Explicit step assignment")
+    approvals.includes('scope === "team"')
+      && approvals.includes("resolveConnectVisibleApproverUserIds(account)")
+      && approvals.includes("resolveConnectActorUserIds(account)")
+      && approvals.includes('scope === "team" ? listConnectPayAdvanceOversight(account)'),
+    "Entire team expands assigned queues; Immediate stays on this login only"
+  ],
+  [
+    attendanceManagerList.includes("reportees.scope === \"team\"")
+      && attendanceManagerList.includes("resolveConnectVisibleApproverUserIds")
+      && attendanceManagerList.includes('.in("approver_user_id", actorUserIds)')
       && !attendanceManagerList.includes("connectReporteeMatches")
       && attendanceHrList.includes("loadConnectAttendanceApproveScope")
       && attendanceHrList.includes("connectWorkforceMatches")
       && !attendanceHrList.includes("connectReporteeMatches")
       && rosterSwapList.includes('.in("approver_user_id", actorUserIds)')
       && !rosterSwapList.includes("connectReporteeMatches"),
-    "assigned approvals and permission-scoped HR queues are never hidden by a reporting-tree filter"
+    "attendance reporting-line expansion follows the Immediate / Entire team toggle"
   ],
   [
-    approvals.includes("Steps are assigned explicitly")
-      && approvals.includes("matchesReportee: () => true")
-      && approvals.includes("listConnectWfhHrApprovals(account)")
-      && approvals.includes("listConnectBusinessTripHrApprovals(account)"),
-    "leave/WFH/travel assignments and HR queues remain independent of oversight filters"
+    approvals.includes("listConnectWfhHrApprovals(account)")
+      && approvals.includes("listConnectBusinessTripHrApprovals(account)")
+      && approvals.includes("matchesReportee: () => true"),
+    "HR queues remain independent of oversight filters"
   ],
   [
     reimbursements.includes('.in("approver_user_id", userIds)')
       && reimbursements.includes("Do not require org-chart reportee scope")
+      && reimbursements.includes('scope === "team" ? expenseOversightSummary')
       && !reimbursements.includes("connectReporteeMatches(reportees"),
-    "claims are assignee-scoped (not org-chart filtered)"
+    "claims stay assignee-scoped; expense oversight loads only for Entire team"
   ],
-  [location.includes("loadConnectReporteeAccess(account, reporteeScope)"), "location review authorization follows the selected reporting scope"]
+  [location.includes("loadConnectReporteeAccess(account, reporteeScope)"), "location review authorization follows the selected reporting scope"],
+  [
+    designations.includes("isOperationsHeadDesignation")
+      && resignation.includes("isOperationsHeadDesignation(designation)"),
+    "Cluster Manager resignations can resolve to Head / Area Operations"
+  ]
 ];
 
 const failed = checks.filter(([ok]) => !ok);

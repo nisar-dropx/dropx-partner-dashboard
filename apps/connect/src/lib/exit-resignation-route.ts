@@ -5,7 +5,8 @@ import {
   isFinanceHeadDesignation,
   isFloorResignationDesignation,
   isHrPeopleDesignation,
-  isManagingPartnerDesignation
+  isManagingPartnerDesignation,
+  isOperationsHeadDesignation
 } from "./approval-designation-labels";
 
 export type ResignationTier = "floor" | "mid" | "business_head" | "hr" | "managing_partner";
@@ -75,7 +76,9 @@ export function planResignationSeats(tier: ResignationTier): PlannedResignationS
 
 function matchesSeatKind(kind: ResignationSeatKind, designation: DesignationLabel | null | undefined) {
   if (kind === "cluster_manager") return isClusterManagerDesignation(designation);
-  if (kind === "business_head") return isBusinessOrNationalHeadDesignation(designation);
+  // Mid-tier resignations (e.g. Cluster Manager) should stop at Head / Area
+  // Operations when that is the live solid-line manager — not skip to National Head.
+  if (kind === "business_head") return isOperationsHeadDesignation(designation);
   return false;
 }
 

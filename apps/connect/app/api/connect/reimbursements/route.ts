@@ -508,8 +508,8 @@ export async function GET(request: Request) {
       const [approvals, preRequestApprovals, expenseOversight, preRequestOversight] = await Promise.all([
         approvalPayload(account.companyId, actorUserIds),
         preRequestApprovalPayload(account.companyId, actorUserIds),
-        expenseOversightSummary(account),
-        preRequestOversightSummary(account)
+        scope === "team" ? expenseOversightSummary(account) : Promise.resolve([]),
+        scope === "team" ? preRequestOversightSummary(account) : Promise.resolve([])
       ]);
       return NextResponse.json({
         categories: [],
