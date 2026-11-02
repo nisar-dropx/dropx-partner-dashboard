@@ -1,7 +1,7 @@
 "use client";
 
 import { groupWorkforceDeductionDisplay } from "@/lib/workforce-loss-recovery";
-import { routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
+import { isKilometreField, routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
 import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -1174,7 +1174,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             const expanded = expandedId === row.id;
             const detailId = `payout-breakup-${row.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
             const reviewDays = row.dailyBreakdown.filter(day => day.deliveryReview);
-            const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined);
+            const fuelDays = row.dailyBreakdown.filter(day => day.routeFuel);
+            const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined || (isKilometreField(item.code) && fuelDays.length > 0));
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
             const deductionDisplay = groupWorkforceDeductionDisplay(deductionTotals);
             const paymentBalanceAvailable = row.paymentSummary
@@ -1264,7 +1265,6 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                       <span><small>Gross deductions</small><strong className={row.deductions ? "negative" : undefined}>{row.deductions ? `- ${money(row.deductions)}` : money(0)}</strong></span>
                       <span><small>Net pay</small><strong>{money(row.netAmount)}</strong></span>
                     </div>
-                    {row.dailyBreakdown.some(day=>day.routeFuel) ? <section className="payout-breakup-summary"><h3>Calculated route km &amp; fuel</h3><p>Station departure + delivery journey + station return, from the Amazon GPS trail where it is complete, otherwise roads between Amazon delivery scans. Finalised after the work day closes.</p><div className="table-wrap"><table><thead><tr><th>Day</th><th>Route km</th><th>Rate / km</th><th>Fuel allowance</th><th>Source / status</th></tr></thead><tbody>{row.dailyBreakdown.filter(day=>day.routeFuel).map(day=>{const fuel=day.routeFuel!;return <tr key={day.date}><td>{dateLabel(day.date)}</td><td>{fuel.km===null?'Pending':`${routeKm(fuel.km)} km`}</td><td>{rateMoney(fuel.rate)}</td><td>{fuel.amount===null?'Pending':exactMoney(fuel.amount)}</td><td>{fuel.status==='pending'?routePendingLabel(fuel.reason):fuel.source==='manual'?'Uploaded units':`Station ${routeKm(fuel.departureKm??0)} + delivery ${routeKm(fuel.deliveryKm??0)} + return ${routeKm(fuel.returnKm??0)} km`}</td></tr>})}</tbody></table></div></section> : null}
                     {attendanceRanges.length ? <div className="payout-breakup-summary">
                       {attendanceRanges.map((range) => <span key={`${range.basis}|${range.effectiveFrom}|${range.effectiveTo}`}>
                         <small>Uploaded attendance range</small>
@@ -1282,7 +1282,23 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                             <tbody>
                               {paymentTotals.map((item) => <tr key={`${item.code}|${item.componentType}|${item.rate}|${item.reportedCount === undefined ? "standard" : `${item.thresholdPeriod}|${item.thresholdMinimum}|${item.thresholdConfigurationMissing === true}`}`}>
                                 <td>
-                                  <strong>{item.label}</strong>
+                                  {isKilometreField(item.code) && fuelDays.length > 0 ? <details>
+                                    <summary><strong>{item.label}</strong></summary>
+                                    <p>Station departure + delivery journey + station return, from the Amazon GPS trail where it is complete, otherwise roads between Amazon delivery scans. Finalised after the work day closes.</p>
+                                    <div className="table-wrap"><table aria-label="Day-wise fuel allowance breakdown">
+                                      <thead><tr><th scope="col">Day</th><th scope="col">Route km</th><th scope="col">Rate / km</th><th scope="col">Fuel allowance</th><th scope="col">Source / status</th></tr></thead>
+                                      <tbody>{fuelDays.filter(day => day.routeFuel!.rate === item.rate).map(day => {
+                                        const fuel = day.routeFuel!;
+                                        return <tr key={day.date}>
+                                          <td>{dateLabel(day.date)}</td>
+                                          <td>{fuel.km === null ? "Pending" : `${routeKm(fuel.km)} km`}</td>
+                                          <td>{rateMoney(fuel.rate)}</td>
+                                          <td>{fuel.amount === null ? "Pending" : exactMoney(fuel.amount)}</td>
+                                          <td>{fuel.status === "pending" ? routePendingLabel(fuel.reason) : fuel.source === "manual" ? "Uploaded units" : `Station ${routeKm(fuel.departureKm ?? 0)} + delivery ${routeKm(fuel.deliveryKm ?? 0)} + return ${routeKm(fuel.returnKm ?? 0)} km`}</td>
+                                        </tr>;
+                                      })}</tbody>
+                                    </table></div>
+                                  </details> : <strong>{item.label}</strong>}
                                   {item.reportedCount !== undefined ? <small>{item.thresholdConfigurationMissing
                                     ? "Combined threshold · minimum not saved"
                                     : `${item.thresholdPeriod === "month" ? "Monthly" : "Daily"} combined minimum · ${units(item.thresholdMinimum ?? 0)} units`}</small> : null}
