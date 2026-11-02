@@ -1119,6 +1119,14 @@ export type LoadFlashBoardBackfill = {
   cleared?: number;
 };
 
+function workerFetchErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error || fallback);
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|network|socket/i.test(message)) {
+    return "Worker connection dropped. Click Refresh 7d again — the run will resume from the last packet.";
+  }
+  return message || fallback;
+}
+
 /** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
 export async function backfillLoadFlashBoard(opts?: {
   days?: number;
@@ -1142,13 +1150,18 @@ export async function backfillLoadFlashBoard(opts?: {
   if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
   if (opts?.retryJobs?.length) url.searchParams.set("retryJobs", opts.retryJobs.join(","));
   if (opts?.reset) url.searchParams.set("reset", "1");
-  const response = await fetch(url.toString(), {
-    method: "POST",
-    headers: { "x-admin-key": adminKey, Accept: "application/json" },
-    cache: "no-store",
-    // Concurrent packet of ~25 stations; wall clock ≈ slowest station in the batch.
-    signal: AbortSignal.timeout(120000)
-  });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "x-admin-key": adminKey, Accept: "application/json" },
+      cache: "no-store",
+      // Concurrent packet; wall clock ≈ slowest station in the batch (Ageing-heavy).
+      signal: AbortSignal.timeout(120000)
+    });
+  } catch (error) {
+    throw new EddWorkerError(workerFetchErrorMessage(error, "Unable to backfill the station board."));
+  }
   const raw = await readJson(response);
   if (!response.ok) {
     throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
@@ -1216,7 +1229,11 @@ export async function fetchLoadFlashBoard(date?: string, stations?: string[]): P
   };
 }
 
-export async function fetchLoadFlashTracking(date?: string, stations?: string[]): Promise<LoadFlashTrackingRow[]> {
+export async function fetchLoadFlashTracking(
+  date?: string,
+  stations?: string[],
+  options?: { buckets?: string[] },
+): Promise<LoadFlashTrackingRow[]> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -1224,12 +1241,18 @@ export async function fetchLoadFlashTracking(date?: string, stations?: string[])
   const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/packages`);
   if (date) url.searchParams.set("date", date);
   if (stations?.length) url.searchParams.set("stations", stations.join(","));
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: { "x-admin-key": adminKey, Accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(60000)
-  });
+  if (options?.buckets?.length) url.searchParams.set("buckets", options.buckets.join(","));
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "x-admin-key": adminKey, Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(60000)
+    });
+  } catch (error) {
+    throw new EddWorkerError(workerFetchErrorMessage(error, "Unable to load tracking IDs."));
+  }
   const raw = await readJson(response);
   if (!response.ok) {
     throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
