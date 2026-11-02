@@ -522,8 +522,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return /aborted due to timeout|timeout|timed out|504|524|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|connection dropped|network|socket/i.test(message);
   }
 
-  /** Stations claimed per tick — worker pulls them sequentially (shared cookie). */
-  const BOARD_PULL_CONCURRENCY = "2";
+  /** Stations per tick (last packet uses whatever remain if <4). */
+  const BOARD_PULL_CONCURRENCY = "4";
 
   async function postBackfillTick(params: URLSearchParams) {
     const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
@@ -547,7 +547,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const stillFailed: string[] = [];
     let deferredRetries = 0;
     for (let i = 0; i < keys.length; ) {
-      const chunk = keys.slice(i, i + 2);
+      const chunk = keys.slice(i, i + 4);
       const recovered = Math.min(i + chunk.length, keys.length);
       setBackfillNote(`${passLabel} · ${recovered}/${keys.length}`);
       if (stationTotal > 0) {

@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const days = Number(url.searchParams.get("days") ?? 1) || 1;
     const startIndex = Number(url.searchParams.get("startIndex") ?? 0) || 0;
     const date = String(url.searchParams.get("date") ?? "").trim();
-    const concurrency = Math.max(1, Math.min(2, Number(url.searchParams.get("concurrency") ?? 2) || 2));
+    const concurrency = Math.max(1, Math.min(4, Number(url.searchParams.get("concurrency") ?? 4) || 4));
     const retryRaw = String(url.searchParams.get("retryJobs") ?? "").trim();
     const retryJobs = retryRaw
       ? retryRaw.split(",").map((part) => part.trim()).filter(Boolean)
