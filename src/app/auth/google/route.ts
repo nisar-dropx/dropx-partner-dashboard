@@ -17,8 +17,12 @@ function safeNextPath(value: string | null) {
 }
 
 export async function GET(request: NextRequest) {
-  const supabase = createServerSupabaseClient();
   const loginUrl = new URL("/login", request.url);
+  const nextPath = safeNextPath(request.nextUrl.searchParams.get("next"));
+  // Carrier response: PKCE verifier cookies are written here, then Location is
+  // swapped to Google so the browser stores the verifier on the same hop.
+  const response = NextResponse.redirect(loginUrl);
+  const supabase = createServerSupabaseClient(response);
 
   if (!supabase) {
     loginUrl.searchParams.set("error", "Authentication is not configured.");
@@ -26,7 +30,6 @@ export async function GET(request: NextRequest) {
   }
 
   const callbackUrl = new URL("/auth/callback", request.nextUrl.origin);
-  const nextPath = safeNextPath(request.nextUrl.searchParams.get("next"));
   if (nextPath) callbackUrl.searchParams.set("next", nextPath);
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -50,5 +53,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.redirect(data.url);
+  response.headers.set("Location", data.url);
+  return response;
 }

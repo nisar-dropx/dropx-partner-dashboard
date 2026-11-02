@@ -4,6 +4,7 @@ import { createOpsAuthTransfer } from "@/lib/ops-auth-transfer";
 import { isPeopleHostName, safePeopleNextPath } from "@/lib/people/surface";
 import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { friendlyAuthLoginError } from "@/lib/auth-login-error";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -219,7 +220,10 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error || !data.user?.email) {
-      loginUrl.searchParams.set("error", error?.message ?? "Google login could not be completed.");
+      loginUrl.searchParams.set(
+        "error",
+        friendlyAuthLoginError(error?.message) || "Google login could not be completed."
+      );
       return NextResponse.redirect(loginUrl);
     }
 

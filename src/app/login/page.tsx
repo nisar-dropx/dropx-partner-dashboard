@@ -14,6 +14,7 @@ import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navi
 import { isPeopleHostName } from "@/lib/people/surface";
 import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
 import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
+import { friendlyAuthLoginError } from "@/lib/auth-login-error";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { withTimeout } from "@/lib/with-timeout";
 import { signInWithGoogle } from "./actions";
@@ -74,7 +75,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       : "/unauthorized?page=dashboard_portal&reason=access");
   }
 
-  const message = searchParams?.error ?? searchParams?.reason;
+  const message = friendlyAuthLoginError(searchParams?.error ?? searchParams?.reason);
 
   if (isOpsHost) {
     return (
