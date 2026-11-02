@@ -7,6 +7,7 @@ import Link from "next/link";
 import type { LossTab } from "@/components/ops-loss-report";
 import { LossHeader, LOSSES_PATH, NlViewSwitch } from "./nl-loss-report";
 import { NlLiveCases } from "./nl-live-cases";
+import { NlRecoveryDownloadButton } from "./nl-recovery-download-modal";
 import { monthLabel } from "@/lib/ops-pulse/nl-loss-policy";
 import {
   STAGE_COPY,
@@ -189,6 +190,28 @@ export function NlLiveReport({
           </form>
           {isFinal && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind="nl" query={new URLSearchParams({ kind: "nl", month: v.month, station: v.station || "", cluster: v.cluster || "", reason: v.reason || "" }).toString()} canUpload={v.canDispute} scope={v.station ? `stations ${v.station}` : "your stations"} /></details> : null}
           {!ledgerReady && isFinal ? <p className={styles.notice}>Payroll collections are unavailable; recovery amounts are incomplete.</p> : null}
+          {isFinal && !v.station && v.cases.length ? (
+            <section className={styles.panel}>
+              <div className={styles.panelHead}>
+                <div>
+                  <h2>Download recovery cases</h2>
+                  <p>
+                    {v.cases.length} cases across your filtered stations ·{" "}
+                    {money(v.cases.reduce((sum, c) => sum + Number(c.amount || 0), 0))}
+                  </p>
+                </div>
+                <div className={styles.toolbar}>
+                  <NlRecoveryDownloadButton
+                    cases={v.cases}
+                    month={v.month}
+                    outcomes={v.outcomes}
+                    filePrefix="nl-recovery"
+                    label="Download CSV"
+                  />
+                </div>
+              </div>
+            </section>
+          ) : null}
           <LossStationTable facts={facts} title={isFinal ? "Station recovery updates" : "Station dispute overview"} initial={!isFinal} href={href({})}/>
           {v.station ? (
             <>

@@ -17,6 +17,7 @@ import {
 import { type LossSettings, type RecoveryOutcome, recoveryCsv, recoveryPending, recoveryNeedsReview } from "@/lib/ops-pulse/nl-loss-policy";
 import type { LiveCase } from "@/lib/ops-pulse/nl-live";
 import { RecoveryForm } from "./nl-loss-cases";
+import { NlRecoveryDownloadButton } from "./nl-recovery-download-modal";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
@@ -136,7 +137,7 @@ export function NlLiveCases({
   const pages = Math.ceil(shown.length / 15);
   const sorted = sortLossRows(shown.map(x => x.c), sort).map(c => ({ c, phase: phaseOf(c) }));
   const current = sorted.slice(page * 15, page * 15 + 15);
-  function download() {
+  function downloadLive() {
     const columns = [
       "Month", "Station", "TID", "Loss reason", "Sub reason", "Shipment type", "Value",
       "Cloak status", "Cloak stage", "Amazon decision", "Dispute filed in Cloak",
@@ -189,9 +190,18 @@ export function NlLiveCases({
               setPage(0);
             }}
           />
-          <button className={styles.button} onClick={download}>
-            Download CSV
-          </button>
+          {stageView === "final" ? (
+            <NlRecoveryDownloadButton
+              cases={sorted.map(({ c }) => c)}
+              month={month}
+              outcomes={outcomes}
+              filePrefix="nl-recovery"
+            />
+          ) : (
+            <button className={styles.button} onClick={downloadLive} disabled={!sorted.length}>
+              Download CSV
+            </button>
+          )}
         </div>
       </div>
       <div className={styles.chips} role="tablist" aria-label="Case status">

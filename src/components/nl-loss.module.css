@@ -1160,6 +1160,42 @@
   justify-content: flex-end;
   gap: 10px;
 }
+.downloadDialog {
+  width: min(720px, 100%);
+}
+.downloadTidList {
+  display: grid;
+  gap: 6px;
+  max-height: min(320px, 40vh);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #e0e7f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.downloadTidList label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: white;
+  border: 1px solid transparent;
+  font-weight: 500;
+  cursor: pointer;
+}
+.downloadTidList label small {
+  display: block;
+  color: #66758a;
+  font-weight: 500;
+  margin-top: 2px;
+}
+.downloadTidSelected {
+  border-color: #c9d7ea !important;
+  background: #eef4fb !important;
+}
 /* Compact density for every Losses view (overrides the roomier defaults above). */
 .workspace{gap:14px}
 .metrics{gap:10px}

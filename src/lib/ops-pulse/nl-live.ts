@@ -195,7 +195,14 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     .filter((s) => s.count > 0)
     .sort((a, b) => b.pending - a.pending || b.amount - a.amount);
   let cases: LiveCase[] = [];
-  if (station && month) {
+  // Final recovery needs case rows for all-station CSV download; Initial still loads per station.
+  const wantedStations =
+    station
+      ? lossFilterValues(station)
+      : stageView === "final"
+        ? [...new Set(filtered.map((r) => r.station_code))]
+        : [];
+  if (wantedStations.length && month) {
     const rows = await readAllRows(
       db
         .from("nl_loss_month_cases")
@@ -203,7 +210,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
         .eq("company_id", company)
         .eq("report", "nl")
         .eq("month", month)
-        .in("station_code", lossFilterValues(station))
+        .in("station_code", wantedStations)
         .eq("source_present", true)
         .order("amount", { ascending: false })
         .order("case_key"),

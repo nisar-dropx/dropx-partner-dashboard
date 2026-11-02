@@ -8,6 +8,7 @@ import { NlLossRefresh } from "./nl-loss-refresh";
 import { LossHeader, type LossTab } from "@/components/loss-header";
 export { LossHeader };
 import { NlLossCases } from "./nl-loss-cases";
+import { NlRecoveryDownloadButton } from "./nl-recovery-download-modal";
 import { LossWorkbook } from "./loss-workbook";
 import { ALL_PERIODS, type NlView } from "@/lib/ops-pulse/nl-loss";
 import styles from "./nl-loss.module.css";
@@ -171,6 +172,27 @@ export function NlLossReport({
         </span>
       </div>
       {!ledgerReady && !initial ? <p className={styles.notice}>Payroll collections are unavailable; recovery amounts are incomplete.</p> : null}
+      {!initial && !v.station && v.cases.length ? (
+        <section className={styles.panel}>
+          <div className={styles.panelHead}>
+            <div>
+              <h2>Download recovery cases</h2>
+              <p>
+                {v.cases.length} cases across your filtered stations ·{" "}
+                {money(v.cases.reduce((sum, c) => sum + Number(c.amount || 0), 0))}
+              </p>
+            </div>
+            <div className={styles.toolbar}>
+              <NlRecoveryDownloadButton
+                cases={v.cases}
+                month={v.month || ""}
+                outcomes={v.outcomes}
+                filePrefix={v.kind === "slp_final" ? "slp-recovery" : "nl-recovery"}
+              />
+            </div>
+          </div>
+        </section>
+      ) : null}
       <LossStationTable facts={facts} title={initial ? "Station initial overview" : "Station recovery overview"} initial={initial} href={href(v.station)}/>
       {!initial && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind={v.kind} query={workbookQuery.toString()} canUpload={v.canEdit} scope={v.station || "your stations"}/></details> : null}
       {v.station ? (

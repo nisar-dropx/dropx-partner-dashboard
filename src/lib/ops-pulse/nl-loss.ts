@@ -287,10 +287,11 @@ export async function loadRecoveryView(
     .filter((s) => s.count > 0)
     .sort((a, b) => b.amount - a.amount);
   let cases: NlCase[] = [];
-  const wanted = options.allStations
-    ? totals.map((t) => t.source_code)
-    : station
-      ? lossFilterValues(station)
+  // Final recovery CSV needs case rows on the all-stations overview; Initial stays per-station.
+  const wanted = station
+    ? lossFilterValues(station)
+    : options.allStations || kind === "slp_final" || kind === "nl"
+      ? totals.map((t) => t.source_code)
       : [];
   if (wanted.length && month) {
     const months = [
