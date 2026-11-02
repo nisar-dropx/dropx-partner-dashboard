@@ -24,7 +24,7 @@ station consistency, active production components and ordered slabs starting at 
 actions enforce payment-method permissions and location scope. The table has RLS and only
 the trusted server's service role can read/insert; browser roles have no access.
 
-Migration: `20261102063036_conversion_rate_rules.sql`. Apply only this file to the shared
+Migration: `20261102064011_conversion_rate_rules.sql`. Apply only this file to the shared
 project; do not blanket-push pending migrations. Deploy application code after the additive
 migration. The loader tolerates only the missing-table/schema-cache errors during rollout;
 other database failures block calculation rather than silently paying a different rate.

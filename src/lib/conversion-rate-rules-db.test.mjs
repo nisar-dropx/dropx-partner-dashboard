@@ -25,7 +25,7 @@ test("migration is repeatable, rules are future-only and immutable, scopes and o
       insert into payment_fields values ('${id(6)}','${id(1)}','production',true), ('${id(7)}','${id(1)}','amount',true);
       insert into payment_method_components values ('${id(1)}','${id(5)}','${id(6)}',true), ('${id(1)}','${id(5)}','${id(7)}',true);
     `);
-    const sql = await readFile(new URL("../../supabase/migrations/20261102063036_conversion_rate_rules.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../../supabase/migrations/20261102064011_conversion_rate_rules.sql", import.meta.url), "utf8");
     await db.exec(sql); await db.exec(sql);
     const insert = (changes = {}) => {
       const row = { company: id(1), method: id(5), field: id(6), provider: id(2), model: id(3), station: id(4), from: "2099-01-01", to: "2099-01-31", tiers: [{ minimum: 0, rate: 12 }, { minimum: 80, rate: 14 }], ...changes };
