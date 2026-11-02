@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -63,7 +65,7 @@ function LossSearchDetails({row}:{row:NlCase}) {
    {plan?<><div><dt>Salary month</dt><dd>{plan.deduction_month||'Not scheduled'}</dd></div><div><dt>Plan status</dt><dd>{(plan.approval_status||'Recorded').replaceAll('_',' ')}</dd></div></>:null}
    {row.redispute?<div><dt>Redispute</dt><dd>{redisputeStatus({...row.redispute,followup_status:''})}</dd></div>:null}
   </dl>
-  {plan?.allocations?.length?<><small>Saved recovery allocation · actual deductions are recorded in payroll</small><div className={ui.tableWrap}><table className={ui.allocations}><thead><tr><th>Person</th><th>Designation</th><th>Salary month</th><th>Assigned value</th></tr></thead><tbody>{plan.allocations.map((person,i)=><tr key={person.ref||i}><td>{person.full_name||person.employee_code||'Name not recorded'}{person.employee_code?<small> · {person.employee_code}</small>:null}</td><td>{person.designation||'—'}</td><td>{person.salary_month||plan.deduction_month||'Not scheduled'}</td><td>{money(person.amount)}</td></tr>)}</tbody></table></div></>:null}
+  {plan?.allocations?.length?<><small>Saved recovery allocation · actual deductions are recorded in payroll</small><div className={ui.tableWrap}><ReportTable className={ui.allocations}><thead><tr><th>Person</th><th>Designation</th><th>Salary month</th><th>Assigned value</th></tr></thead><tbody>{plan.allocations.map((person,i)=><tr key={person.ref||i}><td>{person.full_name||person.employee_code||'Name not recorded'}{person.employee_code?<small> · {person.employee_code}</small>:null}</td><td>{person.designation||'—'}</td><td>{person.salary_month||plan.deduction_month||'Not scheduled'}</td><td>{money(person.amount)}</td></tr>)}</tbody></ReportTable></div></>:null}
   {plan?.remarks?<details><summary>Recovery remarks</summary><p>{plan.remarks}</p></details>:null}
  </section>;
 }

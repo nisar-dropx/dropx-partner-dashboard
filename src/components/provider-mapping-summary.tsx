@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import "./provider-mapping-summary.css";
 
 import {useEffect, useMemo, useRef, useState} from "react";
@@ -187,7 +189,7 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
         </div>
       </div>
       <div className="table-wrap mapping-summary-table-wrap">
-        <table className="mapping-summary-table">
+        <ReportTable className="mapping-summary-table">
           <thead><tr><th>Station</th><th>People owner / region</th><th>Total IDs</th><th>Mapped</th><th>Ready</th><th>Mapping missing</th><th>Data issues</th><th>Profiles · associates</th><th>Mapping coverage</th><th>Details</th></tr></thead>
           <tbody>{filtered.map(station => {
             const needsAttention = station.unmapped + station.dataIssues > 0;
@@ -202,7 +204,7 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
               <td><button className="button secondary compact" type="button" onClick={() => openDetails("total",station.stationId)}>{station.total ? "View IDs" : "View"}</button></td>
             </tr>;
           })}{!filtered.length ? <tr><td className="mapping-summary-empty" colSpan={10}>No stations match the selected filters.</td></tr> : null}</tbody>
-        </table>
+        </ReportTable>
       </div>
       <div className="mapping-summary-footer"><span>{filtered.length} of {monthly.length} stations</span><span>{selectedMonths.length ? "Only IDs with outbound activity in the selected month(s) are counted. Inactive saved mappings are excluded." : "One-day mappings count only on their exact effective date."}</span></div>
     </div>
@@ -213,10 +215,10 @@ export function ProviderMappingSummary({managerOptions=[],canOpenMapping=false,c
         {canOpenWorkforce ? profileWorkspaces.map(link=><a key={link.href} className="button secondary compact" href={link.href} target="_blank" rel="noopener noreferrer">{link.label}</a>):null}
       </div>
       <p className="mapping-summary-note">Profiles: {countButton(profileCounts.profilePending,"profile_pending",selection.stationId)} pending · {countButton(profileCounts.profileCompleted,"profile_completed",selection.stationId)} completed · {countButton(profileCounts.profileReview,"profile_review",selection.stationId)} awaiting review. Profile counts are unique associates; mapping counts are provider IDs.</p>
-      <div className="table-wrap mapping-summary-detail-table"><table><thead>{profileView?<tr><th>DropX ID / associate</th><th>Station · provider IDs</th><th>Profile status</th><th>Workspace</th></tr>:<tr><th>Station · provider ID / name</th><th>DropX ID / name</th><th>Payment / coverage</th><th>Mapping status</th><th>Profiles</th><th>Details</th></tr>}</thead><tbody>
+      <div className="table-wrap mapping-summary-detail-table"><ReportTable><thead>{profileView?<tr><th>DropX ID / associate</th><th>Station · provider IDs</th><th>Profile status</th><th>Workspace</th></tr>:<tr><th>Station · provider ID / name</th><th>DropX ID / name</th><th>Payment / coverage</th><th>Mapping status</th><th>Profiles</th><th>Details</th></tr>}</thead><tbody>
         {profileView ? visibleProfiles.map(p=><tr key={p.id}><td><strong>{p.dropxId || "ID unavailable"}</strong><small>{p.fullName}</small></td><td>{detailRows.filter(d=>d.profiles.some(person=>person.id===p.id)).map(d=><small key={d.key}>{d.stationCode} · {d.providerMemberId}</small>)}</td><td>{mappingProfileLabels[p.state]}<small>{p.status.replaceAll("_"," ") || "Not recorded"}</small></td><td>{canOpenWorkforce?<a href={workforcePath+"?view="+encodeURIComponent(p.id)} target="_blank" rel="noopener noreferrer">Open profile ↗</a>:"Workspace access required"}</td></tr>) : visibleDetails.map(d=><tr key={d.key}><td><strong>{d.stationCode} · {d.providerMemberId}</strong><small>{d.providerMemberName || "Name unavailable"}</small></td><td><strong>{d.dropxId || "—"}</strong><small>{d.dropxName || "Not mapped"}</small></td><td>{d.paymentMethod || "—"}<small>{d.coverageLabel} · {d.coveragePercent}%</small></td><td><span className={`mapping-status ${d.status}`}>{statusLabel[d.status]}</span><small>{d.issues.join(" · ")}</small></td><td>{d.profiles.length ? d.profiles.map(p=><small key={p.id}>{p.dropxId} · {mappingProfileLabels[p.state]}{canOpenWorkforce?<> <a href={workforcePath+"?view="+encodeURIComponent(p.id)} target="_blank" rel="noopener noreferrer">Profile ↗</a></>:null}</small>):"No linked profile"}</td><td>{canOpenMapping?<a href={"/provider-id-mapping?"+new URLSearchParams({station:d.stationId,q:d.providerMemberId,...(selectedMonths.length===1?{month:selectedMonths[0]}:{})})} target="_blank" rel="noopener noreferrer">Open mapping ↗</a>:"Mapping access required"}</td></tr>)}
         {!(profileView?visibleProfiles:visibleDetails).length?<tr><td colSpan={profileView?4:6}>No records match this count and the current filters.</td></tr>:null}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
     </section> : null}
 
   </section>;

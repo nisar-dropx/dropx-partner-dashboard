@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ChevronRight, Clock, Download, Info, Loader2, RefreshCw, Search, X } from "lucide-react";
@@ -508,10 +510,10 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
             </div>
             <details className={s.more}>
               <summary>View as a table</summary>
-              <div className={s.hourTable}><table>
+              <div className={s.hourTable}><ReportTable>
                 <thead><tr><th scope="col">Hour</th><th scope="col">Load</th><th scope="col">Delivered</th><th scope="col">Delivered %</th><th scope="col">On road</th></tr></thead>
                 <tbody>{hourly.map((point) => <tr key={point.hour}><td>{String(point.hour).padStart(2, "0")}:00</td><td>{count(point.totalLoad)}</td><td>{count(point.delivered)}</td><td>{percent(point.delivered, point.totalLoad)}%</td><td>{count(point.outOnRoad)}</td></tr>)}</tbody>
-              </table></div>
+              </ReportTable></div>
             </details>
           </section>
         ) : null}
@@ -535,7 +537,7 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
             <label className={s.search}><Search size={14} /><span className={s.srOnly}>Search station</span><input type="search" placeholder="Search station" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           </header>
           <div className={s.tableWrap}>
-            <table className={s.table}>
+            <ReportTable className={s.table}>
               <thead>
                 <tr>
                   {header("stationCode", "Station", false)}
@@ -597,7 +599,7 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
                   </tr>
                 </tfoot>
               ) : null}
-            </table>
+            </ReportTable>
           </div>
           {!rows.length ? <p className={s.empty}>No stations match. {filter !== "all" || query ? <button type="button" className={s.link} onClick={() => { setFilter("all"); setQuery(""); }}>Show all stations</button> : null}</p> : null}
         </section>

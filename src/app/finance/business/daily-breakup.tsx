@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import type { BusinessRow } from "@/lib/finance/performance";
 import { addAmounts, addQuantities } from "@/lib/finance/pricing";
 const money = (v: string | null) =>
@@ -154,7 +156,7 @@ export function DailyBreakup({
         amount.
       </div>
       <div className="fin-table-wrap">
-        <table className="fin-table fin-daily-table">
+        <ReportTable className="fin-table fin-daily-table">
           <thead>
             <tr>
               <th>Date</th>
@@ -283,7 +285,7 @@ export function DailyBreakup({
               <th></th>
             </tr>
           </tfoot>
-        </table>
+        </ReportTable>
       </div>
       <p className="fin-footnote">
         Pending variable earnings are excluded from the current estimate. MG

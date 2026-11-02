@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -112,7 +114,7 @@ export default async function WorkforceCategoriesPage({
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead><tr><th>Code</th><th>Category</th><th>Statutory</th><th>Activation</th><th>App pages</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
                 {filtered.map((category) => (
@@ -130,7 +132,7 @@ export default async function WorkforceCategoriesPage({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

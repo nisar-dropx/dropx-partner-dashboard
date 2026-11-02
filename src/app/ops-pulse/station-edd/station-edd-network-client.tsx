@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Loader2, MapPin, RefreshCw, ShieldCheck } from "lucide-react";
 import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
@@ -165,7 +167,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
           <div className={s.actions}>{filtersActive ? <ResetFilters onClick={() => update({}, true)}/> : null}<StationEddDownload href={networkReport} label="Export station table" disabled={!filtered.length}/></div>
         </div>
       </div>
-      <div className={s.tableWrap}><table className={[s.table, s.networkTable].join(" ")} aria-label="Station EDD results" aria-busy={calculating > 0}>
+      <div className={s.tableWrap}><ReportTable className={[s.table, s.networkTable].join(" ")} aria-label="Station EDD results" aria-busy={calculating > 0}>
         <thead><tr><SortHeader label="Station" column="stationCode" sort={controls.sort} direction={controls.direction} onSort={sort}/>{cols.map(([key, label]) => <SortHeader key={key} label={label} column={key} sort={controls.sort} direction={controls.direction} onSort={sort} numeric/>)}<SortHeader label="Latest observation" column="fetchedAt" sort={controls.sort} direction={controls.direction} onSort={sort}/><th scope="col"><span className={s.srOnly}>Open station</span></th></tr></thead>
         <tbody>
           {filtered.map(row => {
@@ -185,7 +187,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
           })}
         </tbody>
         {filtered.length > 1 && !firstLoad ? <tfoot><tr><td>Total · {filtered.length} stations</td>{cols.map(([key]) => <td className={s.numeric} key={key}>{n(sum(key))}</td>)}<td colSpan={2}/></tr></tfoot> : null}
-      </table></div>
+      </ReportTable></div>
       {!filtered.length ? <div className={s.empty}><strong>{stations.length ? "No stations match these filters." : "No stations are assigned to you yet."}</strong><p>{stations.length ? "Reset the filters to return to all authorized locations." : "Ask an administrator to add delivery stations to your location access."}</p>{stations.length ? <ResetFilters onClick={() => update({}, true)}/> : null}</div> : null}
       <div className={s.downloadBar}>
         <div><strong>Download tracking IDs · {exportCount} {exportCount === 1 ? "station" : "stations"}</strong><p>One Excel for the stations and statuses you choose. Pending excludes parcels with a known earlier dispatch or attempt; status exports include the selected parcels with their attempt classification.</p></div>

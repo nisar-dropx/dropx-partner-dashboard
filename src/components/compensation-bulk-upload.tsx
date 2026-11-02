@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState } from "react";
 
@@ -177,7 +179,7 @@ export function CompensationBulkUpload({ kind }: { kind: ImportKind }) {
             ) : null}
 
             <div className="table-wrap compensation-preview-table">
-              <table>
+              <ReportTable>
                 <thead><tr><th>Row</th><th>DropX ID</th><th>Database person</th><th>{employee ? "Monthly CTC" : "Monthly remuneration"}</th><th>Action</th></tr></thead>
                 <tbody>{rows.slice(0, 50).map((row) => (
                   <tr key={`${row.rowNumber}-${row.dropxId}`}>
@@ -188,7 +190,7 @@ export function CompensationBulkUpload({ kind }: { kind: ImportKind }) {
                     <td><span className={`status-pill ${row.action === "blocked" ? "warn" : "good"}`}>{row.action}</span></td>
                   </tr>
                 ))}</tbody>
-              </table>
+              </ReportTable>
             </div>
             {rows.length > 50 ? <p className="subtle compensation-preview-more">Showing the first 50 of {rows.length} validated rows.</p> : null}
             {preview.canCommit && !preview.importId ? (

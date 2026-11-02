@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { isPendingPaymentApproval } from '@/lib/payment-pending-approval';
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -476,7 +478,7 @@ export default async function PaymentApprovalsPage({
             ))}
           </div>
           <div className="table-wrap payment-responsive-list">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Request</th>
@@ -521,7 +523,7 @@ export default async function PaymentApprovalsPage({
                   <tr><td className="empty-cell" colSpan={10}>{currentStatus === "pending" ? "No approvals pending." : "No requests match this view."}</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

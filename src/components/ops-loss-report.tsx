@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { NlViewSwitch } from "./nl-loss-report";
 import styles from "@/components/ops-loss-report.module.css";
@@ -76,7 +78,7 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
             {(["xlsx", "csv"] as const).map((f) => <a key={f} className={`${styles.button} ${f === "xlsx" ? styles.primary : ""}`} href={`/api/ops-pulse/losses/potential/export?format=${f}&period=${view.selectedPeriod ?? ALL_SNAPSHOTS}`} download>Download {f === "xlsx" ? "Excel" : "CSV"}</a>)}
           </div> : null}
         </div>
-        <div className={styles.tableWrap}><table className={styles.table}>
+        <div className={styles.tableWrap}><ReportTable className={styles.table}>
           <thead><tr><th>Station</th><th className={styles.numeric}>Cases</th>{hasAmount ? <th className={styles.numeric}>Loss amount</th> : null}<th>Share</th><th /></tr></thead>
           <tbody>
             {totals.map((t) => {
@@ -96,7 +98,7 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
             {!totals.length ? <tr><td colSpan={hasAmount ? 5 : 4}><div className={styles.empty}><strong>No losses for your stations</strong>Nothing in this report is mapped to a station you can access.</div></td></tr> : null}
           </tbody>
           {totals.length > 1 ? <tfoot><tr><td>Total</td><td className={styles.numeric}>{totalRows.toLocaleString("en-IN")}</td>{hasAmount ? <td className={styles.numeric}>{money(totalAmount)}</td> : null}<td /><td /></tr></tfoot> : null}
-        </table></div>
+        </ReportTable></div>
       </section>
 
       {selected ? <OpsLossCases

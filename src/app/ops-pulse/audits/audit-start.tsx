@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -390,7 +392,7 @@ export function AuditRequests({
         </p>
       )}
       <div className={styles.tableScroll}>
-        <table className={styles.reportTable}>
+        <ReportTable className={styles.reportTable}>
           <thead>
             <tr>
               <th>Requested by</th>
@@ -516,7 +518,7 @@ export function AuditRequests({
               </tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </section>
   );

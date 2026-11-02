@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
@@ -925,7 +927,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
         </div>
       </div>
       <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap" ref={tableWrapRef}>
-        {editableSheet ? <table className={`all-people-edit-sheet ${sheetEditMode ? "is-editing" : "is-viewing"}`}>
+        {editableSheet ? <ReportTable className={`all-people-edit-sheet ${sheetEditMode ? "is-editing" : "is-viewing"}`}>
           <thead><tr>{activeSheetColumns.map((column) => <th className={`sheet-column-${column.key}`} key={column.key}>{column.label}</th>)}<th className="sheet-row-actions">Save</th></tr></thead>
           <tbody>
             {sheetRows.map((row) => {
@@ -1073,7 +1075,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
             })}
             {!sheetRows.length ? <tr><td className="empty-cell" colSpan={activeSheetColumns.length + 1}>No people match the selected filters.</td></tr> : null}
           </tbody>
-        </table> : <table>
+        </ReportTable> : <ReportTable>
           <thead><tr><th>DropX ID</th><th>Biometric ID</th><th>Full name</th><th>Category</th><th>Mobile</th><th>Email</th><th>Location</th><th>Model</th><th>Provider</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>
             {visibleRows.map((row) => (
@@ -1086,7 +1088,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
             ))}
             {!filteredRows.length ? <tr><td className="empty-cell" colSpan={12}>No people match the selected filters.</td></tr> : null}
           </tbody>
-        </table>}
+        </ReportTable>}
       </div>
       {editableSheet ? (
         <div

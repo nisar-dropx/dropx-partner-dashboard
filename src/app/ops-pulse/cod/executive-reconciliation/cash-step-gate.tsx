@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useRouter } from "next/navigation";
 import {
@@ -341,7 +343,7 @@ function IncompleteDriversModal({
             {isToday ? " Continue unlocks once every row is entered or marked “will submit later.”" : " Continue unlocks only when all are entered."}
           </p>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Associate</th>
@@ -409,7 +411,7 @@ function IncompleteDriversModal({
                   </tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           <div className="form-actions" style={{ marginTop: 16 }}>
             <button className="button" type="button" onClick={onClose}>Back to cash sheet</button>

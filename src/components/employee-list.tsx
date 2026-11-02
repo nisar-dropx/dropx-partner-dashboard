@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UserRound } from "lucide-react";
@@ -171,7 +173,7 @@ export function EmployeeList({
         </div>
       </div>
       <div className="table-wrap field-executive-table-wrap employee-table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Emp ID</th>
@@ -215,7 +217,7 @@ export function EmployeeList({
               <tr><td className="empty-cell" colSpan={11}>No employees match the selected filters.</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {totalPages > 1 ? (
         <div className="panel-foot pagination">

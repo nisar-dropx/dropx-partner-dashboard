@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -317,7 +319,7 @@ export default async function AttendanceIntegrityPage({
 
         {tab === "reviews" ? (
           <div className="table-wrap">
-            <table className="data-table">
+            <ReportTable className="data-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -373,11 +375,11 @@ export default async function AttendanceIntegrityPage({
                   <tr><td colSpan={7} className="empty-cell">No pending support packages.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         ) : (
           <div className="table-wrap">
-            <table className="data-table">
+            <ReportTable className="data-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -427,7 +429,7 @@ export default async function AttendanceIntegrityPage({
                   <tr><td colSpan={6} className="empty-cell">No open flags.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         )}
       </div>

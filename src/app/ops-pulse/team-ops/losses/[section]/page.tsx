@@ -112,9 +112,10 @@ export default async function LossesSectionPage({
     if (!restricted) notFound();
     const selected = searchParams.view === 'redisputes' ? 'redisputes' : searchParams.view === 'review' ? 'review' : 'enable';
     const view = await loadRecoveryWorkspace(auth, selected !== 'review');
-    const [windows, grants] = await Promise.all([
+    const [windows, grants, stationScope] = await Promise.all([
       readAllRows(supabaseAdmin!.from('nl_case_response_windows').select('*').eq('company_id',auth.companyId).order('updated_at',{ascending:false}).order('month').order('case_key')),
       readAllRows(supabaseAdmin!.from('nl_loss_exception_options').select('*').eq('company_id',auth.companyId).order('month').order('case_key').order('kind')),
+      selected === 'redisputes' ? lossClusterScope(auth) : Promise.resolve(null),
     ]);
     if (windows.error || grants.error) throw Error('Exceptions could not be loaded. Retry after the exception update is available.');
     const scope=new Set(view.rows.map(r=>r.month+'|'+r.case_key));
@@ -122,7 +123,7 @@ export default async function LossesSectionPage({
     return <main className={styles.workspace}>
       <LossHeader title="Exceptions" intro="Enable shipment exceptions and review station submissions." tabs={tabs} active="exceptions"/>
       <nav className={styles.toolbar} aria-label="Exception views" style={{justifyContent:'flex-start'}}>{[['enable','Manage exceptions'],['redisputes','Redispute tracking'],['review','Review required']].map(([key,label])=>selected===key?<span key={key} className={`${styles.chip} ${styles.activeChip}`} aria-current="page">{label}</span>:<Link key={key} className={styles.button} href={'/team-ops/losses/exceptions?view='+key} scroll={false}>{label}</Link>)}</nav>
-      {selected==='redisputes'?<LossRedisputeDesk rows={view.rows} windows={scopedWindows} canActivate={view.canApprove}/> : selected==='review'?<LossRecoveryWorkspace {...view} approvals/> : <LossExceptionsDesk rows={view.rows} grants={(grants.data||[]).filter(g=>scope.has(g.month+'|'+g.case_key))} windows={scopedWindows} canEdit={view.canApprove} recoverableStatuses={view.settings?.recoverable_statuses||[]}/>}
+      {selected==='redisputes'?<LossRedisputeDesk rows={view.rows} windows={scopedWindows} canActivate={view.canApprove} stations={stationScope?.stations.map(s=>({station:s.source_code,clusterKeys:s.clusterKeys,region:String(s.region||'Unmapped')}))} clusterOptions={stationScope?.clusterOptions}/> : selected==='review'?<LossRecoveryWorkspace {...view} approvals/> : <LossExceptionsDesk rows={view.rows} grants={(grants.data||[]).filter(g=>scope.has(g.month+'|'+g.case_key))} windows={scopedWindows} canEdit={view.canApprove} recoverableStatuses={view.settings?.recoverable_statuses||[]}/>}
     </main>;
   }
   if (params.section === 'recovery-updates') {

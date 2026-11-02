@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
@@ -241,7 +243,7 @@ export default async function PortalChecksPage({ searchParams }: { searchParams?
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -274,7 +276,7 @@ export default async function PortalChecksPage({ searchParams }: { searchParams?
                     <tr><td className="empty-cell" colSpan={10}>No portal checks queued or received for this filter.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

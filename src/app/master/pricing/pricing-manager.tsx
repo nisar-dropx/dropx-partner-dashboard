@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -317,7 +319,7 @@ export function PricingManager({
       </div>
       <section className="panel">
         <div className="fin-table-wrap">
-          <table className="fin-table">
+          <ReportTable className="fin-table">
             <thead>
               <tr>
                 <th>Allocation / location</th>
@@ -403,7 +405,7 @@ export function PricingManager({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {!cards.length && (
           <div className="fin-empty">
@@ -617,7 +619,7 @@ export function PricingManager({
                   contract. Leave the final upper bound empty.
                 </p>
                 <div className="fin-table-wrap">
-                  <table className="fin-table">
+                  <ReportTable className="fin-table">
                     <thead>
                       <tr>
                         <th>Above deliveries</th>
@@ -674,7 +676,7 @@ export function PricingManager({
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </ReportTable>
                 </div>
                 <button
                   type="button"
@@ -769,7 +771,7 @@ export function PricingManager({
                 </strong>
               </p>
               <div className="fin-table-wrap fin-preview">
-                <table className="fin-table">
+                <ReportTable className="fin-table">
                   <thead>
                     <tr>
                       <th>Station</th>
@@ -786,7 +788,7 @@ export function PricingManager({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </ReportTable>
               </div>
               <p className="subtle">
                 Exact decimal values and blanks are retained. This imports

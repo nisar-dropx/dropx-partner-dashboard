@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import {LossReminderSettings} from '@/components/loss-reminder-settings';
 import {InsightNotificationSettings} from '@/components/insight-notification-settings';
 import { AmazonNowNotificationSettings } from '@/components/amazon-now-notification-settings';
@@ -53,7 +55,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
   </form>
   <p><small>{lossDigest.data.config?.delivery_ready===true?'delivery_ready is set — you may enable after verifying recipients.':'delivery_ready is false — dry-run only; enable is blocked until verification.'}</small></p>
   <h3 style={{marginTop:20}}>Recent deliveries</h3>
-  <div style={{overflowX:'auto'}}><table style={{width:'100%',textAlign:'left'}}><thead><tr><th>Report day</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{(lossHistory.data||[]).map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||'—'}</td></tr>)}</tbody></table></div>
+  <div style={{overflowX:'auto'}}><ReportTable style={{width:'100%',textAlign:'left'}}><thead><tr><th>Report day</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead><tbody>{(lossHistory.data||[]).map(r=><tr key={r.id}><td>{r.report_date}</td><td>{r.recipient_email}</td><td>{r.status}</td><td>{r.error||'—'}</td></tr>)}</tbody></ReportTable></div>
   {!lossHistory.data?.length?<p>No scheduled deliveries yet (expected while disabled).</p>:null}
  </section>:null}
  </AppShell>;

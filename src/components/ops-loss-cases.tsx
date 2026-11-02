@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -81,13 +83,13 @@ function PotentialCases({ station, stationName, rows, closeHref, showPeriod = fa
         <Link href={closeHref} scroll={false} className={styles.button}>Close</Link>
       </div>
     </div>
-    <div className={styles.tableWrap}><table className={styles.table}>
+    <div className={styles.tableWrap}><ReportTable className={styles.table}>
       <thead><tr>{showPeriod ? <th>Snapshot</th> : null}{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
       <tbody>
         {shown.map((r) => <tr key={r.case_key}>{showPeriod ? <td className={styles.nowrap}>{r.period ? dateFmt(r.period) : ""}</td> : null}{columns.map((c) => <td key={c}>{r.extra?.[c] ?? ""}</td>)}</tr>)}
         {!shown.length ? <tr><td colSpan={Math.max(span, 1)}><div className={styles.empty}>No packages match “{query}”.</div></td></tr> : null}
       </tbody>
-    </table></div>
+    </ReportTable></div>
   </section>;
 }
 
@@ -137,7 +139,7 @@ function TypedCases({ report, station, stationName, rows, closeHref, fileLabel, 
         <Link href={closeHref} scroll={false} className={styles.button}>Close</Link>
       </div>
     </div>
-    <div className={styles.tableWrap}><table className={styles.table}>
+    <div className={styles.tableWrap}><ReportTable className={styles.table}>
       <thead><tr>{columns.map((c) => <th key={c.key} className={c.kind === "money" ? styles.numeric : undefined}>{c.label}</th>)}</tr></thead>
       <tbody>
         {shown.map((r) => <tr key={r.case_key}>{columns.map((c) => {
@@ -149,6 +151,6 @@ function TypedCases({ report, station, stationName, rows, closeHref, fileLabel, 
         })}</tr>)}
         {!shown.length ? <tr><td colSpan={Math.max(columns.length, 1)}><div className={styles.empty}>No cases match “{query}”.</div></td></tr> : null}
       </tbody>
-    </table></div>
+    </ReportTable></div>
   </section>;
 }

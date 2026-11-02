@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useSearchParams } from "next/navigation";
 import { useOpsScreenRouter as useRouter } from "@/components/ops-screen-runtime";
@@ -1161,7 +1163,7 @@ function ShiftReportBody({
             <span className={rui.count}>{people.length}</span>
           </div>
           <div className={rui.tableWrap}>
-            <table className={rui.table}>
+            <ReportTable className={rui.table}>
               <thead>
                 <tr>
                   <th>Person</th>
@@ -1212,7 +1214,7 @@ function ShiftReportBody({
                   ))
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
 
@@ -1222,7 +1224,7 @@ function ShiftReportBody({
             <span className={rui.count}>{byStore.length}</span>
           </div>
           <div className={rui.tableWrap}>
-            <table className={rui.table}>
+            <ReportTable className={rui.table}>
               <thead>
                 <tr>
                   <th>Store</th>
@@ -1272,7 +1274,7 @@ function ShiftReportBody({
                   ))
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </div>
@@ -1441,7 +1443,7 @@ function ShiftReportBody({
         </div>
 
         <div className={`${rui.tableWrap} ${rui.tableWideWrap}`}>
-          <table className={`${rui.table} ${rui.tableWide}`}>
+          <ReportTable className={`${rui.table} ${rui.tableWide}`}>
             <thead>
               <tr>
                 <th>Shift</th>
@@ -1514,7 +1516,7 @@ function ShiftReportBody({
                 ))
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         <Pager page={paged.page} pages={paged.pages} setPage={setPage} />
       </section>
@@ -1739,7 +1741,7 @@ function StoreReportBody({
             <span className={rui.count}>{people.length}</span>
           </div>
           <div className={rui.tableWrap}>
-            <table className={rui.table}>
+            <ReportTable className={rui.table}>
               <thead>
                 <tr>
                   <th>Person</th>
@@ -1790,7 +1792,7 @@ function StoreReportBody({
                   ))
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
 
@@ -1800,7 +1802,7 @@ function StoreReportBody({
             <span className={rui.count}>{byStore.length}</span>
           </div>
           <div className={rui.tableWrap}>
-            <table className={rui.table}>
+            <ReportTable className={rui.table}>
               <thead>
                 <tr>
                   <th>Store</th>
@@ -1850,7 +1852,7 @@ function StoreReportBody({
                   ))
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </div>
@@ -1996,7 +1998,7 @@ function StoreReportBody({
         </div>
 
         <div className={`${rui.tableWrap} ${rui.tableWideWrap}`}>
-          <table className={`${rui.table} ${rui.tableWide}`}>
+          <ReportTable className={`${rui.table} ${rui.tableWide}`}>
             <thead>
               <tr>
                 <th>Day</th>
@@ -2060,7 +2062,7 @@ function StoreReportBody({
                 ))
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         <Pager page={paged.page} pages={paged.pages} setPage={setPage} />
       </section>

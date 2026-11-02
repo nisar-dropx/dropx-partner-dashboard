@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -641,14 +643,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                 return <article key={metric.metricKey}><header><span>{metric.short}</span><strong>{percent(latest)}</strong><i className={improving ? "up" : declining ? "down" : "flat"}>{improving ? "↑ Improving" : declining ? "↓ Declining" : "— Stable"} · {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)} pp</i></header><svg preserveAspectRatio="none" viewBox="0 0 240 62"><polyline fill="none" points={trendPath(points)}/></svg><footer>{trendStationRows.map((row) => <span key={`${metric.metricKey}-${row.report_date}`} title={`${formatOpsDate(row.report_date)}: ${percent(dailyMetricValue(row, metric) ?? 0)}`}>{String(row.report_date).slice(8)}</span>)}</footer><small>Target {targetLabel(metric.target, metric.direction)}</small></article>;
               })}</div> : <div className="empty-state">No Hawkeye D-1 history is available for this station in Amazon Week {selectedDailyWeek}.</div>}
             </section> : null}
-            {actionRows.length ? <section className="panel performance-action-queue"><div className="panel-head"><div><h2>Action queue</h2><p className="subtle">Highest target misses for {selectedDate.split("-").reverse().join("/")}.</p></div><strong>{actionRows.length} priorities</strong></div><div className="table-wrap"><table><thead><tr><th>Station</th><th>City</th><th>Missed targets</th><th>DSR</th><th></th></tr></thead><tbody>{actionRows.map((row) => {
+            {actionRows.length ? <section className="panel performance-action-queue"><div className="panel-head"><div><h2>Action queue</h2><p className="subtle">Highest target misses for {selectedDate.split("-").reverse().join("/")}.</p></div><strong>{actionRows.length} priorities</strong></div><div className="table-wrap"><ReportTable><thead><tr><th>Station</th><th>City</th><th>Missed targets</th><th>DSR</th><th></th></tr></thead><tbody>{actionRows.map((row) => {
               const code = stationCode(row.station_code);
               return <tr key={`action-${row.batch_id}-${row.station_code}`}><td><strong>{code}</strong></td><td>{row.row_label || "—"}</td><td><span className="station-attention risk">{missedTargets(row)} misses</span></td><td>{percent(dsrMetric ? dailyMetricValue(row, dsrMetric) ?? 0 : 0)}</td><td><Link href={trendHref(code)}>Trend →</Link></td></tr>;
-            })}</tbody></table></div></section> : null}
+            })}</tbody></ReportTable></div></section> : null}
             <section className="panel performance-matrix-panel">
               <div className="panel-head"><div><h2>Daily performance review</h2><p className="subtle">DSR follows volume. Red needs action, amber is near target and green is achieved.</p></div><div className="panel-head-tools"><strong>{dailyRows.length} stations</strong><PerformanceSortControl value={dailySort} options={[{ label: "Most misses first", value: "exceptions_desc" }, { label: "Station A–Z", value: "station_asc" }, { label: "Station Z–A", value: "station_desc" }, { label: "Lowest DSR first", value: "dsr_low" }, { label: "Highest DSR first", value: "dsr_high" }]} /></div></div>
               <div className="performance-matrix-wrap">
-                <table className="performance-matrix">
+                <ReportTable className="performance-matrix">
                   <thead><tr><th className="sticky-rank">#</th><th className="sticky-station">Station</th><th>Review</th><th>Delivered</th><th>C-Return</th><th>MFN</th>{orderedDailyMetricDefinitions.map((metric) => <th key={metric.label} title={metric.label}><span className="metric-sort-heading"><span>{metric.short}</span><Link aria-label={`Sort ${metric.label} ${dailySort === `metric_${metric.index}_asc` ? "descending" : "ascending"}`} className={dailySort.startsWith(`metric_${metric.index}_`) ? "active" : ""} href={metricSortHref(metric.index)} title={`Sort ${dailySort === `metric_${metric.index}_asc` ? "descending" : "ascending"}`}>{dailySort === `metric_${metric.index}_asc` ? "↑" : dailySort === `metric_${metric.index}_desc` ? "↓" : "↕"}</Link></span><small>{targetLabel(metric.target, metric.direction)}</small></th>)}</tr></thead>
                   <tbody>
                     {sortedDailyRows.map((row, index) => {
@@ -670,7 +672,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                     })}
                     {!dailyRows.length ? <tr><td colSpan={6 + orderedDailyMetricDefinitions.length} className="empty-cell">Daily performance data is not available for the selected date and stations. Delivery data remains available separately.</td></tr> : null}
                   </tbody>
-                </table>
+                </ReportTable>
               </div>
             </section>
             {dailyRows.length ? <section className="panel hawkeye-full-scorecard">
@@ -706,7 +708,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
               </article>
               <article className="ops-visual-card sls-ranking-card">
                 <header><div><span>SLS SCORECARD</span><h2>Station ranking</h2></div><div className="panel-head-tools"><strong>{weekRange.start}–{weekRange.end}</strong><PerformanceSortControl value={slsSort} options={[{ label: "Highest SLS first", value: "score_desc" }, { label: "Lowest SLS first", value: "score_asc" }, { label: "Station A–Z", value: "station_asc" }, { label: "Station Z–A", value: "station_desc" }]} /></div></header>
-                <div className="table-wrap"><table><thead><tr><th>Rank</th><th>Station</th><th>City</th><th>Standing</th><th>SLS score</th><th>Metrics achieved</th></tr></thead><tbody>
+                <div className="table-wrap"><ReportTable><thead><tr><th>Rank</th><th>Station</th><th>City</th><th>Standing</th><th>SLS score</th><th>Metrics achieved</th></tr></thead><tbody>
                   {sortedSlsRows.map((row, index) => {
                     const values = metricValues(row);
                     const weighted = slsWeightedAttainment(values, slsMetricDefinitions);
@@ -715,7 +717,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                     return <tr key={`${row.batch_id}-${code}`}><td>{index + 1}</td><td><strong>{code}</strong></td><td>{location?.station_name || location?.city || row.row_label || "—"}</td><td><span className={`performance-standing ${standing(row.raw_text).toLowerCase()}`}>{standing(row.raw_text)}</span></td><td><strong>{percent(values[1])}</strong></td><td><strong>{weighted.percentage}%</strong><small className="achievement-count">{weighted.achievedWeight.toFixed(1)}/{weighted.availableWeight.toFixed(1)} mapped weight</small></td></tr>;
                   })}
                   {!slsRows.length ? <tr><td colSpan={6} className="empty-cell">Data not available for Week {selectedWeek}.</td></tr> : null}
-                </tbody></table></div>
+                </tbody></ReportTable></div>
               </article>
               {suppressedSlsRows ? <div className="performance-data-note">{suppressedSlsRows} duplicate summary row{suppressedSlsRows === 1 ? "" : "s"} excluded from this week.</div> : null}
               <section className="sls-station-scorecards">

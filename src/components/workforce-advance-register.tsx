@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ChevronDown, EllipsisVertical, Search } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -618,7 +620,7 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
         <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
       </div>
       {invalidDateRange ? <div aria-live="polite" className="payout-inline-message error">Paid from date must be on or before paid to date.</div> : null}
-      <div className={`table-wrap workforce-advance-table-wrap ${actionMenuId ? "menu-open" : ""}`}><table className="workforce-advance-table"><thead><tr><th>Advance</th><th>Workforce</th><th>Designation</th><th>Location</th><th>Paid on</th><th>Payment details</th><th className="payout-money">Total</th><th className="payout-money">Deducted</th><th className="payout-money">Pending</th><th>Status</th><th>Source / remark</th><th className="workforce-advance-action-cell">Actions</th></tr></thead>
+      <div className={`table-wrap workforce-advance-table-wrap ${actionMenuId ? "menu-open" : ""}`}><ReportTable className="workforce-advance-table"><thead><tr><th>Advance</th><th>Workforce</th><th>Designation</th><th>Location</th><th>Paid on</th><th>Payment details</th><th className="payout-money">Total</th><th className="payout-money">Deducted</th><th className="payout-money">Pending</th><th>Status</th><th>Source / remark</th><th className="workforce-advance-action-cell">Actions</th></tr></thead>
         <tbody>{visible.length ? visible.map((row) => <tr className={row.linkStatus === "pending" ? "workforce-advance-pending-row" : undefined} key={row.id}>
           <td><strong>{row.advanceNumber}</strong></td>
           <td><strong>{row.dropxId}</strong><small>{row.workforceName}</small>{row.reassignmentHistory.length > 0 && row.originalDropxId !== row.dropxId ? <small>Originally imported for {row.originalDropxId}</small> : null}</td>
@@ -629,7 +631,7 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
           <td><strong>{modeLabel(row.source)}</strong><small>{row.remark || `Added ${dateLabel(row.createdAt)}`}</small>{row.linkStatus === "pending" ? <small>Links automatically when this exact DropX ID is registered.</small> : null}{row.recoveryHistory.length ? <details className="workforce-advance-history"><summary>Recovery history ({row.recoveryHistory.length})</summary><div>{row.recoveryHistory.map((recovery) => <p key={recovery.id}><strong>{money(recovery.amount)}</strong> · {recovery.type === "opening_balance" ? "Opening deduction" : `${dateLabel(recovery.periodStart)}–${dateLabel(recovery.periodEnd)}`}<small>{modeLabel(recovery.status)}{recovery.reversalReason ? ` · ${recovery.reversalReason}` : ""}</small></p>)}</div></details> : null}{row.reassignmentHistory.length ? <details className="workforce-advance-history"><summary>Reassignment history ({row.reassignmentHistory.length})</summary><div>{row.reassignmentHistory.map((entry) => <p key={entry.id}><strong>Revision {entry.revision}</strong> · {entry.fromDropxId || entry.originalDropxId} → {entry.toDropxId}<small>{entry.fromWorkforceName || "Unregistered ID"} → {entry.toWorkforceName}{entry.toLocation ? ` · ${entry.toLocation}` : ""}</small><small>{entry.reason} · {dateLabel(entry.reassignedAt)}</small></p>)}</div></details> : null}</td>
           <td className="workforce-advance-action-cell"><AdvanceActionMenu canEdit={canEdit} onOpenChange={(open) => setActionMenuId(open ? row.id : null)} onReassign={() => setReassignRow(row)} open={actionMenuId === row.id} row={row} /></td>
         </tr>) : <tr><td className="empty-cell" colSpan={12}>No Workforce advances match this view.</td></tr>}</tbody>
-      </table></div>
+      </ReportTable></div>
       <div className="workforce-advance-pagination"><label>Rows <select className="field" onChange={(event) => { setSize(event.target.value); setPage(1); }} value={size}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="all">All</option></select></label><span>{filtered.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)} of ${filtered.length}` : "0 records"} · Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">Previous</button><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))} type="button">Next</button></div>
     </section>
     {reassignRow ? <AdvanceReassignmentModal

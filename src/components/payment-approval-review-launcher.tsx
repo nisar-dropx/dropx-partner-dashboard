@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ExternalLink, Eye, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -281,7 +283,7 @@ export function PaymentApprovalReviewLauncher({
           {detailLoading ? <div className="payment-review-optional-loading" role="status"><span className="inline-spinner" aria-hidden="true" /><div><strong>Loading additional evidence</strong><small>You can approve, return, reject, or open another request now.</small></div></div> : null}
           {detailError ? <div className="message-panel error" role="alert"><strong>Additional evidence unavailable</strong><p>{detailError}</p><button className="button secondary compact" onClick={() => { setDetailError(""); setDetailAttempt((value) => value + 1); }} type="button">Retry details</button></div> : null}
           {detail?.replacement ? <div className="message-panel"><strong>{detail.replacement.reason}</strong><p>{detail.replacement.number} · {detail.replacement.model} · Replacement date: {detail.replacement.date}</p></div> : null}
-          {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
+          {detail?.answers.length ? <div className="table-wrap payment-review-answers"><ReportTable><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></ReportTable></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
 
           {detail?.volumeDate && summary.locationId ? <PaymentVolumeContext date={detail.volumeDate} locationId={summary.locationId} /> : null}
           {detail?.fuel ? <div className="van-fuel-review"><strong>{detail.fuel.vehicle_no}</strong><span>Fuel date · {detail.fuel.fuel_date}</span><span>{detail.fuel.litres != null ? `${detail.fuel.litres} L` : "Litres pending bill"}</span></div> : null}
@@ -292,7 +294,7 @@ export function PaymentApprovalReviewLauncher({
           {summary.paymentHeadCode === "VAN_ADHOC" ? <PaymentApprovalAdhocHistory requestId={summary.id} /> : null}
           {detail?.trackingCount ? <PaymentApprovalShipments count={detail.trackingCount} requestId={summary.id} /> : null}
 
-          {detail?.logs.length ? <details className="payment-review-additional-details"><summary><span>Request history</span><small>{detail.logs.length} events</small></summary><div className="table-wrap"><table><thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Remarks</th><th>Date · IST</th></tr></thead><tbody>{detail.logs.map((entry) => <tr key={entry.id}><td>{entry.action}</td><td>{entry.actor}</td><td>{entry.role}</td><td>{entry.comments || "-"}</td><td>{displayDateTime(entry.createdAt)}</td></tr>)}</tbody></table></div></details> : null}
+          {detail?.logs.length ? <details className="payment-review-additional-details"><summary><span>Request history</span><small>{detail.logs.length} events</small></summary><div className="table-wrap"><ReportTable><thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Remarks</th><th>Date · IST</th></tr></thead><tbody>{detail.logs.map((entry) => <tr key={entry.id}><td>{entry.action}</td><td>{entry.actor}</td><td>{entry.role}</td><td>{entry.comments || "-"}</td><td>{displayDateTime(entry.createdAt)}</td></tr>)}</tbody></ReportTable></div></details> : null}
         </div>
       </section>
 

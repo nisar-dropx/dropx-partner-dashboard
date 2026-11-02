@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import {
   filterLossDebits,
@@ -144,7 +146,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
           </h2>
         </div>
         <div className={styles.tableWrap}>
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>{station || salaryScope === 'earlier' ? 'Person / designation' : 'Station'}</th>
@@ -181,7 +183,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {!groups.length && (
           <p className={styles.empty}>
@@ -202,7 +204,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
             </button>
           </div>
           <div className={styles.tableWrap}>
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Payroll month</th>
@@ -228,12 +230,12 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
           <details className={styles.compactDetails}>
             <summary>Shipment details · {filtered.length}</summary>
             <div className={styles.tableWrap}>
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Shipment ID</th>
@@ -254,7 +256,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </details>
         </section>

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -225,7 +227,7 @@ export default async function DailySubmissionPage({ searchParams }: { searchPara
               <span className="count-badge">{rows.length} records</span>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -259,7 +261,7 @@ export default async function DailySubmissionPage({ searchParams }: { searchPara
                     <tr><td className="empty-cell" colSpan={9}>No daily submissions found for this filter.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

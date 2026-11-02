@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { ChevronDown, History } from "lucide-react";
@@ -97,13 +99,13 @@ export function OpsRosterDecisionHistory({
           {decision.line.length ? <ul>{decision.line.map((step, index) => <li key={`${decision.id}:line:${index}`}>{step.stage}{step.status ? ` · ${statusLabel(step.status)}` : ""}{step.actor ? ` · ${step.actor}` : ""}{step.reason ? ` · ${step.reason}` : ""}</li>)}</ul> : null}
           {decision.rounds.length ? <ul>{decision.rounds.map((round) => <li key={`${decision.id}:${round.round}`}>Earlier round {round.round}{round.status ? ` · ${statusLabel(round.status)}` : ""}{round.actor ? ` · ${round.actor}` : ""}{round.reason ? ` · ${round.reason}` : ""}</li>)}</ul> : null}
           {peopleRows.length ? <div className={styles.historyGridWrap}>
-            <table className={styles.historyGrid}>
+            <ReportTable className={styles.historyGrid}>
               <thead><tr><th>Person</th>{dates.map((date) => <th key={date}>{dayLabel(date)}<small>{dateLabel(date)}</small></th>)}</tr></thead>
               <tbody>{peopleRows.map((row) => <tr key={`${decision.id}:${row.code}:${row.name}`}>
                 <th><strong>{row.name}</strong>{row.code ? <small>{row.code}</small> : null}</th>
                 {dates.map((date) => <td key={date}>{row.cells.get(date) ?? "—"}</td>)}
               </tr>)}</tbody>
-            </table>
+            </ReportTable>
           </div> : <p className={styles.historyEmpty}>This decision has no saved days for this week.</p>}
         </article>;
       }) : <p className={styles.historyEmpty}>No draft, approved, returned or rejected roster for this week.</p>}

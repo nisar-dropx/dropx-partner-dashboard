@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import { CpsCostWorkspace } from "./cps-cost-workspace";
 import { CpsAttention } from "./cps-attention";
@@ -152,7 +154,7 @@ export function CpsExplorer({
           )}
         </details>
         <div className="cps-table-wrap cps-comparison-scroll">
-          <table>
+          <ReportTable reportCanExport={canExport}>
             <thead>
               <tr>
                 {[
@@ -234,7 +236,7 @@ export function CpsExplorer({
                 );
               })}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {!shown.length && (
           <p className="panel-body">

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { payoutChecks, type PayoutCheckRow } from "@/lib/workforce-payout-checks";
 import styles from "./workforce-payout-checks.module.css";
 
@@ -20,14 +22,14 @@ export function WorkforcePayoutChecks({ rows }: { rows: PayoutCheckRow[] }) {
         {s.groups.map((g) => (
           <section key={g.code}>
             <h3>{g.label} <small>{g.help}</small></h3>
-            <table>
+            <ReportTable>
               <thead><tr><th>Associate</th><th>Station</th><th>Days</th><th>Gross</th><th>Deductions</th><th>Net</th><th>Reviewed</th></tr></thead>
               <tbody>
                 {g.rows.slice(0, 50).map((r) => (
                   <tr key={r.id}><td>{r.name} <small>{r.dropxId}</small></td><td>{r.location}</td><td>{r.workDays}</td><td>{inr(r.grossPayment)}</td><td>{inr(r.deductions)}</td><td><b>{inr(r.netAmount)}</b></td><td>{r.publicationTargetAmount == null ? "—" : inr(r.publicationTargetAmount)}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
             {g.rows.length > 50 ? <p>{g.rows.length - 50} more — filter the table below.</p> : null}
           </section>
         ))}

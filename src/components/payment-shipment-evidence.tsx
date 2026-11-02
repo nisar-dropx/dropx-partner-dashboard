@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { shipmentPincodeBreakup, type ShipmentEvidence } from '@/lib/payment-shipment-evidence';
@@ -51,9 +53,9 @@ function ShipmentDetails({ rows, total, divisor }: { rows: ShipmentEvidence[]; t
       <div className={styles.pins} aria-label="Pincode shipment breakup">{breakup.map(item => <span key={item.pincode}><strong>{item.pincode}</strong> {item.count}</span>)}</div>
       <label className={styles.search}>Find tracking ID or pincode<input className="field" value={search} onChange={event => {setSearch(event.currentTarget.value);setPage(0);}} placeholder="Search these shipments" /></label>
       {selection ? <div ref={visualRef} className={styles.selection} role="region" aria-label={`Size illustration for ${selection.trackingId}`}><div className={styles.visualHeading}><strong>{selection.trackingId} · {selection.pincode ?? 'Pincode unavailable'}</strong><button type="button" onClick={()=>setSelected(null)}>Close size</button></div><PackageVisual row={selection} /><p>Actual weight {measure(selection.weightKg)} kg · Volumetric weight {measure(selection.volumetricKg)} kg</p><small>Source snapshot: {selection.snapshotAt ? new Date(selection.snapshotAt).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' IST' : 'Unavailable'}</small></div> : null}
-      <div className={styles.table}><table><thead><tr><th>Tracking ID</th><th>Pincode</th><th>Weight kg</th><th>L × W × H cm</th><th>Vol. kg</th><th>Approx. fit</th><th>Size visual</th></tr></thead><tbody>{visible.map(row => <tr key={row.trackingId}>
+      <div className={styles.table}><ReportTable><thead><tr><th>Tracking ID</th><th>Pincode</th><th>Weight kg</th><th>L × W × H cm</th><th>Vol. kg</th><th>Approx. fit</th><th>Size visual</th></tr></thead><tbody>{visible.map(row => <tr key={row.trackingId}>
         <td><strong>{row.trackingId}</strong>{!row.matched ? <small>Details unavailable</small> : null}</td><td>{row.pincode ?? '—'}</td><td>{measure(row.weightKg)}</td><td>{[row.lengthCm,row.widthCm,row.heightCm].map(measure).join(' × ')}</td><td>{measure(row.volumetricKg)}</td><td>{row.suitability === 'small' ? 'Small / bike' : row.suitability === 'bulky' ? 'Van-needed' : 'Unclassified'}</td><td><button type="button" aria-label={`View size illustration for ${row.trackingId}`} aria-expanded={selected === row.trackingId} onClick={() => setSelected(selected === row.trackingId ? null : row.trackingId)}>{selected === row.trackingId ? 'Close' : 'View size'}</button></td>
-      </tr>)}</tbody></table></div>
+      </tr>)}</tbody></ReportTable></div>
       {!visible.length ? <p>No shipments match this search.</p> : null}
       <div className={styles.pages}><span>{filtered.length ? page*10+1 : 0}–{Math.min((page+1)*10,filtered.length)} of {filtered.length}</span><button type="button" disabled={page===0} onClick={()=>setPage(page-1)}>Previous</button><button type="button" disabled={(page+1)*10>=filtered.length} onClick={()=>setPage(page+1)}>Next</button></div>
       <p>Saved shipment evidence only. {divisor ? `Volumetric kg = L × W × H ÷ ${divisor}, using the configured size master.` : 'Volumetric rule unavailable.'} Dimensions and suitability are approximate; missing data does not block approval.</p>

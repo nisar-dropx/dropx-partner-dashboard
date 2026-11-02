@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
@@ -52,10 +54,10 @@ export default async function CapacityShipmentEvidencePage({ searchParams }: { s
     <div className="capacity-station-toolbar"><a className="button secondary compact" href={`/ops-pulse/capacity/${station}?from=${from}&to=${to}`}>← Station capacity</a><span className="status-pill neutral">{classified.length}{(result.data?.length ?? 0) >= 1000 ? "+" : ""} rows</span></div>
     {result.error || sizeResult.error ? <div className="message-panel error">{result.error?.message || sizeResult.error}</div> : null}
     <section className="panel"><div className="panel-head"><div><h2>Applied evidence</h2><p className="subtle">{from || "All dates"} to {to || "latest"}{pincode ? ` · pincode ${pincode}` : ""}{associate ? ` · ID ${associate}` : ""}{size ? ` · ${size}` : ""}</p></div></div>
-      <div className="table-wrap"><table className="capacity-daily-table"><thead><tr><th>Date</th><th>Tracking ID</th><th>Associate</th><th>Pincode</th><th>Weight</th><th>Dimensions cm</th><th>Classification</th></tr></thead><tbody>
+      <div className="table-wrap"><ReportTable className="capacity-daily-table"><thead><tr><th>Date</th><th>Tracking ID</th><th>Associate</th><th>Pincode</th><th>Weight</th><th>Dimensions cm</th><th>Classification</th></tr></thead><tbody>
         {classified.map((row) => <tr key={row.tracking_id}><td>{row.work_date.split("-").reverse().join("/")}</td><td><strong>{row.tracking_id}</strong></td><td>{row.driver_name || "—"}<small>{row.driver_id}</small></td><td>{row.postal_code}</td><td>{row.actual_weight_kg == null ? "—" : `${row.actual_weight_kg} kg`}</td><td>{row.length_cm ?? "—"} × {row.width_cm ?? "—"} × {row.height_cm ?? "—"}</td><td><span className={`capacity-decision ${row.classification === "Volumetric" ? "risk" : row.classification === "Small" ? "balanced" : "unconfigured"}`}>{row.classification}</span></td></tr>)}
         {!classified.length ? <tr><td className="empty-cell" colSpan={7}>No tracking IDs match this selection.</td></tr> : null}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
     </section>
   </div></AppShell>;
 }

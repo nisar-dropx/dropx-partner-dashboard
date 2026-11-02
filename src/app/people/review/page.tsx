@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AlertTriangle, ArrowLeft, BadgeCheck, Eye, FileText, Fingerprint, Search, ShieldAlert, UserRound } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -502,7 +504,7 @@ export default async function PeopleReviewPage({
         </div>
 
         <div className="table-wrap">
-          <table className="people-review-table">
+          <ReportTable className="people-review-table">
             <thead>
               <tr>
                 <th>Profile</th>
@@ -556,7 +558,7 @@ export default async function PeopleReviewPage({
                 </tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {paginatedProfiles.pageCount > 1 ? (
           <nav aria-label="Profile review pages" className="people-review-pagination">

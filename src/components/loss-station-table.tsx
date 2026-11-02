@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { monthLabel } from "@/lib/ops-pulse/nl-loss-policy";
@@ -70,7 +72,7 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
       <select aria-label={`${title} status`} value={status} onChange={e=>setStatus(e.target.value)}>{LOSS_SUMMARY_STATUSES.filter(([key])=>initial ? ["all","station","amazon"].includes(key) : !["station","amazon"].includes(key)).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
       <select aria-label={`${title} sort`} value={sort} onChange={e=>setSort(e.target.value as LossFactSort)}>{sorts.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
     </div>:null}</div>
-    <div className={styles.scroll}><table><caption className={styles.caption}>Each cell shows shipment count and exact rupee value. Updated means recovery details saved, not money recovered. Recovered includes partial collections; outstanding includes unconfirmed draft payroll.</caption><thead><tr><th aria-sort={ariaSort("station")}>{sortHeader("Station", "station")}</th><th aria-sort={ariaSort("amount")} title={compact ? "Confirmed recoverable shipment count and value" : "Total tracking IDs and loss value"}>{sortHeader(compact ? "Recoverable" : "Total shipments / value", "amount", "Sort by loss value")}</th>
+    <div className={styles.scroll}><ReportTable><caption className={styles.caption}>Each cell shows shipment count and exact rupee value. Updated means recovery details saved, not money recovered. Recovered includes partial collections; outstanding includes unconfirmed draft payroll.</caption><thead><tr><th aria-sort={ariaSort("station")}>{sortHeader("Station", "station")}</th><th aria-sort={ariaSort("amount")} title={compact ? "Confirmed recoverable shipment count and value" : "Total tracking IDs and loss value"}>{sortHeader(compact ? "Recoverable" : "Total shipments / value", "amount", "Sort by loss value")}</th>
       {initial ? <><th>Waiting on station</th><th>Awaiting Amazon / final</th></> : <>
         {compact ? <><th aria-sort={ariaSort("pending")}>{sortHeader("Needs update", "pending", "Sort by pending update value")}</th><th title="Saved recovery details; not confirmed collections">Updated</th></> : <><th>Updated</th><th>Pending update</th></>}
         <th aria-sort={ariaSort("recovered")} title="Shipments with full or partial confirmed recovery">{sortHeader("Recovered", "recovered")}</th>
@@ -81,7 +83,7 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
       {!compact ? <th>Last dates</th> : null}</tr></thead><tbody>
       {rows.map(row=><tr key={row.station}><th scope="row"><Link href={stationHref(row.station)} prefetch={false}>{row.station} ↗</Link>{compact?<small className={styles.stationDate}>Updated {date(row.updatedAt)}</small>:null}</th>{metrics(row)}</tr>)}
       {!rows.length?<tr><td colSpan={initial?5:compact?6:9}>No cases match these filters.</td></tr>:null}
-    </tbody>{rows.length>0?<tfoot><tr><th scope="row">Total</th>{metrics(total)}</tr></tfoot>:null}</table></div>
+    </tbody>{rows.length>0?<tfoot><tr><th scope="row">Total</th>{metrics(total)}</tr></tfoot>:null}</ReportTable></div>
   </section>;
 }
 

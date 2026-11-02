@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -287,7 +289,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Effective month</th>
@@ -317,7 +319,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
 
@@ -329,7 +331,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Changed at</th>
@@ -355,7 +357,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
                     <tr><td className="empty-cell" colSpan={6}>No attendance-setting changes have been recorded yet.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { AdvertisingBreakdown } from "./advertising-breakdown";
 import { CpsAssociateTable, CpsDaCohorts } from "./cps-associate-breakdown";
 import { CpsFuelInsights } from "./cps-fuel-insights";
@@ -214,7 +216,7 @@ export function CpsCostWorkspace({
           </div>
           {issueFilter !== "bills" && (
             <div className="cps-table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Issue</th>
@@ -262,7 +264,7 @@ export function CpsCostWorkspace({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           )}
           {issueFilter !== "mapping" && assumedBills > 0 && (
@@ -367,7 +369,7 @@ export function CpsCostWorkspace({
         </div>
         {head === "DA" && <CpsDaCohorts rows={snapshot.da_details ?? []} />}
         {head === "Van" ? <CpsVanBreakdown snapshot={snapshot} shipments={total.shipments} amount={costs.Van}/> : <div className="cps-table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Cost item</th>
@@ -474,7 +476,7 @@ export function CpsCostWorkspace({
                 <th>{money(ratio(costs[head], total.shipments), 2)}</th>
               </tr>
             </tfoot>
-          </table>
+          </ReportTable>
         </div>}
         {head === "UTR" && !staff.some(p=>p.group !== "Manager share" && p.group !== "Telecaller share") && <p className="cps-footnote">No active station-team CTC was allocated for these dates. Check active People assignments and effective CTC if a station team should be included. Unassigned manager roles add no cost or exception.</p>}
         {!bySource.size && (
@@ -490,7 +492,7 @@ export function CpsCostWorkspace({
               Staff cost allocation <span>Private · grouped costs only</span>
             </summary>
             <div className="cps-table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Cost group</th>
@@ -517,7 +519,7 @@ export function CpsCostWorkspace({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
             <p className="cps-footnote">
               Active employment dates and effective People CTC drive accrual.
@@ -539,7 +541,7 @@ export function CpsCostWorkspace({
               <span>{vanPeople.length} station assignments</span>
             </summary>
             <div className="cps-table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Associate</th>
@@ -569,7 +571,7 @@ export function CpsCostWorkspace({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
             <p className="cps-footnote">
               Spot DA requests appear in the cost breakdown above. Vehicle
@@ -587,7 +589,7 @@ export function CpsCostWorkspace({
           </span>
         </summary>
         <div className="cps-table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Date</th>
@@ -616,7 +618,7 @@ export function CpsCostWorkspace({
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </details>
     </>

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -266,7 +268,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       </section>
       <section className="panel">
         <div className="panel-head"><div><h2>Complete device punch history</h2><p className="subtle">{total ? `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, total)} of ${total} raw punches.` : "No matching raw punches."} Newest punches are shown first.</p></div></div>
-        <div className="table-wrap"><table><thead><tr><th>Punch time</th><th>Location</th><th>Device</th><th>Enrolment / mapping</th><th>Employee / workforce</th><th>Transaction</th><th>Capture result</th><th>Reason</th></tr></thead><tbody>
+        <div className="table-wrap"><ReportTable><thead><tr><th>Punch time</th><th>Location</th><th>Device</th><th>Enrolment / mapping</th><th>Employee / workforce</th><th>Transaction</th><th>Capture result</th><th>Reason</th></tr></thead><tbody>
           {rows.map((row) => {
             const resolvedDevice = resolveRawPunchDevice(row, deviceIndex);
             const device = resolvedDevice.device;
@@ -289,7 +291,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
             </tr>;
           })}
           {!rows.length ? <tr><td className="empty-cell" colSpan={8}>No raw punch records found.</td></tr> : null}
-        </tbody></table></div>
+        </tbody></ReportTable></div>
         <div className="verification-api-pagination"><Link aria-disabled={page <= 1} className={page <= 1 ? "button secondary disabled" : "button secondary"} href={page <= 1 ? "#" : pageHref(searchParams, page - 1)}>Previous</Link><span>Page {Math.min(page, totalPages)} of {totalPages}</span><Link aria-disabled={page >= totalPages} className={page >= totalPages ? "button secondary disabled" : "button secondary"} href={page >= totalPages ? "#" : pageHref(searchParams, page + 1)}>Next</Link></div>
       </section>
     </AppShell>

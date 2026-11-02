@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { ChevronDown } from "lucide-react";
 import { calendarDays, groupVanCosts, type CostItem } from "@/lib/ops-pulse/cps-cost-details";
 import { ratio, type CpsSnapshot } from "@/lib/ops-pulse/cps";
@@ -22,9 +24,9 @@ function SourceItem({ item, snapshot, shipments }: { item: CostItem; snapshot: C
         <p>{v.from_date} – {v.through_date}. {v.daily_rent != null ? "Daily rate × eligible deployed days." : "Monthly rate ÷ calendar days × eligible deployed days."} Fleet deployment and rent-status rules apply.</p>
       </article>)}
     </div>}
-    <div className="cps-table-wrap cps-source-days"><table><caption>Daily charges · {item.source}</caption><thead><tr><th>Date</th><th>Station</th><th>Amount</th></tr></thead><tbody>
+    <div className="cps-table-wrap cps-source-days"><ReportTable><caption>Daily charges · {item.source}</caption><thead><tr><th>Date</th><th>Station</th><th>Amount</th></tr></thead><tbody>
       {[...item.lines].sort((a,b) => a.work_date.localeCompare(b.work_date) || a.station_code.localeCompare(b.station_code)).map((line,i) => <tr key={`${line.work_date}|${line.station_code}|${i}`}><td>{line.work_date}</td><td>{line.station_code}</td><td>{money(line.amount)}</td></tr>)}
-    </tbody><tfoot><tr><th colSpan={2}>Item total</th><th>{money(item.amount)}</th></tr></tfoot></table></div>
+    </tbody><tfoot><tr><th colSpan={2}>Item total</th><th>{money(item.amount)}</th></tr></tfoot></ReportTable></div>
   </details>;
 }
 export function CpsVanBreakdown({ snapshot, shipments, amount }: { snapshot: CpsSnapshot; shipments: number; amount: number }) {

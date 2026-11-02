@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState } from "react";
 
@@ -44,11 +46,11 @@ export function ConversionSlabFields() {
   const [nextId, setNextId] = useState(1);
   return <>
     <h3>Conversion slabs</h3><p className="subtle">Start at 0%. Each rate applies up to the next minimum. Add or remove rows as needed (up to 20).</p>
-    <div className="table-wrap"><table><thead><tr><th>Minimum conversion % (inclusive)</th><th>Rate per production unit (₹)</th><th>Action</th></tr></thead><tbody>
+    <div className="table-wrap"><ReportTable><thead><tr><th>Minimum conversion % (inclusive)</th><th>Rate per production unit (₹)</th><th>Action</th></tr></thead><tbody>
       {rows.map((id, index) => <tr key={id}><td><input className="field" aria-label={`Slab ${index + 1} minimum conversion`} type="number" name="minimum" min="0" max="100" step="0.01" defaultValue={id === 0 ? 0 : undefined} readOnly={id === 0} required /></td>
         <td><input className="field" aria-label={`Slab ${index + 1} rate`} type="number" name="rate" min="0" step="0.01" required /></td>
         <td>{id !== 0 ? <button type="button" className="button secondary compact" aria-label={`Remove slab ${index + 1}`} onClick={() => setRows(rows.filter(row => row !== id))}>Remove</button> : <span className="subtle">Base slab</span>}</td></tr>)}
-    </tbody></table></div>
+    </tbody></ReportTable></div>
     <button type="button" className="button secondary compact" disabled={rows.length >= 20} onClick={() => { setRows([...rows, nextId]); setNextId(nextId + 1); }}>Add slab row</button>
   </>;
 }

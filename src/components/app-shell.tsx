@@ -163,6 +163,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
     <PaymentNotificationProvider key={`${authorization.userId}:${authorization.isPreview}`} initialData={paymentNotifications} refreshOnMount={isOpsHost}>
     <AppShellFrame
       opsDesignPreview={isOpsHost}
+      reportExportsAllowed={isOpsHost && !authorization.readOnly && hasPermission(authorization, "ops_reports", "access")}
       pageTitle={active}
       desktopActions={topActions}
       mobileActions={topActions}

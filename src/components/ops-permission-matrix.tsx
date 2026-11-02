@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { additionalPermissionPages, filterPermissionMenus, menuPermissionIds, permissionMenuGroups, type PermissionNavigationView, type PermissionPage } from "@/lib/ops-pulse/permission-navigation";
@@ -75,7 +77,7 @@ export function OpsPermissionMatrix({pages, initialPermissions = [], navigationV
       <label className="ops-permission-search">Find a menu<input type="search" placeholder="Menu or submenu" value={search} onChange={event => setSearch(event.target.value)} /></label>
     </div>
     <p className="ops-permission-help">Expand + for submenu access. Menu switches apply to displayed submenus; shared access updates linked menus. Edit requires View.</p>
-    <div className="table-wrap ops-permission-table-wrap"><table className="permission-table ops-permission-table">
+    <div className="table-wrap ops-permission-table-wrap"><ReportTable className="permission-table ops-permission-table">
       <thead><tr><th>Main menu <small>{visible.length}</small></th>{(["all", ...actions] as const).map(action => <th key={action}><div className="ops-permission-column-head"><span>{action === "all" ? "All" : action[0].toUpperCase() + action.slice(1)}</span>{checkbox(visibleIds, action, "Displayed menus")}</div></th>)}</tr></thead>
       <tbody>{visible.map(group => {
         const open = expanded.has(group.key) || Boolean(search.trim());
@@ -85,8 +87,8 @@ export function OpsPermissionMatrix({pages, initialPermissions = [], navigationV
           {group.expandable && open ? group.rows.map(row => <tr className="ops-permission-submenu-row" key={row.key}><td><span>{row.label}</span><SharedAccess labels={row.sharedWith}/></td>{cells([row.page.id], `${group.label} / ${row.label}`)}</tr>) : null}
         </Fragment>;
       })}{!visible.length && <tr><td colSpan={5}>No matching menu in this workspace.</td></tr>}</tbody>
-    </table></div>
-    {additional.length > 0 && <div className="ops-permission-additional"><button type="button" className="button secondary compact" aria-expanded={showAdditional} onClick={() => setShowAdditional(value => !value)}>{showAdditional ? "−" : "+"} Additional permissions ({additional.length})</button>{showAdditional && <><p className="ops-permission-help">Existing permissions without a sidebar menu. Their saved values are retained.</p><div className="table-wrap ops-permission-table-wrap"><table className="permission-table ops-permission-table"><thead><tr><th>Permission</th><th>All</th><th>View</th><th>Add</th><th>Edit</th></tr></thead><tbody>{visibleAdditional.map(page => <tr key={page.id}><td>{page.name}</td>{cells([page.id], page.name)}</tr>)}</tbody></table></div></>}</div>}
+    </ReportTable></div>
+    {additional.length > 0 && <div className="ops-permission-additional"><button type="button" className="button secondary compact" aria-expanded={showAdditional} onClick={() => setShowAdditional(value => !value)}>{showAdditional ? "−" : "+"} Additional permissions ({additional.length})</button>{showAdditional && <><p className="ops-permission-help">Existing permissions without a sidebar menu. Their saved values are retained.</p><div className="table-wrap ops-permission-table-wrap"><ReportTable className="permission-table ops-permission-table"><thead><tr><th>Permission</th><th>All</th><th>View</th><th>Add</th><th>Edit</th></tr></thead><tbody>{visibleAdditional.map(page => <tr key={page.id}><td>{page.name}</td>{cells([page.id], page.name)}</tr>)}</tbody></ReportTable></div></>}</div>}
     <p className="ops-permission-footnote">Workspace selection only changes this view. Other workspace permissions stay unchanged until you edit them. Save menu access to apply your changes.</p>
     <input name="permissions_json" type="hidden" value={JSON.stringify(pages.map(page => ({page_id: page.id, can_view: permissions[page.id]?.view ?? false, can_add: permissions[page.id]?.add ?? false, can_edit: permissions[page.id]?.edit ?? false})))} />
   </div>;

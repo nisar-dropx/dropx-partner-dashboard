@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import { Copy, Settings } from "lucide-react";
@@ -346,7 +348,7 @@ export function WhatsAppSettingsPanel({
           </button>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Profile</th>
@@ -412,7 +414,7 @@ export function WhatsAppSettingsPanel({
                 </tr>
               )) : <tr><td className="empty-cell" colSpan={8}>No WhatsApp profiles added yet.</td></tr>}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
 

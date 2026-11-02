@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -243,7 +245,7 @@ export function RentManager({
 
       <section className="panel">
         <div className="fin-table-wrap">
-          <table className="fin-table">
+          <ReportTable className="fin-table">
             <thead>
               <tr>
                 <th>Premise / allocation</th>
@@ -295,7 +297,7 @@ export function RentManager({
                 <tr><td colSpan={9} className="fin-empty">No rent agreements match these filters.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
 

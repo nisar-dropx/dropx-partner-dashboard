@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -186,7 +188,7 @@ export default async function DeveloperPage({ searchParams }: { searchParams?: S
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Menu</th>
@@ -211,7 +213,7 @@ export default async function DeveloperPage({ searchParams }: { searchParams?: S
                 });
               })}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

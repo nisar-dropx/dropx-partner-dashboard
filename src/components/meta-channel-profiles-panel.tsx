@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState } from "react";
 import { deleteMetaChannelProfile, saveMetaChannelProfile } from "@/app/settings/meta-messaging-actions";
@@ -64,7 +66,7 @@ export function MetaChannelProfilesPanel({ canEdit, enabled, platform, profiles 
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Profile</th>
@@ -105,7 +107,7 @@ export function MetaChannelProfilesPanel({ canEdit, enabled, platform, profiles 
                 </tr>
               )) : <tr><td className="empty-cell" colSpan={8}>No {label} profiles added yet.</td></tr>}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
 

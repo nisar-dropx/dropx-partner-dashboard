@@ -4,7 +4,7 @@ import { Menu, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { OpsDesignContext } from "@/components/ops-design-context";
+import { OpsDesignContext, OpsReportExportContext } from "@/components/ops-design-context";
 import { EventLogTracker } from "@/components/event-log-tracker";
 
 type AppShellFrameProps = {
@@ -16,12 +16,13 @@ type AppShellFrameProps = {
   opsDesignPreview?: boolean;
   pageTitle?: string;
   trackEvents?: boolean;
+  reportExportsAllowed?: boolean;
 };
 
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle, trackEvents = true }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, opsDesignPreview = false, pageTitle, trackEvents = true, reportExportsAllowed = false }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // OpsPulse always uses the new shell, including server render and storage-restricted browsers.
   const modern = opsDesignPreview;
@@ -103,6 +104,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
 
   return (
     <OpsDesignContext.Provider value={opsDesignPreview && modern}>
+    <OpsReportExportContext.Provider value={reportExportsAllowed}>
     <div ref={shellRef} className={`shell ${opsDesignPreview && modern ? "ops-modern" : ""} ${sidebarOpen ? "sidebar-open" : ""}`} onClick={event => {
       const target = event.target as HTMLElement;
       if (modern && (target.closest("[data-close-ops-menu]") || target.closest(".sidebar a[href]"))) setSidebarOpen(false);
@@ -143,6 +145,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
         <div className="content" id="ops-page-content" tabIndex={-1}>{children}</div>
       </main>
     </div>
+    </OpsReportExportContext.Provider>
     </OpsDesignContext.Provider>
   );
 }

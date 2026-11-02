@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { groupWorkforceDeductionDisplay } from "@/lib/workforce-loss-recovery";
 import { isKilometreField, routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
@@ -1154,7 +1156,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       <span>Use the header checkbox to select every matching eligible row.</span>
     </div> : null}
     <div className="table-wrap payout-table-wrap" ref={tableWrapRef}>
-      <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
+      <ReportTable className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
         <caption className="sr-only">{subjectLabel} payout totals</caption>
         <thead><tr>
           {showSelection ? <th className="payout-select-cell" scope="col"><input aria-label={`Select all matching ${subjectLabelLower} payouts for available actions`} checked={actionSelectionFull} disabled={!selectable.length || actionBusy} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
@@ -1276,7 +1278,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                       <section className="payout-total-group">
                         <h3>Payment totals</h3>
                         <div className="table-wrap payout-total-table-wrap">
-                          <table>
+                          <ReportTable>
                             <caption className="sr-only">Payment-head totals for {row.name}</caption>
                             <thead><tr><th scope="col">Payment</th><th className="payout-money" scope="col">Units</th><th className="payout-money" scope="col">Rate</th><th className="payout-money" scope="col">Amount</th></tr></thead>
                             <tbody>
@@ -1285,7 +1287,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                                   {isKilometreField(item.code) && fuelDays.length > 0 ? <details>
                                     <summary><strong>{item.label}</strong></summary>
                                     <p>Station departure + delivery journey + station return, from the Amazon GPS trail where it is complete, otherwise roads between Amazon delivery scans. Finalised after the work day closes.</p>
-                                    <div className="table-wrap"><table aria-label="Day-wise fuel allowance breakdown">
+                                    <div className="table-wrap"><ReportTable aria-label="Day-wise fuel allowance breakdown">
                                       <thead><tr><th scope="col">Day</th><th scope="col">Route km</th><th scope="col">Rate / km</th><th scope="col">Fuel allowance</th><th scope="col">Source / status</th></tr></thead>
                                       <tbody>{fuelDays.filter(day => day.routeFuel!.rate === item.rate).map(day => {
                                         const fuel = day.routeFuel!;
@@ -1297,7 +1299,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                                           <td>{fuel.status === "pending" ? routePendingLabel(fuel.reason) : fuel.source === "manual" ? "Uploaded units" : `Station ${routeKm(fuel.departureKm ?? 0)} + delivery ${routeKm(fuel.deliveryKm ?? 0)} + return ${routeKm(fuel.returnKm ?? 0)} km`}</td>
                                         </tr>;
                                       })}</tbody>
-                                    </table></div>
+                                    </ReportTable></div>
                                   </details> : <strong>{item.label}</strong>}
                                   {item.reportedCount !== undefined ? <small>{item.thresholdConfigurationMissing
                                     ? "Combined threshold · minimum not saved"
@@ -1329,29 +1331,29 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                               {!paymentTotals.length && !row.additions && !row.incentiveAmount ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
                             </tbody>
                             <tfoot><tr><th colSpan={3} scope="row">Gross payment</th><td className="payout-money"><strong>{money(row.grossPayment)}</strong></td></tr></tfoot>
-                          </table>
+                          </ReportTable>
                         </div>
                       </section>
                       <section className="payout-total-group">
                         <h3>Deduction totals</h3>
                         <div className="table-wrap payout-total-table-wrap">
-                          <table>
+                          <ReportTable>
                             <caption className="sr-only">Deduction-head totals for {row.name}</caption>
                             <thead><tr><th scope="col">Deduction</th><th className="payout-money" scope="col">Total</th></tr></thead>
                             <tbody>
                               {deductionDisplay.other.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="negative payout-money"><strong>- {money(item.amount)}</strong></td></tr>)}
                               {deductionDisplay.losses.length ? <tr>
                                 <td><details><summary><strong>Shipment loss</strong> · {deductionDisplay.losses.length} deduction{deductionDisplay.losses.length === 1 ? "" : "s"}</summary>
-                                  <table aria-label="Shipment loss breakdown"><thead><tr><th>Shipment / loss period</th><th>Deducted</th></tr></thead><tbody>
+                                  <ReportTable aria-label="Shipment loss breakdown"><thead><tr><th>Shipment / loss period</th><th>Deducted</th></tr></thead><tbody>
                                     {deductionDisplay.losses.map((item, index) => <tr key={item.recoveryKey || `${item.code}-${index}`}><td>{item.label.replace(/^Loss recovery · /, "")}</td><td className="negative payout-money">− {money(item.amount)}</td></tr>)}
-                                  </tbody></table>
+                                  </tbody></ReportTable>
                                 </details></td>
                                 <td className="negative payout-money"><strong>− {money(deductionDisplay.lossTotal)}</strong></td>
                               </tr> : null}
                               {!deductionTotals.length ? <tr><td className="empty-cell" colSpan={2}>No deductions for this period.</td></tr> : null}
                             </tbody>
                             <tfoot><tr><th scope="row">Gross deductions</th><td className={`${row.deductions ? "negative " : ""}payout-money`}><strong>{row.deductions ? `- ${money(row.deductions)}` : money(0)}</strong></td></tr></tfoot>
-                          </table>
+                          </ReportTable>
                         </div>
                       </section>
                     </div></> : <div className="payout-inline-message">Payment calculation details will appear after this row has a valid mapping and payment setup. Allocation history remains available above.</div>}
@@ -1361,7 +1363,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             ].filter(Boolean) as ReactElement[];
           }) : <tr><td className="empty-cell" colSpan={tableColumnCount}>No {subjectLabelLower} payouts match the selected period and filters.</td></tr>}
         </tbody>
-      </table>
+      </ReportTable>
     </div>
     <div
       aria-label={`${subjectLabel} payout horizontal scrollbar`}

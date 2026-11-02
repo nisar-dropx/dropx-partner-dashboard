@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -93,7 +95,7 @@ export function PaymentRecoveryBulkUpload() {
         {preview ? <div className="compensation-preview">
           <div className="compensation-preview-summary"><span><strong>{preview.totalRows ?? 0}</strong> TIDs</span><span><strong>{money(preview.totalValue ?? 0)}</strong> total value</span><span><strong>Not configured</strong> recovery method selected after upload</span></div>
           {preview.issues?.length ? <div className="compensation-issues" role="alert"><strong>{preview.issues.length} issue{preview.issues.length === 1 ? "" : "s"} must be corrected</strong><ul>{preview.issues.map((issue, index) => <li key={`${issue.rowNumber ?? "file"}-${issue.tid ?? "general"}-${index}`}>{issue.rowNumber ? `Row ${issue.rowNumber}` : "Workbook"}{issue.tid ? ` · ${issue.tid}` : ""}: {issue.message}</li>)}</ul></div> : null}
-          {preview.rows?.length ? <div className="table-wrap compensation-preview-table"><table><thead><tr><th>Row</th><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th>Value</th><th>Provider reference</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={`${row.rowNumber}-${row.tid}`}><td>{row.rowNumber}</td><td><strong>{row.tid}</strong></td><td><strong>{row.providerCode || "—"}</strong>{row.providerName && row.providerName !== row.providerCode ? <small>{row.providerName}</small> : null}</td><td>{row.location}</td><td>{monthLabel(row.debitMonth)}</td><td>{money(row.value)}</td><td>{row.providerReference || "—"}</td></tr>)}</tbody></table></div> : null}
+          {preview.rows?.length ? <div className="table-wrap compensation-preview-table"><ReportTable><thead><tr><th>Row</th><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th>Value</th><th>Provider reference</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={`${row.rowNumber}-${row.tid}`}><td>{row.rowNumber}</td><td><strong>{row.tid}</strong></td><td><strong>{row.providerCode || "—"}</strong>{row.providerName && row.providerName !== row.providerCode ? <small>{row.providerName}</small> : null}</td><td>{row.location}</td><td>{monthLabel(row.debitMonth)}</td><td>{money(row.value)}</td><td>{row.providerReference || "—"}</td></tr>)}</tbody></ReportTable></div> : null}
           {preview.canCommit && !preview.batchId ? <div className="compensation-commit-row"><span>Every row passed validation. Nothing has been added, configured, or deducted yet.</span><button className="button" disabled={Boolean(busy)} onClick={() => submit("commit")} type="button">{busy === "commit" ? "Adding…" : `Confirm and add ${preview.totalRows ?? 0} TIDs`}</button></div> : null}
         </div> : null}
       </div>

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { CapacityScopeFilter } from "@/components/capacity-scope-filter";
 import { CapacityViewTabs } from "@/components/capacity-view-tabs";
@@ -147,7 +149,7 @@ export default async function CapacityPage({ searchParams }: { searchParams?: Se
 
     <section className="panel capacity-simple-stations">
       <div className="panel-head"><div><h2>All stations</h2><p className="subtle">{snapshot.summary.stations} stations · open a station for daily and associate detail.</p></div><a className="button secondary compact" href="/master/capacity">Capacity Master</a></div>
-      <div className="table-wrap"><table className="capacity-table capacity-simple-table"><thead><tr>
+      <div className="table-wrap"><ReportTable className="capacity-table capacity-simple-table"><thead><tr>
         <th><a href={sortHref("station")}>Station {sortMark("station")}</a></th>
         <th><a href={sortHref("workload")}>Avg workload {sortMark("workload")}</a></th>
         <th>DA mix</th>
@@ -166,7 +168,7 @@ export default async function CapacityPage({ searchParams }: { searchParams?: Se
           <td><span className={`capacity-decision ${decisionTone(row)}`}>{row.dataState !== "ready" ? "Refresh data" : row.decision.label}</span></td>
         </tr>)}
         {!stations.length ? <tr><td className="empty-cell" colSpan={7}>No permitted stations are selected.</td></tr> : null}
-      </tbody></table></div>
+      </tbody></ReportTable></div>
     </section>
   </div></AppShell>;
 }

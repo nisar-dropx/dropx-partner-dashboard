@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -206,7 +208,7 @@ export function WorkforcePayoutBulkUpload({
                 ) : null}
 
                 <div className="table-wrap compensation-preview-table">
-                  <table>
+                  <ReportTable>
                     <thead><tr><th>Row</th><th>DropX ID</th><th>Location</th><th>Database person</th><th>Input</th><th>FIELD_CODE</th><th>VALUE</th><th>EFFECTIVE_DATE</th><th>EFFECTIVE_TO</th><th>Action</th></tr></thead>
                     <tbody>{rows.slice(0, 50).map((row) => (
                       <tr key={`${row.rowNumber}-${row.dropxId}-${row.inputType}-${row.fieldCode}`}>
@@ -222,7 +224,7 @@ export function WorkforcePayoutBulkUpload({
                         <td><span className={`status-pill ${row.action === "CLEAR" ? "warn" : "good"}`}>{row.action.toLowerCase()}</span></td>
                       </tr>
                     ))}</tbody>
-                  </table>
+                  </ReportTable>
                 </div>
                 {(preview.matchedRows ?? rows.length) > 50 ? <p className="subtle compensation-preview-more">Showing the first 50 of {preview.matchedRows} matched rows.</p> : null}
                 {preview.canCommit && !preview.importId ? (

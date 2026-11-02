@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { PageHead } from "@/components/page-head";
 import { syncMetaLeadAds } from "@/app/leads/actions";
 import { SubmitButton } from "@/components/submit-button";
@@ -57,7 +59,7 @@ function EmptyState({ children }: { children: string }) {
 function LeadTable({ rows, mode }: { rows: LeadRow[]; mode: "all" | "followups" | "interviews" }) {
   return (
     <div className="table-wrap">
-      <table className="lead-table">
+      <ReportTable className="lead-table">
         <thead>
           <tr>
             <th>Name / City</th>
@@ -99,7 +101,7 @@ function LeadTable({ rows, mode }: { rows: LeadRow[]; mode: "all" | "followups" 
             </tr>
           )}
         </tbody>
-      </table>
+      </ReportTable>
     </div>
   );
 }
@@ -166,7 +168,7 @@ function Dashboard({ data }: { data: LeadWorkspaceData }) {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Station</th>
@@ -193,7 +195,7 @@ function Dashboard({ data }: { data: LeadWorkspaceData }) {
                 <tr><td colSpan={7}><EmptyState>No station summary yet.</EmptyState></td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </>

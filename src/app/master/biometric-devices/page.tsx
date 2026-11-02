@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { BiometricDeviceProfileFields } from "@/components/biometric-device-profile-fields";
@@ -344,7 +346,7 @@ function DeviceStatusPanel({
         </div>
       </div>
       <div className="table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Device no.</th>
@@ -369,7 +371,7 @@ function DeviceStatusPanel({
               <tr><td className="empty-cell" colSpan={6}>No devices found.</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </section>
   );
@@ -451,7 +453,7 @@ export default async function DeviceMasterPage({
             </div>
 
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Device no.</th>
@@ -503,7 +505,7 @@ export default async function DeviceMasterPage({
                     <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 11 : 10}>No devices found.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
 
@@ -547,7 +549,7 @@ export default async function DeviceMasterPage({
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Assigned location</th>
@@ -576,7 +578,7 @@ export default async function DeviceMasterPage({
                     <tr><td className="empty-cell" colSpan={6}>No punch logs received yet.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
 
@@ -588,7 +590,7 @@ export default async function DeviceMasterPage({
               </div>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th>Location</th>
@@ -618,7 +620,7 @@ export default async function DeviceMasterPage({
                     <tr><td className="empty-cell" colSpan={7}>No device events received yet.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

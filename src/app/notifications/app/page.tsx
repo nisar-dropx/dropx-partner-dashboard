@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { AppNotificationComposer, type AppNotificationRecipient } from "@/components/app-notification-composer";
 import { requirePagePermission } from "@/lib/authorization";
@@ -134,7 +136,7 @@ export default async function AppNotificationsPage({
             <span>{history.length} latest records</span>
           </div>
           <div className="table-scroll">
-            <table>
+            <ReportTable>
               <thead><tr><th>Sent</th><th>Recipient</th><th>Message</th><th>Inbox</th><th>Push</th></tr></thead>
               <tbody>
                 {history.map((row) => {
@@ -153,7 +155,7 @@ export default async function AppNotificationsPage({
                 })}
                 {!history.length ? <tr><td colSpan={5}>No app notifications have been sent.</td></tr> : null}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </main>

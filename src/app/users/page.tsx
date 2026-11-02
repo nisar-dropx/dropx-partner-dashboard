@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { opsNavCatalogForMode } from "@/lib/ops-pulse/navigation";
 import { operatingModes } from "@/lib/ops-pulse/operating-context";
@@ -812,7 +814,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             {isCompanyOwner(authorization) && pagePermission.canEdit ? <form action={reconcilePeopleAccessArchitecture}><SubmitButton className="button secondary" pendingText="Applying defaults…">Apply previous defaults</SubmitButton></form> : null}
           </div>
         </div>
-        <div className="table-wrap"><table style={{ minWidth: 900 }}><thead><tr><th>Designation</th>{businessProducts.map((product) => <th key={product.code}>{product.label}</th>)}</tr></thead><tbody>
+        <div className="table-wrap"><ReportTable style={{ minWidth: 900 }}><thead><tr><th>Designation</th>{businessProducts.map((product) => <th key={product.code}>{product.label}</th>)}</tr></thead><tbody>
           {dashboardDesignationOverview.designations.map((designation) => <tr key={designation.id}><td><strong>{designation.name}</strong><div className="subtle">{designation.code}</div></td>{businessProducts.map((product) => {
             const policy = designation.policies[product.code];
             // Recruit keeps its menus in its own app, so only shared-matrix portals can be checked for an empty role.
@@ -821,7 +823,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             return <td key={product.code}><a href={product.href}><StatusPill status={label} /></a></td>;
           })}</tr>)}
           {!dashboardDesignationOverview.designations.length ? <tr><td className="empty-cell" colSpan={businessProducts.length + 1}>No active People designation is available.</td></tr> : null}
-        </tbody></table></div>
+        </tbody></ReportTable></div>
         <div className="panel-body"><div className="stacked-actions"><a className="button secondary" href="/master/location">Locations &amp; station accounts</a></div></div>
       </section>
       ) : null}

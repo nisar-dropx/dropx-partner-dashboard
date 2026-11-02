@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -120,7 +122,7 @@ export default async function DomainsSettingsPage() {
               </div>
             </div>
             <div className="table-wrap">
-              <table className="data-table">
+              <ReportTable className="data-table">
                 <thead>
                   <tr>
                     <th>Domain</th>
@@ -157,7 +159,7 @@ export default async function DomainsSettingsPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           </section>
         </>

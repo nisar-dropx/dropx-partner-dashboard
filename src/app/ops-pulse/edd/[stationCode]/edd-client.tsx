@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw, Search } from "lucide-react";
@@ -486,7 +488,7 @@ export function EddClient({ stationCode, initialOutcome }: { stationCode: string
               </div>
 
               <div className="edd-table-wrap">
-                <table className="edd-table">
+                <ReportTable className="edd-table">
                   <thead>
                     <tr>
                       {COLUMNS.map((column) => {
@@ -531,7 +533,7 @@ export function EddClient({ stationCode, initialOutcome }: { stationCode: string
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </ReportTable>
                 {!pagedPackages.length ? <p className="subtle" style={{ marginTop: 10 }}>No tracking IDs match this filter.</p> : null}
               </div>
 

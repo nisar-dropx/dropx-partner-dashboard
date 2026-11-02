@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { LocationScopeSelect } from "@/components/location-scope-select";
 import { PageHead } from "@/components/page-head";
@@ -191,7 +193,7 @@ export default async function PositionsPage({ searchParams }: PositionPageProps)
 
         <section className="panel">
           <div className="panel-head"><div><h2>Position master</h2><p className="subtle">{positions.length} positions</p></div></div>
-          <div className="table-wrap"><table><thead><tr><th>Position</th><th>Designation / Role</th><th>Scope</th><th>Reports to</th><th>Occupant</th><th>Status</th>{authorization.permissions.users?.canEdit ? <th>Action</th> : null}</tr></thead><tbody>
+          <div className="table-wrap"><ReportTable><thead><tr><th>Position</th><th>Designation / Role</th><th>Scope</th><th>Reports to</th><th>Occupant</th><th>Status</th>{authorization.permissions.users?.canEdit ? <th>Action</th> : null}</tr></thead><tbody>
             {positions.map((position) => {
               const occupant = permanentByPosition.get(position.id);
               const profile = occupant ? profileById.get(occupant.profile_id) : null;
@@ -209,12 +211,12 @@ export default async function PositionsPage({ searchParams }: PositionPageProps)
               </tr>;
             })}
             {!positions.length ? <tr><td className="empty-cell" colSpan={authorization.permissions.users?.canEdit ? 7 : 6}>No positions created yet.</td></tr> : null}
-          </tbody></table></div>
+          </tbody></ReportTable></div>
         </section>
 
         <section className="panel">
           <div className="panel-head"><div><h2>Active assignments</h2><p className="subtle">Permanent occupants and scheduled temporary cover</p></div></div>
-          <div className="table-wrap"><table><thead><tr><th>Position</th><th>Person</th><th>Type</th><th>Effective dates</th><th>Reason</th>{authorization.permissions.users?.canEdit ? <th>Action</th> : null}</tr></thead><tbody>
+          <div className="table-wrap"><ReportTable><thead><tr><th>Position</th><th>Person</th><th>Type</th><th>Effective dates</th><th>Reason</th>{authorization.permissions.users?.canEdit ? <th>Action</th> : null}</tr></thead><tbody>
             {assignments.map((assignment) => {
               const profile = profileById.get(assignment.profile_id);
               return <tr key={assignment.id}>
@@ -227,7 +229,7 @@ export default async function PositionsPage({ searchParams }: PositionPageProps)
               </tr>;
             })}
             {!assignments.length ? <tr><td className="empty-cell" colSpan={authorization.permissions.users?.canEdit ? 6 : 5}>No active assignments.</td></tr> : null}
-          </tbody></table></div>
+          </tbody></ReportTable></div>
         </section>
       </> : null}
     </AppShell>

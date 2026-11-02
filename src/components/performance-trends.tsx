@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import {
   createContext,
   useContext,
@@ -421,7 +423,7 @@ export function PerformanceTrendProvider({
                     ) : null}
                     {expanded ? (
                       <div className="review-trend-table">
-                        <table>
+                        <ReportTable>
                           <caption>Daily values · {station}</caption>
                           <thead>
                             <tr>
@@ -441,7 +443,7 @@ export function PerformanceTrendProvider({
                               </tr>
                             ))}
                           </tbody>
-                        </table>
+                        </ReportTable>
                       </div>
                     ) : null}
                     <p className="review-trend-note">{series.note}</p>

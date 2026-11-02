@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -252,7 +254,7 @@ export default async function BusinessPage({
             </div>
           </div>
           <div className="fin-table-wrap">
-            <table className="fin-table">
+            <ReportTable className="fin-table">
               <thead>
                 <tr>
                   <th>Billing group</th>
@@ -316,7 +318,7 @@ export default async function BusinessPage({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       )}
@@ -335,7 +337,7 @@ export default async function BusinessPage({
           </div>
         </div>
         <div className="fin-table-wrap">
-          <table className="fin-table">
+          <ReportTable className="fin-table">
             <thead>
               <tr>
                 <th>Allocation</th>
@@ -508,7 +510,7 @@ export default async function BusinessPage({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
         {!rows.length && (
           <div className="fin-empty">

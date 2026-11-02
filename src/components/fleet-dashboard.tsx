@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { FleetReports } from "@/components/fleet-daily-report";
 import { Activity, Download, Eye, Fuel, Gauge, MoreVertical, TriangleAlert } from "lucide-react";
@@ -1998,7 +2000,7 @@ function DataTable({ headers, numericFrom = 4, rows }: { headers: string[]; nume
   if (!rows.length) return <div className="fleet-empty">No data for selected filters.</div>;
   return (
     <div className="fleet-table-wrap">
-      <table className="fleet-table">
+      <ReportTable className="fleet-table">
         <thead>
           <tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr>
         </thead>
@@ -2011,7 +2013,7 @@ function DataTable({ headers, numericFrom = 4, rows }: { headers: string[]; nume
             </tr>
           ))}
         </tbody>
-      </table>
+      </ReportTable>
     </div>
   );
 }

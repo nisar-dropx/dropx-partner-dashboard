@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import { daCohortTotals, type CpsDaDetail } from "@/lib/ops-pulse/cps-details";
 import { cpsShipmentCount, ratio } from "@/lib/ops-pulse/cps";
@@ -30,10 +32,10 @@ export function CpsAssociateTable({rows,component,source}:{rows:CpsDaDetail[];so
           {r.van!==0&&<span>Vehicle component · Van<strong>{money(r.van)}</strong></span>}
         </div>
         <p className="cps-footnote">{r.work_dates.length} distinct worked days from {r.work_bases.join(" and ")||"available evidence"}; {r.cost_dates.length} recorded cost / activity days. Calendar salary can accrue on days with no deliveries. CPS includes both delivery and customer-return counts and their pay. Seller pickup / MFN and seller-return counts and pay remain in payroll / P&L only.</p>
-        {r.periods.some(p=>p.production_details?.length) && <details className="cps-drilldown" open><summary>How package / production pay is calculated</summary><div className="cps-table-wrap"><table><thead><tr><th>Payment head</th><th>Dates</th><th>Reported units</th><th>Minimum deducted</th><th>Paid units</th><th>Rate</th><th>Included amount</th></tr></thead><tbody>{r.periods.flatMap((p,i)=>(p.production_details??[]).map((c,j)=><tr key={`${i}|${j}`}><td>{c.label}<small>{c.basis} · {c.bucket==='van'?'Van CPS':c.bucket==='fuel'?'DA fuel':'Package pay'}</small></td><td>{p.from} – {p.to}</td><td>{count(c.reported_units)}</td><td>{count(c.threshold_units)}</td><td>{count(c.payable_units)}</td><td>{money(c.rate)}</td><td>{money(c.amount)}</td></tr>))}</tbody></table></div></details>}
-        <div className="cps-table-wrap"><table><thead><tr><th>Applied dates</th><th>Effective rate card</th><th>Delivered</th><th>Customer returns</th><th>Fixed / MG</th><th>Variable</th><th>DA fuel</th><th>DA payout</th></tr></thead><tbody>
+        {r.periods.some(p=>p.production_details?.length) && <details className="cps-drilldown" open><summary>How package / production pay is calculated</summary><div className="cps-table-wrap"><ReportTable><thead><tr><th>Payment head</th><th>Dates</th><th>Reported units</th><th>Minimum deducted</th><th>Paid units</th><th>Rate</th><th>Included amount</th></tr></thead><tbody>{r.periods.flatMap((p,i)=>(p.production_details??[]).map((c,j)=><tr key={`${i}|${j}`}><td>{c.label}<small>{c.basis} · {c.bucket==='van'?'Van CPS':c.bucket==='fuel'?'DA fuel':'Package pay'}</small></td><td>{p.from} – {p.to}</td><td>{count(c.reported_units)}</td><td>{count(c.threshold_units)}</td><td>{count(c.payable_units)}</td><td>{money(c.rate)}</td><td>{money(c.amount)}</td></tr>))}</tbody></ReportTable></div></details>}
+        <div className="cps-table-wrap"><ReportTable><thead><tr><th>Applied dates</th><th>Effective rate card</th><th>Delivered</th><th>Customer returns</th><th>Fixed / MG</th><th>Variable</th><th>DA fuel</th><th>DA payout</th></tr></thead><tbody>
           {r.periods.map((p,i)=><tr key={i}><td>{p.from} – {p.to}<small>Card effective {p.card_from} · {p.source}</small></td><td className="cps-rate-cell">{p.rates.map((rate,j)=><small key={j}><strong>{rate.label}</strong> {money(rate.rate)} / {rate.basis}</small>)}</td><td>{count(p.deliveries)}</td><td>{count(p.customer_returns)}</td><td>{money(p.salary)}</td><td>{money(p.variable)}</td><td>{money(p.fuel)}</td><td>{money(p.salary+p.variable+p.fuel)}</td></tr>)}
-        </tbody></table></div>
+        </tbody></ReportTable></div>
       </div>
     </details>)}
     </>}

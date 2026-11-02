@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -378,7 +380,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
       </div>
       <p className="subtle payment-report-result-count">Showing {visibleRequests.length} of {filteredRequests.length} matching records</p>
       <div className="table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
                 <th>Request</th>
@@ -425,7 +427,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
               <tr><td className="empty-cell" colSpan={15}>No payment requests found.</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {filteredRequests.length > effectivePageSize ? <div className="panel-foot pagination"><button className="pager-button" disabled={page === 1} onClick={() => setPage((value) => value - 1)} type="button">Previous</button><span>Page {page} of {totalPages}</span><button className="pager-button" disabled={page === totalPages} onClick={() => setPage((value) => value + 1)} type="button">Next</button></div> : null}
 
@@ -469,7 +471,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
                   <div className="section-divider" />
                   <h3>Request details</h3>
                   <div className="table-wrap">
-                    <table>
+                    <ReportTable>
                       <tbody>
                         {selectedRequest.answers.map((answer) => (
                           <tr key={answer.id}>
@@ -494,7 +496,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </ReportTable>
                   </div>
                 </>
               ) : null}
@@ -502,7 +504,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
               <div className="section-divider" />
               <h3>History</h3>
               <div className="table-wrap">
-                <table>
+                <ReportTable>
                   <tbody>
                     {history.length ? history.map((item) => (
                       <tr key={item.id}>
@@ -516,7 +518,7 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
                       <tr><td className="empty-cell" colSpan={5}>No history found.</td></tr>
                     )}
                   </tbody>
-                </table>
+                </ReportTable>
               </div>
             </div>
           </section>

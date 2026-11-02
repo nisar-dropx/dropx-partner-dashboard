@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -295,7 +297,7 @@ export function DriverReconCashPanel({
 
       {summary && summary.pendingRows.length ? (
         <div className="table-wrap driver-recon-pending-table">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Associate</th>
@@ -323,7 +325,7 @@ export function DriverReconCashPanel({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       ) : summary && !loading ? (
         <p className="driver-recon-all-clear">

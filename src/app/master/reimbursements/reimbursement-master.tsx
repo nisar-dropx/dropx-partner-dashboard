@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveReimbursementMaster } from "./actions";
@@ -174,7 +176,7 @@ export function ReimbursementMaster({
           ) : null}
         </header>
         <div className="rm-table">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 {(tab === "limits"
@@ -299,7 +301,7 @@ export function ReimbursementMaster({
                 </tr>
               ) : null}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
       <p className="rm-note">

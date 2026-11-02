@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -84,7 +86,7 @@ export default async function PaymentBanksPage({ searchParams }: { searchParams?
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Bank</th>
@@ -109,7 +111,7 @@ export default async function PaymentBanksPage({ searchParams }: { searchParams?
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 6 : 5}>No payment banks added yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

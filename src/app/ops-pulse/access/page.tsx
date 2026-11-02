@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -87,7 +89,7 @@ export default async function OpsAccessPage() {
         <section className="panel">
           <div className="panel-head"><div><h2>OpsPulse scope register</h2><p className="subtle">Station scope comes from access permissions. Managers and reporting authorities come from the live People reporting hierarchy.</p></div></div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead><tr><th>User</th><th>Ops role</th><th>Models</th><th>Region</th><th>Reporting authority</th><th>Cluster Manager</th><th>Locations</th><th>Status</th></tr></thead>
               <tbody>
                 {rows.map(({ membership, profile, roleLabel, scoped, modes }) => (
@@ -103,7 +105,7 @@ export default async function OpsAccessPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       </div>

@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentHeadForm } from "@/components/payment-head-form";
@@ -159,7 +161,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <ReportTable>
               <thead>
                 <tr>
                   <th>Code</th>
@@ -213,7 +215,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 13 : 12}>No payment heads added yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </ReportTable>
           </div>
         </section>
       ) : null}

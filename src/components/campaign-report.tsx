@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -165,7 +167,7 @@ export function CampaignReport({
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             {showChannel ? (
               <colgroup>
                 <col style={{ width: "15%" }} />
@@ -226,7 +228,7 @@ export function CampaignReport({
                           <span className={`status-pill ${notificationStatusClass(campaign.status)}`}>{campaign.status}</span>
                         </summary>
                         <div className={`campaign-recipient-table ${compactRecipients ? "compact-recipient-table" : ""}`}>
-                          <table>
+                          <ReportTable>
                             <colgroup>
                               <col style={{ width: "44px" }} />
                               <col style={{ width: "170px" }} />
@@ -257,7 +259,7 @@ export function CampaignReport({
                                 </tr>
                               )) : <tr><td className="empty-cell" colSpan={6}>No recipient rows found.</td></tr>}
                             </tbody>
-                          </table>
+                          </ReportTable>
                         </div>
                       </details>
                     </td>
@@ -265,7 +267,7 @@ export function CampaignReport({
                 );
               }) : <tr><td className="empty-cell" colSpan={headerColumns}>{emptyMessage}</td></tr>}
             </tbody>
-          </table>
+          </ReportTable>
           <div className="pagination-row campaign-pagination">
             <span>{filteredCampaigns.length} campaigns</span>
             <div className="pager">

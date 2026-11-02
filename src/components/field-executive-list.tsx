@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import {PartnerProgressNote} from "./partner-progress-note";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -266,7 +268,7 @@ export function FieldExecutiveList({
         </div>
       </div>
       <div className={`table-wrap field-executive-table-wrap ${openMenuId ? "menu-open" : ""}`}>
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Full name</th>
@@ -330,7 +332,7 @@ export function FieldExecutiveList({
               <tr><td className="empty-cell" colSpan={showActions ? 9 : 8}>{emptyLabel}</td></tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {totalPages > 1 ? (
         <div className="panel-foot pagination">

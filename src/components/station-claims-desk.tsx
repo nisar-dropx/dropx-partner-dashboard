@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { StationClaim } from "@/lib/ops-pulse/station-claims";
@@ -76,7 +78,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
         </div>
         {shown.length ? (
           <div className={styles.tableWrap}>
-            <table className={styles.ledgerTable}>
+            <ReportTable className={styles.ledgerTable}>
               <thead><tr><th>Claim</th><th>Station</th><th>Incident</th><th className={styles.num}>Amount</th><th>Status · next step</th><th /></tr></thead>
               <tbody>
                 {paged.rows.map((c) => {
@@ -101,7 +103,7 @@ export function StationClaimsDesk({ claims, cases, outcomes, settings, stations,
                   ];
                 })}
               </tbody>
-            </table>
+            </ReportTable>
             <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="claims" />
           </div>
         ) : (

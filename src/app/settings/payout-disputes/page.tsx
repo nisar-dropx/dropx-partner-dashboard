@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -388,7 +390,7 @@ function WorkflowForm({
 
             {selectedRoleIds.length ? (
               <div className="table-wrap" style={{ marginTop: 12 }}>
-                <table>
+                <ReportTable>
                   <thead><tr><th>Priority</th><th>Role</th><th>Currently eligible active users</th><th>Permission check</th></tr></thead>
                   <tbody>
                     {selectedRoleIds.map((roleId, index) => {
@@ -421,7 +423,7 @@ function WorkflowForm({
                       );
                     })}
                   </tbody>
-                </table>
+                </ReportTable>
               </div>
             ) : <p className="subtle" style={{ marginTop: 12 }}>Select roles and save to activate this stage.</p>}
           </div>
@@ -585,7 +587,7 @@ export default async function PayoutDisputeWorkflowSettingsPage({ searchParams }
 
           {overrides.length ? (
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead><tr><th>Station</th><th>Initial approval</th><th>Final approval</th><th>Processor</th><th /></tr></thead>
                 <tbody>
                   {overrides.map((workflow) => {
@@ -602,7 +604,7 @@ export default async function PayoutDisputeWorkflowSettingsPage({ searchParams }
                     );
                   })}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
           ) : <div className="panel-body"><p className="subtle">No station overrides. The company default applies everywhere.</p></div>}
         </section>

@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -868,7 +870,7 @@ export function BulkWhatsAppPanel({
               <button className="button ghost compact" disabled={!sendListIds.size && !checkedIds.size} onClick={clearSendList} type="button">Clear</button>
             </div>
             <div className="table-wrap">
-              <table>
+              <ReportTable>
                 <thead>
                   <tr>
                     <th><input aria-label="Select visible recipients" checked={visibleContacts.length > 0 && visibleContacts.every((contact) => checkedIds.has(contact.id))} onChange={toggleVisibleContacts} type="checkbox" /></th>
@@ -899,7 +901,7 @@ export function BulkWhatsAppPanel({
                     </tr>
                   )) : <tr><td className="empty-cell" colSpan={6}>No contacts found.</td></tr>}
                 </tbody>
-              </table>
+              </ReportTable>
             </div>
             {totalPages > 1 ? (
               <div className="panel-foot pagination">

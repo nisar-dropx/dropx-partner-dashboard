@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState, useTransition } from "react";
 import { StatusPill } from "@/components/status-pill";
@@ -144,7 +146,7 @@ export function LocationPortalAccessPanel({ canEdit, products, rows, saveAction 
       {selectedIds.size ? <button className={styles.miniButton} onClick={() => setSelectedIds(new Set())} type="button">Clear selection</button> : null}
     </div> : null}
     <div className="table-wrap">
-      <table style={{ minWidth: 1080 }}>
+      <ReportTable style={{ minWidth: 1080 }}>
         <thead><tr><th style={{ width: 42 }}>{canEdit ? <input aria-label="Select all visible locations" checked={allVisibleSelected} onChange={selectVisible} type="checkbox" /> : null}</th><th>Location</th><th>DropX mailbox</th>{products.map((product) => <th key={product.code}>{product.label}</th>)}<th>Status</th></tr></thead>
         <tbody>
           {visibleRows.map((row) => {
@@ -164,7 +166,7 @@ export function LocationPortalAccessPanel({ canEdit, products, rows, saveAction 
           })}
           {!visibleRows.length ? <tr><td className="empty-cell" colSpan={products.length + 4}>No matching active location was found.</td></tr> : null}
         </tbody>
-      </table>
+      </ReportTable>
     </div>
     {totalPages > 1 ? <div className="pagination"><button className="pager-button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)} type="button">Prev</button><span>Page {currentPage} of {totalPages}</span><button className="pager-button" disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)} type="button">Next</button></div> : null}
     {canEdit && (dirtyIds.length || feedback) ? <div className={styles.footerBar}>

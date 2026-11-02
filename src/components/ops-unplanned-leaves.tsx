@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emptyUnplannedFilters, filterUnplannedRows, unplannedQuery, type UnplannedFilters, type UnplannedWorkspace } from "@/lib/ops-pulse/unplanned-leaves";
 import "./ops-unplanned-leaves.css";
@@ -76,14 +78,14 @@ export function OpsUnplannedLeaves({initial,initialFilters}: {initial:UnplannedW
       </div>
       {badManager?<div className="oul-error" role="alert">This manager is not available in your reporting scope for this date. No other team’s list has been substituted. Clear the manager filter to see your own scope.</div>:null}
       {!badManager&&branches.length>0&&<details className="oul-branches" open><summary>Drill into a manager’s team</summary><div>{branches.map(m=><button key={m.id} onClick={()=>change({manager:m.id,direct:false,location:"",cluster:"",region:"",search:""})}><span>{m.name}<small>{m.role}</small></span><b>{m.count} →</b></button>)}</div></details>}
-      <div className="table-wrap"><table><thead><tr><th>Person / contact</th><th>Location</th><th>Scheduled shift · IST</th><th>Reports to</th><th>Attendance</th></tr></thead>
+      <div className="table-wrap"><ReportTable><thead><tr><th>Person / contact</th><th>Location</th><th>Scheduled shift · IST</th><th>Reports to</th><th>Attendance</th></tr></thead>
         <tbody>{rows.slice(page*25,page*25+25).map(r=><tr key={r.person_id}>
           <td><strong>{r.full_name}</strong><small>{r.worker_code} · {r.role_name}</small>{r.mobile&&<a href={"tel:"+r.mobile.replace(/[^+\d]/g,"")}>{r.mobile}</a>}</td>
           <td><strong>{r.station_code||"Unassigned"}</strong><small>{r.station_name}</small></td>
           <td>{r.shift_code}<small>{r.shift_start.slice(0,5)} – {r.shift_end.slice(0,5)}{r.shift_end<=r.shift_start?" (+1 day)":""}</small></td>
           <td>{r.manager_name||data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||(r.manager_person_ids[0]?"Reporting manager":"Not linked")}{r.next_manager_name?` · N+1 ${r.next_manager_name}`:""}</td>
           <td><span className="status-pill warn">No punch · confirm</span><small>In — · Out —</small></td>
-        </tr>)}</tbody></table>
+        </tr>)}</tbody></ReportTable>
         {!rows.length&&!badManager&&<div className="oul-empty">No people to follow up in this view. Change the filters or attendance day if needed.</div>}
       </div>
       <div className="oul-pagination"><span>{rows.length} people · page {Math.min(page+1,pageCount)} of {pageCount}</span><button className="button secondary" disabled={page===0} onClick={()=>setPage(p=>p-1)}>Previous</button><button className="button secondary" disabled={page+1>=pageCount} onClick={()=>setPage(p=>p+1)}>Next</button></div>

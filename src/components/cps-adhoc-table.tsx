@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Download } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
@@ -68,7 +70,7 @@ export function CpsAdHocTable({ stations, reportParams }: { stations: AdHocActiv
         </a>
       </div>
       <div className="table-wrap cps-adhoc-table-wrap">
-        <table className="cps-adhoc-table">
+        <ReportTable className="cps-adhoc-table">
           <thead><tr>
             <SortHeader active={sortKey === "station"} column="station" direction={sortDirection} label="Station" onSort={sort} />
             <SortHeader active={sortKey === "vanCount"} column="vanCount" direction={sortDirection} label="Adhoc Van" onSort={sort} />
@@ -122,7 +124,7 @@ export function CpsAdHocTable({ stations, reportParams }: { stations: AdHocActiv
             })}
             {!stations.length ? <tr><td className="empty-cell" colSpan={7}>No permitted stations match the selected filters.</td></tr> : null}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
     </>
   );

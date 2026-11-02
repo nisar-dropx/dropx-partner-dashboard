@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { usePathname, useSearchParams } from "next/navigation";
 import { MouseEvent, PointerEvent, useEffect, useMemo, useState } from "react";
@@ -270,7 +272,7 @@ export function UsersListPanel({
         </div>
       </div>
       <div className="table-wrap users-table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>User</th>
@@ -335,7 +337,7 @@ export function UsersListPanel({
               </tr>
             )}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       <div className="mobile-user-cards" aria-label="Users">
         {pagedUsers.length ? pagedUsers.map((user) => {

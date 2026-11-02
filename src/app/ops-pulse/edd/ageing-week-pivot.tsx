@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 /** State × ISO week of promised delivery date — Sum of Order Amount (Ageing let.xlsx). */
 
 import type { CSSProperties } from "react";
@@ -35,7 +37,7 @@ export function AgeingWeekPivot({ rows, title }: { rows: AgeingWeekAmountRow[] |
       <p style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", opacity: 0.75 }}>
         State × ISO week of Promised Delivery Date — same layout as Ageing let.xlsx
       </p>
-      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.85rem", minWidth: 640 }}>
+      <ReportTable style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.85rem", minWidth: 640 }}>
         <thead>
           <tr>
             <th style={th}>Row Labels</th>
@@ -67,7 +69,7 @@ export function AgeingWeekPivot({ rows, title }: { rows: AgeingWeekAmountRow[] |
             <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{inr(grand)}</td>
           </tr>
         </tbody>
-      </table>
+      </ReportTable>
     </section>
   );
 }

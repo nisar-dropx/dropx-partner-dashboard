@@ -1,3 +1,5 @@
+
+import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -116,7 +118,7 @@ export default async function PaymentSettingsPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <ReportTable>
             <thead>
               <tr>
                 <th>Step</th>
@@ -138,7 +140,7 @@ export default async function PaymentSettingsPage() {
                 <tr><td className="empty-cell" colSpan={3}>No payment approval flow added yet.</td></tr>
               )}
             </tbody>
-          </table>
+          </ReportTable>
         </div>
       </section>
     </AppShell>

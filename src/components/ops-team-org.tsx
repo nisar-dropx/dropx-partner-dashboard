@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Search } from "lucide-react";
@@ -175,7 +177,7 @@ function Names({ people }: { people: TeamOrgCoveragePerson[] }) {
 function Coverage({ view }: { view: TeamOrgView }) {
   if (!view.coverage.length) return null;
   const table = <div className="table-wrap team-org-table-wrap">
-    <table className="team-org-table">
+    <ReportTable className="team-org-table">
       <thead><tr><th>Location</th><th>People</th><th>Station lead</th><th>Cluster manager</th><th>Area operations manager</th></tr></thead>
       <tbody>{view.coverage.map((row) => <tr key={row.location}>
         <td><strong>{row.location}</strong></td>
@@ -184,7 +186,7 @@ function Coverage({ view }: { view: TeamOrgView }) {
         <td><Names people={row.clusterManagers} /></td>
         <td><Names people={row.areaManagers} /></td>
       </tr>)}</tbody>
-    </table>
+    </ReportTable>
   </div>;
   const heading = <div><h2>Locations and clusters</h2><p>Who each location&apos;s people report up to.</p></div>;
   // The whole-company list is long, so it starts closed there.
@@ -256,7 +258,7 @@ function Directory({ view, graph, companyName, anchorId, onAnchor }: { view: Tea
     </div> : null}
 
     <div className="table-wrap team-org-table-wrap">
-      <table className="team-org-table">
+      <ReportTable className="team-org-table">
         <thead><tr><th>Person</th><th>Reports to</th><th>Cluster manager</th><th>Department</th><th>Location</th><th>Team</th></tr></thead>
         <tbody>
           {rows.slice(0, limit).map(({ node, depth }) => {
@@ -284,7 +286,7 @@ function Directory({ view, graph, companyName, anchorId, onAnchor }: { view: Tea
           })}
           {!rows.length ? <tr><td className="team-org-empty-cell" colSpan={6}>{term ? "No one in your scope matches this search." : anchor ? `No one reports to ${anchor.name}.` : "No people are mapped in this view."}</td></tr> : null}
         </tbody>
-      </table>
+      </ReportTable>
     </div>
     {rows.length > limit ? <div className="team-org-more">
       <span>Showing {limit} of {rows.length}</span>

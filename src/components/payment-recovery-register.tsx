@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { ChevronDown, Search } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
@@ -362,7 +364,7 @@ export function PaymentRecoveryRegister({ canAdd, canEdit, rows }: {
         <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
       </div>
       {invalidMonthRange ? <div aria-live="polite" className="payout-inline-message error">Debit month from must be on or before debit month to.</div> : null}
-      <div className="table-wrap workforce-advance-table-wrap"><table className="workforce-advance-table"><thead><tr><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th className="payout-money">Value</th><th>Recovery route</th><th>Recover from</th><th className="payout-money">Recovered</th><th className="payout-money">Pending</th><th>Status</th><th>Reference (optional) / reason</th></tr></thead>
+      <div className="table-wrap workforce-advance-table-wrap"><ReportTable className="workforce-advance-table"><thead><tr><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th className="payout-money">Value</th><th>Recovery route</th><th>Recover from</th><th className="payout-money">Recovered</th><th className="payout-money">Pending</th><th>Status</th><th>Reference (optional) / reason</th></tr></thead>
         <tbody>{visible.length ? visible.map((row) => {
           const linkStatus = rowLinkStatus(row);
           const configuring = !row.recoveryMethod && configuringId === row.id;
@@ -386,7 +388,7 @@ export function PaymentRecoveryRegister({ canAdd, canEdit, rows }: {
             {configuring ? <tr><td colSpan={11}><PaymentRecoveryConfigurator caseId={row.id} onCancel={() => setConfiguringId(null)} tid={row.tid} value={row.value} /></td></tr> : null}
           </Fragment>;
         }) : <tr><td className="empty-cell" colSpan={11}>{invalidMonthRange ? "Correct the month range to view recoveries." : "No payment recoveries match this view."}</td></tr>}</tbody>
-      </table></div>
+      </ReportTable></div>
       <div className="workforce-advance-pagination"><label>Rows <select className="field" onChange={(event) => { setSize(event.target.value); setPage(1); }} value={size}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="all">All</option></select></label><span>{filtered.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)} of ${filtered.length}` : "0 records"} · Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(Math.max(1, safePage - 1))} type="button">Previous</button><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(Math.min(pages, safePage + 1))} type="button">Next</button></div>
     </section>
   </div>;

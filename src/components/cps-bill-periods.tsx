@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CpsExpensePeriod } from "@/lib/ops-pulse/cps";
@@ -28,7 +30,7 @@ export function CpsBillPeriods({
         is changed.
       </p>
       <div className="cps-table-wrap">
-        <table>
+        <ReportTable>
           <thead>
             <tr>
               <th>Station / bill</th>
@@ -77,7 +79,7 @@ export function CpsBillPeriods({
               </tr>
             ))}
           </tbody>
-        </table>
+        </ReportTable>
       </div>
       {rows
         .filter((r) => `${r.source}:${r.source_id}` === edit)

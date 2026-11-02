@@ -1,4 +1,6 @@
 "use client";
+import { ReportTable } from "@/components/report-table";
+
 
 import { useMemo, useState } from "react";
 import type { EddPackage } from "@/lib/ops-pulse/edd-worker";
@@ -35,11 +37,11 @@ export function EddAttemptHolds({ packages, stationCode, now, onOpen }: { packag
         <Field label="Sort holds"><select className={s.select} value={sort} onChange={e=>{setSort(e.target.value);setPage(1);}}><option value="attempt">Attempt time</option><option value="tid">Tracking ID</option><option value="state">Current status</option></select></Field>
         <Field label="Hold sort direction"><select className={s.select} value={direction} onChange={e=>{setDirection(e.target.value);setPage(1);}}><option value="asc">Ascending</option><option value="desc">Descending</option></select></Field>
       </div><div className={s.resultBar}><strong>{filtered.length.toLocaleString("en-IN")} matching parcels</strong><div className={s.actions}><button className={s.button} onClick={()=>{choose("all");setQuery("");setSort("attempt");setDirection("asc");}}>Reset filters</button><StationEddDownload href={"/api/ops-pulse/station-edd/report?"+new URLSearchParams({stationCode,report:"holds",category:filter,query,sort,direction})} label="Export matching holds" disabled={!filtered.length}/></div></div></div>
-      <div className={s.tableWrap} role="region" aria-label="Attempt and hold details, scroll horizontally" tabIndex={0}><table className={s.table}><thead><tr><th>Tracking ID / EDD</th><th>Attempt category</th><th>Current source status</th><th>Distinct attempts</th><th>Second attempt · IST</th><th>Received back · IST</th><th>48-hour return observation</th></tr></thead><tbody>{filtered.slice((current-1)*size,current*size).map(row=>{
+      <div className={s.tableWrap} role="region" aria-label="Attempt and hold details, scroll horizontally" tabIndex={0}><ReportTable className={s.table}><thead><tr><th>Tracking ID / EDD</th><th>Attempt category</th><th>Current source status</th><th>Distinct attempts</th><th>Second attempt · IST</th><th>Received back · IST</th><th>48-hour return observation</th></tr></thead><tbody>{filtered.slice((current-1)*size,current*size).map(row=>{
         const elapsed = row.returnedAt ? Math.max(0,now-Date.parse(row.returnedAt)) : null;
         const mismatch = row.pkg.verification?.routeStationCode && row.pkg.verification.routeStationCode !== stationCode;
         return <tr key={row.pkg.trackingId}><td><button className={s.tidButton} onClick={()=>onOpen(row.pkg.trackingId)}>{row.pkg.trackingId}</button><small className={s.cellSub}>{stationEddDate(row.pkg) || "EDD unconfirmed"}</small></td><td>{labels[row.category as Category]}</td><td>{row.state}{mismatch ? <small className={s.cellSub}>Route {row.pkg.verification!.routeStationCode} · location needs reconciliation</small> : null}</td><td>{row.complete ? row.observedAttempts : row.observedAttempts ? `${row.observedAttempts}+ observed` : "Unconfirmed"}</td><td>{stamp(row.secondAttemptAt)}</td><td>{stamp(row.returnedAt)}</td><td>{row.category !== "hcr" ? "—" : !row.atStation || mismatch ? "Station receipt not current/confirmed" : elapsed == null ? "Return time not recorded" : elapsed >= 48*3600000 ? "48h since return elapsed" : `${Math.ceil((48*3600000-elapsed)/3600000)}h to 48h since return`}<small className={s.cellSub}>{row.category === "returningToFc" ? "FC transit observed" : "Ready for FC not source-confirmed"}</small></td></tr>;
-      })}</tbody></table></div>
+      })}</tbody></ReportTable></div>
       {!filtered.length ? <div className={s.empty}>No matching observed parcels. Missing history is not proof of no HFR/HCR.</div> : null}
       <TablePager count={filtered.length} page={current} size={size} onPage={setPage} onSize={value=>{setSize(Number(value));setPage(1);}} noun="parcels"/>
       <p className={s.tableHelp}>The 48-hour figure is explicitly measured from the recorded return receipt. The operational hold-start rule still needs confirmation. Elapsed time never changes a shipment to Ready for FC; that requires the source readiness status.</p>
