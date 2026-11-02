@@ -18,12 +18,14 @@ export async function POST(request: Request) {
     const retryJobs = retryRaw
       ? retryRaw.split(",").map((part) => part.trim()).filter(Boolean)
       : undefined;
+    const reset = String(url.searchParams.get("reset") ?? "").trim() === "1";
     const outcome = await backfillLoadFlashBoard({
       days,
       startIndex,
       date: date || undefined,
       concurrency,
       retryJobs,
+      reset,
     });
     return NextResponse.json(outcome);
   } catch (error) {

@@ -1108,8 +1108,11 @@ export type LoadFlashBoardBackfill = {
   nextIndex: number;
   total: number;
   done: boolean;
-  /** Station|date keys that failed this tick (for a final retry pass). */
+  /** Station|date keys that failed this tick (for end-of-run retry passes). */
   failed: string[];
+  /** Set when this call only wiped prior board pivots (new Refresh 7d run). */
+  reset?: boolean;
+  cleared?: number;
 };
 
 /** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
@@ -1119,8 +1122,10 @@ export async function backfillLoadFlashBoard(opts?: {
   date?: string;
   /** Parallel station×date jobs per tick (worker clamps 1–25). */
   concurrency?: number;
-  /** Explicit failure list for one final retry pass (`STATION|YYYY-MM-DD`). */
+  /** Explicit failure list for end-of-run retry passes (`STATION|YYYY-MM-DD`). */
   retryJobs?: string[];
+  /** Wipe prior board pivots for the window before pulling (new Refresh 7d). */
+  reset?: boolean;
 }): Promise<LoadFlashBoardBackfill> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
@@ -1132,6 +1137,7 @@ export async function backfillLoadFlashBoard(opts?: {
   if (opts?.date) url.searchParams.set("date", opts.date);
   if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
   if (opts?.retryJobs?.length) url.searchParams.set("retryJobs", opts.retryJobs.join(","));
+  if (opts?.reset) url.searchParams.set("reset", "1");
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
@@ -1155,6 +1161,8 @@ export async function backfillLoadFlashBoard(opts?: {
     total: Number(raw.total ?? 0) || 0,
     done: Boolean(raw.done),
     failed,
+    reset: Boolean(raw.reset),
+    cleared: raw.cleared == null ? undefined : Number(raw.cleared) || 0,
   };
 }
 

@@ -531,16 +531,88 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return { response, body };
   }
 
+  async function runRetryPass(keys: string[], passLabel: string, streakTimeoutsRef: { n: number }) {
+    const stillFailed: string[] = [];
+    let deferredRetries = 0;
+    for (let i = 0; i < keys.length; ) {
+      const chunk = keys.slice(i, i + 25);
+      setBackfillNote(`${passLabel} · ${Math.min(i + chunk.length, keys.length)}/${keys.length}`);
+      const params = new URLSearchParams({
+        days: "7",
+        date: payload.businessDate,
+        concurrency: "25",
+        retryJobs: chunk.join(","),
+      });
+      let response: Response;
+      let body: { failed?: string[]; error?: string; advanced?: number; done?: boolean };
+      try {
+        ({ response, body } = await postBackfillTick(params));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Board retry failed.";
+        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+          streakTimeoutsRef.n += 1;
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        throw err instanceof Error ? err : new Error(message);
+      }
+      if (!response.ok) {
+        const message = String(body.error ?? "Board retry failed.");
+        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+          streakTimeoutsRef.n += 1;
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        throw new Error(message);
+      }
+      streakTimeoutsRef.n = 0;
+      const advanced = Number(body.advanced ?? 0) || 0;
+      if (!advanced) {
+        deferredRetries += 1;
+        if (deferredRetries > 8) {
+          stillFailed.push(...chunk);
+          i += chunk.length;
+          deferredRetries = 0;
+          continue;
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      deferredRetries = 0;
+      const failedAgain = new Set((body.failed ?? []).map(String).filter(Boolean));
+      for (const key of chunk) {
+        if (failedAgain.has(key)) stillFailed.push(key);
+      }
+      i += chunk.length;
+    }
+    return stillFailed;
+  }
+
   async function runBackfillLoop() {
-    let startIndex = Math.max(0, backfillCursor.current);
+    // Every Refresh 7d is a new run — wipe prior board pivots first.
+    backfillCursor.current = 0;
+    setBackfillNote("Clearing previous board data…");
+    setBackfillProgress({ done: 0, total: 0 });
+    {
+      const resetParams = new URLSearchParams({
+        days: "7",
+        date: payload.businessDate,
+        concurrency: "25",
+        reset: "1",
+      });
+      const { response, body } = await postBackfillTick(resetParams);
+      if (!response.ok) throw new Error(String(body.error ?? "Unable to clear prior board data."));
+      const total = Number(body.total ?? 0) || 0;
+      if (total > 0) setBackfillProgress({ done: 0, total });
+      setBackfillNote(`Cleared prior board data · pulling ${total || "…"} station-days…`);
+      await reloadBoard().catch(() => undefined);
+    }
+
+    let startIndex = 0;
     let guard = 0;
-    let streakTimeouts = 0;
+    const streakTimeoutsRef = { n: 0 };
     let ticksSinceReload = 0;
     const failedAcc = new Set<string>();
-    if (startIndex > 0) {
-      setBackfillProgress((prev) => prev ?? { done: startIndex, total: Math.max(startIndex, 1) });
-      setBackfillNote(`Resuming board pull · ${startIndex}…`);
-    }
     // ~25 stations/tick → ~10 ticks for 245 jobs; keep headroom for retries.
     while (guard < 40) {
       guard += 1;
@@ -556,8 +628,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         ({ response, body } = await postBackfillTick(params));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Board backfill failed.";
-        if (isTimeoutMessage(message) && streakTimeouts < 4) {
-          streakTimeouts += 1;
+        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+          streakTimeoutsRef.n += 1;
           setBackfillNote(`Worker busy — retrying packet at ${startIndex}…`);
           await new Promise((r) => setTimeout(r, 1500));
           continue;
@@ -567,18 +639,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       }
       if (!response.ok) {
         const message = String(body.error ?? "Board backfill failed.");
-        if (isTimeoutMessage(message) && streakTimeouts < 4) {
-          streakTimeouts += 1;
+        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+          streakTimeoutsRef.n += 1;
           setBackfillNote(`Packet timed out — retrying ${startIndex}…`);
           await new Promise((r) => setTimeout(r, 1500));
           continue;
         }
         backfillCursor.current = startIndex;
         throw new Error(isTimeoutMessage(message)
-          ? "Board pull timed out. Click Refresh 7d again — it resumes where it left off."
+          ? "Board pull timed out. Click Refresh 7d again to start a clean run."
           : message);
       }
-      streakTimeouts = 0;
+      streakTimeoutsRef.n = 0;
       for (const key of body.failed ?? []) {
         if (key) failedAcc.add(String(key));
       }
@@ -607,67 +679,19 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       }
     }
 
-    // One final pass: each failed station-day is attempted exactly once more.
-    const retryList = [...failedAcc];
-    const stillFailed: string[] = [];
-    let deferredRetries = 0;
-    for (let i = 0; i < retryList.length; ) {
-      const chunk = retryList.slice(i, i + 25);
-      setBackfillNote(`Retrying failed pulls · ${Math.min(i + chunk.length, retryList.length)}/${retryList.length}`);
-      const params = new URLSearchParams({
-        days: "7",
-        date: payload.businessDate,
-        concurrency: "25",
-        retryJobs: chunk.join(","),
-      });
-      let response: Response;
-      let body: { failed?: string[]; error?: string; advanced?: number; done?: boolean };
-      try {
-        ({ response, body } = await postBackfillTick(params));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Board retry failed.";
-        if (isTimeoutMessage(message) && streakTimeouts < 4) {
-          streakTimeouts += 1;
-          await new Promise((r) => setTimeout(r, 1500));
-          continue; // same chunk again
-        }
-        throw err instanceof Error ? err : new Error(message);
-      }
-      if (!response.ok) {
-        const message = String(body.error ?? "Board retry failed.");
-        if (isTimeoutMessage(message) && streakTimeouts < 4) {
-          streakTimeouts += 1;
-          await new Promise((r) => setTimeout(r, 1500));
-          continue;
-        }
-        throw new Error(message);
-      }
-      streakTimeouts = 0;
-      const advanced = Number(body.advanced ?? 0) || 0;
-      if (!advanced) {
-        deferredRetries += 1;
-        if (deferredRetries > 8) {
-          // Give up on this chunk rather than hang — treat as still failed.
-          stillFailed.push(...chunk);
-          i += chunk.length;
-          deferredRetries = 0;
-          continue;
-        }
-        await new Promise((r) => setTimeout(r, 1200));
-        continue;
-      }
-      deferredRetries = 0;
-      const failedAgain = new Set((body.failed ?? []).map(String).filter(Boolean));
-      for (const key of chunk) {
-        if (failedAgain.has(key)) stillFailed.push(key);
-      }
-      i += chunk.length;
+    // End-of-run: retry failures twice more (attempt 2, then attempt 3 if still failing).
+    let pending = [...failedAcc];
+    if (pending.length) {
+      pending = await runRetryPass(pending, "Retry 1 of failed pulls", streakTimeoutsRef);
     }
-    if (stillFailed.length) {
+    if (pending.length) {
+      pending = await runRetryPass(pending, "Retry 2 of failed pulls", streakTimeoutsRef);
+    }
+    if (pending.length) {
       setBackfillNote(
-        `Board pull finished · ${stillFailed.length} station-day${stillFailed.length === 1 ? "" : "s"} still failed after retry`,
+        `Board pull finished · ${pending.length} station-day${pending.length === 1 ? "" : "s"} still failed after 2 retries`,
       );
-    } else if (retryList.length) {
+    } else if (failedAcc.size) {
       setBackfillNote("Board pull finished · all retries recovered");
     }
   }
@@ -677,7 +701,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setBusy("refresh");
     setError(null);
     setBackfillNote("Starting last 7 days board pull…");
-    setBackfillProgress((prev) => (backfillCursor.current > 0 ? prev : { done: 0, total: 0 }));
+    setBackfillProgress({ done: 0, total: 0 });
     try {
       // Kick Ops Live in the background — do not block/fail Refresh 7d on its timeout.
       void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
@@ -693,7 +717,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed.";
       setError(isTimeoutMessage(message)
-        ? "Board pull timed out. Click Refresh 7d again — it resumes where it left off."
+        ? "Board pull timed out. Click Refresh 7d again to start a clean run."
         : message);
       // Keep the progress bar + last note so the pause point stays visible.
     } finally {
