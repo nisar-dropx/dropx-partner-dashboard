@@ -31,6 +31,7 @@ export type AttendanceIssueCode =
   | "half_day"
   | "absent"
   | "missing_punch"
+  | "no_record"
   | "policy_review";
 
 export type AttendanceIssue = {
@@ -167,11 +168,16 @@ export function attendanceDayInsight(
   if (!row) {
     return {
       calendarClass: "off",
-      detail: "No attendance record is available for this day.",
+      detail: "No attendance record is available for this day. Request regularization if you worked or the day should be marked differently.",
       headline: "No record",
-      issues: [],
+      issues: [{
+        code: "no_record",
+        label: "No attendance record",
+        message: "There is no finalized attendance for this day. Request regularization if punches or the day outcome are missing.",
+        tone: "amber"
+      }],
       label: "No record",
-      needsRegularization: false,
+      needsRegularization: true,
       payDayType: "no_record",
       tone: "neutral"
     };
@@ -453,8 +459,22 @@ export function attendanceDayInsight(
   }
 
   if (payDayType === "no_record") {
-    return { calendarClass: "off", detail: "No finalized attendance outcome is available for this day.",
-      headline: label, issues: [], label, needsRegularization: false, payDayType, tone: "neutral" };
+    issues.push({
+      code: "no_record",
+      label: "No attendance record",
+      message: "No finalized attendance outcome is available for this day. Request regularization if you worked or the day should be corrected.",
+      tone: "amber"
+    });
+    return {
+      calendarClass: "off",
+      detail: "No finalized attendance outcome is available for this day. Request regularization if you worked or the day should be marked differently.",
+      headline: label || "No record",
+      issues,
+      label: label || "No record",
+      needsRegularization: true,
+      payDayType,
+      tone: "neutral"
+    };
   }
 
   const baseLabel = state.includes("full day") ? "Full day" : label;

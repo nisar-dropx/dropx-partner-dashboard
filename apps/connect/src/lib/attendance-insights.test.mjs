@@ -42,6 +42,26 @@ test("makes an absent zero-punch workday regularizable", () => {
   assert.match(insight.detail, /request regularization/i);
 });
 
+test("makes a No record day regularizable", () => {
+  const empty = attendanceDayInsight(undefined);
+  assert.equal(empty.payDayType, "no_record");
+  assert.equal(empty.needsRegularization, true);
+  assert.deepEqual(empty.issues.map((issue) => issue.code), ["no_record"]);
+
+  const offboarded = attendanceDayInsight(row({
+    status: "offboarded",
+    attendanceStatus: "Offboarded",
+    inTime: "",
+    outTime: "",
+    workHours: "00:00",
+    punchCount: 0
+  }));
+  assert.equal(offboarded.payDayType, "no_record");
+  assert.equal(offboarded.needsRegularization, true);
+  assert.ok(offboarded.issues.some((issue) => issue.code === "no_record"));
+  assert.match(offboarded.detail, /request regularization/i);
+});
+
 test("WFH approval is not a full day or missing-punch warning before finalization", () => {
   // Calendar tile color matters here too: "Upcoming" (shift hasn't started)
   // stays "off" (no data yet), but "Day in progress" and "Finalizing" are an
