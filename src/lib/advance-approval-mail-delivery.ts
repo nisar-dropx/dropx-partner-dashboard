@@ -19,7 +19,7 @@ export async function deliverInitialAdvanceMail(thread:AdvanceMailThread,deps:{
    "Review the amount and recovery terms, then Approve, Return or Reject in DropX One:","https://one.dropxlogistics.com/approvals?section=pay-advances",
    "Further reminders remain in this email conversation. Replying to this email does not record a decision."].join("\n\n"),
    inReplyTo:thread.last_message_id??undefined,references:[...new Set([thread.root_message_id,thread.last_message_id].filter((id):id is string=>Boolean(id)))]});
-  if(!receipt.accepted.includes(thread.recipient_email))throw Error("SMTP did not accept the assigned approver");
+  if(!receipt.accepted.some(address=>typeof address==="string"&&address.toLowerCase()===thread.recipient_email.toLowerCase()))throw Error("SMTP did not accept the assigned approver");
  }catch(error){await deps.finish({status:"failed",messageId,subject,error:error instanceof Error?error.message:"SMTP failed"});return false;}
  // A failed receipt write after SMTP acceptance must retain the lease, not
  // create a second failed attempt or immediately send the message again.

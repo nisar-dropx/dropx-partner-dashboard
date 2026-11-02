@@ -29,6 +29,10 @@ test('later messages retain subject and both reply headers',async()=>{
  const d=deps();await deliverInitialAdvanceMail({...thread,subject:'Original subject',send_count:3,root_message_id:'<root>',last_message_id:'<last>'},d);
  const m=d.calls.find(c=>c[0]==='send')[1];assert.equal(m.subject,'Original subject');assert.equal(m.inReplyTo,'<last>');assert.deepEqual(m.references,['<root>','<last>']);
 });
+test('SMTP address case normalization does not create false retry failures',async()=>{
+ const d=deps();assert.equal(await deliverInitialAdvanceMail({...thread,recipient_email:'Manager@Example.com'},d),true);
+ assert.equal(d.calls.at(-1)[1].status,'sent');
+});
 test('reassignment prevents send; SMTP failure records retry; accepted receipt error never records false failure',async()=>{
  let d=deps();d.current=async()=>false;await deliverInitialAdvanceMail(thread,d);assert.equal(d.calls.some(c=>c[0]==='send'),false);
  d=deps();d.send=async()=>{throw Error('SMTP unavailable')};await deliverInitialAdvanceMail(thread,d);assert.equal(d.calls.at(-1)[1].status,'failed');
