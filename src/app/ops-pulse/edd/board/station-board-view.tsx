@@ -432,7 +432,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
   const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
-  /** Resume Refresh 7d after a proxy timeout instead of restarting from station 0. */
+  /** Resume Refresh today after a proxy timeout instead of restarting from station 0. */
   const backfillCursor = useRef(0);
   const backfillClearSeq = useRef(0);
 
@@ -442,7 +442,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const pivot = useMemo(() => eddPivot(stations, dates), [stations, dates]);
   const ageingWeeks = useMemo(() => collectAgeingWeeks(stations), [stations]);
   const ageing = useMemo(() => ageingPivot(stations, ageingMode, ageingWeeks), [stations, ageingMode, ageingWeeks]);
-  /** When Refresh 7d began — falls back to earliest station save if meta missing. */
+  /** When Refresh today began — falls back to earliest station save if meta missing. */
   const refreshStartedAt = useMemo(() => {
     const fromMeta = payload.refreshStartedAt;
     if (fromMeta && !Number.isNaN(Date.parse(fromMeta))) return fromMeta;
@@ -520,8 +520,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return /aborted due to timeout|timeout|timed out|504|524|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|connection dropped|network|socket/i.test(message);
   }
 
-  /** Station-week jobs (EDD once + 7 date pulls) — keep low to avoid CF drops. */
-  const BOARD_PULL_CONCURRENCY = "2";
+  /** Stations per tick (EDD + C-Return + DSR + Ageing each) — keep ≤4 to avoid CF drops. */
+  const BOARD_PULL_CONCURRENCY = "4";
 
   async function postBackfillTick(params: URLSearchParams) {
     const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
@@ -540,10 +540,10 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const stillFailed: string[] = [];
     let deferredRetries = 0;
     for (let i = 0; i < keys.length; ) {
-      const chunk = keys.slice(i, i + 2);
+      const chunk = keys.slice(i, i + 4);
       setBackfillNote(`${passLabel} · ${Math.min(i + chunk.length, keys.length)}/${keys.length}`);
       const params = new URLSearchParams({
-        days: "7",
+        days: "1",
         date: payload.businessDate,
         concurrency: BOARD_PULL_CONCURRENCY,
         retryJobs: chunk.join(","),
@@ -594,13 +594,13 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   }
 
   async function runBackfillLoop() {
-    // Every Refresh 7d is a new run — wipe prior board pivots first.
+    // Every Refresh today is a new run — wipe prior board pivots first.
     backfillCursor.current = 0;
     setBackfillNote("Clearing previous board data…");
     setBackfillProgress({ done: 0, total: 0 });
     {
       const resetParams = new URLSearchParams({
-        days: "7",
+        days: "1",
         date: payload.businessDate,
         concurrency: BOARD_PULL_CONCURRENCY,
         reset: "1",
@@ -618,11 +618,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const streakTimeoutsRef = { n: 0 };
     let ticksSinceReload = 0;
     const failedAcc = new Set<string>();
-    // Station-centric: each job = EDD once + 7 date-scoped C-Return/DSR/Ageing pulls.
+    // Station-centric: each job = EDD + C-Return + DSR + Ageing for the selected date.
     while (guard < 40) {
       guard += 1;
       const params = new URLSearchParams({
-        days: "7",
+        days: "1",
         startIndex: String(startIndex),
         date: payload.businessDate,
         concurrency: BOARD_PULL_CONCURRENCY,
@@ -652,7 +652,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         }
         backfillCursor.current = startIndex;
         throw new Error(isTransientMessage(message)
-          ? "Worker connection dropped. Click Refresh 7d again — it will resume cleanly."
+          ? "Worker connection dropped. Click Refresh today again — it will resume cleanly."
           : message);
       }
       streakTimeoutsRef.n = 0;
@@ -666,7 +666,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         backfillCursor.current = 0;
         break;
       }
-      // Soft miss (budget / warm-up): retry same index — never mark the week done.
+      // Soft miss (budget / warm-up): retry same index — never mark the run done.
       if (!advanced) {
         setBackfillNote(`Worker deferred packet at ${startIndex} — retrying…`);
         await new Promise((r) => setTimeout(r, 1200));
@@ -676,7 +676,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       backfillCursor.current = startIndex;
       const done = total ? Math.min(startIndex, total) : startIndex;
       if (total > 0) setBackfillProgress({ done, total });
-      setBackfillNote(total ? `Pulling stations (EDD once + 7d) · ${done}/${total}` : "Pulling board data…");
+      setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
       ticksSinceReload += 1;
       if (ticksSinceReload >= 2) {
         ticksSinceReload = 0;
@@ -705,14 +705,14 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const clearSeq = ++backfillClearSeq.current;
     setBusy("refresh");
     setError(null);
-    setBackfillNote("Starting last 7 days board pull…");
+    setBackfillNote("Starting Refresh today…");
     setBackfillProgress({ done: 0, total: 0 });
     try {
-      // Kick Ops Live in the background — do not block/fail Refresh 7d on its timeout.
+      // Kick Ops Live in the background — do not block/fail Refresh today on its timeout.
       void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
       await runBackfillLoop();
       await reloadBoard();
-      setBackfillNote("Last 7 days board data updated.");
+      setBackfillNote("Selected date board data updated.");
       // Keep the full bar visible briefly, then clear.
       window.setTimeout(() => {
         if (clearSeq !== backfillClearSeq.current) return;
@@ -722,7 +722,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed.";
       setError(isTransientMessage(message)
-        ? "Worker connection dropped. Click Refresh 7d again — it will resume cleanly."
+        ? "Worker connection dropped. Click Refresh today again — it will resume cleanly."
         : message);
       // Keep the progress bar + last note so the pause point stays visible.
     } finally {
@@ -940,7 +940,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
 
         <div className={s.actions}>
           <button type="button" disabled={busy !== null} onClick={() => void refresh()}>
-            {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Refresh 7d
+            {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Refresh today
           </button>
           <button type="button" disabled={busy !== null} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
@@ -1193,7 +1193,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             );
           })}
           {!ageing.grandTotal.count && stations.some((row) => row.hasSnapshot) ? (
-            <p className={s.note}>If Ageing is empty, click <strong>Refresh 7d</strong> to pull portal Ageing for the selected date.</p>
+            <p className={s.note}>If Ageing is empty, click <strong>Refresh today</strong> to pull portal Ageing for the selected date.</p>
           ) : null}
         </section>
       ) : null}
@@ -1331,7 +1331,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                                 {station.stationCode}
                               </button>
                             </td>
-                            <td colSpan={7} className={s.muted}>No DA DSR yet — Refresh 7d</td>
+                            <td colSpan={7} className={s.muted}>No DA DSR yet — Refresh today</td>
                           </tr>,
                         ];
                       }
@@ -1397,7 +1397,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       ) : null}
 
       {!pivot.grandTotal && view === "edd" && stations.some((row) => row.hasSnapshot) ? (
-        <p className={s.note}>If cells are empty, click <strong>Refresh 7d</strong> to pull board data for the last week.</p>
+        <p className={s.note}>If cells are empty, click <strong>Refresh today</strong> to pull board data for the selected date.</p>
       ) : null}
 
       {selected ? (
@@ -1596,7 +1596,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                         ? selected.board.daDsr.filter((da) => da.delivered === 0)
                         : selected.board.daDsr;
                       if (!das.length) {
-                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh 7d"}</p>;
+                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh today"}</p>;
                       }
                       const tot = sumDaDsr(das);
                       return (
@@ -1643,7 +1643,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </div>
                 </div>
                 {!tids.length ? (
-                  <p className={s.empty}>No tracking IDs for this station yet. Try Refresh 7d.</p>
+                  <p className={s.empty}>No tracking IDs for this station yet. Try Refresh today.</p>
                 ) : tidMode === "day" ? (
                   <div className={s.tidPlain}>
                     {dayTids.map((row) => (

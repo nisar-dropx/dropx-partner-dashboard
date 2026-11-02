@@ -982,9 +982,9 @@ export type LoadFlashBoardStation = {
 
 export type LoadFlashBoardNetwork = {
   asOf: string;
-  /** When the latest Refresh 7d run started (clear + pull). */
+  /** When the latest Refresh today run started (clear + pull). */
   refreshStartedAt: string | null;
-  /** When the main Refresh 7d pull window finished (retries may still follow). */
+  /** When the main Refresh today pull window finished (retries may still follow). */
   refreshFinishedAt: string | null;
   businessDate: string;
   dates: string[];
@@ -1112,9 +1112,9 @@ export type LoadFlashBoardBackfill = {
   nextIndex: number;
   total: number;
   done: boolean;
-  /** Station|date keys that failed this tick (for end-of-run retry passes). */
+  /** Station codes that failed this tick (for end-of-run retry passes). */
   failed: string[];
-  /** Set when this call only wiped prior board pivots (new Refresh 7d run). */
+  /** Set when this call only wiped prior board pivots (new Refresh today run). */
   reset?: boolean;
   cleared?: number;
 };
@@ -1122,21 +1122,21 @@ export type LoadFlashBoardBackfill = {
 function workerFetchErrorMessage(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : String(error || fallback);
   if (/fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|network|socket/i.test(message)) {
-    return "Worker connection dropped. Click Refresh 7d again — the run will resume from the last packet.";
+    return "Worker connection dropped. Click Refresh today again — the run will resume from the last packet.";
   }
   return message || fallback;
 }
 
-/** Walk last-N-days Station board Amazon pulls (continue with nextIndex until done). */
+/** Walk selected-date Station board Amazon pulls (continue with nextIndex until done). */
 export async function backfillLoadFlashBoard(opts?: {
   days?: number;
   startIndex?: number;
   date?: string;
-  /** Parallel station×date jobs per tick (worker clamps 1–25). */
+  /** Parallel stations per tick (worker clamps 1–4). */
   concurrency?: number;
-  /** Explicit failure list for end-of-run retry passes (`STATION|YYYY-MM-DD`). */
+  /** Explicit failure list for end-of-run retry passes (station codes). */
   retryJobs?: string[];
-  /** Wipe prior board pivots for the window before pulling (new Refresh 7d). */
+  /** Wipe prior board pivots for the selected date before pulling (new Refresh today). */
   reset?: boolean;
 }): Promise<LoadFlashBoardBackfill> {
   const { baseUrl, adminKey } = workerConfig();
@@ -1144,7 +1144,8 @@ export async function backfillLoadFlashBoard(opts?: {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
   }
   const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board/backfill`);
-  if (opts?.days) url.searchParams.set("days", String(opts.days));
+  // Refresh today always pulls the selected business date only.
+  url.searchParams.set("days", "1");
   if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
   if (opts?.date) url.searchParams.set("date", opts.date);
   if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
@@ -1172,7 +1173,7 @@ export async function backfillLoadFlashBoard(opts?: {
     ? raw.failed.map((item) => String(item || "").trim()).filter(Boolean)
     : [];
   return {
-    days: Number(raw.days ?? opts?.days ?? 7) || 7,
+    days: Number(raw.days ?? 1) || 1,
     advanced: Number(raw.advanced ?? 0) || 0,
     nextIndex: Number(raw.nextIndex ?? 0) || 0,
     total: Number(raw.total ?? 0) || 0,
