@@ -50,13 +50,23 @@ function fixture() {
         for (const [field, asc] of [...orders].reverse()) rows = [...rows].sort((a, b) => String(get(a, field)).localeCompare(String(get(b, field))) * (asc ? 1 : -1));
         return { data: rows, error: null };
       };
+      // readAllRows / historical backfill page with .range(); fixture tables stay under one page.
+      let rangeStart = 0; let rangeEnd = Number.POSITIVE_INFINITY;
       const q = {
         select() { return q; }, eq(k, v) { conditions.push(r => get(r, k) === v); return q; },
         in(k, v) { conditions.push(r => v.includes(get(r, k))); return q; },
         gte(k, v) { conditions.push(r => get(r, k) >= v); return q; }, lte(k, v) { conditions.push(r => get(r, k) <= v); return q; },
+        lt(k, v) { conditions.push(r => get(r, k) < v); return q; },
+        ilike(k, v) { const needle = String(v).replaceAll("%", "").toLowerCase(); conditions.push(r => String(get(r, k) ?? "").toLowerCase().includes(needle)); return q; },
+        or() { return q; }, not() { return q; }, is(k, v) { conditions.push(r => (v === null ? get(r, k) == null : get(r, k) === v)); return q; },
         order(k, o = {}) { orders.push([k, o.ascending !== false]); return q; },
+        range(from, to) { rangeStart = from; rangeEnd = to; return q; },
         async maybeSingle() { return { data: result().data[0] ?? null, error: null }; },
-        then(resolve, reject) { return Promise.resolve(result()).then(resolve, reject); }
+        then(resolve, reject) {
+          const page = result();
+          const rows = (page.data ?? []).slice(rangeStart, rangeEnd + 1);
+          return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+        }
       };
       return q;
     },
