@@ -94,10 +94,6 @@
     {
       "path": "/api/cron/attendance-catchup-audit",
       "schedule": "0 0 1 1 *"
-    },
-    {
-      "path": "/api/cron/advance-finance-digest",
-      "schedule": "30 11 * * *"
     }
   ]
 }

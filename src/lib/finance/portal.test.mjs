@@ -50,6 +50,7 @@ const rootMocks = {
   "@/lib/people/surface": { isPeopleHostName: host => host === "people.dropxlogistics.com" },
   "@/lib/finance/navigation": navigation,
   "@/lib/finance/surface": surface,
+  "@/lib/auth-login-error": compile("../auth-login-error.ts"),
   "next/navigation": { redirect }
 };
 test("Finance root redirects to Finance; main Dashboard keeps its existing renderer", async () => {

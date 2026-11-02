@@ -11,8 +11,8 @@ their assigned requests. Recheck assignments, status and SMTP settings before
 sending; completed/reassigned items are removed from the saved payload.
 
 `advance_finance_daily` in `portal_notification_controls` uses the existing Ops
-digest scheduler, durable run uniqueness and SMTP receipt handling. Its dedicated
-11:30 UTC cron has the five-minute portal worker as a retry path. Concurrent calls
+digest scheduler, durable run uniqueness and SMTP receipt handling. The existing
+five-minute portal worker picks it up at 17:00 IST and retries later if needed. Concurrent calls
 share one company/date run. Every daily edition uses the previous email's subject,
 root and last Message-ID, including across month boundaries. Ambiguous SMTP
 delivery is held for verification rather than automatically sent twice.
