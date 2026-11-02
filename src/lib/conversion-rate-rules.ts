@@ -52,17 +52,18 @@ export function resolveConversionRate(input: {
   if (matches.length !== 1) throw new Error("Overlapping conversion rate rules. Resolve the rate configuration before calculating payments.");
   const rule = matches[0];
   if (!input.rows.length) return fallback;
-  let delivered = 0, assigned = 0;
+  let completedTotal = 0, baseTotal = 0;
   for (const row of input.rows) {
     const numeratorValue = row[rule.numerator_source], denominatorValue = row[rule.denominator_source];
     if (numeratorValue == null || denominatorValue == null || numeratorValue === "" || denominatorValue === "") return fallback;
     const numerator = Number(numeratorValue), denominator = Number(denominatorValue);
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || numerator < 0 || denominator < 0 || numerator > denominator) return fallback;
-    delivered += numerator;
-    assigned += denominator;
+    completedTotal += numerator;
+    baseTotal += denominator;
   }
-  if (assigned <= 0) return fallback;
-  const conversion = delivered / assigned * 100;
-  const tier = conversionRateTiers(matches[0].tiers).filter(tier => tier.minimum <= conversion).at(-1)!;
+  if (baseTotal <= 0 || !Number.isFinite(completedTotal) || !Number.isFinite(baseTotal)) return fallback;
+  const conversion = completedTotal / baseTotal * 100;
+  // Cross multiplication avoids a boundary such as 58 / 200 * 100 becoming 28.999999999999996.
+  const tier = conversionRateTiers(rule.tiers).filter(tier => completedTotal * 100 >= tier.minimum * baseTotal).at(-1)!;
   return { rate: tier.rate, ruleId: matches[0].id, conversion };
 }

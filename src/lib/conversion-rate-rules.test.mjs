@@ -15,6 +15,10 @@ test("selects the slab at exact boundaries without rounding conversion", () => {
 test("conversion is a ratio of summed counts, not an average of percentages", () => {
   assert.equal(resolveConversionRate({ ...input, rows: [{ total_delivery: 1, delivery_assigned_count: 1 }, { total_delivery: 79, delivery_assigned_count: 99 }] }).rate, 14);
 });
+test("floating-point percentage division cannot push an exact slab boundary down", () => {
+  assert.equal(resolveConversionRate({ ...input, rules: [{ ...rule, tiers: [{ minimum: 0, rate: 10 }, { minimum: 29, rate: 15 }] }],
+    rows: [{ total_delivery: 58, delivery_assigned_count: 200 }] }).rate, 15);
+});
 test("new methods and conversion inputs work without code-side metric names", () => {
   assert.equal(resolveConversionRate({ ...input, paymentMethodId: "NEW_METHOD", paymentFieldId: "NEW_FIELD",
     rules: [{ ...rule, payment_method_id: "NEW_METHOD", payment_field_id: "NEW_FIELD", numerator_source: "new_completed_metric", denominator_source: "new_base_metric" }],
