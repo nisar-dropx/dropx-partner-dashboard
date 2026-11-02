@@ -537,12 +537,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const stillFailed: string[] = [];
     let deferredRetries = 0;
     for (let i = 0; i < keys.length; ) {
-      const chunk = keys.slice(i, i + 12);
+      const chunk = keys.slice(i, i + 20);
       setBackfillNote(`${passLabel} · ${Math.min(i + chunk.length, keys.length)}/${keys.length}`);
       const params = new URLSearchParams({
         days: "7",
         date: payload.businessDate,
-        concurrency: "12",
+        concurrency: "20",
         retryJobs: chunk.join(","),
       });
       let response: Response;
@@ -599,7 +599,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       const resetParams = new URLSearchParams({
         days: "7",
         date: payload.businessDate,
-        concurrency: "12",
+        concurrency: "20",
         reset: "1",
       });
       const { response, body } = await postBackfillTick(resetParams);
@@ -615,14 +615,14 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const streakTimeoutsRef = { n: 0 };
     let ticksSinceReload = 0;
     const failedAcc = new Set<string>();
-    // 12 concurrent station-days — high enough for speed, low enough to avoid Amazon/proxy collapse.
-    while (guard < 60) {
+    // 20 concurrent station-days with sequential Amazon pulls per station.
+    while (guard < 40) {
       guard += 1;
       const params = new URLSearchParams({
         days: "7",
         startIndex: String(startIndex),
         date: payload.businessDate,
-        concurrency: "12",
+        concurrency: "20",
       });
       let response: Response;
       let body: { nextIndex?: number; total?: number; done?: boolean; advanced?: number; failed?: string[]; error?: string };
