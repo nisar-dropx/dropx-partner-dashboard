@@ -518,9 +518,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setRun(next.run);
   }
 
-  function isTimeoutMessage(message: string) {
-    return /aborted due to timeout|timeout|timed out|504|524/i.test(message);
+  function isTransientMessage(message: string) {
+    return /aborted due to timeout|timeout|timed out|504|524|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|connection dropped|network|socket/i.test(message);
   }
+
+  /** Station-week jobs (EDD once + 7 date pulls) — keep low to avoid CF drops. */
+  const BOARD_PULL_CONCURRENCY = "2";
 
   async function postBackfillTick(params: URLSearchParams) {
     const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
@@ -539,12 +542,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const stillFailed: string[] = [];
     let deferredRetries = 0;
     for (let i = 0; i < keys.length; ) {
-      const chunk = keys.slice(i, i + 20);
+      const chunk = keys.slice(i, i + 2);
       setBackfillNote(`${passLabel} · ${Math.min(i + chunk.length, keys.length)}/${keys.length}`);
       const params = new URLSearchParams({
         days: "7",
         date: payload.businessDate,
-        concurrency: "20",
+        concurrency: BOARD_PULL_CONCURRENCY,
         retryJobs: chunk.join(","),
       });
       let response: Response;
@@ -553,18 +556,18 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         ({ response, body } = await postBackfillTick(params));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Board retry failed.";
-        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
         throw err instanceof Error ? err : new Error(message);
       }
       if (!response.ok) {
         const message = String(body.error ?? "Board retry failed.");
-        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
         throw new Error(message);
@@ -601,14 +604,14 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       const resetParams = new URLSearchParams({
         days: "7",
         date: payload.businessDate,
-        concurrency: "20",
+        concurrency: BOARD_PULL_CONCURRENCY,
         reset: "1",
       });
       const { response, body } = await postBackfillTick(resetParams);
       if (!response.ok) throw new Error(String(body.error ?? "Unable to clear prior board data."));
       const total = Number(body.total ?? 0) || 0;
       if (total > 0) setBackfillProgress({ done: 0, total });
-      setBackfillNote(`Cleared prior board data · pulling ${total || "…"} station-days…`);
+      setBackfillNote(`Cleared prior board data · pulling ${total || "…"} stations…`);
       await reloadBoard().catch(() => undefined);
     }
 
@@ -617,14 +620,14 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const streakTimeoutsRef = { n: 0 };
     let ticksSinceReload = 0;
     const failedAcc = new Set<string>();
-    // 20 concurrent station-days with sequential Amazon pulls per station.
+    // Station-centric: each job = EDD once + 7 date-scoped C-Return/DSR/Ageing pulls.
     while (guard < 40) {
       guard += 1;
       const params = new URLSearchParams({
         days: "7",
         startIndex: String(startIndex),
         date: payload.businessDate,
-        concurrency: "20",
+        concurrency: BOARD_PULL_CONCURRENCY,
       });
       let response: Response;
       let body: { nextIndex?: number; total?: number; done?: boolean; advanced?: number; failed?: string[]; error?: string };
@@ -632,10 +635,10 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         ({ response, body } = await postBackfillTick(params));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Board backfill failed.";
-        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
           setBackfillNote(`Worker busy — retrying packet at ${startIndex}…`);
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
         backfillCursor.current = startIndex;
@@ -643,15 +646,15 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       }
       if (!response.ok) {
         const message = String(body.error ?? "Board backfill failed.");
-        if (isTimeoutMessage(message) && streakTimeoutsRef.n < 4) {
+        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
-          setBackfillNote(`Packet timed out — retrying ${startIndex}…`);
-          await new Promise((r) => setTimeout(r, 1500));
+          setBackfillNote(`Connection dropped — retrying ${startIndex}…`);
+          await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
         backfillCursor.current = startIndex;
-        throw new Error(isTimeoutMessage(message)
-          ? "Board pull timed out. Click Refresh 7d again to start a clean run."
+        throw new Error(isTransientMessage(message)
+          ? "Worker connection dropped. Click Refresh 7d again — it will resume cleanly."
           : message);
       }
       streakTimeoutsRef.n = 0;
@@ -675,7 +678,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       backfillCursor.current = startIndex;
       const done = total ? Math.min(startIndex, total) : startIndex;
       if (total > 0) setBackfillProgress({ done, total });
-      setBackfillNote(total ? `Pulling board data (last 7 days) · ${done}/${total}` : "Pulling board data…");
+      setBackfillNote(total ? `Pulling stations (EDD once + 7d) · ${done}/${total}` : "Pulling board data…");
       ticksSinceReload += 1;
       if (ticksSinceReload >= 2) {
         ticksSinceReload = 0;
@@ -693,7 +696,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     }
     if (pending.length) {
       setBackfillNote(
-        `Board pull finished · ${pending.length} station-day${pending.length === 1 ? "" : "s"} still failed after 2 retries`,
+        `Board pull finished · ${pending.length} station${pending.length === 1 ? "" : "s"} still failed after 2 retries`,
       );
     } else if (failedAcc.size) {
       setBackfillNote("Board pull finished · all retries recovered");
@@ -720,8 +723,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       }, 2500);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed.";
-      setError(isTimeoutMessage(message)
-        ? "Board pull timed out. Click Refresh 7d again to start a clean run."
+      setError(isTransientMessage(message)
+        ? "Worker connection dropped. Click Refresh 7d again — it will resume cleanly."
         : message);
       // Keep the progress bar + last note so the pause point stays visible.
     } finally {
@@ -979,7 +982,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             <span>
               {backfillNote
                 || (backfillProgress && backfillProgress.total > 0
-                  ? `Pulling board data (last 7 days) · ${backfillProgress.done}/${backfillProgress.total}`
+                  ? `Pulling stations · ${backfillProgress.done}/${backfillProgress.total}`
                   : "Pulling board data…")}
             </span>
           </div>
@@ -989,7 +992,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
 
       <div className={s.kpis}>
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong><small>{regionLabel}</small></article>
-        <article className={s.kpi}><span>EDD packages</span><strong>{totals.edd.toLocaleString("en-IN")}</strong><small>Promised-date backlog</small></article>
+        <article className={s.kpi}><span>EDD packages</span><strong>{totals.edd.toLocaleString("en-IN")}</strong><small>Inducted × promised date</small></article>
         <article className={s.kpi}><span>C-Return</span><strong>{totals.cReturn.toLocaleString("en-IN")}</strong><small>{totals.pickupPct}% pickup done</small></article>
         <article className={s.kpi}><span>Zero-delivery DAs</span><strong>{totals.zero.toLocaleString("en-IN")}</strong><small>of {totals.das.toLocaleString("en-IN")} DAs</small></article>
       </div>
@@ -997,8 +1000,8 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
       {view === "edd" ? (
         <section className={s.panel}>
           <div className={s.panelHead}>
-            <h3>EDD · station × promised date</h3>
-            <span>Click a station for shareable detail + TIDs</span>
+            <h3>EDD · Inducted × promised delivery date</h3>
+            <span>Portal PackageResults backlog — not Ops Live pending. Click a station for TIDs.</span>
           </div>
           {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
             const local = eddPivot(group.stations, dates);
@@ -1423,11 +1426,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                 <button type="button" onClick={() => setPanelMode("card")}>
                   <LayoutList size={14} /> View station card
                 </button>
-              ) : view !== "ageing" ? (
+              ) : (
                 <button type="button" disabled={tidsBusy} onClick={() => void loadTids()}>
                   {tidsBusy ? <Loader2 size={14} className="spin" /> : <ListOrdered size={14} />} View TIDs
                 </button>
-              ) : null}
+              )}
             </div>
 
             {tidsError ? <p className={s.error}>{tidsError}</p> : null}
@@ -1463,7 +1466,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
                     <strong>EDD · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
-                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · last 5 days + upcoming</small>
+                    <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · Inducted × promised delivery date</small>
                   </div>
                   <div className={s.shareCols}><span>Promised date</span><span>Packages</span></div>
                   <div className={s.shareRows}>
