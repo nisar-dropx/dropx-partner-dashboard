@@ -11,7 +11,7 @@ test('station context exposes only evidence even to managers',()=>{
 test('management form reviews evidence, never submits or enables/removes',()=>{
  assert.deepEqual(actions({stationView:false}),[]);
  assert.deepEqual(actions({stationView:false,state:'awaiting_review'}),['approve','return']);
- assert.deepEqual(actions({stationView:false,state:'approved'}),['tracking','won','lost']);
+ assert.deepEqual(actions({stationView:false,state:'approved'}),['tracking']);
  assert.deepEqual(actions({stationView:false,state:'with_vendor'}),['tracking','won','lost']);
  assert.deepEqual(actions({stationView:false,state:'awaiting_review',canManage:false}),[]);
 });

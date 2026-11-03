@@ -7,3 +7,9 @@
 .links { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12px; }
 .returnNote { margin: 8px 12px; padding: 10px 12px; border: 1px solid #f4d49b; border-radius: 8px; background: #fff7e8; color: #805015; font-size: 13px; }
 .returnNote p { margin: 5px 0; white-space: pre-wrap; }
+
+.fields { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 14px; }
+.lifecycle { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 12px 0; font-size: 12px; }
+.lifecycle li { padding: 6px 10px; border: 1px solid #dce3ed; border-radius: 16px; color: #586a86; }
+.lifecycle li[aria-current="step"] { background: #fff1e9; border-color: #f5a47f; color: #aa3e15; font-weight: 700; }
+.lifecycle li[data-complete="true"] { background: #edf7f0; color: #266442; }

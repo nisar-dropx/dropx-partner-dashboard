@@ -717,6 +717,40 @@ await db.query(`select nl_loss_recovery_approve('${C}','2026-09','LEFT-NO-PAY',1
 await db.query(grantLeft('LEFT-NO-PAY',true,0));
 await db.query(waiveLeft('LEFT-NO-PAY',`employee:${uid(12)}`));
 eq('No-pay balance write-off uses explicit exception',Number((await one("select amount from nl_recovery_waivers where case_key='LEFT-NO-PAY'")).amount),1000);
+
+// Manual Amazon ticket tracking uses the same atomic review/financial state machine.
+const ticketMigration=readFileSync('supabase/migrations/20261103144613_loss_redispute_ticket_lifecycle.sql','utf8');
+await db.exec(ticketMigration); await db.exec(ticketMigration);
+await db.exec(`insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status)
+ values('${C}','nl','2026-09','TICKET','BLR1',100,'Recoverable')`);
+const ticketStep=(version,action,details={},actor=SLP)=>rd(version,action,details,actor).replaceAll('CONTRACTOR','TICKET');
+const ticketRow=()=>one("select * from nl_case_response_windows where case_key='TICKET'");
+await db.query(ticketStep(0,'activate'));
+await mustReject('Ticket before evidence rejected',ticketStep(1,'tracking',{note:'Amazon ticket has been raised',tt_reference:'AMZ-101',followup_on:'2027-01-01'}));
+await db.query(ticketStep(1,'response',{note:'Station submitted supporting documents',reason:'Incorrect loss assignment',tt_reference:'CLOAK-101',evidence_url:'https://example.com/evidence'},CM));
+await mustReject('SLP cannot confirm own station evidence',ticketStep(2,'approve',{note:'Evidence confirmed by station'},CM));
+await db.query(ticketStep(2,'approve',{note:'SLP verified the station evidence'}));
+eq('Cloak ticket retained separately',(await ticketRow()).response_details.tt_reference,'CLOAK-101');
+eq('Amazon ticket starts blank',(await ticketRow()).tt_reference,null);
+await mustReject('Outcome cannot skip ticket raised',ticketStep(3,'won',{note:'Amazon confirmed the outcome',tt_reference:'AMZ-101'}));
+for (const details of [{tt_reference:''},{followup_status:'won'},{followup_on:null},{tt_reference:'x'.repeat(161)}]) {
+ await mustReject('Invalid ticket metadata rejected',ticketStep(3,'tracking',{note:'Ticket raised for station loss',tt_reference:'AMZ-101',followup_on:'2027-01-01',followup_status:'filed',...details}));
+}
+await db.query(ticketStep(3,'tracking',{note:'Ticket raised for station loss',tt_reference:'AMZ-101',followup_on:'2027-01-01',followup_status:'filed'}));
+eq('Ticket raised is saved',(await ticketRow()).followup_status,'filed');
+await mustReject('Stale update cannot overwrite ticket',ticketStep(3,'tracking',{note:'Stale status from another browser',tt_reference:'AMZ-OLD',followup_on:'2027-01-01'}));
+await db.query(ticketStep(4,'tracking',{note:'Followed up; awaiting Amazon response',tt_reference:'AMZ-102',followup_on:'2027-01-03',followup_status:'with_vendor'}));
+eq('Awaiting Amazon saved',(await ticketRow()).followup_status,'with_vendor');
+eq('Follow-up and corrected ID saved',((await ticketRow()).tt_reference),'AMZ-102');
+eq('Every update retains history',(await one("select count(*)::int n from nl_case_response_events where case_key='TICKET'")).n,5);
+eq('Previous ticket remains in audit',(await one("select tracking->'before'->>'tt_reference' ticket from nl_case_response_events where case_key='TICKET' and tracking->'after'->>'version'='5'")).ticket,'AMZ-101');
+await db.query(ticketStep(5,'won',{note:'Amazon accepted the claim; recovered',tt_reference:'AMZ-102'}));
+eq('Recovered closes case',(await ticketRow()).enabled,false);
+eq('Recovered keeps canonical payroll stop',(await ticketRow()).workflow_status,'won');
+eq('Final outcome clears follow-up',(await ticketRow()).followup_on,null);
+await mustReject('Closed case cannot accept more follow-up',ticketStep(6,'tracking',{note:'Do not overwrite closed case',tt_reference:'AMZ-102',followup_on:'2027-01-04'}));
+eq('Browser role cannot call transition',(await one("select has_function_privilege('authenticated','nl_redispute_transition(uuid,text,text,integer,text,jsonb,uuid,text)','execute') x")).x,false);
+eq('Anonymous cannot call transition',(await one("select has_function_privilege('anon','nl_redispute_transition(uuid,text,text,integer,text,jsonb,uuid,text)','execute') x")).x,false);
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
 

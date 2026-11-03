@@ -772,3 +772,26 @@ alter loss, payroll, approval or collection records.
 - Intake rejects duplicate category tickets through all active workflow stages and fails closed without a valid publication deadline.
 - One-time November 1 closure covers exactly 45 September disputes raised before October 16, confirmed previously settled by Managing Partner. Original rows are retained in immutable closure events; `legacy_resolution_unverified` is true. No payroll or payment amount is modified.
 - Both One and Ops show the same short ticket reference. Ops closed history includes earlier closures and rejected tickets. Complete history remains accessible; verified corrections still require a newer publication and the approved net delta.
+
+### Manual redispute ticket lifecycle — 3 November 2026
+
+Redispute tracking opens the existing case editor in a dialog on the same page.
+SLP Manager (or the existing authorised final roles) confirms station evidence,
+records the Amazon ticket ID, then updates Ticket raised / Awaiting response from
+Amazon, next follow-up and remarks. Overdue, Due today and Upcoming filters use IST.
+Station Cloak ticket and Amazon ticket remain separate. Recovered and Unsuccessful
+are available only after a ticket is recorded. Every update remains versioned and
+in the existing append-only history; conflicts require an explicit reload.
+
+`20261103144613_loss_redispute_ticket_lifecycle.sql` extends the existing service-only
+transition. It uses existing `followup_status` values `filed` and `with_vendor`, while
+keeping `workflow_status = with_vendor` for both. Recovered maps to `won`: stop future
+recovery, without inventing a collection or changing completed payroll. Unsuccessful
+maps to `lost` and retains the open-payroll resume-month checks. No new role grants,
+tables, notifications or Amazon integration are introduced.
+
+Release the migration individually with the matching app update. Do not blanket-push
+migrations. The migration is tested twice in the lifecycle PGlite fixture, including
+independent review, ticket-before-outcome, invalid status/ID, stale version, preserved
+history and service-only grants. This entry describes the implementation; it does not
+assert that the migration or app has been deployed.
