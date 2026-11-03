@@ -32,7 +32,7 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
   const activeSort = controls ? sort : selectedSort;
   const activeDirection = controls ? (sort === "station" ? "asc" : "desc") : sortDirection;
   const activeStatus = controls ? status : selectedStatus;
-  const filtered = filterLossFacts(facts,{status:activeStatus}), rows = groupLossFacts(filtered,activeSort,activeDirection), total = totalLossFacts(filtered);
+  const filtered = filterLossFacts(facts,{status:activeStatus}), rows = groupLossFacts(filtered,activeSort,activeDirection,!initial), total = totalLossFacts(filtered);
   function stationHref(station:string) {
     const [path,query] = href.split("?"), q = new URLSearchParams(query);
     q.set("station",station);
@@ -40,7 +40,7 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
     return `${path}?${q}`;
   }
   const metrics = (row: ReturnType<typeof totalLossFacts>) => <>
-    <td><Pair count={row.count} amount={row.amount}/></td>
+    <td><Pair {...(initial ? {count:row.count,amount:row.amount} : row.recoverable)}/></td>
     {initial ? <>
       <td className={styles.warn}><Pair {...row.stationPending}/></td><td className={styles.info}><Pair {...row.amazon}/></td>
     </> : <>
@@ -70,9 +70,9 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
   return <section className={`${styles.panel} ${compact ? styles.compact : ""}`} aria-label={title}>
     <div className={styles.head}><h2>{title}</h2>{headerControls}{controls ? <div className={styles.controls}>
       <select aria-label={`${title} status`} value={status} onChange={e=>setStatus(e.target.value)}>{LOSS_SUMMARY_STATUSES.filter(([key])=>initial ? ["all","station","amazon"].includes(key) : !["station","amazon"].includes(key)).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
-      <select aria-label={`${title} sort`} value={sort} onChange={e=>setSort(e.target.value as LossFactSort)}>{sorts.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
+      <select aria-label={`${title} sort`} value={sort} onChange={e=>setSort(e.target.value as LossFactSort)}>{sorts.map(([key,label])=><option key={key} value={key}>{!initial && key === "amount" ? "Recoverable value · highest first" : !initial && key === "count" ? "Recoverable shipments · highest first" : label}</option>)}</select>
     </div>:null}</div>
-    <div className={styles.scroll}><ReportTable><caption className={styles.caption}>Each cell shows shipment count and exact rupee value. Updated means recovery details saved, not money recovered. Recovered includes partial collections; outstanding includes unconfirmed draft payroll.</caption><thead><tr><th aria-sort={ariaSort("station")}>{sortHeader("Station", "station")}</th><th aria-sort={ariaSort("amount")} title={compact ? "Confirmed recoverable shipment count and value" : "Total tracking IDs and loss value"}>{sortHeader(compact ? "Recoverable" : "Total shipments / value", "amount", "Sort by loss value")}</th>
+    <div className={styles.scroll}><ReportTable><caption className={styles.caption}>Each cell shows shipment count and exact rupee value. Recoverable excludes non-recoverable cases. Updated means recovery details saved, not money recovered. Recovered includes partial collections; outstanding includes unconfirmed draft payroll.</caption><thead><tr><th aria-sort={ariaSort("station")}>{sortHeader("Station", "station")}</th><th aria-sort={ariaSort("amount")} title={initial ? "Total tracking IDs and loss value" : "Confirmed recoverable shipment count and value"}>{sortHeader(initial ? "Total shipments / value" : compact ? "Recoverable" : "Recoverable shipments / value", "amount", initial ? "Sort by loss value" : "Sort by recoverable value")}</th>
       {initial ? <><th>Waiting on station</th><th>Awaiting Amazon / final</th></> : <>
         {compact ? <><th aria-sort={ariaSort("pending")}>{sortHeader("Needs update", "pending", "Sort by pending update value")}</th><th title="Saved recovery details; not confirmed collections">Updated</th></> : <><th>Updated</th><th>Pending update</th></>}
         <th aria-sort={ariaSort("recovered")} title="Shipments with full or partial confirmed recovery">{sortHeader("Recovered", "recovered")}</th>

@@ -42,6 +42,7 @@ assert.equal(filterLossFactsByOwnership(summary,ownership,{cluster:'cm:kerala',r
 assert.equal(filterLossFactsByOwnership(summary,ownership,{}).length,3,'All ownership filters preserve the complete authorized population');
 const totals=totalLossFacts(facts);
 assert.equal(totals.amount,370);assert.equal(totals.recovered,50);assert.equal(totals.remaining,190);assert.equal(totals.updated.count,1);assert.equal(totals.pending.count,2);assert.equal(totals.nonrecoverable.count,1);
+assert.deepEqual(totals.recoverable,{count:3,amount:250},'recoverable total excludes Initial and Non-recoverable cases');
 assert.equal(filterLossFacts(facts,{station:'AAA',stage:'final',status:'pending_update'}).length,1);
 assert.equal(filterLossFacts(facts,{station:'OUTSIDE'}).length,0);
 assert.equal(filterLossFacts(facts,{period:'2025-01'}).length,0);
@@ -49,6 +50,7 @@ assert.deepEqual(groupLossFacts(facts,'station').map(r=>r.station),['AAA','BBB']
 assert.deepEqual(groupLossFacts(facts,'station','desc').map(r=>r.station),['BBB','AAA'],'station header reverses direction');
 assert.equal(groupLossFacts(facts,'remaining')[0].station,'AAA');
 assert.equal(groupLossFacts(facts,'remaining','asc')[0].station,'BBB','numeric headers support ascending order');
+assert.equal(groupLossFacts([...facts,row('large-nonrecoverable',1000,{station_code:'BBB',source_status:'Non-Recoverable'})],'amount','desc',true)[0].station,'AAA','final value sort uses recoverable value, not non-recoverable loss value');
 facts=lossFacts([row('receipt',100,{recovery:plan(100,{outcome_code:'already_recovered',recovery_details:{receipt_reference:'R',received_amount:'100'}})})],[line('receipt','a',40)],['Recoverable']);
 assert.equal(facts[0].recovered,100,'receipt and payroll cannot double count the same loss');assert.equal(facts[0].remaining,0);
 assert.equal(recoverableLossFacts(facts).length,1,'fully recovered cases remain visible');

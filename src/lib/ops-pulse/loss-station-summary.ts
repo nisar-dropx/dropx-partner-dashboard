@@ -126,6 +126,7 @@ export function totalLossFacts(rows: LossFact[]) {
   };
   return { count: rows.length, amount: amount(r=>r.amount), recovered: amount(r=>r.recovered), remaining: amount(r=>r.remaining), waived: amount(r=>r.waived), draft: amount(r=>r.draft), draftCount: rows.filter(r=>r.draft>0).length,
     recoveredCount: rows.filter(r=>r.recovered>0).length, remainingCount: rows.filter(r=>r.remaining>0).length,
+    recoverable: group(r=>r.recoverable),
     updated: group(r=>r.updated), pending: group(r=>r.recoverable&&!r.updated),
     stationPending: group(r=>r.waitingStation), amazon: group(r=>r.waitingAmazon),
     nonrecoverable: group(r=>r.stage==="final"&&!r.recoverable),
@@ -135,14 +136,15 @@ export function groupLossFacts(
   rows: LossFact[],
   sort: LossFactSort = "amount",
   direction: LossFactSortDirection = sort === "station" ? "asc" : "desc",
+  recoverableTotals = false,
 ) {
   const groups = [...new Set(rows.map(r=>r.station))].map(station=>({ station, ...totalLossFacts(rows.filter(r=>r.station===station)) }));
   const factor = direction === "asc" ? 1 : -1;
   return groups.sort((a,b) => {
     if (sort === "station") return factor * a.station.localeCompare(b.station);
     if (sort === "updatedAt") return factor * a.updatedAt.localeCompare(b.updatedAt) || a.station.localeCompare(b.station);
-    const left = sort === "count" ? a.count : sort === "recovered" ? a.recovered : sort === "remaining" ? a.remaining : sort === "pending" ? a.pending.amount : a.amount;
-    const right = sort === "count" ? b.count : sort === "recovered" ? b.recovered : sort === "remaining" ? b.remaining : sort === "pending" ? b.pending.amount : b.amount;
+    const left = sort === "count" ? (recoverableTotals ? a.recoverable.count : a.count) : sort === "recovered" ? a.recovered : sort === "remaining" ? a.remaining : sort === "pending" ? a.pending.amount : recoverableTotals ? a.recoverable.amount : a.amount;
+    const right = sort === "count" ? (recoverableTotals ? b.recoverable.count : b.count) : sort === "recovered" ? b.recovered : sort === "remaining" ? b.remaining : sort === "pending" ? b.pending.amount : recoverableTotals ? b.recoverable.amount : b.amount;
     return factor * (left - right) || a.station.localeCompare(b.station);
   });
 }
