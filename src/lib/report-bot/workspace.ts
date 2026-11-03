@@ -17,3 +17,7 @@ export function reportBotHref(workspace: ReportBotWorkspace, tab = "today") {
 export function reportBotChatHref(workspace: ReportBotWorkspace, group?: string) {
   return `/report-bot/chats?workspace=${workspace}${group ? `&group=${encodeURIComponent(group)}` : ""}`;
 }
+
+export function reportBotSetupHref(workspace: ReportBotWorkspace) {
+  return `/report-bot/setup?workspace=${workspace}`;
+}

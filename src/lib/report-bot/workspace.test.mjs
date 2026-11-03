@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { PGlite } from '@electric-sql/pglite';
-import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref } from './workspace.ts';
+import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, reportBotSetupHref } from './workspace.ts';
 
 const require = createRequire(import.meta.url);
-const workspaceModule = { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref };
+const workspaceModule = { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, reportBotSetupHref };
 const accessModule = { exports: {} };
 let currentAuth;
 const hasPermission = (auth, code, action) => Boolean(auth.permissions[code]?.[action === 'edit' ? 'canEdit' : 'canView']);
@@ -25,6 +25,7 @@ test('workspace routes default old links to Dark Store, preserve Last Mile links
   assert.equal(reportBotWorkspace('last_mile'), 'last_mile');
   assert.throws(() => reportBotWorkspace('all'), /Invalid/);
   assert.equal(reportBotPage('last_mile'), 'ops_lm_report_bot');
+  assert.equal(reportBotSetupHref('last_mile'), '/report-bot/setup?workspace=last_mile');
   assert.match(reportBotHref('last_mile','groups'), /workspace=last_mile&tab=groups/);
   assert.match(reportBotChatHref('last_mile','a'), /workspace=last_mile&group=a/);
 });
@@ -43,6 +44,9 @@ test('all-location access alone never grants bot access; scope and configurable 
   currentAuth=auth('ops_lm_report_bot');
   assert.equal(await reportBotApiAuthorization('access'),null);
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),currentAuth);
+  currentAuth=auth('ops_report_bot');
+  assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'Dark Store access cannot authorize Last Mile session requests');
+  currentAuth=auth('ops_lm_report_bot');
   currentAuth.permissions.ops_lm_report_bot.canEdit=false;
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'permission changes apply without a hardcoded role bypass');
 });

@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
+import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotSetupHref, reportBotChatHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
 
 import { ReportTable } from "@/components/report-table";
@@ -111,7 +111,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   const canEdit = hasPermission(authorization, pageCode, "edit");
   // Old links to the moved tabs land on the setup page instead of a blank tab.
   const requested = searchParams?.tab;
-  if (requested === "connection" || requested === "settings") redirect(SETUP_HREF);
+  if (requested === "connection" || requested === "settings") redirect(reportBotSetupHref(workspace));
   if (requested === "chats") redirect(reportBotChatHref(workspace));
   const tab: Tab = TABS.find((entry) => entry.key === requested)?.key ?? "today";
   const db = reportBotDb();
@@ -169,7 +169,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           </div>
           <div className={s.formActions}>
             <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
-            {workspace === "dark_store" ? <Link className={s.button} href={SETUP_HREF}><Settings2 size={15} aria-hidden />Setup</Link> : null}
+            <Link className={s.button} href={reportBotSetupHref(workspace)}><Settings2 size={15} aria-hidden />Setup</Link>
           </div>
         </header>
 
@@ -887,7 +887,7 @@ function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit
               </div>
             </details>
           ))}
-          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">Install TCC3 templates or add one manually.</Empty> : null}
+          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">{workspace === "dark_store" ? "Install TCC3 templates or add one manually." : "Add a report type to define your Last Mile checks."}</Empty> : null}
           {canEdit ? (
             <details className={`${s.item} ${s.addItem}`} open={!reportTypes.length}>
               <summary><span>+ Add report type</span><ChevronRight size={18} className={s.chevron} aria-hidden /></summary>

@@ -1,3 +1,4 @@
+import { reportBotWorkspace } from "@/lib/report-bot/workspace";
 import { NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { reportBotApiAuthorization } from "@/lib/report-bot/access";
@@ -7,8 +8,11 @@ import { workerRequest, WorkerError, type WorkerSession } from "@/lib/report-bot
 export const dynamic = "force-dynamic";
 
 /** Polled by the Connection tab while linking. Only people who can edit the bot see the QR. */
-export async function GET() {
-  const authorization = await reportBotApiAuthorization("edit");
+export async function GET(request: Request) {
+  let workspace;
+  try { workspace = reportBotWorkspace(new URL(request.url).searchParams.get("workspace")); }
+  catch { return NextResponse.json({ error: "Invalid workspace" }, { status: 400 }); }
+  const authorization = await reportBotApiAuthorization("edit", workspace);
   if (!authorization) return NextResponse.json({ error: "Access denied" }, { status: 403 });
   const settings = await loadReportBotSettings(authorization.companyId!);
   try {
