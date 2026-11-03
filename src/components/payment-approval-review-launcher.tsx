@@ -1,8 +1,6 @@
 "use client";
-import { ReportTable } from "@/components/report-table";
 
-
-import { ExternalLink, Eye, X } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -94,13 +92,6 @@ function hasValue(value: string | null) {
   return Boolean(value && value.trim() && value.trim() !== "-");
 }
 
-function attachmentPreviewKind(name: string) {
-  const extension = name.toLowerCase().split(".").pop();
-  if (extension && ["avif", "bmp", "gif", "jfif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension)) return "image";
-  if (extension === "pdf") return "document";
-  return "unsupported";
-}
-
 export function PaymentApprovalReviewLauncher({
   canAct,
   initiallyOpen = false,
@@ -114,14 +105,12 @@ export function PaymentApprovalReviewLauncher({
 }) {
   const router = useRouter();
   const reviewRef = useRef<HTMLElement>(null);
-  const attachmentRef = useRef<HTMLElement>(null);
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(initiallyOpen);
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailAttempt, setDetailAttempt] = useState(0);
-  const [attachment, setAttachment] = useState<ReviewAttachment | null>(null);
   const [comments, setComments] = useState("");
   const [decisionError, setDecisionError] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -129,7 +118,7 @@ export function PaymentApprovalReviewLauncher({
   useEffect(() => setMounted(true), []);
   useEffect(() => {
     if (!open || !mounted) return;
-    const panel = attachment ? attachmentRef.current : reviewRef.current;
+    const panel = reviewRef.current;
     if (!panel) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -142,8 +131,7 @@ export function PaymentApprovalReviewLauncher({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (attachment) setAttachment(null);
-        else close();
+        close();
       }
       if (event.key !== 'Tab') return;
       const elements = targets(), first = elements[0], last = elements[elements.length - 1];
@@ -157,7 +145,7 @@ export function PaymentApprovalReviewLauncher({
       if (!wasInert) shell?.removeAttribute('inert');
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [attachment, mounted, open]);
+  }, [mounted, open]);
 
   useEffect(() => {
     if (!open || detail) return;
@@ -199,7 +187,6 @@ export function PaymentApprovalReviewLauncher({
   ], [summary]);
 
   function close() {
-    setAttachment(null);
     setOpen(false);
     if (!initiallyOpen) return;
     const url = new URL(window.location.href);
@@ -254,36 +241,24 @@ export function PaymentApprovalReviewLauncher({
             <article><small>Payment head</small><strong>{summary.paymentHeadName}</strong></article>
             <article><small>{summary.amountEstimated ? "Estimated amount" : "Amount"}</small><strong>{summary.amountText}</strong></article>
             <article><small>Approval status</small><span className={`status-pill ${summary.statusTone || ""}`}>{summary.statusLabel}</span></article>
-            <article><small>Current stage</small><strong>{summary.currentOwner || "Unassigned"}</strong><span>{summary.currentRole}{displayedTotal ? ` · ${displayedStep || 1} of ${displayedTotal}` : ""}</span></article>
+            <article><small>Location</small><strong>{detail?.locationLabel || summary.locationCode}</strong>{detail?.shipmentCount != null ? <span>{detail.shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
           </div>
 
           <PaymentCostSummary actual={summary.amountActual} estimate={summary.amountRequested} shipments={detail?.shipmentCount ?? null} />
 
-          {summary.approvalRoutingReason ? <details className="payment-review-additional-details payment-review-routing-note"><summary>Approval routing</summary><p>{summary.approvalRoutingReason}</p></details> : null}
-
-          {canAct ? <section className="payment-approval-action-form payment-review-fast-actions">
-            <div className="payment-approval-decision-intro"><div><strong>Decision required</strong><span>{displayedStep && displayedTotal ? `${finalStep ? "Final approval" : "Approval"} step ${displayedStep} of ${displayedTotal}` : "Additional evidence loads below without blocking your action."}</span></div><span className="status-pill warn">Awaiting your action</span></div>
-            {summary.remarks?.trim() ? <p className="payment-requestor-remarks"><strong>Requester note:</strong> {summary.remarks}</p> : null}
-            <label>Decision note<textarea className="field" onChange={(event) => setComments(event.target.value)} rows={2} value={comments} /><small>Optional when approving. Required when returning or rejecting.</small></label>
-            {decisionError ? <p className="message-panel error" role="alert">{decisionError}</p> : null}
-            <div className="payment-approval-action-buttons">
-              <button className="button payment-approve-button" onClick={() => void decide("approve")} type="button">{finalStep ? "Approve final" : "Approve & continue"}</button>
-              <button className="button payment-return-button" onClick={() => void decide("return")} type="button">Return for correction</button>
-              <button className="button payment-reject-button" onClick={() => void decide("reject")} type="button">Reject request</button>
-            </div>
-          </section> : null}
+          {summary.approvalRoutingReason ? <div className="message-panel payment-review-route-summary"><strong>{summary.currentOwner ? `Pending with ${summary.currentOwner}` : "Approval route"}</strong><p>{summary.currentRole}{displayedTotal ? ` · ${displayedStep || 1} of ${displayedTotal}` : ""}</p><p>{summary.approvalRoutingReason}</p></div> : null}
 
           <details className="payment-review-additional-details">
             <summary><span>Payment and beneficiary details</span><small>Open only when needed</small></summary>
-            <dl className="payment-review-fact-grid">{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+            <div className="form-grid three">{details.map(([label, value]) => <label key={label}>{label}<input className="field" readOnly value={value} /></label>)}</div>
           </details>
 
           <div className="section-divider" />
-          <div className="payment-review-section-head"><div><h3>Request evidence</h3><p>Supporting details and attachments.</p></div><span>{detail ? `${detail.attachmentCount} attachments` : "Loading"}</span></div>
+          <div className="payment-review-section-head"><div><h3>Request details</h3><p>Fields and evidence supplied with this request.</p></div><span>{detail ? `${detail.attachmentCount} attachments` : "Loading"}</span></div>
           {detailLoading ? <div className="payment-review-optional-loading" role="status"><span className="inline-spinner" aria-hidden="true" /><div><strong>Loading additional evidence</strong><small>You can approve, return, reject, or open another request now.</small></div></div> : null}
           {detailError ? <div className="message-panel error" role="alert"><strong>Additional evidence unavailable</strong><p>{detailError}</p><button className="button secondary compact" onClick={() => { setDetailError(""); setDetailAttempt((value) => value + 1); }} type="button">Retry details</button></div> : null}
           {detail?.replacement ? <div className="message-panel"><strong>{detail.replacement.reason}</strong><p>{detail.replacement.number} · {detail.replacement.model} · Replacement date: {detail.replacement.date}</p></div> : null}
-          {detail?.answers.length ? <div className="table-wrap payment-review-answers"><ReportTable reportHeaders={["Field", "Response / attachment"]}><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></ReportTable></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
+          {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><a aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" href={file.url} rel="noreferrer" target="_blank" title="View attachment"><Eye size={16} /></a></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
 
           {detail?.volumeDate && summary.locationId ? <PaymentVolumeContext date={detail.volumeDate} locationId={summary.locationId} /> : null}
           {detail?.fuel ? <div className="van-fuel-review"><strong>{detail.fuel.vehicle_no}</strong><span>Fuel date · {detail.fuel.fuel_date}</span><span>{detail.fuel.litres != null ? `${detail.fuel.litres} L` : "Litres pending bill"}</span></div> : null}
@@ -294,19 +269,24 @@ export function PaymentApprovalReviewLauncher({
           {summary.paymentHeadCode === "VAN_ADHOC" ? <PaymentApprovalAdhocHistory requestId={summary.id} /> : null}
           {detail?.trackingCount ? <PaymentApprovalShipments count={detail.trackingCount} requestId={summary.id} /> : null}
 
-          {detail?.logs.length ? <details className="payment-review-additional-details"><summary><span>Request history</span><small>{detail.logs.length} events</small></summary><div className="table-wrap"><ReportTable><thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Remarks</th><th>Date · IST</th></tr></thead><tbody>{detail.logs.map((entry) => <tr key={entry.id}><td>{entry.action}</td><td>{entry.actor}</td><td>{entry.role}</td><td>{entry.comments || "-"}</td><td>{displayDateTime(entry.createdAt)}</td></tr>)}</tbody></ReportTable></div></details> : null}
+          {canAct ? <>
+            <div className="section-divider" />
+            <section className="payment-approval-action-form">
+              <div className="payment-approval-decision-intro"><div><strong>Decision required</strong><span>{displayedStep && displayedTotal ? `${finalStep ? "Final approval" : "Approval"} step ${displayedStep} of ${displayedTotal}` : "Review the request details before recording your decision."}</span></div><span className="status-pill warn">Awaiting your action</span></div>
+              {summary.remarks?.trim() ? <p className="payment-requestor-remarks"><strong>Requester note:</strong> {summary.remarks}</p> : null}
+              <label>Decision note<textarea className="field" onChange={(event) => setComments(event.target.value)} rows={2} value={comments} /><small>Optional when approving. Required when returning or rejecting.</small></label>
+              {decisionError ? <p className="message-panel error" role="alert">{decisionError}</p> : null}
+              <div className="payment-approval-action-buttons">
+                <button className="button payment-approve-button" onClick={() => void decide("approve")} type="button">{finalStep ? "Approve final" : "Approve & continue"}</button>
+                <button className="button payment-return-button" onClick={() => void decide("return")} type="button">Return for correction</button>
+                <button className="button payment-reject-button" onClick={() => void decide("reject")} type="button">Reject request</button>
+              </div>
+            </section>
+          </> : null}
+
+          {detail?.logs.length ? <details className="payment-review-additional-details"><summary><span>Request history</span><small>{detail.logs.length} events</small></summary><div className="table-wrap"><table><thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Remarks</th><th>Date · IST</th></tr></thead><tbody>{detail.logs.map((entry) => <tr key={entry.id}><td>{entry.action}</td><td>{entry.actor}</td><td>{entry.role}</td><td>{entry.comments || "-"}</td><td>{displayDateTime(entry.createdAt)}</td></tr>)}</tbody></table></div></details> : null}
         </div>
       </section>
-
-      {attachment ? <div className="modal-backdrop payment-attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setAttachment(null); }}>
-        <section ref={attachmentRef} aria-label={`Attachment ${attachment.name}`} aria-modal="true" className="modal-panel payment-attachment-preview-modal" role="dialog">
-          <div className="panel-head"><div><small>Request attachment</small><h2>{attachment.name}</h2></div><button aria-label="Close attachment" className="icon-button" onClick={() => setAttachment(null)} type="button"><X size={18} /></button></div>
-          {attachmentPreviewKind(attachment.name) === "image" ? <div className="payment-attachment-preview-canvas"><img alt={attachment.name} className="payment-attachment-preview-image" src={attachment.url} /></div> : null}
-          {attachmentPreviewKind(attachment.name) === "document" ? <iframe className="payment-attachment-preview-frame" src={attachment.url} title={attachment.name} /> : null}
-          {attachmentPreviewKind(attachment.name) === "unsupported" ? <div className="payment-attachment-preview-unavailable"><strong>Preview is not available for this file type.</strong><span>Use Open full size to view or download the attachment.</span></div> : null}
-          <div className="payment-attachment-preview-actions"><a className="button secondary" href={attachment.url} rel="noreferrer" target="_blank"><ExternalLink size={16} />Open full size</a></div>
-        </section>
-      </div> : null}
     </div>
   ) : null;
 
