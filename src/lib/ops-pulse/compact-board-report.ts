@@ -29,7 +29,7 @@ export function boardDeliverySummary(stations: StationBoardStation[], zeroOnly =
 
 /** One ordering and column projection for screen, Excel and share images. */
 export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort, options: { dsr: boolean; singleStation: boolean; groupByStation?: boolean }) {
-  const grouped = options.dsr && options.groupByStation !== false;
+  const grouped = options.groupByStation ?? options.dsr;
   let headers = [...table.headers];
   let rows = table.rows.map(row => row.map(cell => ({ ...cell })));
   if (options.dsr) {
@@ -55,7 +55,7 @@ export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort
   if (stationIndex >= 0 && options.singleStation) {
     headers.splice(stationIndex, 1);
     rows = rows.map(row => row.filter((_, i) => i !== stationIndex));
-    if (options.dsr && totals.length) rows[rows.length - 1][0] = { text: "Grand Total", bold: true, align: "left" };
+    if (headers.includes("DA's Name") && totals.length) rows[rows.length - 1][0] = { text: "Grand Total", bold: true, align: "left" };
   } else if (grouped && stationIndex >= 0) {
     rows.forEach((row, i) => { if (rowStations[i] && !groupStarts[i]) row[stationIndex] = { ...row[stationIndex], text: "" }; });
   }

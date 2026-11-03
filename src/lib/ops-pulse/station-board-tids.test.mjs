@@ -41,3 +41,12 @@ test("C-Return rolls picked-up Amazon states into PICKUP_DONE", () => {
   assert.equal(rows.find((row) => row.trackingId === "P1")?.status, "PICKUP_DONE");
   assert.equal(rows.find((row) => row.trackingId === "P2")?.status, "AT_STATION");
 });
+
+test('C-Return fallback is selected per station so mixed snapshot generations remain visible', () => {
+ const rows = mapBoardTidExportRows([
+  { stationCode:'KLZA',trackingId:'1',bucket:'BoardCReturn',state:'DELAYED',driverId:'A',driverName:'A',edd:'' },
+  { stationCode:'KLZA',trackingId:'1',bucket:'Pickup',state:'DELAYED',driverId:'A',driverName:'A',edd:'' },
+  { stationCode:'GDRD',trackingId:'2',bucket:'Pickup',state:'AT_STATION',driverId:'B',driverName:'B',edd:'' },
+ ], 'creturn');
+ assert.deepEqual(rows.map(r=>r.stationCode), ['KLZA','GDRD']);
+});

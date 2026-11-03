@@ -19,7 +19,7 @@ function todayKolkata() {
 export default async function StationBoardPage({
   searchParams,
 }: {
-  searchParams?: { date?: string; region?: string; view?: string; stations?: string; clusters?: string };
+  searchParams?: { date?: string; region?: string; view?: string; stations?: string; clusters?: string; detail?: string; layout?: string };
 }) {
   const authorization = await requireEddAccess("edd_station_board");
   const companyId = requireCompanyId(authorization);
@@ -82,6 +82,8 @@ export default async function StationBoardPage({
             initialView={String(searchParams?.view ?? "")}
             initialStations={String(searchParams?.stations ?? "")}
             initialClusters={String(searchParams?.clusters ?? "")}
+            initialDetail={String(searchParams?.detail ?? "")}
+            initialLayout={String(searchParams?.layout ?? "")}
           />
         ) : null}
       </div>

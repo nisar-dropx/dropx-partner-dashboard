@@ -1,4 +1,5 @@
 "use client";
+import { cReturnDetailTable, dsrStationTable, pendingCReturn, type CReturnAssociate, type BoardDetailLevel } from "@/lib/ops-pulse/board-detail-report";
 import { ReportTable } from "@/components/report-table";
 
 
@@ -49,6 +50,8 @@ type Props = {
   initialView?: string;
   initialStations?: string;
   initialClusters?: string;
+  initialDetail?: string;
+  initialLayout?: string;
 };
 
 type BlockBusy = "image" | "share" | null;
@@ -145,32 +148,6 @@ function buildShareTable(
       { text: String(pivot.grandTotal), bold: true, align: "right" },
     ]);
     return { title: `EDD · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
-  }
-
-  if (view === "creturn") {
-    const headers = ["Station", ...CRETURN_DISPLAY.map((k) => CRETURN_SHORT[k]), "Total", "Pickup %"];
-    const rows: BoardShareCell[][] = stations.map((station) => [
-      { text: station.stationCode, bold: true, align: "left" },
-      ...CRETURN_DISPLAY.map((status) => ({
-        text: station.board.cReturn[status] ? String(station.board.cReturn[status]) : "0",
-        align: "right" as const,
-      })),
-      { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" },
-      { text: station.board.cReturnTotal ? `${station.board.pickupDonePct}%` : "—", bold: true, bg: station.board.cReturnTotal ? pickupPctColor(station.board.pickupDonePct) : undefined, color: station.board.cReturnTotal ? pickupPctTextColor(station.board.pickupDonePct) : undefined, align: "right" },
-    ]);
-    const tot = sumCReturn(stations);
-    rows.push([
-      { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
-      ...CRETURN_DISPLAY.map((status) => ({
-        text: String(tot.byStatus[status] ?? 0),
-        bold: true,
-        align: "right" as const,
-        bg: "#edf2f8",
-      })),
-      { text: String(tot.total), bold: true, align: "right", bg: "#edf2f8" },
-      { text: tot.total ? `${tot.pickupDonePct}%` : "—", bold: true, bg: tot.total ? pickupPctColor(tot.pickupDonePct) : undefined, color: tot.total ? pickupPctTextColor(tot.pickupDonePct) : undefined, align: "right" },
-    ]);
-    return { title: `C-Return · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
   }
 
   if (view === "ageing") {
@@ -274,7 +251,7 @@ function buildShareTable(
   };
 }
 
-export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters }: Props) {
+export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout }: Props) {
   const [payload, setPayload] = useState(initial);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initial.run);
   const [view, setView] = useState<StationBoardView>(() => asView(initialView));
@@ -282,7 +259,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [stationFilter, setStationFilter] = useState<Set<string>>(() => new Set((initialStations || "").split(",").filter(Boolean)));
   const [clusterFilter, setClusterFilter] = useState<Set<string>>(() => new Set((initialClusters || "").split(",").filter(Boolean)));
   const [sorts, setSorts] = useState<Record<string, BoardReportSort>>({});
-  const sort = sorts[view] ?? { header: view === "zero" ? DSR_HEADERS.oor : view === "dsr" ? DSR_HEADERS.dsrPct : "Station", direction: view === "dsr" || view === "zero" ? "desc" : "asc" };
+  const [levels, setLevels] = useState<Record<string, BoardDetailLevel>>(() => initialDetail === "station" || initialDetail === "associate" ? { [asView(initialView)]: initialDetail } : {});
+  const level = levels[view] ?? (view === "creturn" ? "station" : "associate");
+  const [groupByStation, setGroupByStation] = useState(initialLayout === "grouped");
+  const hasDetailViews = view === "creturn" || view === "dsr" || view === "zero";
+  const sortKey = `${view}-${level}-${groupByStation}`;
+  const sort = sorts[sortKey] ?? { header: view === "creturn" ? "Pending pickup" : view === "zero" ? DSR_HEADERS.oor : view === "dsr" ? DSR_HEADERS.dsrPct : "Station", direction: hasDetailViews ? "desc" : "asc" };
+  const [cReturnData, setCReturnData] = useState<{ key: string; rows: CReturnAssociate[]; error?: string } | null>(null);
+  const [detailRetry, setDetailRetry] = useState(0);
   const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
@@ -349,19 +333,50 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const pct = (value: number | null) => value == null ? "—" : `${value.toFixed(1)}%`;
   const reportTime = stations.map(row => row.fetchedAt).filter((at): at is string => !!at).sort().at(-1) || payload.asOf;
   const singleStation = stations.length === 1;
+  const cReturnKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt])]);
+  const needsCReturn = view === "creturn" && level === "associate";
+  const detailPending = needsCReturn && cReturnData?.key !== cReturnKey;
+  const detailError = needsCReturn && cReturnData?.key === cReturnKey ? cReturnData.error : undefined;
+  const detailUnavailable = detailPending || !!detailError;
+  const cReturnRows = cReturnData?.key === cReturnKey && !cReturnData.error ? cReturnData.rows : [];
+  useEffect(() => {
+    if (!needsCReturn) return;
+    const controller = new AbortController();
+    const [date, stationSnapshots] = JSON.parse(cReturnKey) as [string, [string, string | null][]];
+    const codes = stationSnapshots.map(([code]) => code);
+    if (!codes.length) { setCReturnData({ key: cReturnKey, rows: [] }); return; }
+    const params = new URLSearchParams({ date, kind: "creturn", stations: codes.join(","), detail: "associate" });
+    void (async () => {
+      try {
+        const response = await fetch(`/api/ops-pulse/edd/board/tids?${params}`, { cache: "no-store", signal: controller.signal });
+        const body = await response.json();
+        if (!response.ok || !Array.isArray(body.associates)) throw new Error(body.error || "Unable to load C-Return associates.");
+        if (!controller.signal.aborted) setCReturnData({ key: cReturnKey, rows: body.associates });
+      } catch (error) {
+        if (!controller.signal.aborted) setCReturnData({ key: cReturnKey, rows: [], error: error instanceof Error ? error.message : "Unable to load C-Return associates." });
+      }
+    })();
+    return () => controller.abort();
+  }, [needsCReturn, cReturnKey, detailRetry]);
+  const cReturnShown = needsCReturn
+    ? cReturnRows.reduce((a, r) => ({ total: a.total + r.total, picked: a.picked + (r.statuses.PICKUP_DONE || 0), pending: a.pending + pendingCReturn(r.statuses, r.total) }), { total: 0, picked: 0, pending: 0 })
+    : stations.reduce((a, r) => ({ total: a.total + r.board.cReturnTotal, picked: a.picked + r.board.pickupDone, pending: a.pending + pendingCReturn(r.board.cReturn, r.board.cReturnTotal) }), { total: 0, picked: 0, pending: 0 });
   function reportFor(blockStations: StationBoardStation[], label: string) {
-    const table = buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
+    const table = view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
+      : (view === "dsr" || view === "zero") && level === "station" ? dsrStationTable(blockStations, stationNames, view === "zero")
+      : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
     const d = boardDeliverySummary(blockStations, view === "zero");
     const stats = view === "dsr" || view === "zero"
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Attempted ${pct(d.attemptPct)} (${count(d.attempted)}) · Rejected ${pct(d.rejectPct)} (${count(d.rejected)})`
       : "";
     return prepareBoardReport({ ...table,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
-      subtitle: `${table.subtitle} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}`,
-    }, sort, { dsr: view === "dsr" || view === "zero", singleStation: view !== "zero" && blockStations.length === 1, groupByStation: view !== "zero" });
+      subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}`,
+    }, sort, { dsr: level === "associate" && (view === "dsr" || view === "zero"), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
   const report = reportFor(stations, regionLabel);
   function excelReport(table = report, tidSheet?: ExcelReport["extraSheets"]): ExcelReport {
+    if (detailUnavailable) throw new Error("Wait for associate details to load, then retry.");
     return {
       title: table.title,
       headers: table.headers,
@@ -423,7 +438,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }];
   }
 
-  function changeView(next: StationBoardView) { setView(next); syncUrl(next); setTids(null); }
+  function changeView(next: StationBoardView) { setView(next); setTids(null); }
+  useEffect(() => { syncUrl(view); }, [view, level, groupByStation, stationFilter, clusterFilter, regions, payload.businessDate]);
 
 
   function goToDate(date: string) {
@@ -447,6 +463,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     const url = new URL(window.location.href);
     url.searchParams.set("view", nextView);
     url.searchParams.set("date", payload.businessDate);
+    url.searchParams.set("detail", level);
+    url.searchParams.set("layout", groupByStation ? "grouped" : "combined");
     for (const [key, values] of [["region", regions], ["stations", stationFilter], ["clusters", clusterFilter]] as const) {
       if (values.size) url.searchParams.set(key, [...values].join(","));
       else url.searchParams.delete(key);
@@ -455,7 +473,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   }
 
   function boardHref(date: string) {
-    const params = new URLSearchParams({ date, view });
+    const params = new URLSearchParams({ date, view, detail: level, layout: groupByStation ? "grouped" : "combined" });
     for (const [key, values] of [["region", regions], ["stations", stationFilter], ["clusters", clusterFilter]] as const) {
       if (values.size) params.set(key, [...values].join(","));
     }
@@ -984,26 +1002,34 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <EddMultiSelect label="Regions" options={STATION_BOARD_REGIONS.map(r => r.id)} selected={regions} onChange={setRegions} renderOption={id => STATION_BOARD_REGIONS.find(r => r.id === id)?.label || id} />
         </div>
 
+        {hasDetailViews ? <div className={s.segment} aria-label="Report detail">
+          <button type="button" aria-pressed={level === "station"} onClick={() => setLevels(p => ({ ...p, [view]: "station" }))}>Station summary</button>
+          <button type="button" aria-pressed={level === "associate"} onClick={() => setLevels(p => ({ ...p, [view]: "associate" }))}>Associate detail</button>
+        </div> : null}
+        {hasDetailViews && level === "associate" ? <div className={s.segment} aria-label="Associate layout">
+          <button type="button" aria-pressed={!groupByStation} onClick={() => setGroupByStation(false)}>Combined</button>
+          <button type="button" aria-pressed={groupByStation} onClick={() => setGroupByStation(true)}>Group by station</button>
+        </div> : null}
         <div className={s.actions}>
           <button type="button" disabled={busy !== null} onClick={() => void refresh()}>
             {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
             {busy === "refresh" ? " Working…" : " Refresh"}
           </button>
-          <button type="button" disabled={busy !== null} onClick={() => void onDownload()}>
+          <button type="button" disabled={busy !== null || detailUnavailable} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
           </button>
           <button
             type="button"
-            disabled={busy !== null}
+            disabled={busy !== null || detailUnavailable}
             onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: false, scope: "all" })}
           >
             {busy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
           </button>
-          <CopyReportImage resetKey={`${view}-${ageingMode}-${reportTime}-${[...stationFilter]}-${[...clusterFilter]}-${[...regions]}-${JSON.stringify(sort)}`} disabled={busy !== null || !report.rows.length} getImages={() => renderBoardShareImages(report, true)} />
+          <CopyReportImage resetKey={`${view}-${level}-${groupByStation}-${ageingMode}-${reportTime}-${[...stationFilter]}-${[...clusterFilter]}-${[...regions]}-${JSON.stringify(sort)}`} disabled={busy !== null || detailUnavailable || !report.rows.length} getImages={() => renderBoardShareImages(report, true)} />
           <button
             type="button"
             className={s.primary}
-            disabled={busy !== null}
+            disabled={busy !== null || detailUnavailable}
             onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: true, scope: "all" })}
           >
             {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
@@ -1043,6 +1069,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <article className={s.kpi} title="Attempted = delivered + failed + rejected; percentage of total shipments"><span>Attempted</span><strong>{pct(delivery.attemptPct)} <small>({count(delivery.attempted)})</small></strong></article>
           <article className={s.kpi} title="Rejected / total shipments"><span>Rejected</span><strong>{pct(delivery.rejectPct)} <small>({count(delivery.rejected)})</small></strong></article>
           <article className={s.kpi}><span>On road</span><strong>{pct(delivery.roadPct)} <small>({count(delivery.oor)})</small></strong></article>
+        </> : view === "creturn" ? <>
+          <article className={s.kpi}><span>Total C-Return</span><strong>{detailUnavailable ? "—" : count(cReturnShown.total)}</strong></article>
+          <article className={s.kpi}><span>Pending pickup</span><strong>{detailUnavailable ? "—" : count(cReturnShown.pending)}</strong></article>
+          <article className={s.kpi}><span>Pickup done</span><strong>{detailUnavailable ? "—" : count(cReturnShown.picked)} <small>{!detailUnavailable && cReturnShown.total ? `(${Math.round(cReturnShown.picked / cReturnShown.total * 100)}%)` : ""}</small></strong></article>
         </> : view === "ageing" ? <>
           <article className={s.kpi}><span>Ageing shipments</span><strong>{count(ageing.grandTotal.count)}</strong></article>
           <article className={s.kpi}><span>Ageing value</span><strong>₹{inr(ageing.grandTotal.amount)}</strong></article>
@@ -1064,22 +1094,25 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div>
         <div className={s.reportMeta}>
           <span>{stations.length} stations{view === "dsr" || view === "zero" ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
-          <span>{view === "dsr" || view === "zero" ? (view === "zero" ? "Sorted across stations · percentages of total shipments" : "Sorted within station · percentages of total shipments") : "Select a station for details"}</span>
+          <span>{view === "dsr" || view === "zero" ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
-        <div className={s.scroll}>
+        {detailUnavailable ? <div className={s.empty} role={detailError ? "alert" : "status"}>
+          {detailError || "Loading C-Return associates…"}
+          {detailError ? <button type="button" onClick={() => { setCReturnData(null); setDetailRetry(n => n + 1); }}>Retry</button> : null}
+        </div> : <div className={s.scroll}>
           <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
             <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-              <button type="button" className={s.sortButton} title={header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [view]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+              <button type="button" className={s.sortButton} title={header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
             </th>)}</tr></thead>
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
               {row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
-                {((report.headers[column] === "Station" && cell.text) || (singleStation && column === 0 && report.rowStations[i])) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(report.rowStations[i])}>{cell.text}</button> : cell.text}
+                {((report.headers[column] === "Station" && cell.text) || (singleStation && !report.headers.includes("Station") && column === 0 && report.rowStations[i])) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(report.rowStations[i])}>{cell.text}</button> : cell.text}
               </td>)}
             </tr>)}</tbody>
             {report.totalRows ? <tfoot>{report.rows.slice(-report.totalRows).map((row, i) => <tr key={i}>{row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align }}>{cell.text}</td>)}</tr>)}</tfoot> : null}
           </ReportTable>
           {!stations.length || !report.rows.length ? <p className={s.empty}>No matching records for these filters.</p> : null}
-        </div>
+        </div>}
       </section>
 
       {!pivot.grandTotal && view === "edd" && stations.some((row) => row.hasSnapshot) ? (
