@@ -360,9 +360,68 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }, sort, { dsr: view === "dsr" || view === "zero", singleStation: blockStations.length === 1 });
   }
   const report = reportFor(stations, regionLabel);
-  function excelReport(table = report): ExcelReport {
-    return { title: table.title, headers: table.headers, rows: table.rows.map(row => row.map(cell => cell.text)), scope: table.subtitle };
+  function excelReport(table = report, tidSheet?: ExcelReport["extraSheets"]): ExcelReport {
+    return {
+      title: table.title,
+      headers: table.headers,
+      rows: table.rows.map((row) => row.map((cell) => cell.text)),
+      scope: table.subtitle,
+      extraSheets: tidSheet,
+    };
   }
+
+  async function fetchTidExcelSheet(stationCodes: string[]): Promise<NonNullable<ExcelReport["extraSheets"]>> {
+    const codes = [...new Set(stationCodes.map((code) => code.trim().toUpperCase()).filter(Boolean))];
+    if (!codes.length) {
+      return [{ name: "All TIDs", headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "DA ID", "DA Name"], rows: [] }];
+    }
+    const params = new URLSearchParams({
+      date: payload.businessDate,
+      kind: view,
+      stations: codes.join(","),
+    });
+    const response = await fetch(`/api/ops-pulse/edd/board/tids?${params}`, { cache: "no-store" });
+    const body = (await response.json().catch(() => ({}))) as {
+      rows?: Array<{
+        stationCode?: string;
+        trackingId?: string;
+        status?: string;
+        edd?: string;
+        driverId?: string;
+        driverName?: string;
+      }>;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(String(body.error ?? "Unable to load tracking IDs for Excel."));
+    const reportLabel =
+      view === "creturn" ? "C-Return"
+        : view === "ageing" ? "Ageing"
+          : view === "dsr" ? "DA DSR"
+            : view === "zero" ? "Zero deliveries"
+              : "EDD";
+    const rows = (Array.isArray(body.rows) ? body.rows : [])
+      .map((row) => [
+        String(row.stationCode ?? "").toUpperCase(),
+        reportLabel,
+        String(row.trackingId ?? "").trim(),
+        String(row.status ?? ""),
+        String(row.edd ?? ""),
+        String(row.driverId ?? ""),
+        String(row.driverName ?? ""),
+      ] as (string | number | boolean | null)[])
+      .filter((row) => String(row[2] ?? "").trim());
+    rows.sort((a, b) =>
+      String(a[0]).localeCompare(String(b[0]))
+      || String(a[4]).localeCompare(String(b[4]))
+      || String(a[2]).localeCompare(String(b[2])),
+    );
+    return [{
+      name: "All TIDs",
+      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "DA ID", "DA Name"],
+      rows,
+    }];
+  }
+
   function changeView(next: StationBoardView) { setView(next); syncUrl(next); setTids(null); }
 
 
@@ -732,11 +791,23 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setBusy("download");
     setError(null);
     try {
-      await downloadReportExcel(excelReport());
+      const tidSheet = await fetchTidExcelSheet(stations.map((row) => row.stationCode));
+      await downloadReportExcel(excelReport(report, tidSheet));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function downloadStationExcel() {
+    if (!selected) return;
+    setError(null);
+    try {
+      const tidSheet = await fetchTidExcelSheet([selected.stationCode]);
+      await downloadReportExcel(excelReport(reportFor([selected], selected.stationCode), tidSheet));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Excel download failed. Retry.");
     }
   }
 
@@ -1028,7 +1099,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
             </div>
 
             <div className={s.drawerActions}>
-              <button type="button" onClick={() => void downloadReportExcel(excelReport(reportFor([selected], selected.stationCode))).catch(() => setError("Excel download failed. Retry."))}><Download size={14} /> Excel</button>
+              <button type="button" onClick={() => void downloadStationExcel()}><Download size={14} /> Excel</button>
               <button type="button" disabled={stationShareBusy !== null} onClick={() => void shareStation(false)}>
                 {stationShareBusy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
               </button>

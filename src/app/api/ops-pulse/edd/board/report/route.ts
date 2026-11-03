@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireEddApi } from "@/lib/ops-pulse/edd-access";
-import { fetchLoadFlashBoard } from "@/lib/ops-pulse/edd-worker";
+import { fetchLoadFlashBoard, fetchLoadFlashTracking } from "@/lib/ops-pulse/edd-worker";
 import { loadFlashViewerStations, pickFlashStations } from "@/lib/ops-pulse/load-flash-access";
 import {
   filterStationsByRegion,
@@ -10,6 +10,12 @@ import {
   type StationBoardView,
 } from "@/lib/ops-pulse/station-board";
 import type { StationBoardRegionId } from "@/lib/ops-pulse/station-board-regions";
+import {
+  boardTidBucketsForKinds,
+  boardTidSheetRows,
+  mapBoardTidExportRows,
+  type StationBoardTidKind,
+} from "@/lib/ops-pulse/station-board-tids";
 import { compressedWorkbookResponse } from "@/lib/report-workbook";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +23,11 @@ export const maxDuration = 60;
 
 const VIEWS = new Set<StationBoardView | "full">(["edd", "creturn", "dsr", "zero", "ageing", "full"]);
 const REGIONS = new Set<StationBoardRegionId | "ALL">(["ALL", "KL", "AP", "ODCG", "OTHER"]);
+
+function tidKindsForView(view: StationBoardView | "full"): StationBoardTidKind[] {
+  if (view === "full") return ["edd", "creturn", "ageing", "dsr"];
+  return [view];
+}
 
 export async function GET(request: Request) {
   try {
@@ -48,6 +59,25 @@ export async function GET(request: Request) {
       run: payload.run,
     };
     const sheets = stationBoardSheets(network, view, scoped);
+
+    const kinds = tidKindsForView(view);
+    const stationCodes = scoped.map((row) => row.stationCode);
+    if (stationCodes.length) {
+      const flash = (await fetchLoadFlashTracking(payload.businessDate || date || undefined, stationCodes, {
+        buckets: boardTidBucketsForKinds(kinds),
+      })).filter((row) => allowed.has(row.stationCode) && stationCodes.includes(row.stationCode));
+      const tidRows = kinds.flatMap((kind) => mapBoardTidExportRows(flash, kind));
+      // Deduplicate same TID appearing under multiple report kinds (e.g. full export).
+      const seen = new Set<string>();
+      const unique = tidRows.filter((row) => {
+        const key = `${row.stationCode}\t${row.report}\t${row.trackingId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      sheets.push({ name: "All TIDs", rows: boardTidSheetRows(unique) });
+    }
+
     if (!sheets.length) {
       return NextResponse.json({ error: "No rows to export for this view." }, { status: 404 });
     }
