@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Check, Loader2, Megaphone, Plus, RefreshCw, Search, Users, X } from "lucide-react";
@@ -22,7 +23,7 @@ function SaveButton({ count, ready }: { count: number; ready: boolean }) {
  * "Add or remove groups": every WhatsApp group the linked number is in, live from the
  * worker. Only ticked groups are listened to and shown on the Groups page.
  */
-export function GroupPicker({ action, disabled }: { action: (form: FormData) => void | Promise<void>; disabled?: boolean }) {
+export function GroupPicker({ action, disabled, workspace = "dark_store" }: { workspace?: ReportBotWorkspace; action: (form: FormData) => void | Promise<void>; disabled?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<AvailableGroup[] | null>(null);
@@ -35,7 +36,7 @@ export function GroupPicker({ action, disabled }: { action: (form: FormData) => 
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/report-bot/groups", { cache: "no-store" });
+      const response = await fetch(`/api/report-bot/groups?workspace=${workspace}`, { cache: "no-store" });
       const payload = await response.json() as { groups?: AvailableGroup[]; error?: string };
       if (!response.ok || !payload.groups) throw new Error(payload.error ?? "Could not load groups.");
       setGroups(payload.groups);
@@ -77,6 +78,7 @@ export function GroupPicker({ action, disabled }: { action: (form: FormData) => 
       <dialog ref={ref} className={`${s.modal} ${s.modalNarrow}`} aria-labelledby="group-picker-title" onClose={() => setOpen(false)}
         onClick={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
         <form action={action} className={s.picker}>
+          <input type="hidden" name="workspace" value={workspace} />
           <input type="hidden" name="selected" value={payload} />
           <div className={s.modalHead}>
             <div>

@@ -1,3 +1,4 @@
+import type { ReportBotWorkspace } from "./workspace";
 import "server-only";
 import { AI_TIMEOUT_MS, AiError, analyseReportImage, type CandidateReport } from "@/lib/report-bot/ai";
 import { fetchReportImage } from "@/lib/report-bot/image";
@@ -25,7 +26,7 @@ import {
 import { reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 
-type GroupRow = { id: string; company_id: string; wa_group_id: string; group_name: string | null; location_id: string | null; is_enabled: boolean; bot_in_group: boolean; mode?: GroupMode };
+type GroupRow = { workspace: ReportBotWorkspace; id: string; company_id: string; wa_group_id: string; group_name: string | null; location_id: string | null; is_enabled: boolean; bot_in_group: boolean; mode?: GroupMode };
 type ScheduleRow = {
   id: string; company_id: string; group_id: string; report_type_id: string; days_of_week: number[]; reminder_times: string[];
   due_time: string; first_reminder_template: string; followup_template: string; overdue_template: string | null; is_active: boolean;
@@ -59,7 +60,7 @@ function must<T>(result: { data: T | null; error: { message: string } | null }, 
 
 async function loadGroups(companyId: string) {
   const db = reportBotDb();
-  return must(await db.from("report_bot_groups").select("id,company_id,wa_group_id,group_name,location_id,is_enabled,bot_in_group,mode").eq("company_id", companyId), "Load groups") as GroupRow[];
+  return must(await db.from("report_bot_groups").select("id,company_id,wa_group_id,group_name,location_id,is_enabled,bot_in_group,mode,workspace").eq("company_id", companyId), "Load groups") as GroupRow[];
 }
 
 /** Creates today's request rows; idempotent on (schedule, date). Also closes past days. */
@@ -256,7 +257,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
     if (!submission) break;
     processed += 1;
     try {
-      const group = must(await db.from("report_bot_groups").select("id,group_name,location_id,is_enabled,mode, station:stations(station_code,station_name)").eq("id", submission.group_id).single(), "Load group") as unknown as GroupRow & { station: { station_code: string; station_name: string | null } | null; mode?: GroupMode };
+      const group = must(await db.from("report_bot_groups").select("id,group_name,location_id,is_enabled,mode,workspace, station:stations(station_code,station_name)").eq("id", submission.group_id).single(), "Load group") as unknown as GroupRow & { station: { station_code: string; station_name: string | null } | null; mode?: GroupMode };
       if (!group.is_enabled) {
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "Group was disabled before the image was analysed.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
         continue;
@@ -281,6 +282,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         mime,
         candidates,
         groupName: group.group_name ?? "group",
+        workspace: group.workspace,
         stationLabel: group.station ? [group.station.station_code, group.station.station_name].filter(Boolean).join(" · ") : null,
         businessDate,
         caption: submission.caption

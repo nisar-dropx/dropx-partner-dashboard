@@ -1,3 +1,4 @@
+import type { ReportBotWorkspace } from "./workspace";
 import "server-only";
 import { AI_TIMEOUT_MS, AiError, analyseOperationalReport, type CandidateReport } from "@/lib/report-bot/ai";
 import { fetchReportImage } from "@/lib/report-bot/image";
@@ -45,7 +46,7 @@ function must<T>(result: { data: T | null; error: { message: string } | null }, 
   return result.data as T;
 }
 
-async function candidatesForGroup(settings: ReportBotSettings, groupId: string, businessDate: string) {
+async function candidatesForGroup(settings: ReportBotSettings, groupId: string, businessDate: string, workspace: ReportBotWorkspace) {
   const db = reportBotDb();
   const requests = must(await db.from("report_bot_requests")
     .select("id,status,report_type_id, report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint)")
@@ -82,6 +83,7 @@ async function candidatesForGroup(settings: ReportBotSettings, groupId: string, 
   const types = must(await db.from("report_bot_report_types")
     .select("id,name,description,rules,category,subtypes,auto_reply_policy,feedback_hint,is_active")
     .eq("company_id", settings.company_id)
+    .eq("workspace", workspace)
     .eq("is_active", true), "Load report types") as Array<CandidateReport & { is_active: boolean }>;
   return { requests: [], candidates: types.map(toCandidate) };
 }
@@ -190,9 +192,9 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
   if (!event) return;
 
   const group = must(await db.from("report_bot_groups")
-    .select("id,group_name,is_enabled,mode,location_id, station:stations(station_code,station_name)")
+    .select("id,group_name,is_enabled,mode,location_id,workspace, station:stations(station_code,station_name)")
     .eq("id", event.group_id).single(), "Load group") as unknown as {
-      id: string; group_name: string | null; is_enabled: boolean; mode: GroupMode | null;
+      id: string; group_name: string | null; is_enabled: boolean; mode: GroupMode | null; workspace: ReportBotWorkspace;
       station: { station_code: string; station_name: string | null } | null;
     };
   if (!group.is_enabled) return;
@@ -240,7 +242,7 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
   }
 
   const businessDate = localClock(new Date(event.message_at), settings.timezone).date;
-  const { requests, candidates } = await candidatesForGroup(settings, event.group_id, businessDate);
+  const { requests, candidates } = await candidatesForGroup(settings, event.group_id, businessDate, group.workspace);
   if (!candidates.length) return;
 
   const bundleTexts = bundle.flatMap((row) => [row.text_body, row.caption].filter((part): part is string => Boolean(part?.trim())));
@@ -266,6 +268,7 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     bundleTexts,
     candidates,
     groupName: group.group_name ?? "group",
+    workspace: group.workspace,
     stationLabel: group.station ? [group.station.station_code, group.station.station_name].filter(Boolean).join(" · ") : null,
     businessDate
   });

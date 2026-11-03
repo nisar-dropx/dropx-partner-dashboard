@@ -1,3 +1,6 @@
+import type { ComponentProps } from "react";
+import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
+import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
 
 import { ReportTable } from "@/components/report-table";
 import Link from "next/link";
@@ -28,7 +31,7 @@ import { ReminderTimesField } from "@/components/report-bot-reminder-times";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
-import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
+import { canSeeGroup } from "@/lib/report-bot/access";
 import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from "@/lib/report-bot/logic";
 import { aiKeyConfigured, aiKeyName, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import {
@@ -74,7 +77,7 @@ const GROUP_MODE_LABEL: Record<string, string> = { observe: "Observe", review: "
 
 type GroupRow = {
   id: string; wa_group_id: string; group_name: string | null; participant_count: number | null; location_id: string | null;
-  is_enabled: boolean; bot_in_group: boolean; mode?: string;
+  is_enabled: boolean; bot_in_group: boolean; mode?: string; workspace?: ReportBotWorkspace;
 };
 type ReportTypeRow = {
   id: string; name: string; description: string | null; rules: string[]; is_active: boolean;
@@ -93,18 +96,23 @@ type SubmissionRow = {
 };
 type Lookup = { groupName: Map<string, string>; reportName: Map<string, string> };
 
-function tabHref(tab: Tab) {
-  return `/report-bot?tab=${tab}`;
+function tabHref(tab: Tab, workspace: ReportBotWorkspace) {
+  return reportBotHref(workspace, tab);
+}
+function BotForm({ workspace, children, ...props }: ComponentProps<"form"> & { workspace: ReportBotWorkspace }) {
+  return <form {...props}><input type="hidden" name="workspace" value={workspace} />{children}</form>;
 }
 
-export default async function ReportBotPage({ searchParams }: { searchParams?: { tab?: string } }) {
-  const authorization = await requirePagePermission(REPORT_BOT_PAGE, "access");
+export default async function ReportBotPage({ searchParams }: { searchParams?: { tab?: string; workspace?: string } }) {
+  const workspace = reportBotWorkspace(searchParams?.workspace);
+  const pageCode = reportBotPage(workspace);
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const canEdit = hasPermission(authorization, REPORT_BOT_PAGE, "edit");
+  const canEdit = hasPermission(authorization, pageCode, "edit");
   // Old links to the moved tabs land on the setup page instead of a blank tab.
   const requested = searchParams?.tab;
   if (requested === "connection" || requested === "settings") redirect(SETUP_HREF);
-  if (requested === "chats") redirect("/report-bot/chats");
+  if (requested === "chats") redirect(reportBotChatHref(workspace));
   const tab: Tab = TABS.find((entry) => entry.key === requested)?.key ?? "today";
   const db = reportBotDb();
 
@@ -113,7 +121,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
     settings = await loadReportBotSettings(companyId);
   } catch (error) {
     return (
-      <AppShell active="Report Bot" pageCode={REPORT_BOT_PAGE}>
+      <AppShell active="Report Bot" pageCode={pageCode}>
         <div className={s.page}>
           <div className={`${s.flash} ${s.flashError}`} role="alert">
             <AlertTriangle size={18} aria-hidden />
@@ -125,8 +133,8 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   }
 
   const [groupsResult, reportTypesResult, steps] = await Promise.all([
-    db.from("report_bot_groups").select("*").eq("company_id", companyId).order("group_name"),
-    db.from("report_bot_report_types").select("*").eq("company_id", companyId).order("name"),
+    db.from("report_bot_groups").select("*").eq("company_id", companyId).eq("workspace", workspace).order("group_name"),
+    db.from("report_bot_report_types").select("*").eq("company_id", companyId).eq("workspace", workspace).order("name"),
     loadSetupSteps(settings)
   ]);
   const groups = ((groupsResult.data ?? []) as GroupRow[]).filter((group) => canSeeGroup(authorization, group));
@@ -151,21 +159,21 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   const modeLabel = settings.mode === "live" ? "Live" : settings.mode === "listen" ? "Listen only" : "Off";
 
   return (
-    <AppShell active="Report Bot" pageCode={REPORT_BOT_PAGE}>
+    <AppShell active="Report Bot" pageCode={pageCode}>
       <div className={s.page}>
         <header className={s.hero}>
           <div>
-            <span className={s.eyebrow}><Bot size={13} aria-hidden /> Ops Pulse · Dark Store</span>
+            <span className={s.eyebrow}><Bot size={13} aria-hidden /> Ops Pulse · {workspace === "last_mile" ? "Last Mile" : "Dark Store"}</span>
             <h1>Report Bot</h1>
-            <p>Approved operational-group assistant for WhatsApp report groups. It classifies messages and evidence, drafts feedback for review, and never reads private chats.</p>
+            <p>{workspace === "last_mile" ? "Last Mile reports, groups and schedules · shared WhatsApp number." : "Report checks, reminders and reviewed replies for Dark Store groups."}</p>
           </div>
           <div className={s.formActions}>
             <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
-            <Link className={s.button} href={SETUP_HREF}><Settings2 size={15} aria-hidden />Setup</Link>
+            {workspace === "dark_store" ? <Link className={s.button} href={SETUP_HREF}><Settings2 size={15} aria-hidden />Setup</Link> : null}
           </div>
         </header>
 
-        <div className={s.tiles}>
+        {workspace === "last_mile" ? <div className={s.flash}><Smartphone size={16} /><span>{linked ? "WhatsApp connected" : "WhatsApp not connected"}{settings.connected_number ? ` · +${settings.connected_number}` : ""} · New groups start in Observe. Access: Users & Access → Designation Access → Last Mile Report Bot.</span></div> : <div className={s.tiles}>
           <Link className={s.tile} href={`${SETUP_HREF}#mode`}>
             <span className={`${s.tileIcon} ${settings.mode === "live" ? s.good : settings.mode === "listen" ? s.warn : ""}`}><Bot size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>Mode</span><div className={s.tileValue}>{modeLabel}</div><div className={s.tileHint}>{settings.mode === "live" ? "Sends reminders and replies" : settings.mode === "listen" ? "Checks photos, sends nothing" : "Not listening to groups"}</div></span>
@@ -182,9 +190,9 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
             <span className={`${s.tileIcon} ${s[aiReady ? "good" : "bad"]}`}><Sparkles size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>AI check</span><div className={s.tileValue}>{aiReady ? `${aiProviderLabel(settings.ai_provider)} ready` : "Key missing"}</div><div className={s.tileHint}>{aiReady ? settings.ai_model : `Add ${aiKeyName(settings.ai_provider)} in Vercel`}</div></span>
           </Link>
-        </div>
+        </div>}
 
-        {doneSteps < steps.length ? (
+        {workspace === "dark_store" && doneSteps < steps.length ? (
           <div className={s.setupBanner}>
             <span><strong>Setup {doneSteps} of {steps.length} done.</strong> Finish it to start receiving report checks.</span>
             <Link className={`${s.button} ${s.primary} ${s.small}`} href={SETUP_HREF}>Finish setup<ChevronRight size={14} aria-hidden /></Link>
@@ -192,33 +200,33 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         ) : null}
 
         {await MigrationWarning()}
-        <div className={`${s.flash} ${s.flashSuccess} ${s.flashCompact}`} role="note">
+        {workspace === "dark_store" ? <div className={`${s.flash} ${s.flashSuccess} ${s.flashCompact}`} role="note">
           <Bot size={14} aria-hidden />
           <div>
             <strong>Pilot:</strong>
             Use <strong>Testing</strong> only. Do not enable or message <strong>TCC3 · Adayar</strong> until Duplicate configuration after Observe → Review. Private chats are never read.
           </div>
-        </div>
+        </div> : null}
         <FlashMessage />
 
-        <ReportBotNav active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
+        <ReportBotNav workspace={workspace} active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
         <div className={s.formActions} style={{ marginBottom: 8 }}>
-          <Link className={`${s.button} ${s.small} ${tab === "actions" ? s.primary : ""}`} href="/report-bot?tab=actions">Open actions</Link>
-          <Link className={`${s.button} ${s.small} ${tab === "summary" ? s.primary : ""}`} href="/report-bot?tab=summary">Daily site summary</Link>
+          <Link className={`${s.button} ${s.small} ${tab === "actions" ? s.primary : ""}`} href={reportBotHref(workspace, "actions")}>Open actions</Link>
+          <Link className={`${s.button} ${s.small} ${tab === "summary" ? s.primary : ""}`} href={reportBotHref(workspace, "summary")}>Daily site summary</Link>
         </div>
 
-        {tab === "today" ? await TodayTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
-        {tab === "review" ? await ReviewTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
-        {tab === "actions" ? await ActionsTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
-        {tab === "summary" ? await SummaryTab({ companyId, groupIds, lookup, settings }) : null}
-        {tab === "groups" ? await GroupsTab({ authorization, groups, canEdit }) : null}
-        {tab === "reports" ? <ReportsTab groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
+        {tab === "today" ? await TodayTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
+        {tab === "review" ? await ReviewTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
+        {tab === "actions" ? await ActionsTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
+        {tab === "summary" ? await SummaryTab({ workspace, companyId, groupIds, lookup, settings }) : null}
+        {tab === "groups" ? await GroupsTab({ workspace, authorization, groups, canEdit }) : null}
+        {tab === "reports" ? <ReportsTab workspace={workspace} groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
       </div>
     </AppShell>
   );
 }
 
-async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
+async function TodayTab({ workspace, companyId, groupIds, lookup, settings, canEdit }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
   const date = localClock(new Date(), settings.timezone).date;
   const db = reportBotDb();
   const [requests, submissions] = groupIds.length ? await Promise.all([
@@ -261,11 +269,11 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
                           <div className={s.rowActions}>
                             {["pending", "overdue"].includes(row.status) ? (
                               <>
-                                <form action={setRequestStatus}><input type="hidden" name="id" value={row.id} /><input type="hidden" name="status" value="received" /><ActionButton className={`${s.button} ${s.small}`}>Mark received</ActionButton></form>
-                                <form action={setRequestStatus}><input type="hidden" name="id" value={row.id} /><input type="hidden" name="status" value="cancelled" /><ActionButton className={`${s.button} ${s.small} ${s.ghost}`} confirm="Cancel today's reminders for this group?">Skip today</ActionButton></form>
+                                <BotForm workspace={workspace} action={setRequestStatus}><input type="hidden" name="id" value={row.id} /><input type="hidden" name="status" value="received" /><ActionButton className={`${s.button} ${s.small}`}>Mark received</ActionButton></BotForm>
+                                <BotForm workspace={workspace} action={setRequestStatus}><input type="hidden" name="id" value={row.id} /><input type="hidden" name="status" value="cancelled" /><ActionButton className={`${s.button} ${s.small} ${s.ghost}`} confirm="Cancel today's reminders for this group?">Skip today</ActionButton></BotForm>
                               </>
                             ) : row.status === "cancelled" ? (
-                              <form action={setRequestStatus}><input type="hidden" name="id" value={row.id} /><input type="hidden" name="status" value="pending" /><ActionButton className={`${s.button} ${s.small}`}>Reopen</ActionButton></form>
+                              <BotForm workspace={workspace} action={setRequestStatus}><input type="hidden" name="id" value={row.id} /><input type="hidden" name="status" value="pending" /><ActionButton className={`${s.button} ${s.small}`}>Reopen</ActionButton></BotForm>
                             ) : null}
                           </div>
                         </td>
@@ -278,7 +286,7 @@ async function TodayTab({ companyId, groupIds, lookup, settings, canEdit }: { co
           </div>
         ) : (
           <Empty icon={<CalendarCheck size={28} aria-hidden />} title={settings.mode === "off" ? "The bot is off" : "Nothing due today"}>
-            {settings.mode === "off" ? <>Turn on <Link href={`${SETUP_HREF}#mode`}>Listen only</Link> to start tracking reports.</> : <>Reports appear here on days that have a <Link href={tabHref("reports")}>schedule</Link>.</>}
+            {settings.mode === "off" ? <>Turn on <Link href={`${SETUP_HREF}#mode`}>Listen only</Link> to start tracking reports.</> : <>Reports appear here on days that have a <Link href={tabHref("reports", workspace)}>schedule</Link>.</>}
           </Empty>
         )}
       </Card>
@@ -381,7 +389,7 @@ function CheckList({ checks }: { checks: AnalysisCheck[] }) {
   );
 }
 
-async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
+async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, canEdit }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
   const db = reportBotDb();
   const [waiting, attention, recent, reviewItems] = groupIds.length ? await Promise.all([
     db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).eq("status", "awaiting_approval").order("message_at").limit(50),
@@ -420,7 +428,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
                       </dl>
                     ) : null}
                     {canEdit && row.review_status === "draft_ready" ? (
-                      <form action={approveReviewItem} className={s.reply}>
+                      <BotForm workspace={workspace} action={approveReviewItem} className={s.reply}>
                         <input type="hidden" name="id" value={row.id} />
                         <Field label="Feedback draft">
                           <textarea className={s.textarea} name="feedback_text" rows={3} defaultValue={row.feedback_draft ?? ""} required maxLength={3000} />
@@ -429,13 +437,13 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
                           <ActionButton className={`${s.button} ${s.primary}`}><Send size={15} aria-hidden />Approve and send</ActionButton>
                           <ActionButton className={`${s.button} ${s.danger}`} formAction={dismissReviewItem} skipValidation>Dismiss</ActionButton>
                         </div>
-                      </form>
+                      </BotForm>
                     ) : canEdit ? (
-                      <form action={dismissReviewItem} className={s.formActions}>
+                      <BotForm workspace={workspace} action={dismissReviewItem} className={s.formActions}>
                         <input type="hidden" name="id" value={row.id} />
                         <span className={s.hint}>{row.feedback_draft || "Observe only — no send."}</span>
                         <ActionButton className={`${s.button} ${s.small} ${s.ghost}`}>Dismiss</ActionButton>
-                      </form>
+                      </BotForm>
                     ) : null}
                   </div>
                 </article>
@@ -457,14 +465,14 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
             </div>
             <div className={s.formActions}>
               {waitingRows.some((row) => row.feedback_text?.trim()) ? (
-                <form action={sendAllWaiting}>
+                <BotForm workspace={workspace} action={sendAllWaiting}>
                   <ActionButton className={s.button} confirm={`Post the AI's reply for all ${waitingRows.length} waiting photos?`}><Send size={15} aria-hidden />Send all waiting</ActionButton>
-                </form>
+                </BotForm>
               ) : null}
-              <form action={setAutoReply}>
+              {workspace === "dark_store" ? <BotForm workspace={workspace} action={setAutoReply}>
                 <input type="hidden" name="auto" value={auto ? "off" : "on"} />
                 <ActionButton className={`${s.button} ${auto ? "" : s.primary}`}><Sparkles size={15} aria-hidden />{auto ? "Turn auto-reply off" : "Turn auto-reply on"}</ActionButton>
-              </form>
+              </BotForm> : null}
             </div>
           </div>
         </section>
@@ -512,7 +520,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
                     ) : null}
                     {row.ai_result?.checks?.length ? <CheckList checks={row.ai_result.checks} /> : null}
                     {canEdit ? (
-                      <form action={approveFeedback} className={s.reply}>
+                      <BotForm workspace={workspace} action={approveFeedback} className={s.reply}>
                         <input type="hidden" name="id" value={row.id} />
                         <Field label="Reply to post in the group" hint="Edit freely. It's posted as a reply to this photo.">
                           <textarea className={s.textarea} name="feedback_text" rows={4} defaultValue={row.feedback_text ?? ""} required maxLength={3000} />
@@ -522,7 +530,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
                           <ActionButton className={`${s.button} ${s.ghost}`} formAction={reanalyseSubmission} skipValidation><RefreshCw size={15} aria-hidden />Check again</ActionButton>
                           <ActionButton className={`${s.button} ${s.danger}`} formAction={rejectFeedback} skipValidation>Don&apos;t send</ActionButton>
                         </div>
-                      </form>
+                      </BotForm>
                     ) : <p className={s.hint}>Proposed reply: {row.feedback_text}</p>}
                   </div>
                 </article>
@@ -546,11 +554,11 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
                     <td><StatusBadge value={row.status} /><span className={s.cellSub}>{row.status_reason}</span></td>
                     {canEdit ? (
                       <td>
-                        <form action={reanalyseSubmission} className={s.rowActions}>
+                        <BotForm workspace={workspace} action={reanalyseSubmission} className={s.rowActions}>
                           <input type="hidden" name="id" value={row.id} />
                           <ActionButton className={`${s.button} ${s.small}`}><RefreshCw size={14} aria-hidden />Retry</ActionButton>
                           <ActionButton className={`${s.button} ${s.small} ${s.ghost}`} formAction={rejectFeedback}>Dismiss</ActionButton>
-                        </form>
+                        </BotForm>
                       </td>
                     ) : null}
                   </tr>
@@ -566,11 +574,16 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
   );
 }
 
-async function GroupsTab({ authorization, groups, canEdit }: { authorization: AuthorizationContext; groups: GroupRow[]; canEdit: boolean }) {
+async function GroupsTab({ workspace, authorization, groups, canEdit }: { workspace: ReportBotWorkspace; authorization: AuthorizationContext; groups: GroupRow[]; canEdit: boolean }) {
   let stores: Array<{ id: string; station_code: string; station_name: string | null }> = [];
   let storeError: string | null = null;
   try {
-    stores = (await darkStoreScope(authorization)).locations;
+    if (workspace === "dark_store") stores = (await darkStoreScope(authorization)).locations;
+    else {
+      const scope = await loadCodLocations(requireCompanyId(authorization), authorization.locationScopeIds, authorization.hasAllLocationAccess);
+      if (scope.error) throw new Error("Locations could not be loaded.");
+      stores = scope.locations.filter(l => !l.is_ho && !l.hide_from_location_list && locationModelName(l).toUpperCase() !== "NOW");
+    }
   } catch (error) {
     storeError = error instanceof Error ? error.message : "Stores could not be loaded.";
   }
@@ -581,8 +594,8 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
     <Card
       title="WhatsApp groups"
       icon={<Users size={18} aria-hidden />}
-      description="Per-group mode: Observe (classify only) → Review (approve drafts) → Live (limited auto-replies). Pilot on Testing only. Private chats are never read."
-      action={canEdit ? <GroupPicker action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
+      description="Observe: classify only · Review: approve replies · Live: automatic eligible replies. Reminders run in Review and Live."
+      action={canEdit ? <GroupPicker workspace={workspace} action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
       flush
     >
       {storeError ? <div className={s.cardBody}><p className={s.hint} role="alert">{storeError}</p></div> : null}
@@ -598,12 +611,12 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
                     {group.participant_count ? <span>{group.participant_count} members</span> : null}
                     <Badge tone={group.mode === "live" ? "good" : group.mode === "review" ? "warn" : "info"}>{GROUP_MODE_LABEL[group.mode ?? "observe"] ?? "Observe"}</Badge>
                     {group.bot_in_group ? <Badge tone="good">Listening</Badge> : <Badge tone="bad">Bot number not in group</Badge>}
-                    <Link href={`/report-bot/chats?group=${group.id}`}>Open chat</Link>
+                    <Link href={reportBotChatHref(workspace, group.id)}>Open chat</Link>
                   </div>
                 </div>
               </div>
               {canEdit ? (
-                <form action={setGroupMode} className={s.inlineForm}>
+                <BotForm workspace={workspace} action={setGroupMode} className={s.inlineForm}>
                   <input type="hidden" name="group_id" value={group.id} />
                   <Field label="Group mode">
                     <select className={s.select} name="mode" defaultValue={group.mode ?? "observe"}>
@@ -613,23 +626,23 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
                     </select>
                   </Field>
                   <ActionButton className={`${s.button} ${s.small}`}>Save mode</ActionButton>
-                </form>
+                </BotForm>
               ) : null}
-              <form action={updateGroup} className={s.inlineForm}>
+              <BotForm workspace={workspace} action={updateGroup} className={s.inlineForm}>
                 <input type="hidden" name="group_id" value={group.id} />
-                <Field label="Store">
+                <Field label={workspace === "last_mile" ? "Station" : "Store"}>
                   <select className={s.select} name="location_id" defaultValue={group.location_id ?? ""} disabled={!canEdit}>
                     <option value="">{authorization.hasAllLocationAccess ? "No store linked" : "Choose a store"}</option>
                     {stores.map((store) => <option key={store.id} value={store.id}>{store.station_code}{store.station_name ? ` · ${store.station_name}` : ""}</option>)}
                   </select>
                 </Field>
                 {canEdit ? <ActionButton className={`${s.button} ${s.small}`}>Save</ActionButton> : null}
-              </form>
+              </BotForm>
               {canEdit ? (
-                <form action={removeGroup}>
+                <BotForm workspace={workspace} action={removeGroup}>
                   <input type="hidden" name="group_id" value={group.id} />
                   <ActionButton className={`${s.button} ${s.small} ${s.danger}`} confirm={`Remove "${group.group_name ?? "this group"}" from the bot? It stops listening and posting there; history is kept.`}>Remove</ActionButton>
-                </form>
+                </BotForm>
               ) : null}
             </div>
           ))}
@@ -637,13 +650,13 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
       ) : (
         <Empty icon={<Users size={28} aria-hidden />} title="No groups on the bot yet">
           {canEdit ? <>Press <strong>Add or remove groups</strong> and tick the report groups.</> : "An editor adds the report groups here."}
-          {" "}The WhatsApp number must be <Link href={`${SETUP_HREF}#whatsapp`}>linked</Link> first.
+          {workspace === "dark_store" ? <> The WhatsApp number must be <Link href={`${SETUP_HREF}#whatsapp`}>linked</Link> first.</> : <> Uses the existing shared WhatsApp connection.</>}
         </Empty>
       )}
     </Card>
     {canEdit && active.length >= 2 ? (
-      <Card title="Duplicate configuration" icon={<Users size={18} aria-hidden />} description="Explicit copy of schedules to another group as inactive drafts. Target is forced to Observe. Never auto-copies to TCC3.">
-        <form action={duplicateGroupConfiguration} className={s.formGrid}>
+      <Card title="Duplicate configuration" icon={<Users size={18} aria-hidden />} description="Copy schedules as inactive drafts. Target group stays in Observe.">
+        <BotForm workspace={workspace} action={duplicateGroupConfiguration} className={s.formGrid}>
           <Field label="From group">
             <select className={s.select} name="source_group_id" required>
               <option value="">Choose source</option>
@@ -659,14 +672,14 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
           <div className={s.span3}>
             <ActionButton className={`${s.button} ${s.primary}`} confirm="Copy inactive schedule drafts to the target group and leave it in Observe?">Duplicate configuration</ActionButton>
           </div>
-        </form>
+        </BotForm>
       </Card>
     ) : null}
     </>
   );
 }
 
-async function ActionsTab({ companyId, groupIds, lookup, settings, canEdit }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
+async function ActionsTab({ workspace, companyId, groupIds, lookup, settings, canEdit }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
   const result = groupIds.length
     ? await reportBotDb().from("report_bot_actions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["open", "pending_evidence", "unmatched_closure"]).order("created_at", { ascending: false }).limit(100)
     : { data: [] };
@@ -689,11 +702,11 @@ async function ActionsTab({ companyId, groupIds, lookup, settings, canEdit }: { 
                   <td><Badge tone="warn">{row.status}</Badge></td>
                   {canEdit ? (
                     <td>
-                      <form action={closeOpenAction} className={s.rowActions}>
+                      <BotForm workspace={workspace} action={closeOpenAction} className={s.rowActions}>
                         <input type="hidden" name="id" value={row.id} />
                         <input className={s.input} name="closure_note" placeholder="Closure note" maxLength={500} />
                         <ActionButton className={`${s.button} ${s.small}`}>Close</ActionButton>
-                      </form>
+                      </BotForm>
                     </td>
                   ) : null}
                 </tr>
@@ -706,8 +719,27 @@ async function ActionsTab({ companyId, groupIds, lookup, settings, canEdit }: { 
   );
 }
 
-async function SummaryTab({ companyId, groupIds, lookup, settings }: { companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings }) {
+async function SummaryTab({ workspace, companyId, groupIds, lookup, settings }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings }) {
   const date = localClock(new Date(), settings.timezone).date;
+  if (workspace === "last_mile") {
+    const db = reportBotDb();
+    const [requests, reviews, actions] = groupIds.length ? await Promise.all([
+      db.from("report_bot_requests").select("group_id,status").eq("company_id", companyId).eq("business_date", date).in("group_id", groupIds),
+      db.from("report_bot_review_items").select("group_id").eq("company_id", companyId).in("group_id", groupIds).eq("review_status", "draft_ready"),
+      db.from("report_bot_actions").select("group_id").eq("company_id", companyId).in("group_id", groupIds).in("status", ["open", "pending_evidence", "unmatched_closure"])
+    ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+    const error = requests.error || reviews.error || actions.error;
+    if (error) return <Card title="Daily summary"><p role="alert">Summary unavailable. Please retry.</p></Card>;
+    return <Card title={`Last Mile report summary · ${date}`} description="Today's scheduled reports and all outstanding follow-ups.">
+      {groupIds.length ? <ReportTable className={s.table}>
+        <thead><tr><th>Group / station</th><th>Expected</th><th>Received</th><th>Pending</th><th>Overdue</th><th>Review</th><th>Open actions</th></tr></thead>
+        <tbody>{groupIds.map(id => {
+          const rows = (requests.data ?? []).filter(r => r.group_id === id && r.status !== "cancelled");
+          return <tr key={id}><td>{lookup.groupName.get(id)}</td><td>{rows.length}</td><td>{rows.filter(r => r.status === "received").length}</td><td>{rows.filter(r => r.status === "pending").length}</td><td>{rows.filter(r => r.status === "overdue" || r.status === "missed").length}</td><td>{(reviews.data ?? []).filter(r => r.group_id === id).length}</td><td>{(actions.data ?? []).filter(r => r.group_id === id).length}</td></tr>;
+        })}</tbody>
+      </ReportTable> : <p className={s.hint}>Add your Last Mile groups and report schedules to start tracking.</p>}
+    </Card>;
+  }
   const result = groupIds.length
     ? await reportBotDb().from("report_bot_daily_summaries").select("*").eq("company_id", companyId).eq("business_date", date).in("group_id", groupIds)
     : { data: [] };
@@ -735,9 +767,9 @@ async function SummaryTab({ companyId, groupIds, lookup, settings }: { companyId
   );
 }
 
-function ReportTypeForm({ report }: { report?: ReportTypeRow }) {
+function ReportTypeForm({ workspace, report }: { workspace: ReportBotWorkspace; report?: ReportTypeRow }) {
   return (
-    <form action={saveReportType} className={s.formGrid}>
+    <BotForm workspace={workspace} action={saveReportType} className={s.formGrid}>
       {report ? <input type="hidden" name="id" value={report.id} /> : null}
       <Field label="Report name" hint="As the team calls it.">
         <input className={s.input} name="name" defaultValue={report?.name ?? ""} required maxLength={120} placeholder="EOD closure screenshot" />
@@ -752,13 +784,13 @@ function ReportTypeForm({ report }: { report?: ReportTypeRow }) {
         <Toggle name="is_active" label="Active" hint="Paused report types stop all their reminders." defaultChecked={report?.is_active ?? true} />
         <ActionButton className={`${s.button} ${s.primary}`}>{report ? "Save changes" : "Add report type"}</ActionButton>
       </div>
-    </form>
+    </BotForm>
   );
 }
 
-function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRow; groups: GroupRow[]; reportTypes: ReportTypeRow[] }) {
+function ScheduleForm({ workspace, schedule, groups, reportTypes }: { workspace: ReportBotWorkspace; schedule?: ScheduleRow; groups: GroupRow[]; reportTypes: ReportTypeRow[] }) {
   return (
-    <form action={saveSchedule} className={s.formGrid}>
+    <BotForm workspace={workspace} action={saveSchedule} className={s.formGrid}>
       {schedule ? <input type="hidden" name="id" value={schedule.id} /> : null}
       <Field label="Group">
         <select className={s.select} name="group_id" defaultValue={schedule?.group_id ?? ""} required>
@@ -813,25 +845,25 @@ function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRo
         <Toggle name="is_active" label="Active" defaultChecked={schedule?.is_active ?? true} />
         <ActionButton className={`${s.button} ${s.primary}`}>{schedule ? "Save changes" : "Add schedule"}</ActionButton>
       </div>
-    </form>
+    </BotForm>
   );
 }
 
-function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { groups: GroupRow[]; reportTypes: ReportTypeRow[]; schedules: ScheduleRow[]; lookup: Lookup; canEdit: boolean }) {
+function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit }: { workspace: ReportBotWorkspace; groups: GroupRow[]; reportTypes: ReportTypeRow[]; schedules: ScheduleRow[]; lookup: Lookup; canEdit: boolean }) {
   const testingGroup = groups.find((group) => group.is_enabled && /^testing$/i.test((group.group_name ?? "").trim()));
   return (
     <div className={s.twoCol}>
-      <Card title="Report types" icon={<FileText size={18} aria-hidden />} description="Configurable checklist/rules. TCC3 War Room templates install by slug; they are never hardcoded in the worker.">
-        {canEdit ? (
+      <Card title="Report types" icon={<FileText size={18} aria-hidden />} description="Separate report rules and checklists for this workspace.">
+        {canEdit && workspace === "dark_store" ? (
           <div className={s.formActions} style={{ marginBottom: 12 }}>
-            <form action={installTcc3Templates}>
+            <BotForm workspace={workspace} action={installTcc3Templates}>
               <ActionButton className={`${s.button} ${s.primary}`}>Install TCC3 War Room templates</ActionButton>
-            </form>
+            </BotForm>
             {testingGroup ? (
-              <form action={seedDraftSchedulesForGroup}>
+              <BotForm workspace={workspace} action={seedDraftSchedulesForGroup}>
                 <input type="hidden" name="group_id" value={testingGroup.id} />
                 <ActionButton className={s.button} confirm="Seed TCC3 schedules on Testing, activate timed reminders, and set the group to Review so replies can post?">Seed &amp; activate Testing reminders</ActionButton>
-              </form>
+              </BotForm>
             ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed reminders.</span>}
           </div>
         ) : null}
@@ -851,7 +883,7 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
                 <ChevronRight size={18} className={s.chevron} aria-hidden />
               </summary>
               <div className={s.itemBody}>
-                {canEdit ? <ReportTypeForm report={report} /> : <ul className={s.checks}>{report.rules.map((rule) => <li key={rule}>{rule}</li>)}</ul>}
+                {canEdit ? <ReportTypeForm workspace={workspace} report={report} /> : <ul className={s.checks}>{report.rules.map((rule) => <li key={rule}>{rule}</li>)}</ul>}
               </div>
             </details>
           ))}
@@ -859,7 +891,7 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
           {canEdit ? (
             <details className={`${s.item} ${s.addItem}`} open={!reportTypes.length}>
               <summary><span>+ Add report type</span><ChevronRight size={18} className={s.chevron} aria-hidden /></summary>
-              <div className={s.itemBody}><ReportTypeForm /></div>
+              <div className={s.itemBody}><ReportTypeForm workspace={workspace} /></div>
             </details>
           ) : null}
         </div>
@@ -888,21 +920,21 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
               {canEdit ? (
                 <div className={s.itemBody}>
                   <div className={s.formActions} style={{ justifyContent: "flex-start", marginBottom: 14, flexWrap: "wrap" }}>
-                    <form action={previewScheduleReminders}>
+                    <BotForm workspace={workspace} action={previewScheduleReminders}>
                       <input type="hidden" name="id" value={schedule.id} />
                       <ActionButton className={`${s.button} ${s.small} ${s.ghost}`}>Preview today&apos;s slots</ActionButton>
-                    </form>
-                    <form action={sendTestReminder} className={s.formActions}>
+                    </BotForm>
+                    <BotForm workspace={workspace} action={sendTestReminder} className={s.formActions}>
                       <input type="hidden" name="id" value={schedule.id} />
                       <ActionButton className={`${s.button} ${s.small}`}><Send size={14} aria-hidden />Send test reminder</ActionButton>
-                    </form>
+                    </BotForm>
                     <span className={s.hint}>
                       {schedule.is_active ? "Active" : "Draft/inactive"}
                       {schedule.schedule_kind ? ` · ${schedule.schedule_kind}` : ""}
                       . Test send needs company Live + group Review/Live (Testing only during pilot).
                     </span>
                   </div>
-                  <ScheduleForm schedule={schedule} groups={groups} reportTypes={reportTypes} />
+                  <ScheduleForm workspace={workspace} schedule={schedule} groups={groups} reportTypes={reportTypes} />
                 </div>
               ) : null}
             </details>
@@ -912,7 +944,7 @@ function ReportsTab({ groups, reportTypes, schedules, lookup, canEdit }: { group
             groups.length && reportTypes.length ? (
               <details className={`${s.item} ${s.addItem}`} open={!schedules.length}>
                 <summary><span>+ Add schedule</span><ChevronRight size={18} className={s.chevron} aria-hidden /></summary>
-                <div className={s.itemBody}><ScheduleForm groups={groups} reportTypes={reportTypes} /></div>
+                <div className={s.itemBody}><ScheduleForm workspace={workspace} groups={groups} reportTypes={reportTypes} /></div>
               </details>
             ) : <p className={s.hint}>Add a group (Groups tab) and a report type first.</p>
           ) : null}

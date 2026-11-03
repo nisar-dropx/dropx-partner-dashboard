@@ -2,9 +2,9 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
+import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
+import { canSeeGroup, type ReportBotAuthorization } from "@/lib/report-bot/access";
 import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isTestingGroupName, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
@@ -17,18 +17,21 @@ import {
 import { TCC3_REPORT_TEMPLATES } from "@/lib/report-bot/tcc3-templates";
 import { workerRequest } from "@/lib/report-bot/worker-client";
 
+import { reportBotWorkspace, reportBotPage, reportBotHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
+import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
+
 const FLASH_COOKIE = "dropx_report_bot_flash";
 const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings", "actions", "summary"]);
 
 type Flash = { error?: string; notice?: string; token?: string };
 
-function finish(tab: string, flash: Flash): never {
+function finish(tab: string, flash: Flash, workspace: ReportBotWorkspace): never {
   cookies().set(FLASH_COOKIE, JSON.stringify(flash), { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure: process.env.NODE_ENV === "production" });
   // Connection and settings live on the setup page (Settings → Report Bot setup).
   if (tab === "worker") redirect("/report-bot/setup#worker");
   if (tab === "connection") redirect("/report-bot/setup#whatsapp");
   if (tab === "settings") redirect("/report-bot/setup");
-  redirect(`/report-bot?tab=${TABS.has(tab) ? tab : "today"}`);
+  redirect(reportBotHref(workspace, TABS.has(tab) ? tab : "today"));
 }
 
 function isRedirect(error: unknown) {
@@ -36,8 +39,8 @@ function isRedirect(error: unknown) {
 }
 
 /** Runs a mutation with edit permission and turns any error into a visible message on the same tab. */
-async function mutate(tab: string, work: (context: { authorization: AuthorizationContext; companyId: string }) => Promise<Flash>) {
-  const authorization = await requirePagePermission(REPORT_BOT_PAGE, "edit");
+async function mutate(tab: string, work: (context: { authorization: ReportBotAuthorization; companyId: string }) => Promise<Flash>, workspace: ReportBotWorkspace = "dark_store") {
+  const authorization: ReportBotAuthorization = { ...await requirePagePermission(reportBotPage(workspace), "edit"), reportBotWorkspace: workspace };
   const companyId = requireCompanyId(authorization);
   let flash: Flash;
   try {
@@ -46,7 +49,7 @@ async function mutate(tab: string, work: (context: { authorization: Authorizatio
     if (isRedirect(error)) throw error;
     flash = { error: error instanceof Error ? error.message : "Something went wrong. Please try again." };
   }
-  finish(tab, flash);
+  finish(tab, flash, workspace);
 }
 
 /** Form text, trimmed, with Windows line endings from text boxes normalised to \n. */
@@ -90,8 +93,8 @@ async function pushWorkerConfig(settings: ReportBotSettings) {
   }
 }
 
-async function scopedGroup(authorization: AuthorizationContext, companyId: string, groupId: string) {
-  const group = check(await reportBotDb().from("report_bot_groups").select("id,location_id,is_enabled,wa_group_id,mode,group_name").eq("company_id", companyId).eq("id", groupId).maybeSingle(), "Load group");
+async function scopedGroup(authorization: ReportBotAuthorization, companyId: string, groupId: string) {
+  const group = check(await reportBotDb().from("report_bot_groups").select("id,location_id,is_enabled,wa_group_id,mode,group_name,workspace").eq("company_id", companyId).eq("id", groupId).maybeSingle(), "Load group");
   if (!group || !canSeeGroup(authorization, group)) throw new Error("This group is not available to you.");
   return group as { id: string; location_id: string | null; is_enabled: boolean; wa_group_id: string; mode: GroupMode; group_name: string | null };
 }
@@ -228,9 +231,15 @@ export async function saveGroupSelection(form: FormData) {
     const selected = picked.filter((group) => typeof group.id === "string" && /^[0-9-]+@g\.us$/.test(group.id));
     const now = new Date().toISOString();
     const db = reportBotDb();
+    const workspace = authorization.reportBotWorkspace ?? "dark_store";
+    if (selected.length) {
+      const existing = check(await db.from("report_bot_groups").select("wa_group_id,workspace").eq("company_id", companyId).in("wa_group_id", selected.map(g => String(g.id))), "Check group ownership") as Array<{ wa_group_id: string; workspace: string }>;
+      if (existing.some(g => g.workspace !== workspace)) throw new Error("A selected group belongs to the other report workspace. Choose a separate group.");
+    }
     if (selected.length) {
       check(await db.from("report_bot_groups").upsert(selected.map((group) => ({
         company_id: companyId,
+        workspace,
         wa_group_id: group.id as string,
         group_name: String(group.subject ?? "").slice(0, 200) || null,
         participant_count: Number.isInteger(group.size) ? group.size as number : null,
@@ -242,7 +251,7 @@ export async function saveGroupSelection(form: FormData) {
       })), { onConflict: "company_id,wa_group_id" }), "Save groups");
     }
     const keep = new Set(selected.map((group) => group.id as string));
-    const enabled = check(await db.from("report_bot_groups").select("id,wa_group_id").eq("company_id", companyId).eq("is_enabled", true), "Load groups") as Array<{ id: string; wa_group_id: string }>;
+    const enabled = check(await db.from("report_bot_groups").select("id,wa_group_id").eq("company_id", companyId).eq("workspace", workspace).eq("is_enabled", true), "Load groups") as Array<{ id: string; wa_group_id: string }>;
     const removed = enabled.filter((group) => !keep.has(group.wa_group_id)).map((group) => group.id);
     if (removed.length) {
       check(await db.from("report_bot_groups").update({ is_enabled: false, updated_at: now }).in("id", removed), "Turn off groups");
@@ -250,8 +259,8 @@ export async function saveGroupSelection(form: FormData) {
         .in("group_id", removed).eq("status", "pending"), "Cancel queued messages");
     }
     await pushWorkerConfig(await loadReportBotSettings(companyId));
-    return { notice: `${selected.length} group${selected.length === 1 ? "" : "s"} on the bot.${removed.length ? ` ${removed.length} removed.` : ""} Link each one to its store below.` };
-  });
+    return { notice: `${selected.length} group${selected.length === 1 ? "" : "s"} on the bot.${removed.length ? ` ${removed.length} removed.` : ""} Map each group to its location below.` };
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function updateGroup(form: FormData) {
@@ -261,12 +270,16 @@ export async function updateGroup(form: FormData) {
     if (locationId && !authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) throw new Error("You do not have access to that store.");
     if (!locationId && !authorization.hasAllLocationAccess) throw new Error("Choose one of your stores for this group.");
     if (locationId) {
+      const scope = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+      if (scope.error) throw new Error("Location access could not be loaded.");
+      const location = scope.locations.find(l => l.id === locationId);
+      if (!location || location.is_ho || location.hide_from_location_list || (locationModelName(location).toUpperCase() === "NOW") !== ((authorization.reportBotWorkspace ?? "dark_store") === "dark_store")) throw new Error("Choose a location from this report workspace.");
       const station = check(await reportBotDb().from("stations").select("id").eq("company_id", companyId).eq("id", locationId).maybeSingle(), "Check store");
       if (!station) throw new Error("That store does not exist.");
     }
     check(await reportBotDb().from("report_bot_groups").update({ location_id: locationId, updated_at: new Date().toISOString() }).eq("id", group.id), "Save group");
-    return { notice: "Store saved for this group." };
-  });
+    return { notice: "Location saved for this group." };
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function removeGroup(form: FormData) {
@@ -278,7 +291,7 @@ export async function removeGroup(form: FormData) {
       .eq("group_id", group.id).eq("status", "pending"), "Cancel queued messages");
     await pushWorkerConfig(await loadReportBotSettings(companyId));
     return { notice: "Group removed. The bot no longer listens or posts there; its history is kept." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function saveReportType(form: FormData) {
@@ -296,12 +309,14 @@ export async function saveReportType(form: FormData) {
       updated_at: new Date().toISOString()
     };
     if (id) {
-      check(await reportBotDb().from("report_bot_report_types").update(row).eq("company_id", companyId).eq("id", id), "Save report type");
+      const existing = check(await reportBotDb().from("report_bot_report_types").select("id").eq("company_id", companyId).eq("workspace", authorization.reportBotWorkspace ?? "dark_store").eq("id", id).maybeSingle(), "Check report type");
+      if (!existing) throw new Error("This report type is not available in this workspace.");
+      check(await reportBotDb().from("report_bot_report_types").update(row).eq("company_id", companyId).eq("workspace", authorization.reportBotWorkspace ?? "dark_store").eq("id", id), "Save report type");
     } else {
-      check(await reportBotDb().from("report_bot_report_types").insert({ ...row, company_id: companyId, created_by: authorization.userId }), "Create report type");
+      check(await reportBotDb().from("report_bot_report_types").insert({ ...row, company_id: companyId, workspace: authorization.reportBotWorkspace ?? "dark_store", created_by: authorization.userId }), "Create report type");
     }
     return { notice: id ? "Report type updated." : "Report type created. Now add a schedule for a group." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function saveSchedule(form: FormData) {
@@ -315,7 +330,7 @@ export async function saveSchedule(form: FormData) {
     }
     const group = await scopedGroup(authorization, companyId, field(form, "group_id"));
     const reportTypeId = field(form, "report_type_id");
-    const reportType = check(await reportBotDb().from("report_bot_report_types").select("id").eq("company_id", companyId).eq("id", reportTypeId).maybeSingle(), "Check report type");
+    const reportType = check(await reportBotDb().from("report_bot_report_types").select("id").eq("company_id", companyId).eq("workspace", authorization.reportBotWorkspace ?? "dark_store").eq("id", reportTypeId).maybeSingle(), "Check report type");
     if (!reportType) throw new Error("Choose a report type.");
     const days = normalizeDays(form.getAll("days").map(String));
     if (!days.length) throw new Error("Choose at least one day.");
@@ -341,16 +356,16 @@ export async function saveSchedule(form: FormData) {
     if (result.error?.code === "23505") throw new Error("This group already has a schedule for that report. Edit the existing one.");
     check(result, "Save schedule");
     return { notice: reminderTimes.length ? "Schedule saved." : "Schedule saved without reminder times: the bot will track the report but not remind." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
-async function scopedSubmission(authorization: AuthorizationContext, companyId: string, id: string) {
+async function scopedSubmission(authorization: ReportBotAuthorization, companyId: string, id: string) {
   const row = check(await reportBotDb().from("report_bot_submissions")
-    .select("id,company_id,group_id,wa_message_id,sender_jid,status, group:report_bot_groups(location_id)")
+    .select("id,company_id,group_id,wa_message_id,sender_jid,status, group:report_bot_groups(workspace,location_id)")
     .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load submission") as unknown as {
-      id: string; company_id: string; group_id: string; wa_message_id: string; sender_jid: string | null; status: string; group: { location_id: string | null } | null;
+      id: string; company_id: string; group_id: string; wa_message_id: string; sender_jid: string | null; status: string; group: { workspace?: ReportBotWorkspace; location_id: string | null } | null;
     } | null;
-  if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This image is not available to you.");
+  if (!row || !canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })) throw new Error("This image is not available to you.");
   return row;
 }
 
@@ -376,7 +391,7 @@ export async function approveFeedback(form: FormData) {
     await reportBotDb().from("report_bot_outbox").delete().eq("company_id", companyId).eq("dedupe_key", `feedback:${submission.id}`).in("status", ["failed", "cancelled"]);
     await queueFeedback(settings, submission, feedback, authorization.userId, { immediate: true });
     return { notice: await sendNow(settings, [submission.id]) };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /**
@@ -396,19 +411,19 @@ async function sendNow(settings: ReportBotSettings, submissionIds: string[]) {
   return `${sent} of ${submissionIds.length} posted now; the rest go out within a minute (the worker may be busy or reconnecting).`;
 }
 
-export async function sendAllWaiting() {
+export async function sendAllWaiting(form: FormData) {
   await mutate("review", async ({ authorization, companyId }) => {
     const settings = await loadReportBotSettings(companyId);
     const waiting = check(await reportBotDb().from("report_bot_submissions")
-      .select("id,company_id,group_id,wa_message_id,sender_jid,feedback_text, group:report_bot_groups(location_id,mode,is_enabled,group_name)")
-      .eq("company_id", companyId).eq("status", "awaiting_approval").order("message_at").limit(25), "Load waiting") as unknown as Array<{
+      .select("id,company_id,group_id,wa_message_id,sender_jid,feedback_text, group:report_bot_groups!inner(workspace,location_id,mode,is_enabled,group_name)")
+      .eq("company_id", companyId).eq("group.workspace", authorization.reportBotWorkspace ?? "dark_store").eq("status", "awaiting_approval").order("message_at").limit(25), "Load waiting") as unknown as Array<{
         id: string; company_id: string; group_id: string; wa_message_id: string; sender_jid: string | null; feedback_text: string | null;
-        group: { location_id: string | null; mode: GroupMode; is_enabled: boolean; group_name: string | null } | null;
+        group: { workspace?: ReportBotWorkspace; location_id: string | null; mode: GroupMode; is_enabled: boolean; group_name: string | null } | null;
       }>;
     const sendable = waiting.filter((row) =>
       row.feedback_text?.trim()
       && row.group?.is_enabled
-      && canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })
+      && canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })
       && canSendToGroup(settings.mode, row.group?.mode ?? "observe", row.group?.group_name)
     );
     if (!sendable.length) throw new Error("Nothing is waiting that can be sent (need company Live and group Review/Live, or Testing).");
@@ -425,7 +440,7 @@ export async function sendAllWaiting() {
       approved.push(row.id);
     }
     return { notice: approved.length ? await sendNow(settings, approved) : "Someone else already handled these." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /**
@@ -479,7 +494,7 @@ export async function sendTestReminder(form: FormData) {
     if (row.status === "sent") return { notice: `Test reminder posted in ${schedule.group.group_name ?? "the group"}.` };
     if (row.status === "failed") throw new Error(`The test reminder could not be posted: ${row.status_reason ?? "unknown error"}`);
     return { notice: `Test reminder queued; it goes out within a minute.${row.status_reason ? ` (${row.status_reason})` : ""}` };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /** The Review tab's auto-reply switch. Unclear or low-confidence photos still wait for a person. */
@@ -505,7 +520,7 @@ export async function rejectFeedback(form: FormData) {
     await reportBotDb().from("report_bot_outbox").update({ status: "cancelled", status_reason: "Reviewer chose not to send.", updated_at: new Date().toISOString() })
       .eq("submission_id", submission.id).eq("status", "pending");
     return { notice: "No reply will be sent for this image." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function reanalyseSubmission(form: FormData) {
@@ -516,7 +531,7 @@ export async function reanalyseSubmission(form: FormData) {
       status: "queued", status_reason: null, attempts: 0, next_attempt_at: new Date().toISOString(), locked_until: null, updated_at: new Date().toISOString()
     }).eq("id", submission.id), "Re-analyse");
     return { notice: "Queued for analysis again. Check back in a minute." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function setRequestStatus(form: FormData) {
@@ -534,7 +549,7 @@ export async function setRequestStatus(form: FormData) {
         .eq("request_id", request.id).eq("status", "pending");
     }
     return { notice: status === "received" ? "Marked as received; no more reminders today." : status === "cancelled" ? "Today's request cancelled; no reminders will be sent." : "Request reopened." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function setGroupMode(form: FormData) {
@@ -553,7 +568,7 @@ export async function setGroupMode(form: FormData) {
         .eq("group_id", group.id).eq("status", "pending"), "Cancel pending sends");
     }
     return { notice: mode === "observe" ? "Group is in Observe: messages are classified, nothing is sent." : mode === "review" ? "Group is in Review: drafts need approval before any send." : "Group is in Live: auto-replies may post for non high-risk reports when company mode is also Live." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /** Install/update the 10 TCC3 War Room report types for this company (by slug). Does not touch groups. */
@@ -564,7 +579,7 @@ export async function installTcc3Templates() {
     let created = 0;
     let updated = 0;
     for (const template of TCC3_REPORT_TEMPLATES) {
-      const existing = check(await db.from("report_bot_report_types").select("id").eq("company_id", companyId).eq("slug", template.slug).maybeSingle(), "Load type") as { id: string } | null;
+      const existing = check(await db.from("report_bot_report_types").select("id").eq("company_id", companyId).eq("workspace", "dark_store").eq("slug", template.slug).maybeSingle(), "Load type") as { id: string } | null;
       const row = {
         name: template.name,
         description: template.description,
@@ -603,7 +618,7 @@ export async function seedDraftSchedulesForGroup(form: FormData) {
     }
     const testing = isTestingGroupName(groupRow.group_name);
     const db = reportBotDb();
-    const types = check(await db.from("report_bot_report_types").select("id,slug").eq("company_id", companyId).not("slug", "is", null), "Load types") as Array<{ id: string; slug: string }>;
+    const types = check(await db.from("report_bot_report_types").select("id,slug").eq("company_id", companyId).eq("workspace", "dark_store").not("slug", "is", null), "Load types") as Array<{ id: string; slug: string }>;
     const bySlug = new Map(types.map((row) => [row.slug, row.id]));
     let seeded = 0;
     let activated = 0;
@@ -701,7 +716,7 @@ export async function duplicateGroupConfiguration(form: FormData) {
     }
     check(await db.from("report_bot_groups").update({ mode: "observe", updated_at: new Date().toISOString() }).eq("id", target.id), "Reset target to Observe");
     return { notice: `Copied ${copied} schedule(s) to ${targetRow.group_name ?? "target"} as inactive drafts (${skipped} skipped). Target left in Observe mode.` };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function approveReviewItem(form: FormData) {
@@ -710,13 +725,13 @@ export async function approveReviewItem(form: FormData) {
     const feedback = requiredText(form, "feedback_text", "Feedback", 3000);
     const settings = await loadReportBotSettings(companyId);
     const row = check(await reportBotDb().from("report_bot_review_items")
-      .select("id,group_id,submission_id,review_status, primary_event:report_bot_inbound_events(wa_message_id,sender_jid), group:report_bot_groups(location_id,mode,is_enabled,group_name)")
+      .select("id,group_id,submission_id,review_status, primary_event:report_bot_inbound_events(wa_message_id,sender_jid), group:report_bot_groups(workspace,location_id,mode,is_enabled,group_name)")
       .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load review") as unknown as {
         id: string; group_id: string; submission_id: string | null; review_status: string;
         primary_event: { wa_message_id: string; sender_jid: string | null } | null;
-        group: { location_id: string | null; mode: GroupMode; is_enabled: boolean; group_name: string | null } | null;
+        group: { workspace?: ReportBotWorkspace; location_id: string | null; mode: GroupMode; is_enabled: boolean; group_name: string | null } | null;
       } | null;
-    if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
+    if (!row || !canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
     if (!["draft_ready", "observe_only"].includes(row.review_status)) throw new Error("This item was already handled.");
     if (!row.group?.is_enabled || !canSendToGroup(settings.mode, row.group.mode ?? "observe", row.group.group_name)) {
       throw new Error("Company must be Live and this group must be Review or Live to send. Testing may send while company is Live.");
@@ -784,18 +799,18 @@ export async function approveReviewItem(form: FormData) {
       return { notice: "Reply posted in the group." };
     }
     return { notice: "Approved and queued; it goes out within a minute." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function dismissReviewItem(form: FormData) {
   await mutate("review", async ({ authorization, companyId }) => {
     const id = field(form, "id");
     const row = check(await reportBotDb().from("report_bot_review_items")
-      .select("id,submission_id, group:report_bot_groups(location_id)")
+      .select("id,submission_id, group:report_bot_groups(workspace,location_id)")
       .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load review") as unknown as {
-        id: string; submission_id: string | null; group: { location_id: string | null } | null;
+        id: string; submission_id: string | null; group: { workspace?: ReportBotWorkspace; location_id: string | null } | null;
       } | null;
-    if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
+    if (!row || !canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
     const updated = check(await reportBotDb().from("report_bot_review_items").update({
       review_status: "dismissed", reviewed_by: authorization.userId, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString()
     }).eq("id", id).in("review_status", ["draft_ready", "observe_only", "approved"]).select("id"), "Dismiss") as Array<{ id: string }>;
@@ -810,7 +825,7 @@ export async function dismissReviewItem(form: FormData) {
         .eq("submission_id", row.submission_id).eq("status", "pending");
     }
     return { notice: "Dismissed. No reply will be sent." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function closeOpenAction(form: FormData) {
@@ -818,11 +833,11 @@ export async function closeOpenAction(form: FormData) {
     const id = field(form, "id");
     const note = field(form, "closure_note").slice(0, 500) || null;
     const row = check(await reportBotDb().from("report_bot_actions")
-      .select("id, group:report_bot_groups(location_id)")
+      .select("id, group:report_bot_groups(workspace,location_id)")
       .eq("company_id", companyId).eq("id", id).maybeSingle(), "Load action") as unknown as {
-        id: string; group: { location_id: string | null } | null;
+        id: string; group: { workspace?: ReportBotWorkspace; location_id: string | null } | null;
       } | null;
-    if (!row || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) throw new Error("This action is not available to you.");
+    if (!row || !canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })) throw new Error("This action is not available to you.");
     check(await reportBotDb().from("report_bot_actions").update({
       status: "closed",
       closure_note: note,
@@ -830,7 +845,7 @@ export async function closeOpenAction(form: FormData) {
       updated_at: new Date().toISOString()
     }).eq("id", id).in("status", ["open", "pending_evidence", "unmatched_closure"]), "Close action");
     return { notice: "Action marked closed." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /** Dry-run preview of today's remaining reminder slots for a schedule. */
@@ -848,5 +863,5 @@ export async function previewScheduleReminders(form: FormData) {
     const preview = previewReminderSlots(schedule.reminder_times ?? [], schedule.due_time, clock.minutes);
     const upcoming = preview.upcoming.map((slot) => slot.label).join(", ") || "none left today";
     return { notice: `Preview (${schedule.is_active ? "active" : "draft/inactive"}): due ${formatClock(schedule.due_time)}; upcoming reminders today: ${upcoming}; ${preview.past_today} slot(s) already past.` };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
