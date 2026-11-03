@@ -1,3 +1,4 @@
+import { aggregateCReturnAssociates } from "@/lib/ops-pulse/board-detail-report";
 import { NextResponse } from "next/server";
 import { requireEddApi } from "@/lib/ops-pulse/edd-access";
 import { fetchLoadFlashTracking } from "@/lib/ops-pulse/edd-worker";
@@ -65,7 +66,7 @@ export async function GET(request: Request) {
     }));
 
     return NextResponse.json(
-      { station: stations.length === 1 ? stations[0] : undefined, stations, kind, rows },
+      { station: stations.length === 1 ? stations[0] : undefined, stations, kind, ...(kind === "creturn" && params.get("detail") === "associate" ? { associates: aggregateCReturnAssociates(rows) } : { rows }) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

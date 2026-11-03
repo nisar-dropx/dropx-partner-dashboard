@@ -66,9 +66,9 @@ function mapEdd(flash: FlashTrackingLike[]): BoardTidExportRow[] {
 }
 
 function mapCReturn(flash: FlashTrackingLike[]): BoardTidExportRow[] {
-  const preferBoard = flash.some((row) => row.bucket === BOARD_TID.CRETURN);
+  const boardStations = new Set(flash.filter(row => row.bucket === BOARD_TID.CRETURN).map(row => row.stationCode));
   return flash
-    .filter((row) => (preferBoard ? row.bucket === BOARD_TID.CRETURN : row.bucket === "Pickup"))
+    .filter((row) => (boardStations.has(row.stationCode) ? row.bucket === BOARD_TID.CRETURN : row.bucket === "Pickup"))
     .map((row) => {
       const raw = String(row.state || "").trim().toUpperCase();
       const status = CRETURN_PICKED_UP_BUCKET.has(raw) ? "PICKUP_DONE" : raw || "UNKNOWN";
