@@ -51,13 +51,32 @@ export async function renderBoardShareImages(table: BoardShareTable, compact = f
   await document.fonts.ready.catch(() => undefined);
   // Wider canvas when headers are full phrases (e.g. Delivery Failed / Out on Road).
   const longestHeader = Math.max(...table.headers.map((h) => String(h || "").length), 8);
-  const width = Math.min(1800, Math.max(980, 140 + table.headers.length * Math.max(96, longestHeader * 7)));
-  const margin = 16;
-  const usable = width - margin * 2;
+  let width = Math.min(1800, Math.max(980, 140 + table.headers.length * Math.max(96, longestHeader * 7)));
+  const margin = compact ? 6 : 16;
+  let usable = width - margin * 2;
   const colCount = Math.max(1, table.headers.length);
   const firstCol = Math.min(200, Math.max(120, usable * 0.2));
   const other = (usable - firstCol) / Math.max(1, colCount - 1);
-  const widths = table.headers.map((_, i) => (colCount === 1 ? usable : i === 0 ? firstCol : other));
+  let widths = table.headers.map((_, i) => (colCount === 1 ? usable : i === 0 ? firstCol : other));
+  if (compact) {
+    const measure = document.createElement("canvas").getContext("2d");
+    if (!measure) throw new Error("Image export is unavailable in this browser.");
+    measure.font = "700 13px Arial, sans-serif";
+    widths = table.headers.map((header, i) => {
+      const cells = table.rows.map(row => row[i]?.text || "");
+      const numeric = cells.filter(Boolean).every(text => /^[\d₹%.,+−\-— ()]+$/.test(text));
+      const cap = colCount === 1 ? 620 : numeric ? 110 : 260;
+      const content = Math.max(0, ...cells.map(text => Math.min(cap, measure.measureText(text).width + 16)));
+      const heading = Math.min(110, measure.measureText(header).width + 16);
+      return Math.ceil(Math.max(46, heading, content));
+    });
+    usable = widths.reduce((sum, value) => sum + value, 0);
+    if (usable < 320 && widths.length) { widths[0] += 320 - usable; usable = 320; }
+    width = usable + margin * 2;
+  }
+  const generatedAt = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+  const compactTitle = table.title.replace(/^DA DSR\b/, "DSR Report").replace(/ · All regions\b/, "");
+  const heading = compact ? `${compactTitle} · ${generatedAt} IST` : table.title;
   const maxPageHeight = compact ? Math.min(16000, Math.floor(16_000_000 / width)) : 1800;
   const files: File[] = [];
   let pageIndex = 0;
@@ -80,7 +99,7 @@ export async function renderBoardShareImages(table: BoardShareTable, compact = f
       if (!compact) ctx.fillText("Ops Pulse · Station board", margin, 32);
       ctx.fillStyle = "#ffffff";
       ctx.font = compact ? "700 17px Arial, sans-serif" : "700 26px Arial, sans-serif";
-      ctx.fillText(table.title, margin, compact ? 26 : 64, usable);
+      ctx.fillText(heading, margin, compact ? 26 : 64, usable);
       y = compact ? 40 : 104;
       ctx.fillStyle = "#486575";
       ctx.font = "400 14px Arial, sans-serif";

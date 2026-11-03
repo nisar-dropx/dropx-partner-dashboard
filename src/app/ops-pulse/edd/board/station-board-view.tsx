@@ -927,7 +927,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           >
             {busy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
           </button>
-          <CopyReportImage resetKey={report} disabled={busy !== null || !report.rows.length} getImages={() => renderBoardShareImages({ ...report, title: `${report.title} · ${formatOpsDateTime(reportTime, reportTime)}` }, true)} />
+          <CopyReportImage resetKey={`${view}-${ageingMode}-${reportTime}-${[...stationFilter]}-${[...clusterFilter]}-${[...regions]}-${JSON.stringify(sort)}`} disabled={busy !== null || !report.rows.length} getImages={() => renderBoardShareImages(report, true)} />
           <button
             type="button"
             className={s.primary}
@@ -1032,7 +1032,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
               <button type="button" disabled={stationShareBusy !== null} onClick={() => void shareStation(false)}>
                 {stationShareBusy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
               </button>
-              <CopyReportImage resetKey={`${selected.stationCode}-${view}-${reportTime}-${JSON.stringify(sort)}`} disabled={stationShareBusy !== null} getImages={() => { const table = reportFor([selected], selected.stationCode); return renderBoardShareImages({ ...table, title: `${table.title} · ${formatOpsDateTime(reportTime, reportTime)}` }, true); }} />
+              <CopyReportImage resetKey={`${selected.stationCode}-${view}-${reportTime}-${JSON.stringify(sort)}`} disabled={stationShareBusy !== null} getImages={() => { const table = reportFor([selected], selected.stationCode); return renderBoardShareImages(table, true); }} />
               <button type="button" className={s.primary} disabled={stationShareBusy !== null} onClick={() => void shareStation(true)}>
                 {stationShareBusy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
               </button>
