@@ -3,14 +3,26 @@
 import { usePathname } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
 
-/** Station-level Ageing/Performance tabs — same real-route pattern as EddSectionTabs, scoped to one station. */
-export function EddStationSectionTabs({ stationCode, active }: { stationCode: string; active: "ageing" | "performance" | "edds" }) {
+/** Station-level tabs — Ageing/Performance only for FSD, Managing Partner, Finance Head. */
+export function EddStationSectionTabs({
+  stationCode,
+  active,
+  showAgeingPerformance = false,
+}: {
+  stationCode: string;
+  active: "ageing" | "performance" | "edds";
+  showAgeingPerformance?: boolean;
+}) {
   const pathname = usePathname();
   const base = `/edd/${encodeURIComponent(stationCode)}`;
   const sections = [
-    { href: base, key: "ageing" as const, label: "Ageing" },
-    { href: `${base}/performance`, key: "performance" as const, label: "Performance" },
-    { href: `${base}/edds`, key: "edds" as const, label: "EDDs" }
+    ...(showAgeingPerformance
+      ? [
+          { href: base, key: "ageing" as const, label: "Ageing" },
+          { href: `${base}/performance`, key: "performance" as const, label: "Performance" },
+        ]
+      : []),
+    { href: `${base}/edds`, key: "edds" as const, label: "EDDs" },
   ];
 
   return (

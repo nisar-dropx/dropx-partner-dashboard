@@ -4,21 +4,28 @@ import { usePathname } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
 
 /**
- * Network-level Ageing/Performance tabs — real routes with a persistent tab
- * strip, mirroring CodSectionTabs (Executive Reconciliation / COD
- * Submission / Cash In Associate) rather than a client-state
- * toggle: proper URLs, back/forward, and the same visual language as the
- * rest of Ops Pulse.
+ * Network-level Live performance tabs — real routes with a persistent tab
+ * strip. Ageing/Performance are admin-only (FSD, Managing Partner, Finance Head).
  */
-export function EddSectionTabs({ active }: { active: "flash" | "board" | "ageing" | "performance" | "edds" | "scorecard" }) {
+export function EddSectionTabs({
+  active,
+  showAgeingPerformance = false,
+}: {
+  active: "flash" | "board" | "ageing" | "performance" | "edds" | "scorecard";
+  showAgeingPerformance?: boolean;
+}) {
   const pathname = usePathname();
   const sections = [
     { href: "/edd/flash", key: "flash" as const, label: "Ops Live" },
     { href: "/edd/board", key: "board" as const, label: "Station board" },
-    { href: "/edd", key: "ageing" as const, label: "Ageing" },
-    { href: "/edd/performance", key: "performance" as const, label: "Performance" },
+    ...(showAgeingPerformance
+      ? [
+          { href: "/edd", key: "ageing" as const, label: "Ageing" },
+          { href: "/edd/performance", key: "performance" as const, label: "Performance" },
+        ]
+      : []),
     { href: "/edd/edds", key: "edds" as const, label: "EDDs" },
-    { href: "/edd/scorecard", key: "scorecard" as const, label: "Scorecard" }
+    { href: "/edd/scorecard", key: "scorecard" as const, label: "Scorecard" },
   ];
 
   return (

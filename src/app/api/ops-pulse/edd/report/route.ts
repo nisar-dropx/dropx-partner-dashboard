@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddStation, type EddBucketKey } from "@/lib/ops-pulse/edd-worker";
 import { workbookResponse } from "@/lib/report-workbook";
 
@@ -17,7 +17,7 @@ const BUCKET_LABEL: Record<EddBucketKey, string> = {
 /** Excel download of one station's live Ageing backlog — "Live backlog" (every tracking ID) + "Bucket summary" sheets. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const url = new URL(request.url);

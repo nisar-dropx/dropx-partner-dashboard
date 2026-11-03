@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddNetwork, type EddBucketKey } from "@/lib/ops-pulse/edd-worker";
 import { workbookResponse } from "@/lib/report-workbook";
 
@@ -11,7 +11,7 @@ const BUCKET_KEYS: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "futu
 /** Excel download of the network-wide Ageing overview — one row per station. */
 export async function GET() {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const payload = await fetchEddNetwork();

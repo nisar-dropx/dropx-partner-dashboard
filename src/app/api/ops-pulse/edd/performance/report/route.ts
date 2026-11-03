@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddPerformanceDaily, fetchEddPerformanceStation, type EddPerformancePackage } from "@/lib/ops-pulse/edd-worker";
 import { workbookResponse } from "@/lib/report-workbook";
 
@@ -16,7 +16,7 @@ const BUCKET_LABEL: Record<EddPerformancePackage["bucket"], string> = {
 /** Excel download of one station's Delivery Performance — today's packages, a by-associate rollup, and the day-wise archive. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const url = new URL(request.url);

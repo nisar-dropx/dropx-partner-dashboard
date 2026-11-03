@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
+import { canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { unstable_cache } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -48,7 +48,7 @@ export default async function ScorecardPage({ searchParams }: { searchParams?: {
     <AppShell active="Live performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead eyebrow="Ops Pulse · Scorecard" title="Delivery scorecard" subtitle="Station scorecard against the previous period, with each station's DA leaderboard. From the daily shipment file, up to yesterday." />
-        <EddSectionTabs active="scorecard" />
+        <EddSectionTabs active="scorecard" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
         {error ? <section className="panel message-panel error"><div className="panel-body"><strong>{error}</strong></div></section> : null}
         {!stations.length ? <section className="panel message-panel error"><div className="panel-body"><strong>No stations in your scope.</strong></div></section> : null}
         {data ? <ScorecardView data={data} days={days} ranges={[...RANGES]} from={from} to={to} stationNames={Object.fromEntries(stations.map((s) => [s.code, s.name]))} /> : null}

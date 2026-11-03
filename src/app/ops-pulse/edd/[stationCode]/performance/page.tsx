@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
+import { canViewEddAgeingPerformance, requireEddAgeingPerformanceAccess } from "@/lib/ops-pulse/edd-access";
 import { fetchEddAllowedStations, fetchEddPerformanceStation, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
@@ -16,7 +16,7 @@ export default async function EddStationPerformancePage({
 }: {
   params: { stationCode: string };
 }) {
-  const authorization = await requireEddAccess();
+  const authorization = await requireEddAgeingPerformanceAccess();
   const companyId = requireCompanyId(authorization);
   const stationCode = decodeURIComponent(String(params.stationCode ?? "")).trim().toUpperCase();
 
@@ -106,7 +106,7 @@ export default async function EddStationPerformancePage({
           </section>
         ) : (
           <>
-            <EddStationSectionTabs stationCode={stationCode} active="performance" />
+            <EddStationSectionTabs stationCode={stationCode} active="performance" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
             <EddPerformanceView stationCode={stationCode} initialOutcome={initialOutcome} />
           </>
         )}

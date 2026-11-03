@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddStation } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,7 @@ export const maxDuration = 30;
 /** Fast cached read — see src/app/api/ops-pulse/edd/refresh for the live pull. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const url = new URL(request.url);

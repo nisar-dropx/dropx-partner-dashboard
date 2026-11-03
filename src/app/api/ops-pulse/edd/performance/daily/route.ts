@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddPerformanceDaily } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,7 @@ export const maxDuration = 20;
 /** Cached read of the day-over-day performance archive for one station — powers "By date" / "Day-wise ledger". */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const url = new URL(request.url);
