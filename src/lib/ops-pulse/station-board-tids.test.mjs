@@ -50,3 +50,12 @@ test('C-Return fallback is selected per station so mixed snapshot generations re
  ], 'creturn');
  assert.deepEqual(rows.map(r=>r.stationCode), ['KLZA','GDRD']);
 });
+test('DSR export preserves attempt outcome alongside station receipt and unconfirmed assignments',()=>{
+ const rows=mapBoardTidExportRows([
+  {stationCode:'KTUR',trackingId:'1',bucket:'BoardFailed',state:'RECEIVED',edd:'',driverId:'DA1',driverName:'Associate'},
+  {stationCode:'KTUR',trackingId:'2',bucket:'BoardOther',state:'RECEIVED',edd:'',driverId:'DA2',driverName:'Second'},
+ ],'dsr');
+ const sheet=boardTidSheetRows(rows);
+ assert.equal(sheet[0].Status,'Failed');assert.equal(sheet[0]['Current Amazon state'],'RECEIVED');
+ assert.equal(sheet[1].Status,'Other / pending');
+});

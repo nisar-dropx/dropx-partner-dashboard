@@ -16,6 +16,7 @@ export function aggregateCReturnAssociates(shipments: CReturnShipment[]): CRetur
     const id = row.driverId?.trim() || row.driverName?.trim() || '(unassigned)';
     const key = `${row.stationCode}\t${id}`;
     const group = groups.get(key) || { stationCode: row.stationCode, driverId: id, driverName: row.driverName?.trim() || (id === '(unassigned)' ? 'Unassigned' : id), statuses: {}, total: 0 };
+    if (row.driverName?.trim() && row.driverName.trim() !== id) group.driverName = row.driverName.trim();
     const raw = row.status?.trim().toUpperCase() || 'UNKNOWN';
     const status = CRETURN_PICKED_UP_BUCKET.has(raw) ? 'PICKUP_DONE' : raw;
     group.statuses[status] = (group.statuses[status] || 0) + 1;
@@ -49,9 +50,10 @@ export function cReturnDetailTable(stations: StationBoardStation[], associates: 
 }
 
 export function dsrStationTable(stations: StationBoardStation[], names: Record<string, string>, zeroOnly = false): BoardShareTable {
-  const headers = ['Station', 'Location', 'Total', 'Delivered', 'Out on Road', 'Delivery Failed', 'Delivery Rejected', 'DSR%'];
+  const hasOther = stations.some(s => s.board.daDsr.some(d => (d.other || 0) > 0));
+  const headers = ['Station', 'Location', 'Total', 'Delivered', 'Out on Road', 'Delivery Failed', 'Delivery Rejected', ...(hasOther ? ['Other / pending'] : []), 'DSR%'];
   const all = stations.flatMap(s => s.board.daDsr).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0));
-  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, numberCell(sum.failed), numberCell(sum.rejected), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
+  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, numberCell(sum.failed), numberCell(sum.rejected), ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
   const rows: BoardShareCell[][] = stations.flatMap(s => {
     const sum = sumDaDsr(s.board.daDsr.filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0)));
     if (zeroOnly && !sum.total) return [];

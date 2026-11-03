@@ -45,6 +45,7 @@ export type StationBoardDaDsr = {
   failed: number;
   rejected: number;
   oor: number;
+  other?: number;
   total: number;
   dsrPct: number;
 };
@@ -70,6 +71,7 @@ export type StationBoardPayload = {
   pickupDonePct: number;
   daDsr: StationBoardDaDsr[];
   zeroDeliveries: number;
+  dsrHistoryPending?: number;
   ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
   ageingByWeek: Record<string, AgeingBucketCell>;
   /** Ageing let.xlsx: State → ISO week → TID count + Sum of Order Amount (INR). */
@@ -128,6 +130,7 @@ export function sumDaDsr(rows: StationBoardDaDsr[]): {
   failed: number;
   rejected: number;
   oor: number;
+  other?: number;
   total: number;
   dsrPct: number;
   daCount: number;
@@ -136,12 +139,14 @@ export function sumDaDsr(rows: StationBoardDaDsr[]): {
   let failed = 0;
   let rejected = 0;
   let oor = 0;
+  let other = 0;
   let total = 0;
   for (const da of rows) {
     delivered += Number(da.delivered) || 0;
     failed += Number(da.failed) || 0;
     rejected += Number(da.rejected) || 0;
     oor += Number(da.oor) || 0;
+    other += Number(da.other) || 0;
     total += Number(da.total) || 0;
   }
   return {
@@ -149,6 +154,7 @@ export function sumDaDsr(rows: StationBoardDaDsr[]): {
     failed,
     rejected,
     oor,
+    other,
     total,
     dsrPct: total > 0 ? Math.round((delivered / total) * 100) : 0,
     daCount: rows.length,

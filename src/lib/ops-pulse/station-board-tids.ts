@@ -8,6 +8,7 @@ export const BOARD_TID = {
   FAILED: "BoardFailed",
   REJECTED: "BoardRejected",
   OOR: "BoardOOR",
+  OTHER: "BoardOther",
   AGEING: "BoardAgeing",
 } as const;
 
@@ -17,8 +18,8 @@ export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   edd: [BOARD_TID.EDD, "EDD"],
   creturn: [BOARD_TID.CRETURN, "Pickup"],
   ageing: [BOARD_TID.AGEING],
-  dsr: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, "Failed", "Rejected"],
-  zero: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, "Failed", "Rejected"],
+  dsr: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
+  zero: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
 };
 
 export type FlashTrackingLike = {
@@ -35,6 +36,7 @@ export type BoardTidExportRow = {
   stationCode: string;
   trackingId: string;
   status: string;
+  currentState?: string;
   edd: string;
   driverId: string;
   driverName: string;
@@ -43,6 +45,7 @@ export type BoardTidExportRow = {
 
 function dsrStatus(bucket: string): string {
   if (bucket === BOARD_TID.DELIVERED) return "Delivered";
+  if (bucket === BOARD_TID.OTHER) return "Other / pending";
   if (bucket === BOARD_TID.OOR) return "OOR";
   if (bucket === BOARD_TID.FAILED || bucket === "Failed") return "Failed";
   if (bucket === BOARD_TID.REJECTED || bucket === "Rejected") return "Rejected";
@@ -106,6 +109,7 @@ function mapDsr(flash: FlashTrackingLike[], zeroOnly: boolean): BoardTidExportRo
     BOARD_TID.FAILED,
     BOARD_TID.REJECTED,
     BOARD_TID.OOR,
+    BOARD_TID.OTHER,
     "Failed",
     "Rejected",
   ]);
@@ -115,6 +119,7 @@ function mapDsr(flash: FlashTrackingLike[], zeroOnly: boolean): BoardTidExportRo
       stationCode: row.stationCode,
       trackingId: row.trackingId,
       status: dsrStatus(row.bucket),
+      currentState: row.state || "",
       edd: row.edd || "",
       driverId: row.driverId,
       driverName: row.driverName,
@@ -164,6 +169,7 @@ export function boardTidSheetRows(rows: BoardTidExportRow[]): Record<string, unk
       Report: row.report,
       "Tracking ID": row.trackingId,
       Status: row.status,
+      ...(row.currentState !== undefined ? { "Current Amazon state": row.currentState } : {}),
       EDD: row.edd,
       "DA ID": row.driverId,
       "DA Name": row.driverName,

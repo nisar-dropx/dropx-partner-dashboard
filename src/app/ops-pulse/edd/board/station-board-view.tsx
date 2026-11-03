@@ -201,6 +201,7 @@ function buildShareTable(
   }
 
   const zeroOnly = view === "zero";
+  const hasOther = stations.some(s => s.board.daDsr.some(d => (d.other || 0) > 0));
   const headers = [
     "Station",
     DSR_HEADERS.da,
@@ -209,6 +210,7 @@ function buildShareTable(
     DSR_HEADERS.rejected,
     DSR_HEADERS.oor,
     DSR_HEADERS.total,
+    ...(hasOther ? ["Other / pending"] : []),
     DSR_HEADERS.dsrPct,
   ];
   const rows: BoardShareCell[][] = [];
@@ -225,6 +227,7 @@ function buildShareTable(
         { text: String(da.rejected || 0), align: "right" },
         { text: String(da.oor || 0), color: oorTextColor(da.oor, da.total, station.fetchedAt), bold: !!oorTextColor(da.oor, da.total, station.fetchedAt), align: "right" },
         { text: String(da.total), align: "right" },
+        ...(hasOther ? [{ text: String(da.other || 0), align: "right" as const }] : []),
         { text: da.total ? `${da.dsrPct}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct) : undefined, align: "right" },
       ]);
     }
@@ -239,6 +242,7 @@ function buildShareTable(
       { text: String(tot.rejected), bold: true, align: "right", bg: "#edf2f8" },
       { text: String(tot.oor), bold: true, align: "right", bg: "#edf2f8" },
       { text: String(tot.total), bold: true, align: "right", bg: "#edf2f8" },
+      ...(hasOther ? [{ text: String(tot.other || 0), align: "right" as const, bold: true }] : []),
       { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
     ]);
   }
@@ -1002,14 +1006,6 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <EddMultiSelect label="Regions" options={STATION_BOARD_REGIONS.map(r => r.id)} selected={regions} onChange={setRegions} renderOption={id => STATION_BOARD_REGIONS.find(r => r.id === id)?.label || id} />
         </div>
 
-        {hasDetailViews ? <div className={s.segment} aria-label="Report detail">
-          <button type="button" aria-pressed={level === "station"} onClick={() => setLevels(p => ({ ...p, [view]: "station" }))}>Station summary</button>
-          <button type="button" aria-pressed={level === "associate"} onClick={() => setLevels(p => ({ ...p, [view]: "associate" }))}>Associate detail</button>
-        </div> : null}
-        {hasDetailViews && level === "associate" ? <div className={s.segment} aria-label="Associate layout">
-          <button type="button" aria-pressed={!groupByStation} onClick={() => setGroupByStation(false)}>Combined</button>
-          <button type="button" aria-pressed={groupByStation} onClick={() => setGroupByStation(true)}>Group by station</button>
-        </div> : null}
         <div className={s.actions}>
           <button type="button" disabled={busy !== null} onClick={() => void refresh()}>
             {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
@@ -1062,6 +1058,17 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         {error ? <p className={s.error} role="alert">{error}</p> : null}
       </div>
 
+      {hasDetailViews ? <div className={s.viewControls}>
+        {hasDetailViews ? <div className={s.segment} aria-label="Report detail">
+          <button type="button" aria-pressed={level === "station"} onClick={() => setLevels(p => ({ ...p, [view]: "station" }))}>Station summary</button>
+          <button type="button" aria-pressed={level === "associate"} onClick={() => setLevels(p => ({ ...p, [view]: "associate" }))}>Associate detail</button>
+        </div> : null}
+        {hasDetailViews && level === "associate" ? <div className={s.segment} aria-label="Associate layout">
+          <button type="button" aria-pressed={!groupByStation} onClick={() => setGroupByStation(false)}>Combined</button>
+          <button type="button" aria-pressed={groupByStation} onClick={() => setGroupByStation(true)}>Group by station</button>
+        </div> : null}
+      </div> : null}
+
       <div className={s.kpis} aria-live="polite">
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong></article>
         {view === "dsr" || view === "zero" ? <>
@@ -1096,13 +1103,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <span>{stations.length} stations{view === "dsr" || view === "zero" ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
           <span>{view === "dsr" || view === "zero" ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
+        {(view === "dsr" || view === "zero") && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
         {detailUnavailable ? <div className={s.empty} role={detailError ? "alert" : "status"}>
           {detailError || "Loading C-Return associates…"}
           {detailError ? <button type="button" onClick={() => { setCReturnData(null); setDetailRetry(n => n + 1); }}>Retry</button> : null}
         </div> : <div className={s.scroll}>
           <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
             <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-              <button type="button" className={s.sortButton} title={header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+              <button type="button" className={s.sortButton} title={header === "Other / pending" ? "Assigned shipments without a confirmed delivery outcome, including station returns and statuses awaiting verification. Included in Total, excluded from Attempted and OOR." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
             </th>)}</tr></thead>
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
               {row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
