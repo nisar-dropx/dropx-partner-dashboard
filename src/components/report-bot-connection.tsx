@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { useEffect, useState } from "react";
 import s from "@/app/ops-pulse/report-bot/report-bot.module.css";
 
@@ -27,7 +28,7 @@ const LABELS: Record<string, string> = {
 const LINKING = ["qr", "pairing", "connecting", "closed"];
 
 /** Live WhatsApp link status. Polls fast while linking, slowly once connected. */
-export function ReportBotConnection({ initial, polling }: { initial: SessionView; polling: boolean }) {
+export function ReportBotConnection({ initial, polling, workspace = "dark_store" }: { initial: SessionView; polling: boolean; workspace?: ReportBotWorkspace }) {
   const [session, setSession] = useState<SessionView>(initial);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function ReportBotConnection({ initial, polling }: { initial: SessionView
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const response = await fetch("/api/report-bot/session", { cache: "no-store" });
+        const response = await fetch(`/api/report-bot/session?workspace=${workspace}`, { cache: "no-store" });
         const next = await response.json() as SessionView;
         if (!cancelled) setSession(response.ok ? next : { state: "unreachable", error: next.error ?? "Could not load status." });
       } catch {
@@ -49,7 +50,7 @@ export function ReportBotConnection({ initial, polling }: { initial: SessionView
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [polling, session.state]);
+  }, [polling, session.state, workspace]);
 
   const tone = session.state === "open" ? s.good : LINKING.includes(session.state) ? s.warn : s.bad;
   return (

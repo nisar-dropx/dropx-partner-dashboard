@@ -146,17 +146,17 @@ export function workerIsOnline(settings: ReportBotSettings) {
 export type SetupStep = { done: boolean; text: string; href: string };
 
 /** Company-wide setup progress, shared by the setup page and the main page banner. */
-export async function loadSetupSteps(settings: ReportBotSettings): Promise<SetupStep[]> {
+export async function loadSetupSteps(settings: ReportBotSettings, workspace: ReportBotWorkspace = "dark_store"): Promise<SetupStep[]> {
   const db = reportBotDb();
   const [groups, schedules] = await Promise.all([
-    db.from("report_bot_groups").select("id", { head: true, count: "exact" }).eq("company_id", settings.company_id).eq("is_enabled", true),
-    db.from("report_bot_schedules").select("id", { head: true, count: "exact" }).eq("company_id", settings.company_id).eq("is_active", true)
+    db.from("report_bot_groups").select("id", { head: true, count: "exact" }).eq("company_id", settings.company_id).eq("is_enabled", true).eq("workspace", workspace),
+    db.from("report_bot_schedules").select("id,group:report_bot_groups!inner(workspace)", { head: true, count: "exact" }).eq("company_id", settings.company_id).eq("is_active", true).eq("group.workspace", workspace)
   ]);
   return [
     { done: Boolean(settings.worker_url && settings.worker_token_hash && workerIsOnline(settings)), text: "Deploy the worker (Render, free)", href: `${SETUP_HREF}#worker` },
     { done: settings.connection_state === "open", text: "Link a WhatsApp number", href: `${SETUP_HREF}#whatsapp` },
-    { done: (groups.count ?? 0) > 0, text: "Turn on a report group", href: "/report-bot?tab=groups" },
-    { done: (schedules.count ?? 0) > 0, text: "Add a report type and a schedule", href: "/report-bot?tab=reports" },
+    { done: (groups.count ?? 0) > 0, text: "Turn on a report group", href: reportBotHref(workspace, "groups") },
+    { done: (schedules.count ?? 0) > 0, text: "Add a report type and a schedule", href: reportBotHref(workspace, "reports") },
     { done: aiKeyConfigured(settings.ai_provider), text: `Add ${aiKeyName(settings.ai_provider)} in Vercel`, href: `${SETUP_HREF}#ai` },
     { done: settings.mode !== "off", text: "Switch the bot to Listen only", href: `${SETUP_HREF}#mode` }
   ];

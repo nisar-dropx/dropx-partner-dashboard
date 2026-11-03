@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import Link from "next/link";
 import { ArrowLeft, Bot, Download, FileText, Info, Send, Server, Settings2, Smartphone, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
@@ -5,7 +6,7 @@ import { ActionButton, CopyButton } from "@/components/report-bot-controls";
 import { ReportBotConnection } from "@/components/report-bot-connection";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { REPORT_BOT_PAGE } from "@/lib/report-bot/access";
+import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotSetupHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { aiKeyName, ensureWorkerToken, loadReportBotSettings, portalPublicUrl, type ReportBotSettings } from "@/lib/report-bot/settings";
 import { connectWhatsApp, disconnectWhatsApp, rotateWorkerToken, saveBotSettings, saveWorkerUrl } from "../actions";
 import s from "../report-bot.module.css";
@@ -13,17 +14,23 @@ import { Badge, Card, Field, FlashMessage, MigrationWarning, loadSetupSteps, Set
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportBotSetupPage() {
-  const authorization = await requirePagePermission(REPORT_BOT_PAGE, "access");
+function SetupForm({ workspace, children, ...props }: ComponentProps<"form"> & { workspace: ReportBotWorkspace }) {
+  return <form {...props}><input type="hidden" name="workspace" value={workspace} />{children}</form>;
+}
+
+export default async function ReportBotSetupPage({ searchParams }: { searchParams?: { workspace?: string } }) {
+  const workspace = reportBotWorkspace(searchParams?.workspace);
+  const pageCode = reportBotPage(workspace);
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const canEdit = hasPermission(authorization, REPORT_BOT_PAGE, "edit");
+  const canEdit = hasPermission(authorization, pageCode, "edit");
   let settings: ReportBotSettings;
   try {
     settings = await loadReportBotSettings(companyId);
     if (canEdit) settings = await ensureWorkerToken(settings);
   } catch (error) {
     return (
-      <AppShell active="Report Bot setup" pageCode={REPORT_BOT_PAGE}>
+      <AppShell active="Report Bot setup" pageCode={pageCode}>
         <div className={s.page}>
           <div className={`${s.flash} ${s.flashError}`} role="alert">
             <Info size={18} aria-hidden />
@@ -33,33 +40,33 @@ export default async function ReportBotSetupPage() {
       </AppShell>
     );
   }
-  const steps = await loadSetupSteps(settings);
+  const steps = (await loadSetupSteps(settings, workspace)).map(step => ({ ...step, href: step.href.replace("/report-bot/setup", reportBotSetupHref(workspace)) }));
 
   return (
-    <AppShell active="Report Bot setup" pageCode={REPORT_BOT_PAGE}>
+    <AppShell active="Report Bot setup" pageCode={pageCode}>
       <div className={s.page}>
         <header className={s.hero}>
           <div>
-            <span className={s.eyebrow}><Settings2 size={13} aria-hidden /> Settings · Dark Store</span>
+            <span className={s.eyebrow}><Settings2 size={13} aria-hidden /> Settings · Shared connection</span>
             <h1>Report Bot setup</h1>
-            <p>Connect the worker and WhatsApp, choose the AI, and decide how replies are sent.</p>
+            <p>WhatsApp number, connection and AI settings apply to both Last Mile and Dark Store. Report rules and groups stay separate.</p>
           </div>
-          <Link className={s.button} href="/report-bot"><ArrowLeft size={15} aria-hidden />Open Report Bot</Link>
+          <Link className={s.button} href={reportBotHref(workspace)}><ArrowLeft size={15} aria-hidden />Open Report Bot</Link>
         </header>
         <SetupChecklist steps={steps} />
         {await MigrationWarning()}
         <FlashMessage />
         <div className={s.connectSteps}>
-          <WorkerCard settings={settings} canEdit={canEdit} />
-          <WhatsAppCard settings={settings} canEdit={canEdit} />
-          <SettingsForm settings={settings} canEdit={canEdit} />
+          <WorkerCard workspace={workspace} settings={settings} canEdit={canEdit} />
+          <WhatsAppCard workspace={workspace} settings={settings} canEdit={canEdit} />
+          <SettingsForm workspace={workspace} settings={settings} canEdit={canEdit} />
         </div>
       </div>
     </AppShell>
   );
 }
 
-function WorkerCard({ settings, canEdit }: { settings: ReportBotSettings; canEdit: boolean }) {
+function WorkerCard({ workspace, settings, canEdit }: { workspace: ReportBotWorkspace; settings: ReportBotSettings; canEdit: boolean }) {
   const online = workerIsOnline(settings);
   const token = settings.worker_token ?? "";
   const portal = portalPublicUrl();
@@ -143,24 +150,24 @@ function WorkerCard({ settings, canEdit }: { settings: ReportBotSettings; canEdi
             <div className={s.divider} />
           </>
         ) : null}
-        <form action={saveWorkerUrl} className={s.inlineForm}>
+        <SetupForm workspace={workspace} action={saveWorkerUrl} className={s.inlineForm}>
           <Field label="Worker address" hint="Filled in automatically by a worker on Railway, Render or Fly. Only type it for a local test with a tunnel.">
             <input className={s.input} name="worker_url" defaultValue={settings.worker_url ?? ""} placeholder="https://your-worker.up.railway.app" required disabled={!canEdit} />
           </Field>
           {canEdit ? <ActionButton className={`${s.button} ${s.primary}`}>Save address</ActionButton> : null}
-        </form>
+        </SetupForm>
         {canEdit ? (
-          <form action={rotateWorkerToken} className={s.formActions} style={{ justifyContent: "flex-start" }}>
+          <SetupForm workspace={workspace} action={rotateWorkerToken} className={s.formActions} style={{ justifyContent: "flex-start" }}>
             <ActionButton className={`${s.button} ${s.small} ${s.ghost}`} confirm="Replace the token? The running worker stops working until it gets the new one.">Replace token</ActionButton>
             <span className={s.hint}>Only if the token leaked. The running worker must be restarted with the new one.</span>
-          </form>
+          </SetupForm>
         ) : null}
       </div>
     </Card>
   );
 }
 
-function WhatsAppCard({ settings, canEdit }: { settings: ReportBotSettings; canEdit: boolean }) {
+function WhatsAppCard({ workspace, settings, canEdit }: { workspace: ReportBotWorkspace; settings: ReportBotSettings; canEdit: boolean }) {
   const workerReady = Boolean(settings.worker_url && settings.worker_token_hash);
   const linked = settings.connection_state === "open";
   return (
@@ -172,27 +179,27 @@ function WhatsAppCard({ settings, canEdit }: { settings: ReportBotSettings; canE
     >
       <div className={s.session}>
         {workerReady ? (
-          canEdit ? <ReportBotConnection polling initial={{ state: settings.connection_state, number: settings.connected_number, name: settings.connected_name, error: settings.connection_error }} />
+          canEdit ? <ReportBotConnection workspace={workspace} polling initial={{ state: settings.connection_state, number: settings.connected_number, name: settings.connected_name, error: settings.connection_error }} />
             : <div className={s.sessionState}><Badge tone={linked ? "good" : "neutral"}>{linked ? "Connected" : "Not linked"}</Badge>{settings.connected_number ? <strong>+{settings.connected_number}</strong> : null}</div>
         ) : <p className={s.hint}>Save the worker address in step 1 first.</p>}
         {canEdit && workerReady ? (
           <>
             <div className={s.divider} />
             <div className={s.inlineForm}>
-              {linked ? null : <form action={connectWhatsApp}><input type="hidden" name="method" value="qr" /><ActionButton className={`${s.button} ${s.primary}`}><Smartphone size={15} aria-hidden />Link with QR code</ActionButton></form>}
+              {linked ? null : <SetupForm workspace={workspace} action={connectWhatsApp}><input type="hidden" name="method" value="qr" /><ActionButton className={`${s.button} ${s.primary}`}><Smartphone size={15} aria-hidden />Link with QR code</ActionButton></SetupForm>}
               {linked ? null : (
-                <form action={connectWhatsApp} className={s.inlineForm}>
+                <SetupForm workspace={workspace} action={connectWhatsApp} className={s.inlineForm}>
                   <input type="hidden" name="method" value="code" />
                   <Field label="Or link with a code" hint="Number with country code, digits only.">
                     <input className={s.input} name="phone" inputMode="numeric" autoComplete="tel" placeholder="919876543210" required pattern="[0-9]{10,15}" />
                   </Field>
                   <ActionButton className={s.button}>Get code</ActionButton>
-                </form>
+                </SetupForm>
               )}
               {linked || settings.connection_state === "closed" ? (
-                <form action={disconnectWhatsApp}>
-                  <ActionButton className={`${s.button} ${s.danger}`} confirm="Unlink this WhatsApp number? The bot stops until a number is linked again.">Unlink / switch number</ActionButton>
-                </form>
+                <SetupForm workspace={workspace} action={disconnectWhatsApp}>
+                  <ActionButton className={`${s.button} ${s.danger}`} confirm="Switch the shared WhatsApp number? Both Last Mile and Dark Store bots stop until a number is linked again.">Unlink / switch number</ActionButton>
+                </SetupForm>
               ) : null}
             </div>
           </>
@@ -203,14 +210,14 @@ function WhatsAppCard({ settings, canEdit }: { settings: ReportBotSettings; canE
   );
 }
 
-function SettingsForm({ settings, canEdit }: { settings: ReportBotSettings; canEdit: boolean }) {
+function SettingsForm({ workspace, settings, canEdit }: { workspace: ReportBotWorkspace; settings: ReportBotSettings; canEdit: boolean }) {
   const modes = [
     { value: "off", title: "Off", text: "Not listening to any group." },
     { value: "listen", title: "Listen only", text: "Checks report photos but never posts. Use this while testing." },
     { value: "live", title: "Live", text: "Posts reminders and approved replies in the groups." }
   ];
   return (
-    <form action={saveBotSettings} className={s.card}>
+    <SetupForm workspace={workspace} action={saveBotSettings} className={s.card}>
       <div className={s.cardHead}>
         <div><h2><span className={s.stepNumber}>3</span>Bot settings</h2><p>Changes apply within a minute.</p></div>
       </div>
@@ -320,6 +327,6 @@ function SettingsForm({ settings, canEdit }: { settings: ReportBotSettings; canE
           </div>
         ) : null}
       </fieldset>
-    </form>
+    </SetupForm>
   );
 }

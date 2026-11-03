@@ -17,7 +17,7 @@ import {
 import { TCC3_REPORT_TEMPLATES } from "@/lib/report-bot/tcc3-templates";
 import { workerRequest } from "@/lib/report-bot/worker-client";
 
-import { reportBotWorkspace, reportBotPage, reportBotHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
+import { reportBotWorkspace, reportBotSetupHref, reportBotPage, reportBotHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
 
 const FLASH_COOKIE = "dropx_report_bot_flash";
@@ -28,9 +28,9 @@ type Flash = { error?: string; notice?: string; token?: string };
 function finish(tab: string, flash: Flash, workspace: ReportBotWorkspace): never {
   cookies().set(FLASH_COOKIE, JSON.stringify(flash), { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure: process.env.NODE_ENV === "production" });
   // Connection and settings live on the setup page (Settings → Report Bot setup).
-  if (tab === "worker") redirect("/report-bot/setup#worker");
-  if (tab === "connection") redirect("/report-bot/setup#whatsapp");
-  if (tab === "settings") redirect("/report-bot/setup");
+  if (tab === "worker") redirect(`${reportBotSetupHref(workspace)}#worker`);
+  if (tab === "connection") redirect(`${reportBotSetupHref(workspace)}#whatsapp`);
+  if (tab === "settings") redirect(reportBotSetupHref(workspace));
   redirect(reportBotHref(workspace, TABS.has(tab) ? tab : "today"));
 }
 
@@ -156,7 +156,7 @@ export async function saveBotSettings(form: FormData) {
     }
     await pushWorkerConfig({ ...previous, ...update } as ReportBotSettings);
     return { notice: mode === "live" ? "Saved. The bot is Live: reminders and approved feedback will be sent." : mode === "listen" ? "Saved. Listen-only: images are analysed but nothing is sent." : "Saved. The bot is off." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function saveWorkerUrl(form: FormData) {
@@ -172,10 +172,10 @@ export async function saveWorkerUrl(form: FormData) {
     if (url.protocol !== "https:" && !(local && process.env.NODE_ENV !== "production")) throw new Error("The worker address must start with https://");
     check(await reportBotDb().from("report_bot_settings").update({ worker_url: url.toString().replace(/\/+$/, ""), updated_at: new Date().toISOString() }).eq("company_id", companyId), "Save worker address");
     return { notice: "Worker address saved." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
-export async function rotateWorkerToken() {
+export async function rotateWorkerToken(form: FormData) {
   await mutate("worker", async ({ companyId }) => {
     await loadReportBotSettings(companyId);
     const token = generateWorkerToken();
@@ -186,7 +186,7 @@ export async function rotateWorkerToken() {
       updated_at: new Date().toISOString()
     }).eq("company_id", companyId), "Save token");
     return { notice: "New worker token created. Put it in the worker's WORKER_TOKEN setting and restart the worker; the old token stops working now.", token };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 export async function connectWhatsApp(form: FormData) {
@@ -198,10 +198,10 @@ export async function connectWhatsApp(form: FormData) {
     await workerRequest(settings, "/session/connect", { method: "POST", body: { method, phone: method === "code" ? phone : null } });
     await pushWorkerConfig(settings);
     return { notice: method === "code" ? "Open WhatsApp → Linked devices → Link with phone number, and enter the code shown below." : "Scan the QR code below from WhatsApp → Linked devices → Link a device." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
-export async function disconnectWhatsApp() {
+export async function disconnectWhatsApp(form: FormData) {
   await mutate("connection", async ({ companyId }) => {
     const settings = await loadReportBotSettings(companyId);
     await workerRequest(settings, "/session/logout", { method: "POST", body: {} });
@@ -209,7 +209,7 @@ export async function disconnectWhatsApp() {
       connection_state: "logged_out", connected_number: null, connected_name: null, connection_error: null, updated_at: new Date().toISOString()
     }).eq("company_id", companyId), "Save connection");
     return { notice: "WhatsApp unlinked. You can now link a different number. Groups and schedules are kept." };
-  });
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /**
