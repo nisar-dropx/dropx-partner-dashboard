@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
+import { eddSectionPermissions } from "@/lib/ops-pulse/edd-access";
 
 export type StationEddApiContext = {
   authorization: AuthorizationContext;
@@ -10,14 +11,14 @@ export type StationEddApiContext = {
 };
 
 export function hasStationEddAccess(authorization: AuthorizationContext | null) {
-  return Boolean(authorization && hasPermission(authorization, "edd_dashboard", "access"));
+  return Boolean(authorization && hasPermission(authorization, eddSectionPermissions.edds, "access"));
 }
 
 export async function requireStationEddAccess() {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   if (!hasStationEddAccess(authorization)) {
-    redirect("/unauthorized?page=edd_dashboard&action=access");
+    redirect(`/unauthorized?page=${eddSectionPermissions.edds}&action=access`);
   }
   return authorization;
 }

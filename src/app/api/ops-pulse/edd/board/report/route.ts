@@ -31,7 +31,7 @@ function tidKindsForView(view: StationBoardView | "full"): StationBoardTidKind[]
 
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_station_board");
     if (denied) return denied;
     const url = new URL(request.url);
     const date = url.searchParams.get("date") ?? "";

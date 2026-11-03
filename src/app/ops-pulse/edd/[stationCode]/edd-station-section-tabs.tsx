@@ -2,19 +2,23 @@
 
 import { usePathname } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
+import type { EddSectionKey } from "@/lib/ops-pulse/edd-access";
 
 /** Station-level tabs — Ageing/Performance only for FSD, Managing Partner, Finance Head. */
 export function EddStationSectionTabs({
   stationCode,
   active,
   showAgeingPerformance = false,
+  allowedSections,
 }: {
   stationCode: string;
   active: "ageing" | "performance" | "edds";
   showAgeingPerformance?: boolean;
+  allowedSections?: EddSectionKey[];
 }) {
   const pathname = usePathname();
   const base = `/edd/${encodeURIComponent(stationCode)}`;
+  const allowed = new Set(allowedSections ?? ["ageing", "performance", "edds"]);
   const sections = [
     ...(showAgeingPerformance
       ? [
@@ -23,7 +27,7 @@ export function EddStationSectionTabs({
         ]
       : []),
     { href: `${base}/edds`, key: "edds" as const, label: "EDDs" },
-  ];
+  ].filter((section) => allowed.has(section.key));
 
   return (
     <section className="tabs" aria-label={`${stationCode} sections`}>

@@ -121,7 +121,7 @@ export const MCP_READ_ONLY_TOOLS: McpToolDefinition[] = [
   {
     name: "ops_edd_network_summary",
     description: "Read-only EDD / delivery-performance network summary for permitted stations.",
-    pageCodes: ["edd_dashboard"],
+    pageCodes: ["edd_edds"],
     inputSchema: { type: "object", properties: { stationCodes: stationCodesProp } }
   },
   {

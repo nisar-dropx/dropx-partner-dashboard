@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
+import { allowedEddSections, canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { fetchLoadFlashNetwork, isEddWorkerConfigured, type LoadFlashNetworkPayload } from "@/lib/ops-pulse/edd-worker";
 import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
@@ -17,7 +17,7 @@ function todayKolkata() {
 }
 
 export default async function LoadFlashPage({ searchParams }: { searchParams?: { date?: string; cluster?: string; station?: string; driver?: string } }) {
-  const authorization = await requireEddAccess();
+  const authorization = await requireEddAccess("edd_live_ops");
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
@@ -41,7 +41,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
   const clusters = await clustersPending;
 
   return (
-    <AppShell active="Live performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_live_ops">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Ops Live"
@@ -54,7 +54,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
             </div>
           )}
         />
-        <EddSectionTabs active="flash" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
+        <EddSectionTabs active="flash" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
         {!workerConfigured ? (
           <section className="panel message-panel error">
             <div className="panel-body">

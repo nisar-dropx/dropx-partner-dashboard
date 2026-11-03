@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   additionalPermissionPages,
   filterPermissionMenus,
@@ -13,42 +13,11 @@ import {
 
 type Action = "view" | "add" | "edit";
 type Permission = { page_id: string; can_view: boolean; can_add: boolean; can_edit: boolean };
-const actions: Array<{ key: Action; label: string; help: string }> = [
-  { key: "view", label: "View", help: "Open and read this section" },
-  { key: "add", label: "Add", help: "Create or submit new records" },
-  { key: "edit", label: "Edit", help: "Update, approve or take action" },
+const actions: Array<{ key: Action; label: string }> = [
+  { key: "view", label: "View" },
+  { key: "add", label: "Add" },
+  { key: "edit", label: "Edit" },
 ];
-
-function SharedAccess({ labels }: { labels: string[] }) {
-  if (!labels.length) return null;
-  return <p className="ops-permission-linked">Linked route: this saved permission also controls {labels.join(", ")}.</p>;
-}
-
-function AccessCheckbox({
-  label,
-  help,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  help: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className={`ops-permission-action${checked ? " selected" : ""}${disabled ? " disabled" : ""}`}>
-      <span><strong>{label}</strong><small>{help}</small></span>
-      <input type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
-    </label>
-  );
-}
-
-function AccessSummary({ permission }: { permission: Record<Action, boolean> }) {
-  const enabled = actions.filter((action) => permission[action.key]).map((action) => action.label);
-  return <span className={`ops-permission-status${enabled.length ? " configured" : ""}`}>{enabled.length ? enabled.join(" · ") : "No access"}</span>;
-}
 
 export function OpsPermissionMatrix({ pages, initialPermissions = [], navigationViews, initialNavigationView }: {
   pages: PermissionPage[];
@@ -59,14 +28,14 @@ export function OpsPermissionMatrix({ pages, initialPermissions = [], navigation
   const [viewKey, setViewKey] = useState(initialNavigationView ?? navigationViews[0]?.key);
   const [search, setSearch] = useState("");
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
   const [showAdditional, setShowAdditional] = useState(false);
   const [permissions, setPermissions] = useState<Record<string, Record<Action, boolean>>>(() => {
     const existing = new Map(initialPermissions.map((permission) => [permission.page_id, permission]));
     return Object.fromEntries(pages.map((page) => {
       const permission = existing.get(page.id);
       return [page.id, {
-        view: permission?.can_view ?? false,
+        view: Boolean(permission?.can_view || permission?.can_edit),
         add: permission?.can_add ?? false,
         edit: permission?.can_edit ?? false,
       }];
@@ -80,21 +49,47 @@ export function OpsPermissionMatrix({ pages, initialPermissions = [], navigation
   const visible = filterPermissionMenus(groups, search);
   const additional = useMemo(() => additionalPermissionPages(pages, navigationViews), [pages, navigationViews]);
   const term = search.trim().toLowerCase();
-  const visibleAdditional = additional.filter((page) => !term || page.name.toLowerCase().includes(term));
+  const visibleAdditional = additional.filter((page) => !term || `${page.name} ${page.code}`.toLowerCase().includes(term));
+  const visibleIds = [...menuPermissionIds(visible), ...visibleAdditional.map((page) => page.id)];
 
-  function update(id: string, action: Action, checked: boolean) {
+  function updatePages(pageIds: string[], action: Action, checked: boolean) {
     setPermissions((previous) => {
-      const row = previous[id];
-      if (!row) return previous;
-      return {
-        ...previous,
-        [id]: {
+      const next = { ...previous };
+      for (const pageId of new Set(pageIds)) {
+        const row = next[pageId];
+        if (!row) continue;
+        next[pageId] = {
           ...row,
           [action]: action === "view" && !checked && row.edit ? true : checked,
           ...(action === "edit" && checked ? { view: true } : {}),
-        },
-      };
+        };
+      }
+      return next;
     });
+  }
+
+  function setAllForPages(pageIds: string[], checked: boolean) {
+    setPermissions((previous) => {
+      const next = { ...previous };
+      for (const pageId of new Set(pageIds)) if (next[pageId]) {
+        next[pageId] = { view: checked, add: checked, edit: checked };
+      }
+      return next;
+    });
+  }
+
+  function allChecked(pageIds: string[], action: Action) {
+    return pageIds.length > 0 && pageIds.every((pageId) => permissions[pageId]?.[action]);
+  }
+
+  function allFullyChecked(pageIds: string[]) {
+    return pageIds.length > 0 && pageIds.every((pageId) => actions.every((action) => permissions[pageId]?.[action.key]));
+  }
+
+  function someChecked(pageIds: string[], action?: Action) {
+    return pageIds.some((pageId) => action
+      ? permissions[pageId]?.[action]
+      : actions.some((entry) => permissions[pageId]?.[entry.key]));
   }
 
   function toggle(setter: typeof setExpandedMenus, key: string) {
@@ -105,47 +100,33 @@ export function OpsPermissionMatrix({ pages, initialPermissions = [], navigation
     });
   }
 
-  function selectedCount(ids: string[]) {
-    return new Set(ids).size
-      ? [...new Set(ids)].filter((id) => actions.some((action) => permissions[id]?.[action.key])).length
-      : 0;
+  function cells(pageIds: string[], path: string) {
+    const uniqueIds = [...new Set(pageIds)];
+    const all = allFullyChecked(uniqueIds);
+    return (
+      <>
+        <td><input aria-label={`${path}: All`} checked={all} className={`matrix-checkbox${!all && someChecked(uniqueIds) ? " partial" : ""}`} onChange={(event) => setAllForPages(uniqueIds, event.target.checked)} type="checkbox" /></td>
+        {actions.map((action) => {
+          const checked = allChecked(uniqueIds, action.key);
+          return <td key={action.key}><input
+            aria-label={`${path}: ${action.label}`}
+            checked={checked}
+            className={`matrix-checkbox${!checked && someChecked(uniqueIds, action.key) ? " partial" : ""}`}
+            onChange={(event) => updatePages(uniqueIds, action.key, event.target.checked)}
+            type="checkbox"
+          /></td>;
+        })}
+      </>
+    );
   }
 
-  function section(row: PermissionMenuRow, menuLabel: string) {
-    const sectionKey = `${menuLabel}:${row.key}`;
-    const open = expandedSections.has(sectionKey) || Boolean(term);
-    const permission = permissions[row.page.id] ?? { view: false, add: false, edit: false };
+  function leafRow(row: PermissionMenuRow, groupLabel: string) {
+    if (!row.page) return null;
     return (
-      <div className="ops-permission-section" key={sectionKey}>
-        <button
-          type="button"
-          className="ops-permission-section-toggle"
-          aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${menuLabel} / ${row.label}`}
-          onClick={() => toggle(setExpandedSections, sectionKey)}
-        >
-          <span className="ops-permission-chevron" aria-hidden="true">{open ? "−" : "+"}</span>
-          <span className="ops-permission-section-name"><strong>{row.label}</strong><small>Submenu / section</small></span>
-          <AccessSummary permission={permission} />
-        </button>
-        {open ? (
-          <div className="ops-permission-section-body">
-            <div className="ops-permission-actions" aria-label={`${menuLabel} / ${row.label} access`}>
-              {actions.map((action) => (
-                <AccessCheckbox
-                  key={action.key}
-                  label={`${menuLabel} / ${row.label}: ${action.label}`}
-                  help={action.help}
-                  checked={permission[action.key]}
-                  disabled={action.key === "view" && permission.edit}
-                  onChange={(checked) => update(row.page.id, action.key, checked)}
-                />
-              ))}
-            </div>
-            <SharedAccess labels={row.sharedWith} />
-          </div>
-        ) : null}
-      </div>
+      <tr className="permission-child-row" key={row.key}>
+        <td><span>{row.label}</span>{row.sharedWith.length ? <small className="ops-permission-linked-inline">Also controls {row.sharedWith.join(", ")}</small> : null}</td>
+        {cells([row.page.id], `${groupLabel} / ${row.label}`)}
+      </tr>
     );
   }
 
@@ -155,48 +136,61 @@ export function OpsPermissionMatrix({ pages, initialPermissions = [], navigation
         <label>Workspace<select aria-label="Workspace" value={view?.key} onChange={(event) => {
           setViewKey(event.target.value);
           setExpandedMenus(new Set());
-          setExpandedSections(new Set());
+          setExpandedPages(new Set());
+          setShowAdditional(false);
         }}>{navigationViews.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}</select></label>
         <label className="ops-permission-search">Find access<input type="search" placeholder="Menu, submenu or section" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
       </div>
-      <p className="ops-permission-help">Open a menu, then open only the submenu or section you want to configure. Nothing is granted from the menu heading.</p>
+      <p className="ops-permission-help">Expand a menu and page to grant each in-page section independently. Parent checkboxes are optional bulk controls for the visible rows below them.</p>
 
-      <div className="ops-permission-tree">
-        {visible.map((group) => {
-          const open = expandedMenus.has(group.key) || Boolean(term);
-          const ids = menuPermissionIds([group]);
-          const configured = selectedCount(ids);
-          return (
-            <section className="ops-permission-menu" key={group.key}>
-              <button
-                type="button"
-                className="ops-permission-menu-toggle"
-                aria-expanded={open}
-                aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
-                onClick={() => toggle(setExpandedMenus, group.key)}
-              >
-                <span className="ops-permission-chevron" aria-hidden="true">{open ? "−" : "+"}</span>
-                <span className="ops-permission-menu-name"><strong>{group.label}</strong><small>{group.rows.length} submenu{group.rows.length === 1 ? "" : "s"} / sections</small></span>
-                <span className={`ops-permission-menu-summary${configured ? " configured" : ""}`}>{configured ? `${configured} of ${new Set(ids).size} configured` : "No access"}</span>
-              </button>
-              {open ? <div className="ops-permission-menu-body">{group.rows.map((row) => section(row, group.label))}</div> : null}
-            </section>
-          );
-        })}
-        {!visible.length ? <div className="ops-permission-empty">No matching menu, submenu or section in this workspace.</div> : null}
+      <div className="table-wrap ops-permission-table-wrap">
+        <table className="permission-table ops-permission-table">
+          <thead><tr>
+            <th>Menu / page / section</th>
+            <th><span className="matrix-head-check">All</span></th>
+            {actions.map((action) => <th key={action.key}><span className="matrix-head-check">{action.label}</span></th>)}
+          </tr></thead>
+          <tbody>
+            {visible.map((group) => {
+              const groupOpen = expandedMenus.has(group.key) || Boolean(term);
+              const groupIds = menuPermissionIds([group]);
+              return <Fragment key={group.key}>
+                <tr className="permission-group-row">
+                  <td><button className="permission-expand" onClick={() => toggle(setExpandedMenus, group.key)} type="button" aria-expanded={groupOpen} aria-label={`${groupOpen ? "Collapse" : "Expand"} ${group.label}`}>
+                    <span aria-hidden="true">{groupOpen ? "−" : "+"}</span><strong>{group.label}</strong><small>{groupIds.length}</small>
+                  </button></td>
+                  {cells(groupIds, group.label)}
+                </tr>
+                {groupOpen ? group.rows.map((row) => {
+                  if (!row.sections.length) return leafRow(row, group.label);
+                  const pageOpen = expandedPages.has(row.key) || Boolean(term);
+                  const pageIds = row.sections.map((section) => section.page.id);
+                  return <Fragment key={row.key}>
+                    <tr className="permission-child-row ops-permission-page-row">
+                      <td><button className="permission-expand" onClick={() => toggle(setExpandedPages, row.key)} type="button" aria-expanded={pageOpen} aria-label={`${pageOpen ? "Collapse" : "Expand"} ${group.label} / ${row.label}`}>
+                        <span aria-hidden="true">{pageOpen ? "−" : "+"}</span><strong>{row.label}</strong><small>{row.sections.length}</small>
+                      </button></td>
+                      {cells(pageIds, `${group.label} / ${row.label}`)}
+                    </tr>
+                    {pageOpen ? row.sections.map((section) => <tr className="permission-child-row ops-permission-section-row" key={section.key}>
+                      <td><span>{section.label}</span>{section.sharedWith.length ? <small className="ops-permission-linked-inline">Also controls {section.sharedWith.join(", ")}</small> : null}</td>
+                      {cells([section.page.id], `${group.label} / ${row.label} / ${section.label}`)}
+                    </tr>) : null}
+                  </Fragment>;
+                }) : null}
+              </Fragment>;
+            })}
+            {visibleAdditional.length ? <Fragment>
+              <tr className="permission-group-row ops-permission-internal-row"><td><button className="permission-expand" onClick={() => setShowAdditional((open) => !open)} type="button" aria-expanded={showAdditional || Boolean(term)} aria-label={`${showAdditional || term ? "Collapse" : "Expand"} Internal actions`}>
+                <span aria-hidden="true">{showAdditional || term ? "−" : "+"}</span><strong>Internal actions</strong><small>{visibleAdditional.length}</small>
+              </button></td>{cells(visibleAdditional.map((page) => page.id), "Internal actions")}</tr>
+              {showAdditional || term ? visibleAdditional.map((page) => <tr className="permission-child-row" key={page.id}><td><span>{page.name}</span></td>{cells([page.id], `Internal actions / ${page.name}`)}</tr>) : null}
+            </Fragment> : null}
+            {!visible.length && !visibleAdditional.length ? <tr><td className="empty-cell" colSpan={5}>No matching menu, page or section in this workspace.</td></tr> : null}
+          </tbody>
+        </table>
       </div>
-
-      {additional.length ? (
-        <section className="ops-permission-advanced">
-          <button type="button" className="ops-permission-advanced-toggle" aria-expanded={showAdditional} onClick={() => setShowAdditional((value) => !value)}>
-            <span className="ops-permission-chevron" aria-hidden="true">{showAdditional ? "−" : "+"}</span>
-            <span><strong>Internal actions</strong><small>{additional.length} permissions not shown in the sidebar</small></span>
-          </button>
-          {showAdditional ? <div className="ops-permission-menu-body">{visibleAdditional.map((page) => section({ key: `additional:${page.id}`, label: page.name, page, sharedWith: [] }, "Internal actions"))}</div> : null}
-        </section>
-      ) : null}
-
-      <p className="ops-permission-footnote">Saving applies only the individual permissions selected above. Other workspace access is retained.</p>
+      <p className="ops-permission-footnote">{term ? `${visibleIds.length} matching permissions` : `${visibleIds.length} permissions in this workspace`} · Saving keeps other workspace access unchanged.</p>
       <input name="permissions_json" type="hidden" value={JSON.stringify(pages.map((page) => ({
         page_id: page.id,
         can_view: permissions[page.id]?.view ?? false,

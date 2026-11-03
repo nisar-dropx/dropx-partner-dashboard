@@ -9,7 +9,7 @@ export const maxDuration = 60;
 /** Pulls and archives one specific past day — used by "By date" when the picked day isn't in the archive yet. */
 export async function POST(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const url = new URL(request.url);

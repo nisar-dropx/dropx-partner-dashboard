@@ -78,7 +78,14 @@ export const accessPages = [
   { code: "station_audits", name: "Station Audits", sort_order: 94 },
   { code: "ops_loss_master", name: "Loss Recovery Master", sort_order: 94 },
   { code: "station_audit_master", name: "Audit Master", sort_order: 94 },
-  { code: "edd_dashboard", name: "Live performance & Scrub", sort_order: 95 },
+  { code: "edd_dashboard", name: "Live performance (legacy shared access)", sort_order: 95 },
+  { code: "edd_live_ops", name: "Live performance · Ops Live", sort_order: 95 },
+  { code: "edd_station_board", name: "Live performance · Station board", sort_order: 95 },
+  { code: "edd_ageing", name: "Live performance · Ageing", sort_order: 95 },
+  { code: "edd_performance", name: "Live performance · Performance", sort_order: 95 },
+  { code: "edd_edds", name: "Live performance · EDDs", sort_order: 95 },
+  { code: "edd_scorecard", name: "Live performance · Scorecard", sort_order: 95 },
+  { code: "edd_scrub", name: "Operations · Scrub", sort_order: 95 },
   { code: "station_edd", name: "EDD", sort_order: 96 },
   { code: "cps", name: "CPS", sort_order: 73 },
   { code: "cpu_overview", name: "CPU · Dark Store", sort_order: 74 },
@@ -672,6 +679,9 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
     await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], "station_edd");
+    for (const code of ["edd_live_ops", "edd_station_board", "edd_ageing", "edd_performance", "edd_edds", "edd_scorecard", "edd_scrub"]) {
+      await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], code);
+    }
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_overview");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_associates");

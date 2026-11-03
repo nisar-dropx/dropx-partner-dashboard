@@ -8,7 +8,7 @@ export const maxDuration = 20;
 /** Kicks off a background backfill of the last N days for one station — "download all the monthly data" for the Day-wise ledger. Returns immediately. */
 export async function POST(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const url = new URL(request.url);

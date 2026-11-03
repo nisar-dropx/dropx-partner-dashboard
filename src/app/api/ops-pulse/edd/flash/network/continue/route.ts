@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 export async function POST() {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_live_ops");
     if (denied) return denied;
     return NextResponse.json(await continueLoadFlashNetwork());
   } catch (error) {

@@ -17,7 +17,7 @@ const BUCKET_LABEL: Record<EddBucketKey, string> = {
 /** Excel download of one station's live Ageing backlog — "Live backlog" (every tracking ID) + "Bucket summary" sheets. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_ageing");
     if (denied) return denied;
 
     const url = new URL(request.url);

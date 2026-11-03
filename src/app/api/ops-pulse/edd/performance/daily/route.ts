@@ -8,7 +8,7 @@ export const maxDuration = 20;
 /** Cached read of the day-over-day performance archive for one station — powers "By date" / "Day-wise ledger". */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const url = new URL(request.url);

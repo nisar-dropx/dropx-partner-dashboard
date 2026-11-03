@@ -16,7 +16,7 @@ const BUCKET_LABEL: Record<EddPerformancePackage["bucket"], string> = {
 /** Excel download of one station's Delivery Performance — today's packages, a by-associate rollup, and the day-wise archive. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const url = new URL(request.url);

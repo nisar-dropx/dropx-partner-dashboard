@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
+import { allowedEddSections, canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { unstable_cache } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -19,7 +19,7 @@ const ist = (offsetDays: number) => {
 };
 
 export default async function ScorecardPage({ searchParams }: { searchParams?: { days?: string } }) {
-  const authorization = await requireEddAccess();
+  const authorization = await requireEddAccess("edd_scorecard");
   const companyId = requireCompanyId(authorization);
   const days = RANGES.find((d) => String(d) === searchParams?.days) ?? 7;
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
@@ -45,10 +45,10 @@ export default async function ScorecardPage({ searchParams }: { searchParams?: {
     }
   }
   return (
-    <AppShell active="Live performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_scorecard">
       <div className="ops-command-center">
         <PageHead eyebrow="Ops Pulse · Scorecard" title="Delivery scorecard" subtitle="Station scorecard against the previous period, with each station's DA leaderboard. From the daily shipment file, up to yesterday." />
-        <EddSectionTabs active="scorecard" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
+        <EddSectionTabs active="scorecard" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
         {error ? <section className="panel message-panel error"><div className="panel-body"><strong>{error}</strong></div></section> : null}
         {!stations.length ? <section className="panel message-panel error"><div className="panel-body"><strong>No stations in your scope.</strong></div></section> : null}
         {data ? <ScorecardView data={data} days={days} ranges={[...RANGES]} from={from} to={to} stationNames={Object.fromEntries(stations.map((s) => [s.code, s.name]))} /> : null}

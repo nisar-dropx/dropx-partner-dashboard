@@ -10,7 +10,7 @@ export const maxDuration = 60;
 
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_station_board");
     if (denied) return denied;
     const date = new URL(request.url).searchParams.get("date") ?? "";
     const payload = await fetchLoadFlashBoard(date || undefined);

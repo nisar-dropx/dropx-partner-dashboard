@@ -8,7 +8,7 @@ export const maxDuration = 30;
 /** Fast cached read, also used for the client-side sweep-progress poll. */
 export async function GET() {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const payload = await fetchEddPerformanceNetwork();

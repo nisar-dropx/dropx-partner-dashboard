@@ -6,7 +6,7 @@ import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
 import { requireStationEddAccess } from "@/lib/ops-pulse/station-edd-access";
 import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { StationEddDetailClient } from "../../../station-edd/[stationCode]/station-edd-detail-client";
-import { canViewEddAgeingPerformance } from "@/lib/ops-pulse/edd-access";
+import { allowedEddSections, canViewEddAgeingPerformance } from "@/lib/ops-pulse/edd-access";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
 import { eddQueryFromRecord } from "@/lib/ops-pulse/edd-table-controls";
 import styles from "../../../station-edd/station-edd.module.css";
@@ -46,7 +46,7 @@ export default async function StationEddDetailPage({ params, searchParams }: { p
   const place = [location?.city, location?.state].filter(Boolean).join(", ");
 
   return (
-    <AppShell active="Live performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_edds">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Station EDD"
@@ -54,7 +54,7 @@ export default async function StationEddDetailPage({ params, searchParams }: { p
           subtitle={stationName ? `${stationName}${place ? ` · ${place}` : ""} · today's expected-delivery position` : "Today's expected-delivery position and tracking-ID detail."}
         />
 
-        <div className={styles.sectionNav}><EddStationSectionTabs stationCode={stationCode} active="edds" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} /></div>
+        <div className={styles.sectionNav}><EddStationSectionTabs stationCode={stationCode} active="edds" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} /></div>
         {!workerConfigured ? (
           <section className="panel message-panel error"><div className="panel-body"><strong>EDD worker is not configured.</strong></div></section>
         ) : !authorized ? (

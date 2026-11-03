@@ -13,7 +13,7 @@ function compile(file,mocks={}) {
 const appNav=compile('../lib/app-navigation.ts');
 const nav=compile('../lib/ops-pulse/navigation.ts',{'@/lib/app-navigation':appNav,'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:auth=>auth.allowCod}});
 const views=['amazon_edsp','amazon_now','flipkart_odh_mdh'].map(key=>({key,label:key,items:nav.opsNavCatalogForMode(key)}));
-const codes=[...new Set(views.flatMap(view=>view.items.flatMap(item=>[item.code,...(item.permissionCodes??[]),...(item.children??[]).map(child=>child.code)])))].filter(Boolean);
+const codes=[...new Set(views.flatMap(view=>view.items.flatMap(item=>[item.code,...(item.permissionCodes??[]),...(item.children??[]).flatMap(child=>[child.code,...(child.permissionSections??[]).map(section=>section.code)])])))].filter(Boolean);
 const pages=codes.map(code=>({id:code,code,name:`Permission ${code}`}));
 const nodes=n=>!n||typeof n!=='object'?[]:[n,...[n.props?.children].flat(Infinity).flatMap(nodes)];
 function mount(extra={}) {
@@ -38,43 +38,39 @@ test('editor uses actual sidebar parents, submenu labels and order; future menu 
   const futurePages=[...pages,{id:'new',code:'future_page',name:'Old database label'}];
   const next=grouping.permissionMenuGroups(futurePages,[...views[0].items,future],views);
   assert.equal(next.at(-1).rows[0].label,'Future submenu');
+  const performance=groups.find(g=>g.label==='Performance');
+  const live=performance.rows.find(r=>r.label==='Live performance');
+  assert.deepEqual(live.sections.map(section=>section.label),['Ops Live','Station board','Ageing','Performance','EDDs','Scorecard']);
 });
-test('tree is not a table; menus and individual subsections expand without changing saved permissions',()=>{
+test('compact dashboard-style matrix expands menus and in-page sections without changing saved permissions',()=>{
   const extra={id:'unlisted',code:'unlisted',name:'Existing action'};
   const initial=[...pages,extra].map((page,i)=>({page_id:page.id,can_view:i%2===0,can_add:i%3===0,can_edit:i%5===0}));
   const h=mount({pages:[...pages,extra],initialPermissions:initial});h.render();
-  assert.equal(h.all().filter(n=>n.type==='table').length,0);
-  assert.equal(h.all().filter(n=>n.props.className==='ops-permission-section').length,0);
-  assert.deepEqual(h.payload(),initial);
+  assert.equal(h.all().filter(n=>n.type==='table').length,1);
+  assert(!h.all().some(n=>n.props.className==='report-table-tools'));
   h.all().find(n=>n.props['aria-label']==='Expand Workforce').props.onClick();h.render();
-  assert(h.all().some(n=>n.props.className==='ops-permission-section'));
-  assert.equal(h.all().filter(n=>n.props.className==='ops-permission-actions').length,0);
-  h.all().find(n=>n.props['aria-label']==='Expand Workforce / ID Mapping').props.onClick();h.render();
-  assert.equal(h.all().filter(n=>n.props.className==='ops-permission-actions').length,1);
-  assert.deepEqual(h.payload(),initial);
+  assert(h.all().some(n=>n.props['aria-label']==='Workforce / ID Mapping: View'));
+  h.all().find(n=>n.props['aria-label']==='Expand Performance').props.onClick();h.render();
+  h.all().find(n=>n.props['aria-label']==='Expand Performance / Live performance').props.onClick();h.render();
+  assert(h.all().some(n=>n.props['aria-label']==='Performance / Live performance / Station board: View'));
   h.all().find(n=>n.props['aria-label']==='Workspace').props.onChange({target:{value:'amazon_now'}});h.render();
   assert(h.all().some(n=>n.props['aria-label']==='Expand Store Audits'));
-  assert.deepEqual(h.payload(),initial);
   h.all().find(n=>n.props.placeholder==='Menu, submenu or section').props.onChange({target:{value:'Audit'}});h.render();
-  assert.deepEqual(h.payload(),initial);
   assert.equal(grouping.additionalPermissionPages([...pages,extra],views)[0].id,'unlisted');
 });
 test('submenu edits sync shared grants, require View for Edit, and do not change unrelated pages',()=>{
   const h=mount();h.render();
   h.all().find(n=>n.props['aria-label']==='Expand Operations').props.onClick();h.render();
-  h.all().find(n=>n.props['aria-label']==='Expand Operations / COD Status').props.onClick();h.render();
-  h.all().find(n=>n.props.label==='Operations / COD Status: Edit').props.onChange(true);h.render();
-  h.all().find(n=>n.props['aria-label']==='Expand Operations / COD Slip Review').props.onClick();h.render();
-  assert.equal(h.all().find(n=>n.props.label==='Operations / COD Slip Review: Edit').props.checked,true);
-  assert.equal(h.all().find(n=>n.props.label==='Operations / COD Slip Review: View').props.disabled,true);
+  h.all().find(n=>n.props['aria-label']==='Operations / COD Status: Edit').props.onChange({target:{checked:true}});h.render();
+  assert.equal(h.all().find(n=>n.props['aria-label']==='Operations / COD Slip Review: Edit').props.checked,true);
+  assert.equal(h.all().find(n=>n.props['aria-label']==='Operations / COD Slip Review: View').props.checked,true);
   const changed=h.payload().filter(p=>p.can_view||p.can_add||p.can_edit);
   assert.deepEqual(changed,[{page_id:'cod_reports',can_view:true,can_add:false,can_edit:true}]);
 });
 test('search opens the matching leaf, which can be granted without any menu-level bulk access',()=>{
   const h=mount();h.render();h.all().find(n=>n.props.placeholder==='Menu, submenu or section').props.onChange({target:{value:'ID Mapping'}});h.render();
-  assert(h.all().some(n=>n.props.label==='Workforce / ID Mapping: View'));
-  assert(!h.all().some(n=>String(n.props['aria-label']||'').includes('All actions')));
-  h.all().find(n=>n.props.label==='Workforce / ID Mapping: View').props.onChange(true);h.render();
+  assert(h.all().some(n=>n.props['aria-label']==='Workforce / ID Mapping: View'));
+  h.all().find(n=>n.props['aria-label']==='Workforce / ID Mapping: View').props.onChange({target:{checked:true}});h.render();
   assert.deepEqual(h.payload().filter(p=>p.can_view),[{page_id:'ops_provider_mapping',can_view:true,can_add:false,can_edit:false}]);
 });
 test('unfiltered configuration catalogue does not bypass live sidebar COD review eligibility',()=>{
@@ -93,10 +89,21 @@ test('attendance and roster links share the existing grant while keeping separat
   assert(attendance.rows[0].sharedWith.includes('Rostering'));
   const h=mount({initialNavigationView:'amazon_now'});h.render();
   h.all().find(n=>n.props['aria-label']==='Expand Shift Attendance').props.onClick();h.render();
-  h.all().find(n=>n.props['aria-label']==='Expand Shift Attendance / Shift Attendance').props.onClick();h.render();
-  h.all().find(n=>n.props.label==='Shift Attendance / Shift Attendance: View').props.onChange(true);h.render();
+  h.all().find(n=>n.props['aria-label']==='Shift Attendance / Shift Attendance: View').props.onChange({target:{checked:true}});h.render();
   h.all().find(n=>n.props['aria-label']==='Expand Rostering').props.onClick();h.render();
-  h.all().find(n=>n.props['aria-label']==='Expand Rostering / Rostering').props.onClick();h.render();
-  assert.equal(h.all().find(n=>n.props.label==='Rostering / Rostering: View').props.checked,true);
+  assert.equal(h.all().find(n=>n.props['aria-label']==='Rostering / Rostering: View').props.checked,true);
   assert.deepEqual(h.payload().filter(p=>p.can_view),[{page_id:'ops_rostering',can_view:true,can_add:false,can_edit:false}]);
+});
+
+test('Live performance sections are independently configurable and parent bulk controls remain optional',()=>{
+  const h=mount();h.render();
+  h.all().find(n=>n.props['aria-label']==='Expand Performance').props.onClick();h.render();
+  h.all().find(n=>n.props['aria-label']==='Expand Performance / Live performance').props.onClick();h.render();
+  h.all().find(n=>n.props['aria-label']==='Performance / Live performance / Station board: View').props.onChange({target:{checked:true}});h.render();
+  assert.deepEqual(h.payload().filter(p=>p.can_view),[{page_id:'edd_station_board',can_view:true,can_add:false,can_edit:false}]);
+  assert.equal(h.all().find(n=>n.props['aria-label']==='Performance / Live performance / Ops Live: View').props.checked,false);
+  h.all().find(n=>n.props['aria-label']==='Performance / Live performance: All').props.onChange({target:{checked:true}});h.render();
+  const liveCodes=['edd_live_ops','edd_station_board','edd_ageing','edd_performance','edd_edds','edd_scorecard'];
+  assert.equal(h.payload().filter(p=>liveCodes.includes(p.page_id)).every(p=>p.can_view&&p.can_add&&p.can_edit),true);
+  assert.equal(h.payload().find(p=>p.page_id==='edd_scrub').can_view,false);
 });

@@ -120,7 +120,9 @@ export async function AppShell({ children, active, pageCode }: { children: React
     .map((item) => item.children?.length ? {
       ...item,
       children: item.children.filter((child) => {
-        return !child.code || hasPermission(authorization, child.code, "access");
+        return child.permissionSections?.length
+          ? child.permissionSections.some((section) => hasPermission(authorization, section.code, "access"))
+          : !child.code || hasPermission(authorization, child.code, "access");
       })
     } : item)
     .filter((item) => item.children?.length ? item.children.length > 0 : hasPermission(authorization, item.code, "access"));

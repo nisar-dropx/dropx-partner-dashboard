@@ -9,7 +9,7 @@ import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { loadStationEddNetworkSummary, type StationEddNetworkSummary } from "@/lib/ops-pulse/station-edd-summary";
 import { StationEddNetworkClient } from "../../station-edd/station-edd-network-client";
 import { StationEddNetworkSkeleton } from "../../station-edd/station-edd-network-skeleton";
-import { canViewEddAgeingPerformance } from "@/lib/ops-pulse/edd-access";
+import { allowedEddSections, canViewEddAgeingPerformance } from "@/lib/ops-pulse/edd-access";
 import { EddSectionTabs } from "../edd-section-tabs";
 import styles from "../../station-edd/station-edd.module.css";
 import { eddQueryFromRecord, type EddQuery } from "@/lib/ops-pulse/edd-table-controls";
@@ -32,12 +32,12 @@ async function StationEddNetwork({ authorization, query }: { authorization: Auth
 export default async function StationEddPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const authorization = await requireStationEddAccess();
   return (
-    <AppShell active="Live performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_edds">
       <div className="ops-command-center">
         <PageHead eyebrow="Ops Pulse · Delivery Performance" title="EDDs · All locations"
           subtitle="First-dispatch pending, delivery outcomes and HFR—across every location you manage."
           action={<TrackingIdSearch />} />
-        <div className={styles.sectionNav}><EddSectionTabs active="edds" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} /></div>
+        <div className={styles.sectionNav}><EddSectionTabs active="edds" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} /></div>
         <Suspense fallback={<StationEddNetworkSkeleton />}>
           <StationEddNetwork authorization={authorization} query={eddQueryFromRecord(searchParams)} />
         </Suspense>
