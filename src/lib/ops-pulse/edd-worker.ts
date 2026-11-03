@@ -982,9 +982,9 @@ export type LoadFlashBoardStation = {
 
 export type LoadFlashBoardNetwork = {
   asOf: string;
-  /** When the latest Refresh today run started (clear + pull). */
+  /** When the latest Refresh run started (in-place pull). */
   refreshStartedAt: string | null;
-  /** When the main Refresh today pull window finished (retries may still follow). */
+  /** When the main Refresh pull window finished (retries may still follow). */
   refreshFinishedAt: string | null;
   businessDate: string;
   dates: string[];
@@ -1114,7 +1114,7 @@ export type LoadFlashBoardBackfill = {
   done: boolean;
   /** Station codes that failed this tick (for end-of-run retry passes). */
   failed: string[];
-  /** Set when this call only wiped prior board pivots (new Refresh today run). */
+  /** Set when this call stamped a new Refresh run (no wipe — in-place updates). */
   reset?: boolean;
   cleared?: number;
 };
@@ -1122,7 +1122,7 @@ export type LoadFlashBoardBackfill = {
 function workerFetchErrorMessage(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : String(error || fallback);
   if (/fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|network|socket/i.test(message)) {
-    return "Worker connection dropped. Click Refresh today again — the run will resume from the last packet.";
+    return "Worker connection dropped. Click Refresh again — the run will resume from the last packet.";
   }
   return message || fallback;
 }
@@ -1136,7 +1136,7 @@ export async function backfillLoadFlashBoard(opts?: {
   concurrency?: number;
   /** Explicit failure list for end-of-run retry passes (station codes). */
   retryJobs?: string[];
-  /** Wipe prior board pivots for the selected date before pulling (new Refresh today). */
+  /** Stamp Refresh start meta before pulling (keeps prior board data). */
   reset?: boolean;
 }): Promise<LoadFlashBoardBackfill> {
   const { baseUrl, adminKey } = workerConfig();
@@ -1144,7 +1144,7 @@ export async function backfillLoadFlashBoard(opts?: {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
   }
   const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board/backfill`);
-  // Refresh today always pulls the selected business date only.
+  // Refresh always pulls the selected business date only.
   url.searchParams.set("days", "1");
   if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
   if (opts?.date) url.searchParams.set("date", opts.date);
