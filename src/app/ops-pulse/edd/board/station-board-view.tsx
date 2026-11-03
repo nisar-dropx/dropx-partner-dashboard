@@ -299,6 +299,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   /** Resume Refresh after a proxy timeout instead of restarting from station 0. */
   const backfillCursor = useRef(0);
   const backfillClearSeq = useRef(0);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
 
   const stations = useMemo(() => filterBoardStations(payload.stations, {
     stations: [...stationFilter], clusters: [...clusterFilter], regions: [...regions],
@@ -431,6 +433,17 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return { response, body };
   }
 
+  function sharedRefreshNote(next: Pick<LoadFlashBoardNetwork, "refreshOwner" | "refreshDone" | "refreshTotal" | "refreshRunning">) {
+    const total = Number(next.refreshTotal ?? 0) || 0;
+    const done = Number(next.refreshDone ?? 0) || 0;
+    const who =
+      next.refreshOwner === "cron"
+        ? "Hourly refresh working"
+        : "Refresh working";
+    if (!next.refreshRunning) return "Board data updated.";
+    return total ? `${who} · ${done}/${total}` : `${who}…`;
+  }
+
   /** Watch a Refresh someone else (or cron) already started — update board as stations finish. */
   async function watchSharedRefresh(clearSeq: number) {
     setBusy("refresh");
@@ -450,13 +463,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       const total = Number(next.refreshTotal ?? 0) || 0;
       const done = Number(next.refreshDone ?? 0) || 0;
       if (total > 0) setBackfillProgress({ done, total });
-      if (next.refreshRunning) {
-        setBackfillNote(total ? `Refresh working · ${done}/${total}` : "Refresh working…");
-        await new Promise((r) => setTimeout(r, 2500));
-        continue;
-      }
-      setBackfillNote("Board data updated.");
-      break;
+      setBackfillNote(sharedRefreshNote(next));
+      if (!next.refreshRunning) break;
+      await new Promise((r) => setTimeout(r, 2500));
     }
   }
 
@@ -679,25 +688,44 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }
   }
 
-  // If another tab/user already started Refresh, show working progress on load.
+  // Join a Refresh already in progress (another user or hourly cron), including
+  // when cron starts while this page is open — poll every ~8s while idle.
   useEffect(() => {
-    if (!initial.refreshRunning || busy === "refresh") return;
-    const clearSeq = ++backfillClearSeq.current;
-    void (async () => {
+    let cancelled = false;
+    async function joinIfRunning() {
+      if (cancelled || busyRef.current !== null) return;
       try {
-        await watchSharedRefresh(clearSeq);
-        setBackfillNote("Board data updated.");
-        window.setTimeout(() => {
-          if (clearSeq !== backfillClearSeq.current) return;
-          setBackfillProgress(null);
-          setBackfillNote("");
-        }, 2500);
-      } finally {
-        setBusy(null);
+        const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" });
+        if (!response.ok || cancelled || busyRef.current !== null) return;
+        const next = (await response.json()) as LoadFlashBoardNetwork;
+        setPayload(next);
+        setRun(next.run);
+        if (!next.refreshRunning || cancelled || busyRef.current !== null) return;
+        const clearSeq = ++backfillClearSeq.current;
+        try {
+          await watchSharedRefresh(clearSeq);
+          if (cancelled || clearSeq !== backfillClearSeq.current) return;
+          setBackfillNote("Board data updated.");
+          window.setTimeout(() => {
+            if (clearSeq !== backfillClearSeq.current) return;
+            setBackfillProgress(null);
+            setBackfillNote("");
+          }, 2500);
+        } finally {
+          if (clearSeq === backfillClearSeq.current) setBusy(null);
+        }
+      } catch {
+        // ignore poll errors — next interval retries
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- join once when the page opens mid-refresh
-  }, []);
+    }
+    void joinIfRunning();
+    const id = window.setInterval(() => void joinIfRunning(), 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll while board date stays put
+  }, [payload.businessDate]);
 
   async function onDownload() {
     setBusy("download");

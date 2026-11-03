@@ -990,6 +990,8 @@ export type LoadFlashBoardNetwork = {
   refreshRunning?: boolean;
   refreshDone?: number;
   refreshTotal?: number;
+  /** Who started the shared run — `ui` click or hourly `cron`. */
+  refreshOwner?: "ui" | "cron" | null;
   businessDate: string;
   dates: string[];
   stations: LoadFlashBoardStation[];
@@ -1230,6 +1232,8 @@ export async function fetchLoadFlashBoard(date?: string, stations?: string[]): P
     refreshRunning: Boolean(raw.refreshRunning),
     refreshDone: Math.max(0, Number(raw.refreshDone) || 0),
     refreshTotal: Math.max(0, Number(raw.refreshTotal) || 0),
+    refreshOwner:
+      raw.refreshOwner === "cron" || raw.refreshOwner === "ui" ? raw.refreshOwner : null,
     businessDate: String(raw.businessDate ?? date ?? ""),
     dates: Array.isArray(raw.dates) ? raw.dates.map((item) => String(item).slice(0, 10)) : [],
     stations: list.map((item) => {
