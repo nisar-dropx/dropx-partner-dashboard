@@ -19,6 +19,7 @@ import {
   DSR_HEADERS,
   dsrHeatColor,
   dsrPctTextColor,
+  oorTextColor,
   eddPivot,
   eddStationTotal,
   heatColor,
@@ -245,7 +246,7 @@ function buildShareTable(
         { text: String(da.delivered), align: "right" },
         { text: String(da.failed || 0), align: "right" },
         { text: String(da.rejected || 0), align: "right" },
-        { text: String(da.oor || 0), align: "right" },
+        { text: String(da.oor || 0), color: oorTextColor(da.oor, da.total, station.fetchedAt), bold: !!oorTextColor(da.oor, da.total, station.fetchedAt), align: "right" },
         { text: String(da.total), align: "right" },
         { text: da.total ? `${da.dsrPct}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct) : undefined, align: "right" },
       ]);
@@ -281,7 +282,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [stationFilter, setStationFilter] = useState<Set<string>>(() => new Set((initialStations || "").split(",").filter(Boolean)));
   const [clusterFilter, setClusterFilter] = useState<Set<string>>(() => new Set((initialClusters || "").split(",").filter(Boolean)));
   const [sorts, setSorts] = useState<Record<string, BoardReportSort>>({});
-  const sort = sorts[view] ?? { header: view === "dsr" || view === "zero" ? DSR_HEADERS.dsrPct : "Station", direction: view === "dsr" || view === "zero" ? "desc" : "asc" };
+  const sort = sorts[view] ?? { header: view === "zero" ? DSR_HEADERS.oor : view === "dsr" ? DSR_HEADERS.dsrPct : "Station", direction: view === "dsr" || view === "zero" ? "desc" : "asc" };
   const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
@@ -357,7 +358,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return prepareBoardReport({ ...table,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
       subtitle: `${table.subtitle} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}`,
-    }, sort, { dsr: view === "dsr" || view === "zero", singleStation: blockStations.length === 1 });
+    }, sort, { dsr: view === "dsr" || view === "zero", singleStation: view !== "zero" && blockStations.length === 1, groupByStation: view !== "zero" });
   }
   const report = reportFor(stations, regionLabel);
   function excelReport(table = report, tidSheet?: ExcelReport["extraSheets"]): ExcelReport {
@@ -1063,12 +1064,12 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div>
         <div className={s.reportMeta}>
           <span>{stations.length} stations{view === "dsr" || view === "zero" ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
-          <span>{view === "dsr" || view === "zero" ? "Sorted within station · percentages of total shipments" : "Select a station for details"}</span>
+          <span>{view === "dsr" || view === "zero" ? (view === "zero" ? "Sorted across stations · percentages of total shipments" : "Sorted within station · percentages of total shipments") : "Select a station for details"}</span>
         </div>
         <div className={s.scroll}>
           <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
             <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-              <button type="button" className={s.sortButton} onClick={() => setSorts(previous => ({ ...previous, [view]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+              <button type="button" className={s.sortButton} title={header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [view]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
             </th>)}</tr></thead>
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
               {row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
@@ -1267,12 +1268,12 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
-                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0) : [...selected.board.daDsr]).sort((a, b) => b.dsrPct - a.dsrPct).map((da) => (
+                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0) : [...selected.board.daDsr]).sort((a, b) => view === "zero" ? b.oor - a.oor : b.dsrPct - a.dsrPct).map((da) => (
                       <div key={da.driverId} className={s.shareRowWide}>
                         <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
                         <strong>{da.total}</strong>
                         <strong>{da.delivered}</strong>
-                        <strong>{da.oor || 0}</strong>
+                        <strong title="Red: more than 50% still on road in a snapshot taken from 1 pm IST onward." style={{ color: oorTextColor(da.oor, da.total, selected.fetchedAt) }}>{da.oor || 0}</strong>
                         <strong>{da.failed || 0}</strong>
                         <strong>{da.rejected || 0}</strong>
                         <strong style={{ background: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct) }}>{da.dsrPct}%</strong>

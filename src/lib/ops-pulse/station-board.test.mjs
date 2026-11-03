@@ -10,6 +10,7 @@ import {
   cReturnStatuses,
   eddPivot,
   normalizeBoard,
+  oorTextColor,
   stationBoardSheets,
   sumCReturn,
   sumDaDsr,
@@ -191,4 +192,18 @@ test("DSR / C-Return grand totals ignore empty boards and keep pickup % stable",
   const cTot = sumCReturn([empty, withDsr]);
   assert.equal(cTot.total, 4);
   assert.equal(cTot.pickupDonePct, 75);
+});
+
+
+test("OOR warning starts at 1 pm IST only above 50% and uses the snapshot time", () => {
+  assert.equal(oorTextColor(100, 100, "2026-11-03T07:29:59Z"), undefined);
+  assert.equal(oorTextColor(51, 100, "2026-11-03T07:30:00Z"), "#b91c1c");
+  assert.equal(oorTextColor(50, 100, "2026-11-03T08:30:00Z"), undefined);
+  assert.equal(oorTextColor(49, 100, "2026-11-03T18:29:59Z"), undefined);
+  assert.equal(oorTextColor(1, 1, "2026-11-03T13:00:00+05:30"), "#b91c1c");
+  assert.equal(oorTextColor(10, 0, "2026-11-03T08:00:00Z"), undefined);
+  assert.equal(oorTextColor(NaN, 100, "2026-11-03T08:00:00Z"), undefined);
+  for (const time of [null, "", "invalid"]) assert.equal(oorTextColor(90, 100, time), undefined);
+  assert.equal(oorTextColor(90, 100, "2026-11-02T06:00:00Z"), undefined, "historical morning snapshot stays neutral");
+  assert.equal(oorTextColor(90, 100, "2026-11-03T18:30:00Z"), undefined, "IST midnight is before the cutoff");
 });

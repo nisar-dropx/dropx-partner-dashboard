@@ -308,6 +308,15 @@ export function dsrPctTextColor(pct: number): string {
   return pct >= 95 ? "#ffffff" : "#223642";
 }
 
+/** Use the station snapshot time, not when an old report happens to be opened. */
+export function oorTextColor(oor: number, total: number, snapshotAt: string | null | undefined): string | undefined {
+  if (!Number.isFinite(oor) || !Number.isFinite(total) || total <= 0 || oor <= total / 2 || !snapshotAt) return undefined;
+  const timestamp = Date.parse(snapshotAt);
+  if (!Number.isFinite(timestamp)) return undefined;
+  const istHour = new Date(timestamp + 330 * 60_000).getUTCHours();
+  return istHour >= 13 ? "#b91c1c" : undefined;
+}
+
 /** Shift a YYYY-MM-DD by N calendar days (UTC date math — safe for IST board dates). */
 export function shiftBoardDate(date: string, days: number): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
