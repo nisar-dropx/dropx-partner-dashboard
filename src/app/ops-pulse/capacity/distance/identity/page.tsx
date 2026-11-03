@@ -98,7 +98,7 @@ export default async function DistanceIdentityPage({
         <PageHead
           eyebrow="Capacity"
           title="Unlinked Amazon IDs"
-          subtitle="Associates without an SCC / Flex transporter link. Link them in the workforce portal, then Sync — distance settles once the Amazon ID is mapped."
+          subtitle="Associates without an Amazon driver ID for these days. Use Map Amazon ID to set the Flex ID and date range, then sync."
         />
         <CapacityWorkspaceTabs
           active="distance"
@@ -110,8 +110,8 @@ export default async function DistanceIdentityPage({
           </Link>
           <span>
             {identityRows.length} associate-
-            {identityRows.length === 1 ? "day" : "days"} waiting for Amazon ID
-            mapping in this selection.
+            {identityRows.length === 1 ? "day" : "days"} with
+            amazon_identity_missing in this selection.
           </span>
         </p>
         <form
@@ -205,9 +205,9 @@ export default async function DistanceIdentityPage({
           />
         )}
         <p className={styles.note}>
-          These days are not payable until the associate is linked to an Amazon
-          transporter ID. After linking, use Sync on Distance &amp; Fuel (or wait
-          for the 5:00 IST job) so the day can settle from GPS / road evidence.
+          These days are not payable until an Amazon driver ID is mapped for the
+          date. Open Map Amazon ID on a row, set the ID and From/To, Apply, then
+          sync (or wait for the 5:00 IST job) so GPS / road evidence can settle.
         </p>
       </div>
     </AppShell>

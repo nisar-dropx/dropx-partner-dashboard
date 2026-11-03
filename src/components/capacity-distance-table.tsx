@@ -4,7 +4,7 @@ import { ReportTable } from "@/components/report-table";
 import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download, Link2Off, MapPinned, X } from "lucide-react";
+import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download, Link2, Link2Off, MapPinned, RouteOff, X } from "lucide-react";
 import { distanceMethods, distanceStatus, filterDistanceEntries, filterDistanceScope, groupDistanceAssociates, type DistanceEntry, type DistanceViewFilters } from "@/lib/ops-pulse/distance-register";
 import { routePendingLabel } from "@/lib/workforce-route-distance";
 import styles from "./capacity-distance.module.css";
@@ -16,23 +16,51 @@ const date = (v: string) => new Date(v + "T00:00:00Z").toLocaleDateString("en-IN
 function reason(r: DistanceEntry) {
   return r.reason === "input_conflict" ? "Conflicting kilometre inputs or overlapping mappings." : routePendingLabel(r.reason);
 }
+function mapAmazonHref(rows: DistanceEntry[], fallbackFrom: string, fallbackTo: string) {
+  const identity = rows.filter((r) => r.reason === "amazon_identity_missing");
+  const source = identity.length ? identity : rows;
+  if (!source.length) return null;
+  // Prefer the station with the most unlinked days for this associate.
+  const byStation = new Map<string, DistanceEntry[]>();
+  for (const row of source) {
+    const list = byStation.get(row.stationId) || [];
+    list.push(row);
+    byStation.set(row.stationId, list);
+  }
+  const stationRows = [...byStation.values()].sort((a, b) => b.length - a.length)[0];
+  const first = stationRows[0];
+  const dates = stationRows.map((r) => r.date).sort();
+  const qs = new URLSearchParams({
+    workforce: first.workforceId,
+    station: first.stationId,
+    from: dates[0] || fallbackFrom,
+    to: dates[dates.length - 1] || fallbackTo,
+  });
+  return `/ops-pulse/capacity/distance/map-amazon-id?${qs}`;
+}
 export function CapacityDistanceTable({
   rows,
   filters,
   mode = "register",
   identityHref,
   identityCount = 0,
+  noRouteHref,
+  noRouteCount = 0,
 }: {
   rows: DistanceEntry[];
   filters: DistanceViewFilters;
-  mode?: "register" | "identity";
+  mode?: "register" | "identity" | "no-route";
   identityHref?: string;
   identityCount?: number;
+  noRouteHref?: string;
+  noRouteCount?: number;
 }) {
   const [page, setPage] = useState(0), [expanded, setExpanded] = useState<string | null>(null),
     [selected, setSelected] = useState<DistanceEntry | null>(null), [sort, setSort] = useState<"name" | "km">("name"),
     [exporting, setExporting] = useState(false), [exportError, setExportError] = useState("");
   const identityMode = mode === "identity";
+  const noRouteMode = mode === "no-route";
+  const queueMode = identityMode || noRouteMode;
   const filtered = useMemo(() => filterDistanceEntries(rows, filters), [rows, filters]);
   const scoped = useMemo(() => filterDistanceScope(rows, filters), [rows, filters]);
   const associates = useMemo(() => {
@@ -43,7 +71,7 @@ export function CapacityDistanceTable({
     total = ready.reduce((s, r) => s + (r.km || 0), 0), fuel = ready.reduce((s, r) => s + (r.fuel || 0), 0);
   const stationCount = new Set(filtered.map((r) => r.station)).size;
   const period = `${date(filters.from)} – ${date(filters.to)}`;
-  const readyOnlyView = !identityMode && (!filters.statuses.length || (filters.statuses.length === 1 && filters.statuses[0] === "Ready"));
+  const readyOnlyView = !queueMode && (!filters.statuses.length || (filters.statuses.length === 1 && filters.statuses[0] === "Ready"));
   const canExport = scoped.length > 0;
   async function download() {
     setExporting(true); setExportError("");
@@ -62,10 +90,15 @@ export function CapacityDistanceTable({
   return <>
     <div className={styles.metrics}>
       {identityMode ? <>
-        <article><span>Unlinked associate-days</span><strong>{filtered.length}</strong><p>amazon_identity_missing in this period</p></article>
+        <article className={styles.metricAccentIdentity}><span>Unlinked associate-days</span><strong>{filtered.length}</strong><p>amazon_identity_missing</p></article>
         <article><span>Associates</span><strong>{associates.length}</strong><p>Need SCC / Flex transporter link</p></article>
         <article><span>Stations</span><strong>{stationCount}</strong><p>{stationCount === 1 ? "station" : "stations"} in this selection</p></article>
         <article><span>Payable distance</span><strong>—</strong><p>Settles after Amazon ID is mapped</p></article>
+      </> : noRouteMode ? <>
+        <article className={styles.metricAccentNoRoute}><span>No-route associate-days</span><strong>{filtered.length}</strong><p>route_not_received</p></article>
+        <article><span>Associates</span><strong>{associates.length}</strong><p>No Amazon itinerary on these days</p></article>
+        <article><span>Stations</span><strong>{stationCount}</strong><p>{stationCount === 1 ? "station" : "stations"} in this selection</p></article>
+        <article><span>System fuel</span><strong>—</strong><p>0 km until a route appears or exception</p></article>
       </> : <>
         <article><span>Recorded distance</span><strong>{number(total)} <small>km</small></strong><p>{ready.length} ready associate-{ready.length === 1 ? "day" : "days"}</p></article>
         <article><span>Fuel allowance</span><strong>₹{number(fuel)}</strong><p>Payable fuel in the selected period</p></article>
@@ -76,16 +109,23 @@ export function CapacityDistanceTable({
     <section className={styles.panel}>
       <header className={styles.tableHead}>
         <div>
-          <h2>{identityMode ? "Unlinked Amazon IDs" : "Associate distance register"}</h2>
+          <h2>{identityMode ? "Unlinked Amazon IDs" : noRouteMode ? "No Amazon route" : "Associate distance register"}</h2>
           <span>{associates.length} {associates.length === 1 ? "associate" : "associates"} · {period}</span>
           <p className={styles.note}>{identityMode
-            ? "Full day list for associates not linked to an Amazon transporter ID. Link in workforce portal, then sync Distance & Fuel."
+            ? "Associates missing an Amazon driver ID for these days. Use Map Amazon ID to set the Flex ID and dates, then sync."
+            : noRouteMode
+            ? "Days with no Amazon delivery itinerary. Confirm the Flex route or handle fuel by payroll exception — Present alone is not payable KM."
             : "Select an associate to see their daily breakdown for this period."}</p>
         </div>
         <div className={styles.tableActions}>
-          {!identityMode && identityHref && identityCount > 0 ? (
+          {!queueMode && identityHref && identityCount > 0 ? (
             <Link href={identityHref} className={styles.identityLink}>
               <Link2Off size={15}/>Unlinked Amazon IDs ({identityCount})
+            </Link>
+          ) : null}
+          {!queueMode && noRouteHref && noRouteCount > 0 ? (
+            <Link href={noRouteHref} className={styles.noRouteLink}>
+              <RouteOff size={15}/>No Amazon route ({noRouteCount})
             </Link>
           ) : null}
           <button type="button" className={styles.sort} onClick={() => { setSort((s) => s === "name" ? "km" : "name"); setPage(0); }}><ArrowDownUp size={15}/>{sort === "name" ? "Name A–Z" : "Highest km first"}</button>
@@ -106,7 +146,21 @@ export function CapacityDistanceTable({
                 <td data-label="Recorded distance" className={styles.numeric}><strong>{a.km === null ? "—" : `${number(a.km)} km`}</strong>{!readyOnlyView && a.pendingDays && a.km !== null ? <small>Recorded days only</small> : null}</td>
                 <td data-label="Fuel allowance" className={styles.numeric}><strong>{a.fuel === null ? "—" : `₹${number(a.fuel)}`}</strong>{!readyOnlyView && a.pendingDays && a.fuel !== null ? <small>Partial total</small> : null}</td>
                 <td data-label="Coverage"><span className={`${styles.badge} ${!readyOnlyView && a.pendingDays ? styles.pending : styles.ready}`}>{readyOnlyView || !a.pendingDays ? "Ready" : `${a.pendingDays} ${a.pendingDays === 1 ? "day" : "days"} pending`}</span></td>
-                <td className={styles.expandIndicator}><ChevronDown size={17} aria-hidden="true" className={expanded === a.key ? styles.rotated : ""}/></td>
+                <td className={styles.expandIndicator}>
+                  <div className={styles.mapAmazonRowActions} onClick={(e) => e.stopPropagation()}>
+                    {identityMode || a.rows.some((r) => r.reason === "amazon_identity_missing") ? (
+                      (() => {
+                        const href = mapAmazonHref(a.rows, filters.from, filters.to);
+                        return href ? (
+                          <Link href={href} className={styles.mapAmazonLink}>
+                            <Link2 size={14} aria-hidden="true" />Map Amazon ID
+                          </Link>
+                        ) : null;
+                      })()
+                    ) : null}
+                    <ChevronDown size={17} aria-hidden="true" className={expanded === a.key ? styles.rotated : ""}/>
+                  </div>
+                </td>
               </tr>
               {expanded === a.key ? <tr className={styles.expandedRow}><td colSpan={8}>
                 <section id={`days-${a.key}`} aria-label={`Daily breakdown for ${a.name}`} className={styles.dailyPanel}>
@@ -118,13 +172,29 @@ export function CapacityDistanceTable({
                       <td className={styles.numeric}>₹{number(r.rate)}</td>
                       <td className={styles.numeric}><strong>{r.fuel === null ? "—" : `₹${number(r.fuel)}`}</strong></td>
                       <td><span className={`${styles.badge} ${r.status === "ready" ? styles.ready : styles.pending}`}>{distanceStatus(r)}</span><small>{r.status === "ready" ? distanceMethods[r.method] || r.method : reason(r)}</small></td>
-                      <td><button type="button" className={styles.open} onClick={() => setSelected(r)} aria-label={`Open distance details for ${r.name}, ${date(r.date)}, ${r.station}`}><MapPinned size={16}/>Details</button></td>
+                      <td className={styles.mapAmazonRowActions}>
+                        {r.reason === "amazon_identity_missing" ? (
+                          <Link
+                            href={`/ops-pulse/capacity/distance/map-amazon-id?${new URLSearchParams({
+                              workforce: r.workforceId,
+                              station: r.stationId,
+                              from: r.date,
+                              to: r.date,
+                            }).toString()}`}
+                            className={styles.mapAmazonLink}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Link2 size={14} aria-hidden="true" />Map Amazon ID
+                          </Link>
+                        ) : null}
+                        <button type="button" className={styles.open} onClick={() => setSelected(r)} aria-label={`Open distance details for ${r.name}, ${date(r.date)}, ${r.station}`}><MapPinned size={16}/>Details</button>
+                      </td>
                     </tr>)}</tbody>
                   </ReportTable>
                 </section>
               </td></tr> : null}
             </Fragment>)}
-            {!shown.length ? <tr><td colSpan={8}><div className={styles.empty}><MapPinned size={28}/><strong>{identityMode ? "No unlinked Amazon IDs in this selection" : "No associates match these filters"}</strong><span>{identityMode ? "Everyone in scope already has a transporter link, or widen the date / station filters." : "Try another date, station or status. Only kilometre-based fuel mappings are included."}</span></div></td></tr> : null}
+            {!shown.length ? <tr><td colSpan={8}><div className={styles.empty}><MapPinned size={28}/><strong>{identityMode ? "No unlinked Amazon IDs in this selection" : noRouteMode ? "No route_not_received days in this selection" : "No associates match these filters"}</strong><span>{identityMode ? "Everyone in scope already has a transporter link, or widen the date / station filters." : noRouteMode ? "Every associate-day in scope already has an Amazon itinerary, or widen the filters." : "Try another date, station or status. Only kilometre-based fuel mappings are included."}</span></div></td></tr> : null}
           </tbody>
         </ReportTable>
       </div>
@@ -133,6 +203,38 @@ export function CapacityDistanceTable({
         <button type="button" aria-label="Next page" disabled={(page + 1) * 50 >= associates.length} onClick={() => setPage((p) => p + 1)}><ChevronRight size={18}/></button>
       </div></footer>
     </section>
+    {!queueMode && ((identityHref && identityCount > 0) || (noRouteHref && noRouteCount > 0)) ? (
+      <section className={styles.queuePanel} aria-label="Payroll hold queues">
+        <header>
+          <h2>Payroll hold queues</h2>
+          <p>Ready days above are payable. Open a queue to clear blockers before fuel for these days.</p>
+        </header>
+        <div className={styles.queueCards}>
+          {identityHref && identityCount > 0 ? (
+            <Link href={identityHref} className={`${styles.queueCard} ${styles.queueCardIdentity}`}>
+              <span className={styles.queueIcon}><Link2Off size={20} aria-hidden="true" /></span>
+              <div>
+                <strong>Unlinked Amazon IDs</strong>
+                <span>amazon_identity_missing</span>
+                <p>Map Amazon driver ID by dates, then sync.</p>
+              </div>
+              <em>{identityCount}</em>
+            </Link>
+          ) : null}
+          {noRouteHref && noRouteCount > 0 ? (
+            <Link href={noRouteHref} className={`${styles.queueCard} ${styles.queueCardNoRoute}`}>
+              <span className={styles.queueIcon}><RouteOff size={20} aria-hidden="true" /></span>
+              <div>
+                <strong>No Amazon route</strong>
+                <span>route_not_received</span>
+                <p>Confirm Flex itinerary or exception pay.</p>
+              </div>
+              <em>{noRouteCount}</em>
+            </Link>
+          ) : null}
+        </div>
+      </section>
+    ) : null}
     {selected ? <DistanceDetail row={selected} close={() => setSelected(null)}/> : null}
   </>;
 }

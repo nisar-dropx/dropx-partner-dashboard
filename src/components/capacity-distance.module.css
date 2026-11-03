@@ -124,23 +124,33 @@
 .tableActions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .download { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; border: 1px solid #172c43; border-radius: 8px; background: #172c43; color: white; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .download:disabled { opacity: .5; cursor: default; }
-.identityLink {
+.identityLink,
+.noRouteLink {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 9px 12px;
-  border: 1px solid #c9a227;
   border-radius: 8px;
-  background: #fff8e8;
-  color: #5c4810;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
 }
+.identityLink {
+  border: 1px solid #c9a227;
+  background: #fff8e8;
+  color: #5c4810;
+}
 .identityLink:hover { background: #fff1cc; }
 .identityLink:focus-visible { outline: 3px solid #e6c86a; outline-offset: 4px; }
+.noRouteLink {
+  border: 1px solid #9bb0c7;
+  background: #f3f7fb;
+  color: #243c55;
+}
+.noRouteLink:hover { background: #e8f0f8; }
+.noRouteLink:focus-visible { outline: 3px solid #88a9d7; outline-offset: 4px; }
 .identityBanner {
   display: flex;
   flex-wrap: wrap;
@@ -154,12 +164,286 @@
   color: #5c4810;
   font-size: 13px;
 }
+.queueBannerNoRoute {
+  border-color: #c5d4e4;
+  background: #f4f8fc;
+  color: #243c55;
+}
 .identityBack {
   font-weight: 700;
   color: #243c55;
   text-decoration: none;
 }
 .identityBack:hover { text-decoration: underline; }
+.metricAccentNoRoute {
+  background: #172c43 !important;
+  color: #fff !important;
+  border-color: #172c43 !important;
+}
+.metricAccentIdentity {
+  background: #5c4810 !important;
+  color: #fff !important;
+  border-color: #5c4810 !important;
+}
+.queuePanel {
+  border: 1px solid #e1e8ef;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfcfe 0%, #fff 48%);
+  padding: 18px 18px 16px;
+  display: grid;
+  gap: 14px;
+  box-shadow: 0 1px 0 rgba(23, 44, 67, 0.04);
+}
+.queuePanel header h2 {
+  margin: 0;
+  font-size: 15px;
+  color: #172c43;
+}
+.queuePanel header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #738097;
+}
+.queueCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.queueCard {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 12px;
+  text-decoration: none;
+  border: 1px solid #e1e8ef;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.queueCard:hover { border-color: #b8c7d8; }
+.queueCardIdentity {
+  background: linear-gradient(180deg, #fffdf7 0%, #fff8e8 100%);
+  border-color: #e6d39a;
+}
+.queueCardIdentity:hover { background: #fff1cc; }
+.queueCardNoRoute {
+  background: linear-gradient(180deg, #f8fbfe 0%, #eef4fa 100%);
+  border-color: #c5d4e4;
+}
+.queueCardNoRoute:hover { background: #e4eef7; }
+.queueIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(23, 44, 67, 0.08);
+  color: #172c43;
+}
+.queueCardIdentity .queueIcon { background: rgba(201, 162, 39, 0.18); color: #5c4810; }
+.queueCard div { min-width: 0; }
+.queueCard strong {
+  display: block;
+  font-size: 14px;
+  color: #172c43;
+}
+.queueCard span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #738097;
+}
+.queueCard p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #52647a;
+}
+.queueCard em {
+  font-style: normal;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #172c43;
+  letter-spacing: -0.4px;
+}
+@media (max-width: 860px) {
+  .queueCards { grid-template-columns: 1fr; }
+}
+.mapAmazonLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid #172c43;
+  border-radius: 8px;
+  background: #172c43;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.mapAmazonLink:hover { background: #243c55; }
+.mapAmazonWrap {
+  display: grid;
+  gap: 18px;
+}
+.mapAmazonForm,
+.mapAmazonHistory {
+  border: 1px solid #e1e8ef;
+  border-radius: 14px;
+  background: #fff;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+.mapAmazonField {
+  display: grid;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #52647a;
+}
+.mapAmazonField input {
+  height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #dbe2eb;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #172c43;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.mapAmazonDates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.mapAmazonPicker {
+  border: 1px solid #e1e8ef;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.mapAmazonPickerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f5f8fb;
+  border-bottom: 1px solid #e1e8ef;
+}
+.mapAmazonPickerHead strong {
+  font-size: 13px;
+  color: #172c43;
+}
+.mapAmazonPickerHead input {
+  min-width: 0;
+  flex: 1;
+  max-width: 220px;
+  height: 32px;
+  padding: 6px 8px;
+  border: 1px solid #dbe2eb;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+}
+.mapAmazonIdList {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+.mapAmazonIdList button {
+  width: 100%;
+  border: 1px solid #dbe2eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #243c55;
+  cursor: pointer;
+  text-align: left;
+}
+.mapAmazonIdList button:hover { background: #f3f7fb; }
+.mapAmazonIdActive {
+  border-color: #172c43 !important;
+  background: #172c43 !important;
+  color: #fff !important;
+}
+.mapAmazonEmpty {
+  grid-column: 1 / -1;
+  padding: 12px;
+  font-size: 12px;
+  color: #738097;
+}
+.mapAmazonActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.mapAmazonHistory header h2 {
+  margin: 0;
+  font-size: 15px;
+  color: #172c43;
+}
+.mapAmazonHistory header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #738097;
+}
+.mapAmazonAssignmentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.mapAmazonAssignmentList li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #e1e8ef;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.mapAmazonAssignmentList strong {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #172c43;
+}
+.mapAmazonAssignmentList span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #738097;
+}
+.mapAmazonRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 700px) {
+  .mapAmazonDates { grid-template-columns: 1fr; }
+}
 .associateRow { cursor: pointer; }
 .associateName { border: 0; background: transparent; color: #243c55; padding: 0; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
 .associateName:hover { color: #bb365d; text-decoration: underline; }

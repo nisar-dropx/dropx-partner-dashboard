@@ -47,7 +47,7 @@ export function routePendingLabel(reason:string|null) {
     gps_trail_unavailable:'Waiting for Amazon GPS trail (OSM road fallback also unavailable)',
     route_in_progress:'Route is still in progress',
     day_in_progress:'Distance settles after the work day closes',
-    route_not_received:'Waiting for delivery route',
+    route_not_received:'No Amazon delivery route for this day — Present alone does not create payable kilometres',
     route_needs_review:'Route excluded from distance (anomalous)',
     route_excluded:'Route excluded from distance (anomalous — not pending)',
     mapping_changed:'Refreshing after a mapping change',

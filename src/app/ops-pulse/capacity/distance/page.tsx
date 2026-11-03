@@ -210,18 +210,30 @@ export default async function DistancePage({
               ...filters.clusters.map((s) => ["clusters", s] as [string, string]),
               ...(q ? [["q", q] as [string, string]] : []),
             ]).toString()}`}
+            noRouteCount={filterDistanceScope(rows, {
+              ...period,
+              ...filters,
+              methods,
+              query: q,
+            }).filter((r) => r.reason === "route_not_received").length}
+            noRouteHref={`/ops-pulse/capacity/distance/no-route?${new URLSearchParams([
+              ["from", period.from],
+              ["to", period.to],
+              ...filters.stations.map((s) => ["stations", s] as [string, string]),
+              ...filters.regions.map((s) => ["regions", s] as [string, string]),
+              ...filters.clusters.map((s) => ["clusters", s] as [string, string]),
+              ...(q ? [["q", q] as [string, string]] : []),
+            ]).toString()}`}
             key={JSON.stringify([period, filters, statuses, methods, q])}
           />
         )}
         <p className={styles.note}>
-          Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
-          up to 31 days per view. Defaults to Ready days only (same payable fuel
-          as workforce payroll). Payable kilometres prefer the Amazon GPS trail;
-          if missing: Mapbox Directions (primary + fallback tokens), then Valhalla,
-          then OSRM.
-          Unlinked Amazon IDs open on their own page. Excluded and other
-          non-ready days are listed on the Excel “No payouts” sheet.
-          Distances sync every morning at 5:00 IST; maps load when opened.
+          Amazon EDSP &amp; XPT · kilometre-based fuel mappings · up to 31 days.
+          Defaults to Ready days (same payable fuel as workforce payroll).
+          Payable kilometres prefer Amazon GPS; if missing: Mapbox (primary +
+          fallback tokens), then Valhalla, then OSRM. Unlinked IDs and days with
+          no Amazon route are listed in the payroll hold queues below. Excluded
+          days appear on the Excel “No payouts” sheet. Sync runs at 5:00 IST.
         </p>
       </div>
     </AppShell>
