@@ -24,12 +24,12 @@ const HISTORY_HOURS = 72;
  * is unreachable, the stored report photos and sent replies are shown instead.
  */
 export async function GET(request: Request) {
-  const authorization = await reportBotApiAuthorization("access");
+  const authorization = await reportBotApiAuthorization("access", "any");
   if (!authorization) return NextResponse.json({ error: "Access denied" }, { status: 403 });
   const groupId = new URL(request.url).searchParams.get("group") ?? "";
   if (!/^[0-9a-f-]{36}$/i.test(groupId)) return NextResponse.json({ error: "Choose a group." }, { status: 400 });
   const db = reportBotDb();
-  const group = await db.from("report_bot_groups").select("id,wa_group_id,group_name,participant_count,location_id,is_enabled")
+  const group = await db.from("report_bot_groups").select("id,wa_group_id,group_name,participant_count,location_id,is_enabled,workspace")
     .eq("company_id", authorization.companyId!).eq("id", groupId).maybeSingle();
   if (!group.data || !canSeeGroup(authorization, group.data)) return NextResponse.json({ error: "Group not found." }, { status: 404 });
 

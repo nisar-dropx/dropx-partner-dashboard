@@ -1,3 +1,4 @@
+import type { ReportBotWorkspace } from "./workspace";
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { analysisJsonSchema, extractJsonText, parseAnalysis, type Analysis } from "@/lib/report-bot/logic";
@@ -25,6 +26,7 @@ export type CandidateReport = {
 };
 
 export type AnalysisInput = {
+  workspace?: ReportBotWorkspace;
   image?: Uint8Array | null;
   mime?: "image/jpeg" | "image/png" | "image/webp" | null;
   text?: string | null;
@@ -37,7 +39,7 @@ export type AnalysisInput = {
 };
 
 const SYSTEM_PROMPT = [
-  "You check operational reports that station teams post in WhatsApp groups for a logistics dark-store / war-room context.",
+  "You check operational reports that station teams post in WhatsApp groups for a logistics operation. Use the supplied workspace and candidate rules: Last Mile delivery operations and Dark Store operations have separate requirements. Do not apply Dark Store requirements to Last Mile reports.",
   "You may receive text only, one image (optionally with a caption), or a short evidence bundle (text + captions from the same sender within a few minutes).",
   "First decide whether the content matches one of the candidate report types. Casual chat, memes, selfies and unrelated messages are not reports: return verdict \"not_report\", is_report false, empty feedback and empty open_actions.",
   "If it is a report, evaluate every rule of the matched report type. Mark a rule \"unclear\" when evidence is missing or illegible; never invent numbers, ticket IDs, temperatures or metric values.",
@@ -50,6 +52,7 @@ const SYSTEM_PROMPT = [
 
 function contextText(input: AnalysisInput, language: string) {
   return JSON.stringify({
+    workspace: input.workspace ?? "dark_store",
     group: input.groupName,
     station: input.stationLabel,
     business_date: input.businessDate,

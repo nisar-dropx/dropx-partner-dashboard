@@ -1,3 +1,4 @@
+import { reportBotHref, reportBotChatHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
@@ -171,11 +172,11 @@ const NAV = [
 export type NavKey = (typeof NAV)[number]["key"];
 
 /** Report Bot's tab bar, shared by the main page and the Chats page. */
-export function ReportBotNav({ active, waiting = 0, attention = 0 }: { active: NavKey; waiting?: number; attention?: number }) {
+export function ReportBotNav({ active, waiting = 0, attention = 0, workspace = "dark_store" }: { workspace?: ReportBotWorkspace; active: NavKey; waiting?: number; attention?: number }) {
   return (
     <nav className={s.tabs} aria-label="Report Bot sections">
-      {NAV.map(({ key, label, icon: Icon, href }) => (
-        <Link key={key} href={href} className={`${s.tab} ${active === key ? s.tabActive : ""}`} aria-current={active === key ? "page" : undefined}>
+      {NAV.map(({ key, label, icon: Icon }) => (
+        <Link key={key} href={key === "chats" ? reportBotChatHref(workspace) : reportBotHref(workspace, key)} className={`${s.tab} ${active === key ? s.tabActive : ""}`} aria-current={active === key ? "page" : undefined}>
           <Icon size={16} aria-hidden />{label}
           {key === "review" && waiting > 0 ? <span className={s.count} aria-label={`${waiting} waiting`}>{waiting}</span> : null}
           {key === "review" && attention > 0 ? <span className={`${s.count} ${s.countMuted}`} aria-label={`${attention} need attention`}>{attention}</span> : null}

@@ -162,9 +162,10 @@ function modelOperations(mode: OperatingMode): NavItem {
     return {
       code: "cod",
       label: "Operations",
-      permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
+      permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd", "ops_lm_report_bot"],
       icon: "O",
       children: [
+        lastMileReportBot,
         networkPlanning,
         scrub,
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
@@ -176,9 +177,10 @@ function modelOperations(mode: OperatingMode): NavItem {
   return {
     code: "cod",
     label: "Operations",
-    permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
+    permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd", "ops_lm_report_bot"],
     icon: "O",
     children: [
+      lastMileReportBot,
       networkPlanning,
       scrub,
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
@@ -191,6 +193,7 @@ function modelOperations(mode: OperatingMode): NavItem {
   };
 }
 
+const lastMileReportBot = { code: "ops_lm_report_bot", label: "Report Bot", href: "/report-bot?workspace=last_mile" };
 const networkPlanning = { code: "service_network", label: "Network Planning", href: "/service-network" };
 const scrub = { code: "edd_scrub", label: "Scrub", href: "/edd/scrub" };
 

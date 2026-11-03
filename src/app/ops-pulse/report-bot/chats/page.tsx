@@ -1,10 +1,11 @@
+import { reportBotWorkspace, reportBotPage, reportBotHref } from "@/lib/report-bot/workspace";
 import Link from "next/link";
 import { ArrowLeft, MessageCircle, Settings2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { ReportBotChats } from "@/components/report-bot-chats";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
+import { canSeeGroup } from "@/lib/report-bot/access";
 import { reportBotDb } from "@/lib/report-bot/settings";
 import s from "../report-bot.module.css";
 import { ReportBotNav, SETUP_HREF } from "../ui";
@@ -12,12 +13,14 @@ import { ReportBotNav, SETUP_HREF } from "../ui";
 export const dynamic = "force-dynamic";
 
 /** WhatsApp Web style view of the report groups the bot is on. */
-export default async function ReportBotChatsPage({ searchParams }: { searchParams?: { group?: string } }) {
-  const authorization = await requirePagePermission(REPORT_BOT_PAGE, "access");
+export default async function ReportBotChatsPage({ searchParams }: { searchParams?: { group?: string; workspace?: string } }) {
+  const workspace = reportBotWorkspace(searchParams?.workspace);
+  const pageCode = reportBotPage(workspace);
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const db = reportBotDb();
-  const groupsResult = await db.from("report_bot_groups").select("id,group_name,participant_count,location_id,is_enabled")
-    .eq("company_id", companyId).eq("is_enabled", true).order("group_name");
+  const groupsResult = await db.from("report_bot_groups").select("id,group_name,participant_count,location_id,is_enabled,workspace")
+    .eq("company_id", companyId).eq("workspace", workspace).eq("is_enabled", true).order("group_name");
   const groups = (groupsResult.data ?? []).filter((group) => canSeeGroup(authorization, group));
   const ids = groups.map((group) => group.id);
 
@@ -47,7 +50,7 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
   const initial = chatGroups.find((group) => group.id === searchParams?.group)?.id ?? null;
 
   return (
-    <AppShell active="Report Bot" pageCode={REPORT_BOT_PAGE}>
+    <AppShell active="Report Bot" pageCode={pageCode}>
       <div className={s.page}>
         <header className={s.hero}>
           <div>
@@ -56,11 +59,11 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
             <p>Each report group as it looks in WhatsApp, with every report photo&apos;s result and the bot&apos;s replies. Updates live.</p>
           </div>
           <div className={s.formActions}>
-            <Link className={s.button} href="/report-bot"><ArrowLeft size={15} aria-hidden />Report Bot</Link>
-            <Link className={s.button} href={SETUP_HREF}><Settings2 size={15} aria-hidden />Setup</Link>
+            <Link className={s.button} href={reportBotHref(workspace)}><ArrowLeft size={15} aria-hidden />Report Bot</Link>
+            {workspace === "dark_store" ? <Link className={s.button} href={SETUP_HREF}><Settings2 size={15} aria-hidden />Setup</Link> : null}
           </div>
         </header>
-        <ReportBotNav active="chats" />
+        <ReportBotNav workspace={workspace} active="chats" />
         <ReportBotChats groups={chatGroups} initialGroupId={initial} />
       </div>
     </AppShell>
