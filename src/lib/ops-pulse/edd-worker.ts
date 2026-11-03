@@ -986,6 +986,10 @@ export type LoadFlashBoardNetwork = {
   refreshStartedAt: string | null;
   /** When the main Refresh pull window finished (retries may still follow). */
   refreshFinishedAt: string | null;
+  /** True while a shared Refresh (any user / cron) is still pulling stations. */
+  refreshRunning?: boolean;
+  refreshDone?: number;
+  refreshTotal?: number;
   businessDate: string;
   dates: string[];
   stations: LoadFlashBoardStation[];
@@ -1117,6 +1121,11 @@ export type LoadFlashBoardBackfill = {
   /** Set when this call stamped a new Refresh run (no wipe — in-place updates). */
   reset?: boolean;
   cleared?: number;
+  /** Another user/cron already owns the shared Refresh — watch, don't start another. */
+  alreadyRunning?: boolean;
+  busy?: boolean;
+  running?: boolean;
+  startedAt?: string;
 };
 
 function workerFetchErrorMessage(error: unknown, fallback: string): string {
@@ -1181,6 +1190,10 @@ export async function backfillLoadFlashBoard(opts?: {
     failed,
     reset: Boolean(raw.reset),
     cleared: raw.cleared == null ? undefined : Number(raw.cleared) || 0,
+    alreadyRunning: Boolean(raw.alreadyRunning),
+    busy: Boolean(raw.busy),
+    running: Boolean(raw.running),
+    startedAt: raw.startedAt == null ? undefined : String(raw.startedAt),
   };
 }
 
@@ -1214,6 +1227,9 @@ export async function fetchLoadFlashBoard(date?: string, stations?: string[]): P
       startedRaw && !Number.isNaN(Date.parse(startedRaw)) ? startedRaw : null,
     refreshFinishedAt:
       finishedRaw && !Number.isNaN(Date.parse(finishedRaw)) ? finishedRaw : null,
+    refreshRunning: Boolean(raw.refreshRunning),
+    refreshDone: Math.max(0, Number(raw.refreshDone) || 0),
+    refreshTotal: Math.max(0, Number(raw.refreshTotal) || 0),
     businessDate: String(raw.businessDate ?? date ?? ""),
     dates: Array.isArray(raw.dates) ? raw.dates.map((item) => String(item).slice(0, 10)) : [],
     stations: list.map((item) => {

@@ -2,7 +2,7 @@
 import { ReportTable } from "@/components/report-table";
 
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
@@ -423,8 +423,41 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       advanced?: number;
       failed?: string[];
       error?: string;
+      alreadyRunning?: boolean;
+      busy?: boolean;
+      running?: boolean;
+      startedAt?: string;
     };
     return { response, body };
+  }
+
+  /** Watch a Refresh someone else (or cron) already started — update board as stations finish. */
+  async function watchSharedRefresh(clearSeq: number) {
+    setBusy("refresh");
+    setBackfillNote("Refresh working…");
+    let guard = 0;
+    while (guard < 120) {
+      guard += 1;
+      if (clearSeq !== backfillClearSeq.current) return;
+      const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" });
+      if (!response.ok) {
+        await new Promise((r) => setTimeout(r, 2500));
+        continue;
+      }
+      const next = (await response.json()) as LoadFlashBoardNetwork;
+      setPayload(next);
+      setRun(next.run);
+      const total = Number(next.refreshTotal ?? 0) || 0;
+      const done = Number(next.refreshDone ?? 0) || 0;
+      if (total > 0) setBackfillProgress({ done, total });
+      if (next.refreshRunning) {
+        setBackfillNote(total ? `Refresh working · ${done}/${total}` : "Refresh working…");
+        await new Promise((r) => setTimeout(r, 2500));
+        continue;
+      }
+      setBackfillNote("Board data updated.");
+      break;
+    }
   }
 
   async function runRetryPass(
@@ -497,7 +530,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return stillFailed;
   }
 
-  async function runBackfillLoop() {
+  async function runBackfillLoop(clearSeq: number): Promise<"owner" | "watcher"> {
     // Keep prior board data visible — stations overwrite in place as each packet saves.
     backfillCursor.current = 0;
     setBackfillNote("Starting refresh…");
@@ -512,49 +545,61 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       const { response, body } = await postBackfillTick(resetParams);
       if (!response.ok) throw new Error(String(body.error ?? "Unable to start board refresh."));
       const total = Number(body.total ?? 0) || 0;
-      if (total > 0) setBackfillProgress({ done: 0, total });
-      setBackfillNote(total ? `Pulling stations · 0/${total}` : "Pulling board data…");
+      const done = Number(body.nextIndex ?? 0) || 0;
+      if (total > 0) setBackfillProgress({ done, total });
+      // Someone else already owns this Refresh — watch shared progress only.
+      if (body.alreadyRunning) {
+        setBackfillNote(total ? `Refresh working · ${done}/${total}` : "Refresh working…");
+        await watchSharedRefresh(clearSeq);
+        return "watcher";
+      }
+      setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
       await reloadBoard().catch(() => undefined);
     }
 
-    let startIndex = 0;
     let guard = 0;
     const streakTimeoutsRef = { n: 0 };
     const failedAcc = new Set<string>();
     let stationTotal = 0;
-    // Station-centric: each job = EDD + C-Return + DSR + Ageing for the selected date.
+    // Shared server cursor — do not send startIndex (prevents two browsers diverging).
     while (guard < 80) {
       guard += 1;
+      if (clearSeq !== backfillClearSeq.current) return "owner";
       const params = new URLSearchParams({
         days: "1",
-        startIndex: String(startIndex),
         date: payload.businessDate,
         concurrency: BOARD_PULL_CONCURRENCY,
       });
       let response: Response;
-      let body: { nextIndex?: number; total?: number; done?: boolean; advanced?: number; failed?: string[]; error?: string };
+      let body: {
+        nextIndex?: number;
+        total?: number;
+        done?: boolean;
+        advanced?: number;
+        failed?: string[];
+        error?: string;
+        busy?: boolean;
+      };
       try {
         ({ response, body } = await postBackfillTick(params));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Board backfill failed.";
         if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
-          setBackfillNote(`Worker busy — retrying packet at ${startIndex}…`);
+          setBackfillNote("Worker busy — retrying packet…");
           await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
-        backfillCursor.current = startIndex;
         throw err instanceof Error ? err : new Error(message);
       }
       if (!response.ok) {
         const message = String(body.error ?? "Board backfill failed.");
         if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
           streakTimeoutsRef.n += 1;
-          setBackfillNote(`Connection dropped — retrying ${startIndex}…`);
+          setBackfillNote("Connection dropped — retrying…");
           await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
-        backfillCursor.current = startIndex;
         throw new Error(isTransientMessage(message)
           ? "Worker connection dropped. Click Refresh again — it will resume cleanly."
           : message);
@@ -565,29 +610,31 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       }
       const advanced = Number(body.advanced ?? 0) || 0;
       const total = Number(body.total ?? 0) || 0;
+      const nextIndex = Number(body.nextIndex ?? 0) || 0;
       if (total > 0) stationTotal = total;
+      if (body.busy && !advanced && !body.done) {
+        setBackfillNote(total ? `Refresh working · ${nextIndex}/${total}` : "Refresh working…");
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
       if (body.done) {
         if (total > 0) setBackfillProgress({ done: total, total });
         backfillCursor.current = 0;
         await reloadBoard().catch(() => undefined);
         break;
       }
-      // Soft miss (budget / warm-up): retry same index — never mark the run done.
       if (!advanced) {
-        setBackfillNote(`Worker deferred packet at ${startIndex} — retrying…`);
+        setBackfillNote(`Worker deferred packet — retrying…`);
         await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
-      startIndex = Number(body.nextIndex ?? startIndex) || startIndex;
-      backfillCursor.current = startIndex;
-      const done = total ? Math.min(startIndex, total) : startIndex;
+      backfillCursor.current = nextIndex;
+      const done = total ? Math.min(nextIndex, total) : nextIndex;
       if (total > 0) setBackfillProgress({ done, total });
       setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
-      // Update board after every packet so cells flip as stations finish.
       await reloadBoard().catch(() => undefined);
     }
 
-    // End-of-run recovery: only stations that failed in the main pass (not a second full sweep).
     let pending = [...failedAcc];
     if (pending.length) {
       setBackfillNote(`Main pull done · recovering ${pending.length} station${pending.length === 1 ? "" : "s"}…`);
@@ -603,6 +650,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     } else if (failedAcc.size) {
       setBackfillNote("Board pull finished · recovered all failed stations");
     }
+    return "owner";
   }
 
   async function refresh() {
@@ -612,12 +660,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setBackfillNote("Starting refresh…");
     setBackfillProgress({ done: 0, total: 0 });
     try {
-      // Kick Ops Live in the background — do not block/fail Refresh on its timeout.
       void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
-      await runBackfillLoop();
+      await runBackfillLoop(clearSeq);
       await reloadBoard();
       setBackfillNote("Board data updated.");
-      // Keep the full bar visible briefly, then clear.
       window.setTimeout(() => {
         if (clearSeq !== backfillClearSeq.current) return;
         setBackfillProgress(null);
@@ -628,11 +674,30 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       setError(isTransientMessage(message)
         ? "Worker connection dropped. Click Refresh again — it will resume cleanly."
         : message);
-      // Keep the progress bar + last note so the pause point stays visible.
     } finally {
       setBusy(null);
     }
   }
+
+  // If another tab/user already started Refresh, show working progress on load.
+  useEffect(() => {
+    if (!initial.refreshRunning || busy === "refresh") return;
+    const clearSeq = ++backfillClearSeq.current;
+    void (async () => {
+      try {
+        await watchSharedRefresh(clearSeq);
+        setBackfillNote("Board data updated.");
+        window.setTimeout(() => {
+          if (clearSeq !== backfillClearSeq.current) return;
+          setBackfillProgress(null);
+          setBackfillNote("");
+        }, 2500);
+      } finally {
+        setBusy(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- join once when the page opens mid-refresh
+  }, []);
 
   async function onDownload() {
     setBusy("download");
@@ -820,7 +885,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
 
         <div className={s.actions}>
           <button type="button" disabled={busy !== null} onClick={() => void refresh()}>
-            {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Refresh
+            {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+            {busy === "refresh" ? " Working…" : " Refresh"}
           </button>
           <button type="button" disabled={busy !== null} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
