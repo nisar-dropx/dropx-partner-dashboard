@@ -11,7 +11,7 @@ const BUCKET_KEYS: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "futu
 /** Excel download of the network-wide Ageing overview — one row per station. */
 export async function GET() {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_ageing");
     if (denied) return denied;
 
     const payload = await fetchEddNetwork();

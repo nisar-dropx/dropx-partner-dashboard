@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canViewEddAgeingPerformance, requireEddAgeingPerformanceAccess } from "@/lib/ops-pulse/edd-access";
+import { allowedEddSections, canViewEddAgeingPerformance, requireEddAgeingPerformanceAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { fetchEddNetwork, isEddWorkerConfigured, type EddNetworkRunStatus, type EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import { EddSectionTabs } from "./edd-section-tabs";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export default async function EddDashboardPage() {
-  const authorization = await requireEddAgeingPerformanceAccess();
+  const authorization = await requireEddAgeingPerformanceAccess("edd_ageing");
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
@@ -38,7 +38,7 @@ export default async function EddDashboardPage() {
   }
 
   return (
-    <AppShell active="Live performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_ageing">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Live tracking"
@@ -51,7 +51,7 @@ export default async function EddDashboardPage() {
             </div>
           )}
         />
-        <EddSectionTabs active="ageing" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
+        <EddSectionTabs active="ageing" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
 
         {!workerConfigured ? (
           <section className="panel message-panel error">

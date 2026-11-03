@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const url = new URL(request.url);

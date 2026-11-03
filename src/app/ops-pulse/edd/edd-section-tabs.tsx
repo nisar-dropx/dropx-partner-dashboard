@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
+import type { EddSectionKey } from "@/lib/ops-pulse/edd-access";
 
 /**
  * Network-level Live performance tabs — real routes with a persistent tab
@@ -10,11 +11,14 @@ import { PendingLink } from "@/components/pending-link";
 export function EddSectionTabs({
   active,
   showAgeingPerformance = false,
+  allowedSections,
 }: {
-  active: "flash" | "board" | "ageing" | "performance" | "edds" | "scorecard";
+  active: Exclude<EddSectionKey, "scrub">;
   showAgeingPerformance?: boolean;
+  allowedSections?: EddSectionKey[];
 }) {
   const pathname = usePathname();
+  const allowed = new Set(allowedSections ?? ["flash", "board", "ageing", "performance", "edds", "scorecard"]);
   const sections = [
     { href: "/edd/flash", key: "flash" as const, label: "Ops Live" },
     { href: "/edd/board", key: "board" as const, label: "Station board" },
@@ -26,7 +30,7 @@ export function EddSectionTabs({
       : []),
     { href: "/edd/edds", key: "edds" as const, label: "EDDs" },
     { href: "/edd/scorecard", key: "scorecard" as const, label: "Scorecard" },
-  ];
+  ].filter((section) => allowed.has(section.key));
 
   return (
     <section className="tabs" aria-label="Live performance sections">

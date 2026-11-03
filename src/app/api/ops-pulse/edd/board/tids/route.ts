@@ -20,7 +20,7 @@ const KINDS = new Set<StationBoardTidKind>(["edd", "creturn", "dsr", "zero", "ag
  */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_station_board");
     if (denied) return denied;
     const params = new URL(request.url).searchParams;
     const date = String(params.get("date") ?? "").trim();

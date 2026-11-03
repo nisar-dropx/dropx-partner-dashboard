@@ -9,7 +9,7 @@ export const maxDuration = 30;
 /** Excel download of the network-wide Delivery Performance overview — one row per station. */
 export async function GET() {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const payload = await fetchEddPerformanceNetwork();

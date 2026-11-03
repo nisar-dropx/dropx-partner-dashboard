@@ -11,14 +11,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export default async function ScrubReportPage() {
-  const authorization = await requireEddAccess();
+  const authorization = await requireEddAccess("edd_scrub");
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
   const clusters = workerConfigured ? await loadFlashClusters(companyId, stations) : [];
 
   return (
-    <AppShell active="Scrub" pageCode="edd_dashboard">
+    <AppShell active="Scrub" pageCode="edd_scrub">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Operations"

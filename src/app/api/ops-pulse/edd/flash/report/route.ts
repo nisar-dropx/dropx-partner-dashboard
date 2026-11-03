@@ -20,7 +20,7 @@ const NO_DRIVER = "none";
  */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_live_ops");
     if (denied) return denied;
     const url = new URL(request.url);
     const date = url.searchParams.get("date") ?? "";

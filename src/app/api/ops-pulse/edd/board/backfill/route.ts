@@ -7,7 +7,7 @@ export const maxDuration = 120;
 
 export async function POST(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_station_board");
     if (denied) return denied;
     const url = new URL(request.url);
     const days = Number(url.searchParams.get("days") ?? 1) || 1;

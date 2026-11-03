@@ -16,7 +16,9 @@ test('Scrub belongs only to Operations, live performance to Performance, COD Rep
   assert.equal(activeOpsHref(items,'/edd/flash','','Live performance'),'/edd/flash');
   assert.equal(activeOpsHref(items,'/edd/AAA/performance','','Live performance'),'/edd/flash');
  }
- assert.equal(nav.firstAllowedOpsHref({pages:['edd_dashboard']}),'/edd/flash');
+ assert.equal(nav.firstAllowedOpsHref({pages:['edd_dashboard']}),null);
+ assert.equal(nav.firstAllowedOpsHref({pages:['edd_station_board']}),'/edd/board');
+ assert.equal(nav.firstAllowedOpsHref({pages:['edd_scrub']}),'/edd/scrub');
 });
 test('old COD report URL redirects to current workspace without reading report data',()=>{
  const page=load('../../app/ops-pulse/cod/reports/page.tsx',{'next/navigation':{redirect:url=>{throw new Error(url)}}});

@@ -494,7 +494,19 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
 .ops-permission-search{flex:1}
 .ops-permission-tools :is(input,select){height:42px;width:100%;min-width:0;border:1px solid #d5dce5;border-radius:8px;padding:8px 10px;background:white;font:inherit;color:#172033}
 .ops-permission-help,.ops-permission-footnote{font-size:12px;line-height:1.5;color:#667085;margin:8px 0 12px}
-.ops-permission-tree{display:grid;gap:8px;max-height:min(62vh,720px);overflow:auto;padding:2px 4px 4px 2px}
+.ops-permission-table-wrap{max-height:min(62vh,720px);overflow:auto;border:1px solid #dce2ea;border-radius:10px}
+.ops-permission-table{min-width:680px;margin:0}
+.ops-permission-table thead{position:sticky;top:0;z-index:3}
+.ops-permission-table th:first-child{width:auto;text-align:left}
+.ops-permission-table .permission-group-row{background:#fff8e8}
+.ops-permission-table .permission-child-row td:first-child{padding-left:46px}
+.ops-permission-table .ops-permission-page-row td:first-child{padding-left:30px;background:#fbfcfe}
+.ops-permission-table .ops-permission-section-row td:first-child{padding-left:76px}
+.ops-permission-table .ops-permission-section-row td:first-child span::before{left:-22px;width:14px}
+.ops-permission-table .permission-expand strong{font-size:12px}
+.ops-permission-table .permission-expand small,.ops-permission-internal-row small{margin-left:2px;color:#7a8798;font-size:10px}
+.ops-permission-internal-row td:first-child{display:flex;gap:8px;align-items:center}
+.ops-permission-linked-inline{display:block;margin-top:3px;color:#8a5b1e;font-size:9px;line-height:1.25}
 .ops-permission-menu,.ops-permission-advanced{border:1px solid #dce2ea;border-radius:12px;background:#fff;overflow:hidden}
 .ops-permission-menu-toggle,.ops-permission-advanced-toggle,.ops-permission-section-toggle{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;color:#172033;text-align:left;font:inherit;cursor:pointer}
 .ops-permission-menu-toggle{min-height:58px;padding:10px 14px}
@@ -529,7 +541,7 @@ body:has(.ops-modern) .payment-review-routing-note>p{padding:0 12px 12px;font-si
   .ops-permission-tools{flex-wrap:wrap;gap:8px}
   .ops-permission-tools label{width:100%;flex-basis:100%}
   .ops-permission-tools :is(input,select){font-size:16px;min-height:44px}
-  .ops-permission-tree{max-height:none}
+  .ops-permission-table-wrap{max-height:none}
   .ops-permission-menu-toggle{padding:9px 10px}
   .ops-permission-menu-summary{white-space:normal;text-align:right;max-width:92px}
   .ops-permission-section-toggle{padding:8px}

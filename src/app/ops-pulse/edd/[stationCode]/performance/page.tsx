@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canViewEddAgeingPerformance, requireEddAgeingPerformanceAccess } from "@/lib/ops-pulse/edd-access";
+import { allowedEddSections, canViewEddAgeingPerformance, requireEddAgeingPerformanceAccess } from "@/lib/ops-pulse/edd-access";
 import { fetchEddAllowedStations, fetchEddPerformanceStation, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
@@ -16,7 +16,7 @@ export default async function EddStationPerformancePage({
 }: {
   params: { stationCode: string };
 }) {
-  const authorization = await requireEddAgeingPerformanceAccess();
+  const authorization = await requireEddAgeingPerformanceAccess("edd_performance");
   const companyId = requireCompanyId(authorization);
   const stationCode = decodeURIComponent(String(params.stationCode ?? "")).trim().toUpperCase();
 
@@ -68,7 +68,7 @@ export default async function EddStationPerformancePage({
   }
 
   return (
-    <AppShell active="Live performance" pageCode="edd_dashboard">
+    <AppShell active="Live performance" pageCode="edd_performance">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Station drill-down"
@@ -106,7 +106,7 @@ export default async function EddStationPerformancePage({
           </section>
         ) : (
           <>
-            <EddStationSectionTabs stationCode={stationCode} active="performance" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
+            <EddStationSectionTabs stationCode={stationCode} active="performance" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
             <EddPerformanceView stationCode={stationCode} initialOutcome={initialOutcome} />
           </>
         )}

@@ -15,7 +15,19 @@ const commonStart: NavItem[] = [
     icon: "P",
     children: [
       { code: "performance", label: "Daily Performance", href: "/performance?view=daily" },
-      { code: "edd_dashboard", label: "Live performance", href: "/edd/flash" },
+      {
+        code: "edd_dashboard",
+        label: "Live performance",
+        href: "/edd/flash",
+        permissionSections: [
+          { code: "edd_live_ops", href: "/edd/flash", label: "Ops Live" },
+          { code: "edd_station_board", href: "/edd/board", label: "Station board" },
+          { code: "edd_ageing", href: "/edd", label: "Ageing" },
+          { code: "edd_performance", href: "/edd/performance", label: "Performance" },
+          { code: "edd_edds", href: "/edd/edds", label: "EDDs" },
+          { code: "edd_scorecard", href: "/edd/scorecard", label: "Scorecard" },
+        ],
+      },
       { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
       { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" },
       { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" },
@@ -180,7 +192,7 @@ function modelOperations(mode: OperatingMode): NavItem {
 }
 
 const networkPlanning = { code: "service_network", label: "Network Planning", href: "/service-network" };
-const scrub = { code: "edd_dashboard", label: "Scrub", href: "/edd/scrub" };
+const scrub = { code: "edd_scrub", label: "Scrub", href: "/edd/scrub" };
 
 /** Unfiltered menu catalogue shared by the sidebar and designation editor. */
 export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
@@ -251,7 +263,13 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   const items = opsNavCatalogForMode(mode);
-  return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
+  return items.map(item=>item.children?{...item,children:item.children
+    .filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))
+    .map(child => {
+      if (!authorization || !child.permissionSections?.length) return child;
+      const firstAllowed = child.permissionSections.find(section => hasPermission(authorization, section.code, "access"));
+      return firstAllowed ? { ...child, href: firstAllowed.href ?? child.href } : child;
+    })}:item);
 }
 
 export function firstAllowedOpsHref(authorization: AuthorizationContext) {
@@ -263,8 +281,14 @@ export function firstAllowedOpsHref(authorization: AuthorizationContext) {
   ];
   for (const item of candidates) {
     if (item.href && hasPermission(authorization, item.code, "access")) return item.href;
-    const child = item.children?.find((entry) => entry.href && entry.code && hasPermission(authorization, entry.code, "access"));
-    if (child?.href && child.href.startsWith("/")) return child.href;
+    for (const child of item.children ?? []) {
+      if (child.permissionSections?.length) {
+        const section = child.permissionSections.find((entry) => entry.href && hasPermission(authorization, entry.code, "access"));
+        if (section?.href?.startsWith("/")) return section.href;
+        continue;
+      }
+      if (child.href && child.code && hasPermission(authorization, child.code, "access")) return child.href;
+    }
   }
   return null;
 }

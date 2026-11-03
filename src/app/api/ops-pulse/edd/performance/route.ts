@@ -8,7 +8,7 @@ export const maxDuration = 30;
 /** Fast cached read — see ./refresh for the manual per-station refresh. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const url = new URL(request.url);

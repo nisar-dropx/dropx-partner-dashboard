@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 async function respond(refresh: boolean) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_scrub");
     if (denied) return denied;
     const viewer = await loadFlashViewerStations();
     const payload = await fetchScrubNetwork(viewer.map((station) => station.code), { refresh });

@@ -9,7 +9,7 @@ export const maxDuration = 60;
 /** Tracking IDs with drivers for one station — the Ops Live station and driver drill-down. */
 export async function GET(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddApi("edd_live_ops");
     if (denied) return denied;
     const params = new URL(request.url).searchParams;
     const station = String(params.get("station") ?? "").trim().toUpperCase();

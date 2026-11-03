@@ -8,7 +8,7 @@ export const maxDuration = 30;
 /** Kicks off (or reports the progress of) a network-wide performance sweep — see eddPerformanceSweep.ts on the worker. */
 export async function POST() {
   try {
-    const denied = await requireEddAgeingPerformanceApi();
+    const denied = await requireEddAgeingPerformanceApi("edd_performance");
     if (denied) return denied;
 
     const run = await refreshAllEddPerformanceNetwork();
