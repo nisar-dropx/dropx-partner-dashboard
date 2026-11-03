@@ -28,7 +28,8 @@ export function boardDeliverySummary(stations: StationBoardStation[], zeroOnly =
 }
 
 /** One ordering and column projection for screen, Excel and share images. */
-export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort, options: { dsr: boolean; singleStation: boolean }) {
+export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort, options: { dsr: boolean; singleStation: boolean; groupByStation?: boolean }) {
+  const grouped = options.dsr && options.groupByStation !== false;
   let headers = [...table.headers];
   let rows = table.rows.map(row => row.map(cell => ({ ...cell })));
   if (options.dsr) {
@@ -42,7 +43,7 @@ export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort
   const totals = rows.filter(r => /^grand total$|^total$/i.test(r[0]?.text || ""));
   let data = rows.filter(r => !totals.includes(r));
   const compare = (a: typeof rows[number], b: typeof rows[number]) => column < 0 ? 0 : compareReportValues(a[column]?.text || "", b[column]?.text || "", sort.direction);
-  if (options.dsr && stationIndex >= 0) {
+  if (grouped && stationIndex >= 0) {
     const groups = new Map<string, typeof rows>();
     data.forEach(row => { const code = row[stationIndex].text; const group = groups.get(code) || []; group.push(row); groups.set(code, group); });
     data = [...groups].sort(([a], [b]) => compareReportValues(a, b, sort.header === "Station" ? sort.direction : "asc"))
@@ -50,12 +51,12 @@ export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort
   } else data.sort(compare);
   rows = [...data, ...totals];
   const rowStations = rows.map(row => stationIndex >= 0 && !totals.includes(row) ? row[stationIndex].text : "");
-  const groupStarts = rows.map((row, i) => options.dsr && !!rowStations[i] && (i === 0 || rowStations[i - 1] !== rowStations[i]));
+  const groupStarts = rows.map((row, i) => grouped && !!rowStations[i] && (i === 0 || rowStations[i - 1] !== rowStations[i]));
   if (stationIndex >= 0 && options.singleStation) {
     headers.splice(stationIndex, 1);
     rows = rows.map(row => row.filter((_, i) => i !== stationIndex));
     if (options.dsr && totals.length) rows[rows.length - 1][0] = { text: "Grand Total", bold: true, align: "left" };
-  } else if (options.dsr && stationIndex >= 0) {
+  } else if (grouped && stationIndex >= 0) {
     rows.forEach((row, i) => { if (rowStations[i] && !groupStarts[i]) row[stationIndex] = { ...row[stationIndex], text: "" }; });
   }
   return { ...table, headers, rows, rowStations, groupStarts, totalRows: totals.length };

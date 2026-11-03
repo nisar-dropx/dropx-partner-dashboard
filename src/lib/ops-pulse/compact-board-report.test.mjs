@@ -43,3 +43,16 @@ test('other board tabs sort numeric values while holding the total at the bottom
  const r=prepareBoardReport({title:'Ageing',subtitle:'',headers:['Station','Total ₹'],rows:[cells(['KLZA','1,200']),cells(['GDRD','90']),cells(['Grand Total','1,290'])]},{header:'Total ₹',direction:'asc'},{dsr:false,singleStation:false});
  assert.deepEqual(r.rows.map(r=>r[0].text),['GDRD','KLZA','Grand Total']);
 });
+
+
+test('zero-delivery layout sorts across stations, repeats station codes and retains totals',()=>{
+ const options={dsr:true,singleStation:false,groupByStation:false};
+ const r=prepareBoardReport(table,{header:'Out on Road',direction:'desc'},options);
+ assert.deepEqual(r.rows.map(row=>row[1].text),['Low','Other','High','3 DAs']);
+ assert.deepEqual(r.rows.map(row=>row[0].text),['KLZA','GDRD','KLZA','Grand Total']);
+ assert(r.groupStarts.every(value=>!value));
+ const asc=prepareBoardReport(table,{header:'Out on Road',direction:'asc'},options);
+ assert.deepEqual(asc.rows.map(row=>row[1].text),['High','Other','Low','3 DAs']);
+ const byStation=prepareBoardReport(table,{header:'Station',direction:'asc'},options);
+ assert.deepEqual(byStation.rows.map(row=>row[0].text),['GDRD','KLZA','KLZA','Grand Total']);
+});
