@@ -28,6 +28,7 @@ try {
   const migration=await readFile('supabase/migrations/20261029115517_unified_paid_advance_ledger.sql','utf8');
   await db.exec(migration);
   await db.exec(migration);
+  await db.exec(await readFile('supabase/migrations/20261103143000_advance_due_month_window.sql','utf8'));
   assert.equal((await one("select count(*)::int n from pg_class where relname in ('pay_advances','pay_advance_deductions') and relrowsecurity")).n,2);
   for (const role of ['anon','authenticated']) {
     assert.equal((await one('select has_table_privilege($1,$2,$3) allowed',[role,'public.pay_advances','SELECT'])).allowed,false);
@@ -38,6 +39,8 @@ try {
     values($1,$2,'workforce',$3,1000,'2026-09-30 19:00:00+00','2026-10-01',3,'legacy_recorded','fixture')`,[advance,company,worker]);
   assert.equal(Number((await due())[0].amount),333.33,'installment rounding leaves the remainder for the last installment');
   assert.equal((await due('2026-09-01')).length,0,'no recovery before the due month');
+  assert.equal(Number((await due('2026-11-01'))[0].amount),333.33,'later month gets only its own installment when earlier recovery has not started');
+  assert.equal((await due('2027-02-01')).length,0,'months after the installment window with no used balance are excluded');
   await reserve('october',200);
   assert.equal(Number((await due())[0].amount),133.33,'other payrolls see reserved capacity');
   assert.equal(Number((await due('2026-10-01','october'))[0].amount),333.33,'same payroll can recalculate');

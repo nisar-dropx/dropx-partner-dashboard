@@ -24,8 +24,12 @@ Bank confirmation queues existing Workforce publications for refresh and wakes
 People's open-payroll refresh. The full Workforce calculator is also the source
 of OneApp's advance deduction. Payroll documents and salary exports include
 ADVANCE_RECOVERY. Processing bank instructions stay frozen; unpaid take-home
-limits recovery and any remainder carries forward. Confirmed recoveries are
-immutable, including when earlier payrolls are recalculated.
+limits how much can be recovered in a month. Each installment is due in its
+payroll month (`first_due_period` and following installment months). An unpaid
+earlier month does not automatically appear in a later month's live earnings or
+payout estimate. Once recovery has started (reserved/confirmed), any remainder
+can still finish in a later month. Confirmed recoveries are immutable, including
+when earlier payrolls are recalculated.
 
 Legacy manual entry, import, reassignment and recovery endpoints return 410.
 Legacy tables remain for historical evidence with application write grants

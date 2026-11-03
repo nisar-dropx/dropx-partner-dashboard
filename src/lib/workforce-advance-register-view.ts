@@ -1,6 +1,8 @@
 export type WorkforceAdvanceRegisterViewRow = {
   advanceNumber: string;
   advanceDate: string;
+  /** Payroll month when recovery should start (YYYY-MM-01). Optional for older fixtures. */
+  firstDuePeriod?: string;
   dropxId: string;
   originalDropxId: string;
   workforceName: string;
@@ -167,6 +169,7 @@ export function buildWorkforceAdvanceCsv(rows: readonly WorkforceAdvanceRegister
     "Current Location",
     "Advance Paid At",
     "Advance Date",
+    "Payroll Due",
     "Payment Mode",
     "Payment Reference",
     "External Reference",
@@ -187,6 +190,7 @@ export function buildWorkforceAdvanceCsv(rows: readonly WorkforceAdvanceRegister
     row.location,
     row.paidLocation,
     row.advanceDate,
+    row.firstDuePeriod || row.advanceDate,
     row.paymentMode,
     row.paymentReference,
     row.externalReference,

@@ -19,6 +19,8 @@ export type WorkforceAdvanceRegisterRow = {
   workforceId: string;
   advanceNumber: string;
   advanceDate: string;
+  /** Payroll month when recovery should start (YYYY-MM-01). */
+  firstDuePeriod: string;
   dropxId: string;
   originalDropxId: string;
   identityRevision: number;
@@ -78,6 +80,13 @@ function money(value: number) {
 function dateLabel(value: string) {
   const parts = value.slice(0, 10).split("-");
   return parts.length === 3 ? parts.reverse().join("/") : value;
+}
+
+function payrollMonthLabel(value: string) {
+  const stamp = String(value || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(stamp)) return "—";
+  const [year, month] = stamp.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 function modeLabel(value: string) {
@@ -603,7 +612,7 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
 
     <section className="panel">
       <div className="panel-head workforce-advance-register-head">
-        <div><h2>Advance register</h2><p className="subtle">Unregistered DropX IDs remain in these totals but cannot be deducted from payouts until Workforce registration links them.</p></div>
+        <div><h2>Advance register</h2><p className="subtle">Unregistered DropX IDs remain in these totals but cannot be deducted from payouts until Workforce registration links them. Each advance recovers in its payroll due month; later months do not pull an untouched earlier balance into live earnings.</p></div>
         <span aria-live="polite" className="workforce-advance-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
       </div>
       <div aria-label="Advance register filters" className="workforce-advance-filter-panel">
@@ -620,17 +629,17 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
         <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
       </div>
       {invalidDateRange ? <div aria-live="polite" className="payout-inline-message error">Paid from date must be on or before paid to date.</div> : null}
-      <div className={`table-wrap workforce-advance-table-wrap ${actionMenuId ? "menu-open" : ""}`}><ReportTable className="workforce-advance-table"><thead><tr><th>Advance</th><th>Workforce</th><th>Designation</th><th>Location</th><th>Paid on</th><th>Payment details</th><th className="payout-money">Total</th><th className="payout-money">Deducted</th><th className="payout-money">Pending</th><th>Status</th><th>Source / remark</th><th className="workforce-advance-action-cell">Actions</th></tr></thead>
+      <div className={`table-wrap workforce-advance-table-wrap ${actionMenuId ? "menu-open" : ""}`}><ReportTable className="workforce-advance-table"><thead><tr><th>Advance</th><th>Workforce</th><th>Designation</th><th>Location</th><th>Paid on</th><th>Payroll due</th><th>Payment details</th><th className="payout-money">Total</th><th className="payout-money">Deducted</th><th className="payout-money">Pending</th><th>Status</th><th>Source / remark</th><th className="workforce-advance-action-cell">Actions</th></tr></thead>
         <tbody>{visible.length ? visible.map((row) => <tr className={row.linkStatus === "pending" ? "workforce-advance-pending-row" : undefined} key={row.id}>
           <td><strong>{row.advanceNumber}</strong></td>
           <td><strong>{row.dropxId}</strong><small>{row.workforceName}</small>{row.reassignmentHistory.length > 0 && row.originalDropxId !== row.dropxId ? <small>Originally imported for {row.originalDropxId}</small> : null}</td>
-          <td>{row.designation || "—"}</td><td><strong>{row.location}</strong>{row.linkStatus === "linked" && row.paidLocation !== row.location ? <small>Advance paid at {row.paidLocation}</small> : null}</td><td>{dateLabel(row.advanceDate)}</td>
+          <td>{row.designation || "—"}</td><td><strong>{row.location}</strong>{row.linkStatus === "linked" && row.paidLocation !== row.location ? <small>Advance paid at {row.paidLocation}</small> : null}</td><td>{dateLabel(row.advanceDate)}</td><td><strong>{payrollMonthLabel(row.firstDuePeriod || row.advanceDate)}</strong><small>Live / payout month</small></td>
           <td><strong>{modeLabel(row.paymentMode)}</strong><small>{row.paymentReference || row.externalReference || "No reference"}</small>{row.paymentReference && row.externalReference ? <small>{row.externalReference}</small> : null}</td>
           <td className="payout-money"><strong>{money(row.total)}</strong></td><td className="payout-money good-text">{money(row.deducted)}</td><td className="payout-money"><strong>{money(row.pending)}</strong></td>
           <td><span className={`status-pill ${row.status === "Fully deducted" ? "good" : row.status === "Partially deducted" || row.status === "Awaiting Workforce registration" ? "warn" : "payout-status-neutral"}`}>{row.status}</span>{row.linkStatus === "pending" ? <small>Not eligible for payout deduction</small> : null}</td>
           <td><strong>{modeLabel(row.source)}</strong><small>{row.remark || `Added ${dateLabel(row.createdAt)}`}</small>{row.linkStatus === "pending" ? <small>Links automatically when this exact DropX ID is registered.</small> : null}{row.recoveryHistory.length ? <details className="workforce-advance-history"><summary>Recovery history ({row.recoveryHistory.length})</summary><div>{row.recoveryHistory.map((recovery) => <p key={recovery.id}><strong>{money(recovery.amount)}</strong> · {recovery.type === "opening_balance" ? "Opening deduction" : `${dateLabel(recovery.periodStart)}–${dateLabel(recovery.periodEnd)}`}<small>{modeLabel(recovery.status)}{recovery.reversalReason ? ` · ${recovery.reversalReason}` : ""}</small></p>)}</div></details> : null}{row.reassignmentHistory.length ? <details className="workforce-advance-history"><summary>Reassignment history ({row.reassignmentHistory.length})</summary><div>{row.reassignmentHistory.map((entry) => <p key={entry.id}><strong>Revision {entry.revision}</strong> · {entry.fromDropxId || entry.originalDropxId} → {entry.toDropxId}<small>{entry.fromWorkforceName || "Unregistered ID"} → {entry.toWorkforceName}{entry.toLocation ? ` · ${entry.toLocation}` : ""}</small><small>{entry.reason} · {dateLabel(entry.reassignedAt)}</small></p>)}</div></details> : null}</td>
           <td className="workforce-advance-action-cell"><AdvanceActionMenu canEdit={canEdit} onOpenChange={(open) => setActionMenuId(open ? row.id : null)} onReassign={() => setReassignRow(row)} open={actionMenuId === row.id} row={row} /></td>
-        </tr>) : <tr><td className="empty-cell" colSpan={12}>No Workforce advances match this view.</td></tr>}</tbody>
+        </tr>) : <tr><td className="empty-cell" colSpan={13}>No Workforce advances match this view.</td></tr>}</tbody>
       </ReportTable></div>
       <div className="workforce-advance-pagination"><label>Rows <select className="field" onChange={(event) => { setSize(event.target.value); setPage(1); }} value={size}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="all">All</option></select></label><span>{filtered.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)} of ${filtered.length}` : "0 records"} · Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">Previous</button><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))} type="button">Next</button></div>
     </section>

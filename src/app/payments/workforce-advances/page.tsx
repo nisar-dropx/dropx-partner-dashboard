@@ -81,12 +81,12 @@ export default async function WorkforceAdvancesPage() {
       if (allLocations) {
         const advanceResult = await readAllRows(supabaseAdmin
           .from("pay_advances")
-          .select("id,workforce_id:worker_id,imported_dropx_id:worker_code,advance_date:paid_at,amount,payment_reference:bank_reference,evidence_type,provenance,created_at").eq("worker_type","workforce")
+          .select("id,workforce_id:worker_id,imported_dropx_id:worker_code,advance_date:paid_at,first_due_period,amount,payment_reference:bank_reference,evidence_type,provenance,created_at").eq("worker_type","workforce")
           .eq("company_id", companyId)
           .order("paid_at", { ascending: false })
           .order("created_at", { ascending: false }));
         advances.push(...advanceResult.data.map(a=>({...a,
-          advance_date:String(a.advance_date).slice(0,10),station_id:a.provenance?.station_id,
+          advance_date:String(a.advance_date).slice(0,10),first_due_period:String(a.first_due_period ?? "").slice(0,10),station_id:a.provenance?.station_id,
           advance_number:a.provenance?.request_number??a.provenance?.advance_number??`ADV-${String(a.id).slice(0,8)}`,
           link_status:a.workforce_id?'linked':'pending',payment_mode:'bank',source_type:a.evidence_type,
           external_reference:a.provenance?.external_reference,remark:a.evidence_type==='legacy_recorded'?'Historical paid advance':'Bank confirmed'
@@ -96,13 +96,13 @@ export default async function WorkforceAdvancesPage() {
         for (let index = 0; index < visibleWorkforceIds.length; index += 100) {
           const advanceResult = await readAllRows(supabaseAdmin
             .from("pay_advances")
-            .select("id,workforce_id:worker_id,imported_dropx_id:worker_code,advance_date:paid_at,amount,payment_reference:bank_reference,evidence_type,provenance,created_at").eq("worker_type","workforce")
+            .select("id,workforce_id:worker_id,imported_dropx_id:worker_code,advance_date:paid_at,first_due_period,amount,payment_reference:bank_reference,evidence_type,provenance,created_at").eq("worker_type","workforce")
             .eq("company_id", companyId)
             .in("worker_id", visibleWorkforceIds.slice(index, index + 100))
             .order("paid_at", { ascending: false })
             .order("created_at", { ascending: false }));
           advances.push(...advanceResult.data.map(a=>({...a,
-          advance_date:String(a.advance_date).slice(0,10),station_id:a.provenance?.station_id,
+          advance_date:String(a.advance_date).slice(0,10),first_due_period:String(a.first_due_period ?? "").slice(0,10),station_id:a.provenance?.station_id,
           advance_number:a.provenance?.request_number??a.provenance?.advance_number??`ADV-${String(a.id).slice(0,8)}`,
           link_status:a.workforce_id?'linked':'pending',payment_mode:'bank',source_type:a.evidence_type,
           external_reference:a.provenance?.external_reference,remark:a.evidence_type==='legacy_recorded'?'Historical paid advance':'Bank confirmed'
@@ -192,6 +192,7 @@ export default async function WorkforceAdvancesPage() {
             workforceId: String(advance.workforce_id ?? ""),
             advanceNumber: String(advance.advance_number),
             advanceDate: String(advance.advance_date),
+            firstDuePeriod: String(advance.first_due_period || advance.advance_date || "").slice(0, 10),
             dropxId: String(linkStatus === "pending" ? advance.imported_dropx_id ?? "" : worker?.dropx_id ?? advance.imported_dropx_id ?? ""),
             originalDropxId: String(advance.imported_dropx_id ?? ""),
             identityRevision: Number(advance.identity_revision ?? 0),

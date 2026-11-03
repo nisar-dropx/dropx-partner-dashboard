@@ -1,5 +1,3 @@
-
-import { ReportTable } from "@/components/report-table";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -166,7 +164,7 @@ export default async function DropxOneDevicesPage({
         </div>
 
         <div className="table-wrap">
-          <ReportTable className="data-table">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Person</th>
@@ -230,7 +228,7 @@ export default async function DropxOneDevicesPage({
                 </tr>
               )}
             </tbody>
-          </ReportTable>
+          </table>
         </div>
 
         {filtered.length > PAGE_SIZE ? (

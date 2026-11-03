@@ -13,6 +13,7 @@ const rows = [
   {
     advanceNumber: "WA-001",
     advanceDate: "2026-09-01",
+    firstDuePeriod: "2026-10-01",
     dropxId: "2000031112340",
     originalDropxId: "2000031112340",
     workforceName: "Boundary One",
@@ -205,6 +206,13 @@ test("CSV exports exactly the rows supplied rather than a page-sized or unfilter
 
   const allCsv = buildWorkforceAdvanceCsv(rows);
   for (const row of rows) assert.match(allCsv, new RegExp(row.advanceNumber));
+});
+
+test("CSV includes payroll due month and falls back to advance date when missing", () => {
+  const csv = buildWorkforceAdvanceCsv(rows);
+  assert.match(csv, /Payroll Due/);
+  assert.match(csv, /2026-10-01/);
+  assert.match(csv, /2026-09-30/);
 });
 
 test("CSV is Excel-friendly, escapes free text, blocks formulas and preserves long numeric IDs", () => {
