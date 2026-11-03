@@ -953,6 +953,7 @@ export type LoadFlashBoardDa = {
   failed: number;
   rejected: number;
   oor: number;
+  other?: number;
   total: number;
   dsrPct: number;
 };
@@ -967,6 +968,7 @@ export type LoadFlashBoardPayload = {
   pickupDonePct: number;
   daDsr: LoadFlashBoardDa[];
   zeroDeliveries: number;
+  dsrHistoryPending?: number;
   ageingByDay: Record<string, LoadFlashAgeingCell>;
   ageingByWeek: Record<string, LoadFlashAgeingCell>;
   ageingByStateWeek: Record<string, Record<string, LoadFlashAgeingCell>>;
@@ -1059,6 +1061,7 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
         failed: Number(da.failed) || 0,
         rejected: Number(da.rejected) || 0,
         oor: Number(da.oor) || 0,
+        other: Number(da.other) || 0,
         total,
         dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0
       });
@@ -1106,6 +1109,7 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     pickupDonePct: Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0,
     daDsr,
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
+    dsrHistoryPending: Number(row.dsrHistoryPending) || 0,
     ageingByDay,
     ageingByWeek,
     ageingByStateWeek,

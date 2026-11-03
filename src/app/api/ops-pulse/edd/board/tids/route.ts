@@ -56,10 +56,11 @@ export async function GET(request: Request) {
     })).filter((row) => allowed.has(row.stationCode) && stations.includes(row.stationCode));
 
     const mapped = mapBoardTidExportRows(flash, kind);
-    const rows = mapped.map(({ stationCode, trackingId, status, edd, driverId, driverName }) => ({
+    const rows = mapped.map(({ stationCode, trackingId, status, currentState, edd, driverId, driverName }) => ({
       stationCode,
       trackingId,
       status,
+      currentState,
       edd,
       driverId,
       driverName,

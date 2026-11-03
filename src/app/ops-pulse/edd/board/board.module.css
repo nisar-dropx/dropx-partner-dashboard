@@ -879,3 +879,5 @@ button.kpi[aria-pressed="true"] { background:#e0e9f6; }
 .shareCardHead span { color:#d9e5f5; }
 .shareRow,.shareRowWide { padding:3px 7px; }
 @media(pointer:coarse) { .sortButton { min-height:36px; } .filters :global(.edd-filter-select) { min-height:36px; } }
+
+.viewControls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
