@@ -21,8 +21,6 @@ import {
   dsrPctTextColor,
   eddPivot,
   eddStationTotal,
-  filterStationsByRegion,
-  groupStationsByRegion,
   heatColor,
   pickupPctColor,
   pickupPctTextColor,
@@ -37,12 +35,18 @@ import type { StationBoardRegionId } from "@/lib/ops-pulse/station-board-regions
 import { STATION_BOARD_REGIONS } from "@/lib/ops-pulse/station-board-regions";
 import { downloadBoardShare, renderBoardShareImages, shareBoardImages, type BoardShareCell, type BoardShareTable } from "@/lib/ops-pulse/station-board-share";
 import s from "./board.module.css";
+import { EddMultiSelect } from "../edd-multi-select";
+import { boardDeliverySummary, filterBoardStations, prepareBoardReport, type BoardCluster, type BoardReportSort } from "@/lib/ops-pulse/compact-board-report";
+import { downloadReportExcel, type ExcelReport } from "@/lib/download-report-excel";
 
 type Props = {
   initial: LoadFlashBoardNetwork;
   stationNames?: Record<string, string>;
+  clusters?: BoardCluster[];
   initialRegion?: string;
   initialView?: string;
+  initialStations?: string;
+  initialClusters?: string;
 };
 
 type BlockBusy = "image" | "share" | null;
@@ -111,24 +115,6 @@ function count(n: number, blankZero = false) {
   return (Number(n) || 0).toLocaleString("en-IN");
 }
 
-async function downloadWorkbook(date: string, report: StationBoardView | "full", region: StationBoardRegionId | "ALL") {
-  const params = new URLSearchParams({ date, report, region });
-  const response = await fetch(`/api/ops-pulse/edd/board/report?${params}`, { cache: "no-store" });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(String((body as { error?: string }).error ?? "Unable to download the workbook."));
-  }
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const named = response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1];
-  a.href = url;
-  a.download = named || `station-board-${date}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
-}
 
 function buildShareTable(
   view: StationBoardView,
@@ -168,19 +154,19 @@ function buildShareTable(
         align: "right" as const,
       })),
       { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" },
-      { text: `${station.board.pickupDonePct}%`, bold: true, bg: pickupPctColor(station.board.pickupDonePct), color: pickupPctTextColor(station.board.pickupDonePct), align: "right" },
+      { text: station.board.cReturnTotal ? `${station.board.pickupDonePct}%` : "—", bold: true, bg: station.board.cReturnTotal ? pickupPctColor(station.board.pickupDonePct) : undefined, color: station.board.cReturnTotal ? pickupPctTextColor(station.board.pickupDonePct) : undefined, align: "right" },
     ]);
     const tot = sumCReturn(stations);
     rows.push([
-      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+      { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
       ...CRETURN_DISPLAY.map((status) => ({
         text: String(tot.byStatus[status] ?? 0),
         bold: true,
         align: "right" as const,
-        bg: "#fff4bf",
+        bg: "#edf2f8",
       })),
-      { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
-      { text: `${tot.pickupDonePct}%`, bold: true, bg: pickupPctColor(tot.pickupDonePct), color: pickupPctTextColor(tot.pickupDonePct), align: "right" },
+      { text: String(tot.total), bold: true, align: "right", bg: "#edf2f8" },
+      { text: tot.total ? `${tot.pickupDonePct}%` : "—", bold: true, bg: tot.total ? pickupPctColor(tot.pickupDonePct) : undefined, color: tot.total ? pickupPctTextColor(tot.pickupDonePct) : undefined, align: "right" },
     ]);
     return { title: `C-Return · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board" };
   }
@@ -200,18 +186,18 @@ function buildShareTable(
         { text: inr(row.total.amount), bold: true, bg: heatColor(row.total.amount, pivot.maxAmount), align: "right" },
       ]);
       rows.push([
-        { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
+        { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
         ...pivot.columns.flatMap((col) => [
-          { text: String(pivot.columnTotals[col]?.count || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
-          { text: inr(pivot.columnTotals[col]?.amount || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+          { text: String(pivot.columnTotals[col]?.count || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
+          { text: inr(pivot.columnTotals[col]?.amount || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
         ]),
-        { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#fff4bf" },
-        { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#fff4bf" },
+        { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#edf2f8" },
+        { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#edf2f8" },
       ]);
       return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · State × ISO week" };
     }
     const pivot = ageingPivot(stations, "day");
-    const headers = ["Station", "CLM", ...AGEING_DAY_BUCKETS.flatMap((b) => [`${AGEING_DAY_LABELS[b]} #`, `${AGEING_DAY_LABELS[b]} ₹`]), "Total #", "Total ₹"];
+    const headers = ["Station", "Location", ...AGEING_DAY_BUCKETS.flatMap((b) => [`${AGEING_DAY_LABELS[b]} #`, `${AGEING_DAY_LABELS[b]} ₹`]), "Total #", "Total ₹"];
     const rows: BoardShareCell[][] = pivot.rows.map((row) => [
       { text: row.stationCode, bold: true, align: "left" },
       { text: stationNames[row.stationCode] || "", align: "left" },
@@ -223,14 +209,14 @@ function buildShareTable(
       { text: inr(row.total.amount), bold: true, bg: heatColor(row.total.amount, pivot.maxAmount), align: "right" },
     ]);
     rows.push([
-      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-      { text: "", bold: true, align: "left", bg: "#fff4bf" },
+      { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
+      { text: "", bold: true, align: "left", bg: "#edf2f8" },
       ...AGEING_DAY_BUCKETS.flatMap((b) => [
-        { text: String(pivot.columnTotals[b]?.count || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
-        { text: inr(pivot.columnTotals[b]?.amount || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
+        { text: String(pivot.columnTotals[b]?.count || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
+        { text: inr(pivot.columnTotals[b]?.amount || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
       ]),
-      { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#fff4bf" },
-      { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#fff4bf" },
+      { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#edf2f8" },
+      { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#edf2f8" },
     ]);
     return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · day buckets" };
   }
@@ -249,7 +235,7 @@ function buildShareTable(
   const rows: BoardShareCell[][] = [];
   const allDas: StationBoardDaDsr[] = [];
   for (const station of stations) {
-    const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0) : station.board.daDsr;
+    const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0) : station.board.daDsr;
     allDas.push(...das);
     for (const da of das) {
       rows.push([
@@ -260,20 +246,20 @@ function buildShareTable(
         { text: String(da.rejected || 0), align: "right" },
         { text: String(da.oor || 0), align: "right" },
         { text: String(da.total), align: "right" },
-        { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct), align: "right" },
+        { text: da.total ? `${da.dsrPct}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct) : undefined, align: "right" },
       ]);
     }
   }
   if (allDas.length) {
     const tot = sumDaDsr(allDas);
     rows.push([
-      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-      { text: `${tot.daCount} DA${tot.daCount === 1 ? "" : "s"}`, bold: true, align: "left", bg: "#fff4bf" },
-      { text: String(tot.delivered), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.failed), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.rejected), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.oor), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
+      { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
+      { text: `${tot.daCount} DA${tot.daCount === 1 ? "" : "s"}`, bold: true, align: "left", bg: "#edf2f8" },
+      { text: String(tot.delivered), bold: true, align: "right", bg: "#edf2f8" },
+      { text: String(tot.failed), bold: true, align: "right", bg: "#edf2f8" },
+      { text: String(tot.rejected), bold: true, align: "right", bg: "#edf2f8" },
+      { text: String(tot.oor), bold: true, align: "right", bg: "#edf2f8" },
+      { text: String(tot.total), bold: true, align: "right", bg: "#edf2f8" },
       { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
     ]);
   }
@@ -286,140 +272,16 @@ function buildShareTable(
   };
 }
 
-function buildStationShareTable(
-  view: StationBoardView,
-  station: StationBoardStation,
-  businessDate: string,
-  stationName: string,
-  ageingMode: AgeingBoardMode = "week",
-): BoardShareTable {
-  const label = stationName && stationName !== station.stationCode
-    ? `${station.stationCode} · ${stationName}`
-    : station.stationCode;
-  const subtitle = `${formatOpsDate(businessDate, businessDate)} · DropX Logistics`;
-
-  if (view === "creturn") {
-    const rows: BoardShareCell[][] = CRETURN_DISPLAY.map((status) => [
-      { text: CRETURN_SHORT[status], align: "left" },
-      { text: String(station.board.cReturn[status] ?? 0), bold: true, align: "right" },
-    ]);
-    rows.push(
-      [{ text: "Grand Total", bold: true, align: "left" }, { text: String(station.board.cReturnTotal || 0), bold: true, align: "right" }],
-      [
-        { text: "Pickup Done %", bold: true, align: "left", bg: pickupPctColor(station.board.pickupDonePct), color: pickupPctTextColor(station.board.pickupDonePct) },
-        { text: `${station.board.pickupDonePct}%`, bold: true, align: "right", bg: pickupPctColor(station.board.pickupDonePct), color: pickupPctTextColor(station.board.pickupDonePct) },
-      ],
-    );
-    return { title: `C-Return · ${label}`, subtitle, headers: ["Status", "Count"], rows, footerNote: "Ops Pulse Station board" };
-  }
-
-  if (view === "edd") {
-    const dates = collectEddDates([station], businessDate);
-    const pivot = eddPivot([station], dates);
-    const row = pivot.rows[0];
-    const rows: BoardShareCell[][] = dates.map((d) => [
-      { text: boardDayLabel(d), align: "left" },
-      { text: String(row?.cells[d] ?? 0), bold: true, bg: heatColor(row?.cells[d] ?? 0, pivot.max), align: "right" },
-    ]);
-    rows.push(
-      [{ text: "Window total", bold: true, align: "left", bg: "#fff4bf" }, { text: String(row?.total ?? 0), bold: true, align: "right", bg: "#fff4bf" }],
-      [{ text: "Full backlog", bold: true, align: "left", bg: "#fff4bf" }, { text: String(eddStationTotal(station)), bold: true, align: "right", bg: "#fff4bf" }],
-    );
-    return { title: `EDD · ${label}`, subtitle, headers: ["Promised date", "Packages"], rows, footerNote: "Ops Pulse Station board" };
-  }
-
-  if (view === "ageing") {
-    if (ageingMode === "week") {
-      const weeks = collectAgeingWeeks([station]);
-      const pivot = ageingStateWeekPivot([station], weeks);
-      const rows: BoardShareCell[][] = pivot.rows.map((row) => [
-        { text: row.state, align: "left" },
-        ...pivot.columns.flatMap((col) => [
-          { text: row.cells[col]?.count ? String(row.cells[col].count) : "", align: "right" as const },
-          { text: row.cells[col]?.amount ? inr(row.cells[col].amount) : "", align: "right" as const },
-        ]),
-        { text: String(row.total.count), bold: true, align: "right" },
-        { text: inr(row.total.amount), bold: true, align: "right", bg: heatColor(row.total.amount, pivot.maxAmount) },
-      ]);
-      rows.push([
-        { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-        ...pivot.columns.flatMap((col) => [
-          { text: String(pivot.columnTotals[col]?.count || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
-          { text: inr(pivot.columnTotals[col]?.amount || 0), bold: true, align: "right" as const, bg: "#fff4bf" },
-        ]),
-        { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#fff4bf" },
-        { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#fff4bf" },
-      ]);
-      return {
-        title: `Ageing · ${label}`,
-        subtitle,
-        headers: ["State", ...pivot.columns.flatMap((col) => [`${col} #`, `${col} ₹`]), "Total #", "Total ₹"],
-        rows,
-        footerNote: "Ops Pulse Station board · State × ISO week",
-      };
-    }
-    const pivot = ageingPivot([station], "day");
-    const row = pivot.rows[0];
-    const rows: BoardShareCell[][] = AGEING_DAY_BUCKETS.map((b) => [
-      { text: AGEING_DAY_LABELS[b], align: "left" },
-      { text: String(row?.cells[b]?.count ?? 0), align: "right" },
-      { text: inr(row?.cells[b]?.amount ?? 0), align: "right" },
-    ]);
-    rows.push([
-      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-      { text: String(row?.total.count ?? 0), bold: true, align: "right", bg: "#fff4bf" },
-      { text: inr(row?.total.amount ?? 0), bold: true, align: "right", bg: heatColor(row?.total.amount ?? 0, pivot.maxAmount) },
-    ]);
-    return { title: `Ageing · ${label}`, subtitle, headers: ["Bucket", "Count", "Order amount"], rows, footerNote: "Ops Pulse Station board" };
-  }
-
-  const zeroOnly = view === "zero";
-  const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0) : station.board.daDsr;
-  const rows: BoardShareCell[][] = das.map((da) => [
-    { text: da.driverName || da.driverId, align: "left" },
-    { text: String(da.delivered), align: "right" },
-    { text: String(da.failed || 0), align: "right" },
-    { text: String(da.rejected || 0), align: "right" },
-    { text: String(da.oor || 0), align: "right" },
-    { text: String(da.total), align: "right" },
-    { text: `${da.dsrPct}%`, bold: true, bg: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct), align: "right" },
-  ]);
-  if (das.length) {
-    const tot = sumDaDsr(das);
-    rows.push([
-      { text: "Grand Total", bold: true, align: "left", bg: "#fff4bf" },
-      { text: String(tot.delivered), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.failed), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.rejected), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.oor), bold: true, align: "right", bg: "#fff4bf" },
-      { text: String(tot.total), bold: true, align: "right", bg: "#fff4bf" },
-      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
-    ]);
-  }
-  return {
-    title: `${zeroOnly ? "Zero deliveries" : "DA DSR"} · ${label}`,
-    subtitle,
-    headers: [
-      DSR_HEADERS.da,
-      DSR_HEADERS.delivered,
-      DSR_HEADERS.failed,
-      DSR_HEADERS.rejected,
-      DSR_HEADERS.oor,
-      DSR_HEADERS.total,
-      DSR_HEADERS.dsrPct,
-    ],
-    rows,
-    footerNote: "Ops Pulse Station board",
-  };
-}
-
-export function StationBoardView({ initial, stationNames = {}, initialRegion, initialView }: Props) {
+export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters }: Props) {
   const [payload, setPayload] = useState(initial);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initial.run);
   const [view, setView] = useState<StationBoardView>(() => asView(initialView));
-  const [region, setRegion] = useState<StationBoardRegionId | "ALL">(() => asRegion(initialRegion));
+  const [regions, setRegions] = useState<Set<string>>(() => new Set((initialRegion || "").split(",").map(asRegion).filter(region => region !== "ALL")));
+  const [stationFilter, setStationFilter] = useState<Set<string>>(() => new Set((initialStations || "").split(",").filter(Boolean)));
+  const [clusterFilter, setClusterFilter] = useState<Set<string>>(() => new Set((initialClusters || "").split(",").filter(Boolean)));
+  const [sorts, setSorts] = useState<Record<string, BoardReportSort>>({});
+  const sort = sorts[view] ?? { header: view === "dsr" || view === "zero" ? DSR_HEADERS.dsrPct : "Station", direction: view === "dsr" || view === "zero" ? "desc" : "asc" };
   const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | null>(null);
-  const [blockBusy, setBlockBusy] = useState<Record<string, BlockBusy>>({});
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
   const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number } | null>(null);
@@ -438,8 +300,9 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   const backfillCursor = useRef(0);
   const backfillClearSeq = useRef(0);
 
-  const stations = useMemo(() => filterStationsByRegion(payload.stations, region), [payload.stations, region]);
-  const groups = useMemo(() => groupStationsByRegion(stations), [stations]);
+  const stations = useMemo(() => filterBoardStations(payload.stations, {
+    stations: [...stationFilter], clusters: [...clusterFilter], regions: [...regions],
+  }, clusters), [payload.stations, stationFilter, clusterFilter, regions, clusters]);
   const dates = useMemo(() => collectEddDates(stations, payload.businessDate), [stations, payload.businessDate]);
   const pivot = useMemo(() => eddPivot(stations, dates), [stations, dates]);
   const ageingWeeks = useMemo(() => collectAgeingWeeks(stations), [stations]);
@@ -465,7 +328,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     const edd = stations.reduce((sum, row) => sum + Object.values(row.board.eddByDate).reduce((a, b) => a + b, 0), 0);
     const cReturn = stations.reduce((sum, row) => sum + row.board.cReturnTotal, 0);
     const pickup = stations.reduce((sum, row) => sum + row.board.pickupDone, 0);
-    const zero = stations.reduce((sum, row) => sum + row.board.zeroDeliveries, 0);
+    const zero = stations.flatMap(row => row.board.daDsr).filter(da => da.total > 0 && da.delivered === 0).length;
     const das = stations.reduce((sum, row) => sum + row.board.daDsr.length, 0);
     return {
       edd,
@@ -477,7 +340,28 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     };
   }, [stations]);
 
-  const regionLabel = region === "ALL" ? "All regions" : STATION_BOARD_REGIONS.find((r) => r.id === region)?.label ?? region;
+  const regionLabel = regions.size ? STATION_BOARD_REGIONS.filter(r => regions.has(r.id)).map(r => r.label).join(" / ") : "All regions";
+  const delivery = useMemo(() => boardDeliverySummary(stations, view === "zero"), [stations, view]);
+  const pct = (value: number | null) => value == null ? "—" : `${value.toFixed(1)}%`;
+  const reportTime = stations.map(row => row.fetchedAt).filter((at): at is string => !!at).sort().at(-1) || payload.asOf;
+  const singleStation = stations.length === 1;
+  function reportFor(blockStations: StationBoardStation[], label: string) {
+    const table = buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
+    const d = boardDeliverySummary(blockStations, view === "zero");
+    const stats = view === "dsr" || view === "zero"
+      ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Attempted ${pct(d.attemptPct)} (${count(d.attempted)}) · Rejected ${pct(d.rejectPct)} (${count(d.rejected)})`
+      : "";
+    return prepareBoardReport({ ...table,
+      title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
+      subtitle: `${table.subtitle} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}`,
+    }, sort, { dsr: view === "dsr" || view === "zero", singleStation: blockStations.length === 1 });
+  }
+  const report = reportFor(stations, regionLabel);
+  function excelReport(table = report): ExcelReport {
+    return { title: table.title, headers: table.headers, rows: table.rows.map(row => row.map(cell => cell.text)), scope: table.subtitle };
+  }
+  function changeView(next: StationBoardView) { setView(next); syncUrl(next); setTids(null); }
+
 
   function goToDate(date: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
@@ -495,19 +379,24 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     return tids.filter((row) => row.edd === tidDay);
   }, [tids, tidDay]);
 
-  function syncUrl(nextView: StationBoardView, nextRegion: StationBoardRegionId | "ALL") {
+  function syncUrl(nextView: StationBoardView) {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     url.searchParams.set("view", nextView);
     url.searchParams.set("date", payload.businessDate);
-    if (nextRegion === "ALL") url.searchParams.delete("region");
-    else url.searchParams.set("region", nextRegion);
+    for (const [key, values] of [["region", regions], ["stations", stationFilter], ["clusters", clusterFilter]] as const) {
+      if (values.size) url.searchParams.set(key, [...values].join(","));
+      else url.searchParams.delete(key);
+    }
     window.history.replaceState(null, "", url.toString());
   }
 
   function boardHref(date: string) {
-    const regionQs = region === "ALL" ? "" : `&region=${region}`;
-    return `/edd/board?date=${encodeURIComponent(date)}&view=${view}${regionQs}`;
+    const params = new URLSearchParams({ date, view });
+    for (const [key, values] of [["region", regions], ["stations", stationFilter], ["clusters", clusterFilter]] as const) {
+      if (values.size) params.set(key, [...values].join(","));
+    }
+    return `/edd/board?${params}`;
   }
 
   async function reloadBoard() {
@@ -749,7 +638,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setBusy("download");
     setError(null);
     try {
-      await downloadWorkbook(payload.businessDate, view, region);
+      await downloadReportExcel(excelReport());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed.");
     } finally {
@@ -766,12 +655,12 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
   }) {
     const setBusyState = (value: BlockBusy | "image" | "share" | null) => {
       if (opts.scope === "all") setBusy(value === null ? null : value);
-      else setBlockBusy((prev) => ({ ...prev, [opts.key]: value }));
+
     };
     setBusyState(opts.share ? "share" : "image");
     setError(null);
     try {
-      const table = buildShareTable(view, opts.blockStations, payload.businessDate, opts.label, stationNames, ageingMode);
+      const table = reportFor(opts.blockStations, opts.label);
       if (!table.rows.length) throw new Error("Nothing to share for this block.");
       const fileName = `station-board-${payload.businessDate}-${view}-${opts.key.toLowerCase()}`;
       if (opts.share) {
@@ -793,7 +682,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     setStationShareBusy(share ? "share" : "image");
     setError(null);
     try {
-      const table = buildStationShareTable(view, selected, payload.businessDate, stationNames[selected.stationCode] || "", ageingMode);
+      const table = reportFor([selected], stationNames[selected.stationCode] || selected.stationCode);
       if (!table.rows.length) throw new Error("Nothing to share for this station.");
       const fileName = `station-board-${payload.businessDate}-${view}-${selected.stationCode.toLowerCase()}`;
       if (share) {
@@ -877,20 +766,6 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
     ["zero", "Zero deliveries"],
   ] as const;
 
-  function regionShareActions(groupId: string, groupLabel: string, groupStations: StationBoardStation[]) {
-    const busyKey = blockBusy[groupId];
-    return (
-      <div className={s.regionActions}>
-        <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: groupId, label: groupLabel, blockStations: groupStations, share: false, scope: "block" })}>
-          {busyKey === "image" ? <Loader2 size={12} className="spin" /> : <ImageDown size={12} />} Image
-        </button>
-        <button type="button" disabled={busy !== null || Boolean(busyKey)} onClick={() => void shareBlock({ key: groupId, label: groupLabel, blockStations: groupStations, share: true, scope: "block" })}>
-          {busyKey === "share" ? <Loader2 size={12} className="spin" /> : <Share2 size={12} />} WhatsApp
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className={s.board}>
       <div className={s.toolbar}>
@@ -927,11 +802,9 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
               key={key}
               type="button"
               role="tab"
-              aria-pressed={view === key}
+              aria-selected={view === key}
               onClick={() => {
-                setView(key);
-                syncUrl(key, region);
-                setTids(null);
+                changeView(key);
               }}
             >
               {label}
@@ -939,18 +812,10 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           ))}
         </div>
 
-        <div className={s.segment} role="tablist" aria-label="Region">
-          <button type="button" aria-pressed={region === "ALL"} onClick={() => { setRegion("ALL"); syncUrl(view, "ALL"); }}>All</button>
-          {STATION_BOARD_REGIONS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              aria-pressed={region === item.id}
-              onClick={() => { setRegion(item.id); syncUrl(view, item.id); }}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className={s.filters}>
+          <EddMultiSelect label="Stations" options={payload.stations.map(row => row.stationCode).sort()} selected={stationFilter} onChange={setStationFilter} renderOption={code => stationNames[code] ? `${code} · ${stationNames[code]}` : code} />
+          <EddMultiSelect label="Cluster / AOM" options={clusters.map(c => c.value)} selected={clusterFilter} onChange={setClusterFilter} renderOption={id => clusters.find(c => c.value === id)?.label || id} />
+          <EddMultiSelect label="Regions" options={STATION_BOARD_REGIONS.map(r => r.id)} selected={regions} onChange={setRegions} renderOption={id => STATION_BOARD_REGIONS.find(r => r.id === id)?.label || id} />
         </div>
 
         <div className={s.actions}>
@@ -963,7 +828,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
           <button
             type="button"
             disabled={busy !== null}
-            onClick={() => void shareBlock({ key: region, label: regionLabel, blockStations: stations, share: false, scope: "all" })}
+            onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: false, scope: "all" })}
           >
             {busy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
           </button>
@@ -971,7 +836,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             type="button"
             className={s.primary}
             disabled={busy !== null}
-            onClick={() => void shareBlock({ key: region, label: regionLabel, blockStations: stations, share: true, scope: "all" })}
+            onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: true, scope: "all" })}
           >
             {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
           </button>
@@ -1003,413 +868,51 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
         {error ? <p className={s.error} role="alert">{error}</p> : null}
       </div>
 
-      <div className={s.kpis}>
-        <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong><small>{regionLabel}</small></article>
-        <article className={s.kpi}><span>EDD packages</span><strong>{totals.edd.toLocaleString("en-IN")}</strong><small>Inducted × promised date</small></article>
-        <article className={s.kpi}><span>C-Return</span><strong>{totals.cReturn.toLocaleString("en-IN")}</strong><small>{totals.pickupPct}% pickup done</small></article>
-        <article className={s.kpi}><span>Zero-delivery DAs</span><strong>{totals.zero.toLocaleString("en-IN")}</strong><small>of {totals.das.toLocaleString("en-IN")} DAs</small></article>
+      <div className={s.kpis} aria-live="polite">
+        <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong></article>
+        {view === "dsr" || view === "zero" ? <>
+          <article className={s.kpi}><span>Overall DSR</span><strong>{pct(delivery.dsrPct)} <small>({count(delivery.delivered)})</small></strong></article>
+          <article className={s.kpi} title="Attempted = delivered + failed + rejected; percentage of total shipments"><span>Attempted</span><strong>{pct(delivery.attemptPct)} <small>({count(delivery.attempted)})</small></strong></article>
+          <article className={s.kpi} title="Rejected / total shipments"><span>Rejected</span><strong>{pct(delivery.rejectPct)} <small>({count(delivery.rejected)})</small></strong></article>
+          <article className={s.kpi}><span>On road</span><strong>{pct(delivery.roadPct)} <small>({count(delivery.oor)})</small></strong></article>
+        </> : view === "ageing" ? <>
+          <article className={s.kpi}><span>Ageing shipments</span><strong>{count(ageing.grandTotal.count)}</strong></article>
+          <article className={s.kpi}><span>Ageing value</span><strong>₹{inr(ageing.grandTotal.amount)}</strong></article>
+        </> : <>
+          <article className={s.kpi}><span>EDD packages</span><strong>{count(totals.edd)}</strong></article>
+          <article className={s.kpi}><span>C-Return</span><strong>{count(totals.cReturn)} <small>· {totals.cReturn ? `${totals.pickupPct}% pickup` : "—"}</small></strong></article>
+        </>}
+        <button type="button" className={s.kpi} aria-pressed={view === "zero"} onClick={() => changeView(view === "zero" ? "dsr" : "zero")}><span>Zero-delivery DAs ↗</span><strong>{count(totals.zero)} <small>of {totals.das} DAs</small></strong></button>
       </div>
 
-      {view === "edd" ? (
-        <section className={s.panel}>
-          <div className={s.panelHead}>
-            <h3>EDD · Inducted × promised delivery date</h3>
-            <span>Portal PackageResults backlog — not Ops Live pending. Click a station for TIDs.</span>
-          </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
-            const local = eddPivot(group.stations, dates);
-            return (
-              <div key={group.id}>
-                <div className={s.region}>
-                  <span>{group.label}</span>
-                  {regionShareActions(group.id, group.label, group.stations)}
-                </div>
-                <div className={s.scroll}>
-                  <ReportTable className={`${s.table} ${s.edd}`}>
-                    <thead>
-                      <tr>
-                        <th>Station</th>
-                        {dates.map((d) => <th key={d}>{boardDayLabel(d)}</th>)}
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {local.rows.map((row) => (
-                        <tr key={row.stationCode} className={s.clickRow} onClick={() => openStationPanel(row.stationCode)}>
-                          <td title={stationNames[row.stationCode] || row.stationCode}>
-                            <button type="button" className={s.stationBtn} onClick={(e) => { e.stopPropagation(); openStationPanel(row.stationCode); }}>
-                              {row.stationCode}
-                            </button>
-                          </td>
-                          {dates.map((d) => {
-                            const value = row.cells[d] ?? 0;
-                            return (
-                              <td key={d} className={value ? s.heat : s.emptyCell} style={value ? { background: heatColor(value, local.max) } : undefined}>
-                                {count(value, true)}
-                              </td>
-                            );
-                          })}
-                          <td className={s.heat} style={{ background: heatColor(row.total, Math.max(...local.rows.map((r) => r.total), 1)) }}>{count(row.total)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td>Grand Total</td>
-                        {dates.map((d) => <td key={d}>{count(local.columnTotals[d] ?? 0)}</td>)}
-                        <td>{count(local.grandTotal)}</td>
-                      </tr>
-                    </tfoot>
-                  </ReportTable>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-      ) : null}
-
-      {view === "ageing" ? (
-        <section className={s.panel}>
-          <div className={s.panelHead}>
-            <h3>
-              {ageingMode === "day"
-                ? "Ageing · station × day buckets"
-                : "Ageing · State × ISO week (count + amount)"}
-            </h3>
-            <div className={s.segment} role="tablist" aria-label="Ageing type">
-              <button type="button" aria-pressed={ageingMode === "day"} onClick={() => setAgeingMode("day")}>Date type</button>
-              <button type="button" aria-pressed={ageingMode === "week"} onClick={() => setAgeingMode("week")}>Week type</button>
-            </div>
-          </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : ageingMode === "week" ? groups.map((group) => {
-            const local = ageingStateWeekPivot(group.stations, ageingWeeks);
-            const cols = local.columns;
-            return (
-              <div key={group.id}>
-                <div className={s.region}>
-                  <span>{group.label}</span>
-                  {regionShareActions(group.id, group.label, group.stations)}
-                </div>
-                <div className={s.scroll}>
-                  <ReportTable className={`${s.table} ${s.ageing}`}>
-                    <thead>
-                      <tr>
-                        <th rowSpan={2}>State</th>
-                        {cols.map((col) => (
-                          <th key={col} colSpan={2}>{col}</th>
-                        ))}
-                        <th rowSpan={2}>Total Count</th>
-                        <th rowSpan={2}>Total Sum</th>
-                      </tr>
-                      <tr>
-                        {cols.flatMap((col) => [
-                          <th key={`${col}-c`}>Count of Tracking ID</th>,
-                          <th key={`${col}-a`}>Sum of Order Amount</th>,
-                        ])}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {local.rows.map((row) => (
-                        <tr key={row.state}>
-                          <td className={s.clm}>{row.state}</td>
-                          {cols.flatMap((col) => {
-                            const cell = row.cells[col] ?? { count: 0, amount: 0 };
-                            return [
-                              <td key={`${col}-c`}>{count(cell.count, true)}</td>,
-                              <td key={`${col}-a`}>{cell.amount ? inr(cell.amount) : ""}</td>,
-                            ];
-                          })}
-                          <td>{count(row.total.count)}</td>
-                          <td className={s.heat} style={{ background: heatColor(row.total.amount, local.maxAmount) }}>{inr(row.total.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td>Grand Total</td>
-                        {cols.flatMap((col) => [
-                          <td key={`${col}-c`}>{count(local.columnTotals[col]?.count ?? 0)}</td>,
-                          <td key={`${col}-a`}>{inr(local.columnTotals[col]?.amount ?? 0)}</td>,
-                        ])}
-                        <td>{count(local.grandTotal.count)}</td>
-                        <td>{inr(local.grandTotal.amount)}</td>
-                      </tr>
-                    </tfoot>
-                  </ReportTable>
-                </div>
-              </div>
-            );
-          }) : groups.map((group) => {
-            const local = ageingPivot(group.stations, "day");
-            const cols = local.columns;
-            return (
-              <div key={group.id}>
-                <div className={s.region}>
-                  <span>{group.label}</span>
-                  {regionShareActions(group.id, group.label, group.stations)}
-                </div>
-                <div className={s.scroll}>
-                  <ReportTable className={`${s.table} ${s.ageing}`}>
-                    <thead>
-                      <tr>
-                        <th rowSpan={2}>Station</th>
-                        <th rowSpan={2}>CLM</th>
-                        {cols.map((col) => (
-                          <th key={col} colSpan={2}>
-                            {AGEING_DAY_LABELS[col as keyof typeof AGEING_DAY_LABELS] || col}
-                          </th>
-                        ))}
-                        <th rowSpan={2}>Total Count</th>
-                        <th rowSpan={2}>Total Sum</th>
-                      </tr>
-                      <tr>
-                        {cols.flatMap((col) => [
-                          <th key={`${col}-c`}>Count of Tracking ID</th>,
-                          <th key={`${col}-a`}>Sum of Order Amount</th>,
-                        ])}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {local.rows.map((row) => (
-                        <tr key={row.stationCode} className={s.clickRow} onClick={() => openStationPanel(row.stationCode)}>
-                          <td>
-                            <button type="button" className={s.stationBtn} onClick={(e) => { e.stopPropagation(); openStationPanel(row.stationCode); }}>
-                              {row.stationCode}
-                            </button>
-                          </td>
-                          <td className={s.clm}>{stationNames[row.stationCode] || ""}</td>
-                          {cols.flatMap((col) => {
-                            const cell = row.cells[col] ?? { count: 0, amount: 0 };
-                            return [
-                              <td key={`${col}-c`}>{count(cell.count, true)}</td>,
-                              <td key={`${col}-a`}>{cell.amount ? inr(cell.amount) : ""}</td>,
-                            ];
-                          })}
-                          <td>{count(row.total.count)}</td>
-                          <td className={s.heat} style={{ background: heatColor(row.total.amount, local.maxAmount) }}>{inr(row.total.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td>Grand Total</td>
-                        <td />
-                        {cols.flatMap((col) => [
-                          <td key={`${col}-c`}>{count(local.columnTotals[col]?.count ?? 0)}</td>,
-                          <td key={`${col}-a`}>{inr(local.columnTotals[col]?.amount ?? 0)}</td>,
-                        ])}
-                        <td>{count(local.grandTotal.count)}</td>
-                        <td>{inr(local.grandTotal.amount)}</td>
-                      </tr>
-                    </tfoot>
-                  </ReportTable>
-                </div>
-              </div>
-            );
-          })}
-          {!ageing.grandTotal.count && stations.some((row) => row.hasSnapshot) ? (
-            <p className={s.note}>If Ageing is empty, click <strong>Refresh</strong> to pull portal Ageing for the selected date.</p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {view === "creturn" ? (
-        <section className={s.panel}>
-          <div className={s.panelHead}>
-            <h3>C-Return · station status</h3>
-            <span>Click a station for shareable card + TIDs</span>
-          </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
-            const tot = sumCReturn(group.stations);
-            return (
-            <div key={group.id}>
-              <div className={s.region}>
-                <span>{group.label}</span>
-                {regionShareActions(group.id, group.label, group.stations)}
-              </div>
-              <div className={s.scroll}>
-                <ReportTable className={`${s.table} ${s.creturn}`}>
-                  <thead>
-                    <tr>
-                      <th>Station</th>
-                      {CRETURN_DISPLAY.map((status) => <th key={status}>{CRETURN_SHORT[status]}</th>)}
-                      <th>Total</th>
-                      <th>Pickup %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.stations.map((station) => (
-                      <tr key={station.stationCode} className={s.clickRow} onClick={() => openStationPanel(station.stationCode)}>
-                        <td title={stationNames[station.stationCode] || station.stationCode}>
-                          <button type="button" className={s.stationBtn} onClick={(e) => { e.stopPropagation(); openStationPanel(station.stationCode); }}>
-                            {station.stationCode}
-                          </button>
-                        </td>
-                        {CRETURN_DISPLAY.map((status) => {
-                          const value = station.board.cReturn[status] ?? 0;
-                          return <td key={status}>{count(value)}</td>;
-                        })}
-                        <td>{count(station.board.cReturnTotal)}</td>
-                        <td
-                          className={s.heat}
-                          style={{
-                            background: pickupPctColor(station.board.pickupDonePct),
-                            color: pickupPctTextColor(station.board.pickupDonePct),
-                          }}
-                        >
-                          {station.board.pickupDonePct}%
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>Grand Total</td>
-                      {CRETURN_DISPLAY.map((status) => <td key={status}>{count(tot.byStatus[status] ?? 0)}</td>)}
-                      <td>{count(tot.total)}</td>
-                      <td
-                        className={s.heat}
-                        style={{
-                          background: pickupPctColor(tot.pickupDonePct),
-                          color: pickupPctTextColor(tot.pickupDonePct),
-                        }}
-                      >
-                        {tot.pickupDonePct}%
-                      </td>
-                    </tr>
-                  </tfoot>
-                </ReportTable>
-              </div>
-            </div>
-            );
-          })}
-        </section>
-      ) : null}
-
-      {view === "dsr" || view === "zero" ? (
-        <section className={s.panel}>
-          <div className={s.panelHead}>
-            <h3>{view === "zero" ? "Zero deliveries · DA DSR" : "DA DSR"}</h3>
-            <span>Click a station for shareable detail + TIDs</span>
-          </div>
-          {!stations.length ? <p className={s.empty}>No stations in this region.</p> : groups.map((group) => {
-            const zeroRows = view === "zero"
-              ? group.stations.flatMap((station) =>
-                  station.board.daDsr
-                    .filter((da) => da.delivered === 0)
-                    .map((da) => ({ station, da })),
-                )
-              : null;
-            if (view === "zero" && zeroRows && !zeroRows.length) {
-              return (
-                <div key={group.id}>
-                  <div className={s.region}>
-                    <span>{group.label}</span>
-                    {regionShareActions(group.id, group.label, group.stations)}
-                  </div>
-                  <p className={s.empty}>No zero-delivery DAs in this block.</p>
-                </div>
-              );
-            }
-            return (
-            <div key={group.id}>
-              <div className={s.region}>
-                <span>{group.label}</span>
-                {regionShareActions(group.id, group.label, group.stations)}
-              </div>
-              <div className={s.scroll}>
-                <ReportTable className={`${s.table} ${s.zero}`}>
-                  <thead>
-                    <tr>
-                      <th>Station</th>
-                      <th>{DSR_HEADERS.da}</th>
-                      <th>{DSR_HEADERS.delivered}</th>
-                      <th>{DSR_HEADERS.failed}</th>
-                      <th>{DSR_HEADERS.rejected}</th>
-                      <th>{DSR_HEADERS.oor}</th>
-                      <th>{DSR_HEADERS.total}</th>
-                      <th>{DSR_HEADERS.dsrPct}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.stations.flatMap((station) => {
-                      const rows = view === "zero"
-                        ? station.board.daDsr.filter((da) => da.delivered === 0)
-                        : station.board.daDsr;
-                      // Zero tab only lists DAs with 0 delivered — skip quiet stations.
-                      if (!rows.length) {
-                        if (view === "zero") return [];
-                        return [
-                          <tr key={`${station.stationCode}-empty`} className={s.clickRow} onClick={() => openStationPanel(station.stationCode)}>
-                            <td>
-                              <button type="button" className={s.stationBtn} onClick={(e) => { e.stopPropagation(); openStationPanel(station.stationCode); }}>
-                                {station.stationCode}
-                              </button>
-                            </td>
-                            <td colSpan={7} className={s.muted}>No DA DSR yet — Refresh</td>
-                          </tr>,
-                        ];
-                      }
-                      return rows.map((da, index) => (
-                        <tr key={`${station.stationCode}-${da.driverId}`} className={s.clickRow} onClick={() => openStationPanel(station.stationCode)}>
-                          <td>
-                            {index === 0 ? (
-                              <button type="button" className={s.stationBtn} onClick={(e) => { e.stopPropagation(); openStationPanel(station.stationCode); }}>
-                                {station.stationCode}
-                              </button>
-                            ) : null}
-                          </td>
-                          <td title={da.driverName || da.driverId}>{da.driverName || da.driverId}</td>
-                          <td>{da.delivered}</td>
-                          <td>{da.failed || 0}</td>
-                          <td>{da.rejected || 0}</td>
-                          <td>{da.oor || 0}</td>
-                          <td>{da.total}</td>
-                          <td
-                            className={s.heat}
-                            style={{ background: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct) }}
-                          >
-                            {da.dsrPct}%
-                          </td>
-                        </tr>
-                      ));
-                    })}
-                  </tbody>
-                  {(() => {
-                    const das = group.stations.flatMap((station) =>
-                      view === "zero"
-                        ? station.board.daDsr.filter((da) => da.delivered === 0)
-                        : station.board.daDsr,
-                    );
-                    if (!das.length) return null;
-                    const tot = sumDaDsr(das);
-                    return (
-                      <tfoot>
-                        <tr>
-                          <td>Grand Total</td>
-                          <td>{tot.daCount} DA{tot.daCount === 1 ? "" : "s"}</td>
-                          <td>{tot.delivered}</td>
-                          <td>{tot.failed}</td>
-                          <td>{tot.rejected}</td>
-                          <td>{tot.oor}</td>
-                          <td>{tot.total}</td>
-                          <td
-                            className={s.heat}
-                            style={{ background: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct) }}
-                          >
-                            {tot.dsrPct}%
-                          </td>
-                        </tr>
-                      </tfoot>
-                    );
-                  })()}
-                </ReportTable>
-              </div>
-            </div>
-            );
-          })}
-        </section>
-      ) : null}
+      <section className={s.panel}>
+        <div className={s.panelHead}>
+          <h3>{report.title}</h3>
+          <span>{formatOpsDate(payload.businessDate, payload.businessDate)} · Updated {formatOpsDateTime(reportTime, reportTime)}</span>
+          {view === "ageing" ? <div className={s.segment} aria-label="Ageing type">
+            <button type="button" aria-pressed={ageingMode === "day"} onClick={() => setAgeingMode("day")}>Day buckets</button>
+            <button type="button" aria-pressed={ageingMode === "week"} onClick={() => setAgeingMode("week")}>Week buckets</button>
+          </div> : null}
+        </div>
+        <div className={s.reportMeta}>
+          <span>{stations.length} stations{view === "dsr" || view === "zero" ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
+          <span>{view === "dsr" || view === "zero" ? "Sorted within station · percentages of total shipments" : "Select a station for details"}</span>
+        </div>
+        <div className={s.scroll}>
+          <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
+            <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
+              <button type="button" className={s.sortButton} onClick={() => setSorts(previous => ({ ...previous, [view]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+            </th>)}</tr></thead>
+            <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
+              {row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
+                {((report.headers[column] === "Station" && cell.text) || (singleStation && column === 0 && report.rowStations[i])) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(report.rowStations[i])}>{cell.text}</button> : cell.text}
+              </td>)}
+            </tr>)}</tbody>
+            {report.totalRows ? <tfoot>{report.rows.slice(-report.totalRows).map((row, i) => <tr key={i}>{row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align }}>{cell.text}</td>)}</tr>)}</tfoot> : null}
+          </ReportTable>
+          {!stations.length || !report.rows.length ? <p className={s.empty}>No matching records for these filters.</p> : null}
+        </div>
+      </section>
 
       {!pivot.grandTotal && view === "edd" && stations.some((row) => row.hasSnapshot) ? (
         <p className={s.note}>If cells are empty, click <strong>Refresh</strong> to pull board data for the selected date.</p>
@@ -1429,6 +932,7 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
             </div>
 
             <div className={s.drawerActions}>
+              <button type="button" onClick={() => void downloadReportExcel(excelReport(reportFor([selected], selected.stationCode))).catch(() => setError("Excel download failed. Retry."))}><Download size={14} /> Excel</button>
               <button type="button" disabled={stationShareBusy !== null} onClick={() => void shareStation(false)}>
                 {stationShareBusy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
               </button>
@@ -1587,28 +1091,28 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                   </div>
                   <div className={s.shareColsWide}>
                     <span>{DSR_HEADERS.da}</span>
+                    <span>{DSR_HEADERS.total}</span>
                     <span>{DSR_HEADERS.delivered}</span>
+                    <span>{DSR_HEADERS.oor}</span>
                     <span>{DSR_HEADERS.failed}</span>
                     <span>{DSR_HEADERS.rejected}</span>
-                    <span>{DSR_HEADERS.oor}</span>
-                    <span>{DSR_HEADERS.total}</span>
                     <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
-                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0) : selected.board.daDsr).map((da) => (
+                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0) : [...selected.board.daDsr]).sort((a, b) => b.dsrPct - a.dsrPct).map((da) => (
                       <div key={da.driverId} className={s.shareRowWide}>
                         <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
+                        <strong>{da.total}</strong>
                         <strong>{da.delivered}</strong>
+                        <strong>{da.oor || 0}</strong>
                         <strong>{da.failed || 0}</strong>
                         <strong>{da.rejected || 0}</strong>
-                        <strong>{da.oor || 0}</strong>
-                        <strong>{da.total}</strong>
                         <strong style={{ background: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct) }}>{da.dsrPct}%</strong>
                       </div>
                     ))}
                     {(() => {
                       const das = view === "zero"
-                        ? selected.board.daDsr.filter((da) => da.delivered === 0)
+                        ? selected.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0)
                         : selected.board.daDsr;
                       if (!das.length) {
                         return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh"}</p>;
@@ -1617,11 +1121,11 @@ export function StationBoardView({ initial, stationNames = {}, initialRegion, in
                       return (
                         <div className={`${s.shareRowWide} ${s.shareTotal}`}>
                           <span>Grand Total · {tot.daCount} DA{tot.daCount === 1 ? "" : "s"}</span>
+                          <strong>{tot.total}</strong>
                           <strong>{tot.delivered}</strong>
+                          <strong>{tot.oor}</strong>
                           <strong>{tot.failed}</strong>
                           <strong>{tot.rejected}</strong>
-                          <strong>{tot.oor}</strong>
-                          <strong>{tot.total}</strong>
                           <strong style={{ background: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct) }}>{tot.dsrPct}%</strong>
                         </div>
                       );

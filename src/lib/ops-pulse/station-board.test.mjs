@@ -88,6 +88,9 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
   assert.ok(sheets.some((sheet) => sheet.name === "EDD by date"));
   assert.ok(sheets.some((sheet) => sheet.name === "C-Return"));
   assert.ok(sheets.some((sheet) => sheet.name === "Zero deliveries"));
+  const dsr = sheets.find((sheet) => sheet.name === "DA DSR");
+  assert.deepEqual(Object.keys(dsr.rows[0]).slice(4, 10), ["Total", "Delivered", "Out on Road", "Delivery Failed", "Delivery Rejected", "DSR%"]);
+  assert.equal(dsr.rows[0]["DA's Name"], "Ben", "highest DSR first within station");
   const zero = sheets.find((sheet) => sheet.name === "Zero deliveries");
   assert.equal(zero.rows.length, 2);
   assert.equal(zero.rows[0]["DA's Name"], "Ada");

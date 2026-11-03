@@ -4,6 +4,7 @@ import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
+import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
 import { fetchLoadFlashBoard, isEddWorkerConfigured, type LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { EddSectionTabs } from "../edd-section-tabs";
 import { StationBoardView } from "./station-board-view";
@@ -18,12 +19,13 @@ function todayKolkata() {
 export default async function StationBoardPage({
   searchParams,
 }: {
-  searchParams?: { date?: string; region?: string; view?: string };
+  searchParams?: { date?: string; region?: string; view?: string; stations?: string; clusters?: string };
 }) {
   const authorization = await requireEddAccess();
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
+  const clusters = await loadFlashClusters(companyId, stations);
   const requested = String(searchParams?.date ?? "").trim();
   const today = todayKolkata();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : today;
@@ -46,7 +48,7 @@ export default async function StationBoardPage({
         <PageHead
           eyebrow="Ops Pulse · Station board"
           title="Live performance"
-          subtitle="EDD, C-Return, DSR and zero-delivery boards by station — hourly Ops Live refresh, Excel, WhatsApp images and tracking IDs."
+          subtitle="Station reports · EDD, Ageing, C-Return and DSR"
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
@@ -74,9 +76,12 @@ export default async function StationBoardPage({
         {workerConfigured && payload ? (
           <StationBoardView
             initial={payload}
+            clusters={clusters}
             stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))}
             initialRegion={String(searchParams?.region ?? "")}
             initialView={String(searchParams?.view ?? "")}
+            initialStations={String(searchParams?.stations ?? "")}
+            initialClusters={String(searchParams?.clusters ?? "")}
           />
         ) : null}
       </div>
