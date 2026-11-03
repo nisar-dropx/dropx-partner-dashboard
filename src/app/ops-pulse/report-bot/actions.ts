@@ -375,7 +375,7 @@ export async function approveFeedback(form: FormData) {
     const feedback = requiredText(form, "feedback_text", "Feedback", 3000);
     const settings = await loadReportBotSettings(companyId);
     const group = await scopedGroup(authorization, companyId, submission.group_id);
-    if (!canSendToGroup(settings.mode, group.mode ?? "observe", group.group_name)) {
+    if (!canSendToGroup(settings.mode, group.mode ?? "observe", group.group_name, authorization.reportBotWorkspace)) {
       throw new Error("Company must be Live and this group must be Review or Live to send a reply. For the Testing pilot, keep company Live — replies are allowed there.");
     }
     // Testing pilot: bump Observe → Review so drafts stay approvable after the first send.
@@ -424,7 +424,7 @@ export async function sendAllWaiting(form: FormData) {
       row.feedback_text?.trim()
       && row.group?.is_enabled
       && canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })
-      && canSendToGroup(settings.mode, row.group?.mode ?? "observe", row.group?.group_name)
+      && canSendToGroup(settings.mode, row.group?.mode ?? "observe", row.group?.group_name, authorization.reportBotWorkspace)
     );
     if (!sendable.length) throw new Error("Nothing is waiting that can be sent (need company Live and group Review/Live, or Testing).");
     const approved: string[] = [];
@@ -460,7 +460,7 @@ export async function sendTestReminder(form: FormData) {
     if (!schedule) throw new Error("Schedule not found.");
     await scopedGroup(authorization, companyId, schedule.group_id);
     if (!schedule.group?.is_enabled) throw new Error("This group is not on the bot. Add it on the Groups tab first.");
-    if (!canSendToGroup(settings.mode, schedule.group.mode ?? "observe", schedule.group.group_name)) {
+    if (!canSendToGroup(settings.mode, schedule.group.mode ?? "observe", schedule.group.group_name, authorization.reportBotWorkspace)) {
       throw new Error("This group is in Observe mode. Switch it to Review (or Live) before sending a test reminder. Testing may send while company is Live.");
     }
     if (isTestingGroupName(schedule.group.group_name) && (schedule.group.mode ?? "observe") === "observe") {
@@ -733,7 +733,7 @@ export async function approveReviewItem(form: FormData) {
       } | null;
     if (!row || !canSeeGroup(authorization, { ...row.group, location_id: row.group?.location_id ?? null })) throw new Error("This review item is not available to you.");
     if (!["draft_ready", "observe_only"].includes(row.review_status)) throw new Error("This item was already handled.");
-    if (!row.group?.is_enabled || !canSendToGroup(settings.mode, row.group.mode ?? "observe", row.group.group_name)) {
+    if (!row.group?.is_enabled || !canSendToGroup(settings.mode, row.group.mode ?? "observe", row.group.group_name, authorization.reportBotWorkspace)) {
       throw new Error("Company must be Live and this group must be Review or Live to send. Testing may send while company is Live.");
     }
     if (isTestingGroupName(row.group.group_name) && (row.group.mode ?? "observe") === "observe") {
