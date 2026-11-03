@@ -216,7 +216,7 @@ export function ReportTable({ children, reportTitle, reportExport, reportCanExpo
   }
   const caption = parts.find(n => element(n) && n.type === "caption") as Element | undefined;
   let bodyIndex = 0;
-  return <table {...props} ref={ref} data-report-table="true" onClickCapture={event => {
+  return <table {...props} className={[props.className, styles.compact].filter(Boolean).join(" ")} ref={ref} data-report-table="true" onClickCapture={event => {
     const target = event.target as HTMLElement;
     if (target.closest("thead") && target.closest("button,a") && !target.closest("[data-report-sort-button]")) setSort(null);
     props.onClickCapture?.(event);

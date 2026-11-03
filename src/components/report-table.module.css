@@ -2,7 +2,16 @@
 .tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:28px}
 .tools button{font:inherit!important;font-weight:600!important;border:1px solid #dce3ec!important;background:#fff!important;color:#34435b!important;border-radius:6px!important;padding:4px 9px!important;min-height:28px!important;width:auto!important;box-shadow:none!important;cursor:pointer}
 .tools button:disabled{opacity:.6;cursor:wait}
-.sort{display:inline-flex!important;align-items:center!important;justify-content:space-between;gap:5px!important;width:100%;font:inherit!important;font-weight:inherit!important;color:inherit!important;background:none!important;border:0!important;border-radius:3px!important;box-shadow:none!important;min-height:24px!important;padding:0!important;text-align:inherit!important;cursor:pointer}
+.sort{display:inline-flex!important;align-items:center!important;justify-content:space-between;gap:5px!important;width:100%;font:inherit!important;font-weight:inherit!important;color:inherit!important;background:none!important;border:0!important;border-radius:3px!important;box-shadow:none!important;min-height:20px!important;padding:0!important;text-align:inherit!important;cursor:pointer}
 .sort span{opacity:.65;font-size:11px;flex-shrink:0}
 .sort:focus-visible,.tools button:focus-visible{outline:2px solid #ed5525!important;outline-offset:2px}
 @media print{.tools{display:none}.sort span{display:none}}
+.compact{border-collapse:collapse;font-variant-numeric:tabular-nums}
+.compact > thead > tr > th{background:#17345c!important;color:#fff!important;text-transform:none!important;letter-spacing:normal!important;font-size:12px!important;line-height:1.25!important;padding:4px 6px!important;border:1px solid #d6dfe9}
+.compact > thead > tr > th :is(button,a){color:inherit!important}
+.compact > tbody > tr > :is(td,th),.compact > tfoot > tr > :is(td,th){padding:3px 6px!important;font-size:12px;line-height:1.3;border:1px solid #e0e6ee}
+.compact > tfoot > tr > td{background:#edf2f8;font-weight:650}
+.compact > caption{padding:2px 4px!important}
+.compact .tools{min-height:24px}
+.compact .tools button{min-height:24px!important;padding:2px 7px!important;border-radius:3px!important}
+@media(pointer:coarse){.sort{min-height:36px!important}.tools button{min-height:36px!important}}

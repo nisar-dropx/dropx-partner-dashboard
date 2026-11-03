@@ -695,16 +695,16 @@ export function stationBoardSheets(
 
   if (view === "dsr" || view === "full") {
     const dsrRows = stations.flatMap((station) =>
-      station.board.daDsr.map((da) => ({
+      [...station.board.daDsr].sort((a, b) => b.dsrPct - a.dsrPct).map((da) => ({
         Station: station.stationCode,
         Region: regionLabel(regionForStation(station.stationCode)),
         [DSR_HEADERS.da]: da.driverName || da.driverId,
         "DA ID": da.driverId,
+        [DSR_HEADERS.total]: da.total,
         [DSR_HEADERS.delivered]: da.delivered,
+        [DSR_HEADERS.oor]: da.oor,
         [DSR_HEADERS.failed]: da.failed,
         [DSR_HEADERS.rejected]: da.rejected,
-        [DSR_HEADERS.oor]: da.oor,
-        [DSR_HEADERS.total]: da.total,
         [DSR_HEADERS.dsrPct]: da.dsrPct,
         "Zero delivery": da.delivered === 0 ? "Yes" : "No",
       })),
@@ -716,11 +716,11 @@ export function stationBoardSheets(
         Region: "",
         [DSR_HEADERS.da]: `${tot.daCount} DAs`,
         "DA ID": "",
+        [DSR_HEADERS.total]: tot.total,
         [DSR_HEADERS.delivered]: tot.delivered,
+        [DSR_HEADERS.oor]: tot.oor,
         [DSR_HEADERS.failed]: tot.failed,
         [DSR_HEADERS.rejected]: tot.rejected,
-        [DSR_HEADERS.oor]: tot.oor,
-        [DSR_HEADERS.total]: tot.total,
         [DSR_HEADERS.dsrPct]: tot.dsrPct,
         "Zero delivery": "",
       });
@@ -730,17 +730,17 @@ export function stationBoardSheets(
 
   if (view === "zero" || view === "full") {
     const zeroDas = stations.flatMap((station) =>
-      station.board.daDsr.filter((da) => da.delivered === 0).map((da) => ({ station, da })),
+      station.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0).map((da) => ({ station, da })),
     );
     const zeroRows = zeroDas.map(({ station, da }) => ({
       Station: station.stationCode,
       Region: regionLabel(regionForStation(station.stationCode)),
       [DSR_HEADERS.da]: da.driverName || da.driverId,
+      [DSR_HEADERS.total]: da.total,
       [DSR_HEADERS.delivered]: da.delivered,
+      [DSR_HEADERS.oor]: da.oor,
       [DSR_HEADERS.failed]: da.failed,
       [DSR_HEADERS.rejected]: da.rejected,
-      [DSR_HEADERS.oor]: da.oor,
-      [DSR_HEADERS.total]: da.total,
       [DSR_HEADERS.dsrPct]: da.dsrPct,
     }));
     if (zeroRows.length) {
@@ -749,11 +749,11 @@ export function stationBoardSheets(
         Station: "Grand Total",
         Region: "",
         [DSR_HEADERS.da]: `${tot.daCount} DAs`,
+        [DSR_HEADERS.total]: tot.total,
         [DSR_HEADERS.delivered]: tot.delivered,
+        [DSR_HEADERS.oor]: tot.oor,
         [DSR_HEADERS.failed]: tot.failed,
         [DSR_HEADERS.rejected]: tot.rejected,
-        [DSR_HEADERS.oor]: tot.oor,
-        [DSR_HEADERS.total]: tot.total,
         [DSR_HEADERS.dsrPct]: tot.dsrPct,
       });
     }

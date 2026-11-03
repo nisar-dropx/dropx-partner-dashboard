@@ -18,6 +18,8 @@ export type BoardShareTable = {
   headers: string[];
   rows: BoardShareCell[][];
   footerNote?: string;
+  /** Repeat the group label only at image page boundaries. */
+  rowStations?: string[];
 };
 
 function wrap(ctx: CanvasRenderingContext2D, text: string, max: number): string[] {
@@ -50,7 +52,7 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
   // Wider canvas when headers are full phrases (e.g. Delivery Failed / Out on Road).
   const longestHeader = Math.max(...table.headers.map((h) => String(h || "").length), 8);
   const width = Math.min(1800, Math.max(980, 140 + table.headers.length * Math.max(96, longestHeader * 7)));
-  const margin = 28;
+  const margin = 16;
   const usable = width - margin * 2;
   const colCount = Math.max(1, table.headers.length);
   const firstCol = Math.min(200, Math.max(120, usable * 0.2));
@@ -71,9 +73,9 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
     const paintHeader = () => {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, maxPageHeight);
-      ctx.fillStyle = "#143447";
+      ctx.fillStyle = "#17345c";
       ctx.fillRect(0, 0, width, 86);
-      ctx.fillStyle = "#8de0d3";
+      ctx.fillStyle = "#cddcf2";
       ctx.font = "700 15px Arial, sans-serif";
       ctx.fillText("Ops Pulse · Station board", margin, 32);
       ctx.fillStyle = "#ffffff";
@@ -89,7 +91,7 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
       y += 10;
       const headerLines = table.headers.map((h, i) => wrap(ctx, h, Math.max(24, widths[i]! - 12)));
       const headerH = Math.max(...headerLines.map((l) => l.length)) * 16 + 14;
-      ctx.fillStyle = "#1f7a4d";
+      ctx.fillStyle = "#17345c";
       ctx.fillRect(margin, y, usable, headerH);
       let x = margin;
       headerLines.forEach((lines, i) => {
@@ -109,12 +111,16 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
     paintHeader();
     let drewBody = false;
     while (rowIndex < table.rows.length) {
-      const row = table.rows[rowIndex]!;
+      const row = table.rows[rowIndex]!.map(cell => ({ ...cell }));
+      const stationColumn = table.headers.indexOf("Station");
+      if (!drewBody && stationColumn >= 0 && !row[stationColumn]?.text && table.rowStations?.[rowIndex]) {
+        row[stationColumn] = { ...row[stationColumn], text: table.rowStations[rowIndex] };
+      }
       const cellLines = row.map((cell, i) => wrap(ctx, cell.text, Math.max(20, widths[i]! - 12)));
-      const h = Math.max(...cellLines.map((l) => l.length), 1) * 17 + 12;
+      const h = Math.max(...cellLines.map((l) => l.length), 1) * 17 + 6;
       if (drewBody && y + h + 48 > maxPageHeight) break;
       const isTotal = /grand total|pickup done/i.test(row[0]?.text ?? "");
-      ctx.fillStyle = isTotal ? "#fff4bf" : rowIndex % 2 ? "#f4f8fa" : "#ffffff";
+      ctx.fillStyle = isTotal ? "#edf2f8" : rowIndex % 2 ? "#f4f8fa" : "#ffffff";
       ctx.fillRect(margin, y, usable, h);
       ctx.fillStyle = "#d7e2e8";
       ctx.fillRect(margin, y + h - 1, usable, 1);
