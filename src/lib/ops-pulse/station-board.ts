@@ -305,7 +305,7 @@ export function dsrHeatColor(pct: number): string {
 
 /** Text on dsrHeatColor — white on deep green (high DSR), dark otherwise. */
 export function dsrPctTextColor(pct: number): string {
-  return pct >= 85 ? "#ffffff" : "inherit";
+  return pct >= 95 ? "#ffffff" : "#223642";
 }
 
 /** Shift a YYYY-MM-DD by N calendar days (UTC date math — safe for IST board dates). */
