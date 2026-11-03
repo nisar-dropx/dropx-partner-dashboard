@@ -191,7 +191,8 @@ export default async function MapAmazonIdPage({
         <p className={styles.note}>
           Same Amazon driver ID can move between associates on different dates.
           Two associates cannot share it on the same station-day. After Apply,
-          Distance sync runs for days in the last 35 days.
+          Distance re-syncs recent days in the range (last 35 days); long ranges
+          may need a manual sync from Distance & Fuel for the rest.
         </p>
       </div>
     </AppShell>

@@ -60,6 +60,11 @@ function isNextRedirect(error: unknown) {
   );
 }
 
+/** Worker processes at most 5 dates per /payable-distance/station call. */
+const SYNC_DAYS_PER_REQUEST = 5;
+/** Keep total auto-sync inside typical server-action budgets. */
+const SYNC_TIME_BUDGET_MS = 100_000;
+
 async function syncStationDays(stationId: string, from: string, to: string) {
   const today = todayKolkata();
   const minSync = new Date(Date.parse(today + "T00:00:00Z") - 35 * 86400000)
@@ -80,9 +85,34 @@ async function syncStationDays(stationId: string, from: string, to: string) {
   )
     .trim()
     .replace(/^["']|["']$/g, "");
-  if (!adminKey) return { synced: 0, attempted: days.length };
-  let ok = 0;
-  for (const date of days.slice(0, 31)) {
+  if (!days.length) {
+    return { synced: 0, failed: 0, attempted: 0, remaining: 0, error: null as string | null };
+  }
+  if (!adminKey) {
+    return {
+      synced: 0,
+      failed: 0,
+      attempted: 0,
+      remaining: days.length,
+      error: "Amazon sync is not configured (AMAZON_SYNC_ADMIN_KEY).",
+    };
+  }
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < days.length; i += SYNC_DAYS_PER_REQUEST) {
+    chunks.push(days.slice(i, i + SYNC_DAYS_PER_REQUEST));
+  }
+
+  let synced = 0;
+  let failed = 0;
+  let attempted = 0;
+  let error: string | null = null;
+  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
+
+  for (const chunk of chunks) {
+    const left = deadline - Date.now();
+    if (left < 5_000) break;
+    attempted += chunk.length;
     try {
       const res = await fetch(`${workerUrl}/payable-distance/station`, {
         method: "POST",
@@ -90,16 +120,63 @@ async function syncStationDays(stationId: string, from: string, to: string) {
           authorization: `Bearer ${adminKey}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ stationId, dates: [date] }),
-        signal: AbortSignal.timeout(110000),
+        body: JSON.stringify({ stationId, dates: chunk }),
+        signal: AbortSignal.timeout(Math.min(110_000, left)),
         cache: "no-store",
       });
-      if (res.ok) ok += 1;
+      if (res.status === 401) {
+        failed += chunk.length;
+        error = "Amazon sync rejected the admin key.";
+        break;
+      }
+      if (!res.ok) {
+        failed += chunk.length;
+        error = error || `Amazon sync failed (HTTP ${res.status}).`;
+        continue;
+      }
+      const results = (await res.json().catch(() => null)) as Array<{ outcome?: string }> | null;
+      if (!Array.isArray(results)) {
+        failed += chunk.length;
+        error = error || "Amazon sync returned an unexpected response.";
+        continue;
+      }
+      for (const row of results) {
+        if (row?.outcome === "done") synced += 1;
+        else failed += 1;
+      }
+      // Worker may truncate to 5; count any unreturned dates as failed.
+      if (results.length < chunk.length) failed += chunk.length - results.length;
     } catch {
-      /* keep going */
+      failed += chunk.length;
+      error = error || "Amazon sync timed out. Mapping was saved — retry sync from Distance & Fuel.";
     }
   }
-  return { synced: ok, attempted: Math.min(days.length, 31) };
+
+  return {
+    synced,
+    failed,
+    attempted,
+    remaining: Math.max(0, days.length - attempted),
+    error,
+  };
+}
+
+function syncNotice(transporterId: string, from: string, to: string, sync: Awaited<ReturnType<typeof syncStationDays>>) {
+  const base = `Amazon driver ID ${transporterId} saved for ${from} to ${to}.`;
+  if (sync.attempted === 0 && sync.remaining === 0) {
+    return `${base} Sync those days from Distance & Fuel if they are older than 35 days.`;
+  }
+  if (sync.attempted === 0 && sync.error) {
+    return `${base} ${sync.error}`;
+  }
+  if (sync.attempted === 0) {
+    return `${base} Auto re-sync did not run; use Distance & Fuel sync for these days.`;
+  }
+  const parts = [`${base} Re-synced ${sync.synced}/${sync.attempted} day(s)`];
+  if (sync.failed) parts.push(`${sync.failed} failed`);
+  if (sync.remaining) parts.push(`${sync.remaining} left — sync the rest from Distance & Fuel`);
+  if (sync.error && sync.synced === 0) parts.push(sync.error);
+  return `${parts.join(". ")}.`;
 }
 
 export async function saveAmazonTransporterAssignment(form: FormData) {
@@ -155,6 +232,36 @@ export async function saveAmazonTransporterAssignment(form: FormData) {
     if (driverClash) {
       throw new Error(
         `Amazon driver ID ${transporterId} is already mapped to another associate for overlapping dates.`,
+      );
+    }
+
+    // Also block IDs already claimed via portal link or settled distance for another associate.
+    // Mapping the same A… on a shared station-day marks BOTH people as identity_conflict.
+    const { data: portalClaim } = await supabaseAdmin
+      .from("workforce_amazon_portal_links")
+      .select("workforce_id")
+      .eq("company_id", companyId)
+      .eq("transporter_id", transporterId)
+      .neq("workforce_id", workforceId)
+      .limit(1);
+    if (portalClaim?.length) {
+      throw new Error(
+        `Amazon driver ID ${transporterId} is already linked to another associate in the portal.`,
+      );
+    }
+    const { data: distanceClaim } = await supabaseAdmin
+      .from("workforce_route_distances")
+      .select("workforce_id,work_date")
+      .eq("company_id", companyId)
+      .eq("station_id", stationId)
+      .eq("transporter_id", transporterId)
+      .neq("workforce_id", workforceId)
+      .gte("work_date", from)
+      .lte("work_date", to)
+      .limit(1);
+    if (distanceClaim?.length) {
+      throw new Error(
+        `Amazon driver ID ${transporterId} is already used by another associate on ${distanceClaim[0].work_date} at this station.`,
       );
     }
 
@@ -288,10 +395,7 @@ export async function saveAmazonTransporterAssignment(form: FormData) {
 
     mapRedirect({
       ...back,
-      notice:
-        sync.attempted === 0
-          ? `Amazon driver ID ${transporterId} saved for ${from} to ${to}. Sync those days from Distance & Fuel if they are older than 35 days.`
-          : `Amazon driver ID ${transporterId} saved. Re-synced ${sync.synced}/${sync.attempted} day(s).`,
+      notice: syncNotice(transporterId, from, to, sync),
     });
   } catch (e) {
     if (isNextRedirect(e)) throw e;
@@ -330,18 +434,32 @@ export async function endAmazonTransporterAssignment(form: FormData) {
     if (loadError || !row) throw new Error("Assignment not found.");
     if (endOn < row.effective_from) throw new Error("End date cannot be before the assignment start.");
 
-    const { error } = await supabaseAdmin
+    const { data: ended, error } = await supabaseAdmin
       .from("workforce_amazon_transporter_assignments")
       .update({ effective_to: endOn, updated_at: new Date().toISOString() })
       .eq("id", assignmentId)
       .eq("company_id", companyId)
       .eq("station_id", stationId)
-      .eq("workforce_id", workforceId);
+      .eq("workforce_id", workforceId)
+      .select("effective_from,effective_to");
     if (error) throw new Error(error.message || "Unable to end assignment.");
+    if (!ended?.length) throw new Error("Assignment not found. Refresh and try again.");
+
+    const syncFrom = ended[0].effective_from;
+    const syncTo = ended[0].effective_to || endOn;
+    const sync = await syncStationDays(stationId, syncFrom, syncTo);
 
     revalidateTag("ops-capacity-distance");
+    revalidatePath("/ops-pulse/capacity/distance");
+    revalidatePath("/ops-pulse/capacity/distance/identity");
     revalidatePath("/ops-pulse/capacity/distance/map-amazon-id");
-    mapRedirect({ ...back, notice: `Assignment ended on ${endOn}.` });
+    mapRedirect({
+      ...back,
+      notice:
+        sync.synced > 0
+          ? `Assignment ended on ${endOn}. Re-synced ${sync.synced}/${sync.attempted} day(s).`
+          : `Assignment ended on ${endOn}.${sync.error ? ` ${sync.error}` : ""}`,
+    });
   } catch (e) {
     if (isNextRedirect(e)) throw e;
     mapRedirect({
