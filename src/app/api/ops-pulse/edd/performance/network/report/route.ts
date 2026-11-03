@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddPerformanceNetwork } from "@/lib/ops-pulse/edd-worker";
 import { workbookResponse } from "@/lib/report-workbook";
 
@@ -9,7 +9,7 @@ export const maxDuration = 30;
 /** Excel download of the network-wide Delivery Performance overview — one row per station. */
 export async function GET() {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const payload = await fetchEddPerformanceNetwork();

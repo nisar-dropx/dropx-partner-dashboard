@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
+import { canViewEddAgeingPerformance } from "@/lib/ops-pulse/edd-ageing-performance-access";
 import { isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
+
+export { canViewEddAgeingPerformance } from "@/lib/ops-pulse/edd-ageing-performance-access";
 
 export function hasEddAccess(authorization: AuthorizationContext | null) {
   if (!authorization) return false;
@@ -19,6 +22,15 @@ export async function requireEddAccess() {
   return authorization;
 }
 
+/** Pages for Ageing / Performance — other Live performance tabs stay on requireEddAccess. */
+export async function requireEddAgeingPerformanceAccess() {
+  const authorization = await requireEddAccess();
+  if (!canViewEddAgeingPerformance(authorization)) {
+    redirect("/edd/flash");
+  }
+  return authorization;
+}
+
 /** Shared EDD API gate: permission + worker config. Returns a response when the request should stop. */
 export async function requireEddApi() {
   const authorization = await getAuthorization();
@@ -29,6 +41,20 @@ export async function requireEddApi() {
     return NextResponse.json(
       { error: "EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_SECRET." },
       { status: 503 }
+    );
+  }
+  return null;
+}
+
+/** API gate for Ageing / Performance endpoints only. */
+export async function requireEddAgeingPerformanceApi() {
+  const denied = await requireEddApi();
+  if (denied) return denied;
+  const authorization = await getAuthorization();
+  if (!canViewEddAgeingPerformance(authorization)) {
+    return NextResponse.json(
+      { error: "Ageing and Performance access is limited to FSD, Managing Partner, and Finance Head." },
+      { status: 403 }
     );
   }
   return null;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireEddApi } from "@/lib/ops-pulse/edd-access";
+import { requireEddAgeingPerformanceApi } from "@/lib/ops-pulse/edd-access";
 import { backfillEddPerformanceDay } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export const maxDuration = 60;
 /** Pulls and archives one specific past day — used by "By date" when the picked day isn't in the archive yet. */
 export async function POST(request: Request) {
   try {
-    const denied = await requireEddApi();
+    const denied = await requireEddAgeingPerformanceApi();
     if (denied) return denied;
 
     const url = new URL(request.url);

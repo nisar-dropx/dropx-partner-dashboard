@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
+import { canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
 import { fetchLoadFlashBoard, isEddWorkerConfigured, type LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
@@ -56,7 +56,7 @@ export default async function StationBoardPage({
             </div>
           )}
         />
-        <EddSectionTabs active="board" />
+        <EddSectionTabs active="board" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
         {!workerConfigured ? (
           <section className="panel message-panel error">
             <div className="panel-body">

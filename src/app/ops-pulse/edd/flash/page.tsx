@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
+import { canViewEddAgeingPerformance, requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { fetchLoadFlashNetwork, isEddWorkerConfigured, type LoadFlashNetworkPayload } from "@/lib/ops-pulse/edd-worker";
 import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
@@ -54,7 +54,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
             </div>
           )}
         />
-        <EddSectionTabs active="flash" />
+        <EddSectionTabs active="flash" showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
         {!workerConfigured ? (
           <section className="panel message-panel error">
             <div className="panel-body">
