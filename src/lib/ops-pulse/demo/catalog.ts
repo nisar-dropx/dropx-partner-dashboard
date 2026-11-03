@@ -421,6 +421,18 @@ define(
   "View document",
 );
 define(
+  ["/report-bot?workspace=last_mile"],
+  "report-bot",
+  "Inspect sample Last Mile group reports, validation rules and follow-ups.",
+  ["Report", "Group", "Result", "Time"],
+  [
+    ["Delivery progress", "Sample station operations", "96% delivered · 12 on road", "17:00"],
+    ["C-Return pickup", "Sample pickup team", "48 / 50 picked up · 2 pending", "17:15"],
+    ["COD closure", "Sample station finance", "Reconciled · evidence checked", "20:00"],
+  ],
+  "View parsed report",
+);
+define(
   ["/report-bot"],
   "report-bot",
   "Try a scripted reporting conversation and inspect the structured store update.",
