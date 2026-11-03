@@ -3,6 +3,8 @@ import { useOpsScreenRequest, useOpsScreenRuntime } from "@/components/ops-scree
 import { useEffect, useRef, useState } from "react";
 import type { ReportPack } from "@/lib/ops-pulse/checklist-report-pack";
 import { buildChecklistSummary, downloadSummary, summaryPdf } from "@/lib/ops-pulse/build-checklist-summary";
+import { CopyReportImage } from "@/components/copy-report-image";
+import { renderBoardShareImages } from "@/lib/ops-pulse/station-board-share";
 import styles from "./si-handover.module.css";
 
 export function ChecklistSummaryActions({ kind, id, completed, revision, pack }: {
@@ -53,6 +55,15 @@ export function ChecklistSummaryActions({ kind, id, completed, revision, pack }:
     {open ? <div className={styles.summaryShareTools}>
       <button type="button" className={styles.btn} disabled={!ready || busy} onClick={() => void whatsapp()}>Share to WhatsApp</button>
       <button type="button" className={styles.btn} disabled={!ready || busy} onClick={() => ready?.images.forEach(downloadSummary)}>PNG{ready && ready.images.length > 1 ? ` (${ready.images.length} pages)` : ""}</button>
+      <CopyReportImage className={styles.btn} resetKey={ready} disabled={!ready || busy} getImages={() => {
+        if (!ready) return Promise.resolve([]);
+        const data = ready.data;
+        return renderBoardShareImages({ title: `${data.title} · ${data.subtitle}`, subtitle: "", headers: ["Section / item", "Status", "Details"], rows: [
+          [{ text: "Report" }, { text: data.status }, { text: [data.owner, data.submitted, data.handover].filter(Boolean).join(" · ") }],
+          ...data.sections.flatMap(section => section.rows.map(row => [{ text: `${section.name} · ${row.label}` }, { text: row.status }, { text: `${row.detail}${row.proofs ? ` · ${row.proofs} evidence files` : ""}` }])),
+          ...(data.notes ? [[{ text: "Handover notes" }, { text: "" }, { text: data.notes }]] : []),
+        ] }, true);
+      }} />
       <button type="button" className={styles.btn} disabled={!ready || busy} onClick={async () => {
         if (!ready) return; setBusy(true); setMessage("");
         try { downloadSummary(await summaryPdf(ready.images, ready.data.filename)); }

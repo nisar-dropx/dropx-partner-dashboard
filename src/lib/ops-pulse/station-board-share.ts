@@ -47,7 +47,7 @@ function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-export async function renderBoardShareImages(table: BoardShareTable): Promise<File[]> {
+export async function renderBoardShareImages(table: BoardShareTable, compact = false): Promise<File[]> {
   await document.fonts.ready.catch(() => undefined);
   // Wider canvas when headers are full phrases (e.g. Delivery Failed / Out on Road).
   const longestHeader = Math.max(...table.headers.map((h) => String(h || "").length), 8);
@@ -57,8 +57,8 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
   const colCount = Math.max(1, table.headers.length);
   const firstCol = Math.min(200, Math.max(120, usable * 0.2));
   const other = (usable - firstCol) / Math.max(1, colCount - 1);
-  const widths = table.headers.map((_, i) => (i === 0 ? firstCol : other));
-  const maxPageHeight = 1800;
+  const widths = table.headers.map((_, i) => (colCount === 1 ? usable : i === 0 ? firstCol : other));
+  const maxPageHeight = compact ? Math.min(16000, Math.floor(16_000_000 / width)) : 1800;
   const files: File[] = [];
   let pageIndex = 0;
   let rowIndex = 0;
@@ -74,21 +74,21 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, maxPageHeight);
       ctx.fillStyle = "#17345c";
-      ctx.fillRect(0, 0, width, 86);
+      ctx.fillRect(0, 0, width, compact ? 40 : 86);
       ctx.fillStyle = "#cddcf2";
       ctx.font = "700 15px Arial, sans-serif";
-      ctx.fillText("Ops Pulse · Station board", margin, 32);
+      if (!compact) ctx.fillText("Ops Pulse · Station board", margin, 32);
       ctx.fillStyle = "#ffffff";
-      ctx.font = "700 26px Arial, sans-serif";
-      ctx.fillText(table.title, margin, 64);
-      y = 104;
+      ctx.font = compact ? "700 17px Arial, sans-serif" : "700 26px Arial, sans-serif";
+      ctx.fillText(table.title, margin, compact ? 26 : 64, usable);
+      y = compact ? 40 : 104;
       ctx.fillStyle = "#486575";
       ctx.font = "400 14px Arial, sans-serif";
-      for (const line of wrap(ctx, table.subtitle, usable)) {
+      for (const line of compact ? [] : wrap(ctx, table.subtitle, usable)) {
         ctx.fillText(line, margin, y);
         y += 18;
       }
-      y += 10;
+      y += compact ? 4 : 10;
       const headerLines = table.headers.map((h, i) => wrap(ctx, h, Math.max(24, widths[i]! - 12)));
       const headerH = Math.max(...headerLines.map((l) => l.length)) * 16 + 14;
       ctx.fillStyle = "#17345c";
@@ -147,14 +147,14 @@ export async function renderBoardShareImages(table: BoardShareTable): Promise<Fi
       if (y + 60 > maxPageHeight) break;
     }
 
-    if (table.footerNote) {
+    if (table.footerNote && !compact) {
       ctx.fillStyle = "#647583";
       ctx.font = "400 12px Arial, sans-serif";
       ctx.fillText(table.footerNote, margin, y + 22);
       y += 36;
-    } else y += 24;
+    } else y += compact ? 0 : 24;
 
-    const height = Math.min(maxPageHeight, Math.max(220, y + 16));
+    const height = Math.min(maxPageHeight, Math.max(compact ? 80 : 220, y + (compact ? 4 : 16)));
     const cropped = document.createElement("canvas");
     cropped.width = width;
     cropped.height = height;

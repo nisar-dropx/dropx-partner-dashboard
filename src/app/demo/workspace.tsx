@@ -1,4 +1,6 @@
 "use client";
+import { CopyReportImage } from "@/components/copy-report-image";
+import { renderBoardShareImages } from "@/lib/ops-pulse/station-board-share";
 import { ReportTable } from "@/components/report-table";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1408,6 +1410,7 @@ function RecordDialog({
             >
               PNG
             </button>
+            <CopyReportImage className={s.secondary} resetKey={row} disabled={busy} getImages={() => renderBoardShareImages({ title: `SAMPLE · ${menu.label} · ${row.location} · ${demoDate}`, subtitle: "", headers: ["Task", "Status"], rows: checklistTasks.map((task, i) => [{ text: task }, { text: row.tasks?.[i] ? "Done" : "Pending" }]) }, true)} />
             <button
               className={s.secondary}
               disabled={busy}

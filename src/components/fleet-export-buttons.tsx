@@ -2,6 +2,8 @@
 import "./fleet-mobile-controls.css";
 
 import { Download, ChevronDown, FileImage, FileSpreadsheet, FileText } from "lucide-react";
+import { CopyReportImage } from "./copy-report-image";
+import { renderBoardShareImages } from "@/lib/ops-pulse/station-board-share";
 import { useState } from "react";
 import { downloadFleetExcel, downloadFleetImage, downloadFleetPdf, type FleetReportTable } from "@/lib/fleet/report-export";
 
@@ -20,6 +22,7 @@ export function FleetExportButtons({ report, compact = false, image = true }: { 
     <div className="fc-export-options">
     <button className="excel" disabled={Boolean(busy) || !report.rows.length} onClick={() => run("excel")} type="button"><FileSpreadsheet size={14} /> {busy === "excel" ? "Preparing…" : "Excel"}</button>
     {image ? <button className="image" disabled={Boolean(busy) || !report.rows.length} onClick={() => run("image")} type="button"><FileImage size={14} /> {busy === "image" ? "Preparing…" : "Image"}</button> : null}
+    {image ? <CopyReportImage className="image" resetKey={report} disabled={Boolean(busy) || !report.rows.length} getImages={() => renderBoardShareImages({ title: report.title, subtitle: "", headers: report.headers, rows: report.rows.map(row => row.map(value => ({ text: String(value ?? "") }))) }, true)} /> : null}
     <button className="pdf" disabled={Boolean(busy) || !report.rows.length} onClick={() => run("pdf")} type="button"><FileText size={14} /> {busy === "pdf" ? "Preparing…" : "PDF"}</button>
     </div>
     {error ? <span role="alert" style={{fontSize:12,color:"#a32642"}}>{error}</span> : null}
