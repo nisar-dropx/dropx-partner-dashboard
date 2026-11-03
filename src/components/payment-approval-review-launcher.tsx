@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, X } from "lucide-react";
+import { ExternalLink, Eye, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -92,6 +92,13 @@ function hasValue(value: string | null) {
   return Boolean(value && value.trim() && value.trim() !== "-");
 }
 
+function attachmentPreviewKind(name: string) {
+  const extension = name.toLowerCase().split(".").pop();
+  if (extension && ["avif", "bmp", "gif", "jfif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension)) return "image";
+  if (extension === "pdf") return "document";
+  return "unsupported";
+}
+
 export function PaymentApprovalReviewLauncher({
   canAct,
   initiallyOpen = false,
@@ -111,6 +118,7 @@ export function PaymentApprovalReviewLauncher({
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailAttempt, setDetailAttempt] = useState(0);
+  const [attachment, setAttachment] = useState<ReviewAttachment | null>(null);
   const [comments, setComments] = useState("");
   const [decisionError, setDecisionError] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -126,12 +134,16 @@ export function PaymentApprovalReviewLauncher({
     const wasInert = shell?.hasAttribute('inert');
     shell?.setAttribute('inert', '');
     document.body.style.overflow = 'hidden';
-    const targets = () => Array.from(panel.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),textarea:not(:disabled),select:not(:disabled),summary,[tabindex="0"]')).filter(element => element.getClientRects().length > 0);
+    const targets = () => {
+      const activePanel = attachment ? panel.querySelector<HTMLElement>("[data-attachment-preview]") ?? panel : panel;
+      return Array.from(activePanel.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),textarea:not(:disabled),select:not(:disabled),summary,[tabindex="0"]')).filter(element => element.getClientRects().length > 0);
+    };
     targets()[0]?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        close();
+        if (attachment) setAttachment(null);
+        else close();
       }
       if (event.key !== 'Tab') return;
       const elements = targets(), first = elements[0], last = elements[elements.length - 1];
@@ -145,7 +157,7 @@ export function PaymentApprovalReviewLauncher({
       if (!wasInert) shell?.removeAttribute('inert');
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [mounted, open]);
+  }, [attachment, mounted, open]);
 
   useEffect(() => {
     if (!open || detail) return;
@@ -187,6 +199,7 @@ export function PaymentApprovalReviewLauncher({
   ], [summary]);
 
   function close() {
+    setAttachment(null);
     setOpen(false);
     if (!initiallyOpen) return;
     const url = new URL(window.location.href);
@@ -258,7 +271,7 @@ export function PaymentApprovalReviewLauncher({
           {detailLoading ? <div className="payment-review-optional-loading" role="status"><span className="inline-spinner" aria-hidden="true" /><div><strong>Loading additional evidence</strong><small>You can approve, return, reject, or open another request now.</small></div></div> : null}
           {detailError ? <div className="message-panel error" role="alert"><strong>Additional evidence unavailable</strong><p>{detailError}</p><button className="button secondary compact" onClick={() => { setDetailError(""); setDetailAttempt((value) => value + 1); }} type="button">Retry details</button></div> : null}
           {detail?.replacement ? <div className="message-panel"><strong>{detail.replacement.reason}</strong><p>{detail.replacement.number} · {detail.replacement.model} · Replacement date: {detail.replacement.date}</p></div> : null}
-          {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><a aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" href={file.url} rel="noreferrer" target="_blank" title="View attachment"><Eye size={16} /></a></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
+          {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
 
           {detail?.volumeDate && summary.locationId ? <PaymentVolumeContext date={detail.volumeDate} locationId={summary.locationId} /> : null}
           {detail?.fuel ? <div className="van-fuel-review"><strong>{detail.fuel.vehicle_no}</strong><span>Fuel date · {detail.fuel.fuel_date}</span><span>{detail.fuel.litres != null ? `${detail.fuel.litres} L` : "Litres pending bill"}</span></div> : null}
@@ -286,6 +299,16 @@ export function PaymentApprovalReviewLauncher({
 
           {detail?.logs.length ? <details className="payment-review-additional-details"><summary><span>Request history</span><small>{detail.logs.length} events</small></summary><div className="table-wrap"><table><thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Remarks</th><th>Date · IST</th></tr></thead><tbody>{detail.logs.map((entry) => <tr key={entry.id}><td>{entry.action}</td><td>{entry.actor}</td><td>{entry.role}</td><td>{entry.comments || "-"}</td><td>{displayDateTime(entry.createdAt)}</td></tr>)}</tbody></table></div></details> : null}
         </div>
+
+        {attachment ? <div className="modal-backdrop payment-attachment-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setAttachment(null); }}>
+          <section aria-label={`Attachment ${attachment.name}`} aria-modal="true" className="modal-panel payment-attachment-preview-modal" data-attachment-preview role="dialog">
+            <div className="panel-head payment-attachment-preview-head"><div><small>Request attachment</small><h2 title={attachment.name}>{attachment.name}</h2></div><button aria-label="Close attachment" className="icon-button" onClick={() => setAttachment(null)} type="button"><X size={18} /></button></div>
+            {attachmentPreviewKind(attachment.name) === "image" ? <div className="payment-attachment-preview-canvas"><img alt={attachment.name} className="payment-attachment-preview-image" src={attachment.url} /></div> : null}
+            {attachmentPreviewKind(attachment.name) === "document" ? <iframe className="payment-attachment-preview-frame" src={attachment.url} title={attachment.name} /> : null}
+            {attachmentPreviewKind(attachment.name) === "unsupported" ? <div className="payment-attachment-preview-unavailable"><strong>Preview is not available for this file type.</strong><span>Open the attachment in full size to view or download it.</span></div> : null}
+            <div className="payment-attachment-preview-actions"><span>Preview fitted to the window</span><a className="button secondary compact" href={attachment.url} rel="noreferrer" target="_blank"><ExternalLink size={16} />Open full size</a></div>
+          </section>
+        </div> : null}
       </section>
     </div>
   ) : null;

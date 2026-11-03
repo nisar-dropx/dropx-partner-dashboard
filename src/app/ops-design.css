@@ -445,6 +445,7 @@ body:has(.ops-modern) .payment-review-client-modal .panel-body{min-width:0}
 
 /* Dialogs must cover the sticky app header and floating assistant. */
 body:has(.ops-modern) .modal-backdrop{z-index:1100}
+body:has(.ops-modern) .payment-attachment-preview-backdrop{z-index:1110}
 body:has(.ops-modern):has(.modal-backdrop) .ops-ai{visibility:hidden}
 
 body:has(.ops-modern) .payment-review-sticky-head{flex-direction:row;align-items:flex-start}

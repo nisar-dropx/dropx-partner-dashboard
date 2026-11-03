@@ -16330,6 +16330,95 @@ body:has([aria-modal="true"]) .ops-ai {
   color: #e84815;
 }
 
+.payment-attachment-preview-backdrop {
+  background: rgba(15, 23, 42, 0.68);
+  padding: 24px;
+}
+
+.payment-attachment-preview-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(620px, calc(100dvh - 56px));
+  max-height: calc(100dvh - 56px);
+  overflow: hidden;
+  width: min(760px, calc(100vw - 48px));
+}
+
+.payment-attachment-preview-head {
+  min-width: 0;
+}
+
+.payment-attachment-preview-head > div {
+  min-width: 0;
+}
+
+.payment-attachment-preview-head h2 {
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payment-attachment-preview-frame {
+  background: #eef1f5;
+  border: 0;
+  height: 100%;
+  min-height: 320px;
+  width: 100%;
+}
+
+.payment-attachment-preview-canvas {
+  align-items: center;
+  background: #eef1f5;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.payment-attachment-preview-image {
+  display: block;
+  height: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.payment-attachment-preview-unavailable {
+  align-items: center;
+  background: #f8fafc;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+}
+
+.payment-attachment-preview-actions {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.payment-attachment-preview-actions > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.payment-attachment-preview-actions .button {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
 .payment-approval-action-form {
   display: grid;
   gap: 14px;
@@ -16479,6 +16568,20 @@ body:has([aria-modal="true"]) .ops-ai {
 
   .payment-review-client-backdrop {
     padding: 8px;
+  }
+
+  .payment-attachment-preview-backdrop {
+    padding: 8px;
+  }
+
+  .payment-attachment-preview-modal {
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    width: calc(100vw - 16px);
+  }
+
+  .payment-attachment-preview-actions > span {
+    display: none;
   }
 }
 
