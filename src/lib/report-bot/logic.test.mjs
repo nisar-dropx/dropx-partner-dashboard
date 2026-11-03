@@ -129,6 +129,8 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(canSendToGroup("live", "review"), true);
   assert.equal(canSendToGroup("live", "observe"), false);
   assert.equal(canSendToGroup("live", "observe", "Testing"), true, "Testing pilot may send while company is Live");
+  assert.equal(canSendToGroup("live", "observe", "Testing", "last_mile"), false, "Last Mile Observe has no legacy pilot bypass");
+  assert.equal(effectiveGroupModeForReview("observe", "Testing", "last_mile"), "observe");
   assert.equal(canSendToGroup("live", "observe", "  testing  "), true, "Testing name is trimmed/case-insensitive");
   assert.equal(canSendToGroup("live", "observe", "TCC3 · Adayar"), false);
   assert.equal(canSendToGroup("live", "observe", "Testing War Room"), false, "partial name must not match");

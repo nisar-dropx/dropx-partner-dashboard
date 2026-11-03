@@ -199,7 +199,7 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     };
   if (!group.is_enabled) return;
   const storedMode: GroupMode = group.mode === "review" || group.mode === "live" ? group.mode : "observe";
-  const groupMode = effectiveGroupModeForReview(storedMode, group.group_name);
+  const groupMode = effectiveGroupModeForReview(storedMode, group.group_name, group.workspace);
 
   const windowMinutes = Number(settings.correlation_window_minutes ?? 10);
   let bundleId = event.bundle_id;

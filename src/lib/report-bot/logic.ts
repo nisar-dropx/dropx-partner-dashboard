@@ -1,3 +1,4 @@
+import type { ReportBotWorkspace } from "./workspace";
 // Pure Report Bot rules. No imports, so node --test can load this file directly.
 
 export type BotMode = "off" | "listen" | "live";
@@ -337,10 +338,10 @@ export function isTestingGroupName(name: string | null | undefined) {
  * The Testing pilot group may send while company is Live even if still on Observe,
  * so replies can be verified without flipping production groups.
  */
-export function canSendToGroup(companyMode: BotMode, groupMode: GroupMode, groupName?: string | null) {
+export function canSendToGroup(companyMode: BotMode, groupMode: GroupMode, groupName?: string | null, workspace: ReportBotWorkspace = "dark_store") {
   if (companyMode !== "live") return false;
   if (groupMode === "review" || groupMode === "live") return true;
-  return isTestingGroupName(groupName);
+  return workspace === "dark_store" && isTestingGroupName(groupName);
 }
 
 export function canAutoSendToGroup(companyMode: BotMode, groupMode: GroupMode) {
@@ -348,8 +349,8 @@ export function canAutoSendToGroup(companyMode: BotMode, groupMode: GroupMode) {
 }
 
 /** Effective review behaviour: Testing in Observe still produces approvable drafts. */
-export function effectiveGroupModeForReview(groupMode: GroupMode, groupName?: string | null): GroupMode {
-  if (groupMode === "observe" && isTestingGroupName(groupName)) return "review";
+export function effectiveGroupModeForReview(groupMode: GroupMode, groupName?: string | null, workspace: ReportBotWorkspace = "dark_store"): GroupMode {
+  if (workspace === "dark_store" && groupMode === "observe" && isTestingGroupName(groupName)) return "review";
   return groupMode;
 }
 
