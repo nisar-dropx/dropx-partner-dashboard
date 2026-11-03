@@ -66,7 +66,7 @@ function harness({ stored = new Map(), blocked = false } = {}) {
       if (!slots[i] || deps.some((dep, index) => !Object.is(dep, slots[i][index]))) { slots[i] = deps; effects.push(fn); }
     }
   };
-  const mocks = { "@/lib/ops-pulse/assistant-language": language, react: hooks, "react/jsx-runtime": { jsx, jsxs: jsx }, "lucide-react": { ChevronLeft: "icon", ChevronRight: "icon", GripVertical: "icon", X: "icon" }, "@/lib/ops-pulse/assistant-position": position };
+  const mocks = { "./copy-report-image": { CopyReportImage: "copy-report-image" }, "@/lib/ops-pulse/station-board-share": { renderBoardShareImages: async () => [] }, "@/lib/ops-pulse/assistant-language": language, react: hooks, "react/jsx-runtime": { jsx, jsxs: jsx }, "lucide-react": { ChevronLeft: "icon", ChevronRight: "icon", GripVertical: "icon", X: "icon" }, "@/lib/ops-pulse/assistant-position": position };
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled)(name => { if (!(name in mocks)) throw Error(name); return mocks[name]; }, module, module.exports);
   const render = () => { cursor = 0; tree = module.exports.OpsAiChat(); };
