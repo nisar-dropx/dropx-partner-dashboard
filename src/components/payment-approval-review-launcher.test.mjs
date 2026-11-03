@@ -23,10 +23,12 @@ test("slow evidence is fetched separately from the fast decision shell", () => {
   assert.match(route, /Promise\.all\(\[/);
 });
 
-test("attachments use the original direct view behavior without a nested preview modal", () => {
-  assert.match(launcher, /href=\{file\.url\}/);
-  assert.match(launcher, /title="View attachment"/);
-  assert.doesNotMatch(launcher, /payment-attachment-preview-/);
+test("attachments open in a fitted in-window preview with an explicit full-size option", () => {
+  assert.match(launcher, /onClick=\{\(\) => setAttachment\(file\)\}/);
+  assert.match(launcher, /className="payment-attachment-preview-image"/);
+  assert.match(launcher, /<iframe className="payment-attachment-preview-frame"/);
+  assert.match(launcher, /Preview fitted to the window/);
+  assert.match(launcher, />Open full size<\/a>/);
   assert.equal((launcher.match(/target="_blank"/g) ?? []).length, 1);
 });
 
@@ -59,7 +61,7 @@ test("closing during evidence loading permits a fresh request on reopening", asy
   globalThis.document={body:{}};
   globalThis.fetch=(url,options)=>new Promise((resolve,reject)=>{requests.push({url,options,resolve});options.signal.addEventListener('abort',()=>reject(new Error('aborted')))});
   const module={exports:{}};
-  const mocks={react:hooks,'react-dom':{createPortal:node=>node},'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react':{X:'svg',Eye:'svg'},'next/navigation':{useRouter:()=>({refresh(){}})}};
+  const mocks={react:hooks,'react-dom':{createPortal:node=>node},'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react':{X:'svg',Eye:'svg',ExternalLink:'svg'},'next/navigation':{useRouter:()=>({refresh(){}})}};
   new Function('require','module','exports',ts.transpileModule(launcher,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText)(id=>mocks[id]??{},module,module.exports);
   const summary={id:'test-request',requestNo:'TEST',locationCode:'ST01',paymentHeadName:'Office supplies',currentStep:1,totalSteps:2,statusLabel:'Pending',amountText:'₹100',paymentMode:null};
   let tree;const render=()=>{cursor=0;pending=[];tree=module.exports.PaymentApprovalReviewLauncher({canAct:false,summary});pending.forEach(fn=>fn());return tree};
