@@ -864,6 +864,7 @@ button.kpi[aria-pressed="true"] { background:#e0e9f6; }
 .kpi small,.kpi span { font-size:11px; }
 .panel { border-radius:4px; }
 .panelHead { padding:5px 7px; background:#17345c; color:#fff; }
+.panelHead h3 { color:#fff !important; }
 .panelHead span { color:#d9e5f5; font-size:11px; }
 .reportMeta { display:flex; justify-content:space-between; flex-wrap:wrap; gap:4px; padding:3px 7px; font-size:11px; background:#edf2f8; color:#34435b; }
 .compactTable { min-width:0!important; width:max-content; max-width:100%; table-layout:auto; }
