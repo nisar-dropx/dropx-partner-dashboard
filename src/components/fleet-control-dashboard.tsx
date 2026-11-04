@@ -1,4 +1,5 @@
 "use client";
+import { vehicleDisplayName, vehicleDisplayDetail } from "@/lib/fleet/vehicle-display";
 import { vehicleIsOperational, vehicleIsTerminal } from "@/lib/fleet/vehicle-status-policy";
 import { FleetAttachmentPreview } from "./fleet-attachment-preview";
 import { FleetVehicleMeta, FleetVehicleMetadataProvider } from "@/components/fleet-vehicle-meta";
@@ -179,13 +180,6 @@ function FleetScopeFilters({ children, extraSummary = [], clusters, onClusters, 
   </div></FleetMobileSection>;
 }
 
-function vehicleDisplayName(vehicle: FleetControlVehicle) {
-  if (!vehicle.vehicleNo.startsWith('PENDING-')) return vehicle.vehicleNo;
-  return (vehicle.ownershipType === 'own' ? '' : vehicle.daName || vehicle.vendorName) || vehicle.model || 'Vehicle';
-}
-function vehicleDisplayDetail(vehicle: FleetControlVehicle) {
-  return [vehicle.model || "Model not recorded", vehicle.stationCode || "Station not mapped", vehicle.vehicleNo.startsWith('PENDING-') ? 'Registration not added' : null].filter(Boolean).join(' · ');
-}
 export function FleetControlDashboard({
   approveAction,
   data: serverData,
@@ -411,12 +405,12 @@ export function FleetControlDashboard({
   }
 
   const sourceCounts=new Map<string,number>();
-  for(const v of vehicles){if(!inScope(v.stationCode)|| (vehicleStatuses.length&&!vehicleStatuses.includes(v.status)) || (vehicleDeployments.length&&!vehicleDeployments.includes(v.deploymentStatus)))continue;const q=query.trim().toLowerCase();if(q&&!`${v.vehicleNo} ${v.model} ${v.stationCode} ${v.currentLocationLabel} ${v.statusLabel} ${v.deploymentStatus}`.toLowerCase().includes(q))continue;sourceCounts.set(v.sourceId??v.ownershipType,(sourceCounts.get(v.sourceId??v.ownershipType)??0)+1);}
+  for(const v of vehicles){if(!inScope(v.stationCode)|| (vehicleStatuses.length&&!vehicleStatuses.includes(v.status)) || (vehicleDeployments.length&&!vehicleDeployments.includes(v.deploymentStatus)))continue;const q=query.trim().toLowerCase();if(q&&!`${v.vehicleNo} ${vehicleDisplayName(v)} ${v.model} ${v.stationCode} ${v.currentLocationLabel} ${v.statusLabel} ${v.deploymentStatus}`.toLowerCase().includes(q))continue;sourceCounts.set(v.sourceId??v.ownershipType,(sourceCounts.get(v.sourceId??v.ownershipType)??0)+1);}
   const sourceTotal=Array.from(sourceCounts.values()).reduce((a,b)=>a+b,0);
   const filteredVehicles = useMemo(() => vehicles.filter((vehicle) => {
     const needle = query.trim().toLowerCase();
-    return inScope(vehicle.stationCode) && (!vehicleStatuses.length || vehicleStatuses.includes(vehicle.status)) && (!vehicleOwnerships.length || vehicleOwnerships.includes(vehicle.sourceId??vehicle.ownershipType)) && (!vehicleDeployments.length || vehicleDeployments.includes(vehicle.deploymentStatus)) && (!needle || `${vehicle.vehicleNo} ${vehicle.model} ${vehicle.stationCode} ${vehicle.currentLocationLabel} ${vehicle.statusLabel} ${vehicle.deploymentStatus}`.toLowerCase().includes(needle));
-  }).sort((a, b) => vehicleSort === "placement" ? a.stationCode.localeCompare(b.stationCode) || a.vehicleNo.localeCompare(b.vehicleNo) : vehicleSort === "status" ? a.statusLabel.localeCompare(b.statusLabel) || a.vehicleNo.localeCompare(b.vehicleNo) : vehicleSort === "document" ? (a.nextDocumentDays ?? 9999) - (b.nextDocumentDays ?? 9999) : a.vehicleNo.localeCompare(b.vehicleNo)), [query, stations, clusters, regions, vehicleStatuses, vehicleOwnerships, vehicleDeployments, vehicleSort, vehicles, stationByCode]);
+    return inScope(vehicle.stationCode) && (!vehicleStatuses.length || vehicleStatuses.includes(vehicle.status)) && (!vehicleOwnerships.length || vehicleOwnerships.includes(vehicle.sourceId??vehicle.ownershipType)) && (!vehicleDeployments.length || vehicleDeployments.includes(vehicle.deploymentStatus)) && (!needle || `${vehicle.vehicleNo} ${vehicleDisplayName(vehicle)} ${vehicle.model} ${vehicle.stationCode} ${vehicle.currentLocationLabel} ${vehicle.statusLabel} ${vehicle.deploymentStatus}`.toLowerCase().includes(needle));
+  }).sort((a, b) => vehicleSort === "placement" ? a.stationCode.localeCompare(b.stationCode) || vehicleDisplayName(a).localeCompare(vehicleDisplayName(b)) : vehicleSort === "status" ? a.statusLabel.localeCompare(b.statusLabel) || vehicleDisplayName(a).localeCompare(vehicleDisplayName(b)) : vehicleSort === "document" ? (a.nextDocumentDays ?? 9999) - (b.nextDocumentDays ?? 9999) : vehicleDisplayName(a).localeCompare(vehicleDisplayName(b))), [query, stations, clusters, regions, vehicleStatuses, vehicleOwnerships, vehicleDeployments, vehicleSort, vehicles, stationByCode]);
 
   const filteredPayments = useMemo(() => payments.filter((payment) => {
     const needle = query.trim().toLowerCase();
@@ -780,7 +774,7 @@ export function FleetControlDashboard({
             {vehicleView === "live" ? <FleetVehicleLiveStatus onManage={setSelectedVehicle} vehicles={filteredVehicles} /> : <>
             <div className="fc-segment-cards fc-registry-stats"><article><small>Matching vehicles</small><strong>{filteredVehicles.length}</strong></article><article><small>Active</small><strong>{filteredVehicles.filter(v=>v.status==="active"&&v.deploymentStatus==="deployed").length}</strong></article><article><small>Under service</small><strong>{filteredVehicles.filter(v=>["under_service","breakdown"].includes(v.status)).length}</strong></article><article><small>Document attention</small><strong>{filteredVehicles.filter(v=>attentionVehicles.some(a=>a.id===v.id)).length}</strong></article></div>
             <div className="fc-table-panel fc-registry-panel">
-              <div className="fc-table-toolbar"><span>{filteredVehicles.length} vehicles</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setVehicleSort(event.target.value)} value={vehicleSort}><option value="vehicle">Vehicle number</option><option value="placement">Placement</option><option value="status">Status</option><option value="document">Document urgency</option></select></label><FleetExportButtons compact image report={{ title: "Fleet vehicle registry", subtitle: `As at ${data.today} · active filters applied`, fileName: `fleet-vehicles-${data.today}`, headers: ["Vehicle","Assigned station","Deployment","Current physical location","Location type","Source","Model","Fuel","Status","Next document","Expiry"], rows: filteredVehicles.map((item) => [item.vehicleNo,item.stationCode,item.deploymentStatus === "not_deployed" ? "Not deployed" : "Deployed",item.currentLocationLabel,item.currentLocationType,vehicleSourceTitle(item),item.model,item.fuelType,item.statusLabel,item.nextDocument,item.nextDocumentDate]) }} /></div></div>
+              <div className="fc-table-toolbar"><span>{filteredVehicles.length} vehicles</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setVehicleSort(event.target.value)} value={vehicleSort}><option value="vehicle">Vehicle name / number</option><option value="placement">Placement</option><option value="status">Status</option><option value="document">Document urgency</option></select></label><FleetExportButtons compact image report={{ title: "Fleet vehicle registry", subtitle: `As at ${data.today} · active filters applied`, fileName: `fleet-vehicles-${data.today}`, headers: ["Vehicle","Assigned station","Deployment","Current physical location","Location type","Source","Model","Fuel","Status","Next document","Expiry"], rows: filteredVehicles.map((item) => [vehicleDisplayName(item),item.stationCode,item.deploymentStatus === "not_deployed" ? "Not deployed" : "Deployed",item.currentLocationLabel,item.currentLocationType,vehicleSourceTitle(item),item.model,item.fuelType,item.statusLabel,item.nextDocument,item.nextDocumentDate]) }} /></div></div>
               <div className="fc-registry-mobile" aria-label="Vehicle registry list">{filteredVehicles.map(vehicle => <article key={vehicle.id}>
                 <button className="fc-registry-open" type="button" onClick={() => setSelectedVehicle(vehicle)} aria-label={`Manage ${vehicleDisplayName(vehicle)}`}>
                   <span className="fc-registry-icon"><Truck size={18}/></span><span><strong>{vehicleDisplayName(vehicle)}</strong><small>{vehicleDisplayDetail(vehicle)}</small></span><ArrowRight size={17}/>
