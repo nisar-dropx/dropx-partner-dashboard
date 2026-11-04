@@ -165,7 +165,7 @@ function mapDsrStation(flash: FlashTrackingLike[]): BoardTidExportRow[] {
       stationCode: row.stationCode,
       trackingId: row.trackingId,
       sourceBucket: row.bucket,
-      status: row.bucket === BOARD_TID.EDD ? "EDD pending"
+      status: row.bucket === BOARD_TID.EDD ? "Inducted inventory"
         : row.bucket === BOARD_TID.AGEING ? row.state || "At station"
           : dsrStatus(row.bucket),
       currentState: row.state || "",

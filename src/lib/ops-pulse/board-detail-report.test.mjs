@@ -35,9 +35,9 @@ test('C-Return pending counts exclude terminal statuses; global sorting and expo
 });
 test('DSR station summary uses weighted totals, retains station and location, sorts across stations',()=>{
  const dsr=[{...stations[0],board:normalizeBoard({daDsr:[{driverId:'A',delivered:90,oor:10,total:100},{driverId:'B',delivered:0,failed:10,total:10}]})},{...stations[1],board:normalizeBoard({daDsr:[{driverId:'C',delivered:1,oor:9,total:10}]})}];
- const table=dsrStationTable(dsr,{KLZA:'Vadakara',GDRD:'Gudur'},false,{KLZA:{eddPending:7,physicalAtStation:12},GDRD:{eddPending:2,physicalAtStation:3}});
+ const table=dsrStationTable(dsr,{KLZA:'Vadakara',GDRD:'Gudur'},false,{KLZA:{eddPending:7,overduePending:12,physicalAtStation:19,dispatchUnconfirmed:0},GDRD:{eddPending:2,overduePending:3,physicalAtStation:5,dispatchUnconfirmed:0}});
  const report=prepareBoardReport(table,{header:'DSR%',direction:'desc'},{dsr:false,singleStation:false,groupByStation:false});
- assert.deepEqual(report.headers,['Station','Location','EDD pending at station','Physical at station','Assigned','Delivered','Delivery Failed','Delivery Rejected','Out on Road','DSR%']);
+ assert.deepEqual(report.headers,['Station','Location','EDD pending today','Overdue at station','Assigned','Delivered','Delivery Failed','Delivery Rejected','Out on Road','DSR%']);
  assert.deepEqual(report.rows[0].slice(0,6).map(c=>c.text),['KLZA','Vadakara','7','12','110','90']);
  assert.equal(report.rows[0].at(-1).text,'82%');
  assert.equal(report.rows.at(-1).at(-1).text,'76%');
@@ -45,4 +45,9 @@ test('DSR station summary uses weighted totals, retains station and location, so
  const cr=cReturnDetailTable([stations[0]],[],'station',{KLZA:'Vadakara'});
  assert.deepEqual(cr.headers.slice(0,2),['Station','Location']);
  assert.deepEqual(cr.rows[0].slice(0,2).map(c=>c.text),['KLZA','Vadakara']);
+});
+
+test('incomplete inventory remains unknown in totals while loaded empty stock is zero',()=>{
+ const table=dsrStationTable(stations,{},false,{KLZA:{eddPending:0,overduePending:0,physicalAtStation:0,dispatchUnconfirmed:0}});
+ assert.deepEqual(table.rows.map(row=>row.slice(2,4).map(cell=>cell.text)),[['0','0'],['—','—'],['—','—']]);
 });

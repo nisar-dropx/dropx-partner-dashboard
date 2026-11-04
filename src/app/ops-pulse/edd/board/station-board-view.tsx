@@ -44,7 +44,7 @@ import { EddMultiSelect } from "../edd-multi-select";
 import { boardDeliverySummary, filterBoardStations, prepareBoardReport, type BoardCluster, type BoardReportSort } from "@/lib/ops-pulse/compact-board-report";
 import { downloadReportExcel, type ExcelReport } from "@/lib/download-report-excel";
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
-import { stationDsrMetricRows, summarizeStationDsrRows, type StationDsrMetric, type StationDsrTidRow } from "@/lib/ops-pulse/station-dsr-summary";
+import { stationDsrMetricRows, stationDsrReportRows, summarizeStationDsrRows, STATION_DSR_INVENTORY_NOTE, STATION_DSR_PENDING_HEADER, STATION_DSR_OVERDUE_HEADER, type StationDsrMetric, type StationDsrTidRow } from "@/lib/ops-pulse/station-dsr-summary";
 
 type Props = {
   initial: LoadFlashBoardNetwork;
@@ -395,9 +395,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const dsrStationRows = dsrStationData?.key === dsrStationKey && !dsrStationData.error ? dsrStationData.rows : [];
   const dsrStationInventory = useMemo(
     () => dsrStationData?.key === dsrStationKey && !dsrStationData.error
-      ? summarizeStationDsrRows(dsrStationData.rows, payload.businessDate)
+      ? summarizeStationDsrRows(dsrStationData.rows, payload.businessDate, stations.filter(station => station.hasSnapshot).map(station => station.stationCode))
       : undefined,
-    [dsrStationData, dsrStationKey, payload.businessDate],
+    [dsrStationData, dsrStationKey, payload.businessDate, stations],
   );
   useEffect(() => {
     if (!needsDsrStation) return;
@@ -450,7 +450,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       : "";
     return prepareBoardReport({ ...table,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
-      subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}`,
+      subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}${blockStations.some(station => dsrStationInventory?.[station.stationCode]?.dispatchUnconfirmed) ? " Assigned at-station shipments with uncertain dispatch history remain under Other / pending." : ""}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
   const report = reportFor(stations, regionLabel);
@@ -484,6 +484,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         stationCode?: string;
         trackingId?: string;
         status?: string;
+        currentState?: string;
+        sourceBucket?: string;
         edd?: string;
         driverId?: string;
         driverName?: string;
@@ -499,16 +501,24 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
               : view === "premium" ? "Premium DOT"
                 : view === "standard" ? "Standard DOT"
                   : "EDD";
-    const rows = (Array.isArray(body.rows) ? body.rows : [])
+    const stationReport = view === "dsr" && level === "station";
+    const rawRows = (Array.isArray(body.rows) ? body.rows : []);
+    const exportRows = stationReport ? stationDsrReportRows(rawRows.map(row => ({
+      ...row, stationCode: String(row.stationCode || "").toUpperCase(), trackingId: String(row.trackingId || "").trim(),
+      sourceBucket: String(row.sourceBucket || ""), status: String(row.status || ""), edd: String(row.edd || ""),
+      driverId: String(row.driverId || ""), driverName: String(row.driverName || ""),
+    })), payload.businessDate) : rawRows;
+    const rows = exportRows
       .map((row) => [
         String(row.stationCode ?? "").toUpperCase(),
-        reportLabel,
+        stationReport ? "DSR station" : reportLabel,
         String(row.trackingId ?? "").trim(),
         String(row.status ?? ""),
         String(row.edd ?? ""),
         String((row as { shipOption?: string }).shipOption ?? ""),
         String(row.driverId ?? ""),
         String(row.driverName ?? ""),
+        ...(stationReport ? [String(row.currentState || "")] : []),
       ] as (string | number | boolean | null)[])
       .filter((row) => String(row[2] ?? "").trim());
     rows.sort((a, b) =>
@@ -518,7 +528,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     );
     return [{
       name: "All TIDs",
-      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "Ship Option", "DA ID", "DA Name"],
+      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "Ship Option", "DA ID", "DA Name", ...(stationReport ? ["Current Amazon state"] : [])],
       rows,
     }];
   }
@@ -1202,8 +1212,13 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <span>{isDsrFamilyView(view) ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
         {isDsrFamilyView(view) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
+        {needsDsrStation ? <small className={s.reportMeta}>{STATION_DSR_INVENTORY_NOTE}</small> : null}
+        {needsDsrStation && stations.some(station => dsrStationInventory?.[station.stationCode]?.dispatchUnconfirmed) ? <small role="status" className={s.reportMeta}>
+          Dispatch history needs verification; these shipments remain under Other / pending:
+          {stations.filter(station => dsrStationInventory?.[station.stationCode]?.dispatchUnconfirmed).map(station => <button type="button" key={station.stationCode} onClick={() => openStationMetricPanel(station.stationCode, "dispatchUnconfirmed", `Dispatch verification · ${station.stationCode}`)}>{station.stationCode} · {count(dsrStationInventory![station.stationCode].dispatchUnconfirmed)} TIDs</button>)}
+        </small> : null}
         {needsDsrStation && (dsrStationPending || dsrStationError) ? <small role={dsrStationError ? "alert" : "status"} className={s.reportMeta}>
-          {dsrStationError || "Loading EDD pending and dispatch-eligible physical station TIDs…"}
+          {dsrStationError || "Loading today's pending and overdue at-station TIDs…"}
           {dsrStationError ? <button type="button" onClick={() => { setDsrStationData(null); setDsrStationRetry(value => value + 1); }}>Retry</button> : null}
         </small> : null}
         {detailUnavailable ? <div className={s.empty} role={detailError ? "alert" : "status"}>
@@ -1212,12 +1227,12 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div> : <div className={s.scroll}>
           <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
             <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-              <button type="button" className={s.sortButton} title={header === "EDD pending at station" ? "Today and overdue first-dispatch EDD TIDs still pending at the station. Open the count to see each EDD date." : header === "Physical at station" ? "Dispatch-eligible Ageing stock at station. Excludes future EDD, Ready for FC, FC/transit, customer-hold/HCR and shipments failed or rejected today." : header === "Other / pending" ? "Assigned shipments without a confirmed outcome. Included in Assigned, separate from delivered, failed, rejected and on-road." : header === DSR_HEADERS.failed ? "Amazon delivery-failed outcome: the operational attempted count. Rejections remain separate." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+              <button type="button" className={s.sortButton} title={header === STATION_DSR_PENDING_HEADER ? "Confirmed at-station TIDs due on the selected date. Future EDD and today’s DSR cohort are excluded; uncertain dispatch remains under Other / pending." : header === STATION_DSR_OVERDUE_HEADER ? "Confirmed at-station TIDs with an EDD before the selected date, excluding today’s DSR cohort, customer holds and FC returns." : header === "Other / pending" ? "Assigned shipments without a confirmed outcome. Included in Assigned, separate from delivered, failed, rejected and on-road." : header === DSR_HEADERS.failed ? "Amazon delivery-failed outcome: the operational attempted count. Rejections remain separate." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
             </th>)}</tr></thead>
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
               {row.map((cell, column) => {
                 const header = report.headers[column];
-                const metric = ({ "EDD pending at station": "eddPending", "Physical at station": "physicalAtStation", Assigned: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Other / pending": "other" } as Record<string, StationDsrMetric>)[header];
+                const metric = ({ [STATION_DSR_PENDING_HEADER]: "eddPending", [STATION_DSR_OVERDUE_HEADER]: "overduePending", Assigned: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Other / pending": "other" } as Record<string, StationDsrMetric>)[header];
                 const stationCode = report.rowStations[i];
                 const stationMetric = view === "dsr" && level === "station" && metric && cell.text !== "—";
                 return <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
