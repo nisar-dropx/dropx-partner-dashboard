@@ -305,9 +305,9 @@ async function validateLeaveSubmission({
   const entitlements = await resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type });
   const leaveType = entitlements.find((item) => item.leave_type_id === leaveTypeId);
   if (!leaveType) throw new Error("This leave type is not available for your current location and designation.");
-  // Replaces the old blanket "cannot start in the past": CL/SL may use this month
-  // and next (plus last month on the 1st-2nd), comp-off from the day after the day
-  // worked until it lapses, anything else today onwards.
+  // Replaces the old blanket "cannot start in the past": CL/SL may use the previous,
+  // current and next month; comp-off from the day after the day worked until it
+  // lapses; anything else today onwards.
   const outsideWindow = leaveDatesOutsideWindow(await leaveWindowFor(account, type, leaveType, today), fromDate, toDate, leaveType.name);
   if (outsideWindow) throw new Error(outsideWindow);
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";

@@ -2,19 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compOffApplyUntil, compOffUsableFrom, compOffValidUntil, earnedLeaveAvailable, earnedLeaveLapsedDays, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
 
-test('CL/SL: whole current month and next month (mid-month)', () => {
-  assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-09-01', latest: '2026-10-31' });
-  assert.deepEqual(leaveDateWindow({ code: 'SICK', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-09-01', latest: '2026-10-31' });
+test('CL/SL: previous, current and next month (including mid-month)', () => {
+  assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-08-01', latest: '2026-10-31' });
+  assert.deepEqual(leaveDateWindow({ code: 'SICK', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-08-01', latest: '2026-10-31' });
+  assert.equal(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-11-04' }).earliest, '2026-10-01');
+  assert.equal(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-10-03' }).earliest, '2026-09-01');
 });
 
-test('CL/SL: previous month allowed only on the 1st and 2nd', () => {
-  assert.equal(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-10-01' }).earliest, '2026-09-01');
-  assert.equal(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-10-02' }).earliest, '2026-09-01');
-  assert.equal(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-10-03' }).earliest, '2026-10-01');
-});
-
-test('CL/SL: year boundary', () => {
-  assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-12-20' }), { earliest: '2026-12-01', latest: '2027-01-31' });
+test('CL/SL: year boundary keeps December when applying in January', () => {
+  assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-12-20' }), { earliest: '2026-11-01', latest: '2027-01-31' });
   assert.equal(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2027-01-02' }).earliest, '2026-12-01');
 });
 

@@ -3,9 +3,9 @@
  * The server computes this once and sends it to DropX One, so the date pickers
  * and the submit check always agree. Rules agreed with HR on 2026-09-25:
  *
- * - Casual / Sick leave: any date in the current month or the next month. On
- *   the 1st and 2nd of a month, dates in the previous month are allowed too
- *   (a short window to record leave already taken).
+ * - Casual / Sick leave: any date in the previous month, the current month, or
+ *   the next month (so DropX One can still record leave already taken after the
+ *   attendance close window).
  * - Comp-off (earned by working a week off or holiday): from the leave type's
  *   apply-earliest setting (day after worked, earning-month start, or N days
  *   before the worked day in the same month) until the credit lapses - week-off
@@ -35,8 +35,6 @@ export type CompOffCredit = {
   applyUntil?: string;
   usableFrom?: string | null;
 };
-
-const BACKDATE_GRACE_DAY = 2;
 
 function parts(date: string) {
   const [year, month, day] = date.split("-").map(Number);
@@ -149,8 +147,7 @@ export function leaveDateWindow(input: {
     return earliest <= latest ? { earliest, latest } : null;
   }
   if (balanceMode === "annual_balance" && isMonthlyCapLeaveCode(code)) {
-    const earliest = parts(today).day <= BACKDATE_GRACE_DAY ? firstOfMonth(today, -1) : firstOfMonth(today);
-    return { earliest, latest: lastOfMonth(today, 1) };
+    return { earliest: firstOfMonth(today, -1), latest: lastOfMonth(today, 1) };
   }
   return { earliest: today, latest: null };
 }
