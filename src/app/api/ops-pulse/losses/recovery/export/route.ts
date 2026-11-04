@@ -2,14 +2,14 @@ import * as XLSX from 'xlsx';
 import { getAuthorization, hasPermission } from '@/lib/authorization';
 import { loadRecoveryWorkspace } from '@/lib/ops-pulse/loss-recovery-workspace';
 import { recoveryUpdates, filterRecoveryUpdates, recoveryUpdateExportRows } from '@/lib/ops-pulse/loss-recovery-updates';
-import { indiaMonth } from '@/lib/ops-pulse/loss-recovery-queue-policy';
+import { loadCurrentLossPayrollMonth } from '@/lib/ops-pulse/loss-debit-data';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const auth = await getAuthorization();
     if (!auth || !hasPermission(auth, 'ops_losses', 'access')) return new Response('Access denied', {status:403});
     // Same permission and station scope as the recovery screen.
-    const view = await loadRecoveryWorkspace(auth), q = new URL(request.url).searchParams, currentMonth = indiaMonth();
+    const [view, currentMonth] = await Promise.all([loadRecoveryWorkspace(auth), loadCurrentLossPayrollMonth(auth)]), q = new URL(request.url).searchParams;
     const rows = filterRecoveryUpdates(recoveryUpdates(view.rows, view.lines, view.settings?.recoverable_statuses || [], currentMonth), {
       station:q.get('station') || '', month:q.get('month') || '', status:q.get('status') || '', query:q.get('query') || '', salaryScope:q.get('salaryScope') || '', currentMonth,
     });

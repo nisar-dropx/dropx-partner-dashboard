@@ -1,19 +1,19 @@
 import * as XLSX from "xlsx";
 import { getAuthorization } from "@/lib/authorization";
-import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
+import { loadCurrentLossPayrollMonth, loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
 import {
   filterLossDebits,
   summarizeLossDebits,
 } from "@/lib/ops-pulse/loss-debit-review";
-import { indiaMonth } from '@/lib/ops-pulse/loss-recovery-queue-policy';
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const auth = await getAuthorization();
     if (!auth) return new Response("Access denied", { status: 403 });
+    const currentMonth = await loadCurrentLossPayrollMonth(auth);
     const q = new URL(request.url).searchParams,
       f = {
-        month: q.get("month") || "", salaryScope: q.get('salaryScope') || '', currentMonth: indiaMonth(),
+        month: q.get("month") || "", salaryScope: q.get('salaryScope') || '', currentMonth,
         station: q.get("station") || "",
         person: q.get("person") || "",
         designation: q.get("designation") || "",
@@ -27,23 +27,25 @@ export async function GET(request: Request) {
       XLSX.utils.book_append_sheet(book, sheet, name);
     };
     add("Station summary", [
-      ["Station", "People", "Shipments", "Deducted", "Draft payroll"],
+      ["Station", "Recipients", "Shipments", "Deducted", "Draft payroll", "Scheduled"],
       ...summarizeLossDebits(rows, "station").map((g) => [
         g.label,
         g.people,
         g.shipments,
         g.deducted,
         g.draft,
+        g.scheduled,
       ]),
     ]);
     add("People", [
-      ["Name", "Details", "Station", "Salary month", "Shipments", "Deducted", "Draft payroll"],
+      ["Name", "Details", "Station", "Salary month", "Shipments", "Deducted", "Draft payroll", "Scheduled"],
       ...summarizeLossDebits(rows, "person_month").map((g) => [
         g.label,
         g.detail, g.stations, g.payrollMonth,
         g.shipments,
         g.deducted,
         g.draft,
+        g.scheduled,
       ]),
     ]);
     add("Shipment details", [
@@ -56,6 +58,7 @@ export async function GET(request: Request) {
         "Loss month",
         "Salary month",
         "Amount",
+        "Payroll source",
         "Status",
       ],
       ...rows.map((r) => [
@@ -67,15 +70,16 @@ export async function GET(request: Request) {
         r.loss_month,
         r.payroll_month,
         r.amount,
-        r.is_deducted ? "Deducted" : "Draft payroll",
+        r.payroll_source === "workforce" ? "Workforce payout" : "People payroll",
+        r.payroll_status === "deducted" ? "Deducted" : r.payroll_status === "draft" ? "Draft payroll" : "Scheduled",
       ]),
     ]);
     add("Monthly history", [
-      ["Payroll month", "People", "Shipments", "Deducted", "Draft payroll"],
+      ["Payroll month", "Recipients", "Shipments", "Deducted", "Draft payroll", "Scheduled"],
       ...summarizeLossDebits(
         filterLossDebits(all, { ...f, month: "", salaryScope: '' }),
         "month",
-      ).map((g) => [g.key, g.people, g.shipments, g.deducted, g.draft]),
+      ).map((g) => [g.key, g.people, g.shipments, g.deducted, g.draft, g.scheduled]),
     ]);
     return new Response(
       XLSX.write(book, { type: "buffer", bookType: "xlsx" }),

@@ -10,7 +10,8 @@ export type LossDebit = {
   designation: string;
   amount: number;
   payroll_month: string;
-  is_deducted: boolean;
+  payroll_status: "scheduled" | "draft" | "deducted";
+  payroll_source: "people" | "workforce";
 };
 export function filterLossDebits(
   rows: LossDebit[],
@@ -48,6 +49,9 @@ export function summarizeLossDebits(
       shipments: Set<string>;
       deducted: number;
       draft: number;
+      scheduled: number;
+      peoplePayroll: number;
+      workforcePayout: number;
     }
   >();
   for (const r of rows) {
@@ -66,12 +70,18 @@ export function summarizeLossDebits(
       shipments: new Set<string>(),
       deducted: 0,
       draft: 0,
+      scheduled: 0,
+      peoplePayroll: 0,
+      workforcePayout: 0,
     };
     g.people.add(r.employee_ref);
     g.stations.add(r.station_code);
     g.shipments.add(`${r.loss_month}|${r.case_key}`);
-    if (r.is_deducted) g.deducted += r.amount;
-    else g.draft += r.amount;
+    if (r.payroll_status === "deducted") g.deducted += r.amount;
+    else if (r.payroll_status === "draft") g.draft += r.amount;
+    else g.scheduled += r.amount;
+    if (r.payroll_source === "workforce") g.workforcePayout += r.amount;
+    else g.peoplePayroll += r.amount;
     groups.set(key, g);
   }
   return [...groups.values()]
@@ -82,6 +92,9 @@ export function summarizeLossDebits(
       shipments: g.shipments.size,
       deducted: Math.round(g.deducted * 100) / 100,
       draft: Math.round(g.draft * 100) / 100,
+      scheduled: Math.round(g.scheduled * 100) / 100,
+      peoplePayroll: Math.round(g.peoplePayroll * 100) / 100,
+      workforcePayout: Math.round(g.workforcePayout * 100) / 100,
     }))
     .sort((a, b) =>
       by === "month"
