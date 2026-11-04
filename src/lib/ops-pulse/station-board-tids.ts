@@ -4,6 +4,8 @@ import { isPremiumDot, isStandardDot } from "./ship-option-dot.ts";
 /** Board-only TID buckets (must match amazon-edd-worker BOARD_TID_BUCKET). */
 export const BOARD_TID = {
   EDD: "BoardEDD",
+  PHYSICAL: "BoardPhysical",
+  PENDING_TODAY: "BoardPendingToday",
   CRETURN: "BoardCReturn",
   DELIVERED: "BoardDelivered",
   FAILED: "BoardFailed",
@@ -22,7 +24,7 @@ export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   creturn: [BOARD_TID.CRETURN, "Pickup"],
   ageing: [BOARD_TID.AGEING],
   dsr: DSR_BUCKETS,
-  "dsr-station": [BOARD_TID.EDD, BOARD_TID.AGEING, BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
+  "dsr-station": [BOARD_TID.PHYSICAL, BOARD_TID.PENDING_TODAY, BOARD_TID.EDD, BOARD_TID.AGEING, BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
   zero: DSR_BUCKETS,
   premium: DSR_BUCKETS,
   standard: DSR_BUCKETS,
@@ -165,7 +167,9 @@ function mapDsrStation(flash: FlashTrackingLike[]): BoardTidExportRow[] {
       stationCode: row.stationCode,
       trackingId: row.trackingId,
       sourceBucket: row.bucket,
-      status: row.bucket === BOARD_TID.EDD ? "Inducted inventory"
+      status: row.bucket === BOARD_TID.PENDING_TODAY ? "EDD pending today"
+        : row.bucket === BOARD_TID.PHYSICAL ? "Physical at station"
+        : row.bucket === BOARD_TID.EDD ? "Inducted inventory"
         : row.bucket === BOARD_TID.AGEING ? row.state || "At station"
           : dsrStatus(row.bucket),
       currentState: row.state || "",

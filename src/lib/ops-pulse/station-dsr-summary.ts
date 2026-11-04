@@ -1,150 +1,55 @@
 import { BOARD_TID } from "./station-board-tids.ts";
 
-export type StationDsrMetric =
-  | "eddPending"
-  | "overduePending"
-  | "dispatchUnconfirmed"
-  | "physicalAtStation"
-  | "assigned"
-  | "delivered"
-  | "failed"
-  | "rejected"
-  | "onRoad"
-  | "other";
-
+export type StationDsrMetric = "eddPending" | "physicalAtStation" | "assigned" | "delivered" | "failed" | "rejected" | "onRoad" | "other";
 export type StationDsrTidRow = {
-  stationCode: string;
-  trackingId: string;
-  sourceBucket: string;
-  status: string;
-  currentState?: string;
-  edd: string;
-  driverId: string;
-  driverName: string;
+  stationCode: string; trackingId: string; sourceBucket: string; status: string;
+  currentState?: string; edd: string; driverId: string; driverName: string;
 };
-
-export type StationDsrInventorySummary = {
-  eddPending: number;
-  overduePending: number;
-  physicalAtStation: number;
-  dispatchUnconfirmed: number;
-};
-
-export const STATION_DSR_INVENTORY_NOTE = "Pending today uses the selected EDD date; overdue stock is separate. Future EDD, return-to-FC stock and today's dispatched or attempted shipments are excluded.";
+export type StationDsrInventorySummary = { eddPending: number; physicalAtStation: number };
 export const STATION_DSR_PENDING_HEADER = "EDD pending today";
-export const STATION_DSR_OVERDUE_HEADER = "Overdue at station";
+export const STATION_DSR_PHYSICAL_HEADER = "Physical at station";
+export const STATION_DSR_INVENTORY_NOTE = "EDD pending: due on the selected date and not dispatched or attempted that day. Physical at station: all stock present, including future, overdue, held and returned parcels. Pending is included in physical; do not add the two counts.";
 
-const OUTCOME_BUCKETS = new Set<string>([
-  BOARD_TID.DELIVERED,
-  BOARD_TID.FAILED,
-  BOARD_TID.REJECTED,
-  BOARD_TID.OOR,
-  BOARD_TID.OTHER,
-  "Failed",
-  "Rejected",
-]);
-
-const METRIC_BUCKETS: Partial<Record<StationDsrMetric, Set<string>>> = {
+const OUTCOME_BUCKETS = new Set<string>([BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"]);
+const METRIC_BUCKETS: Record<StationDsrMetric, Set<string>> = {
+  eddPending: new Set([BOARD_TID.PENDING_TODAY]),
+  physicalAtStation: new Set([BOARD_TID.PHYSICAL]),
   assigned: OUTCOME_BUCKETS,
-  delivered: new Set([BOARD_TID.DELIVERED]),
-  failed: new Set([BOARD_TID.FAILED, "Failed"]),
-  rejected: new Set([BOARD_TID.REJECTED, "Rejected"]),
-  onRoad: new Set([BOARD_TID.OOR]),
-  other: new Set([BOARD_TID.OTHER]),
+  delivered: new Set([BOARD_TID.DELIVERED]), failed: new Set([BOARD_TID.FAILED, "Failed"]),
+  rejected: new Set([BOARD_TID.REJECTED, "Rejected"]), onRoad: new Set([BOARD_TID.OOR]), other: new Set([BOARD_TID.OTHER]),
 };
-
-// Amazon uses both INDUCT and INDUCTED for the same receipt event.
-const PHYSICAL_AT_STATION_STATES = new Set(["AT_STATION", "INDUCTED", "INDUCT", "RECEIVED"]);
-const INVENTORY_BUCKETS = new Set<string>([BOARD_TID.EDD, BOARD_TID.AGEING]);
-
-function uniqueTrackingRows(rows: StationDsrTidRow[]) {
+const keyOf = (row: StationDsrTidRow) => `${row.stationCode}\t${row.trackingId.trim()}`;
+function uniqueRows(rows: StationDsrTidRow[]) {
   const unique = new Map<string, StationDsrTidRow>();
-  for (const row of rows) {
-    const trackingId = row.trackingId.trim();
-    const key = `${row.stationCode}\t${trackingId}`;
-    if (trackingId && !unique.has(key)) unique.set(key, { ...row, trackingId });
-  }
+  for (const row of rows) if (row.trackingId.trim() && !unique.has(keyOf(row))) unique.set(keyOf(row), { ...row, trackingId: row.trackingId.trim() });
   return [...unique.values()];
 }
 
-function normalizedState(row: StationDsrTidRow) {
-  return String(row.currentState || row.status || "").trim().toUpperCase().replace(/\s+/g, "_");
+/** The worker verifies complete dated history before publishing these buckets.
+ * Never infer physical location or first dispatch from a daily outcome bucket. */
+export function stationDsrMetricRows(rows: StationDsrTidRow[], stationCode: string, businessDate: string, metric: StationDsrMetric) {
+  return uniqueRows(rows.filter(row => row.stationCode === stationCode && METRIC_BUCKETS[metric].has(row.sourceBucket)
+    && (metric !== "eddPending" || row.edd === businessDate)));
 }
 
-function validDay(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value))
-    && new Date(value).toISOString().slice(0, 10) === value;
-}
-
-const inventoryKey = (row: StationDsrTidRow) => `${row.stationCode}\t${row.trackingId.trim()}`;
-
-/** Both board feeds are needed: BoardEDD is the current inducted census across
- * all promised dates; BoardAgeing contains older stock only. Prefer the current
- * inducted record when an older ageing row repeats the same tracking ID. */
-function dueStationStock(rows: StationDsrTidRow[], businessDate: string) {
-  if (!validDay(businessDate)) return [];
-  const stock = new Map<string, StationDsrTidRow>();
-  for (const row of rows) {
-    if (!INVENTORY_BUCKETS.has(row.sourceBucket)) continue;
-    const key = inventoryKey(row);
-    if (row.trackingId.trim() && (!stock.has(key) || row.sourceBucket === BOARD_TID.EDD)) stock.set(key, row);
-  }
-  return [...stock.values()].filter(row => validDay(row.edd) && row.edd <= businessDate
-    && PHYSICAL_AT_STATION_STATES.has(normalizedState(row)));
-}
-
-/**
- * Confirmed pending stock is outside today's DSR cohort. A current receipt
- * must never erase today's dispatch/attempt. Other/pending is kept separate:
- * that bucket can represent either pre-dispatch assignment or a debrief after
- * going out, so it cannot prove that a parcel has never gone out today.
- */
-export function physicalAtStationRows(rows: StationDsrTidRow[], businessDate: string) {
-  const sameDayOutcome = new Set(rows.filter(row => OUTCOME_BUCKETS.has(row.sourceBucket)).map(inventoryKey));
-  return uniqueTrackingRows(dueStationStock(rows, businessDate).filter(row => !sameDayOutcome.has(inventoryKey(row))));
-}
-
-export function stationDsrMetricRows(
-  rows: StationDsrTidRow[],
-  stationCode: string,
-  businessDate: string,
-  metric: StationDsrMetric,
-) {
-  const stationRows = rows.filter((row) => row.stationCode === stationCode);
-  if (metric === "eddPending") {
-    return physicalAtStationRows(stationRows, businessDate).filter(row => row.edd === businessDate).map(row => ({ ...row, status: STATION_DSR_PENDING_HEADER }));
-  }
-  if (metric === "overduePending") return physicalAtStationRows(stationRows, businessDate).filter(row => row.edd < businessDate).map(row => ({ ...row, status: STATION_DSR_OVERDUE_HEADER }));
-  if (metric === "dispatchUnconfirmed") {
-    const uncertain = new Set(stationRows.filter(row => row.sourceBucket === BOARD_TID.OTHER).map(inventoryKey));
-    const confirmed = new Set(stationRows.filter(row => OUTCOME_BUCKETS.has(row.sourceBucket) && row.sourceBucket !== BOARD_TID.OTHER).map(inventoryKey));
-    return uniqueTrackingRows(dueStationStock(stationRows, businessDate).filter(row => uncertain.has(inventoryKey(row)) && !confirmed.has(inventoryKey(row)))).map(row => ({ ...row, status: "Other / pending — dispatch needs verification" }));
-  }
-  if (metric === "physicalAtStation") return physicalAtStationRows(stationRows, businessDate);
-  const buckets = METRIC_BUCKETS[metric];
-  return uniqueTrackingRows(stationRows.filter((row) => buckets?.has(row.sourceBucket)));
-}
-
-export function summarizeStationDsrRows(rows: StationDsrTidRow[], businessDate: string, availableStations: string[] = []) {
-  const codes = new Set([...availableStations, ...rows.map((row) => row.stationCode)].filter(Boolean));
+export function summarizeStationDsrRows(rows: StationDsrTidRow[], businessDate: string, completeStations: string[] = []) {
+  const codes = new Set([...completeStations, ...rows.filter(row => row.sourceBucket === BOARD_TID.PHYSICAL || row.sourceBucket === BOARD_TID.PENDING_TODAY).map(row => row.stationCode)]);
   const summaries: Record<string, StationDsrInventorySummary> = {};
-  for (const stationCode of codes) {
-    summaries[stationCode] = {
-      eddPending: stationDsrMetricRows(rows, stationCode, businessDate, "eddPending").length,
-      overduePending: stationDsrMetricRows(rows, stationCode, businessDate, "overduePending").length,
-      physicalAtStation: stationDsrMetricRows(rows, stationCode, businessDate, "physicalAtStation").length,
-      dispatchUnconfirmed: stationDsrMetricRows(rows, stationCode, businessDate, "dispatchUnconfirmed").length,
-    };
-  }
+  for (const code of codes) summaries[code] = {
+    eddPending: stationDsrMetricRows(rows, code, businessDate, "eddPending").length,
+    physicalAtStation: stationDsrMetricRows(rows, code, businessDate, "physicalAtStation").length,
+  };
   return summaries;
 }
 
-/** The station report's All TIDs sheet contains exactly the displayed pending
- * groups and assigned cohort. Never label the unfiltered future census as EDD pending. */
+/** Overlapping stock/outcome groups become flags on one Excel row per TID. */
 export function stationDsrReportRows(rows: StationDsrTidRow[], businessDate: string) {
-  return [...new Set(rows.map(row => row.stationCode))].flatMap(code => [
-    ...stationDsrMetricRows(rows, code, businessDate, "eddPending"),
-    ...stationDsrMetricRows(rows, code, businessDate, "overduePending"),
-    ...stationDsrMetricRows(rows, code, businessDate, "assigned"),
-  ]);
+  const physical = new Map(rows.filter(row => row.sourceBucket === BOARD_TID.PHYSICAL).map(row => [keyOf(row), row]));
+  const pending = new Set(rows.filter(row => row.sourceBucket === BOARD_TID.PENDING_TODAY && row.edd === businessDate).map(keyOf));
+  const assigned = new Map(rows.filter(row => OUTCOME_BUCKETS.has(row.sourceBucket)).map(row => [keyOf(row), row]));
+  return uniqueRows([...physical.values(), ...assigned.values()]).map(row => ({
+    ...row, currentState: physical.get(keyOf(row))?.currentState || row.currentState,
+    eddPending: pending.has(keyOf(row)), physicalAtStation: physical.has(keyOf(row)),
+    assigned: assigned.has(keyOf(row)), dsrOutcome: assigned.get(keyOf(row))?.status || "",
+  }));
 }

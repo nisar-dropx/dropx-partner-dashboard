@@ -1,5 +1,5 @@
 import { CRETURN_DISPLAY, CRETURN_SHORT, CRETURN_PICKED_UP_BUCKET, pickupPctColor, pickupPctTextColor, sumDaDsr, dsrHeatColor, dsrPctTextColor, oorTextColor, type StationBoardStation } from './station-board.ts';
-import { STATION_DSR_PENDING_HEADER, STATION_DSR_OVERDUE_HEADER, type StationDsrInventorySummary } from './station-dsr-summary.ts';
+import { STATION_DSR_PENDING_HEADER, STATION_DSR_PHYSICAL_HEADER, type StationDsrInventorySummary } from './station-dsr-summary.ts';
 import type { BoardShareCell, BoardShareTable } from './station-board-share.ts';
 
 export type BoardDetailLevel = 'station' | 'associate';
@@ -60,10 +60,10 @@ export function dsrStationTable(
 ): BoardShareTable {
   const hasOther = stations.some(s => pickDas(s.board).some(d => (d.other || 0) > 0));
   const showInventory = Boolean(inventory) && !zeroOnly;
-  const inventoryHeaders = showInventory ? [STATION_DSR_PENDING_HEADER, STATION_DSR_OVERDUE_HEADER] : [];
+  const inventoryHeaders = showInventory ? [STATION_DSR_PENDING_HEADER, STATION_DSR_PHYSICAL_HEADER] : [];
   const headers = ['Station', 'Location', ...inventoryHeaders, 'Assigned', 'Delivered', 'Delivery Failed', 'Delivery Rejected', 'Out on Road', ...(hasOther ? ['Other / pending'] : []), 'DSR%'];
   const all = stations.flatMap(s => pickDas(s.board)).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0));
-  const inventoryCells = (summary?: StationDsrInventorySummary): BoardShareCell[] => inventoryHeaders.length ? [summary ? numberCell(summary.eddPending) : { text: '—', align: 'right' }, summary ? numberCell(summary.overduePending) : { text: '—', align: 'right' }] : [];
+  const inventoryCells = (summary?: StationDsrInventorySummary): BoardShareCell[] => inventoryHeaders.length ? [summary ? numberCell(summary.eddPending) : { text: '—', align: 'right' }, summary ? numberCell(summary.physicalAtStation) : { text: '—', align: 'right' }] : [];
   const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), numberCell(sum.failed), numberCell(sum.rejected), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
   const rows: BoardShareCell[][] = stations.flatMap(s => {
     const sum = sumDaDsr(pickDas(s.board).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0)));
@@ -71,7 +71,7 @@ export function dsrStationTable(
     return [[{ text: s.stationCode, bold: true }, { text: names[s.stationCode] || '' }, ...inventoryCells(inventory?.[s.stationCode]), ...metrics(sum, s.fetchedAt)]];
   });
   if (rows.length) {
-    const inventoryTotal = inventory && stations.every(station => inventory[station.stationCode]) ? stations.reduce<StationDsrInventorySummary>((total, station) => ({ eddPending: total.eddPending + inventory[station.stationCode].eddPending, overduePending: total.overduePending + inventory[station.stationCode].overduePending, physicalAtStation: total.physicalAtStation + inventory[station.stationCode].physicalAtStation, dispatchUnconfirmed: total.dispatchUnconfirmed + inventory[station.stationCode].dispatchUnconfirmed }), { eddPending: 0, overduePending: 0, physicalAtStation: 0, dispatchUnconfirmed: 0 }) : undefined;
+    const inventoryTotal = inventory && stations.every(station => inventory[station.stationCode]) ? stations.reduce<StationDsrInventorySummary>((total, station) => ({ eddPending: total.eddPending + inventory[station.stationCode].eddPending, physicalAtStation: total.physicalAtStation + inventory[station.stationCode].physicalAtStation }), { eddPending: 0, physicalAtStation: 0 }) : undefined;
     rows.push([{ text: 'Grand Total', bold: true }, { text: `${rows.length} stations` }, ...inventoryCells(inventoryTotal), ...metrics(sumDaDsr(all))]);
   }
   return { title: `${title} · Stations`, subtitle: '', headers, rows };
