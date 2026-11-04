@@ -785,3 +785,5 @@ alter loss, payroll, approval or collection records.
 - Recorded work or finalized/bank-issued payroll blocks replacement activation. Returned requests keep the absence; rejection/cancellation releases it and restores prior attendance only when the replacement marker still owns that row. New punches remain visible as a conflict for review. Finalized pay blocks automatic release.
 - Migration `20261104080244_adhoc_driver_reasons_and_absence.sql` is applied in production. The three tables are server-only with RLS and no client grants/policies by design. No production absence/request records were created for testing.
 - Validation: TypeScript, 62 request/payroll regression tests, and the PGlite lifecycle suite (including repeat migration, cancellation, returned edits, paid-payroll guards and restricted attendance access).
+
+- Follow-up migration `20261104081848_adhoc_driver_payout_dependency.sql` versions absence-ledger changes for advance-recovery snapshots using statement-level company locks. Insert, update, delete and truncate are covered; the 311-test payout suite and repeated-migration PGlite dependency test pass.
