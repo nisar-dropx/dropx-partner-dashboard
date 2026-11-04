@@ -1318,7 +1318,7 @@ export async function loadWorkforcePayoutRows(
         amount: line.amount,
         sortOrder: line.sortOrder
       }));
-      const lines = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
+      const lines: WorkforcePayoutRow["dailyBreakdown"][number]["lines"] = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
       if (paidAdhoc?.effect === "base_only") {
         lines.splice(
           0,
