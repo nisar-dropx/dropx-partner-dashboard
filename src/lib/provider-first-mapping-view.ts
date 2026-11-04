@@ -627,6 +627,26 @@ export function providerFirstLocationNeedsDates(
   );
 }
 
+/** A completed, exclusive historical assignment is not a concurrent Keep-all mapping.
+ * Cancelled rows cannot prove identity; any live period overlap still blocks it.
+ * The server and transactional RPC repeat these checks against unfiltered history.
+ */
+export function providerFirstHistoricalLocationIsAllowed(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined,
+  today = mappingLookupToday()
+) {
+  if (!worker || worker.id !== row.workforceId || worker.hasRestrictedMapping
+    || !worker.profileStationId || worker.profileStationId === row.stationId
+    || row.mappingId || !isIsoCalendarDate(row.effectiveFrom)
+    || !isIsoCalendarDate(row.effectiveTo) || row.effectiveTo < row.effectiveFrom
+    || row.effectiveTo >= today) return false;
+  const history = [...historicalWorkerMappings(worker), ...currentWorkerMappings(worker)];
+  return history.some(mapping => Boolean(mapping.mappingId) && mappingIdentityMatchesRow(mapping, row))
+    && !history.some(mapping => mapping.effectiveFrom <= row.effectiveTo
+      && (!mapping.effectiveTo || mapping.effectiveTo >= row.effectiveFrom));
+}
+
 /**
  * A Provider ID may be retained at a second location only when the selected
  * DropX profile already has that exact provider/member identity mapped at its
@@ -657,6 +677,7 @@ export function providerFirstLocationIsAllowed(
       && mappingIdentityMatchesRow(mapping, row)
   );
   if (selectedClosedMapping) return true;
+  if (providerFirstHistoricalLocationIsAllowed(row, worker)) return true;
   if (row.stationId === registeredStationId) {
     // An unmapped profile may be bootstrapped at its own location. If a current
     // mapping exists, an exact historical interval wins over an unrelated

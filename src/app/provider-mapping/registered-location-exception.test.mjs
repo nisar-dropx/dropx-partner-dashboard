@@ -159,7 +159,7 @@ test("server proves a contiguous registered timeline and selects the anchor effe
   assert.match(actions, /providerFirstMappingPeriodContains\([\s\S]*?requestedEffectiveFrom,[\s\S]*?requestedEffectiveFrom/);
   assert.match(actions, /mapping\.status === "active" && !mapping\.effective_to/);
   assert.match(actions, /mapping\.status === "closed" && Boolean\(mapping\.effective_to\)/);
-  assert.match(actions, /needsRegisteredLocationException && \(!registeredLocationMapping \|\| !registeredLocationPeriodCovered\)/);
+  assert.match(actions, /needsRegisteredLocationException && !submittedClosedMapping && \(!registeredLocationMapping \|\| !registeredLocationPeriodCovered\)/);
   assert.match(actions, /!relevantProviderMappings\.length && !relevantTargetMappings\.length && !registeredLocationMapping/);
   assert.match(actions, /\.\.\.\(registeredLocationMapping \? \[registeredLocationMapping\] : \[\]\)/);
   assert.match(actions, /allowKeepAll: changeKind === "location"/);
@@ -207,7 +207,7 @@ test("server and database repeat the registered-location proof for current and h
   ]);
   assert.match(actions, /select\("id, dropx_id, full_name, location_id, source_profile_type, source_profile_id"\)/);
   assert.match(actions, /registeredLocationMapping = matchingRegisteredMappings\.find/);
-  assert.match(actions, /needsRegisteredLocationException && \(!registeredLocationMapping \|\| !registeredLocationPeriodCovered\)/);
+  assert.match(actions, /needsRegisteredLocationException && !submittedClosedMapping && \(!registeredLocationMapping \|\| !registeredLocationPeriodCovered\)/);
   assert.match(actions, /Keep all is required for an additional location/);
   assert.match(actions, /if \(!mappingId && !confirmedReplacementMappingId && !options\.keepExistingLocationMappingId\)/);
   assert.match(migration, /anchor\.station_id = registered_station/);

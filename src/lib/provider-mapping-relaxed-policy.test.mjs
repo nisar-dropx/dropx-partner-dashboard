@@ -85,7 +85,7 @@ test("a verified registered-location mapping permits only Keep all at a second l
   assert.equal(remap?.mappingId, "mapping-a");
 });
 
-test("a closed registered-location mapping permits only fully contained bounded periods", () => {
+test("concurrent historical mappings require full coverage; exclusive completed periods need no concurrent anchor", () => {
   const historicalWorker = {
     ...baseWorker,
     mappingId: "",
@@ -137,16 +137,17 @@ test("a closed registered-location mapping permits only fully contained bounded 
   });
 
   for (const outsideAnchor of [
-    { ...exactSeptember, effectiveFrom: "2026-07-01", effectiveTo: "2026-07-31" },
     { ...exactSeptember, effectiveFrom: "2026-07-01", effectiveTo: "" },
     { ...exactSeptember, effectiveFrom: "2026-09-01", effectiveTo: "" },
-    { ...exactSeptember, effectiveFrom: "2026-10-01", effectiveTo: "2026-10-31" },
     { ...exactSeptember, effectiveFrom: "2026-08-31", effectiveTo: "2026-09-15" },
     { ...exactSeptember, effectiveFrom: "2026-09-15", effectiveTo: "2026-10-01" }
   ]) {
     assert.equal(providerFirstLocationIsAllowed(outsideAnchor, historicalWorker), false);
     assert.equal(providerFirstLocationRemap(outsideAnchor, historicalWorker), null);
   }
+  const exclusive = { ...exactSeptember, effectiveFrom: "2026-10-01", effectiveTo: "2026-10-31" };
+  assert.equal(providerFirstLocationIsAllowed(exclusive, historicalWorker), true);
+  assert.equal(providerFirstLocationRemap(exclusive, historicalWorker), null);
 });
 
 test("location validation waits for a start date when an exact registered mapping exists", () => {
@@ -188,8 +189,8 @@ test("location validation waits for a start date when an exact registered mappin
   assert.equal(providerFirstLocationRemap(awaitingStartDate, historicalWorker), null);
   assert.equal(providerFirstLocationIsAllowed({
     ...awaitingStartDate,
-    effectiveFrom: "2026-10-01",
-    effectiveTo: "2026-10-31"
+    effectiveFrom: "2099-10-01",
+    effectiveTo: "2099-10-31"
   }, historicalWorker), false);
   assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, {
     ...historicalWorker,
