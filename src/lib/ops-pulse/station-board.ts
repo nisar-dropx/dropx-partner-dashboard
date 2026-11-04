@@ -77,6 +77,7 @@ export type StationBoardPayload = {
   zeroDeliveriesStandard: number;
   dsrFrozenAt?: string | null;
   dsrHistoryPending?: number;
+  stationInventoryVersion?: number;
   ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
   ageingByWeek: Record<string, AgeingBucketCell>;
   /** Ageing let.xlsx: State → ISO week → TID count + Sum of Order Amount (INR). */
@@ -307,6 +308,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     }
   }
   return {
+    stationInventoryVersion: row.stationInventoryVersion === 1 ? 1 : undefined,
     eddByDate,
     cReturn,
     cReturnTotal,

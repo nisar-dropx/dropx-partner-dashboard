@@ -5,7 +5,7 @@ import { stripTypeScriptTypes } from 'node:module';
 
 const source = readFileSync(new URL('./paid-advance-register.ts', import.meta.url), 'utf8')
   .replace('"./supabase-pagination"', JSON.stringify(new URL('./supabase-pagination.ts', import.meta.url).href));
-const { loadPaidAdvanceRegister } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
+const { loadPaidAdvanceRegister, loadPaidAdvanceRegisterView } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
 
 function fixture(data, failTable) {
   const reads = [];
@@ -55,4 +55,24 @@ test('reads every paid record beyond the API page size, retaining separate equal
 test('fails visibly instead of showing an incomplete paid register after a database error', async () => {
   const f = fixture({ pay_advances: [advance('paid', 'employee')] }, 'employees');
   await assert.rejects(loadPaidAdvanceRegister(f.db, 'our-company'), /Read failed/);
+});
+
+test('shared register counts only confirmed and waived recovery, scoped to the company and advance', async () => {
+  const f = fixture({ pay_advances: [advance('hrms', 'employee'), advance('workforce', 'workforce'), advance('unlinked', 'workforce')].map(a => a.id === 'unlinked' ? {...a, worker_id: null} : a),
+    pay_advance_deductions: [
+      ...['confirmed', 'waived', 'reserved', 'reversed'].map((status, i) => ({id: String(i), company_id: 'our-company', advance_id: 'hrms', amount: 500, status, period_start: '2026-10-01'})),
+      {id: 'foreign', company_id: 'other', advance_id: 'hrms', amount: 500, status: 'confirmed'},
+      {id: 'full', company_id: 'our-company', advance_id: 'workforce', amount: 2000, status: 'confirmed'}
+    ] });
+  const rows = await loadPaidAdvanceRegisterView(f.db, 'our-company');
+  assert.deepEqual(rows.map(r => [r.id, r.total, r.deducted, r.pending, r.status]), [
+    ['hrms', 2000, 1000, 1000, 'Partially deducted'], ['workforce', 2000, 2000, 0, 'Fully deducted'], ['unlinked', 2000, 0, 2000, 'Pending']
+  ]);
+  assert.equal(rows[2].linkStatus, 'pending');
+  assert.equal(rows[0].recoveryHistory.length, 4);
+});
+
+test('recovery read failure does not silently display zero deductions', async () => {
+  const f = fixture({pay_advances: [advance('paid', 'employee')]}, 'pay_advance_deductions');
+  await assert.rejects(loadPaidAdvanceRegisterView(f.db, 'our-company'), /Read failed/);
 });
