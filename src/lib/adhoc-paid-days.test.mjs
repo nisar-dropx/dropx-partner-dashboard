@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { adhocDaIdentityFields, adhocPaidDayKey } from './adhoc-da-identity.ts';
 import { paidAdhocDays, paidAdhocDayBreakdown } from './adhoc-paid-days.ts';
 import { deliveryIdentityFields, normalizeDeliveryIdentityPolicy } from './adhoc-delivery-identity.ts';
@@ -49,4 +50,11 @@ test('manual FHR preserves leading zeroes and requires an actual work date',()=>
  form.set('adhoc_work_date','2026-02-30');assert.throws(()=>adhocDaIdentityFields(form),/date/);
  form.set('adhoc_work_date','2026-10-12');const result=adhocDaIdentityFields(form);
  assert.equal(result.adhoc_provider_employee_id,'001234567890');assert.equal(result.adhoc_work_date,'2026-10-12');assert.equal(result.adhoc_payout_policy,'work_day');
+});
+test('pre-activation bank rows can finish without weakening new-request identity checks',()=>{
+ const migration=readFileSync(new URL('../../supabase/migrations/20261104202500_preserve_inflight_delivery_payments.sql',import.meta.url),'utf8');
+ assert.match(migration,/before insert on public\.payment_requests[\s\S]*?payment_delivery_identity_guard\(\)/);
+ assert.match(migration,/before delete on public\.payment_requests[\s\S]*?payment_delivery_identity_guard\(\)/);
+ assert.match(migration,/old\.delivery_identity_confirmed is false[\s\S]*?lower\(old\.status\) in \('processing', 'processed', 'paid'\)[\s\S]*?lower\(new\.status\) in \('processing', 'processed', 'paid'\)/);
+ assert.match(migration,/new\.company_id[\s\S]*?new\.adhoc_client[\s\S]*?is not distinct from row\([\s\S]*?old\.company_id[\s\S]*?old\.adhoc_client/);
 });
