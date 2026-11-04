@@ -18,11 +18,10 @@ export function includesSwa(shipOption: unknown): boolean {
 }
 
 export function classifyShipOptionDot(shipOption: unknown): DotLane {
-  const raw = normalizeShipOption(shipOption);
-  if (!raw) return null;
-  if (startsWithStd(raw)) return "standard";
-  if (includesSwa(raw)) return null;
-  return "premium";
+  const raw = normalizeShipOption(shipOption).toUpperCase();
+  if (raw === 'STD') return 'standard';
+  if (['EXP', 'EXP-IN-GRD-COD-ELIGIBLE', 'EXP-IN-NOMINATED-DAY'].includes(raw)) return 'premium';
+  return null;
 }
 
 export function isStandardDot(shipOption: unknown): boolean {

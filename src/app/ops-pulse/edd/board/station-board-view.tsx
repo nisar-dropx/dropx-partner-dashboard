@@ -1,4 +1,6 @@
 "use client";
+import { dotStationTable } from "@/lib/ops-pulse/dot-report";
+import { isDotView, sumDot, matchesDotMetric, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { cReturnDetailTable, dsrStationTable, pendingCReturn, type CReturnAssociate, type BoardDetailLevel } from "@/lib/ops-pulse/board-detail-report";
 import { ReportTable } from "@/components/report-table";
 
@@ -67,6 +69,8 @@ type TidRow = {
   trackingId: string;
   status: string;
   currentState?: string;
+  dotDispatched?: boolean;
+  dotAtStation?: boolean;
   sourceBucket?: string;
   edd: string;
   driverId: string;
@@ -105,6 +109,7 @@ async function copyText(text: string) {
 
 function asView(value: string | undefined): StationBoardView {
   const key = String(value || "edd").toLowerCase().replace(/[^a-z]/g, "");
+  if (key === "swa") return "swa";
   if (key === "creturn") return "creturn";
   if (key === "dsr" || key === "dadsr") return "dsr";
   if (key === "zero" || key === "zerodeliveries") return "zero";
@@ -213,7 +218,7 @@ function buildShareTable(
   const dsrTitle =
     view === "premium" ? "Premium DOT"
       : view === "standard" ? "Standard DOT"
-        : zeroOnly ? "Zero deliveries"
+        : view === "swa" ? "SWA DSR" : zeroOnly ? "Zero deliveries"
           : "DSR";
   const hasOther = stations.some((s) => daDsrForView(s.board, view).some((d) => (d.other || 0) > 0));
   const headers = [
@@ -280,16 +285,16 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [levels, setLevels] = useState<Record<string, BoardDetailLevel>>(() => initialDetail === "station" || initialDetail === "associate" ? { [asView(initialView)]: initialDetail } : {});
   // DSR is primarily a station operating report. Open the auditable station
   // inventory view first; associate detail remains one click away.
-  const level = levels[view] ?? (view === "creturn" || view === "dsr" ? "station" : "associate");
+  const level = levels[view] ?? (view === "creturn" || view === "dsr" || view === "swa" || isDotView(view) ? "station" : "associate");
   const [groupByStation, setGroupByStation] = useState(initialLayout === "grouped");
   const hasDetailViews = view === "creturn" || isDsrFamilyView(view);
   const sortKey = `${view}-${level}-${groupByStation}`;
   const sort = sorts[sortKey] ?? {
-    header: view === "creturn" ? "Pending pickup"
+    header: isDotView(view) ? "DOT%" : view === "creturn" ? "Pending pickup"
       : view === "zero" ? DSR_HEADERS.oor
         : isDsrFamilyView(view) ? DSR_HEADERS.dsrPct
           : "Station",
-    direction: hasDetailViews ? "desc" : "asc",
+    direction: hasDetailViews || isDotView(view) ? "desc" : "asc",
   };
   const [cReturnData, setCReturnData] = useState<{ key: string; rows: CReturnAssociate[]; error?: string } | null>(null);
   const [detailRetry, setDetailRetry] = useState(0);
@@ -420,13 +425,16 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const cReturnShown = needsCReturn
     ? cReturnRows.reduce((a, r) => ({ total: a.total + r.total, picked: a.picked + (r.statuses.PICKUP_DONE || 0), pending: a.pending + pendingCReturn(r.statuses, r.total) }), { total: 0, picked: 0, pending: 0 })
     : stations.reduce((a, r) => ({ total: a.total + r.board.cReturnTotal, picked: a.picked + r.board.pickupDone, pending: a.pending + pendingCReturn(r.board.cReturn, r.board.cReturnTotal) }), { total: 0, picked: 0, pending: 0 });
+  const dotValues = stations.map(station => station.board.dotVersion === 1 ? (view === "premium" ? station.board.dotPremium : station.board.dotStandard) : undefined);
+  const dotUnavailable = isDotView(view) && dotValues.some(value => !value);
+  const dotSummary = sumDot(dotValues.filter((value): value is DotTotals => Boolean(value)));
   function reportFor(blockStations: StationBoardStation[], label: string) {
     const dsrTitle =
       view === "premium" ? "Premium DOT"
         : view === "standard" ? "Standard DOT"
-          : view === "zero" ? "Zero deliveries"
+          : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries"
             : "DSR";
-    const table = view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
+    const table = isDotView(view) ? dotStationTable(blockStations, view as "premium" | "standard") : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
       : isDsrFamilyView(view) && level === "station"
         ? dsrStationTable(
           blockStations,
@@ -447,16 +455,17 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     const stats = isDsrFamilyView(view)
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
       : "";
-    const historyPending = isDsrFamilyView(view) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
+    const historyPending = (isDsrFamilyView(view) || isDotView(view)) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
     return prepareBoardReport({ ...table,
-      compactNote: view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending today is included in physical stock; do not add these columns.` : undefined,
+      compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending today is included in physical stock; do not add these columns.` : undefined,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending ? ` · Provisional (${count(historyPending)} history checks pending)` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
   const report = reportFor(stations, regionLabel);
-  const outputUnavailable = detailUnavailable || dsrStationPending || Boolean(dsrStationError);
+  const outputUnavailable = dotUnavailable || detailUnavailable || dsrStationPending || Boolean(dsrStationError);
   function excelReport(table = report, tidSheet?: ExcelReport["extraSheets"]): ExcelReport {
+    if (dotUnavailable) throw new Error("DOT eligible inventory was not captured for every selected station. Refresh today or select a captured date.");
     if (detailUnavailable) throw new Error("Wait for associate details to load, then retry.");
     if (dsrStationPending) throw new Error("Wait for station EDD and physical inventory to load, then retry.");
     if (dsrStationError) throw new Error(dsrStationError);
@@ -486,6 +495,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         trackingId?: string;
         status?: string;
         currentState?: string;
+        dotDispatched?: boolean;
+        dotAtStation?: boolean;
         sourceBucket?: string;
         edd?: string;
         driverId?: string;
@@ -498,7 +509,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       view === "creturn" ? "C-Return"
         : view === "ageing" ? "Ageing"
           : view === "dsr" ? "DA DSR"
-            : view === "zero" ? "Zero deliveries"
+            : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries"
               : view === "premium" ? "Premium DOT"
                 : view === "standard" ? "Standard DOT"
                   : "EDD";
@@ -519,6 +530,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         String((row as { shipOption?: string }).shipOption ?? ""),
         String(row.driverId ?? ""),
         String(row.driverName ?? ""),
+        ...(isDotView(view) ? [String(row.currentState || ""), Boolean((row as TidRow).dotDispatched), Boolean((row as TidRow).dotAtStation)] : []),
         ...(stationReport ? [String(row.currentState || ""), Boolean((row as { eddPending?: boolean }).eddPending), Boolean((row as { physicalAtStation?: boolean }).physicalAtStation), String((row as { dsrOutcome?: string }).dsrOutcome || "")] : []),
       ] as (string | number | boolean | null)[])
       .filter((row) => String(row[2] ?? "").trim());
@@ -529,7 +541,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     );
     return [{
       name: "All TIDs",
-      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "Ship Option", "DA ID", "DA Name", ...(stationReport ? ["Current Amazon state", "EDD pending today", "Physical at station", "DSR outcome"] : [])],
+      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "Ship Option", "DA ID", "DA Name", ...(isDotView(view) ? ["Current Amazon state", "Dispatched today", "Currently at station"] : []), ...(stationReport ? ["Current Amazon state", "EDD pending today", "Physical at station", "DSR outcome"] : [])],
       rows,
     }];
   }
@@ -711,6 +723,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   }
 
   function openStationPanel(code: string) {
+    if (isDotView(view)) { void openDotMetricPanel(code, "Eligible"); return; }
     setOpenStation(code);
     setTids(null);
     setTidsError(null);
@@ -760,6 +773,19 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }
   }
 
+  async function openDotMetricPanel(code: string, header: string) {
+    setOpenStation(code); setPanelMode("tids"); setTids(null); setTidsBusy(true); setTidsError(null);
+    setTidLabel(`${header} · ${code}`); setTidMode("grouped"); setTidDay(null);
+    try {
+      const params = new URLSearchParams({station: code, date: payload.businessDate, kind: view});
+      const response = await fetch(`/api/ops-pulse/edd/board/tids?${params}`, {cache: "no-store"});
+      const body = await response.json();
+      if (!response.ok || !Array.isArray(body.rows)) throw new Error(body.error || "Unable to load DOT shipments.");
+      setTids((body.rows as TidRow[]).filter(row => matchesDotMetric(row, header)));
+    } catch (err) { setTidsError(err instanceof Error ? err.message : "Unable to load DOT shipments."); }
+    finally { setTidsBusy(false); }
+  }
+
   function openStationMetricPanel(code: string, metric: StationDsrMetric, label: string) {
     const rows = stationDsrMetricRows(dsrStationRows, code, payload.businessDate, metric);
     setOpenStation(code);
@@ -790,7 +816,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     ["creturn", "C-Return"],
     ["dsr", "DSR"],
     ["premium", "Premium DOT"],
-    ["standard", "Standard DOT"],
+    ["standard", "AFN Standard DOT"],
+    ["swa", "SWA DSR"],
     ["zero", "Zero deliveries"],
   ] as const;
 
@@ -911,7 +938,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
 
       <div className={s.kpis} aria-live="polite">
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong></article>
-        {isDsrFamilyView(view) ? <>
+        {isDotView(view) ? <>
+          {([['Eligible', dotSummary.total], ['Dispatched', dotSummary.dispatched], ['At station', dotSummary.atStation], ['Delivered', dotSummary.delivered]] as const).map(([label,value]) => <article key={label} className={s.kpi}><span>{label}</span><strong>{dotUnavailable ? "—" : count(value)}</strong></article>)}
+          <article className={s.kpi}><span>DOT</span><strong>{dotUnavailable || !dotSummary.total ? "—" : pct(dotSummary.dotPct)}</strong></article>
+        </> : isDsrFamilyView(view) ? <>
           <article className={s.kpi}><span>Overall DSR</span><strong>{pct(delivery.dsrPct)} <small>({count(delivery.delivered)})</small></strong></article>
           <article className={s.kpi} title="Shipments with a delivery-failed outcome; rejected shipments are shown separately"><span>Delivery failed</span><strong>{count(delivery.failed)}</strong></article>
           <article className={s.kpi} title="Shipments with a delivery-rejected outcome"><span>Rejected</span><strong>{count(delivery.rejected)}</strong></article>
@@ -927,7 +957,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <article className={s.kpi}><span>EDD packages</span><strong>{count(totals.edd)}</strong></article>
           <article className={s.kpi}><span>C-Return</span><strong>{count(totals.cReturn)} <small>· {totals.cReturn ? `${totals.pickupPct}% pickup` : "—"}</small></strong></article>
         </>}
-        <button type="button" className={s.kpi} aria-pressed={view === "zero"} onClick={() => changeView(view === "zero" ? "dsr" : "zero")}><span>Zero-delivery DAs ↗</span><strong>{count(totals.zero)} <small>of {totals.das} DAs</small></strong></button>
+        {!isDotView(view) && <button type="button" className={s.kpi} aria-pressed={view === "zero"} onClick={() => changeView(view === "zero" ? "dsr" : "zero")}><span>Zero-delivery DAs ↗</span><strong>{count(totals.zero)} <small>of {totals.das} DAs</small></strong></button>}
       </div>
 
       <section className={s.panel}>
@@ -943,7 +973,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <span>{stations.length} stations{isDsrFamilyView(view) ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
           <span>{isDsrFamilyView(view) ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
-        {isDsrFamilyView(view) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
+        {(isDsrFamilyView(view) || isDotView(view)) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
+        {isDotView(view) ? <small className={s.reportMeta}>Due by selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
+        {dotUnavailable ? <small className={s.reportMeta} role="status">Eligible DOT inventory was not captured for this date. Refresh today to start tracking; historical gaps are shown as —.</small> : null}
         {needsDsrStation ? <small className={s.reportMeta}>{STATION_DSR_INVENTORY_NOTE}</small> : null}
         {needsDsrStation && (dsrStationPending || dsrStationError) ? <small role={dsrStationError ? "alert" : "status"} className={s.reportMeta}>
           {dsrStationError || "Loading pending-today and physical inventory…"}
@@ -965,6 +997,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                 const stationMetric = view === "dsr" && level === "station" && metric && cell.text !== "—";
                 return <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
                   {((header === "Station" && cell.text) || (singleStation && !report.headers.includes("Station") && column === 0 && stationCode)) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(stationCode)}>{cell.text}</button>
+                    : isDotView(view) && column > 0 && cell.text !== "—" && header !== "DOT%" ? <button type="button" className={s.metricBtn} onClick={() => void openDotMetricPanel(stationCode, header)}>{cell.text}</button>
                     : stationMetric ? <button type="button" className={s.metricBtn} title={`View ${header} TIDs`} onClick={() => openStationMetricPanel(stationCode, metric, `${header} · ${stationCode}`)}>{cell.text}</button>
                       : cell.text}
                 </td>;
@@ -1002,7 +1035,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
               <button type="button" className={s.primary} disabled={stationShareBusy !== null} onClick={() => void shareStation(true)}>
                 {stationShareBusy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
               </button>
-              {panelMode === "tids" ? (
+              {panelMode === "tids" && !isDotView(view) ? (
                 <button type="button" onClick={() => setPanelMode("card")}>
                   <LayoutList size={14} /> View station card
                 </button>
@@ -1149,7 +1182,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                 <div className={s.shareCard}>
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
-                    <strong>{view === "premium" ? "Premium DOT" : view === "standard" ? "Standard DOT" : view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                    <strong>{view === "premium" ? "Premium DOT" : view === "standard" ? "Standard DOT" : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
                   <div className={s.shareColsWide}>
@@ -1249,7 +1282,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                   </div>
                 ) : (
                   <div className={s.tidPlain}>
-                    {tids.map((row) => <button type="button" className={s.tidTrack} key={row.trackingId} onClick={() => setOpenTrackingId(row.trackingId)}><code>{row.trackingId}{row.status ? ` · ${row.status}` : ""}</code><span>Track</span></button>)}
+                    {tids.map((row) => <button type="button" className={s.tidTrack} key={row.trackingId} onClick={() => setOpenTrackingId(row.trackingId)}><code>{row.trackingId}{row.status ? ` · ${row.status}` : ""}{isDotView(view) ? ` · ${row.currentState || "—"} · EDD ${row.edd || "—"}` : ""}</code><span>Track</span></button>)}
                   </div>
                 )}
               </div>

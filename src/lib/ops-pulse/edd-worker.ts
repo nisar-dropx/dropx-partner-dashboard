@@ -1,3 +1,4 @@
+import { parseDotTotals, type DotTotals } from "./dot-metrics.ts";
 export type EddBucketKey = "overdue" | "dueToday" | "dueTomorrow" | "future" | "unknown";
 
 export type EddPackage = {
@@ -940,6 +941,8 @@ export type LoadFlashTrackingRow = {
   isAccessPoint: boolean;
   /** Amazon shipOption — Premium / Standard DOT filters. */
   shipOption: string;
+  dotDispatched?: boolean;
+  dotAtStation?: boolean;
 };
 
 /**
@@ -977,6 +980,10 @@ export type LoadFlashBoardPayload = {
   dsrFrozenAt: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  dotVersion?: number;
+  dotPremium?: DotTotals;
+  dotStandard?: DotTotals;
+  daDsrSwa?: LoadFlashBoardDa[];
   ageingByDay: Record<string, LoadFlashAgeingCell>;
   ageingByWeek: Record<string, LoadFlashAgeingCell>;
   ageingByStateWeek: Record<string, Record<string, LoadFlashAgeingCell>>;
@@ -1130,6 +1137,8 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
     daDsrPremium,
     zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
+    daDsrSwa: parseLoadFlashDaList(row.daDsrSwa),
+    ...(Number(row.dotVersion) === 1 ? { dotVersion: 1, dotPremium: parseDotTotals(row.dotPremium), dotStandard: parseDotTotals(row.dotStandard) } : {}),
     daDsrStandard,
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
@@ -1324,6 +1333,8 @@ export async function fetchLoadFlashTracking(
       driverName: String(row.driverName ?? "").trim(),
       isAccessPoint: Boolean(row.isAccessPoint),
       shipOption: String(row.shipOption ?? "").trim(),
+      dotDispatched: Boolean(row.dotDispatched),
+      dotAtStation: Boolean(row.dotAtStation),
     };
   }).filter((row) => row.trackingId);
 }
