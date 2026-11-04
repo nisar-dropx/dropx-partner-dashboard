@@ -7,6 +7,7 @@ import {
 } from "@/lib/ops-pulse/loss-recovery-controls";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { stationEvidenceError } from "@/lib/ops-pulse/loss-station-evidence";
+import { ticketUpdateError } from "@/lib/ops-pulse/loss-redispute-queue";
 export const dynamic = "force-dynamic";
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
@@ -100,12 +101,15 @@ async function transition(b: Record<string, any>) {
     tt_reference: String(b.tt_reference || "").trim(),
     tt_url: String(b.tt_url || "").trim(),
     followup_on: b.followup_on || null,
+    ...(b.action === "tracking" ? { followup_status: b.followup_status ?? "with_vendor" } : {}),
     recovery_month: b.recovery_month || null,
   };
   if (b.action === "response") {
     const validationError = stationEvidenceError(details);
     if (validationError) throw Error(validationError);
   }
+  const ticketError = ticketUpdateError(b.action, details);
+  if (ticketError) throw Error(ticketError);
   if (b.action === "return" && (details.note.length < 10 || details.note.length > 4000))
     throw Error("Add a correction note for the station (10–4000 characters).");
   for (const value of [details.evidence_url, details.tt_url])

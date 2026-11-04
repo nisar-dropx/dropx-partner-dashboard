@@ -29,6 +29,14 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  auth={...base,roleCode:'OPERATIONS_CLM'};const bulkDenied=await post({action:'bulk_activate',rows:[{month:'2026-09',case_key:'T1',version:0}]});assert.equal(bulkDenied.status,403);assert.equal(rpcCalls,0);
 
  auth={...base,roleCode:'OPERATIONS_SLPM'};assert.equal((await post({action:'tracking',tt_reference:'TT-123',followup_status:'filed',followup_on:'2026-11-01'})).status,200);
+ assert.equal(lastRpc.p_details.followup_status,'filed','Ticket raised status reaches the atomic writer');
+ for(const invalid of [{followup_status:'won'}, {tt_reference:''}, {tt_reference:'X'.repeat(161)}, {followup_on:'2026-02-30'}, {followup_on:''}]) {
+  const before=rpcCalls;
+  assert.equal((await post({action:'tracking',tt_reference:'AMZ-123',followup_on:'2026-11-05',followup_status:'with_vendor',...invalid})).status,403);
+  assert.equal(rpcCalls,before,'Invalid ticket updates cannot reach storage');
+ }
+ assert.equal((await post({action:'tracking',tt_reference:'AMZ-123',followup_on:'2026-11-05'})).status,200);
+ assert.equal(lastRpc.p_details.followup_status,'with_vendor','Old clients retain the previous status default');
  assert.equal((await post({action:'activate'},'https://evil.example')).status,403);
  assert.equal((await post({action:'tracking',tt_url:'javascript:alert(1)'})).status,403);
  assert.equal((await post({action:'tracking',case_key:'outside'})).status,403);

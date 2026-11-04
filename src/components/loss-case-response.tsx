@@ -1,21 +1,15 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
+import { redisputeStatus, ticketStatuses, ticketUpdateError } from "@/lib/ops-pulse/loss-redispute-queue";
+import type { RedisputeWindow } from "./loss-redispute-desk";
 import { responseActions } from "@/lib/ops-pulse/loss-response-actions";
 import { stationEvidenceError, type StationEvidence } from "@/lib/ops-pulse/loss-station-evidence";
 import evidenceStyles from "./loss-case-response.module.css";
 type Data = {
-  window: {
-    version: number;
-    enabled: boolean;
-    workflow_status?: string;
-    tt_reference?: string;
-    tt_url?: string;
-    recovery_month?: string;
-    response_details?: Partial<StationEvidence>;
-  };
+  window: RedisputeWindow;
   events: {
     id: string;
     action: string;
@@ -23,7 +17,7 @@ type Data = {
     evidence_url?: string;
     actor_name: string;
     created_at: string;
-    tracking?: { details?: Partial<StationEvidence> };
+    tracking?: { details?: Partial<StationEvidence> & { followup_status?: string; tt_url?: string; followup_on?: string }; after?: RedisputeWindow };
   }[];
   canActivate: boolean;
   readOnly: boolean;
@@ -34,28 +28,25 @@ type Data = {
     details: { tid?: string; extra?: Record<string, string> };
   };
 };
-const labels: Record<string, string> = {
-  awaiting_station: "Station evidence needed",
-  awaiting_review: "Awaiting review",
-  returned: "Returned for correction",
-  approved: "Approved · file post-dispute ticket",
-  with_vendor: "With vendor",
-  won: "Won · recovery stopped",
-  lost: "Unsuccessful · recovery resumed",
-  cancelled: "Cancelled",
-  legacy: "Earlier follow-up",
-};
 export function LossCaseResponse({
   month,
   caseKey,
   embedded = false,
   initialAction = "",
+  inlineManager = false,
+  onSaved,
 }: {
   month: string;
   caseKey: string;
   embedded?: boolean;
   initialAction?: "" | "return";
+  inlineManager?: boolean;
+  onSaved?: (window: RedisputeWindow) => void;
 }) {
+  const saving = useRef(false);
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState("");
+  const [ticketStatus, setTicketStatus] = useState("filed");
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -73,6 +64,8 @@ export function LossCaseResponse({
     [payMonth, setPayMonth] = useState("");
   useEffect(() => {
     const controller = new AbortController();
+    setError("");
+    setLoading(true);
     fetch(
       `/api/ops-pulse/losses/case-response?${new URLSearchParams({ month, case: caseKey })}`,
       { signal: controller.signal, cache: "no-store" },
@@ -90,20 +83,25 @@ export function LossCaseResponse({
         setCctv(j.window.response_details?.cctv_url || "");
         setCctvNotRequired(j.window.response_details?.cctv_not_required === true);
         setNote(embedded || !j.canActivate ? j.window.response_details?.note || "" : "");
-        setTicket((embedded || !j.canActivate ? j.window.response_details?.tt_reference : j.window.tt_reference) || "");
+        setTicket((embedded || !j.canActivate ? j.window.response_details?.tt_reference : (j.window.workflow_status === "approved" ? "" : j.window.tt_reference)) || "");
         setTicketUrl(j.window.tt_url || "");
+        setDue(j.window.followup_on || "");
+        setTicketStatus(j.window.workflow_status === "approved" || j.window.followup_status === "filed" ? "filed" : "with_vendor");
 
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
-      });
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [month, caseKey, revision, embedded]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (!data || !selectedAction) return;
-    if (!canSubmit) { setError(selectedAction === "response" ? evidenceError || "Complete all required fields." : "Add a clear update (10–4000 characters)."); return; }
+    if (!data || !selectedAction || saving.current) return;
+    if (!canSubmit) { setError(selectedAction === "response" ? evidenceError || "Complete all required fields." : ticketError || "Add a clear update (10–4000 characters)."); return; }
+    saving.current = true;
     setBusy(true);
+    setSaved("");
     setError("");
     try {
       const r = await fetch("/api/ops-pulse/losses/case-response", {
@@ -122,16 +120,24 @@ export function LossCaseResponse({
           tt_reference: ticket,
           tt_url: ticketUrl,
           followup_on: due,
+          followup_status: ticketStatus,
           recovery_month: payMonth,
         }),
       });
       const j = await r.json();
       if (!r.ok) throw Error(j.error);
+      setData(current => current ? { ...current, window: j.window } : current);
+      if (selectedAction === "approve") { setTicket(""); setTicketUrl(""); setDue(""); setTicketStatus("filed"); }
+      onSaved?.(j.window);
+      setSaved("Update saved.");
+      setAction("");
       setNote("");
+      setLoading(true);
       setRevision((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to save.");
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -144,16 +150,17 @@ export function LossCaseResponse({
   const evidenceError = stationEvidenceError({ reason, note, tt_reference: ticket,
     evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
   const validNote = note.trim().length >= 10 && note.trim().length <= 4000;
-  const canSubmit = selectedAction === "response" ? !evidenceError : !!selectedAction && validNote;
+  const ticketError = ticketUpdateError(selectedAction, { tt_reference: ticket, tt_url: ticketUrl, followup_on: due, followup_status: ticketStatus });
+  const canSubmit = !loading && (selectedAction === "response" ? !evidenceError : !!selectedAction && validNote && !ticketError);
   const returnEvent = state === "returned" ? data?.events.find((event) => event.action === "return") : null;
   const actionNames: Record<string, string> = {
     activate: "Activate redispute",
     response: state === "returned" ? "Resubmit station evidence" : "Submit station evidence",
-    approve: "Approve response",
+    approve: "Confirm station evidence",
     return: "Return for correction",
-    tracking: "Update post-dispute ticket",
-    won: "Final outcome · won",
-    lost: "Final outcome · unsuccessful",
+    tracking: state === "approved" ? "Record ticket raised" : "Update ticket / follow-up",
+    won: "Recovered · redispute successful",
+    lost: "Unsuccessful · resume recovery",
     revoke: "Remove redispute",
   };
   return (
@@ -161,16 +168,17 @@ export function LossCaseResponse({
       className={styles.workspace}
       style={{ maxWidth: 1000, margin: "0 auto", ...(embedded ? {padding:0} : {}) }}
     >
-      {!embedded ? <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute tracking" : "Recovery"}</a> : null}
-      {embedded ? <h3>Redispute evidence &amp; status</h3> : <h1>Shipment redispute</h1>}
-      <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>
+      {!embedded && !inlineManager ? <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute tracking" : "Recovery"}</a> : null}
+      {embedded ? <h3>Redispute evidence &amp; status</h3> : !inlineManager ? <h1>Shipment redispute</h1> : null}
+      {!inlineManager ? <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/> : null}
+      {saved ? <p role="status">{saved}</p> : null}
       {error ? (
         <p role="alert" className={styles.error}>
-          {error}
+          {error} <button type="button" className={styles.button} disabled={busy || loading} onClick={() => setRevision(n => n + 1)}>Reload latest status</button>
         </p>
       ) : null}
       {!data ? (
-        <p role="status">Loading shipment…</p>
+        <p role="status">{error ? "Shipment could not be loaded." : "Loading shipment…"}</p>
       ) : (
         <>
           <section className={styles.panel}>
@@ -185,11 +193,7 @@ export function LossCaseResponse({
                 ₹{Number(data.row.amount).toLocaleString("en-IN")}
               </strong>
               <span>
-                {data.window.enabled
-                  ? labels[state] || state
-                  : data.window.workflow_status
-                    ? labels[state]
-                    : "Not activated"}
+                {redisputeStatus(data.window)}
               </span>
             </div>
             <TrackingDetailModal
@@ -197,6 +201,17 @@ export function LossCaseResponse({
               stationHint={data.row.station_code}
               onClose={() => setTracking(false)}
             />
+            {!stationView ? <ol className={evidenceStyles.lifecycle} aria-label="Redispute lifecycle">
+              {['Station evidence', 'SLP confirmation', 'Ticket raised', 'Amazon follow-up', 'Outcome'].map((label, index) => {
+                const step = ['won', 'lost'].includes(state) ? 4 : state === 'with_vendor' ? (data.window.followup_status === 'filed' ? 2 : 3) : state === 'approved' ? 2 : state === 'awaiting_review' ? 1 : 0;
+                return <li key={label} aria-current={index === step ? 'step' : undefined} data-complete={index < step}>{label}</li>;
+              })}
+            </ol> : null}
+            {!stationView && state === 'approved' ? <p className={styles.hint}>Station evidence confirmed. Raise the Amazon ticket, then record its ID and next follow-up here.</p> : null}
+            {!stationView && data.window.tt_reference && state !== 'approved' && ['with_vendor', 'won', 'lost'].includes(state) ? <div className={evidenceStyles.links}>
+              <strong>Amazon ticket: {data.window.tt_url ? <a href={data.window.tt_url} target="_blank" rel="noreferrer">{data.window.tt_reference} ↗</a> : data.window.tt_reference}</strong>
+              {data.window.enabled && data.window.followup_on ? <span>Next follow-up: {data.window.followup_on}</span> : null}
+            </div> : null}
             {returnEvent ? <div className={evidenceStyles.returnNote} role="status">
               <strong>Returned for correction</strong>
               <p>{returnEvent.note}</p>
@@ -231,8 +246,19 @@ export function LossCaseResponse({
           (data.canActivate || data.window.enabled) ? (
             <section className={styles.panel}>
               <form onSubmit={save} className={styles.detail}>
+                <fieldset disabled={busy || loading} className={evidenceStyles.fields}>
                 <div className={styles.formGrid}>
-                  {actions.length > 1 ? <label>
+                  {actions.includes('tracking') ? <label>
+                    Status
+                    <select aria-label="Status" value={selectedAction === 'tracking' ? ticketStatus : selectedAction} onChange={e => {
+                      const value = e.target.value;
+                      if (value === 'filed' || value === 'with_vendor') { setAction('tracking'); setTicketStatus(value); }
+                      else setAction(value);
+                    }}>
+                      {ticketStatuses.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
+                      {actions.filter(a => a !== 'tracking').map(a => <option key={a} value={a}>{actionNames[a]}</option>)}
+                    </select>
+                  </label> : actions.length > 1 ? <label>
                     Next action
                     <select value={selectedAction} onChange={(e) => setAction(e.target.value)}>
                       {actions.map((a) => <option key={a} value={a}>{actionNames[a]}</option>)}
@@ -293,7 +319,7 @@ export function LossCaseResponse({
                   {["tracking", "won", "lost"].includes(selectedAction) ? (
                     <>
                       <label>
-                        Post-dispute ticket
+                        Amazon ticket ID *
                         <input
                           value={ticket}
                           onChange={(e) => setTicket(e.target.value)}
@@ -308,6 +334,7 @@ export function LossCaseResponse({
                           type="url"
                           value={ticketUrl}
                           onChange={(e) => setTicketUrl(e.target.value)}
+                          maxLength={2000}
                         />
                       </label>
                       {selectedAction === "tracking" ? (
@@ -341,7 +368,7 @@ export function LossCaseResponse({
                 <label>
                     {selectedAction === "response"
                       ? "Detailed description *"
-                      : selectedAction === "return" ? "Correction note to station *" : "Decision / update"}
+                      : selectedAction === "return" ? "Correction note to station *" : "Remarks *"}
                     <textarea
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
@@ -352,6 +379,8 @@ export function LossCaseResponse({
                       placeholder={selectedAction === "response" ? "Explain why the loss should be reconsidered and what the evidence shows." : selectedAction === "return" ? "Tell the station exactly what to correct before resubmitting." : undefined}
                     />
                   </label>
+                {selectedAction === 'won' ? <p className={styles.hint}>Confirm Amazon accepted the redispute. This stops the remaining payroll recovery; previous deductions are unchanged.</p> : null}
+                {ticketError ? <small className={styles.hint}>{ticketError}</small> : null}
                 <div className={styles.toolbar}>
                   <button className={styles.primary} disabled={busy || !canSubmit}>
                     {busy ? "Saving…" : actionNames[selectedAction]}
@@ -360,6 +389,7 @@ export function LossCaseResponse({
                     {selectedAction === "return" ? "The station will see this note and can correct and resubmit." : selectedAction === "response" && !canSubmit ? "Complete all required fields to submit." : "Recorded in OpsPulse; tickets are filed with the vendor separately."}
                   </small>
                 </div>
+                </fieldset>
               </form>
             </section>
           ) : null}
@@ -377,6 +407,11 @@ export function LossCaseResponse({
                 </small>
                 {e.action === "response" && e.tracking?.details?.reason ? <strong>{e.tracking.details.reason}</strong> : null}
                 <p>{e.note}</p>
+                {['tracking', 'won', 'lost'].includes(e.action) && e.tracking?.after ? <div className={evidenceStyles.links}>
+                  <span>{redisputeStatus(e.tracking.after)}</span>
+                  <span>Ticket: {e.tracking.after.tt_reference}</span>
+                  {e.tracking.after.followup_on ? <span>Follow-up: {e.tracking.after.followup_on}</span> : null}
+                </div> : null}
                 {e.action === "response" && e.tracking?.details ? <EvidenceLinks details={e.tracking.details} /> : e.evidence_url ? (
                   <a href={e.evidence_url} target="_blank" rel="noreferrer">
                     Evidence ↗
