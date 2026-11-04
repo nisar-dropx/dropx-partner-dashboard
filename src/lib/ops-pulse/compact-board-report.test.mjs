@@ -15,7 +15,7 @@ test('station, cluster and region multi-selects intersect and never add records 
 });
 test('summary keeps delivery failures and rejections separate without an attempted aggregate',()=>{
  const all=boardDeliverySummary(stations);
- assert.equal(all.total,120);assert.equal(all.dsrPct,75.8);assert.equal(all.failed,7);assert.equal(all.rejected,2);assert.equal('attempted' in all,false);assert.equal('attemptPct' in all,false);
+ assert.equal(all.total,120);assert.equal(all.dsrPct,91/120*100);assert.equal(all.failed,7);assert.equal(all.rejected,2);assert.equal('attempted' in all,false);assert.equal('attemptPct' in all,false);
  const zero=boardDeliverySummary(stations,true);
  assert.equal(zero.total,10);assert.equal(zero.dsrPct,0);assert.equal(zero.failed,2);assert.equal(zero.rejected,0);assert.equal(zero.oor,8);assert.equal(zero.daCount,1);
  assert.equal(boardDeliverySummary([]).dsrPct,null);

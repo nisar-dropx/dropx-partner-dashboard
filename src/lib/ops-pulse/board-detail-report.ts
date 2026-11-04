@@ -40,8 +40,8 @@ export function cReturnDetailTable(stations: StationBoardStation[], associates: 
   const hasOther = items.some(r => other(r) > 0);
   const headers = ['Station', level === 'associate' ? "DA's Name" : 'Location', 'Total', 'Pending pickup', ...CRETURN_DISPLAY.map(k => CRETURN_SHORT[k]), ...(hasOther ? ['Other'] : []), 'Pickup %'];
   const metrics = (r: CReturnAssociate): BoardShareCell[] => {
-    const pct = r.total ? Math.round((r.statuses.PICKUP_DONE || 0) / r.total * 100) : 0;
-    return [numberCell(r.total), { ...numberCell(pendingCReturn(r.statuses, r.total)), bold: true }, ...CRETURN_DISPLAY.map(k => numberCell(r.statuses[k] || 0)), ...(hasOther ? [numberCell(other(r))] : []), { text: r.total ? `${pct}%` : '—', align: 'right', bold: true, bg: r.total ? pickupPctColor(pct) : undefined, color: r.total ? pickupPctTextColor(pct) : undefined }];
+    const pct = r.total ? (r.statuses.PICKUP_DONE || 0) / r.total * 100 : 0;
+    return [numberCell(r.total), { ...numberCell(pendingCReturn(r.statuses, r.total)), bold: true }, ...CRETURN_DISPLAY.map(k => numberCell(r.statuses[k] || 0)), ...(hasOther ? [numberCell(other(r))] : []), { text: r.total ? `${pct.toFixed(2)}%` : '—', align: 'right', bold: true, bg: r.total ? pickupPctColor(pct) : undefined, color: r.total ? pickupPctTextColor(pct) : undefined }];
   };
   const rows: BoardShareCell[][] = items.map(r => [{ text: r.stationCode, align: 'left', bold: true }, { text: level === 'associate' ? r.driverName || r.driverId : names[r.stationCode] || '', align: 'left' }, ...metrics(r)]);
   const total: CReturnAssociate = { stationCode: '', driverId: '', driverName: '', statuses: {}, total: 0 };
@@ -62,10 +62,10 @@ export function dsrStationTable(
   const hasOther = stations.some(s => pickDas(s.board).some(d => (d.other || 0) > 0));
   const showInventory = Boolean(inventory) && !zeroOnly;
   const inventoryHeaders = showInventory ? [STATION_DSR_PENDING_HEADER, STATION_DSR_PHYSICAL_HEADER] : [];
-  const headers = ['Station', 'Location', ...inventoryHeaders, 'Assigned', 'Delivered', 'Delivery Failed', 'Delivery Rejected', 'Out on Road', ...(hasOther ? ['Outcome missing'] : []), 'DSR%'];
+  const headers = ['Station', 'Location', ...inventoryHeaders, 'Total', 'Delivered', 'Out on Road', 'Delivery Failed', 'Delivery Rejected', ...(hasOther ? ['Outcome missing'] : []), 'DSR%'];
   const all = stations.flatMap(s => pickDas(s.board)).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0));
   const inventoryCells = (summary?: StationDsrInventorySummary): BoardShareCell[] => inventoryHeaders.length ? [summary ? numberCell(summary.eddPending) : { text: '—', align: 'right' }, summary ? numberCell(summary.physicalAtStation) : { text: '—', align: 'right' }] : [];
-  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), numberCell(sum.failed), numberCell(sum.rejected), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct, dsrTarget) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct, dsrTarget) : undefined }];
+  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, numberCell(sum.failed), numberCell(sum.rejected), ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct.toFixed(2)}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
   const rows: BoardShareCell[][] = stations.flatMap(s => {
     const sum = sumDaDsr(pickDas(s.board).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0)));
     if (zeroOnly && !sum.total) return [];

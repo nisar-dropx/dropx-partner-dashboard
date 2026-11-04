@@ -79,6 +79,7 @@ export type StationBoardPayload = {
   dsrFrozenAt?: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  rtsVersion?: number;
   dotVersion?: number;
   dotMetadataPending?: number;
   dotPremium?: DotTotals;
@@ -106,7 +107,7 @@ export type StationBoardNetwork = {
   run: { id: string; status: string; stationsTotal: number; stationsDone: number; stationsOk: number; stationsFailed: number; startedAt: string; finishedAt: string | null } | null;
 };
 
-export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing" | "premium" | "standard" | "swa";
+export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing" | "premium" | "standard" | "swa" | "dot" | "rts";
 export type AgeingBoardMode = "day" | "week";
 
 /** DSR-shaped views that share DA tables / TID drill-down. */
@@ -187,7 +188,7 @@ export function sumDaDsr(rows: StationBoardDaDsr[]): {
     oor,
     other,
     total,
-    dsrPct: total > 0 ? Math.round((delivered / total) * 100) : 0,
+    dsrPct: total > 0 ? (delivered / total) * 100 : 0,
     daCount: rows.length,
   };
 }
@@ -228,7 +229,7 @@ function parseDaDsrList(value: unknown): StationBoardDaDsr[] {
       oor: Number(da.oor) || 0,
       other: Number(da.other) || 0,
       total,
-      dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0,
+      dsrPct: total > 0 ? (delivered / total) * 100 : 0,
     });
   }
   return daDsr;
@@ -275,7 +276,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
   }
   const cReturnTotal = Number(row.cReturnTotal ?? Object.values(cReturn).reduce((a, b) => a + b, 0)) || 0;
   const pickupDone = Number(row.pickupDone ?? cReturn.PICKUP_DONE ?? 0) || 0;
-  const pickupDonePct = Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0;
+  const pickupDonePct = cReturnTotal > 0 ? (pickupDone / cReturnTotal) * 100 : 0;
   const daDsr = parseDaDsrList(row.daDsr);
   const daDsrPremium = parseDaDsrList(row.daDsrPremium);
   const daDsrStandard = parseDaDsrList(row.daDsrStandard);
@@ -326,6 +327,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     daDsrPremium,
     zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
     daDsrSwa: parseDaDsrList(row.daDsrSwa),
+    ...(Number(row.rtsVersion) === 1 ? {rtsVersion: 1} : {}),
     ...(Number(row.dotVersion) === 1 ? { dotVersion: 1, dotMetadataPending: Number(row.dotMetadataPending) || 0, dotPremium: parseDotTotals(row.dotPremium), dotStandard: parseDotTotals(row.dotStandard) } : {}),
     daDsrStandard,
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
@@ -598,7 +600,7 @@ export function sumCReturn(stations: StationBoardStation[]) {
     byStatus,
     total,
     pickupDone,
-    pickupDonePct: total > 0 ? Math.round((pickupDone / total) * 100) : 0,
+    pickupDonePct: total > 0 ? (pickupDone / total) * 100 : 0,
   };
 }
 

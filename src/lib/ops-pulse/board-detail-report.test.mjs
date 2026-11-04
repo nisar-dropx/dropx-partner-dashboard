@@ -21,7 +21,7 @@ test('C-Return pending counts exclude terminal statuses; global sorting and expo
  assert.equal(report.rows[0][3].text,'2');
  assert.equal(report.rows.at(-1)[2].text,'7');
  assert.equal(report.rows.at(-1)[3].text,'4');
- assert.equal(report.rows.at(-1).at(-1).text,'14%');
+ assert.equal(report.rows.at(-1).at(-1).text,'14.29%');
  assert(report.headers.includes('Other'));
  assert(report.groupStarts.every(v=>!v));
  const grouped=prepareBoardReport(table,{header:'Pending pickup',direction:'desc'},{dsr:false,singleStation:false,groupByStation:true});
@@ -37,10 +37,10 @@ test('DSR station summary uses weighted totals, retains station and location, so
  const dsr=[{...stations[0],board:normalizeBoard({daDsr:[{driverId:'A',delivered:90,oor:10,total:100},{driverId:'B',delivered:0,failed:10,total:10}]})},{...stations[1],board:normalizeBoard({daDsr:[{driverId:'C',delivered:1,oor:9,total:10}]})}];
  const table=dsrStationTable(dsr,{KLZA:'Vadakara',GDRD:'Gudur'},false,{KLZA:{eddPending:7,physicalAtStation:12},GDRD:{eddPending:2,physicalAtStation:3}});
  const report=prepareBoardReport(table,{header:'DSR%',direction:'desc'},{dsr:false,singleStation:false,groupByStation:false});
- assert.deepEqual(report.headers,['Station','Location','EDD pending today','Physical at station','Assigned','Delivered','Delivery Failed','Delivery Rejected','Out on Road','DSR%']);
+ assert.deepEqual(report.headers,['Station','Location','EDD pending today','Physical at station','Total','Delivered','Out on Road','Delivery Failed','Delivery Rejected','DSR%']);
  assert.deepEqual(report.rows[0].slice(0,6).map(c=>c.text),['KLZA','Vadakara','7','12','110','90']);
- assert.equal(report.rows[0].at(-1).text,'82%');
- assert.equal(report.rows.at(-1).at(-1).text,'76%');
+ assert.equal(report.rows[0].at(-1).text,'81.82%');
+ assert.equal(report.rows.at(-1).at(-1).text,'75.83%');
  assert.equal(dsrStationTable([dsr[0]],{},true).rows[0][2].text,'10');
  const cr=cReturnDetailTable([stations[0]],[],'station',{KLZA:'Vadakara'});
  assert.deepEqual(cr.headers.slice(0,2),['Station','Location']);

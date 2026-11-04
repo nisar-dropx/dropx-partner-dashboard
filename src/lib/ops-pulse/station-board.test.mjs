@@ -41,7 +41,7 @@ test("EDD pivot and C-Return / DSR sheet builders stay stable", () => {
     ],
     zeroDeliveries: 1,
   });
-  assert.equal(board.pickupDonePct, 73);
+  assert.equal(board.pickupDonePct, 8/11*100);
   assert.equal(cReturnStatuses(board).find((r) => r.status === "PICKUP_DONE").count, 8);
 
   const stations = [
@@ -214,7 +214,7 @@ test("DSR normalization preserves incomplete history and unattempted assigned sh
   assert.equal(board.dsrHistoryPending, 334);
   assert.equal(board.daDsr[0].other, 1);
   assert.equal(sumDaDsr(board.daDsr).total, 51);
-  assert.equal(board.daDsr[0].dsrPct, 88);
+  assert.equal(board.daDsr[0].dsrPct, 15/17*100);
   const station = {stationCode: "KLZA", board};
   const sheets = stationBoardSheets({businessDate:"2026-11-03"}, "dsr", [station]);
   assert.equal(sheets[0].rows[0]["Outcome missing"], 1);

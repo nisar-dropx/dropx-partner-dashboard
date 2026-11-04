@@ -8,7 +8,7 @@ test('weighted DOT, strict missing data and station totals',()=>{
  const a={...emptyDot(),total:2,delivered:1};const b={...emptyDot(),total:8,delivered:8};
  assert.equal(sumDot([a,b]).dotPct,90);assert.equal(parseDotTotals({total:0}),undefined);
  const stations=[{stationCode:'KLZA',board:normalizeBoard({dotVersion:1,dotPremium:a})},{stationCode:'GDRD',board:normalizeBoard({dotVersion:1,dotPremium:b})}];
- const report=dotStationTable(stations,'premium');assert.equal(report.rows.at(-1).at(-1).text,'90.0%');
+ const report=dotStationTable(stations,'premium');assert.equal(report.rows.at(-1).at(-1).text,'90.00%');
  assert.equal(dotStationTable([...stations,{stationCode:'KTUR',board:normalizeBoard({})}],'premium').rows.at(-1)[1].text,'—');
 });
 test('DOT drilldown excludes DSR-only, future inventory and other classes; flags match counters',()=>{
