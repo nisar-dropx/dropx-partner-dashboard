@@ -7,36 +7,13 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { loadPayAdvanceWorkerContexts, type PayAdvanceWorkerContext } from "@/lib/pay-advance-payment-context";
-import { formatApplyingMonth, formatWorkingDays, workerCodeFromDetails } from "@/lib/pay-advance-worker-facts";
+import { formatApplyingMonth, formatWorkingDays } from "@/lib/pay-advance-worker-facts";
+import { loadPaidAdvanceRegister, type PaidAdvanceRegisterRow } from "@/lib/paid-advance-register";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-
-type PayAdvancePaymentRow = {
-  id: string;
-  request_no: string;
-  location_code: string | null;
-  requested_for_name: string | null;
-  amount: number | null;
-  status: string | null;
-  approval_status: string | null;
-  created_at: string;
-  work_date: string | null;
-  source_type: string | null;
-  source_id: string | null;
-  details: { worker_code?: string | null } | null;
-};
 
 function money(value: number | null | undefined) {
   if (value == null) return "—";
   return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
-}
-
-function paymentStatus(row: PayAdvancePaymentRow) {
-  const approval = String(row.approval_status ?? "").toUpperCase();
-  const status = String(row.status ?? "").toUpperCase();
-  if (approval === "PROCESSED" || status === "PROCESSED" || status === "PAID") return "Paid";
-  if (approval === "PROCESSING" || status === "PROCESSING") return "Processing";
-  if (approval === "REJECTED" || status === "REJECTED") return "Rejected";
-  return "Waiting for payment";
 }
 
 export const dynamic = "force-dynamic";
@@ -44,31 +21,28 @@ export const dynamic = "force-dynamic";
 export default async function PayAdvanceRegisterPage() {
   const authorization = await requirePagePermission("payment_process", "access");
   const companyId = requireCompanyId(authorization);
-  let rows: PayAdvancePaymentRow[] = [];
+  let rows: PaidAdvanceRegisterRow[] = [];
   let error: string | null = null;
   if (!supabaseAdmin) {
     error = "Supabase service role key is not configured.";
   } else {
-    const result = await supabaseAdmin
-      .from("payment_requests")
-      .select("id, request_no, location_code, requested_for_name, amount, status, approval_status, created_at, work_date, source_type, source_id, details")
-      .eq("company_id", companyId)
-      .or("source_type.eq.pay_advance,category.eq.pay_advance")
-      .order("created_at", { ascending: false });
-    rows = (result.data ?? []) as PayAdvancePaymentRow[];
-    error = result.error?.message ?? null;
+    try {
+      rows = await loadPaidAdvanceRegister(supabaseAdmin, companyId);
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "Unable to load paid advances.";
+    }
   }
   let contexts = new Map<string, PayAdvanceWorkerContext>();
   if (!error) {
     try {
       contexts = await loadPayAdvanceWorkerContexts(companyId, rows.map((row) => ({
         id: row.id,
-        sourceId: row.source_id,
-        sourceType: row.source_type ?? "pay_advance",
-        requestedForName: row.requested_for_name,
-        workerCode: workerCodeFromDetails(row.details),
-        createdAt: row.created_at,
-        workDate: row.work_date
+        sourceId: row.request_id,
+        sourceType: "pay_advance",
+        requestedForName: row.name,
+        workerCode: row.worker_code,
+        createdAt: row.paid_at,
+        workDate: row.first_due_period
       })));
     } catch {
       contexts = new Map();
@@ -80,28 +54,28 @@ export default async function PayAdvanceRegisterPage() {
       <PageHead
         eyebrow="Payments"
         title="Pay Advances"
-        subtitle="Salary advances approved in People and sent here for payment. The same register is on the dashboard and fin.dropxlogistics.com. Paying one debits it on that month’s payroll."
+        subtitle="Paid advances for HRMS and Workforce, including recorded historical payments. Unpaid requests are shown in Payment Process."
       />
       {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Pay advance register unavailable</strong><p className="subtle" style={{ marginTop: 6 }}>{error}</p></div></section> : null}
       {!error ? <section className="panel">
-        <div className="panel-head"><div><h2>Pay advance register</h2><p className="subtle">{rows.length} records · open Process to pay one</p></div><a className="button secondary" href="/payments/process">Open payment process</a></div>
-        <div className="table-wrap"><ReportTable><thead><tr><th>Person</th><th>ID</th><th>Station</th><th>Applying month</th><th>Working days</th><th>Monthly CTC</th><th>Monthly gross</th><th>Advance</th><th>Payment</th><th>Request</th><th>Sent</th></tr></thead>
+        <div className="panel-head"><div><h2>Paid advance register</h2><p className="subtle">{rows.length} paid records</p></div><a className="button secondary" href="/payments/process">Open payment process</a></div>
+        <div className="table-wrap"><ReportTable><thead><tr><th>Person</th><th>ID</th><th>Station</th><th>Recovery month</th><th>Working days</th><th>Monthly CTC</th><th>Monthly gross</th><th>Advance</th><th>Payment</th><th>Reference</th><th>Paid on</th></tr></thead>
           <tbody>{rows.length ? rows.map((row) => {
             const context = contexts.get(row.id);
             return <tr key={row.id}>
-              <td><strong>{context?.name ?? row.requested_for_name ?? "—"}</strong></td>
-              <td>{context?.workerCode ?? workerCodeFromDetails(row.details) ?? "—"}</td>
-              <td>{row.location_code ?? "—"}</td>
-              <td>{context ? formatApplyingMonth(context.applyingMonth) : "—"}</td>
-              <td>{context ? formatWorkingDays(context.workingDays) : "—"}</td>
-              <td>{money(context?.monthlyCtc)}</td>
-              <td>{money(context?.monthlyGross)}</td>
+              <td><strong>{context?.name ?? row.name}</strong></td>
+              <td>{row.worker_code ?? "—"}</td>
+              <td>{row.station}</td>
+              <td>{formatApplyingMonth(row.first_due_period)}</td>
+              <td>{context?.applyingMonth === row.first_due_period ? formatWorkingDays(context.workingDays) : "—"}</td>
+              <td>{money(context?.applyingMonth === row.first_due_period ? context.monthlyCtc : null)}</td>
+              <td>{money(context?.applyingMonth === row.first_due_period ? context.monthlyGross : null)}</td>
               <td>{money(row.amount)}</td>
-              <td><StatusPill status={paymentStatus(row)} /></td>
-              <td>{row.request_no}</td>
-              <td>{formatDashboardDateTime(row.created_at)}</td>
+              <td><StatusPill status="Paid" /></td>
+              <td>{String(row.provenance?.request_number ?? row.bank_reference ?? `ADV-${row.id.slice(0, 8)}`)}</td>
+              <td>{formatDashboardDateTime(row.paid_at)}</td>
             </tr>;
-          }) : <tr><td className="empty-cell" colSpan={11}>No pay advance has been sent to Payments.</td></tr>}</tbody>
+          }) : <tr><td className="empty-cell" colSpan={11}>No paid advance has been recorded.</td></tr>}</tbody>
         </ReportTable></div>
       </section> : null}
     </AppShell>
