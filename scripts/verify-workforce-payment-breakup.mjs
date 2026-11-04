@@ -37,7 +37,7 @@ assert.match(workforcePage, /summarizeWorkDays/, "Workforce must summarize captu
 assert.match(workforcePage, /workDayUnits:\s*calculation\.attendanceUnit/, "Direct payout Work Days must use canonical attendance units");
 assert.match(workforcePage, /paymentMethodBreakdown/, "Workforce must subtotal each mapped payment method separately");
 assert.match(workforcePage, /select\("payment_method_id,payment_field_id,component_code,component_type,label,pay_schedule,sort_order,/, "Workforce payout must load the saved payment-field order and field identity");
-assert.match(workforcePage, /const lines = orderPayoutLines\(\[\.\.\.productionLines, \.\.\.attendanceLines\], configuredComponentOrder\)/, "Mixed payout fields must use the payment method's configured order");
+assert.match(workforcePage, /const lines(?:\s*:\s*WorkforcePayoutRow\["dailyBreakdown"\]\[number\]\["lines"\])?\s*=\s*orderPayoutLines\(\[\.\.\.productionLines, \.\.\.attendanceLines\], configuredComponentOrder\)/, "Mixed payout fields must use the payment method's configured order");
 assert.match(workforcePage, /const currentComponentOrder = paymentComponentOrderMap\(componentsByMethod\.get\(methodId\)[\s\S]*?lines: orderPayoutLines\(calculation\.lines\.map/, "Existing direct-allocation values must render in the payment method's current field order");
 assert.doesNotMatch(workforcePage, /capture_method: "biometric" as const/, "Direct allocations must use the effective-dated attendance setting without a biometric override");
 assert.match(workforcePage, /summarizePayoutBreakdownLines\(dailyBreakdown\.flatMap\(\(day\) => day\.lines\)\)/, "Existing component units, rates and amounts must remain in the payout breakup");
