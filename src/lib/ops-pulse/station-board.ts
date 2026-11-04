@@ -80,6 +80,7 @@ export type StationBoardPayload = {
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
   dotVersion?: number;
+  dotMetadataPending?: number;
   dotPremium?: DotTotals;
   dotStandard?: DotTotals;
   daDsrSwa?: StationBoardDaDsr[];
@@ -325,7 +326,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     daDsrPremium,
     zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
     daDsrSwa: parseDaDsrList(row.daDsrSwa),
-    ...(Number(row.dotVersion) === 1 ? { dotVersion: 1, dotPremium: parseDotTotals(row.dotPremium), dotStandard: parseDotTotals(row.dotStandard) } : {}),
+    ...(Number(row.dotVersion) === 1 ? { dotVersion: 1, dotMetadataPending: Number(row.dotMetadataPending) || 0, dotPremium: parseDotTotals(row.dotPremium), dotStandard: parseDotTotals(row.dotStandard) } : {}),
     daDsrStandard,
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,

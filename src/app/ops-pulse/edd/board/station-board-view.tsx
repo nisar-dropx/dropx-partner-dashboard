@@ -427,6 +427,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     : stations.reduce((a, r) => ({ total: a.total + r.board.cReturnTotal, picked: a.picked + r.board.pickupDone, pending: a.pending + pendingCReturn(r.board.cReturn, r.board.cReturnTotal) }), { total: 0, picked: 0, pending: 0 });
   const dotValues = stations.map(station => station.board.dotVersion === 1 ? (view === "premium" ? station.board.dotPremium : station.board.dotStandard) : undefined);
   const dotUnavailable = isDotView(view) && dotValues.some(value => !value);
+  const dotMetadataPending = stations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0);
   const dotSummary = sumDot(dotValues.filter((value): value is DotTotals => Boolean(value)));
   function reportFor(blockStations: StationBoardStation[], label: string) {
     const dsrTitle =
@@ -456,9 +457,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
       : "";
     const historyPending = (isDsrFamilyView(view) || isDotView(view)) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
+    const metadataPending = isDotView(view) ? blockStations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0) : 0;
     return prepareBoardReport({ ...table,
       compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending today is included in physical stock; do not add these columns.` : undefined,
-      title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending ? ` · Provisional (${count(historyPending)} history checks pending)` : ""}`,
+      title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending || metadataPending ? ` · Provisional (${[historyPending ? `${count(historyPending)} history checks pending` : "", metadataPending ? `${count(metadataPending)} data pending` : ""].filter(Boolean).join(" · ")})` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
@@ -937,7 +939,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       </div> : null}
 
       <div className={s.kpis} aria-live="polite">
-        <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong></article>
+        <article className={s.kpi}><span>Stations ready</span><strong>{isDotView(view) ? dotValues.filter(Boolean).length : totals.ready}/{stations.length}</strong></article>
         {isDotView(view) ? <>
           {([['Eligible', dotSummary.total], ['Dispatched', dotSummary.dispatched], ['At station', dotSummary.atStation], ['Delivered', dotSummary.delivered]] as const).map(([label,value]) => <article key={label} className={s.kpi}><span>{label}</span><strong>{dotUnavailable ? "—" : count(value)}</strong></article>)}
           <article className={s.kpi}><span>DOT</span><strong>{dotUnavailable || !dotSummary.total ? "—" : pct(dotSummary.dotPct)}</strong></article>
@@ -975,6 +977,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div>
         {(isDsrFamilyView(view) || isDotView(view)) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
         {isDotView(view) ? <small className={s.reportMeta}>Due by selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
+        {isDotView(view) && dotMetadataPending > 0 ? <small className={s.reportMeta} role="status">{count(dotMetadataPending)} shipments have missing or unrecognised ship option / EDD. DOT includes confirmed eligible classes only.</small> : null}
         {dotUnavailable ? <small className={s.reportMeta} role="status">Eligible DOT inventory was not captured for this date. Refresh today to start tracking; historical gaps are shown as —.</small> : null}
         {needsDsrStation ? <small className={s.reportMeta}>{STATION_DSR_INVENTORY_NOTE}</small> : null}
         {needsDsrStation && (dsrStationPending || dsrStationError) ? <small role={dsrStationError ? "alert" : "status"} className={s.reportMeta}>
