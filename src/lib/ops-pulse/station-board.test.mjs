@@ -207,3 +207,17 @@ test("OOR warning starts at 1 pm IST only above 50% and uses the snapshot time",
   assert.equal(oorTextColor(90, 100, "2026-11-02T06:00:00Z"), undefined, "historical morning snapshot stays neutral");
   assert.equal(oorTextColor(90, 100, "2026-11-03T18:30:00Z"), undefined, "IST midnight is before the cutoff");
 });
+
+
+test("DSR normalization preserves incomplete history and unattempted assigned shipments", () => {
+  const board = normalizeBoard({ dsrHistoryPending: 334, daDsr: [{ driverId: "DA1", delivered: 45, failed: 2, rejected: 3, oor: 0, other: 1, total: 51 }] });
+  assert.equal(board.dsrHistoryPending, 334);
+  assert.equal(board.daDsr[0].other, 1);
+  assert.equal(sumDaDsr(board.daDsr).total, 51);
+  assert.equal(board.daDsr[0].dsrPct, 88);
+  const station = {stationCode: "KLZA", board};
+  const sheets = stationBoardSheets({businessDate:"2026-11-03"}, "dsr", [station]);
+  assert.equal(sheets[0].rows[0]["Other / unattempted"], 1);
+  assert.equal(sheets[0].rows[0]["History checks pending"], 334);
+  assert.equal(sheets[0].rows.at(-1)["Other / unattempted"], 1);
+});
