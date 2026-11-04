@@ -1,6 +1,7 @@
 
 import { ReportTable } from "@/components/report-table";
-import { VanFuelFields } from "@/components/van-fuel-fields";
+import { vehiclePaymentPolicy } from "@/lib/vehicle-payment";
+import { VehiclePaymentFields } from "@/components/vehicle-payment-fields";
 import { PaymentResubmissionSavedDetails } from "@/components/payment-resubmission-saved-details";
 import { EvidencePreview } from "@/components/evidence-preview";
 import { PaymentResubmissionContext } from "@/components/payment-resubmission-context";
@@ -481,7 +482,7 @@ export default async function ExpenseRequestPage({
             </div>
             <form action={resubmitPayout ? resubmitPaymentRequest : resubmitExpenseRequest} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={resubmitRequest.id} />
-              {resubmitHead?.code === "VAN_FUEL" ? <VanFuelFields locationId={resubmitRequest.location_id ?? ""} saved={resubmitRequest.details} actual={hasSubmittedPaymentDetails(resubmitRequest)} /> : null}
+              {vehiclePaymentPolicy(resubmitHead?.code) ? <VehiclePaymentFields headCode={resubmitHead!.code} locationId={resubmitRequest.location_id ?? ""} saved={resubmitRequest.details} actual={hasSubmittedPaymentDetails(resubmitRequest)} /> : null}
               {resubmitPayout ? <input type="hidden" name="return_to" value="expense" /> : null}
               {resubmitContext ? <PaymentResubmissionContext context={resubmitContext} location={resubmitRequest.location_code} head={resubmitHead?.name ?? "Payment request"} amount={resubmitRequest.amount_requested ?? resubmitRequest.amount} remarks={resubmitRequest.remarks} payout={resubmitPayout} /> : null}
               <PaymentResubmissionSavedDetails remarks={resubmitContext?.originalRemarks || resubmitRequest.remarks} original={Boolean(resubmitContext?.originalRemarks)} answers={Array.from(answerByQuestionId.values())} questions={resubmitHead?.payment_head_questions ?? []} />
@@ -559,7 +560,7 @@ export default async function ExpenseRequestPage({
             </div>
             <form action={submitPaymentBankDetails} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={bankRequest.id} />
-              {bankHead?.code === "VAN_FUEL" ? <VanFuelFields locationId={bankRequest.location_id ?? ""} saved={bankRequest.details} actual preserveVehicle /> : null}
+              {vehiclePaymentPolicy(bankHead?.code) ? <VehiclePaymentFields headCode={bankHead!.code} locationId={bankRequest.location_id ?? ""} saved={bankRequest.details} actual preserveVehicle /> : null}
               <input type="hidden" name="return_to" value="expense" />
               <div className="form-grid three">
                 <label>

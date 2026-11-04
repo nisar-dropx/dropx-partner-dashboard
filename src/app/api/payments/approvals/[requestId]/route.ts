@@ -1,4 +1,5 @@
 import { loadSameDayFuel } from "@/lib/van-fuel-server";
+import { paymentVehicleDetails } from "@/lib/vehicle-payment";
 import { vanFuelDetails } from "@/lib/van-fuel";
 import { NextResponse } from "next/server";
 
@@ -124,6 +125,7 @@ export async function GET(_request: Request, context: { params: { requestId: str
     const fuel = vanFuelDetails(request.details);
     const fuelHistory = fuel ? await loadSameDayFuel(companyId, fuel.vehicle_no, fuel.fuel_date).catch(() => ({ rows: [], latestDate: null, error: "Fuel history unavailable" })) : null;
     return NextResponse.json({
+      vehicle: paymentVehicleDetails(request.details),
       fuelHistory,
       fuel: vanFuelDetails(request.details),
       answers,
