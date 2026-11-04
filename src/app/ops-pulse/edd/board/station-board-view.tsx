@@ -617,6 +617,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         ? "Hourly refresh working"
         : "Refresh working";
     if (!next.refreshRunning) return "Board data updated.";
+    if (total > 0 && done >= total) return `${who} · finishing recovery…`;
     return total ? `${who} · ${done}/${total}` : `${who}…`;
   }
 
@@ -798,7 +799,16 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       const nextIndex = Number(body.nextIndex ?? 0) || 0;
       if (total > 0) stationTotal = total;
       if (body.busy && !advanced && !body.done) {
-        setBackfillNote(total ? `Refresh working · ${nextIndex}/${total}` : "Refresh working…");
+        const deferred = String((body as { deferredReason?: string }).deferredReason ?? "");
+        setBackfillNote(
+          deferred === "ops-live"
+            ? (total ? `Waiting for Ops Live · board ${nextIndex}/${total}` : "Waiting for Ops Live…")
+            : total && nextIndex >= total
+              ? `Refresh working · finishing recovery…`
+              : total
+                ? `Refresh working · ${nextIndex}/${total}`
+                : "Refresh working…",
+        );
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }
@@ -845,7 +855,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setBackfillNote("Starting refresh…");
     setBackfillProgress({ done: 0, total: 0 });
     try {
-      void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
+      // Station board Refresh owns Amazon for this click. Do not also start the
+      // Ops Live durable sweep — that blocked board ticks and frozen the UI at 35/35.
       await runBackfillLoop(clearSeq);
       await reloadBoard();
       setBackfillNote("Board data updated.");
