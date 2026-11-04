@@ -12,13 +12,14 @@ export const BOARD_TID = {
   AGEING: "BoardAgeing",
 } as const;
 
-export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "zero" | "ageing";
+export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing";
 
 export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   edd: [BOARD_TID.EDD, "EDD"],
   creturn: [BOARD_TID.CRETURN, "Pickup"],
   ageing: [BOARD_TID.AGEING],
   dsr: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
+  "dsr-station": [BOARD_TID.EDD, BOARD_TID.AGEING, BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
   zero: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
 };
 
@@ -41,6 +42,7 @@ export type BoardTidExportRow = {
   driverId: string;
   driverName: string;
   report: string;
+  sourceBucket?: string;
 };
 
 function dsrStatus(bucket: string): string {
@@ -142,6 +144,26 @@ function mapDsr(flash: FlashTrackingLike[], zeroOnly: boolean): BoardTidExportRo
   return rows;
 }
 
+function mapDsrStation(flash: FlashTrackingLike[]): BoardTidExportRow[] {
+  const buckets = new Set(BOARD_TID_KIND_BUCKETS["dsr-station"]);
+  return flash
+    .filter((row) => buckets.has(row.bucket))
+    .map((row) => ({
+      stationCode: row.stationCode,
+      trackingId: row.trackingId,
+      sourceBucket: row.bucket,
+      status: row.bucket === BOARD_TID.EDD ? "EDD pending"
+        : row.bucket === BOARD_TID.AGEING ? row.state || "At station"
+          : dsrStatus(row.bucket),
+      currentState: row.state || "",
+      edd: row.edd || "",
+      driverId: row.driverId,
+      driverName: row.driverName,
+      report: "DSR station",
+    }))
+    .filter((row) => row.trackingId);
+}
+
 /** Map worker flash tracking rows into Station board TID export rows for one report kind. */
 export function mapBoardTidExportRows(
   flash: FlashTrackingLike[],
@@ -150,6 +172,7 @@ export function mapBoardTidExportRows(
   if (kind === "edd") return mapEdd(flash);
   if (kind === "creturn") return mapCReturn(flash);
   if (kind === "ageing") return mapAgeing(flash);
+  if (kind === "dsr-station") return mapDsrStation(flash);
   if (kind === "zero") return mapDsr(flash, true);
   return mapDsr(flash, false);
 }

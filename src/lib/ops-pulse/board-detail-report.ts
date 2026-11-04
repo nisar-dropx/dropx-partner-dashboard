@@ -1,4 +1,5 @@
 import { CRETURN_DISPLAY, CRETURN_SHORT, CRETURN_PICKED_UP_BUCKET, pickupPctColor, pickupPctTextColor, sumDaDsr, dsrHeatColor, dsrPctTextColor, oorTextColor, type StationBoardStation } from './station-board.ts';
+import type { StationDsrInventorySummary } from './station-dsr-summary.ts';
 import type { BoardShareCell, BoardShareTable } from './station-board-share.ts';
 
 export type BoardDetailLevel = 'station' | 'associate';
@@ -49,16 +50,21 @@ export function cReturnDetailTable(stations: StationBoardStation[], associates: 
   return { title: `C-Return · ${level === 'associate' ? 'Associates' : 'Stations'}`, subtitle: '', headers, rows };
 }
 
-export function dsrStationTable(stations: StationBoardStation[], names: Record<string, string>, zeroOnly = false): BoardShareTable {
+export function dsrStationTable(stations: StationBoardStation[], names: Record<string, string>, zeroOnly = false, inventory?: Record<string, StationDsrInventorySummary>): BoardShareTable {
   const hasOther = stations.some(s => s.board.daDsr.some(d => (d.other || 0) > 0));
-  const headers = ['Station', 'Location', 'Total', 'Delivered', 'Out on Road', 'Delivery Failed', 'Delivery Rejected', ...(hasOther ? ['Other / pending'] : []), 'DSR%'];
+  const inventoryHeaders = zeroOnly ? [] : ['EDD pending', 'EDD today at station', 'Physical at station'];
+  const headers = ['Station', 'Location', ...inventoryHeaders, 'Assigned', 'Delivered', 'Delivery Failed', 'Delivery Rejected', 'Out on Road', ...(hasOther ? ['Other / pending'] : []), 'DSR%'];
   const all = stations.flatMap(s => s.board.daDsr).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0));
-  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, numberCell(sum.failed), numberCell(sum.rejected), ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
+  const inventoryCells = (summary?: StationDsrInventorySummary): BoardShareCell[] => inventoryHeaders.length ? [summary ? numberCell(summary.eddPending) : { text: '—', align: 'right' }, summary ? numberCell(summary.eddTodayAtStation) : { text: '—', align: 'right' }, summary ? numberCell(summary.physicalAtStation) : { text: '—', align: 'right' }] : [];
+  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), numberCell(sum.failed), numberCell(sum.rejected), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
   const rows: BoardShareCell[][] = stations.flatMap(s => {
     const sum = sumDaDsr(s.board.daDsr.filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0)));
     if (zeroOnly && !sum.total) return [];
-    return [[{ text: s.stationCode, bold: true }, { text: names[s.stationCode] || '' }, ...metrics(sum, s.fetchedAt)]];
+    return [[{ text: s.stationCode, bold: true }, { text: names[s.stationCode] || '' }, ...inventoryCells(inventory?.[s.stationCode]), ...metrics(sum, s.fetchedAt)]];
   });
-  if (rows.length) rows.push([{ text: 'Grand Total', bold: true }, { text: `${rows.length} stations` }, ...metrics(sumDaDsr(all))]);
+  if (rows.length) {
+    const inventoryTotal = inventory ? stations.reduce<StationDsrInventorySummary>((total, station) => ({ eddPending: total.eddPending + (inventory[station.stationCode]?.eddPending || 0), eddTodayAtStation: total.eddTodayAtStation + (inventory[station.stationCode]?.eddTodayAtStation || 0), physicalAtStation: total.physicalAtStation + (inventory[station.stationCode]?.physicalAtStation || 0) }), { eddPending: 0, eddTodayAtStation: 0, physicalAtStation: 0 }) : undefined;
+    rows.push([{ text: 'Grand Total', bold: true }, { text: `${rows.length} stations` }, ...inventoryCells(inventoryTotal), ...metrics(sumDaDsr(all))]);
+  }
   return { title: `${zeroOnly ? 'Zero deliveries' : 'DSR'} · Stations`, subtitle: '', headers, rows };
 }

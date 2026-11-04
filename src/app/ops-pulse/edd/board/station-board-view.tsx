@@ -41,6 +41,8 @@ import s from "./board.module.css";
 import { EddMultiSelect } from "../edd-multi-select";
 import { boardDeliverySummary, filterBoardStations, prepareBoardReport, type BoardCluster, type BoardReportSort } from "@/lib/ops-pulse/compact-board-report";
 import { downloadReportExcel, type ExcelReport } from "@/lib/download-report-excel";
+import { TrackingDetailModal } from "@/components/tracking-detail-modal";
+import { stationDsrMetricRows, summarizeStationDsrRows, type StationDsrMetric, type StationDsrTidRow } from "@/lib/ops-pulse/station-dsr-summary";
 
 type Props = {
   initial: LoadFlashBoardNetwork;
@@ -59,8 +61,11 @@ type TidMode = "grouped" | "day";
 type PanelMode = "card" | "tids";
 
 type TidRow = {
+  stationCode?: string;
   trackingId: string;
   status: string;
+  currentState?: string;
+  sourceBucket?: string;
   edd: string;
   driverId: string;
   driverName: string;
@@ -271,6 +276,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const sort = sorts[sortKey] ?? { header: view === "creturn" ? "Pending pickup" : view === "zero" ? DSR_HEADERS.oor : view === "dsr" ? DSR_HEADERS.dsrPct : "Station", direction: hasDetailViews ? "desc" : "asc" };
   const [cReturnData, setCReturnData] = useState<{ key: string; rows: CReturnAssociate[]; error?: string } | null>(null);
   const [detailRetry, setDetailRetry] = useState(0);
+  const [dsrStationData, setDsrStationData] = useState<{ key: string; rows: StationDsrTidRow[]; error?: string } | null>(null);
+  const [dsrStationRetry, setDsrStationRetry] = useState(0);
   const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
@@ -283,6 +290,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [tidDay, setTidDay] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState<PanelMode>("card");
   const [copied, setCopied] = useState(false);
+  const [tidLabel, setTidLabel] = useState("Tracking IDs");
+  const [openTrackingId, setOpenTrackingId] = useState<string | null>(null);
   const [stationShareBusy, setStationShareBusy] = useState<BlockBusy>(null);
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
   const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
@@ -362,16 +371,46 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     })();
     return () => controller.abort();
   }, [needsCReturn, cReturnKey, detailRetry]);
+  const needsDsrStation = view === "dsr" && level === "station";
+  const dsrStationKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt])]);
+  const dsrStationPending = needsDsrStation && dsrStationData?.key !== dsrStationKey;
+  const dsrStationError = needsDsrStation && dsrStationData?.key === dsrStationKey ? dsrStationData.error : undefined;
+  const dsrStationRows = dsrStationData?.key === dsrStationKey && !dsrStationData.error ? dsrStationData.rows : [];
+  const dsrStationInventory = useMemo(
+    () => dsrStationData?.key === dsrStationKey && !dsrStationData.error
+      ? summarizeStationDsrRows(dsrStationData.rows, payload.businessDate)
+      : undefined,
+    [dsrStationData, dsrStationKey, payload.businessDate],
+  );
+  useEffect(() => {
+    if (!needsDsrStation) return;
+    const controller = new AbortController();
+    const [date, stationSnapshots] = JSON.parse(dsrStationKey) as [string, [string, string | null][]];
+    const codes = stationSnapshots.map(([code]) => code);
+    if (!codes.length) { setDsrStationData({ key: dsrStationKey, rows: [] }); return; }
+    const params = new URLSearchParams({ date, kind: "dsr-station", stations: codes.join(",") });
+    void (async () => {
+      try {
+        const response = await fetch(`/api/ops-pulse/edd/board/tids?${params}`, { cache: "no-store", signal: controller.signal });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !Array.isArray(body.rows)) throw new Error(body.error || "Unable to load station EDD and physical inventory.");
+        if (!controller.signal.aborted) setDsrStationData({ key: dsrStationKey, rows: body.rows });
+      } catch (error) {
+        if (!controller.signal.aborted) setDsrStationData({ key: dsrStationKey, rows: [], error: error instanceof Error ? error.message : "Unable to load station EDD and physical inventory." });
+      }
+    })();
+    return () => controller.abort();
+  }, [needsDsrStation, dsrStationKey, dsrStationRetry]);
   const cReturnShown = needsCReturn
     ? cReturnRows.reduce((a, r) => ({ total: a.total + r.total, picked: a.picked + (r.statuses.PICKUP_DONE || 0), pending: a.pending + pendingCReturn(r.statuses, r.total) }), { total: 0, picked: 0, pending: 0 })
     : stations.reduce((a, r) => ({ total: a.total + r.board.cReturnTotal, picked: a.picked + r.board.pickupDone, pending: a.pending + pendingCReturn(r.board.cReturn, r.board.cReturnTotal) }), { total: 0, picked: 0, pending: 0 });
   function reportFor(blockStations: StationBoardStation[], label: string) {
     const table = view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
-      : (view === "dsr" || view === "zero") && level === "station" ? dsrStationTable(blockStations, stationNames, view === "zero")
+      : (view === "dsr" || view === "zero") && level === "station" ? dsrStationTable(blockStations, stationNames, view === "zero", view === "dsr" ? dsrStationInventory : undefined)
       : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
     const d = boardDeliverySummary(blockStations, view === "zero");
     const stats = view === "dsr" || view === "zero"
-      ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Attempted ${pct(d.attemptPct)} (${count(d.attempted)}) · Rejected ${pct(d.rejectPct)} (${count(d.rejected)})`
+      ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
       : "";
     return prepareBoardReport({ ...table,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
@@ -379,8 +418,11 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }, sort, { dsr: level === "associate" && (view === "dsr" || view === "zero"), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
   const report = reportFor(stations, regionLabel);
+  const outputUnavailable = detailUnavailable || dsrStationPending || Boolean(dsrStationError);
   function excelReport(table = report, tidSheet?: ExcelReport["extraSheets"]): ExcelReport {
     if (detailUnavailable) throw new Error("Wait for associate details to load, then retry.");
+    if (dsrStationPending) throw new Error("Wait for station EDD and physical inventory to load, then retry.");
+    if (dsrStationError) throw new Error(dsrStationError);
     return {
       title: table.title,
       headers: table.headers,
@@ -397,7 +439,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }
     const params = new URLSearchParams({
       date: payload.businessDate,
-      kind: view,
+      kind: view === "dsr" && level === "station" ? "dsr-station" : view,
       stations: codes.join(","),
     });
     const response = await fetch(`/api/ops-pulse/edd/board/tids?${params}`, { cache: "no-store" });
@@ -894,6 +936,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setTidMode("grouped");
     setTidDay(null);
     setPanelMode("card");
+    setTidLabel("Tracking IDs");
     setCopied(false);
   }
 
@@ -904,6 +947,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setTidMode("grouped");
     setTidDay(null);
     setPanelMode("card");
+    setTidLabel("Tracking IDs");
     setCopied(false);
   }
 
@@ -924,6 +968,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       const body = await response.json().catch(() => ({})) as { rows?: TidRow[]; error?: string };
       if (!response.ok) throw new Error(String(body.error ?? "Unable to load tracking IDs."));
       setTids(Array.isArray(body.rows) ? body.rows : []);
+      setTidLabel("Tracking IDs");
       setPanelMode("tids");
     } catch (err) {
       setTidsError(err instanceof Error ? err.message : "Unable to load tracking IDs.");
@@ -932,6 +977,18 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     } finally {
       setTidsBusy(false);
     }
+  }
+
+  function openStationMetricPanel(code: string, metric: StationDsrMetric, label: string) {
+    const rows = stationDsrMetricRows(dsrStationRows, code, payload.businessDate, metric);
+    setOpenStation(code);
+    setTids(rows);
+    setTidsError(null);
+    setTidMode("grouped");
+    setTidDay(null);
+    setPanelMode("tids");
+    setTidLabel(label);
+    setCopied(false);
   }
 
   async function copyTids(rows: TidRow[]) {
@@ -1011,21 +1068,21 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
             {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
             {busy === "refresh" ? " Working…" : " Refresh"}
           </button>
-          <button type="button" disabled={busy !== null || detailUnavailable} onClick={() => void onDownload()}>
+          <button type="button" disabled={busy !== null || outputUnavailable} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
           </button>
           <button
             type="button"
-            disabled={busy !== null || detailUnavailable}
+            disabled={busy !== null || outputUnavailable}
             onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: false, scope: "all" })}
           >
             {busy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
           </button>
-          <CopyReportImage resetKey={`${view}-${level}-${groupByStation}-${ageingMode}-${reportTime}-${[...stationFilter]}-${[...clusterFilter]}-${[...regions]}-${JSON.stringify(sort)}`} disabled={busy !== null || detailUnavailable || !report.rows.length} getImages={() => renderBoardShareImages(report, true)} />
+          <CopyReportImage resetKey={`${view}-${level}-${groupByStation}-${ageingMode}-${reportTime}-${[...stationFilter]}-${[...clusterFilter]}-${[...regions]}-${JSON.stringify(sort)}`} disabled={busy !== null || outputUnavailable || !report.rows.length} getImages={() => renderBoardShareImages(report, true)} />
           <button
             type="button"
             className={s.primary}
-            disabled={busy !== null || detailUnavailable}
+            disabled={busy !== null || outputUnavailable}
             onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: true, scope: "all" })}
           >
             {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
@@ -1060,7 +1117,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
 
       {hasDetailViews ? <div className={s.viewControls}>
         {hasDetailViews ? <div className={s.segment} aria-label="Report detail">
-          <button type="button" aria-pressed={level === "station"} onClick={() => setLevels(p => ({ ...p, [view]: "station" }))}>Station summary</button>
+          <button type="button" aria-pressed={level === "station"} onClick={() => setLevels(p => ({ ...p, [view]: "station" }))}>Station view</button>
           <button type="button" aria-pressed={level === "associate"} onClick={() => setLevels(p => ({ ...p, [view]: "associate" }))}>Associate detail</button>
         </div> : null}
         {hasDetailViews && level === "associate" ? <div className={s.segment} aria-label="Associate layout">
@@ -1073,8 +1130,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong></article>
         {view === "dsr" || view === "zero" ? <>
           <article className={s.kpi}><span>Overall DSR</span><strong>{pct(delivery.dsrPct)} <small>({count(delivery.delivered)})</small></strong></article>
-          <article className={s.kpi} title="Attempted = delivered + failed + rejected; percentage of total shipments"><span>Attempted</span><strong>{pct(delivery.attemptPct)} <small>({count(delivery.attempted)})</small></strong></article>
-          <article className={s.kpi} title="Rejected / total shipments"><span>Rejected</span><strong>{pct(delivery.rejectPct)} <small>({count(delivery.rejected)})</small></strong></article>
+          <article className={s.kpi} title="Shipments with a delivery-failed outcome; rejected shipments are shown separately"><span>Delivery failed</span><strong>{count(delivery.failed)}</strong></article>
+          <article className={s.kpi} title="Shipments with a delivery-rejected outcome"><span>Rejected</span><strong>{count(delivery.rejected)}</strong></article>
           <article className={s.kpi}><span>On road</span><strong>{pct(delivery.roadPct)} <small>({count(delivery.oor)})</small></strong></article>
         </> : view === "creturn" ? <>
           <article className={s.kpi}><span>Total C-Return</span><strong>{detailUnavailable ? "—" : count(cReturnShown.total)}</strong></article>
@@ -1104,18 +1161,30 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <span>{view === "dsr" || view === "zero" ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
         {(view === "dsr" || view === "zero") && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
+        {needsDsrStation && (dsrStationPending || dsrStationError) ? <small role={dsrStationError ? "alert" : "status"} className={s.reportMeta}>
+          {dsrStationError || "Loading EDD pending and dispatch-eligible physical station TIDs…"}
+          {dsrStationError ? <button type="button" onClick={() => { setDsrStationData(null); setDsrStationRetry(value => value + 1); }}>Retry</button> : null}
+        </small> : null}
         {detailUnavailable ? <div className={s.empty} role={detailError ? "alert" : "status"}>
           {detailError || "Loading C-Return associates…"}
           {detailError ? <button type="button" onClick={() => { setCReturnData(null); setDetailRetry(n => n + 1); }}>Retry</button> : null}
         </div> : <div className={s.scroll}>
           <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
             <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-              <button type="button" className={s.sortButton} title={header === "Other / pending" ? "Assigned shipments without a confirmed delivery outcome, including station returns and statuses awaiting verification. Included in Total, excluded from Attempted and OOR." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+              <button type="button" className={s.sortButton} title={header === "EDD pending" ? "All first-dispatch EDD pending TIDs in the selected station snapshot." : header === "EDD today at station" ? "EDD is the selected date and the shipment is still at station before first dispatch." : header === "Physical at station" ? "Dispatch-eligible Ageing stock at station. Excludes future EDD, Ready for FC, FC/transit, customer-hold/HCR and shipments failed or rejected today." : header === "Other / pending" ? "Assigned shipments without a confirmed outcome. Included in Assigned, separate from delivered, failed, rejected and on-road." : header === DSR_HEADERS.failed ? "Amazon delivery-failed outcome: the operational attempted count. Rejections remain separate." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
             </th>)}</tr></thead>
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
-              {row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
-                {((report.headers[column] === "Station" && cell.text) || (singleStation && !report.headers.includes("Station") && column === 0 && report.rowStations[i])) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(report.rowStations[i])}>{cell.text}</button> : cell.text}
-              </td>)}
+              {row.map((cell, column) => {
+                const header = report.headers[column];
+                const metric = ({ "EDD pending": "eddPending", "EDD today at station": "eddTodayAtStation", "Physical at station": "physicalAtStation", Assigned: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Other / pending": "other" } as Record<string, StationDsrMetric>)[header];
+                const stationCode = report.rowStations[i];
+                const stationMetric = view === "dsr" && level === "station" && metric && cell.text !== "—";
+                return <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
+                  {((header === "Station" && cell.text) || (singleStation && !report.headers.includes("Station") && column === 0 && stationCode)) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(stationCode)}>{cell.text}</button>
+                    : stationMetric ? <button type="button" className={s.metricBtn} title={`View ${header} TIDs`} onClick={() => openStationMetricPanel(stationCode, metric, `${header} · ${stationCode}`)}>{cell.text}</button>
+                      : cell.text}
+                </td>;
+              })}
             </tr>)}</tbody>
             {report.totalRows ? <tfoot>{report.rows.slice(-report.totalRows).map((row, i) => <tr key={i}>{row.map((cell, column) => <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align }}>{cell.text}</td>)}</tr>)}</tfoot> : null}
           </ReportTable>
@@ -1351,7 +1420,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                   <h3>
                     {tidMode === "day" && tidDay
                       ? `TIDs · ${tidDay === "unknown" ? "No EDD" : boardDayLabel(tidDay)} · ${dayTids.length.toLocaleString("en-IN")}`
-                      : `Tracking IDs · ${tids.length.toLocaleString("en-IN")}`}
+                      : `${tidLabel} · ${tids.length.toLocaleString("en-IN")}`}
                   </h3>
                   <div className={s.tidTools}>
                     {tidMode === "day" ? (
@@ -1375,9 +1444,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                   <p className={s.empty}>No tracking IDs for this station yet. Try Refresh.</p>
                 ) : tidMode === "day" ? (
                   <div className={s.tidPlain}>
-                    {dayTids.map((row) => (
-                      <code key={row.trackingId}>{row.trackingId}</code>
-                    ))}
+                    {dayTids.map((row) => <button type="button" className={s.tidTrack} key={row.trackingId} onClick={() => setOpenTrackingId(row.trackingId)}><code>{row.trackingId}</code><span>Track</span></button>)}
                   </div>
                 ) : view === "edd" ? (
                   <div className={s.tidGroups}>
@@ -1400,9 +1467,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                   </div>
                 ) : (
                   <div className={s.tidPlain}>
-                    {tids.map((row) => (
-                      <code key={row.trackingId}>{row.trackingId}{row.status ? ` · ${row.status}` : ""}</code>
-                    ))}
+                    {tids.map((row) => <button type="button" className={s.tidTrack} key={row.trackingId} onClick={() => setOpenTrackingId(row.trackingId)}><code>{row.trackingId}{row.status ? ` · ${row.status}` : ""}</code><span>Track</span></button>)}
                   </div>
                 )}
               </div>
@@ -1410,6 +1475,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           </aside>
         </div>
       ) : null}
+      <TrackingDetailModal trackingId={openTrackingId} stationHint={selected?.stationCode} onClose={() => setOpenTrackingId(null)} />
     </div>
   );
 }

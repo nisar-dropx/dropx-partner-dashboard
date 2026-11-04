@@ -21,10 +21,9 @@ export function boardDeliverySummary(stations: StationBoardStation[], zeroOnly =
   const sums = rows.reduce((a, d) => ({ total: a.total + d.total, delivered: a.delivered + d.delivered,
     failed: a.failed + d.failed, rejected: a.rejected + d.rejected, oor: a.oor + d.oor }),
   { total: 0, delivered: 0, failed: 0, rejected: 0, oor: 0 });
-  const attempted = sums.delivered + sums.failed + sums.rejected;
   const pct = (n: number) => sums.total ? Math.round(n / sums.total * 1000) / 10 : null;
-  return { ...sums, attempted, dsrPct: pct(sums.delivered), attemptPct: pct(attempted), rejectPct: pct(sums.rejected),
-    roadPct: pct(sums.oor), daCount: rows.length, zeroCount: rows.filter(d => d.delivered === 0).length };
+  return { ...sums, dsrPct: pct(sums.delivered), roadPct: pct(sums.oor),
+    daCount: rows.length, zeroCount: rows.filter(d => d.delivered === 0).length };
 }
 
 /** One ordering and column projection for screen, Excel and share images. */

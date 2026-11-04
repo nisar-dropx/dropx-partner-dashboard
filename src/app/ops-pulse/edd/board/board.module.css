@@ -829,6 +829,52 @@
   color: #223642;
 }
 
+.tidTrack {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tidTrack:hover,
+.tidTrack:focus-visible {
+  background: #eaf2f8;
+}
+
+.tidTrack span {
+  color: #1d5f9c;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.metricBtn {
+  min-width: 32px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #14568b;
+  font: inherit;
+  font-weight: 750;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.metricBtn:hover,
+.metricBtn:focus-visible {
+  background: #eaf2f8;
+}
+
 .table.tids td:first-child,
 .table.tids th:first-child {
   width: 140px;
