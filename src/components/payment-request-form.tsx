@@ -9,7 +9,9 @@ import { AdhocReasonSelector } from "./adhoc-reason-selector";
 import { PaymentVolumeContext } from "./payment-volume-context";
 import { PaymentTrackingInput } from "./payment-tracking-input";
 import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
+import { AdhocDeliveryFields } from "./adhoc-delivery-fields";
 import { AdhocDaFields } from "./adhoc-da-fields";
+import { normalizeDeliveryIdentityPolicy, type DeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PaymentContactPicker } from "@/components/payment-contact-picker";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
@@ -37,6 +39,7 @@ type PaymentHead = {
   request_expense_approval?: boolean | null;
   expense_approval_threshold?: number | null;
   supported_payment_modes?: PaymentMode[] | null;
+  delivery_identity_policy?: DeliveryIdentityPolicy | null;
   payment_head_questions: PaymentQuestion[];
 };
 
@@ -147,6 +150,7 @@ export function PaymentRequestForm({
   const [selectedBankContactId, setSelectedBankContactId] = useState("");
   const [selectedUpiContactId, setSelectedUpiContactId] = useState("");
   const selectedHead = useMemo(() => heads.find((head) => head.id === selectedHeadId) ?? null, [heads, selectedHeadId]);
+  const deliveryIdentityPolicy = normalizeDeliveryIdentityPolicy(selectedHead?.delivery_identity_policy);
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(selectedHead?.supported_payment_modes), [selectedHead]);
   const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
   const upiContacts = useMemo(() => savedContacts.filter((contact) => contact.upi_id), [savedContacts]);
@@ -288,8 +292,9 @@ export function PaymentRequestForm({
       </div>
       {vehiclePaymentPolicy(selectedHead?.code) ? <VehiclePaymentFields headCode={selectedHead!.code} key={`${selectedLocationId}:${selectedHeadId}`} locationId={selectedLocationId} actual={showBankDetails} /> : null}
       {blockedByExpenseApproval ? <p className="payment-form-warning" role="alert">Required Expense Approval</p> : null}
-      {blockedByExpenseApproval && selectedHead?.code === "ADHOC_DA" ? <p className="subtle">This head requires prior expense approval. After approval, use Submit payment details to select the DA / Provider ID. DA selection belongs to the payment step, not the initial expense request.</p> : null}
-      {showBankDetails && selectedHead?.code === "ADHOC_DA" ? <AdhocDaFields key={selectedLocationId} locationId={selectedLocationId} /> : null}
+      {blockedByExpenseApproval && deliveryIdentityPolicy !== "none" ? <p className="subtle">After approval, use Submit payment details to record who performed the deliveries and the ID used.</p> : null}
+      {showBankDetails && deliveryIdentityPolicy === "legacy_adhoc_da" ? <AdhocDaFields key={`${selectedLocationId}:${selectedHeadId}`} locationId={selectedLocationId} /> : null}
+      {showBankDetails && deliveryIdentityPolicy !== "none" && deliveryIdentityPolicy !== "legacy_adhoc_da" ? <AdhocDeliveryFields key={`${selectedLocationId}:${selectedHeadId}`} locationId={selectedLocationId} policy={deliveryIdentityPolicy} /> : null}
       {showBankDetails ? (
         <>
           <div className="payment-mode-switch" role="radiogroup" aria-label="Payment mode">

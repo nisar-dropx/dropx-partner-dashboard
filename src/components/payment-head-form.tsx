@@ -7,6 +7,7 @@ import { DEFAULT_PAYMENT_FILE_GROUPS, PAYMENT_FILE_GROUPS, normalizePaymentFileG
 import { isFinanceOrAccountsRoleCode } from "@/lib/payment-finance-role";
 import { isPeopleApprovedPaymentHead, peopleApprovedPaymentHeadMessage } from "@/lib/people-approved-payment-heads";
 import { ALL_PAYMENT_MODES, PAYMENT_MODES, type PaymentMode } from "@/lib/payment-modes";
+import type { DeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 
 type Question = {
   id?: string | null;
@@ -35,6 +36,7 @@ type PaymentHeadFormProps = {
     final_approval_role_ids?: string[] | null;
     payment_process_role_ids?: string[] | null;
     supported_payment_modes?: PaymentMode[] | null;
+    delivery_identity_policy?: DeliveryIdentityPolicy | null;
     requires_supporting_document: boolean;
     request_expense_approval: boolean;
     expense_approval_threshold?: number | null;
@@ -604,6 +606,16 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
           Supported Payment Methods
           <PaymentModeMultiSelect selectedValues={initialHead?.supported_payment_modes} />
           <span className="helper-text">Requesters can select only these methods.</span>
+        </label>
+        <label>
+          Delivery ID control
+          <select className="field" name="delivery_identity_policy" defaultValue={initialHead?.delivery_identity_policy ?? "none"}>
+            <option value="none">Not required</option>
+            <option value="legacy_adhoc_da">Ad hoc DA / Wishmaster paid day</option>
+            <option value="paid_associate_day">Paid associate day</option>
+            <option value="van_execution">Van delivery performer</option>
+          </select>
+          <span className="helper-text">Controls the ID/date fields and payout treatment without code changes.</span>
         </label>
         <label className="check-row payment-head-option">
           <input

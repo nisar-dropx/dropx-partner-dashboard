@@ -10,6 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizePaymentModes, paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { createPaymentHead, updatePaymentHead } from "./actions";
+import type { DeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 
 type QuestionRow = {
   id: string;
@@ -34,6 +35,7 @@ type PaymentHeadRow = {
   final_approval_role_ids: string[] | null;
   payment_process_role_ids: string[] | null;
   supported_payment_modes: PaymentMode[] | null;
+  delivery_identity_policy: DeliveryIdentityPolicy;
   requires_supporting_document: boolean;
   request_expense_approval: boolean;
   expense_approval_threshold: number | null;
@@ -70,7 +72,7 @@ async function loadPaymentHeads(companyId: string) {
   const [headsResult, rolesResult] = await Promise.all([
     supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days), payment_head_approval_steps (id, step_order, candidates, is_required)")
+      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, delivery_identity_policy, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days), payment_head_approval_steps (id, step_order, candidates, is_required)")
       .eq("company_id", companyId)
       .order("code"),
     supabaseAdmin
@@ -172,6 +174,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                   <th>Ordered Workflow</th>
                   <th>Payment Process</th>
                   <th>Payment Methods</th>
+                  <th>Delivery ID</th>
                   <th>Expense Approval</th>
                   <th>Fields</th>
                   <th>File Upload</th>
@@ -197,6 +200,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                       </td>
                       <td>{(head.payment_process_role_ids ?? []).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
                       <td>{normalizePaymentModes(head.supported_payment_modes).map(paymentModeLabel).join(", ")}</td>
+                      <td>{head.delivery_identity_policy === "legacy_adhoc_da" ? "Ad hoc DA paid day" : head.delivery_identity_policy === "paid_associate_day" ? "Paid day" : head.delivery_identity_policy === "van_execution" ? "Van performer" : "-"}</td>
                       <td>{head.request_expense_approval ? (head.expense_approval_threshold == null ? "All requests" : `Above Rs ${Number(head.expense_approval_threshold).toLocaleString("en-IN")}`) : "-"}</td>
                       <td>{expenseFields} expense / {paymentFields} payment</td>
                       <td>{head.payment_head_questions?.some((question) => question.answer_type === "file") ? "Configured" : "-"}</td>
@@ -212,7 +216,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 13 : 12}>No payment heads added yet.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 14 : 13}>No payment heads added yet.</td></tr>
                 )}
               </tbody>
             </ReportTable>
@@ -254,6 +258,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                 final_approval_role_ids: editHead.final_approval_role_ids,
                 payment_process_role_ids: editHead.payment_process_role_ids,
                 supported_payment_modes: editHead.supported_payment_modes,
+                delivery_identity_policy: editHead.delivery_identity_policy,
                 requires_supporting_document: editHead.requires_supporting_document,
                 request_expense_approval: editHead.request_expense_approval,
                 expense_approval_threshold: editHead.expense_approval_threshold,

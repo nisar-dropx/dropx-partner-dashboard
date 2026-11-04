@@ -2,7 +2,7 @@ import { driverAbsentDayBreakdown } from "@/lib/adhoc-driver";
 import { applyWorkforcePaidAdvances } from "@/lib/workforce-paid-advances";
 import "server-only";
 import { conversionMetricSources, resolveConversionRate, type ConversionRateRule } from "@/lib/conversion-rate-rules";
-import { paidAdhocDays, paidAdhocDayBreakdown } from "@/lib/adhoc-paid-days";
+import { baseOnlyAdhocLine, paidAdhocDays, paidAdhocDayBreakdown, type AdhocPaidDayTreatment } from "@/lib/adhoc-paid-days";
 import { adhocPaidDayKey } from "@/lib/adhoc-da-identity";
 import { loadRouteDistanceContext } from "@/lib/workforce-route-distance-data";
 import { isKilometreField, kilometreRate, routeFuelForDay, type RouteDistanceContext } from "@/lib/workforce-route-distance";
@@ -192,9 +192,11 @@ export async function loadWorkforcePayoutRows(
     mapping.field_executive_id
   ].some((identity) => identity && scopedIdentityIds.has(String(identity)));
   const paidDaysResult = await readAllRows(admin.from("payment_requests")
-    .select("location_id,adhoc_client,adhoc_provider_employee_id,adhoc_work_date,status,adhoc_payout_policy,request_no")
-    .eq("company_id", companyId).eq("source_system", "OPS_ADHOC_DA").eq("adhoc_payout_policy", "work_day")
-    .in("status", ["processed", "paid"]).gte("adhoc_work_date", workforcePaymentMonthStart(fromDate)).lte("adhoc_work_date", toDate));
+    .select("location_id,adhoc_client,adhoc_provider_employee_id,adhoc_work_date,status,adhoc_payout_policy,request_no,delivery_identity_confirmed,delivery_provider_employee_id,delivery_work_date,delivery_performer_workforce_id,adhoc_payout_effect")
+    .eq("company_id", companyId)
+    .or("and(source_system.eq.OPS_ADHOC_DA,adhoc_payout_policy.eq.work_day),delivery_identity_confirmed.eq.true")
+    .in("status", ["processed", "paid"])
+    .or(`and(adhoc_work_date.gte.${workforcePaymentMonthStart(fromDate)},adhoc_work_date.lte.${toDate}),and(delivery_work_date.gte.${workforcePaymentMonthStart(fromDate)},delivery_work_date.lte.${toDate})`));
   if (paidDaysResult.error) return { rows: [] as WorkforcePayoutRow[], error: "Unable to verify paid ad hoc work. Retry before calculating payouts." };
   const absenceResult = await readAllRows(admin.from("payment_adhoc_driver_absences")
     .select("workforce_id,work_date,request_no").eq("company_id", companyId).eq("active", true)
@@ -207,7 +209,7 @@ export async function loadWorkforcePayoutRows(
     const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
     return paidDays.get(adhocPaidDayKey(String(mapping.station_id), `${provider?.code ?? ""} ${provider?.name ?? ""}`, String(mapping.provider_member_id ?? ""), date));
   };
-  const paidWorkforceDays = new Map<string, string>();
+  const paidWorkforceDays = new Map<string, AdhocPaidDayTreatment>();
   const paidWorkerDay = (workerId: string, stationId: string, date: string) => paidWorkforceDays.get(`${workerId}|${stationId}|${date}`);
   const primaryScopedMappings = scopeEnabled ? allMappings.filter(mappingBelongsToScope) : allMappings;
   const scopedMappingIds = new Set(primaryScopedMappings.map((mapping: any) => String(mapping.id)));
@@ -282,11 +284,20 @@ export async function loadWorkforcePayoutRows(
   // provider mappings independent: their stored Provider ID remains valid
   // payout evidence even when the linked profile is no longer active.
   for (const payment of paidDaysResult.data ?? []) {
+    const paymentDate = String(payment.delivery_work_date ?? payment.adhoc_work_date ?? "");
+    const directTreatment = payment.delivery_identity_confirmed && payment.delivery_performer_workforce_id && payment.adhoc_payout_effect !== "none"
+      ? { requestNo: String(payment.request_no), effect: payment.adhoc_payout_effect as "full_day" | "base_only", workforceId: String(payment.delivery_performer_workforce_id) }
+      : null;
+    if (directTreatment && paymentDate) {
+      paidWorkforceDays.set(`${directTreatment.workforceId}|${payment.location_id}|${paymentDate}`, directTreatment);
+      continue;
+    }
     const matches = allMappings.filter((mapping: any) => String(mapping.station_id) === payment.location_id
-      && String(mapping.effective_from) <= payment.adhoc_work_date && (!mapping.effective_to || String(mapping.effective_to) >= payment.adhoc_work_date)
-      && paidDayForMapping(mapping, payment.adhoc_work_date) === payment.request_no);
+      && String(mapping.effective_from) <= paymentDate && (!mapping.effective_to || String(mapping.effective_to) >= paymentDate)
+      && paidDayForMapping(mapping, paymentDate)?.requestNo === payment.request_no);
     const identities = [...new Set(matches.map((mapping: any) => workerBySource.get(mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id)?.id).filter(Boolean))];
-    if (identities.length === 1) paidWorkforceDays.set(`${identities[0]}|${payment.location_id}|${payment.adhoc_work_date}`, payment.request_no);
+    const treatment = matches.length ? paidDayForMapping(matches[0], paymentDate) : null;
+    if (identities.length === 1 && treatment) paidWorkforceDays.set(`${identities[0]}|${payment.location_id}|${paymentDate}`, treatment);
   }
   const directAllocationProfileIsVisible = (allocation: any) => directPaymentProfileIsVisible(
     workerBySource.get(String(allocation.workforce_id)) ?? {},
@@ -1106,7 +1117,7 @@ export async function loadWorkforcePayoutRows(
       }
       const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
       return dateRange(activeFrom, activeTo).flatMap((date) => {
-        if (paidDayForMapping(mapping, date)) return [];
+        if (paidDayForMapping(mapping, date)?.effect === "full_day") return [];
         const rows = providerDailyRowsByDate.get(date) ?? [];
         return productionRules.filter(rule=>!(isKilometreField(rule.code)&&routeContext.enabledFrom&&date>=routeContext.enabledFrom)).map((rule) => {
           const providerUnits = rule.customProduction
@@ -1208,7 +1219,7 @@ export async function loadWorkforcePayoutRows(
       const replacement = absentDay(String(worker.id), date);
       if (replacement) return driverAbsentDayBreakdown(date, replacement);
       const paidAdhoc = paidDayForMapping(mapping, date);
-      if (paidAdhoc) return paidAdhocDayBreakdown(date, paidAdhoc);
+      if (paidAdhoc?.effect === "full_day") return paidAdhocDayBreakdown(date, paidAdhoc);
       const rows = eligibleDailyByDate.get(date) ?? [];
       const kmRate = kilometreRate(mapping);
       const routeFuel = kmRate===null?null:routeFuelForDay(routeContext,{workforceId:String(worker.id),stationId:String(mapping.station_id),mappingId:String(mapping.id),date,rate:kmRate,hasActivity:rows.some(daily=>Number(daily.total_activity??daily.total_delivery??0)>0)||attendanceUnitForDate(String(worker.id),String(mapping.station_id),date,attendanceSourceKey)>0});
@@ -1269,7 +1280,7 @@ export async function loadWorkforcePayoutRows(
       });
       const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
       const aggregateAttendance = aggregateAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey);
-      const ownedAttendanceComponents = attendanceDateSet.has(date) || aggregateAttendance ? attendanceComponents : [];
+      const ownedAttendanceComponents = paidAdhoc?.effect === "base_only" ? [] : attendanceDateSet.has(date) || aggregateAttendance ? attendanceComponents : [];
       const hasImportedAttendance = hasImportedAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey);
       const attendancePay = directPayForDay(
         paymentValuesForDate(mapping.payment_values, ownedAttendanceComponents, String(worker.id), String(mapping.station_id), date),
@@ -1294,10 +1305,10 @@ export async function loadWorkforcePayoutRows(
           dailyDeliveryCount: deliveryDayCost ? rows.reduce((sum, daily) => sum + Math.max(0, Number(daily.total_delivery ?? (Number(daily.amazon_delivery ?? 0) + Number(daily.swa_delivery ?? 0))) || 0), 0) : undefined
         }
       );
-      const workDayUnits = attendancePay.attendanceUnit;
+      const workDayUnits = paidAdhoc?.effect === "base_only" ? 0 : attendancePay.attendanceUnit;
       missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0
         && (attendancePay.missing || (!dailyOnlyDeliveryCost && (Boolean(aggregateAttendance?.issue) || invalidAggregateAttendance)));
-      const attendanceLines = attendancePay.lines.map((line) => ({
+      const attendanceLines = (paidAdhoc?.effect === "base_only" ? [] : attendancePay.lines).map((line) => ({
         code: line.code,
         label: line.label,
         componentType: "amount" as const,
@@ -1307,7 +1318,7 @@ export async function loadWorkforcePayoutRows(
         amount: line.amount,
         sortOrder: line.sortOrder
       }));
-      const lines = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
+      const lines = orderPayoutLines([...productionLines, ...attendanceLines, ...(paidAdhoc?.effect === "base_only" ? [baseOnlyAdhocLine(paidAdhoc)] : [])], configuredComponentOrder);
       const baseAmount = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
       return {
         date,
