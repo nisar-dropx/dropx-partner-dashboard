@@ -41,7 +41,7 @@ export async function styleReportWorkbook(bytes:ArrayBuffer|Uint8Array,styles:Re
   if(name==='xl/worksheets/sheet1.xml' && rowCount && rules.length){
    const cf=rules.map((r,i)=>{
     const letter=col(r.column),ref=r.row == null ? `${letter}2:${letter}${rowCount+1}` : `${letter}${r.row+2}`;
-    return `<conditionalFormatting sqref="${ref}"><cfRule type="cellIs" dxfId="0" priority="${i*3+1}" operator="greaterThanOrEqual" stopIfTrue="1"><formula>${r.target/100}</formula></cfRule><cfRule type="cellIs" dxfId="1" priority="${i*3+2}" operator="greaterThanOrEqual" stopIfTrue="1"><formula>${(r.target-5)/100}</formula></cfRule><cfRule type="cellIs" dxfId="2" priority="${i*3+3}" operator="lessThan"><formula>${(r.target-5)/100}</formula></cfRule></conditionalFormatting>`;
+    return `<conditionalFormatting sqref="${ref}"><cfRule type="cellIs" dxfId="0" priority="${i*4+1}" operator="greaterThanOrEqual" stopIfTrue="1"><formula>${r.target/100}</formula></cfRule><cfRule type="cellIs" dxfId="1" priority="${i*4+2}" operator="greaterThanOrEqual" stopIfTrue="1"><formula>${Math.max(0,r.target-4)/100}</formula></cfRule><cfRule type="cellIs" dxfId="2" priority="${i*4+3}" operator="greaterThanOrEqual" stopIfTrue="1"><formula>${Math.max(0,r.target-14)/100}</formula></cfRule><cfRule type="cellIs" dxfId="3" priority="${i*4+4}" operator="lessThan"><formula>${Math.max(0,r.target-14)/100}</formula></cfRule></conditionalFormatting>`;
    }).join('');
    sheet=sheet.replace(/(<ignoredErrors|<pageMargins|<pageSetup|<headerFooter|<drawing|<legacyDrawing|<extLst|<\/worksheet>)/,cf+'$1');
   }
@@ -49,7 +49,7 @@ export async function styleReportWorkbook(bytes:ArrayBuffer|Uint8Array,styles:Re
  }
  const append=(tag:string,entries:string[],base:number)=>{xml=xml.replace(new RegExp(`<${tag} count="\\d+"([^>]*)>([\\s\\S]*?)<\\/${tag}>`),`<${tag} count="${base+entries.length}"$1>$2${entries.join('')}</${tag}>`);};
  append('fonts',fontXml,fonts);append('fills',fillXml,fills);append('cellXfs',xfXml,xfs);
- if(rules.length){const dxfs='<dxfs count="3">'+[['166534','DCFCE7'],['92400E','FEF3C7'],['991B1B','FEE2E2']].map(([fg,bg])=>`<dxf><font><color rgb="FF${fg}"/></font><fill><patternFill patternType="solid"><fgColor rgb="FF${bg}"/><bgColor indexed="64"/></patternFill></fill></dxf>`).join('')+'</dxfs>';xml=xml.includes('<dxfs')?xml.replace(/<dxfs[^>]*(?:\/>|>[\s\S]*?<\/dxfs>)/,dxfs):xml.replace('</styleSheet>',dxfs+'</styleSheet>');}
+ if(rules.length){const dxfs='<dxfs count="4">'+[['FFFFFF','166534'],['166534','DCFCE7'],['92400E','FEF3C7'],['991B1B','FEE2E2']].map(([fg,bg])=>`<dxf><font><color rgb="FF${fg}"/></font><fill><patternFill patternType="solid"><fgColor rgb="FF${bg}"/><bgColor indexed="64"/></patternFill></fill></dxf>`).join('')+'</dxfs>';xml=xml.includes('<dxfs')?xml.replace(/<dxfs[^>]*(?:\/>|>[\s\S]*?<\/dxfs>)/,dxfs):xml.replace('</styleSheet>',dxfs+'</styleSheet>');}
  zip.file('xl/styles.xml',xml);
  return zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
 }
