@@ -160,11 +160,11 @@ function csvCell(value: string | number) {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-export function buildWorkforceAdvanceCsv(rows: readonly WorkforceAdvanceRegisterViewRow[]) {
+export function buildWorkforceAdvanceCsv(rows: readonly WorkforceAdvanceRegisterViewRow[], personLabel = "Workforce") {
   const headers = [
     "Advance Number",
     "DropX ID",
-    "Workforce Name",
+    `${personLabel} Name`,
     "Designation",
     "Current Location",
     "Advance Paid At",
