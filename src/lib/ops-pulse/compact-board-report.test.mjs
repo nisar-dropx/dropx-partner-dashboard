@@ -13,11 +13,11 @@ test('station, cluster and region multi-selects intersect and never add records 
  assert.equal(filterBoardStations(stations,{stations:[],clusters:['unknown'],regions:[]},clusters).length,0);
  assert.equal(filterBoardStations(stations,{stations:['KLZA','GDRD'],clusters:[],regions:['KL','AP']},clusters).length,2);
 });
-test('summary uses shipment-weighted ratios and all metrics follow zero-DA drilldown',()=>{
+test('summary keeps delivery failures and rejections separate without an attempted aggregate',()=>{
  const all=boardDeliverySummary(stations);
- assert.equal(all.total,120);assert.equal(all.dsrPct,75.8);assert.equal(all.attempted,100);assert.equal(all.attemptPct,83.3);assert.equal(all.rejectPct,1.7);
+ assert.equal(all.total,120);assert.equal(all.dsrPct,75.8);assert.equal(all.failed,7);assert.equal(all.rejected,2);assert.equal('attempted' in all,false);assert.equal('attemptPct' in all,false);
  const zero=boardDeliverySummary(stations,true);
- assert.equal(zero.total,10);assert.equal(zero.dsrPct,0);assert.equal(zero.attemptPct,20);assert.equal(zero.oor,8);assert.equal(zero.daCount,1);
+ assert.equal(zero.total,10);assert.equal(zero.dsrPct,0);assert.equal(zero.failed,2);assert.equal(zero.rejected,0);assert.equal(zero.oor,8);assert.equal(zero.daCount,1);
  assert.equal(boardDeliverySummary([]).dsrPct,null);
 });
 const cells=(xs)=>xs.map(v=>({text:String(v)}));

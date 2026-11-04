@@ -59,3 +59,14 @@ test('DSR export preserves attempt outcome alongside station receipt and unconfi
  assert.equal(sheet[0].Status,'Failed');assert.equal(sheet[0]['Current Amazon state'],'RECEIVED');
  assert.equal(sheet[1].Status,'Other / pending');
 });
+
+test('DSR station detail preserves source buckets needed for auditable station metrics',()=>{
+ const rows=mapBoardTidExportRows([
+  {stationCode:'QLDA',trackingId:'E1',bucket:'BoardEDD',state:'INDUCTED',edd:'2026-11-04',driverId:'',driverName:''},
+  {stationCode:'QLDA',trackingId:'A1',bucket:'BoardAgeing',state:'RECEIVED',edd:'2026-11-03',driverId:'',driverName:''},
+  {stationCode:'QLDA',trackingId:'F1',bucket:'BoardFailed',state:'DELIVERY_FAILED',edd:'2026-11-04',driverId:'D1',driverName:'DA'},
+ ],'dsr-station');
+ assert.deepEqual(rows.map(row=>row.sourceBucket),['BoardEDD','BoardAgeing','BoardFailed']);
+ assert.equal(rows[0].status,'EDD pending');
+ assert.equal(rows[2].status,'Failed');
+});
