@@ -1318,7 +1318,14 @@ export async function loadWorkforcePayoutRows(
         amount: line.amount,
         sortOrder: line.sortOrder
       }));
-      const lines = orderPayoutLines([...productionLines, ...attendanceLines, ...(paidAdhoc?.effect === "base_only" ? [baseOnlyAdhocLine(paidAdhoc)] : [])], configuredComponentOrder);
+      const lines = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
+      if (paidAdhoc?.effect === "base_only") {
+        lines.splice(
+          0,
+          lines.length,
+          ...orderPayoutLines([...lines, baseOnlyAdhocLine(paidAdhoc)], configuredComponentOrder)
+        );
+      }
       const baseAmount = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
       return {
         date,
