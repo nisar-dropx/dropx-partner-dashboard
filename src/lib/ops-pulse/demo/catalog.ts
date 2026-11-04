@@ -209,7 +209,7 @@ define(
 define(
   [
     "/payments/advance-request",
-    "/payments/pay-advances",
+    "/payments/advance-register",
     "/payments/requests",
     "/payments/approvals",
     "/payments/report",

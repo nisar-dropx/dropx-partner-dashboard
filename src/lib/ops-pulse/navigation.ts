@@ -89,7 +89,7 @@ const payments: NavItem = {
   icon: "₹",
   children: [
     { code: "advance_requests", label: "Advance Request", href: "/payments/advance-request" },
-    { code: "payment_process", label: "Pay Advances", href: "/payments/pay-advances" },
+    { code: "payment_process", label: "Advance Register", href: "/payments/advance-register" },
     { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
     { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
     { code: "payment_reports", label: "Payment Report", href: "/payments/report" }
