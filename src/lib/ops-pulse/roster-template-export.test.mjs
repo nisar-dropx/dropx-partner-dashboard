@@ -8,6 +8,7 @@ import {
   parseRosterExportStationIds,
   safeRosterFilename
 } from "./roster-template-export.ts";
+import { rosterPdfDayLabel } from "./roster-template-pdf.ts";
 
 const sampleInput = {
   stations: [
@@ -84,4 +85,20 @@ test("workbook includes every station even when a station has no people", () => 
   assert.equal(rows[0].LOCATION_CODE, "EKM1");
   assert.equal(rows[1].MONDAY, "GEN");
   assert.match(String(workbook.Sheets.Instructions.A1.v), /multi-station/i);
+});
+
+test("pdf day labels show clock times instead of shift codes", () => {
+  const shiftByCode = new Map([
+    ["SHIFT_07", { start_time: "06:30:00", end_time: "15:30:00" }],
+    ["SHIFT_00", { start_time: "22:00:00", end_time: "07:00:00" }],
+    ["GEN", { start_time: "09:00", end_time: "18:00" }]
+  ]);
+  assert.equal(rosterPdfDayLabel("SHIFT_07", shiftByCode), "06:30-15:30");
+  assert.equal(rosterPdfDayLabel("SHIFT_00", shiftByCode), "22:00-07:00");
+  assert.equal(rosterPdfDayLabel("GEN", shiftByCode), "09:00-18:00");
+  assert.equal(rosterPdfDayLabel("WO", shiftByCode), "WO");
+  assert.equal(rosterPdfDayLabel("wo", shiftByCode), "WO");
+  assert.equal(rosterPdfDayLabel("", shiftByCode), "—");
+  assert.equal(rosterPdfDayLabel("UNKNOWN", shiftByCode), "UNKNOWN");
+  assert.equal(rosterPdfDayLabel("GEN", new Map([["GEN", { start_time: "", end_time: "" }]])), "GEN");
 });

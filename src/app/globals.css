@@ -22111,25 +22111,27 @@ td strong,
 .station-timetable-off-only small { color: #6941c6; font-size: 7px; }
 .station-timetable-off-only .station-timetable-detail { padding-left: 9px; background: #fafaff; }
 .station-active-roster { border-bottom: 1px solid #eaecf0; background: #fff; }
-.station-active-roster summary { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: center; gap: 12px; min-height: 36px; padding: 6px 12px; color: #475467; background: #fffcf5; cursor: pointer; list-style: none; }
+.station-active-roster summary { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: center; gap: 12px; min-height: 40px; padding: 8px 14px; color: #475467; background: #fffcf5; cursor: pointer; list-style: none; }
 .station-active-roster summary::-webkit-details-marker { display: none; }
-.station-active-roster-title { display: flex; align-items: center; gap: 7px; min-width: 0; color: #b54708; }
+.station-active-roster-title { display: flex; align-items: center; gap: 8px; min-width: 0; color: #b54708; }
 .station-active-roster-title > span { display: grid; gap: 1px; }
-.station-active-roster summary b { color: #182230; font-size: 10px; }
-.station-active-roster summary small { color: #667085; font-size: 8px; }
-.station-active-roster-counts { display: inline-flex; align-items: center; gap: 4px; color: #667085; font-size: 8px; white-space: nowrap; }
+.station-active-roster summary b { color: #182230; font-size: 12px; }
+.station-active-roster summary small { color: #667085; font-size: 10px; }
+.station-active-roster-counts { display: inline-flex; align-items: center; gap: 6px; color: #667085; font-size: 10px; white-space: nowrap; }
 .station-active-roster-counts i { width: 3px; height: 3px; border-radius: 50%; background: #d0d5dd; }
-.station-active-roster-action { display: inline-flex; align-items: center; gap: 4px; color: #b54708; font-size: 8px; font-weight: 850; white-space: nowrap; }
+.station-active-roster-action { display: inline-flex; align-items: center; gap: 4px; color: #b54708; font-size: 10px; font-weight: 850; white-space: nowrap; }
 .station-active-roster-action svg { transition: transform .16s ease; }
 .station-active-roster[open] .station-active-roster-action svg { transform: rotate(180deg); }
-.station-active-roster[open] summary { background: #fffcf5; }
-.station-active-roster > div { display: grid; gap: 5px; padding: 0 12px 8px; }
-.station-active-roster section { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; align-items: baseline; }
-.station-active-roster section strong { color: #b54708; font-size: 8px; }
-.station-active-roster section span, .station-active-roster p { margin: 0; color: #475467; font-size: 8px; }
-.station-active-roster-roles { display: flex; flex-wrap: wrap; gap: 3px 12px; }
-.station-active-roster-roles span { display: inline-flex; gap: 4px; }
-.station-active-roster-roles span b { color: #344054; font-size: 8px; }
+.station-active-roster[open] summary { background: #fff7ed; border-bottom: 1px solid #f9dbaf; }
+.station-active-roster-body { display: grid; gap: 0; padding: 4px 14px 10px; }
+.station-active-roster section { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid #f2f4f7; }
+.station-active-roster section:last-child { border-bottom: 0; }
+.station-active-roster section strong { color: #9a3412; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.station-active-roster section span, .station-active-roster p { margin: 0; color: #475467; font-size: 11px; line-height: 1.4; }
+.station-active-roster-roles { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.station-active-roster-roles span { display: inline-flex; gap: 5px; align-items: baseline; max-width: 100%; }
+.station-active-roster-roles span b { color: #1d2939; font-size: 11px; flex: 0 0 auto; }
+.station-active-roster-roles span em { color: #475467; font-style: normal; font-size: 11px; }
 .station-shifts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; gap: 8px; padding: 8px; background: #f6f7f9; }
 .station-shift-insight { overflow: hidden; border: 1px solid #e4e7ec; border-left: 3px solid #12b76a; border-radius: 9px; background: #fff; box-shadow: none; }
 .station-shift-insight.needs-attention { border-left-color: #f04438; }

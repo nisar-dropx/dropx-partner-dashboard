@@ -7,6 +7,7 @@ import { ShiftPunchTimes } from "@/components/shift-punch-times";
 import { matchesShift, shiftCategory, shiftLabel, shiftPunchMinute, isScheduledShift, rosterSetupSummary, type ShiftFilter } from "@/lib/shift-attendance-view";
 import { StationLiveRefresh } from "@/components/station-live-refresh";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
+import { sortDayRosterGroupLabels } from "@/lib/ops-pulse/day-roster-view";
 import type { OpsStationManpowerPerson } from "@/lib/ops-pulse/station-manpower";
 
 type AttendanceState = "on-time" | "late" | "missing" | "away";
@@ -63,13 +64,15 @@ function AttendanceDetail({ person }: { person: OpsStationManpowerPerson }) {
 }
 
 function rosterRoleGroups(members: OpsStationManpowerPerson[]) {
-  const grouped = new Map<string, string[]>();
+  const grouped = new Map<string, { code: string; names: string[]; rank: number }>();
   for (const person of members) {
-    const names = grouped.get(person.designationCode) ?? [];
-    names.push(person.name);
-    grouped.set(person.designationCode, names);
+    const current = grouped.get(person.designationCode) ?? { code: person.designationCode, names: [], rank: tier(person.designation) };
+    current.names.push(person.name);
+    grouped.set(person.designationCode, current);
   }
-  return [...grouped].map(([code, names]) => ({ code, names }));
+  return [...grouped.values()]
+    .map((group) => ({ code: group.code, names: [...group.names].sort((left, right) => left.localeCompare(right)), rank: group.rank }))
+    .sort((left, right) => left.rank - right.rank || left.code.localeCompare(right.code));
 }
 
 function attendanceState(person: OpsStationManpowerPerson): AttendanceState {
@@ -117,15 +120,17 @@ function minuteLabel(value: number) {
   return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
 }
 
+function dayRosterLabel(person: OpsStationManpowerPerson) {
+  if (person.today.rosterDayType === "weekly_off") return "Week off";
+  const shift = shiftClock(person.today.shiftName);
+  return shift ? `${shift.startLabel}–${shift.endLabel}` : "Rostered";
+}
+
 function ActiveRosterView({ asOf, people, locationCode }: { asOf: string; people: OpsStationManpowerPerson[]; locationCode: string }) {
   const rostered = people.filter((person) => Boolean(shiftClock(person.today.shiftName)) || Boolean(person.today.rosterDayType));
   const working = rostered.filter((person) => Boolean(shiftClock(person.today.shiftName)) && person.today.rosterDayType !== "weekly_off");
   const off = rostered.filter((person) => person.today.rosterDayType === "weekly_off");
-  const groups = [...new Map(rostered.map((person) => {
-    const shift = shiftClock(person.today.shiftName);
-    const label = person.today.rosterDayType === "weekly_off" ? "Week off" : shift ? `${shift.startLabel}–${shift.endLabel}` : "Rostered";
-    return [label, label];
-  })).values()];
+  const groups = sortDayRosterGroupLabels([...new Set(rostered.map(dayRosterLabel))]);
 
   return <details className="station-active-roster">
     <summary aria-label={`View day roster for ${locationCode} on ${asOf}`}>
@@ -133,12 +138,14 @@ function ActiveRosterView({ asOf, people, locationCode }: { asOf: string; people
       <span className="station-active-roster-counts"><b>{working.length}</b> working <i /> <b>{off.length}</b> off</span>
       <span className="station-active-roster-action">View roster <ChevronDown size={13} /></span>
     </summary>
-    <div>{groups.length ? groups.map((label) => {
-      const members = rostered.filter((person) => {
-        const shift = shiftClock(person.today.shiftName);
-        return (person.today.rosterDayType === "weekly_off" ? "Week off" : shift ? `${shift.startLabel}–${shift.endLabel}` : "Rostered") === label;
-      });
-      return <section key={label}><strong>{label}</strong><div className="station-active-roster-roles">{rosterRoleGroups(members).map((group) => <span key={group.code}><b>{group.code}</b>{group.names.join(", ")}</span>)}</div></section>;
+    <div className="station-active-roster-body">{groups.length ? groups.map((label) => {
+      const members = rostered.filter((person) => dayRosterLabel(person) === label);
+      return <section key={label}>
+        <strong>{label}</strong>
+        <div className="station-active-roster-roles">{rosterRoleGroups(members).map((group) => (
+          <span key={group.code}><b>{group.code}</b><em>{group.names.join(", ")}</em></span>
+        ))}</div>
+      </section>;
     }) : <p>No active approved roster is published for {locationCode} on this date.</p>}</div>
   </details>;
 }
