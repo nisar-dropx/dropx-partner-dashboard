@@ -61,9 +61,9 @@ export type BoardTidExportRow = {
   dotAtStation?: boolean;
 };
 
-function dsrStatus(bucket: string): string {
+function dsrStatus(bucket: string, state = ""): string {
   if (bucket === BOARD_TID.DELIVERED) return "Delivered";
-  if (bucket === BOARD_TID.OTHER) return "Other / pending";
+  if (bucket === BOARD_TID.OTHER) return /verification pending/i.test(state) ? "History check pending" : "Outcome not recorded";
   if (bucket === BOARD_TID.OOR) return "OOR";
   if (bucket === BOARD_TID.FAILED || bucket === "Failed") return "Failed";
   if (bucket === BOARD_TID.REJECTED || bucket === "Rejected") return "Rejected";
@@ -139,7 +139,7 @@ function mapDsr(
     .map((row) => ({
       stationCode: row.stationCode,
       trackingId: row.trackingId,
-      status: dsrStatus(row.bucket),
+      status: dsrStatus(row.bucket, row.state),
       currentState: row.state || "",
       edd: row.edd || "",
       driverId: row.driverId,
@@ -176,7 +176,7 @@ function mapDsrStation(flash: FlashTrackingLike[]): BoardTidExportRow[] {
         : row.bucket === BOARD_TID.PHYSICAL ? "Physical at station"
         : row.bucket === BOARD_TID.EDD ? "Inducted inventory"
         : row.bucket === BOARD_TID.AGEING ? row.state || "At station"
-          : dsrStatus(row.bucket),
+          : dsrStatus(row.bucket, row.state),
       currentState: row.state || "",
       edd: row.edd || "",
       driverId: row.driverId,

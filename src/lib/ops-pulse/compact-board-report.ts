@@ -32,7 +32,7 @@ export function prepareBoardReport(table: BoardShareTable, sort: BoardReportSort
   let headers = [...table.headers];
   let rows = table.rows.map(row => row.map(cell => ({ ...cell })));
   if (options.dsr) {
-    const order = ["Station", "DA's Name", "Total", "Delivered", "Out on Road", "Delivery Failed", "Delivery Rejected", "Other / pending", "DSR%"];
+    const order = ["Station", "DA's Name", "Total", "Delivered", "Out on Road", "Delivery Failed", "Delivery Rejected", "Outcome missing", "DSR%"];
     const indexes = order.map(h => headers.indexOf(h)).filter(i => i >= 0);
     headers = indexes.map(i => headers[i]);
     rows = rows.map(row => indexes.map(i => row[i]));

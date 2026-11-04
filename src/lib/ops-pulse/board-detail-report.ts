@@ -57,14 +57,15 @@ export function dsrStationTable(
   inventory?: Record<string, StationDsrInventorySummary>,
   pickDas: (board: StationBoardStation['board']) => StationBoardStation['board']['daDsr'] = (board) => board.daDsr,
   title = zeroOnly ? 'Zero deliveries' : 'DSR',
+  dsrTarget = 94,
 ): BoardShareTable {
   const hasOther = stations.some(s => pickDas(s.board).some(d => (d.other || 0) > 0));
   const showInventory = Boolean(inventory) && !zeroOnly;
   const inventoryHeaders = showInventory ? [STATION_DSR_PENDING_HEADER, STATION_DSR_PHYSICAL_HEADER] : [];
-  const headers = ['Station', 'Location', ...inventoryHeaders, 'Assigned', 'Delivered', 'Delivery Failed', 'Delivery Rejected', 'Out on Road', ...(hasOther ? ['Other / pending'] : []), 'DSR%'];
+  const headers = ['Station', 'Location', ...inventoryHeaders, 'Assigned', 'Delivered', 'Delivery Failed', 'Delivery Rejected', 'Out on Road', ...(hasOther ? ['Outcome missing'] : []), 'DSR%'];
   const all = stations.flatMap(s => pickDas(s.board)).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0));
   const inventoryCells = (summary?: StationDsrInventorySummary): BoardShareCell[] => inventoryHeaders.length ? [summary ? numberCell(summary.eddPending) : { text: '—', align: 'right' }, summary ? numberCell(summary.physicalAtStation) : { text: '—', align: 'right' }] : [];
-  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), numberCell(sum.failed), numberCell(sum.rejected), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct) : undefined }];
+  const metrics = (sum: ReturnType<typeof sumDaDsr>, at?: string | null): BoardShareCell[] => [numberCell(sum.total), numberCell(sum.delivered), numberCell(sum.failed), numberCell(sum.rejected), { ...numberCell(sum.oor), color: oorTextColor(sum.oor, sum.total, at) }, ...(hasOther ? [numberCell(sum.other || 0)] : []), { text: sum.total ? `${sum.dsrPct}%` : '—', align: 'right', bold: true, bg: sum.total ? dsrHeatColor(sum.dsrPct, dsrTarget) : undefined, color: sum.total ? dsrPctTextColor(sum.dsrPct, dsrTarget) : undefined }];
   const rows: BoardShareCell[][] = stations.flatMap(s => {
     const sum = sumDaDsr(pickDas(s.board).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0)));
     if (zeroOnly && !sum.total) return [];

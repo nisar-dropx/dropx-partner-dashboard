@@ -1,3 +1,4 @@
+import { loadPerformanceTargets } from "@/lib/ops-pulse/performance-targets";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
@@ -25,7 +26,9 @@ export default async function StationBoardPage({
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
-  const clusters = await loadFlashClusters(companyId, stations);
+  const [clusters, targets] = await Promise.all([loadFlashClusters(companyId, stations), loadPerformanceTargets(companyId, { readOnly: true })]);
+  const configuredDsr = targets.rows.find(t => t.metricKey === "dsr" && t.reportType === "daily" && t.isActive)?.target;
+  const dsrTarget = configuredDsr != null && configuredDsr > 0 ? (configuredDsr <= 1 ? configuredDsr * 100 : configuredDsr) : 94;
   const requested = String(searchParams?.date ?? "").trim();
   const today = todayKolkata();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : today;
@@ -76,6 +79,7 @@ export default async function StationBoardPage({
         {workerConfigured && payload ? (
           <StationBoardView
             initial={payload}
+            dsrTarget={dsrTarget}
             clusters={clusters}
             stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))}
             initialRegion={String(searchParams?.region ?? "")}

@@ -8,7 +8,7 @@ export function dotStationTable(stations: StationBoardStation[], lane: 'premium'
   const cells = (name: string, t?: DotTotals): BoardShareCell[] => [
     {text: name, bold: true, align: 'left'},
     ...keys.map(key => ({text: t ? String(t[key]) : '—', align: 'right' as const})),
-    {text: t?.total ? `${t.dotPct.toFixed(1)}%` : '—', align: 'right', ...(t?.total ? {bg: dsrHeatColor(t.dotPct), color: dsrPctTextColor(t.dotPct)} : {})},
+    {text: t?.total ? `${t.dotPct.toFixed(1)}%` : '—', align: 'right', ...(t?.total ? {bg: dsrHeatColor(t.dotPct, 95), color: dsrPctTextColor(t.dotPct, 95)} : {})},
   ];
   return {title: lane === 'premium' ? 'Premium DOT' : 'AFN Standard DOT', subtitle: '', headers: ['Station','Eligible','Dispatched','At station','On road','Delivered','Failed','Rejected','Other / pending','DOT%'],
     rows: [...stations.map((s,i) => cells(s.stationCode,totals[i])), cells('Grand Total', totals.every(Boolean) ? sumDot(totals as DotTotals[]) : undefined)]};

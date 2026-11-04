@@ -22,6 +22,7 @@ import {
   daDsrForView,
   DSR_HEADERS,
   dsrHeatColor,
+  dsrBandLegend,
   dsrPctTextColor,
   oorTextColor,
   eddPivot,
@@ -50,6 +51,7 @@ import { stationDsrMetricRows, stationDsrReportRows, summarizeStationDsrRows, ST
 
 type Props = {
   initial: LoadFlashBoardNetwork;
+  dsrTarget?: number;
   stationNames?: Record<string, string>;
   clusters?: BoardCluster[];
   initialRegion?: string;
@@ -142,6 +144,7 @@ function buildShareTable(
   regionLabel: string,
   stationNames: Record<string, string> = {},
   ageingMode: AgeingBoardMode = "week",
+  dsrTarget = 94,
 ): BoardShareTable {
   const subtitle = `${formatOpsDate(businessDate, businessDate)} · ${regionLabel} · DropX Logistics`;
   if (view === "edd") {
@@ -229,7 +232,7 @@ function buildShareTable(
     DSR_HEADERS.rejected,
     DSR_HEADERS.oor,
     DSR_HEADERS.total,
-    ...(hasOther ? ["Other / pending"] : []),
+    ...(hasOther ? ["Outcome missing"] : []),
     DSR_HEADERS.dsrPct,
   ];
   const rows: BoardShareCell[][] = [];
@@ -247,7 +250,7 @@ function buildShareTable(
         { text: String(da.oor || 0), color: oorTextColor(da.oor, da.total, station.fetchedAt), bold: !!oorTextColor(da.oor, da.total, station.fetchedAt), align: "right" },
         { text: String(da.total), align: "right" },
         ...(hasOther ? [{ text: String(da.other || 0), align: "right" as const }] : []),
-        { text: da.total ? `${da.dsrPct}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct) : undefined, align: "right" },
+        { text: da.total ? `${da.dsrPct}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct, dsrTarget) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct, dsrTarget) : undefined, align: "right" },
       ]);
     }
   }
@@ -262,7 +265,7 @@ function buildShareTable(
       { text: String(tot.oor), bold: true, align: "right", bg: "#edf2f8" },
       { text: String(tot.total), bold: true, align: "right", bg: "#edf2f8" },
       ...(hasOther ? [{ text: String(tot.other || 0), align: "right" as const, bold: true }] : []),
-      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
+      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct, dsrTarget), color: dsrPctTextColor(tot.dsrPct, dsrTarget), align: "right" },
     ]);
   }
   return {
@@ -274,7 +277,7 @@ function buildShareTable(
   };
 }
 
-export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout }: Props) {
+export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout }: Props) {
   const [payload, setPayload] = useState(initial);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initial.run);
   const [view, setView] = useState<StationBoardView>(() => asView(initialView));
@@ -397,12 +400,11 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const dsrStationPending = needsDsrStation && dsrStationData?.key !== dsrStationKey;
   const dsrStationError = needsDsrStation && dsrStationData?.key === dsrStationKey ? dsrStationData.error : undefined;
   const dsrStationRows = dsrStationData?.key === dsrStationKey && !dsrStationData.error ? dsrStationData.rows : [];
-  const dsrStationInventory = useMemo(
-    () => dsrStationData?.key === dsrStationKey && !dsrStationData.error
-      ? summarizeStationDsrRows(dsrStationData.rows, payload.businessDate, stations.filter(station => station.hasSnapshot && station.board.stationInventoryVersion === 1).map(station => station.stationCode))
-      : undefined,
-    [dsrStationData, dsrStationKey, payload.businessDate, stations],
-  );
+  const dsrStationInventory = useMemo(() => {
+    if (dsrStationData?.key !== dsrStationKey || dsrStationData.error) return {};
+    const verified = new Set(stations.filter(station => station.hasSnapshot && station.board.stationInventoryVersion === 2).map(station => station.stationCode));
+    return summarizeStationDsrRows(dsrStationData.rows.filter(row => verified.has(row.stationCode)), payload.businessDate, [...verified]);
+  }, [dsrStationData, dsrStationKey, payload.businessDate, stations]);
   useEffect(() => {
     if (!needsDsrStation) return;
     const controller = new AbortController();
@@ -444,8 +446,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           view === "dsr" ? dsrStationInventory : undefined,
           (board) => daDsrForView(board, view),
           dsrTitle,
+          dsrTarget,
         )
-      : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
+      : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode, dsrTarget);
     const d = boardDeliverySummary(
       blockStations.map((station) => ({
         ...station,
@@ -459,7 +462,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     const historyPending = (isDsrFamilyView(view) || isDotView(view)) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
     const metadataPending = isDotView(view) ? blockStations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0) : 0;
     return prepareBoardReport({ ...table,
-      compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending today is included in physical stock; do not add these columns.` : undefined,
+      footerNote: isDsrFamilyView(view) ? dsrBandLegend(dsrTarget) : table.footerNote,
+      compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock. ${dsrBandLegend(dsrTarget)}` : undefined,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending || metadataPending ? ` · Provisional (${[historyPending ? `${count(historyPending)} history checks pending` : "", metadataPending ? `${count(metadataPending)} data pending` : ""].filter(Boolean).join(" · ")})` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
@@ -938,6 +942,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div> : null}
       </div> : null}
 
+      {isDsrFamilyView(view) ? <p className={s.note}>{dsrBandLegend(dsrTarget)}</p> : null}
       <div className={s.kpis} aria-live="polite">
         <article className={s.kpi}><span>Stations ready</span><strong>{isDotView(view) ? dotValues.filter(Boolean).length : totals.ready}/{stations.length}</strong></article>
         {isDotView(view) ? <>
@@ -990,12 +995,12 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div> : <div className={s.scroll}>
           <ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={report.title} reportExport={() => excelReport()}>
             <thead><tr>{report.headers.map(header => <th key={header} aria-sort={sort.header === header ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-              <button type="button" className={s.sortButton} title={header === STATION_DSR_PENDING_HEADER ? "Physically at station, due on the selected date, with no dispatch or attempt that day. Driver assignment alone does not exclude a shipment." : header === STATION_DSR_PHYSICAL_HEADER ? "All shipments physically at station across EDD dates, including held and returned stock. Includes EDD pending today; these columns are not additive." : header === "Other / pending" ? "Assigned shipments without a confirmed outcome. Included in Assigned, separate from delivered, failed, rejected and on-road." : header === DSR_HEADERS.failed ? "Amazon delivery-failed outcome: the operational attempted count. Rejections remain separate." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
+              <button type="button" className={s.sortButton} title={header === STATION_DSR_PENDING_HEADER ? "Physically at station, due on the selected date, with no dispatch or attempt on or before that date. Driver assignment alone does not exclude a shipment." : header === STATION_DSR_PHYSICAL_HEADER ? "All shipments physically at station across EDD dates, including held and returned stock. Includes EDD pending today; these columns are not additive." : header === "Outcome missing" ? "Click to inspect shipments awaiting history verification or returned without a recorded delivery outcome. A return alone does not prove failure or rejection. Included in Assigned." : header === DSR_HEADERS.failed ? "Amazon delivery-failed outcome: the operational attempted count. Rejections remain separate." : header === DSR_HEADERS.oor ? "Red: more than 50% still on road from 1 pm IST, based on the station snapshot time." : undefined} onClick={() => setSorts(previous => ({ ...previous, [sortKey]: { header, direction: sort.header === header && sort.direction === "desc" ? "asc" : "desc" } }))}>{header}<span aria-hidden="true">{sort.header === header ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span></button>
             </th>)}</tr></thead>
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
               {row.map((cell, column) => {
                 const header = report.headers[column];
-                const metric = ({ [STATION_DSR_PENDING_HEADER]: "eddPending", [STATION_DSR_PHYSICAL_HEADER]: "physicalAtStation", Assigned: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Other / pending": "other" } as Record<string, StationDsrMetric>)[header];
+                const metric = ({ [STATION_DSR_PENDING_HEADER]: "eddPending", [STATION_DSR_PHYSICAL_HEADER]: "physicalAtStation", Assigned: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Outcome missing": "other" } as Record<string, StationDsrMetric>)[header];
                 const stationCode = report.rowStations[i];
                 const stationMetric = view === "dsr" && level === "station" && metric && cell.text !== "—";
                 return <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
@@ -1188,25 +1193,27 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     <strong>{view === "premium" ? "Premium DOT" : view === "standard" ? "Standard DOT" : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
-                  <div className={s.shareColsWide}>
+                  <div className={s.shareColsWide} style={{ gridTemplateColumns: "minmax(88px, 1.5fr) repeat(7, minmax(46px, .85fr))" }}>
                     <span>{DSR_HEADERS.da}</span>
                     <span>{DSR_HEADERS.total}</span>
                     <span>{DSR_HEADERS.delivered}</span>
                     <span>{DSR_HEADERS.oor}</span>
                     <span>{DSR_HEADERS.failed}</span>
                     <span>{DSR_HEADERS.rejected}</span>
+                    <span>Outcome missing</span>
                     <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
                     {[...daDsrForView(selected.board, view)].sort((a, b) => view === "zero" ? b.oor - a.oor : b.dsrPct - a.dsrPct).map((da) => (
-                      <div key={da.driverId} className={s.shareRowWide}>
+                      <div key={da.driverId} className={s.shareRowWide} style={{ gridTemplateColumns: "minmax(88px, 1.5fr) repeat(7, minmax(46px, .85fr))" }}>
                         <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
                         <strong>{da.total}</strong>
                         <strong>{da.delivered}</strong>
                         <strong title="Red: more than 50% still on road in a snapshot taken from 1 pm IST onward." style={{ color: oorTextColor(da.oor, da.total, selected.fetchedAt) }}>{da.oor || 0}</strong>
                         <strong>{da.failed || 0}</strong>
                         <strong>{da.rejected || 0}</strong>
-                        <strong style={{ background: dsrHeatColor(da.dsrPct), color: dsrPctTextColor(da.dsrPct) }}>{da.dsrPct}%</strong>
+                        <strong>{da.other || 0}</strong>
+                        <strong style={{ background: dsrHeatColor(da.dsrPct, dsrTarget), color: dsrPctTextColor(da.dsrPct, dsrTarget) }}>{da.dsrPct}%</strong>
                       </div>
                     ))}
                     {(() => {
@@ -1216,14 +1223,15 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                       }
                       const tot = sumDaDsr(das);
                       return (
-                        <div className={`${s.shareRowWide} ${s.shareTotal}`}>
+                        <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: "minmax(88px, 1.5fr) repeat(7, minmax(46px, .85fr))" }}>
                           <span>Grand Total · {tot.daCount} DA{tot.daCount === 1 ? "" : "s"}</span>
                           <strong>{tot.total}</strong>
                           <strong>{tot.delivered}</strong>
                           <strong>{tot.oor}</strong>
                           <strong>{tot.failed}</strong>
                           <strong>{tot.rejected}</strong>
-                          <strong style={{ background: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct) }}>{tot.dsrPct}%</strong>
+                          <strong>{tot.other || 0}</strong>
+                          <strong style={{ background: dsrHeatColor(tot.dsrPct, dsrTarget), color: dsrPctTextColor(tot.dsrPct, dsrTarget) }}>{tot.dsrPct}%</strong>
                         </div>
                       );
                     })()}
