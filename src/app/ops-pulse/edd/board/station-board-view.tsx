@@ -17,6 +17,7 @@ import {
   CRETURN_DISPLAY,
   CRETURN_SHORT,
   collectEddDates,
+  daDsrForView,
   DSR_HEADERS,
   dsrHeatColor,
   dsrPctTextColor,
@@ -24,6 +25,7 @@ import {
   eddPivot,
   eddStationTotal,
   heatColor,
+  isDsrFamilyView,
   pickupPctColor,
   pickupPctTextColor,
   sumCReturn,
@@ -107,6 +109,8 @@ function asView(value: string | undefined): StationBoardView {
   if (key === "dsr" || key === "dadsr") return "dsr";
   if (key === "zero" || key === "zerodeliveries") return "zero";
   if (key === "ageing" || key === "aging") return "ageing";
+  if (key === "premium" || key === "premiumdot") return "premium";
+  if (key === "standard" || key === "standarddot") return "standard";
   return "edd";
 }
 
@@ -206,7 +210,12 @@ function buildShareTable(
   }
 
   const zeroOnly = view === "zero";
-  const hasOther = stations.some(s => s.board.daDsr.some(d => (d.other || 0) > 0));
+  const dsrTitle =
+    view === "premium" ? "Premium DOT"
+      : view === "standard" ? "Standard DOT"
+        : zeroOnly ? "Zero deliveries"
+          : "DSR";
+  const hasOther = stations.some((s) => daDsrForView(s.board, view).some((d) => (d.other || 0) > 0));
   const headers = [
     "Station",
     DSR_HEADERS.da,
@@ -221,7 +230,7 @@ function buildShareTable(
   const rows: BoardShareCell[][] = [];
   const allDas: StationBoardDaDsr[] = [];
   for (const station of stations) {
-    const das = zeroOnly ? station.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0) : station.board.daDsr;
+    const das = daDsrForView(station.board, view);
     allDas.push(...das);
     for (const da of das) {
       rows.push([
@@ -252,7 +261,7 @@ function buildShareTable(
     ]);
   }
   return {
-    title: `${zeroOnly ? "Zero deliveries" : "DA DSR"} · ${regionLabel}`,
+    title: `${dsrTitle} · ${regionLabel}`,
     subtitle,
     headers,
     rows,
@@ -273,9 +282,15 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   // inventory view first; associate detail remains one click away.
   const level = levels[view] ?? (view === "creturn" || view === "dsr" ? "station" : "associate");
   const [groupByStation, setGroupByStation] = useState(initialLayout === "grouped");
-  const hasDetailViews = view === "creturn" || view === "dsr" || view === "zero";
+  const hasDetailViews = view === "creturn" || isDsrFamilyView(view);
   const sortKey = `${view}-${level}-${groupByStation}`;
-  const sort = sorts[sortKey] ?? { header: view === "creturn" ? "Pending pickup" : view === "zero" ? DSR_HEADERS.oor : view === "dsr" ? DSR_HEADERS.dsrPct : "Station", direction: hasDetailViews ? "desc" : "asc" };
+  const sort = sorts[sortKey] ?? {
+    header: view === "creturn" ? "Pending pickup"
+      : view === "zero" ? DSR_HEADERS.oor
+        : isDsrFamilyView(view) ? DSR_HEADERS.dsrPct
+          : "Station",
+    direction: hasDetailViews ? "desc" : "asc",
+  };
   const [cReturnData, setCReturnData] = useState<{ key: string; rows: CReturnAssociate[]; error?: string } | null>(null);
   const [detailRetry, setDetailRetry] = useState(0);
   const [dsrStationData, setDsrStationData] = useState<{ key: string; rows: StationDsrTidRow[]; error?: string } | null>(null);
@@ -407,17 +422,36 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     ? cReturnRows.reduce((a, r) => ({ total: a.total + r.total, picked: a.picked + (r.statuses.PICKUP_DONE || 0), pending: a.pending + pendingCReturn(r.statuses, r.total) }), { total: 0, picked: 0, pending: 0 })
     : stations.reduce((a, r) => ({ total: a.total + r.board.cReturnTotal, picked: a.picked + r.board.pickupDone, pending: a.pending + pendingCReturn(r.board.cReturn, r.board.cReturnTotal) }), { total: 0, picked: 0, pending: 0 });
   function reportFor(blockStations: StationBoardStation[], label: string) {
+    const dsrTitle =
+      view === "premium" ? "Premium DOT"
+        : view === "standard" ? "Standard DOT"
+          : view === "zero" ? "Zero deliveries"
+            : "DSR";
     const table = view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
-      : (view === "dsr" || view === "zero") && level === "station" ? dsrStationTable(blockStations, stationNames, view === "zero", view === "dsr" ? dsrStationInventory : undefined)
+      : isDsrFamilyView(view) && level === "station"
+        ? dsrStationTable(
+          blockStations,
+          stationNames,
+          view === "zero",
+          view === "dsr" ? dsrStationInventory : undefined,
+          (board) => daDsrForView(board, view),
+          dsrTitle,
+        )
       : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
-    const d = boardDeliverySummary(blockStations, view === "zero");
-    const stats = view === "dsr" || view === "zero"
+    const d = boardDeliverySummary(
+      blockStations.map((station) => ({
+        ...station,
+        board: { ...station.board, daDsr: daDsrForView(station.board, view === "zero" ? "dsr" : view) },
+      })),
+      view === "zero",
+    );
+    const stats = isDsrFamilyView(view)
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
       : "";
     return prepareBoardReport({ ...table,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}`,
-    }, sort, { dsr: level === "associate" && (view === "dsr" || view === "zero"), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
+    }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
   const report = reportFor(stations, regionLabel);
   const outputUnavailable = detailUnavailable || dsrStationPending || Boolean(dsrStationError);
@@ -462,7 +496,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         : view === "ageing" ? "Ageing"
           : view === "dsr" ? "DA DSR"
             : view === "zero" ? "Zero deliveries"
-              : "EDD";
+              : view === "premium" ? "Premium DOT"
+                : view === "standard" ? "Standard DOT"
+                  : "EDD";
     const rows = (Array.isArray(body.rows) ? body.rows : [])
       .map((row) => [
         String(row.stationCode ?? "").toUpperCase(),
@@ -470,6 +506,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         String(row.trackingId ?? "").trim(),
         String(row.status ?? ""),
         String(row.edd ?? ""),
+        String((row as { shipOption?: string }).shipOption ?? ""),
         String(row.driverId ?? ""),
         String(row.driverName ?? ""),
       ] as (string | number | boolean | null)[])
@@ -481,7 +518,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     );
     return [{
       name: "All TIDs",
-      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "DA ID", "DA Name"],
+      headers: ["Station", "Report", "Tracking ID", "Status", "EDD", "Ship Option", "DA ID", "DA Name"],
       rows,
     }];
   }
@@ -1010,6 +1047,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     ["ageing", "Ageing"],
     ["creturn", "C-Return"],
     ["dsr", "DSR"],
+    ["premium", "Premium DOT"],
+    ["standard", "Standard DOT"],
     ["zero", "Zero deliveries"],
   ] as const;
 
@@ -1130,7 +1169,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
 
       <div className={s.kpis} aria-live="polite">
         <article className={s.kpi}><span>Stations ready</span><strong>{totals.ready}/{stations.length}</strong></article>
-        {view === "dsr" || view === "zero" ? <>
+        {isDsrFamilyView(view) ? <>
           <article className={s.kpi}><span>Overall DSR</span><strong>{pct(delivery.dsrPct)} <small>({count(delivery.delivered)})</small></strong></article>
           <article className={s.kpi} title="Shipments with a delivery-failed outcome; rejected shipments are shown separately"><span>Delivery failed</span><strong>{count(delivery.failed)}</strong></article>
           <article className={s.kpi} title="Shipments with a delivery-rejected outcome"><span>Rejected</span><strong>{count(delivery.rejected)}</strong></article>
@@ -1159,10 +1198,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           </div> : null}
         </div>
         <div className={s.reportMeta}>
-          <span>{stations.length} stations{view === "dsr" || view === "zero" ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
-          <span>{view === "dsr" || view === "zero" ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
+          <span>{stations.length} stations{isDsrFamilyView(view) ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
+          <span>{isDsrFamilyView(view) ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
-        {(view === "dsr" || view === "zero") && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
+        {isDsrFamilyView(view) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
         {needsDsrStation && (dsrStationPending || dsrStationError) ? <small role={dsrStationError ? "alert" : "status"} className={s.reportMeta}>
           {dsrStationError || "Loading EDD pending and dispatch-eligible physical station TIDs…"}
           {dsrStationError ? <button type="button" onClick={() => { setDsrStationData(null); setDsrStationRetry(value => value + 1); }}>Retry</button> : null}
@@ -1367,7 +1406,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                 <div className={s.shareCard}>
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
-                    <strong>{view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                    <strong>{view === "premium" ? "Premium DOT" : view === "standard" ? "Standard DOT" : view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
                   <div className={s.shareColsWide}>
@@ -1380,7 +1419,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     <span>{DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
-                    {(view === "zero" ? selected.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0) : [...selected.board.daDsr]).sort((a, b) => view === "zero" ? b.oor - a.oor : b.dsrPct - a.dsrPct).map((da) => (
+                    {[...daDsrForView(selected.board, view)].sort((a, b) => view === "zero" ? b.oor - a.oor : b.dsrPct - a.dsrPct).map((da) => (
                       <div key={da.driverId} className={s.shareRowWide}>
                         <span title={da.driverName || da.driverId}>{da.driverName || da.driverId}</span>
                         <strong>{da.total}</strong>
@@ -1392,11 +1431,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                       </div>
                     ))}
                     {(() => {
-                      const das = view === "zero"
-                        ? selected.board.daDsr.filter((da) => da.delivered === 0 && da.total > 0)
-                        : selected.board.daDsr;
+                      const das = daDsrForView(selected.board, view);
                       if (!das.length) {
-                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : "No DA DSR yet — Refresh"}</p>;
+                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : view === "premium" || view === "standard" ? `No ${view === "premium" ? "Premium" : "Standard"} DOT rows yet — Refresh` : "No DA DSR yet — Refresh"}</p>;
                       }
                       const tot = sumDaDsr(das);
                       return (

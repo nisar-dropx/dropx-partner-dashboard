@@ -71,6 +71,11 @@ export type StationBoardPayload = {
   pickupDonePct: number;
   daDsr: StationBoardDaDsr[];
   zeroDeliveries: number;
+  daDsrPremium: StationBoardDaDsr[];
+  zeroDeliveriesPremium: number;
+  daDsrStandard: StationBoardDaDsr[];
+  zeroDeliveriesStandard: number;
+  dsrFrozenAt?: string | null;
   dsrHistoryPending?: number;
   ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
   ageingByWeek: Record<string, AgeingBucketCell>;
@@ -94,8 +99,26 @@ export type StationBoardNetwork = {
   run: { id: string; status: string; stationsTotal: number; stationsDone: number; stationsOk: number; stationsFailed: number; startedAt: string; finishedAt: string | null } | null;
 };
 
-export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing";
+export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing" | "premium" | "standard";
 export type AgeingBoardMode = "day" | "week";
+
+/** DSR-shaped views that share DA tables / TID drill-down. */
+export function isDsrFamilyView(view: StationBoardView): boolean {
+  return view === "dsr" || view === "zero" || view === "premium" || view === "standard";
+}
+
+export function daDsrForView(board: StationBoardPayload, view: StationBoardView): StationBoardDaDsr[] {
+  if (view === "premium") return board.daDsrPremium ?? [];
+  if (view === "standard") return board.daDsrStandard ?? [];
+  if (view === "zero") return (board.daDsr ?? []).filter((da) => da.delivered === 0 && da.total > 0);
+  return board.daDsr ?? [];
+}
+
+export function zeroDeliveriesForView(board: StationBoardPayload, view: StationBoardView): number {
+  if (view === "premium") return board.zeroDeliveriesPremium ?? 0;
+  if (view === "standard") return board.zeroDeliveriesStandard ?? 0;
+  return board.zeroDeliveries ?? 0;
+}
 
 /** Full DSR column labels (Excel / share image / board table — no abbreviations). */
 export const DSR_HEADERS = {
@@ -180,6 +203,28 @@ function parseAgeingCell(value: unknown): AgeingBucketCell {
   };
 }
 
+function parseDaDsrList(value: unknown): StationBoardDaDsr[] {
+  const daDsr: StationBoardDaDsr[] = [];
+  if (!Array.isArray(value)) return daDsr;
+  for (const item of value) {
+    const da = (item ?? {}) as Record<string, unknown>;
+    const total = Number(da.total) || 0;
+    const delivered = Number(da.delivered) || 0;
+    if (total <= 0) continue;
+    daDsr.push({
+      driverId: String(da.driverId ?? "").trim() || "(no DA)",
+      driverName: String(da.driverName ?? "").trim(),
+      delivered,
+      failed: Number(da.failed) || 0,
+      rejected: Number(da.rejected) || 0,
+      oor: Number(da.oor) || 0,
+      total,
+      dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0,
+    });
+  }
+  return daDsr;
+}
+
 export function emptyBoard(): StationBoardPayload {
   return {
     eddByDate: {},
@@ -189,6 +234,11 @@ export function emptyBoard(): StationBoardPayload {
     pickupDonePct: 0,
     daDsr: [],
     zeroDeliveries: 0,
+    daDsrPremium: [],
+    zeroDeliveriesPremium: 0,
+    daDsrStandard: [],
+    zeroDeliveriesStandard: 0,
+    dsrFrozenAt: null,
     ageingByDay: emptyAgeingByDay(),
     ageingByWeek: {},
     ageingByStateWeek: {},
@@ -217,25 +267,9 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
   const cReturnTotal = Number(row.cReturnTotal ?? Object.values(cReturn).reduce((a, b) => a + b, 0)) || 0;
   const pickupDone = Number(row.pickupDone ?? cReturn.PICKUP_DONE ?? 0) || 0;
   const pickupDonePct = Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0;
-  const daDsr: StationBoardDaDsr[] = [];
-  if (Array.isArray(row.daDsr)) {
-    for (const item of row.daDsr) {
-      const da = (item ?? {}) as Record<string, unknown>;
-      const total = Number(da.total) || 0;
-      const delivered = Number(da.delivered) || 0;
-      if (total <= 0) continue;
-      daDsr.push({
-        driverId: String(da.driverId ?? "").trim() || "(no DA)",
-        driverName: String(da.driverName ?? "").trim(),
-        delivered,
-        failed: Number(da.failed) || 0,
-        rejected: Number(da.rejected) || 0,
-        oor: Number(da.oor) || 0,
-        total,
-        dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0,
-      });
-    }
-  }
+  const daDsr = parseDaDsrList(row.daDsr);
+  const daDsrPremium = parseDaDsrList(row.daDsrPremium);
+  const daDsrStandard = parseDaDsrList(row.daDsrStandard);
   const ageingByDay = emptyAgeingByDay();
   if (row.ageingByDay && typeof row.ageingByDay === "object" && !Array.isArray(row.ageingByDay)) {
     for (const key of AGEING_DAY_BUCKETS) {
@@ -279,6 +313,11 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     pickupDonePct,
     daDsr,
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
+    daDsrPremium,
+    zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
+    daDsrStandard,
+    zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
+    dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
     ageingByDay,
     ageingByWeek,
     ageingByStateWeek,
@@ -708,9 +747,9 @@ export function stationBoardSheets(
     }
   }
 
-  if (view === "dsr" || view === "full") {
+  const pushDsrSheet = (sheetName: string, pick: (board: StationBoardPayload) => StationBoardDaDsr[]) => {
     const dsrRows = stations.flatMap((station) =>
-      [...station.board.daDsr].sort((a, b) => b.dsrPct - a.dsrPct).map((da) => ({
+      [...pick(station.board)].sort((a, b) => b.dsrPct - a.dsrPct).map((da) => ({
         Station: station.stationCode,
         Region: regionLabel(regionForStation(station.stationCode)),
         [DSR_HEADERS.da]: da.driverName || da.driverId,
@@ -725,7 +764,7 @@ export function stationBoardSheets(
       })),
     );
     if (dsrRows.length) {
-      const tot = sumDaDsr(stations.flatMap((station) => station.board.daDsr));
+      const tot = sumDaDsr(stations.flatMap((station) => pick(station.board)));
       dsrRows.push({
         Station: "Grand Total",
         Region: "",
@@ -740,8 +779,12 @@ export function stationBoardSheets(
         "Zero delivery": "",
       });
     }
-    sheets.push({ name: "DA DSR", rows: dsrRows });
-  }
+    sheets.push({ name: sheetName, rows: dsrRows });
+  };
+
+  if (view === "dsr" || view === "full") pushDsrSheet("DA DSR", (board) => board.daDsr);
+  if (view === "premium" || view === "full") pushDsrSheet("Premium DOT", (board) => board.daDsrPremium ?? []);
+  if (view === "standard" || view === "full") pushDsrSheet("Standard DOT", (board) => board.daDsrStandard ?? []);
 
   if (view === "zero" || view === "full") {
     const zeroDas = stations.flatMap((station) =>
@@ -785,7 +828,9 @@ export function stationBoardFilename(date: string, view: StationBoardView | "ful
         : view === "dsr" ? "da-dsr"
           : view === "zero" ? "zero-deliveries"
             : view === "ageing" ? "ageing"
-              : "edd";
+              : view === "premium" ? "premium-dot"
+                : view === "standard" ? "standard-dot"
+                  : "edd";
   const suffix = scope.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
   return `station-board-${date}-${slug}${suffix ? `-${suffix}` : ""}.xlsx`;
 }

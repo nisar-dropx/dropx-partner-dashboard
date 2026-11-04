@@ -26,7 +26,7 @@ test("mapBoardTidExportRows prefers BoardEDD and maps Ageing / zero DSR filters"
   assert.equal(zero[0].status, "Failed");
 
   const sheet = boardTidSheetRows(edd);
-  assert.deepEqual(Object.keys(sheet[0]), ["Station", "Report", "Tracking ID", "Status", "EDD", "DA ID", "DA Name"]);
+  assert.deepEqual(Object.keys(sheet[0]), ["Station", "Report", "Tracking ID", "Status", "EDD", "Ship Option", "DA ID", "DA Name"]);
   assert.equal(sheet[0]["Tracking ID"], "T1");
 });
 

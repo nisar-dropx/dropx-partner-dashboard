@@ -21,11 +21,11 @@ import { compressedWorkbookResponse } from "@/lib/report-workbook";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VIEWS = new Set<StationBoardView | "full">(["edd", "creturn", "dsr", "zero", "ageing", "full"]);
+const VIEWS = new Set<StationBoardView | "full">(["edd", "creturn", "dsr", "zero", "ageing", "premium", "standard", "full"]);
 const REGIONS = new Set<StationBoardRegionId | "ALL">(["ALL", "KL", "AP", "ODCG", "OTHER"]);
 
 function tidKindsForView(view: StationBoardView | "full"): StationBoardTidKind[] {
-  if (view === "full") return ["edd", "creturn", "ageing", "dsr"];
+  if (view === "full") return ["edd", "creturn", "ageing", "dsr", "premium", "standard"];
   return [view];
 }
 

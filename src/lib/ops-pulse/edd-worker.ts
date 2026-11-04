@@ -938,6 +938,8 @@ export type LoadFlashTrackingRow = {
   driverId: string;
   driverName: string;
   isAccessPoint: boolean;
+  /** Amazon shipOption — Premium / Standard DOT filters. */
+  shipOption: string;
 };
 
 /**
@@ -968,6 +970,11 @@ export type LoadFlashBoardPayload = {
   pickupDonePct: number;
   daDsr: LoadFlashBoardDa[];
   zeroDeliveries: number;
+  daDsrPremium: LoadFlashBoardDa[];
+  zeroDeliveriesPremium: number;
+  daDsrStandard: LoadFlashBoardDa[];
+  zeroDeliveriesStandard: number;
+  dsrFrozenAt: string | null;
   dsrHistoryPending?: number;
   ageingByDay: Record<string, LoadFlashAgeingCell>;
   ageingByWeek: Record<string, LoadFlashAgeingCell>;
@@ -1022,10 +1029,38 @@ function emptyLoadFlashBoard(): LoadFlashBoardPayload {
     pickupDonePct: 0,
     daDsr: [],
     zeroDeliveries: 0,
+    daDsrPremium: [],
+    zeroDeliveriesPremium: 0,
+    daDsrStandard: [],
+    zeroDeliveriesStandard: 0,
+    dsrFrozenAt: null,
     ageingByDay: {},
     ageingByWeek: {},
     ageingByStateWeek: {},
   };
+}
+
+function parseLoadFlashDaList(value: unknown): LoadFlashBoardDa[] {
+  const daDsr: LoadFlashBoardDa[] = [];
+  if (!Array.isArray(value)) return daDsr;
+  for (const item of value) {
+    const da = (item ?? {}) as Record<string, unknown>;
+    const total = Number(da.total) || 0;
+    const delivered = Number(da.delivered) || 0;
+    if (total <= 0) continue;
+    daDsr.push({
+      driverId: String(da.driverId ?? "").trim() || "(no DA)",
+      driverName: String(da.driverName ?? "").trim(),
+      delivered,
+      failed: Number(da.failed) || 0,
+      rejected: Number(da.rejected) || 0,
+      oor: Number(da.oor) || 0,
+      other: Number(da.other) || 0,
+      total,
+      dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0,
+    });
+  }
+  return daDsr;
 }
 
 function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
@@ -1047,26 +1082,9 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
       if (key && n > 0) cReturn[key] = n;
     }
   }
-  const daDsr: LoadFlashBoardDa[] = [];
-  if (Array.isArray(row.daDsr)) {
-    for (const item of row.daDsr) {
-      const da = (item ?? {}) as Record<string, unknown>;
-      const total = Number(da.total) || 0;
-      const delivered = Number(da.delivered) || 0;
-      if (total <= 0) continue;
-      daDsr.push({
-        driverId: String(da.driverId ?? "").trim() || "(no DA)",
-        driverName: String(da.driverName ?? "").trim(),
-        delivered,
-        failed: Number(da.failed) || 0,
-        rejected: Number(da.rejected) || 0,
-        oor: Number(da.oor) || 0,
-        other: Number(da.other) || 0,
-        total,
-        dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0
-      });
-    }
-  }
+  const daDsr = parseLoadFlashDaList(row.daDsr);
+  const daDsrPremium = parseLoadFlashDaList(row.daDsrPremium);
+  const daDsrStandard = parseLoadFlashDaList(row.daDsrStandard);
   const ageingByDay: Record<string, LoadFlashAgeingCell> = {};
   if (row.ageingByDay && typeof row.ageingByDay === "object" && !Array.isArray(row.ageingByDay)) {
     for (const [key, cell] of Object.entries(row.ageingByDay as Record<string, unknown>)) {
@@ -1109,6 +1127,11 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     pickupDonePct: Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0,
     daDsr,
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
+    daDsrPremium,
+    zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
+    daDsrStandard,
+    zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
+    dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
     dsrHistoryPending: Number(row.dsrHistoryPending) || 0,
     ageingByDay,
     ageingByWeek,
@@ -1297,7 +1320,8 @@ export async function fetchLoadFlashTracking(
       delivered: Boolean(row.delivered),
       driverId: String(row.driverId ?? "").trim(),
       driverName: String(row.driverName ?? "").trim(),
-      isAccessPoint: Boolean(row.isAccessPoint)
+      isAccessPoint: Boolean(row.isAccessPoint),
+      shipOption: String(row.shipOption ?? "").trim(),
     };
   }).filter((row) => row.trackingId);
 }

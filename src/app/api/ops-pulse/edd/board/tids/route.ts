@@ -12,7 +12,7 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const KINDS = new Set<StationBoardTidKind>(["edd", "creturn", "dsr", "dsr-station", "zero", "ageing"]);
+const KINDS = new Set<StationBoardTidKind>(["edd", "creturn", "dsr", "dsr-station", "zero", "ageing", "premium", "standard"]);
 
 /**
  * Station-wise tracking IDs for Station board drill-down / Excel All TIDs sheet.
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     })).filter((row) => allowed.has(row.stationCode) && stations.includes(row.stationCode));
 
     const mapped = mapBoardTidExportRows(flash, kind);
-    const rows = mapped.map(({ stationCode, trackingId, status, currentState, sourceBucket, edd, driverId, driverName }) => ({
+    const rows = mapped.map(({ stationCode, trackingId, status, currentState, sourceBucket, edd, driverId, driverName, shipOption }) => ({
       stationCode,
       trackingId,
       status,
@@ -65,6 +65,7 @@ export async function GET(request: Request) {
       edd,
       driverId,
       driverName,
+      shipOption: shipOption || "",
     }));
 
     return NextResponse.json(

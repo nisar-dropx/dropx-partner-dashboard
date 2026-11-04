@@ -1,4 +1,5 @@
 import { CRETURN_PICKED_UP_BUCKET } from "./station-board.ts";
+import { isPremiumDot, isStandardDot } from "./ship-option-dot.ts";
 
 /** Board-only TID buckets (must match amazon-edd-worker BOARD_TID_BUCKET). */
 export const BOARD_TID = {
@@ -12,15 +13,19 @@ export const BOARD_TID = {
   AGEING: "BoardAgeing",
 } as const;
 
-export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing";
+export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard";
+
+const DSR_BUCKETS = [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"];
 
 export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   edd: [BOARD_TID.EDD, "EDD"],
   creturn: [BOARD_TID.CRETURN, "Pickup"],
   ageing: [BOARD_TID.AGEING],
-  dsr: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
+  dsr: DSR_BUCKETS,
   "dsr-station": [BOARD_TID.EDD, BOARD_TID.AGEING, BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
-  zero: [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
+  zero: DSR_BUCKETS,
+  premium: DSR_BUCKETS,
+  standard: DSR_BUCKETS,
 };
 
 export type FlashTrackingLike = {
@@ -31,6 +36,7 @@ export type FlashTrackingLike = {
   edd: string;
   driverId: string;
   driverName: string;
+  shipOption?: string;
 };
 
 export type BoardTidExportRow = {
@@ -43,6 +49,7 @@ export type BoardTidExportRow = {
   driverName: string;
   report: string;
   sourceBucket?: string;
+  shipOption?: string;
 };
 
 function dsrStatus(bucket: string): string {
@@ -105,18 +112,23 @@ function mapAgeing(flash: FlashTrackingLike[]): BoardTidExportRow[] {
     .filter((row) => row.trackingId);
 }
 
-function mapDsr(flash: FlashTrackingLike[], zeroOnly: boolean): BoardTidExportRow[] {
-  const dsrBuckets = new Set([
-    BOARD_TID.DELIVERED,
-    BOARD_TID.FAILED,
-    BOARD_TID.REJECTED,
-    BOARD_TID.OOR,
-    BOARD_TID.OTHER,
-    "Failed",
-    "Rejected",
-  ]);
+function mapDsr(
+  flash: FlashTrackingLike[],
+  mode: "dsr" | "zero" | "premium" | "standard",
+): BoardTidExportRow[] {
+  const dsrBuckets = new Set(DSR_BUCKETS);
+  const reportLabel =
+    mode === "zero" ? "Zero deliveries"
+      : mode === "premium" ? "Premium DOT"
+        : mode === "standard" ? "Standard DOT"
+          : "DA DSR";
   let rows = flash
     .filter((row) => dsrBuckets.has(row.bucket))
+    .filter((row) => {
+      if (mode === "premium") return isPremiumDot(row.shipOption);
+      if (mode === "standard") return isStandardDot(row.shipOption);
+      return true;
+    })
     .map((row) => ({
       stationCode: row.stationCode,
       trackingId: row.trackingId,
@@ -125,11 +137,12 @@ function mapDsr(flash: FlashTrackingLike[], zeroOnly: boolean): BoardTidExportRo
       edd: row.edd || "",
       driverId: row.driverId,
       driverName: row.driverName,
-      report: zeroOnly ? "Zero deliveries" : "DA DSR",
+      report: reportLabel,
+      shipOption: row.shipOption || "",
     }))
     .filter((row) => row.trackingId);
 
-  if (zeroOnly) {
+  if (mode === "zero") {
     const deliveredByDriver = new Map<string, number>();
     for (const row of rows) {
       if (row.status !== "Delivered") continue;
@@ -173,8 +186,10 @@ export function mapBoardTidExportRows(
   if (kind === "creturn") return mapCReturn(flash);
   if (kind === "ageing") return mapAgeing(flash);
   if (kind === "dsr-station") return mapDsrStation(flash);
-  if (kind === "zero") return mapDsr(flash, true);
-  return mapDsr(flash, false);
+  if (kind === "zero") return mapDsr(flash, "zero");
+  if (kind === "premium") return mapDsr(flash, "premium");
+  if (kind === "standard") return mapDsr(flash, "standard");
+  return mapDsr(flash, "dsr");
 }
 
 /** Flat Excel rows for the All TIDs sheet (insertion-order headers). */
@@ -194,6 +209,7 @@ export function boardTidSheetRows(rows: BoardTidExportRow[]): Record<string, unk
       Status: row.status,
       ...(row.currentState !== undefined ? { "Current Amazon state": row.currentState } : {}),
       EDD: row.edd,
+      "Ship Option": row.shipOption || "",
       "DA ID": row.driverId,
       "DA Name": row.driverName,
     }));
