@@ -9,7 +9,7 @@ import { isKilometreField, kilometreRate, routeFuelForDay, type RouteDistanceCon
 
 
 
-import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
+import type { WorkforcePayoutRow, WorkforcePayoutLine } from "@/components/workforce-payout-table";
 
 import type { AuthorizationContext } from "@/lib/authorization";
 import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
@@ -1318,7 +1318,7 @@ export async function loadWorkforcePayoutRows(
         amount: line.amount,
         sortOrder: line.sortOrder
       }));
-      const lines = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
+      const lines: WorkforcePayoutLine[] = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
       if (paidAdhoc?.effect === "base_only") {
         lines.splice(
           0,
