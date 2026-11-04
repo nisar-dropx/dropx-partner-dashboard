@@ -1,3 +1,4 @@
+import { loadFlashClusters } from '@/lib/ops-pulse/load-flash-access';
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
@@ -15,6 +16,7 @@ export default async function EddPerformanceNetworkPage() {
   const authorization = await requireEddAgeingPerformanceAccess("edd_performance");
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+  const clusters = await loadFlashClusters(companyId, stations);
   const workerConfigured = isEddWorkerConfigured();
 
   let error: string | null = null;
@@ -93,7 +95,7 @@ export default async function EddPerformanceNetworkPage() {
         ) : null}
 
         {workerConfigured && stations.length ? (
-          <EddNetworkPerformanceView stations={stations} initialNetwork={network} initialRun={run} />
+          <EddNetworkPerformanceView clusters={clusters} stations={stations} initialNetwork={network} initialRun={run} />
         ) : null}
       </div>
     </AppShell>

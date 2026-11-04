@@ -40,7 +40,7 @@ import { STATION_BOARD_REGIONS } from "@/lib/ops-pulse/station-board-regions";
 import { CopyReportImage } from "@/components/copy-report-image";
 import { downloadBoardShare, renderBoardShareImages, shareBoardImages, type BoardShareCell, type BoardShareTable } from "@/lib/ops-pulse/station-board-share";
 import s from "./board.module.css";
-import { EddMultiSelect } from "../edd-multi-select";
+import { EddScopeFilters } from "../edd-scope-filters";
 import { boardDeliverySummary, filterBoardStations, prepareBoardReport, type BoardCluster, type BoardReportSort } from "@/lib/ops-pulse/compact-board-report";
 import { downloadReportExcel, type ExcelReport } from "@/lib/download-report-excel";
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
@@ -313,7 +313,6 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [otherDate, setOtherDate] = useState(initial.businessDate || "");
   const [ageingMode, setAgeingMode] = useState<AgeingBoardMode>("day");
   /** Resume Refresh after a proxy timeout instead of restarting from station 0. */
-  const backfillCursor = useRef(0);
   const backfillClearSeq = useRef(0);
   const busyRef = useRef(busy);
   busyRef.current = busy;
@@ -585,322 +584,52 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setRun(next.run);
   }
 
-  function isTransientMessage(message: string) {
-    return /aborted due to timeout|timeout|timed out|504|524|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|connection dropped|network|socket/i.test(message);
-  }
-
-  /** Stations per tick (last packet uses whatever remain if <4). */
-  const BOARD_PULL_CONCURRENCY = "4";
-
-  async function postBackfillTick(params: URLSearchParams) {
-    const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
-    const body = await response.json().catch(() => ({})) as {
-      nextIndex?: number;
-      total?: number;
-      done?: boolean;
-      advanced?: number;
-      failed?: string[];
-      error?: string;
-      alreadyRunning?: boolean;
-      busy?: boolean;
-      running?: boolean;
-      startedAt?: string;
-    };
-    return { response, body };
-  }
-
-  function sharedRefreshNote(next: Pick<LoadFlashBoardNetwork, "refreshOwner" | "refreshDone" | "refreshTotal" | "refreshRunning">) {
-    const total = Number(next.refreshTotal ?? 0) || 0;
-    const done = Number(next.refreshDone ?? 0) || 0;
-    const who =
-      next.refreshOwner === "cron"
-        ? "Hourly refresh working"
-        : "Refresh working";
-    if (!next.refreshRunning) return "Board data updated.";
-    return total ? `${who} · ${done}/${total}` : `${who}…`;
-  }
-
-  /** Watch a Refresh someone else (or cron) already started — update board as stations finish. */
-  async function watchSharedRefresh(clearSeq: number) {
-    setBusy("refresh");
-    setBackfillNote("Refresh working…");
-    let guard = 0;
-    while (guard < 120) {
-      guard += 1;
-      if (clearSeq !== backfillClearSeq.current) return;
-      const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" });
-      if (!response.ok) {
-        await new Promise((r) => setTimeout(r, 2500));
-        continue;
-      }
-      const next = (await response.json()) as LoadFlashBoardNetwork;
-      setPayload(next);
-      setRun(next.run);
-      const total = Number(next.refreshTotal ?? 0) || 0;
-      const done = Number(next.refreshDone ?? 0) || 0;
-      if (total > 0) setBackfillProgress({ done, total });
-      setBackfillNote(sharedRefreshNote(next));
-      if (!next.refreshRunning) break;
-      await new Promise((r) => setTimeout(r, 2500));
-    }
-  }
-
-  async function runRetryPass(
-    keys: string[],
-    passLabel: string,
-    streakTimeoutsRef: { n: number },
-    stationTotal: number,
-  ) {
-    const stillFailed: string[] = [];
-    let deferredRetries = 0;
-    for (let i = 0; i < keys.length; ) {
-      const chunk = keys.slice(i, i + 4);
-      const recovered = Math.min(i + chunk.length, keys.length);
-      setBackfillNote(`${passLabel} · ${recovered}/${keys.length}`);
-      if (stationTotal > 0) {
-        setBackfillProgress({
-          done: Math.max(0, stationTotal - keys.length + recovered),
-          total: stationTotal,
-        });
-      }
-      const params = new URLSearchParams({
-        days: "1",
-        date: payload.businessDate,
-        concurrency: BOARD_PULL_CONCURRENCY,
-        retryJobs: chunk.join(","),
-      });
-      let response: Response;
-      let body: { failed?: string[]; error?: string; advanced?: number; done?: boolean };
-      try {
-        ({ response, body } = await postBackfillTick(params));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Board recovery failed.";
-        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
-          streakTimeoutsRef.n += 1;
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw err instanceof Error ? err : new Error(message);
-      }
-      if (!response.ok) {
-        const message = String(body.error ?? "Board recovery failed.");
-        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
-          streakTimeoutsRef.n += 1;
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw new Error(message);
-      }
-      streakTimeoutsRef.n = 0;
-      const advanced = Number(body.advanced ?? 0) || 0;
-      if (!advanced) {
-        deferredRetries += 1;
-        if (deferredRetries > 8) {
-          stillFailed.push(...chunk);
-          i += chunk.length;
-          deferredRetries = 0;
-          continue;
-        }
-        await new Promise((r) => setTimeout(r, 1200));
-        continue;
-      }
-      deferredRetries = 0;
-      const failedAgain = new Set((body.failed ?? []).map(String).filter(Boolean));
-      for (const key of chunk) {
-        if (failedAgain.has(key)) stillFailed.push(key);
-      }
-      i += chunk.length;
-      await reloadBoard().catch(() => undefined);
-    }
-    return stillFailed;
-  }
-
-  async function runBackfillLoop(clearSeq: number): Promise<"owner" | "watcher"> {
-    // Keep prior board data visible — stations overwrite in place as each packet saves.
-    backfillCursor.current = 0;
-    setBackfillNote("Starting refresh…");
-    setBackfillProgress({ done: 0, total: 0 });
-    {
-      const resetParams = new URLSearchParams({
-        days: "1",
-        date: payload.businessDate,
-        concurrency: BOARD_PULL_CONCURRENCY,
-        reset: "1",
-      });
-      const { response, body } = await postBackfillTick(resetParams);
-      if (!response.ok) throw new Error(String(body.error ?? "Unable to start board refresh."));
-      const total = Number(body.total ?? 0) || 0;
-      const done = Number(body.nextIndex ?? 0) || 0;
-      if (total > 0) setBackfillProgress({ done, total });
-      // Someone else already owns this Refresh — watch shared progress only.
-      if (body.alreadyRunning) {
-        setBackfillNote(total ? `Refresh working · ${done}/${total}` : "Refresh working…");
-        await watchSharedRefresh(clearSeq);
-        return "watcher";
-      }
-      setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
-      await reloadBoard().catch(() => undefined);
-    }
-
-    let guard = 0;
-    const streakTimeoutsRef = { n: 0 };
-    const failedAcc = new Set<string>();
-    let stationTotal = 0;
-    // Shared server cursor — do not send startIndex (prevents two browsers diverging).
-    while (guard < 80) {
-      guard += 1;
-      if (clearSeq !== backfillClearSeq.current) return "owner";
-      const params = new URLSearchParams({
-        days: "1",
-        date: payload.businessDate,
-        concurrency: BOARD_PULL_CONCURRENCY,
-      });
-      let response: Response;
-      let body: {
-        nextIndex?: number;
-        total?: number;
-        done?: boolean;
-        advanced?: number;
-        failed?: string[];
-        error?: string;
-        busy?: boolean;
-      };
-      try {
-        ({ response, body } = await postBackfillTick(params));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Board backfill failed.";
-        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
-          streakTimeoutsRef.n += 1;
-          setBackfillNote("Worker busy — retrying packet…");
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw err instanceof Error ? err : new Error(message);
-      }
-      if (!response.ok) {
-        const message = String(body.error ?? "Board backfill failed.");
-        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
-          streakTimeoutsRef.n += 1;
-          setBackfillNote("Connection dropped — retrying…");
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw new Error(isTransientMessage(message)
-          ? "Worker connection dropped. Click Refresh again — it will resume cleanly."
-          : message);
-      }
-      streakTimeoutsRef.n = 0;
-      for (const key of body.failed ?? []) {
-        if (key) failedAcc.add(String(key));
-      }
-      const advanced = Number(body.advanced ?? 0) || 0;
-      const total = Number(body.total ?? 0) || 0;
-      const nextIndex = Number(body.nextIndex ?? 0) || 0;
-      if (total > 0) stationTotal = total;
-      if (body.busy && !advanced && !body.done) {
-        setBackfillNote(total ? `Refresh working · ${nextIndex}/${total}` : "Refresh working…");
-        await new Promise((r) => setTimeout(r, 1500));
-        continue;
-      }
-      if (body.done) {
-        if (total > 0) setBackfillProgress({ done: total, total });
-        backfillCursor.current = 0;
-        await reloadBoard().catch(() => undefined);
-        break;
-      }
-      if (!advanced) {
-        setBackfillNote(`Worker deferred packet — retrying…`);
-        await new Promise((r) => setTimeout(r, 1200));
-        continue;
-      }
-      backfillCursor.current = nextIndex;
-      const done = total ? Math.min(nextIndex, total) : nextIndex;
-      if (total > 0) setBackfillProgress({ done, total });
-      setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
-      await reloadBoard().catch(() => undefined);
-    }
-
-    let pending = [...failedAcc];
-    if (pending.length) {
-      setBackfillNote(`Main pull done · recovering ${pending.length} station${pending.length === 1 ? "" : "s"}…`);
-      pending = await runRetryPass(pending, "Recovering failed stations", streakTimeoutsRef, stationTotal);
-    }
-    if (pending.length) {
-      pending = await runRetryPass(pending, "Second recovery pass", streakTimeoutsRef, stationTotal);
-    }
-    if (pending.length) {
-      setBackfillNote(
-        `Board pull finished · ${pending.length} station${pending.length === 1 ? "" : "s"} still failed after recovery`,
-      );
-    } else if (failedAcc.size) {
-      setBackfillNote("Board pull finished · recovered all failed stations");
-    }
-    return "owner";
-  }
-
   async function refresh() {
+    const selectedCodes = stations.map(row => row.stationCode);
+    if (!selectedCodes.length) return;
     const clearSeq = ++backfillClearSeq.current;
-    setBusy("refresh");
-    setError(null);
-    setBackfillNote("Starting refresh…");
-    setBackfillProgress({ done: 0, total: 0 });
+    setBusy("refresh"); setError(null);
+    setBackfillProgress({ done: 0, total: selectedCodes.length });
+    setBackfillNote(`Queuing ${selectedCodes.length} selected stations…`);
     try {
-      void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST", cache: "no-store" }).catch(() => undefined);
-      await runBackfillLoop(clearSeq);
-      await reloadBoard();
-      setBackfillNote("Board data updated.");
-      window.setTimeout(() => {
+      const response = await fetch('/api/ops-pulse/edd/board/refresh-selected', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stations: selectedCodes }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Unable to queue refresh.');
+      const requestedAt = Date.parse(body.requestedAt);
+      setBackfillNote(`Refreshing ${selectedCodes.join(', ')} · continues if you close this page`);
+      for (let attempt = 0; attempt < 90; attempt++) {
         if (clearSeq !== backfillClearSeq.current) return;
-        setBackfillProgress(null);
-        setBackfillNote("");
-      }, 2500);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Refresh failed.";
-      setError(isTransientMessage(message)
-        ? "Worker connection dropped. Click Refresh again — it will resume cleanly."
-        : message);
-    } finally {
-      setBusy(null);
-    }
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const check = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: 'no-store' });
+        if (!check.ok) continue;
+        const next = await check.json() as LoadFlashBoardNetwork;
+        setPayload(next); setRun(next.run);
+        const done = next.stations.filter(row => selectedCodes.includes(row.stationCode) && Date.parse(row.fetchedAt || '') >= requestedAt).length;
+        setBackfillProgress({ done, total: selectedCodes.length });
+        setBackfillNote(`Selected stations updated · ${done}/${selectedCodes.length}`);
+        if (done === selectedCodes.length) return;
+      }
+      setBackfillNote('Refresh is still queued or retrying. Last complete figures remain visible; updates continue automatically.');
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to refresh selected stations.'); }
+    finally { setBusy(null); }
   }
 
-  // Join a Refresh already in progress (another user or hourly cron), including
-  // when cron starts while this page is open — poll every ~8s while idle.
+  // Poll saved snapshots; the server's minute cron owns refresh work.
   useEffect(() => {
     let cancelled = false;
-    async function joinIfRunning() {
-      if (cancelled || busyRef.current !== null) return;
+    const poll = async () => {
+      if (busyRef.current !== null) return;
       try {
-        const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" });
+        const response = await fetch(`/api/ops-pulse/edd/board?date=${encodeURIComponent(payload.businessDate)}`, { cache: 'no-store' });
         if (!response.ok || cancelled || busyRef.current !== null) return;
-        const next = (await response.json()) as LoadFlashBoardNetwork;
-        setPayload(next);
-        setRun(next.run);
-        if (!next.refreshRunning || cancelled || busyRef.current !== null) return;
-        const clearSeq = ++backfillClearSeq.current;
-        try {
-          await watchSharedRefresh(clearSeq);
-          if (cancelled || clearSeq !== backfillClearSeq.current) return;
-          setBackfillNote("Board data updated.");
-          window.setTimeout(() => {
-            if (clearSeq !== backfillClearSeq.current) return;
-            setBackfillProgress(null);
-            setBackfillNote("");
-          }, 2500);
-        } finally {
-          if (clearSeq === backfillClearSeq.current) setBusy(null);
-        }
-      } catch {
-        // ignore poll errors — next interval retries
-      }
-    }
-    void joinIfRunning();
-    const id = window.setInterval(() => void joinIfRunning(), 8000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
+        const next = await response.json() as LoadFlashBoardNetwork;
+        if (!cancelled) { setPayload(next); setRun(next.run); }
+      } catch { /* Retain the last successful snapshot. */ }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll while board date stays put
+    const timer = window.setInterval(() => void poll(), 15_000);
+    return () => { cancelled = true; window.clearInterval(timer); backfillClearSeq.current++; };
   }, [payload.businessDate]);
 
   async function onDownload() {
@@ -1111,15 +840,15 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div>
 
         <div className={s.filters}>
-          <EddMultiSelect label="Stations" options={payload.stations.map(row => row.stationCode).sort()} selected={stationFilter} onChange={setStationFilter} renderOption={code => stationNames[code] ? `${code} · ${stationNames[code]}` : code} />
-          <EddMultiSelect label="Cluster / AOM" options={clusters.map(c => c.value)} selected={clusterFilter} onChange={setClusterFilter} renderOption={id => clusters.find(c => c.value === id)?.label || id} />
-          <EddMultiSelect label="Regions" options={STATION_BOARD_REGIONS.map(r => r.id)} selected={regions} onChange={setRegions} renderOption={id => STATION_BOARD_REGIONS.find(r => r.id === id)?.label || id} />
+          <EddScopeFilters codes={payload.stations.map(row => row.stationCode)} clusters={clusters} stationNames={stationNames}
+            value={{ stations: [...stationFilter], clusters: [...clusterFilter], regions: [...regions] }}
+            onChange={next => { setStationFilter(new Set(next.stations)); setClusterFilter(new Set(next.clusters)); setRegions(new Set(next.regions.map(asRegion).filter(region => region !== 'ALL'))); }} />
         </div>
 
         <div className={s.actions}>
-          <button type="button" disabled={busy !== null} onClick={() => void refresh()}>
+          <button type="button" disabled={busy !== null || !stations.length || payload.businessDate !== new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())} title="Refresh the stations in the current filters. Live refresh is available for today." onClick={() => void refresh()}>
             {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
-            {busy === "refresh" ? " Working…" : " Refresh"}
+            {busy === "refresh" ? " Refreshing…" : ` Refresh ${stations.length} station${stations.length === 1 ? "" : "s"}`}
           </button>
           <button type="button" disabled={busy !== null || outputUnavailable} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel

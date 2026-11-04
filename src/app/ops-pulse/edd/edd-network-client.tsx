@@ -1,4 +1,6 @@
 "use client";
+import { EddScopeFilters } from './edd-scope-filters';
+import { scopedStationCodes, emptyEddScope, type EddCluster } from '@/lib/ops-pulse/edd-scope';
 import { ReportTable } from "@/components/report-table";
 
 
@@ -94,14 +96,21 @@ async function fetchNetwork(): Promise<{ stations: EddNetworkStation[]; run: Edd
 export function EddNetworkClient({
   stations,
   initialNetwork,
-  initialRun
+  initialRun,
+  clusters = []
 }: {
   stations: EddStationOption[];
+  clusters?: EddCluster[];
   initialNetwork: EddNetworkStation[];
   initialRun: EddNetworkRunStatus | null;
 }) {
   const nameByCode = useMemo(() => new Map(stations.map((s) => [s.code, s.name])), [stations]);
-  const [rows, setRows] = useState<EddNetworkStation[]>(initialNetwork);
+  const [allRows, setRows] = useState<EddNetworkStation[]>(initialNetwork);
+  const [scope, setScope] = useState(emptyEddScope);
+  const rows = useMemo(() => {
+    const codes = new Set(scopedStationCodes(stations.map(s => s.code), clusters, scope));
+    return allRows.filter(row => codes.has(row.stationCode));
+  }, [allRows, stations, clusters, scope]);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initialRun);
   const [search, setSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<SortColumn>("overdue");
@@ -200,15 +209,19 @@ export function EddNetworkClient({
       .finally(() => setRefreshingCode(null));
   }
 
-  function handleRefreshAll() {
-    setStartingSweep(true);
-    setRowError(null);
-    void postJson<{ run: EddNetworkRunStatus | null }>("/api/ops-pulse/edd/refresh-all")
-      .then((result) => setRun(result.run))
-      .catch((err) => {
-        setRowError({ code: "Network sweep", message: err instanceof Error ? err.message : "Unable to start the network refresh." });
-      })
-      .finally(() => setStartingSweep(false));
+  async function handleRefreshAll() {
+    const selectedCodes = filteredRows.map(row => row.stationCode);
+    setStartingSweep(true); setRowError(null);
+    const failed: string[] = [];
+    try {
+      for (const code of selectedCodes) {
+        setRefreshingCode(code);
+        try { await refreshStation(code); } catch { failed.push(code); }
+      }
+      const latest = await fetchNetwork(); setRows(latest.stations); setRun(latest.run);
+      if (failed.length) setRowError({ code: failed.join(', '), message: 'Could not refresh these stations. Their last saved figures are retained.' });
+    } catch (error) { setRowError({ code: 'Refresh', message: error instanceof Error ? error.message : 'Unable to refresh.' }); }
+    finally { setStartingSweep(false); setRefreshingCode(null); }
   }
 
   const sweepRunning = run?.status === "running";
@@ -216,6 +229,7 @@ export function EddNetworkClient({
 
   return (
     <>
+      <div className="edd-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><EddScopeFilters codes={stations.map(s => s.code)} clusters={clusters} stationNames={Object.fromEntries(nameByCode)} value={scope} onChange={next => { setScope(next); setPage(1); }} /></div>
       <section className="edd-bucket-grid">
         <div className="edd-bucket-card static">
           <span>Stations tracked</span>
@@ -225,17 +239,17 @@ export function EddNetworkClient({
         <div className="edd-bucket-card static">
           <span>Total live TIDs</span>
           <strong>{totals.total.toLocaleString("en-IN")}</strong>
-          <small>Across every tracked station</small>
+          <small>Across selected stations</small>
         </div>
         <div className="edd-bucket-card static overdue">
           <span>Overdue</span>
           <strong>{totals.overdue.toLocaleString("en-IN")}</strong>
-          <small>EAD already passed, network-wide</small>
+          <small>EAD already passed, in this selection</small>
         </div>
         <div className="edd-bucket-card static dueToday">
           <span>Due today</span>
           <strong>{totals.dueToday.toLocaleString("en-IN")}</strong>
-          <small>Must deliver today, network-wide</small>
+          <small>Must deliver today, in this selection</small>
         </div>
       </section>
 
@@ -265,11 +279,11 @@ export function EddNetworkClient({
               type="button"
               className="button secondary"
               onClick={handleRefreshAll}
-              disabled={startingSweep || sweepRunning}
+              disabled={startingSweep || sweepRunning || !filteredRows.length}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
               {startingSweep ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
-              {sweepRunning ? "Sweep running…" : startingSweep ? "Starting…" : "Refresh all"}
+              {sweepRunning ? "Sweep running…" : startingSweep ? "Refreshing…" : `Refresh ${filteredRows.length} stations`}
             </button>
           </div>
         </div>

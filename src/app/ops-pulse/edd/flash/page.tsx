@@ -16,7 +16,7 @@ function todayKolkata() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
-export default async function LoadFlashPage({ searchParams }: { searchParams?: { date?: string; cluster?: string; station?: string; driver?: string } }) {
+export default async function LoadFlashPage({ searchParams }: { searchParams?: { date?: string; cluster?: string; station?: string; driver?: string; regions?: string; clusters?: string; stations?: string } }) {
   const authorization = await requireEddAccess("edd_live_ops");
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
@@ -46,11 +46,11 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
         <PageHead
           eyebrow="Ops Pulse · Ops Live"
           title="Live performance"
-          subtitle="The day's delivery report: how much of the morning load is delivered, what is on the road, and which stations need attention. Refreshed hourly, 6:05am to 11:05pm IST."
+          subtitle="The day's delivery report: how much of the morning load is delivered, what is on the road, and which stations need attention. Refresh scheduled every 30 minutes, 6:05am to 11:05pm IST."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
-              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Hourly" : "Setup needed"}</span>
+              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Every 30 min" : "Setup needed"}</span>
             </div>
           )}
         />
@@ -72,7 +72,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
             initial={payload}
             stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))}
             clusters={clusters}
-            initialScope={{ cluster: String(searchParams?.cluster ?? ""), station: String(searchParams?.station ?? "").toUpperCase(), driver: searchParams?.driver == null ? null : String(searchParams.driver) }}
+            initialScope={{ regions: searchParams?.regions?.split(",").filter(Boolean), clusters: searchParams?.clusters?.split(",").filter(Boolean), stations: searchParams?.stations?.split(",").filter(Boolean), cluster: String(searchParams?.cluster ?? ""), station: String(searchParams?.station ?? "").toUpperCase(), driver: searchParams?.driver == null ? null : String(searchParams.driver) }}
           /> : null}
       </div>
     </AppShell>

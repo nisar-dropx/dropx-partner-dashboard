@@ -1,3 +1,4 @@
+import { loadFlashClusters } from '@/lib/ops-pulse/load-flash-access';
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -23,6 +24,7 @@ export default async function ScorecardPage({ searchParams }: { searchParams?: {
   const companyId = requireCompanyId(authorization);
   const days = RANGES.find((d) => String(d) === searchParams?.days) ?? 7;
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+  const clusters = await loadFlashClusters(companyId, stations);
   const to = ist(1), from = ist(days);
   let data: ScorecardData | null = null;
   let error = "";
@@ -51,7 +53,7 @@ export default async function ScorecardPage({ searchParams }: { searchParams?: {
         <EddSectionTabs active="scorecard" allowedSections={allowedEddSections(authorization)} showAgeingPerformance={canViewEddAgeingPerformance(authorization)} />
         {error ? <section className="panel message-panel error"><div className="panel-body"><strong>{error}</strong></div></section> : null}
         {!stations.length ? <section className="panel message-panel error"><div className="panel-body"><strong>No stations in your scope.</strong></div></section> : null}
-        {data ? <ScorecardView data={data} days={days} ranges={[...RANGES]} from={from} to={to} stationNames={Object.fromEntries(stations.map((s) => [s.code, s.name]))} /> : null}
+        {data ? <ScorecardView clusters={clusters} data={data} days={days} ranges={[...RANGES]} from={from} to={to} stationNames={Object.fromEntries(stations.map((s) => [s.code, s.name]))} /> : null}
       </div>
     </AppShell>
   );

@@ -1,4 +1,6 @@
 "use client";
+import { EddScopeFilters } from '../edd-scope-filters';
+import { scopedStationCodes, type EddScope } from '@/lib/ops-pulse/edd-scope';
 import { ReportTable } from "@/components/report-table";
 
 
@@ -24,7 +26,7 @@ type SortKey = "stationCode" | "base" | "deliveredPct" | "outOnRoad" | "totalLoa
 type FilterKey = "all" | "notStarted" | "idle" | "pastEdd" | "returns" | "data";
 type Tone = "critical" | "watch" | "good" | "info";
 type Insight = { tone: Tone; title: string; detail: string; filter?: FilterKey };
-export type LoadFlashScope = { cluster: string; station: string; driver: string | null };
+export type LoadFlashScope = { cluster: string; station: string; driver: string | null; regions?: string[]; clusters?: string[]; stations?: string[] };
 type Tracking = { key: string; rows: LoadFlashTrackingRow[] };
 
 function formatWhen(value: string | null) {
@@ -116,7 +118,9 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
   const [downloading, setDownloading] = useState<LoadFlashReportKind | null>(null);
   const [showAllInsights, setShowAllInsights] = useState(false);
   // What the report is narrowed to: a manager's stations, then one station, then one driver.
-  const [cluster, setCluster] = useState(() => clusters.some((option) => option.value === initialScope?.cluster) ? initialScope!.cluster : "");
+  const [scope, setScope] = useState<EddScope>(() => ({ regions: initialScope?.regions ?? [], clusters: initialScope?.clusters ?? (initialScope?.cluster ? [initialScope.cluster] : []), stations: initialScope?.stations ?? [] }));
+  const cluster = scope.clusters.length === 1 ? scope.clusters[0] : '';
+  const [refreshNote, setRefreshNote] = useState('');
   const [station, setStation] = useState(() => initial.stations.some((row) => row.stationCode === initialScope?.station) ? initialScope!.station : "");
   const [driver, setDriver] = useState<string | null>(() => !initialScope?.station || initialScope.driver == null ? null : initialScope.driver === NO_DRIVER ? "" : initialScope.driver);
   const [tracking, setTracking] = useState<Tracking | null>(null);
@@ -146,26 +150,9 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
 
     void (async () => {
       while (!cancelled) {
-        const started = Date.now();
-        try {
-          const response = await fetch("/api/ops-pulse/edd/flash/network/continue", { method: "POST", cache: "no-store" });
-          const body = await response.json() as { run?: EddNetworkRunStatus | null; error?: string };
-          if (!response.ok) {
-            if (!cancelled) setError(body.error ?? "Unable to keep refreshing stations.");
-            break;
-          }
-          if (!cancelled && body.run) setRun(body.run);
-          if (body.run && body.run.status !== "running") {
-            await pull().catch(() => null);
-            break;
-          }
-        } catch {
-          /* The next pull still shows whatever the cron has saved. */
-        }
-        const latest = await pull().catch(() => null);
-        if (cancelled || !latest || latest.status !== "running") break;
-        const wait = Math.max(0, POLL_MS - (Date.now() - started));
-        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+        const latest = await pull().catch(() => undefined);
+        if (cancelled || latest === null || (latest && latest.status !== "running")) break;
+        await new Promise(resolve => setTimeout(resolve, POLL_MS));
       }
     })();
 
@@ -186,10 +173,9 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
   // Scope: cluster narrows the station list; a selected station narrows every figure to it.
   const clusterOption = clusters.find((option) => option.value === cluster) ?? null;
   const scopeStations = useMemo(() => {
-    if (!clusterOption) return payload.stations;
-    const codes = new Set(clusterOption.stations);
-    return payload.stations.filter((row) => codes.has(row.stationCode));
-  }, [payload.stations, clusterOption]);
+    const codes = new Set(scopedStationCodes(payload.stations.map(row => row.stationCode), clusters, scope));
+    return payload.stations.filter(row => codes.has(row.stationCode));
+  }, [payload.stations, clusters, scope]);
   const stationRow = station ? scopeStations.find((row) => row.stationCode === station) ?? null : null;
   const viewStations = useMemo(() => stationRow ? [stationRow] : scopeStations, [stationRow, scopeStations]);
   const reporting = viewStations.filter((row) => row.hasSnapshot);
@@ -236,11 +222,14 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
     const params = new URLSearchParams(window.location.search);
     const put = (key: string, value: string | null) => { if (value) params.set(key, value); else params.delete(key); };
     put("cluster", cluster);
+    put("regions", scope.regions.join(","));
+    put("clusters", scope.clusters.join(","));
+    put("stations", scope.stations.join(","));
     put("station", station);
     put("driver", station && driver !== null ? driver || NO_DRIVER : null);
     const next = params.toString();
     if (next !== window.location.search.replace(/^\?/, "")) window.history.replaceState(window.history.state, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
-  }, [cluster, station, driver]);
+  }, [cluster, station, driver, scope]);
 
   const totals = useMemo(() => driverView ? flashTotalsFromParcels(driverParcels, payload.businessDate) : flashTotalsFromStations(viewStations), [driverView, driverParcels, viewStations, payload.businessDate]);
   const sweepPct = run && run.stationsTotal ? Math.round((run.stationsDone / run.stationsTotal) * 100) : 0;
@@ -316,16 +305,12 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
     if (code) scopeBar.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function chooseCluster(value: string) {
-    setCluster(value);
-    setFilter("all");
-  }
-
   function saveReport(kind: LoadFlashReportKind) {
+    if (!stationRow && !rows.length) return;
     setDownloading(kind);
     setError(null);
     // The workbook follows the view: this cluster's stations, this station, or this driver.
-    const narrowed = stationRow || clusterOption ? viewStations.map((row) => row.stationCode) : [];
+    const narrowed = (stationRow ? [stationRow] : rows).map(row => row.stationCode);
     void downloadReport(payload.businessDate, kind, { stations: narrowed, driver: stationRow ? driver : null })
       .catch((err) => setError(err instanceof Error ? err.message : "Unable to download the report."))
       .finally(() => setDownloading(null));
@@ -334,11 +319,13 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
   function refreshAll() {
     setStarting(true);
     setError(null);
-    void fetch("/api/ops-pulse/edd/flash/network/refresh-all", { method: "POST" })
+    const selectedCodes = (stationRow ? [stationRow] : rows).map(row => row.stationCode);
+    void fetch("/api/ops-pulse/edd/flash/network/refresh-selected", { method: "POST", headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stations: selectedCodes }) })
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(body.error ?? "Unable to refresh."));
         setRun(body.run ?? null);
+        setRefreshNote(`Queued ${selectedCodes.join(", ")} · updates continue if you close this page.`);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Unable to refresh."))
       .finally(() => setStarting(false));
@@ -366,7 +353,7 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
     { kind: "pickups", label: "Pickups done", value: count(totals.pickupsDone), detail: `of ${count(totals.pickupsAssigned)} assigned · ${percent(totals.pickupsDone, totals.pickupsAssigned)}%` }
   ];
   const shownInsights = showAllInsights ? insights : insights.slice(0, 4);
-  const dateQuery = (date: string) => `/edd/flash?${new URLSearchParams({ date, ...(cluster ? { cluster } : {}), ...(station ? { station } : {}) })}`;
+  const dateQuery = (date: string) => `/edd/flash?${new URLSearchParams({ date, regions: scope.regions.join(","), clusters: scope.clusters.join(","), stations: scope.stations.join(","), ...(cluster ? { cluster } : {}), ...(station ? { station } : {}) })}`;
 
   return (
     <div className={s.report}>
@@ -380,17 +367,18 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
             <a key={date} href={dateQuery(date)} aria-current={date === payload.businessDate ? "page" : undefined}>{formatDay(date, { day: "numeric", month: "short" })}</a>
           ))}
           <form action="/edd/flash">
+            <input type="hidden" name="regions" value={scope.regions.join(",")} /><input type="hidden" name="clusters" value={scope.clusters.join(",")} /><input type="hidden" name="stations" value={scope.stations.join(",")} />
             {cluster ? <input type="hidden" name="cluster" value={cluster} /> : null}
             {station ? <input type="hidden" name="station" value={station} /> : null}
             <input aria-label="Pick another date" title="Pick another date" name="date" type="date" defaultValue={payload.businessDate} key={payload.businessDate} onChange={(event) => { if (event.currentTarget.value) event.currentTarget.form?.requestSubmit(); }} />
           </form>
         </nav>
         <div className={s.actions}>
-          <button type="button" onClick={() => saveReport("full")} disabled={downloading !== null} title="Counts, drivers and every tracking ID for the view on screen">
+          <button type="button" onClick={() => saveReport("full")} disabled={downloading !== null || !(stationRow ? 1 : rows.length)} title="Counts, drivers and every tracking ID for the view on screen">
             {downloading === "full" ? <Loader2 size={14} className="edd-spin" /> : <Download size={14} />} Excel
           </button>
-          <button type="button" className={s.primary} onClick={refreshAll} disabled={starting || refreshing}>
-            {starting || refreshing ? <Loader2 size={14} className="edd-spin" /> : <RefreshCw size={14} />} {refreshing ? "Refreshing…" : "Refresh"}
+          <button type="button" className={s.primary} onClick={refreshAll} disabled={starting || !(stationRow ? 1 : rows.length) || payload.businessDate !== new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())}>
+            {starting || refreshing ? <Loader2 size={14} className="edd-spin" /> : <RefreshCw size={14} />} {starting ? "Queuing…" : `Refresh ${stationRow ? 1 : rows.length} stations`}
           </button>
         </div>
         {run && (refreshing || run.stationsFailed > 0) ? (
@@ -399,21 +387,14 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
             <span>{refreshing ? `Refreshing stations · ${run.stationsDone} of ${run.stationsTotal}` : `Last refresh updated ${run.stationsOk} of ${run.stationsTotal} stations`}{run.stationsFailed ? ` · ${run.stationsFailed} failed` : ""}</span>
           </div>
         ) : null}
+        {refreshNote ? <p role="status">{refreshNote}</p> : null}
         {error ? <p className={s.error} role="alert"><AlertTriangle size={14} /> {error}</p> : null}
       </section>
 
       <section className={s.scope} ref={scopeBar} aria-label="What this report covers">
-        {clusters.length ? (
-          <label className={s.scopeField}>
-            <span>Cluster / AOM</span>
-            <select value={cluster} onChange={(event) => chooseCluster(event.target.value)}>
-              <option value="">All clusters</option>
-              {clusters.map((option) => <option key={option.value} value={option.value}>{option.label} · {option.stations.length}</option>)}
-            </select>
-          </label>
-        ) : null}
+        <EddScopeFilters codes={payload.stations.map(row => row.stationCode)} clusters={clusters} stationNames={stationNames} value={scope} onChange={next => { setScope(next); setStation(''); setDriver(null); setFilter('all'); }} />
         <label className={s.scopeField}>
-          <span>Station</span>
+          <span>Station detail</span>
           <select value={stationRow ? station : ""} onChange={(event) => openStation(event.target.value)}>
             <option value="">All {scopeStations.length} stations</option>
             {[...scopeStations].sort((a, b) => a.stationCode.localeCompare(b.stationCode)).map((row) => <option key={row.stationCode} value={row.stationCode}>{row.stationCode}{stationNames[row.stationCode] ? ` — ${stationNames[row.stationCode]}` : ""}</option>)}
@@ -434,7 +415,7 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
           {stationRow ? <li><ChevronRight size={13} /><button type="button" disabled={driver === null} onClick={() => setDriver(null)}>{stationRow.stationCode}{stationNames[stationRow.stationCode] ? ` · ${stationNames[stationRow.stationCode]}` : ""}</button></li> : null}
           {stationRow && driver !== null ? <li><ChevronRight size={13} /><span>{driverRow ? flashDriverLabel(driverRow) : driver || "Not with a driver"}</span></li> : null}
         </ol>
-        {cluster || stationRow ? <button type="button" className={s.clear} onClick={() => { setCluster(""); openStation(""); }}><X size={13} /> Clear</button> : null}
+        {scope.regions.length || scope.clusters.length || scope.stations.length || stationRow ? <button type="button" className={s.clear} onClick={() => { setScope({ regions: [], clusters: [], stations: [] }); openStation(""); }}><X size={13} /> Clear</button> : null}
       </section>
 
       <section className={s.summary} aria-label="Summary">

@@ -1,4 +1,6 @@
 "use client";
+import { EddScopeFilters } from './edd-scope-filters';
+import { scopedStationCodes, emptyEddScope, type EddCluster } from '@/lib/ops-pulse/edd-scope';
 import { ReportTable } from "@/components/report-table";
 
 
@@ -87,12 +89,12 @@ async function fetchNetwork(): Promise<{ stations: EddPerformanceNetworkStation[
 
 /**
  * Snapshot-only network performance overview — mirrors EddNetworkClient
- * (Ageing) exactly: cached reads, per-row refresh, a network-wide
+ * (Ageing) exactly: cached reads, per-row refresh, a in this selection
  * "Refresh all" that kicks off the worker's sweep in the background, and a
  * progress poll while one is running. No per-page live Amazon calls.
  *
  * Led by "Delivery Performance" (delivered ÷ assigned) as the headline
- * metric a manager actually scans for — a hero card network-wide, a chart
+ * metric a manager actually scans for — a hero card in this selection, a chart
  * ranking the worst stations, and its own sortable/severity-colored column
  * in the table — rather than burying that percentage inside the Delivered
  * cell.
@@ -100,14 +102,21 @@ async function fetchNetwork(): Promise<{ stations: EddPerformanceNetworkStation[
 export function EddNetworkPerformanceView({
   stations,
   initialNetwork,
-  initialRun
+  initialRun,
+  clusters = []
 }: {
   stations: EddStationOption[];
+  clusters?: EddCluster[];
   initialNetwork: EddPerformanceNetworkStation[];
   initialRun: EddNetworkRunStatus | null;
 }) {
   const nameByCode = useMemo(() => new Map(stations.map((s) => [s.code, s.name])), [stations]);
-  const [rows, setRows] = useState<EddPerformanceNetworkStation[]>(initialNetwork);
+  const [allRows, setRows] = useState<EddPerformanceNetworkStation[]>(initialNetwork);
+  const [scope, setScope] = useState(emptyEddScope);
+  const rows = useMemo(() => {
+    const codes = new Set(scopedStationCodes(stations.map(s => s.code), clusters, scope));
+    return allRows.filter(row => codes.has(row.stationCode));
+  }, [allRows, stations, clusters, scope]);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initialRun);
   const [search, setSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<SortColumn>("deliveryPerformance");
@@ -236,15 +245,19 @@ export function EddNetworkPerformanceView({
       .finally(() => setRefreshingCode(null));
   }
 
-  function handleRefreshAll() {
-    setStartingSweep(true);
-    setRowError(null);
-    void postJson<{ run: EddNetworkRunStatus | null }>("/api/ops-pulse/edd/performance/network/refresh-all")
-      .then((result) => setRun(result.run))
-      .catch((err) => {
-        setRowError({ code: "Network sweep", message: err instanceof Error ? err.message : "Unable to start the network sweep." });
-      })
-      .finally(() => setStartingSweep(false));
+  async function handleRefreshAll() {
+    const selectedCodes = filteredRows.map(row => row.stationCode);
+    setStartingSweep(true); setRowError(null);
+    const failed: string[] = [];
+    try {
+      for (const code of selectedCodes) {
+        setRefreshingCode(code);
+        try { await refreshStation(code); } catch { failed.push(code); }
+      }
+      const latest = await fetchNetwork(); setRows(latest.stations); setRun(latest.run);
+      if (failed.length) setRowError({ code: failed.join(', '), message: 'Could not refresh these stations. Their last saved figures are retained.' });
+    } catch (error) { setRowError({ code: 'Refresh', message: error instanceof Error ? error.message : 'Unable to refresh.' }); }
+    finally { setStartingSweep(false); setRefreshingCode(null); }
   }
 
   const sweepRunning = run?.status === "running";
@@ -252,6 +265,7 @@ export function EddNetworkPerformanceView({
 
   return (
     <>
+      <div className="edd-toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><EddScopeFilters codes={stations.map(s => s.code)} clusters={clusters} stationNames={Object.fromEntries(nameByCode)} value={scope} onChange={next => { setScope(next); setPage(1); }} /></div>
       <section className={`edd-hero-card ${networkSeverity}`}>
         <div className="edd-hero-card-top">
           <span>Network delivery performance</span>
@@ -276,7 +290,7 @@ export function EddNetworkPerformanceView({
           ) : null}
           {totals.yetToDispatch > 0 ? (
             <span className="edd-insight-chip" title="Still at stations, no driver or store attached yet — not counted in Assigned above">
-              <strong>{totals.yetToDispatch.toLocaleString("en-IN")}</strong> network-wide yet to dispatch
+              <strong>{totals.yetToDispatch.toLocaleString("en-IN")}</strong> in this selection yet to dispatch
             </span>
           ) : null}
         </div>
@@ -336,11 +350,11 @@ export function EddNetworkPerformanceView({
               type="button"
               className="button secondary"
               onClick={handleRefreshAll}
-              disabled={startingSweep || sweepRunning}
+              disabled={startingSweep || sweepRunning || !filteredRows.length}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
               {startingSweep ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
-              {sweepRunning ? "Sweep running…" : startingSweep ? "Starting…" : "Refresh all"}
+              {sweepRunning ? "Sweep running…" : startingSweep ? "Refreshing…" : `Refresh ${filteredRows.length} stations`}
             </button>
           </div>
         </div>

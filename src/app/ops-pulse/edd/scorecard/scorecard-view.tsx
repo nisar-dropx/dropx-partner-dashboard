@@ -1,4 +1,6 @@
 "use client";
+import { EddScopeFilters } from '../edd-scope-filters';
+import { scopedStationCodes, emptyEddScope, type EddCluster } from '@/lib/ops-pulse/edd-scope';
 import { ReportTable } from "@/components/report-table";
 
 import Link from "next/link";
@@ -30,12 +32,16 @@ function Spark({ points }: { points: Array<[string, number, number]> | null }) {
   return <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden><path d={d} fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>;
 }
 
-export function ScorecardView({ data, days, ranges, from, to, stationNames }: { data: ScorecardData; days: number; ranges: number[]; from: string; to: string; stationNames: Record<string, string> }) {
+export function ScorecardView({ data, days, ranges, from, to, stationNames, clusters = [] }: { clusters?: EddCluster[]; data: ScorecardData; days: number; ranges: number[]; from: string; to: string; stationNames: Record<string, string> }) {
+  const [scope, setScope] = useState(emptyEddScope);
   const [sort, setSort] = useState<keyof typeof SORTS>("delivered");
   const [asc, setAsc] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const scored = useMemo(() => data.stations.map((s) => ({ ...s, ...stationScore(s) })), [data.stations]);
+  const scored = useMemo(() => {
+    const scopeCodes = new Set(scopedStationCodes(Object.keys(stationNames), clusters, scope));
+    return data.stations.filter(s => scopeCodes.has(s.station)).map(s => ({ ...s, ...stationScore(s) }));
+  }, [data.stations, scope, clusters, stationNames]);
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return scored
@@ -54,11 +60,11 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
   const improved = scored.filter((s) => (s.change ?? 0) > 5).sort((a, b) => (b.change ?? 0) - (a.change ?? 0)).slice(0, 4);
   function exportStations() {
     csv([["Station", "Name", "Deliveries", "Assigned", "Delivery success %", "Previous period", "Change %", "DAs", "DA-days", "Per DA per day", "Returns", "Return rate %", "Flag"],
-      ...scored.map((s) => [s.station, stationNames[s.station] ?? "", s.delivered, s.assigned, s.successPct == null ? "Not available from source data" : s.successPct.toFixed(1), s.prev_delivered, s.change == null ? "" : s.change.toFixed(1), s.das, s.da_days, s.perDa.toFixed(1), s.returns, s.returnRate.toFixed(1), s.flag])], `delivery-scorecard-stations-${from}-${to}.csv`);
+      ...rows.map((s) => [s.station, stationNames[s.station] ?? "", s.delivered, s.assigned, s.successPct == null ? "Not available from source data" : s.successPct.toFixed(1), s.prev_delivered, s.change == null ? "" : s.change.toFixed(1), s.das, s.da_days, s.perDa.toFixed(1), s.returns, s.returnRate.toFixed(1), s.flag])], `delivery-scorecard-stations-${from}-${to}.csv`);
   }
   function exportDas() {
     csv([["Station", "DA", "DropX ID", "Provider ID", "Days", "Deliveries", "Assigned", "Delivery success %", "Per day", "Returns", "Last worked"],
-      ...data.das.map((d) => [d.station, d.name, d.dropx_id, d.id, d.days, d.delivered, d.assigned, d.assigned > 0 ? ((d.delivered / d.assigned) * 100).toFixed(1) : "Not available from source data", d.days ? (d.delivered / d.days).toFixed(1) : "0", d.returns, d.last_day])], `delivery-scorecard-das-${from}-${to}.csv`);
+      ...data.das.filter(d => rows.some(row => row.station === d.station)).map((d) => [d.station, d.name, d.dropx_id, d.id, d.days, d.delivered, d.assigned, d.assigned > 0 ? ((d.delivered / d.assigned) * 100).toFixed(1) : "Not available from source data", d.days ? (d.delivered / d.days).toFixed(1) : "0", d.returns, d.last_day])], `delivery-scorecard-das-${from}-${to}.csv`);
   }
   const total = scored.reduce((t, s) => ({ delivered: t.delivered + s.delivered, assigned: t.assigned + s.assigned, prev: t.prev + s.prev_delivered, daDays: t.daDays + s.da_days, das: t.das + s.das, returns: t.returns + s.returns }), { delivered: 0, assigned: 0, prev: 0, daDays: 0, das: 0, returns: 0 });
   const change = total.prev ? ((total.delivered - total.prev) / total.prev) * 100 : null;
@@ -71,6 +77,7 @@ export function ScorecardView({ data, days, ranges, from, to, stationNames }: { 
 
   return (
     <section className={styles.wrap}>
+      <div className={styles.bar}><EddScopeFilters codes={Object.keys(stationNames)} clusters={clusters} value={scope} onChange={setScope} stationNames={stationNames} /></div>
       <div className={styles.kpis}>
         <div><span>Deliveries</span><strong>{n0(total.delivered)}</strong><small>{from} → {to}</small></div>
         <div><span>Delivery success</span><strong>{totalSuccess == null ? "—" : `${n1(totalSuccess)}%`}</strong><small>{totalSuccess == null ? "Not available from source data" : `${n0(total.assigned)} assigned`}</small></div>

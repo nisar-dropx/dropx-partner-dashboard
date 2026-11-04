@@ -52,7 +52,7 @@ export default async function StationBoardPage({
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
-              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Hourly" : "Setup needed"}</span>
+              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Every 30 min" : "Setup needed"}</span>
             </div>
           )}
         />
