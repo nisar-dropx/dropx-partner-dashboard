@@ -56,6 +56,7 @@ type ReviewLog = {
   role: string;
 };
 type ReviewDetail = {
+  driver?: { reason_label: string; work_date: string; person_name?: string; dropx_id?: string; vehicle_no?: string; workforce_id?: string } | null;
   fuelHistory?: { rows: { provider: string; reference: string; amount: number; litres: number }[]; latestDate: string | null; error?: string } | null;
   vehicle?: { vehicle_no: string } | null;
   fuel?: { vehicle_no: string; fuel_date: string; litres: number | null } | null;
@@ -275,6 +276,7 @@ export function PaymentApprovalReviewLauncher({
           {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
 
           {detail?.volumeDate && summary.locationId ? <PaymentVolumeContext date={detail.volumeDate} locationId={summary.locationId} /> : null}
+          {detail?.driver ? <div className="van-fuel-review"><strong>{detail.driver.reason_label}</strong><span>{detail.driver.work_date} · {detail.driver.person_name || detail.driver.vehicle_no} {detail.driver.dropx_id || ''}</span>{detail.driver.workforce_id ? <small>Absent · selected day pay excluded</small> : null}</div> : null}
           {detail?.vehicle && !detail.fuel ? <div className="van-fuel-review"><span>Vehicle number</span><strong>{detail.vehicle.vehicle_no}</strong></div> : null}
           {detail?.fuel ? <div className="van-fuel-review"><strong>{detail.fuel.vehicle_no}</strong><span>Fuel date · {detail.fuel.fuel_date}</span><span>{detail.fuel.litres != null ? `${detail.fuel.litres} L` : "Litres pending bill"}</span></div> : null}
           {detail?.fuelHistory ? <details className="van-fuel-pending" open={detail.fuelHistory.rows.length > 0}><summary>{detail.fuelHistory.rows.length ? `${detail.fuelHistory.rows.length} existing fuel transaction(s) · same vehicle / day` : "Same-day provider fuel check"}</summary>

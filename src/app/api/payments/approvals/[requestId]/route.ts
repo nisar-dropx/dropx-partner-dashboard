@@ -1,3 +1,4 @@
+import { adhocDriverDetails } from "@/lib/adhoc-driver";
 import { loadSameDayFuel } from "@/lib/van-fuel-server";
 import { paymentVehicleDetails } from "@/lib/vehicle-payment";
 import { vanFuelDetails } from "@/lib/van-fuel";
@@ -125,6 +126,7 @@ export async function GET(_request: Request, context: { params: { requestId: str
     const fuel = vanFuelDetails(request.details);
     const fuelHistory = fuel ? await loadSameDayFuel(companyId, fuel.vehicle_no, fuel.fuel_date).catch(() => ({ rows: [], latestDate: null, error: "Fuel history unavailable" })) : null;
     return NextResponse.json({
+      driver: adhocDriverDetails(request.details),
       vehicle: paymentVehicleDetails(request.details),
       fuelHistory,
       fuel: vanFuelDetails(request.details),

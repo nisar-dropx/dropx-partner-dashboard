@@ -48,3 +48,15 @@ test('fuel validation stays delegated; unrelated requests do not acquire vehicle
  assert.deepEqual(await server().prepareVehiclePayment('company','VAN_FUEL','KLZA',form(),true),{details:{fuel:true}});
  assert.deepEqual(await server().prepareVehiclePayment('company','DRINKING_WATER','KLZA',form(),true),{});
 });
+test('driver reasons validate server-side and persist canonical person or Fleet vehicle',async()=>{
+ let args;
+ const api=load('./vehicle-payment-server.ts',{'@/lib/supabase-admin':{supabaseAdmin:{rpc:async(name,input)=>{assert.equal(name,'validate_adhoc_driver_request');args=input;return {data:{reason_key:'driver_leave',work_date:'2026-11-04',workforce_id:'worker',person_name:'Canonical Driver'},error:null};}}},'@/lib/vehicle-payment':policy,'@/lib/van-fuel-server':{}});
+ const f=new FormData();f.set('driver_reason','driver_leave');f.set('driver_work_date','2026-11-04');f.set('driver_workforce_id','worker');
+ const result=await api.prepareVehiclePayment('company','ADHOC_DRIVER','KLZA',f,false,{other:'keep'});
+ assert.equal(args.p_company,'company');assert.equal(args.p_station_code,'KLZA');assert.equal(args.p_details.workforce_id,'worker');assert.equal(result.details.adhoc_driver.person_name,'Canonical Driver');assert.equal(result.details.payment_vehicle,null);assert.equal(result.details.other,'keep');
+ assert.deepEqual(await api.prepareVehiclePayment('company','ADHOC_DRIVER','KLZA',new FormData(),true,{legacy:'approved'},true),{details:{legacy:'approved'}});
+});
+test('driver validation failure prevents request creation',async()=>{
+ const api=load('./vehicle-payment-server.ts',{'@/lib/supabase-admin':{supabaseAdmin:{rpc:async()=>({data:null,error:{message:'Recorded attendance must be reviewed'}})}},'@/lib/vehicle-payment':policy,'@/lib/van-fuel-server':{}});
+ await assert.rejects(api.prepareVehiclePayment('company','ADHOC_DRIVER','KLZA',new FormData(),false),/Recorded attendance/);
+});

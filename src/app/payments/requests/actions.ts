@@ -334,6 +334,7 @@ export async function createExpenseRequest(formData: FormData) {
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
     const fuelFields = await prepareVehiclePayment(companyId, headResult.data.code, locationResult.data.station_code, formData, false);
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
+    const stagedRequest = Boolean(adhocRequest.fields.adhoc_reason_key || fuelFields.details?.adhoc_driver);
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
@@ -414,8 +415,8 @@ export async function createExpenseRequest(formData: FormData) {
         contact_no: null,
         email: null,
         remarks,
-        status: adhocRequest.fields.adhoc_reason_key ? "draft" : "pending",
-        approval_status: adhocRequest.fields.adhoc_reason_key ? "DRAFT" : approvalStatus,
+        status: stagedRequest ? "draft" : "pending",
+        approval_status: stagedRequest ? "DRAFT" : approvalStatus,
         current_step_order: currentStepOrder,
         total_steps: totalSteps,
         current_approver_user_id: approver.userId,
@@ -472,7 +473,7 @@ export async function createExpenseRequest(formData: FormData) {
       if (answersError) throw new Error(answersError.message);
     }
 
-    if (adhocRequest.fields.adhoc_reason_key) {
+    if (stagedRequest) {
       const ready = await admin.from("payment_requests").update({status:"pending",approval_status:approvalStatus}).eq("company_id",companyId).eq("id",request.id).eq("status","draft").select("id").single();
       if(ready.error) throw new Error(ready.error.message);
     }
@@ -584,6 +585,7 @@ export async function createPaymentRequest(formData: FormData) {
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
     const fuelFields = await prepareVehiclePayment(companyId, headResult.data.code, locationResult.data.station_code, formData, true);
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
+    const stagedRequest = Boolean(adhocRequest.fields.adhoc_reason_key || fuelFields.details?.adhoc_driver);
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
     const requestNo = await nextPaymentRequestNo(companyId);
@@ -669,8 +671,8 @@ export async function createPaymentRequest(formData: FormData) {
       contact_no: contactNo,
       email,
       remarks,
-      status: "pending",
-      approval_status: approvalStatus,
+      status: stagedRequest ? "draft" : "pending",
+      approval_status: stagedRequest ? "DRAFT" : approvalStatus,
       current_step_order: currentStepOrder,
       total_steps: totalSteps,
       current_approver_user_id: approver.userId,
@@ -811,7 +813,7 @@ export async function createPaymentRequest(formData: FormData) {
       if (answersError) throw new Error(answersError.message);
     }
 
-    if (adhocRequest.fields.adhoc_reason_key) {
+    if (stagedRequest) {
       const ready = await admin.from("payment_requests").update({status:"pending",approval_status:approvalStatus}).eq("company_id",companyId).eq("id",request.id).eq("status","draft").select("id").single();
       if(ready.error) throw new Error(ready.error.message);
     }

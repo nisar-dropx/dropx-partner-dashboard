@@ -772,3 +772,12 @@ alter loss, payroll, approval or collection records.
 - Intake rejects duplicate category tickets through all active workflow stages and fails closed without a valid publication deadline.
 - One-time November 1 closure covers exactly 45 September disputes raised before October 16, confirmed previously settled by Managing Partner. Original rows are retained in immutable closure events; `legacy_resolution_unverified` is true. No payroll or payment amount is modified.
 - Both One and Ops show the same short ticket reference. Ops closed history includes earlier closures and rejected tickets. Complete history remains accessible; verified corrections still require a newer publication and the approved net delta.
+
+### Adhoc Driver replacement attendance — 4 November 2026
+
+- Ops Masters → Payment Heads → Adhoc Driver reasons controls labels, ordering and enabled status. The three fixed rule types are DCD/ODCD on leave, Driver on leave and Vehicle service.
+- Requests select the deployment date and an eligible station-mapped workforce member, or a Fleet vehicle under service/breakdown. The request and approval review show the selected person/vehicle. Approved legacy requests retain their original details.
+- Submitting a leave replacement records an active absence, marks attendance Absent, invalidates payout calculations and queues publication refresh. Fixed/MG, package work and day-linked incentives are excluded for that day across the person's mappings. Vehicle service creates no absence.
+- Recorded work or finalized/bank-issued payroll blocks replacement activation. Returned requests keep the absence; rejection/cancellation releases it and restores prior attendance only when the replacement marker still owns that row. New punches remain visible as a conflict for review. Finalized pay blocks automatic release.
+- Migration `20261104080244_adhoc_driver_reasons_and_absence.sql` is applied in production. The three tables are server-only with RLS and no client grants/policies by design. No production absence/request records were created for testing.
+- Validation: TypeScript, 62 request/payroll regression tests, and the PGlite lifecycle suite (including repeat migration, cancellation, returned edits, paid-payroll guards and restricted attendance access).

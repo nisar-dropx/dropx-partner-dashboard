@@ -1,3 +1,4 @@
+import { driverAbsentDayBreakdown } from "@/lib/adhoc-driver";
 import { applyWorkforcePaidAdvances } from "@/lib/workforce-paid-advances";
 import "server-only";
 import { conversionMetricSources, resolveConversionRate, type ConversionRateRule } from "@/lib/conversion-rate-rules";
@@ -195,6 +196,12 @@ export async function loadWorkforcePayoutRows(
     .eq("company_id", companyId).eq("source_system", "OPS_ADHOC_DA").eq("adhoc_payout_policy", "work_day")
     .in("status", ["processed", "paid"]).gte("adhoc_work_date", workforcePaymentMonthStart(fromDate)).lte("adhoc_work_date", toDate));
   if (paidDaysResult.error) return { rows: [] as WorkforcePayoutRow[], error: "Unable to verify paid ad hoc work. Retry before calculating payouts." };
+  const absenceResult = await readAllRows(admin.from("payment_adhoc_driver_absences")
+    .select("workforce_id,work_date,request_no").eq("company_id", companyId).eq("active", true)
+    .gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate));
+  if (absenceResult.error) return { rows: [], error: "Unable to verify replacement-driver absences. Retry before calculating payouts." };
+  const absentDays = new Map((absenceResult.data ?? []).map(a => [`${a.workforce_id}|${a.work_date}`, a.request_no]));
+  const absentDay = (workerId: string, date: string) => absentDays.get(`${workerId}|${date}`);
   const paidDays = paidAdhocDays(paidDaysResult.data ?? []);
   const paidDayForMapping = (mapping: any, date: string) => {
     const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
@@ -670,6 +677,7 @@ export async function loadWorkforcePayoutRows(
     unlocatedOwnerStationId: unlocatedAttendanceOwnerStationOn(workforceId, date)
   });
   const attendanceUnitForDate = (workforceId: string, stationId: string, date: string, sourceKey?: string) => {
+    if (absentDay(workforceId, date)) return 0;
     const aggregate = aggregateAttendanceForDate(workforceId, stationId, date, sourceKey);
     if (aggregate?.period.attendance_basis === "days") return aggregate.input.quantity;
     return directPayAttendanceUnit(attendanceForDate(workforceId, stationId, date));
@@ -926,8 +934,8 @@ export async function loadWorkforcePayoutRows(
     const markIssue = (message: string) => {
       if (!aggregateAttendanceIssueByPeriod.has(periodKey)) aggregateAttendanceIssueByPeriod.set(periodKey, message);
     };
-    if (dateRange(period.effective_from, period.effective_to).some(date => paidWorkerDay(period.workforce_id, period.station_id, date))) {
-      markIssue("This attendance range includes a day paid ad hoc. Replace the range with dated attendance to exclude that day correctly.");
+    if (dateRange(period.effective_from, period.effective_to).some(date => paidWorkerDay(period.workforce_id, period.station_id, date) || absentDay(period.workforce_id, date))) {
+      markIssue("This attendance range includes an excluded ad hoc / absent day. Replace the range with dated attendance to exclude that day correctly.");
     }
     if (overlapsVisiblePeriod && (period.effective_from < fromDate || period.effective_to > toDate)) {
       markIssue("Aggregate attendance cannot be prorated in a partial payout view. Open the complete uploaded attendance range.");
@@ -1197,6 +1205,8 @@ export async function loadWorkforcePayoutRows(
     let missingThresholdConfiguration = false;
     let missingRouteDistance = false;
     const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
+      const replacement = absentDay(String(worker.id), date);
+      if (replacement) return driverAbsentDayBreakdown(date, replacement);
       const paidAdhoc = paidDayForMapping(mapping, date);
       if (paidAdhoc) return paidAdhocDayBreakdown(date, paidAdhoc);
       const rows = eligibleDailyByDate.get(date) ?? [];
@@ -1421,13 +1431,13 @@ export async function loadWorkforcePayoutRows(
           stationId: String(location.id),
           // Only an actual timestamp can satisfy reporting-time eligibility.
           // Shipment-derived and aggregate attendance intentionally remain null.
-          inTime: record?.in_time ? String(record.in_time) : null
+          inTime: !absentDay(String(worker.id), date) && record?.in_time ? String(record.in_time) : null
         });
       }
     }
     for (const daily of providerDailyRowsFor(mapping)) {
       const workDate = String(daily.work_date ?? "");
-      if (workDate < fromDate || workDate > toDate) continue;
+      if (workDate < fromDate || workDate > toDate || absentDay(String(worker.id), workDate)) continue;
       group.sources.push({
         id: `${String(mapping.id)}:${String(daily.id)}`,
         workDate,
@@ -1602,6 +1612,8 @@ export async function loadWorkforcePayoutRows(
         requiresMonthlyDayHistory
       );
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
+        const replacement = absentDay(workforceId, date);
+        if (replacement) return { ...driverAbsentDayBreakdown(date, replacement), missing: false };
         const paidAdhoc = paidWorkerDay(workforceId, String(allocation.station_id), date);
         if (paidAdhoc) return { ...paidAdhocDayBreakdown(date, paidAdhoc), missing: false };
         const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
