@@ -152,7 +152,7 @@ export default async function AttendanceReportsPage({
   searchParams?: {
     date?: string;
     from_date?: string;
-    location_id?: string;
+    location_id?: string | string[];
     mode?: string;
     month?: string;
     report?: string;
@@ -176,7 +176,7 @@ export default async function AttendanceReportsPage({
   const reportOptions = optionsForMode(mode);
   const reportMeta = reportOptions.find((option) => option.value === reportType) ?? reportOptions[0];
   const sort = safeSort(searchParams?.sort);
-  const locationId = String(searchParams?.location_id ?? "");
+  const requestedLocationIds = [...new Set(paramValues(searchParams?.location_id))];
   const search = String(searchParams?.search ?? "").trim();
   const designations = paramValues(searchParams?.designation);
   const workerTypes = paramValues(searchParams?.worker_type);
@@ -200,13 +200,14 @@ export default async function AttendanceReportsPage({
       locations = await loadLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
     }
     const allowedLocationIds = new Set(locations.map((location) => location.id));
-    const selectedLocationIds = locationId && allowedLocationIds.has(locationId)
-      ? [locationId]
+    const selectedLocationIds = requestedLocationIds.filter((id) => allowedLocationIds.has(id));
+    const locationIds = selectedLocationIds.length
+      ? selectedLocationIds
       : isOpsSurface || !authorization.hasAllLocationAccess ? locations.map((location) => location.id) : undefined;
     const scopedRows = await loadAttendanceReportRows({
       companyId,
       fromDate: activeRange.fromDate,
-      locationIds: selectedLocationIds,
+      locationIds,
       reportType,
       toDate: activeRange.toDate
     });
@@ -226,16 +227,15 @@ export default async function AttendanceReportsPage({
     .flatMap((row) => punchLabelOrder.map((label) => ({ row, label, time: row.labels[label] })))
     .filter((entry) => entry.time && entry.time !== "--:--")
     .at(-1);
-  const locationOptions = [
-    authorization.hasAllLocationAccess
-      ? { value: "", label: "All locations", helper: "Company-wide report" }
-      : { value: "", label: "All assigned locations", helper: `${locations.length} location${locations.length === 1 ? "" : "s"} in your scope` },
-    ...locations.map((location) => ({
-      value: location.id,
-      label: location.station_code,
-      helper: location.station_name ?? undefined
-    }))
-  ];
+  const selectedLocationIds = requestedLocationIds.filter((id) => locations.some((location) => location.id === id));
+  const locationOptions = locations.map((location) => ({
+    value: location.id,
+    label: location.station_code,
+    helper: location.station_name ?? undefined
+  }));
+  const locationAllLabel = authorization.hasAllLocationAccess
+    ? "All locations"
+    : `All assigned locations (${locations.length})`;
 
   return (
     <AppShell active="Attendance" pageCode={pageCode}>
@@ -273,8 +273,14 @@ export default async function AttendanceReportsPage({
           <label>Sorting
             <SearchableSelect name="sort" options={sortingOptions} defaultValue={sort} placeholder="Select sorting" required />
           </label>
-          <label>Location
-            <SearchableSelect name="location_id" options={locationOptions} defaultValue={locations.some((location) => location.id === locationId) ? locationId : ""} placeholder="All locations" />
+          <label>Stations
+            <AttendanceMultiSelect
+              allLabel={locationAllLabel}
+              defaultValues={selectedLocationIds}
+              label="station"
+              name="location_id"
+              options={locationOptions}
+            />
           </label>
           <label>Designation / role
             <AttendanceMultiSelect allLabel="All designations" defaultValues={designations} label="designation" name="designation" options={filterOptions.designations} />

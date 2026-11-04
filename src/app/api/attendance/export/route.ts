@@ -6,6 +6,10 @@ import {
   loadAttendanceReportRows
 } from "@/lib/biometric/attendance";
 import { filterAttendanceReportRows } from "@/lib/biometric/attendance-report-filters";
+import {
+  attendanceExportWorkerStationKey,
+  resolveAttendanceExportLocationIds
+} from "@/lib/biometric/attendance-export-scope";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
@@ -244,21 +248,25 @@ function duration(totalMinutes: number) {
   return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
 }
 
+function workerStationKey(row: AttendanceReportRow) {
+  return attendanceExportWorkerStationKey(row);
+}
+
 function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: string, toDate: string, rows: AttendanceReportRow[], sort: SortMode, companyName: string): ReportBuild {
   const dates = dateRange(fromDate, toDate);
-  const width = 10 + dates.length;
+  const width = 11 + dates.length;
   const aoa: string[][] = [
     [title, ...blank(Math.max(0, width - 4)), "Report Month:-", monthLabel],
     [companyName, ...blank(width - 1)]
   ];
   const merges = [merge(0, 0, 0, Math.min(3, width - 1)), merge(1, 0, 1, width - 1)];
-  const byWorker = groupBy(rows, (row) => `${row.workerCode}|${row.workerName}|${row.designation}`);
+  const byWorker = groupBy(rows, workerStationKey);
   const byDesignation = groupBy(Array.from(byWorker.entries()), ([, workerRows]) => groupKey(workerRows[0], sort));
 
   Array.from(byDesignation.entries()).forEach(([designation, workers]) => {
     aoa.push([groupLabel(sort), designation, ...blank(width - 2)]);
     merges.push(merge(aoa.length - 1, 1, aoa.length - 1, width - 1));
-    aoa.push(["Empcode", "Name", "Workforce", "Designation", "Shift", "Present", "Full Day", "Half Day", "Absent", "Total Work", ...dates.map((date) => String(dateParts(date).day).padStart(2, "0"))]);
+    aoa.push(["Empcode", "Name", "Workforce", "Designation", "Location", "Shift", "Present", "Full Day", "Half Day", "Absent", "Total Work", ...dates.map((date) => String(dateParts(date).day).padStart(2, "0"))]);
     workers.forEach(([workerKey, workerRows]) => {
       const [code, name] = workerKey.split("|");
       const byDate = new Map(workerRows.map((row) => [row.punchDate, row]));
@@ -271,6 +279,7 @@ function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: st
         name,
         workerRows[0].workerType,
         workerRows[0].designation,
+        workerRows[0].location || "-",
         workerRows[0].shiftName,
         String(present),
         String(fullDay),
@@ -294,35 +303,36 @@ function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: st
     merges.push(merge(aoa.length - 1, 1, aoa.length - 1, width - 1));
   }
 
-  return { aoa, merges, widths: [14, 24, 18, 20, 14, 8, 8, 8, 8, 12, ...dates.map(() => 6)] };
+  return { aoa, merges, widths: [14, 24, 18, 20, 12, 14, 8, 8, 8, 8, 12, ...dates.map(() => 6)] };
 }
 
 function monthlyInOutBuild(title: string, monthLabel: string, fromDate: string, toDate: string, rows: AttendanceReportRow[], sort: SortMode, companyName: string): ReportBuild {
   const dates = dateRange(fromDate, toDate);
-  const header = ["Date", "Shift", "Scheduled", ...inOutHeader().slice(8)];
+  const header = ["Date", "Location", "Shift", "Scheduled", ...inOutHeader().slice(8)];
   const width = header.length;
   const aoa: string[][] = [
     [title, ...blank(Math.max(0, width - 4)), "Report Month:-", monthLabel],
     [companyName, ...blank(width - 1)]
   ];
   const merges = [merge(0, 0, 0, Math.min(3, width - 1)), merge(1, 0, 1, width - 1)];
-  const workers = groupBy(rows, (row) => `${row.workerCode}|${row.workerName}|${row.designation}`);
+  const workers = groupBy(rows, workerStationKey);
 
   Array.from(workers.entries()).forEach(([workerKey, workerRows]) => {
-    const [code, name, designation] = workerKey.split("|");
+    const [code, name] = workerKey.split("|");
+    const station = workerRows[0]?.location || "-";
     aoa.push([groupLabel(sort), groupKey(workerRows[0], sort), ...blank(width - 2)]);
     merges.push(merge(aoa.length - 1, 1, aoa.length - 1, width - 1));
-    aoa.push(["Empcode", code, "Name", name, ...blank(width - 4)]);
-    merges.push(merge(aoa.length - 1, 3, aoa.length - 1, width - 1));
+    aoa.push(["Empcode", code, "Name", name, "Location", station, ...blank(Math.max(0, width - 6))]);
+    if (width > 6) merges.push(merge(aoa.length - 1, 5, aoa.length - 1, width - 1));
     aoa.push(header);
     const byDate = new Map(workerRows.map((row) => [row.punchDate, row]));
     dates.forEach((date) => {
       const row = byDate.get(date);
       if (!row) {
-        aoa.push([displayDate(date), "Unassigned", "--:--", "--:--", ...blank(width - 4)]);
+        aoa.push([displayDate(date), station, "Unassigned", "--:--", "--:--", ...blank(width - 5)]);
         return;
       }
-      aoa.push([displayDate(date), row.shiftName, scheduleLabel(row), label(row, "In1") || row.inTime, ...inOutRow(row).slice(9)]);
+      aoa.push([displayDate(date), row.location || "-", row.shiftName, scheduleLabel(row), label(row, "In1") || row.inTime, ...inOutRow(row).slice(9)]);
     });
     const totalWork = workerRows.reduce((sum, row) => sum + minutes(row.workHours), 0);
     aoa.push(["", "", `Total Work+OT Hrs:- ${duration(totalWork)}`, "Total OT Hrs:- 00:00", "Total Break Hrs:- 00:00", ...blank(Math.max(0, width - 5))]);
@@ -334,7 +344,7 @@ function monthlyInOutBuild(title: string, monthLabel: string, fromDate: string, 
     merges.push(merge(aoa.length - 1, 2, aoa.length - 1, width - 1));
   }
 
-  return { aoa, merges, widths: [12, 14, 14, 9, ...Array(width - 4).fill(8)] };
+  return { aoa, merges, widths: [12, 12, 14, 14, 9, ...Array(Math.max(0, width - 5)).fill(8)] };
 }
 
 function buildReport(mode: ReportMode, reportType: AttendanceReportType, label: string, fromDate: string, toDate: string, rows: AttendanceReportRow[], sort: SortMode, companyName: string) {
@@ -447,7 +457,6 @@ export async function GET(request: Request) {
     const periodicRange = normalizedRange(fromDate, toDate);
     const sort = safeSort(params.get("sort"));
     const reportType = safeReportType(params.get("report"));
-    const locationId = params.get("location_id");
     const search = params.get("search") ?? "";
     const designations = params.getAll("designation").map((value) => value.trim()).filter(Boolean);
     const workerTypes = params.getAll("worker_type").map((value) => value.trim()).filter(Boolean);
@@ -459,13 +468,14 @@ export async function GET(request: Request) {
     const authorizedLocations = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
     if (authorizedLocations.error) throw new Error(authorizedLocations.error);
     const allowedLocationIds = authorizedLocations.locations.map((location) => location.id);
-    if (locationId && !allowedLocationIds.includes(locationId)) {
-      return Response.json({ error: "Location is outside your allocated scope." }, { status: 403 });
+    const scopedLocations = resolveAttendanceExportLocationIds(params.getAll("location_id"), allowedLocationIds);
+    if (!scopedLocations.ok) {
+      return Response.json({ error: "One or more stations are outside your allocated scope." }, { status: 403 });
     }
     const scopedRows = await loadAttendanceReportRows({
       companyId,
       fromDate: range.fromDate,
-      locationIds: locationId ? [locationId] : allowedLocationIds,
+      locationIds: scopedLocations.locationIds,
       reportType,
       toDate: range.toDate
     });

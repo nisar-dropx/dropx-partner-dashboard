@@ -14829,6 +14829,12 @@ body:has([aria-modal="true"]) .ops-ai {
   font-size: 12px;
 }
 
+.attendance-multi-select-helper {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .attendance-shift-cell {
   min-width: 128px;
 }
