@@ -1,10 +1,11 @@
 'use client';
+import { AdhocDriverFields } from '@/components/adhoc-driver-fields';
 import { useEffect, useState } from 'react';
 import { vanFuelDetails } from '@/lib/van-fuel';
 import { paymentVehicleDetails, vehiclePaymentPolicy } from '@/lib/vehicle-payment';
 
 type Vehicle = { id: string; vehicle_no: string; model: string | null };
-export function VehiclePaymentFields({ headCode, locationId, actual = false, saved, preserveVehicle = false }: { headCode: string; locationId: string; actual?: boolean; saved?: unknown; preserveVehicle?: boolean }) {
+function StandardVehiclePaymentFields({ headCode, locationId, actual = false, saved, preserveVehicle = false }: { headCode: string; locationId: string; actual?: boolean; saved?: unknown; preserveVehicle?: boolean }) {
   const fuel = headCode === 'VAN_FUEL';
   const ownOnly = vehiclePaymentPolicy(headCode) === 'own';
   const initialFuel = vanFuelDetails(saved);
@@ -39,4 +40,8 @@ export function VehiclePaymentFields({ headCode, locationId, actual = false, sav
     </div>
     {error ? <p role="alert">{error} <button className="button secondary compact" type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : null}
   </section>;
+}
+
+export function VehiclePaymentFields(props: Parameters<typeof StandardVehiclePaymentFields>[0]) {
+  return props.headCode === 'ADHOC_DRIVER' ? <AdhocDriverFields locationId={props.locationId} saved={props.saved} locked={props.preserveVehicle} /> : <StandardVehiclePaymentFields {...props} />;
 }
