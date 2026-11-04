@@ -1,3 +1,5 @@
+import { applyPayoutDeductionsToAdvanceRegister } from "@/lib/advance-register-payout-deductions";
+import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { WorkforceAdvanceRegister, type WorkforceAdvanceRegisterRow } from "@/components/workforce-advance-register";
@@ -16,6 +18,7 @@ export default async function PayAdvanceRegisterPage() {
   try {
     if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
     rows = await loadPaidAdvanceRegisterView(supabaseAdmin, companyId);
+    rows = await applyPayoutDeductionsToAdvanceRegister(supabaseAdmin, companyId, rows, (from, to, ids) => loadWorkforcePayoutRows(companyId, authorization, from, to, { workforceIds: ids }));
   } catch (cause) {
     error = cause instanceof Error ? cause.message : "Unable to load paid advances.";
   }
@@ -25,6 +28,6 @@ export default async function PayAdvanceRegisterPage() {
     {error
       ? <section className="panel message-panel error"><div className="panel-body"><strong>Pay advance register unavailable</strong><p className="subtle">{error}</p></div></section>
       : <WorkforceAdvanceRegister canAdd={false} canEdit={false} rows={rows} workforceOptions={[]} personLabel="Person" exportPrefix="pay-advances"
-          registerDescription="Paid advances for HRMS and Workforce. Deducted amounts include confirmed recoveries; Pending is the balance still to recover. Unregistered IDs remain visible until registration links them for payroll recovery." />}
+          registerDescription="Paid advances for HRMS and Workforce. Deducted includes recoveries already recorded or included in payout deductions. Pending is the remaining amount not yet included. Unregistered IDs remain visible until registration links them for payroll recovery." />}
   </AppShell>;
 }
