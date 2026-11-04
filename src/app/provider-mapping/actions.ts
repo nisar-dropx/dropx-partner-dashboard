@@ -998,7 +998,16 @@ async function saveExecutiveMappingRow(
 
     const keepAtRegisteredLocation = Boolean(options.keepExistingLocationMappingId)
       && stationId === workerLocationId;
-    const { error } = options.keepExistingLocationMappingId
+    const historicalLocationPeriod = !mappingId && Boolean(effectiveTo)
+      && stationId !== workerLocationId && options.allowWorkforceLocationDriftEdit
+      && !options.keepExistingLocationMappingId && !replacementMappingId;
+    const { error } = historicalLocationPeriod
+      ? await supabaseAdmin.rpc("workforce_save_historical_location_mapping", {
+        p_company: companyId, p_actor: createdBy, p_workforce: id,
+        p_payload: mappingPayload,
+        p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null
+      })
+      : options.keepExistingLocationMappingId
       ? await supabaseAdmin.rpc(
         keepAtRegisteredLocation
           ? "workforce_keep_joining_mapping_at_registered_location"
@@ -1453,7 +1462,21 @@ async function providerFirstReplacementState({
       )
   ) ?? null;
   const registeredLocationPeriodCovered = registeredCoverageResult.data === true;
-  if (needsRegisteredLocationException && (!registeredLocationMapping || !registeredLocationPeriodCovered)) {
+  if (needsRegisteredLocationException && !submittedMappingId && requestedEffectiveTo
+    && !registeredLocationPeriodCovered && !expectedReplacementId) {
+    const { data: historicalAvailable, error: historicalError } = await supabaseAdmin.rpc(
+      "workforce_historical_mapping_period_available", {
+        p_company: companyId, p_workforce: workforceId, p_provider: providerId,
+        p_member: providerMemberId, p_from: requestedEffectiveFrom, p_to: requestedEffectiveTo
+      }
+    );
+    if (historicalError) throw new Error(historicalError.message);
+    if (historicalAvailable === true) {
+      return { confirmation: null, locationRemap: null, keepAll: null,
+        ownerReplacement: null, currentMappingLocationDriftEdit: true };
+    }
+  }
+  if (needsRegisteredLocationException && !submittedClosedMapping && (!registeredLocationMapping || !registeredLocationPeriodCovered)) {
     throw new Error(`Row ${index + 1}: Location mismatch. Map this Provider ID to the DropX profile at its registered location for the complete requested period, then use Keep all for the additional location.`);
   }
 
