@@ -9,6 +9,7 @@ const code = ts.transpileModule(readFileSync(new URL("./adhoc-vehicle-policy.ts"
 }).outputText;
 new Function("exports", "module", code)(module.exports, module);
 const {
+  eligibleAdhocVehicles,
   evaluateAdhocOutOnRoad,
   isBreakdownVehicleReason,
   normalizeAdhocVehicleNo,
@@ -19,24 +20,33 @@ test("normalizeAdhocVehicleNo strips spaces and uppercases", () => {
   assert.equal(normalizeAdhocVehicleNo(" kl 01 ab 1234 "), "KL01AB1234");
 });
 
-test("breakdown vehicle uses plate path, not dropdown", () => {
-  assert.equal(isBreakdownVehicleReason({ reason_key: "breakdown_vehicle" }), true);
-  assert.equal(usesAdhocVehicleDropdown({ reason_key: "breakdown_vehicle", source_code: "OWN" }), false);
-  assert.equal(usesAdhocVehicleDropdown({ reason_key: "company_breakdown", source_code: "OWN" }), true);
-  assert.equal(usesAdhocVehicleDropdown({ reason_key: "high_volume", source_code: null }), false);
-  assert.equal(usesAdhocVehicleDropdown({ reason_key: "connection_vehicle", source_code: null }), false);
+test("breakdown uses Fleet selection; unrelated reasons do not ask for a breakdown vehicle", () => {
+  for (const key of ["company_breakdown", "vendor_breakdown", "odcd_breakdown", "breakdown_vehicle"]) {
+    assert.equal(isBreakdownVehicleReason({ reason_key: key }), true);
+    assert.equal(usesAdhocVehicleDropdown({ reason_key: key, source_code: "OWN" }), true);
+  }
+  for (const key of ["high_volume", "connection_vehicle"]) {
+    assert.equal(isBreakdownVehicleReason({ reason_key: key }), false);
+    assert.equal(usesAdhocVehicleDropdown({ reason_key: key, source_code: null }), false);
+  }
 });
 
-test("out-on-road accepts in_transit, GPS km, or fleet breakdown status", () => {
-  assert.equal(evaluateAdhocOutOnRoad({ status: "active", locationType: "in_transit" }).ok, true);
-  assert.equal(evaluateAdhocOutOnRoad({ status: "active", locationType: "station", gpsKm: 12 }).ok, true);
-  assert.equal(evaluateAdhocOutOnRoad({ status: "breakdown", locationType: "workshop", gpsKm: 0 }).ok, true);
-  assert.equal(evaluateAdhocOutOnRoad({ status: "under_service", locationType: "station" }).evidence, "fleet_status");
+test("Fleet Breakdown is mandatory even with GPS movement, transit or service status", () => {
+  for (const status of ["active", "under_service", "on_leave"]) {
+    const result = evaluateAdhocOutOnRoad({ status, locationType: "in_transit", gpsKm: 12 });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /marked Breakdown in Fleet/);
+  }
+  assert.equal(evaluateAdhocOutOnRoad({ status: "breakdown", locationType: "workshop", gpsKm: 0 }).evidence, "fleet_status");
+  assert.equal(evaluateAdhocOutOnRoad({ status: "breakdown", unavailable: true }).ok, false);
 });
 
-test("out-on-road rejects parked active vans without GPS", () => {
-  const parked = evaluateAdhocOutOnRoad({ status: "active", locationType: "station", gpsKm: 0 });
-  assert.equal(parked.ok, false);
-  assert.match(parked.error || "", /out on road/i);
-  assert.equal(evaluateAdhocOutOnRoad({ status: "active", locationType: "workshop", unavailable: true }).ok, false);
+test("all breakdown reasons strictly filter Fleet, source, date and existing replacements", () => {
+  for (const reason_key of ["company_breakdown", "vendor_breakdown", "odcd_breakdown", "breakdown_vehicle"]) {
+    const rule = { reason_key, source_code: "OWN", required_statuses: [] };
+    const vehicle = { id: "eligible", source: "OWN", status: "breakdown", deploymentDate: "2026-10-01", unavailable: false };
+    const candidates = [vehicle, ...[{status:"active"}, {status:"under_service"}, {source:"VNV"}, {unavailable:true}, {deploymentDate:"2026-12-01"}].map((patch,i)=>({...vehicle,id:`bad${i}`,...patch}))];
+    assert.deepEqual(eligibleAdhocVehicles(rule, candidates, "2026-11-04").map(v=>v.id), ["eligible"]);
+  }
+  assert.equal(eligibleAdhocVehicles({reason_key:"odcd_absent",source_code:"ODCD",required_statuses:[]}, [{source:"ODCD",status:"active",deploymentDate:"2026-10-01",unavailable:false}], "2026-11-04").length, 1);
 });

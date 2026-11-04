@@ -23,18 +23,18 @@ export type AdhocVehicle = {
 };
 export type AdhocContext = { rules: AdhocRule[]; vehicles: AdhocVehicle[]; contact: string | null };
 
-export type AdhocOutOnRoadEvidence = 'in_transit' | 'gps_movement' | 'fleet_status';
+export type AdhocOutOnRoadEvidence = 'fleet_status';
 
 export function normalizeAdhocVehicleNo(value: string): string {
   return value.replace(/\s+/g, '').toUpperCase();
 }
 
 export function isBreakdownVehicleReason(rule: Pick<AdhocRule, 'reason_key'> | null | undefined): boolean {
-  return rule?.reason_key === 'breakdown_vehicle';
+  return Boolean(rule && ['company_breakdown', 'vendor_breakdown', 'odcd_breakdown', 'breakdown_vehicle'].includes(rule.reason_key));
 }
 
 export function usesAdhocVehicleDropdown(rule: Pick<AdhocRule, 'reason_key' | 'source_code'> | null | undefined): boolean {
-  return Boolean(rule?.source_code) && !isBreakdownVehicleReason(rule);
+  return Boolean(rule?.source_code);
 }
 
 export function eligibleAdhocVehicles(rule: AdhocRule, vehicles: AdhocVehicle[], date: string) {
@@ -48,6 +48,7 @@ export function eligibleAdhocVehicles(rule: AdhocRule, vehicles: AdhocVehicle[],
 }
 
 export function requiredAdhocStatuses(rule: AdhocRule): string[] {
+  if (isBreakdownVehicleReason(rule)) return ['breakdown'];
   return rule.required_statuses ?? (rule.required_status ? [rule.required_status] : []);
 }
 
@@ -70,7 +71,7 @@ export function adhocVehicleLabel(vehicle: {
   return [partner, vehicle.model, registration, adhocStatusLabel(vehicle.status)].filter(Boolean).join(' · ');
 }
 
-/** DB-backed out-on-road proof for company Breakdown Vehicle requests. */
+/** Compatibility lookup: only Fleet Breakdown status qualifies, never GPS or location. */
 export function evaluateAdhocOutOnRoad(vehicle: {
   status: string;
   locationType?: string | null;
@@ -80,25 +81,17 @@ export function evaluateAdhocOutOnRoad(vehicle: {
   if (vehicle.unavailable) {
     return { ok: false, evidence: null, error: 'A replacement request already exists for this vehicle and date.' };
   }
-  if (vehicle.locationType === 'in_transit') {
-    return { ok: true, evidence: 'in_transit', error: null };
-  }
-  if (vehicle.status === 'breakdown' || vehicle.status === 'under_service') {
+  if (vehicle.status === 'breakdown') {
     return { ok: true, evidence: 'fleet_status', error: null };
-  }
-  if ((vehicle.gpsKm ?? 0) > 0) {
-    return { ok: true, evidence: 'gps_movement', error: null };
   }
   return {
     ok: false,
     evidence: null,
     error:
-      'Company vehicle is not recorded as out on road for this date. Fleet location must be In transit, GPS must show movement today, or status must already be Breakdown / Under service.',
+      'Vehicle must be marked Breakdown in Fleet before requesting a replacement.',
   };
 }
 
-export function adhocOutOnRoadEvidenceLabel(evidence: AdhocOutOnRoadEvidence): string {
-  if (evidence === 'in_transit') return 'Fleet location: In transit';
-  if (evidence === 'gps_movement') return 'GPS movement recorded today';
-  return 'Fleet status: Breakdown / Under service';
+export function adhocOutOnRoadEvidenceLabel(_evidence: AdhocOutOnRoadEvidence): string {
+  return 'Fleet status: Breakdown';
 }

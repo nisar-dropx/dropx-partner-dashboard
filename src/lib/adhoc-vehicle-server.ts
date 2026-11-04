@@ -37,8 +37,7 @@ function mapVehicle(
     current_location_type?: string | null;
   },
   sourceCodes: Map<string, string | undefined>,
-  unavailable: boolean,
-  gpsKm: number | null
+  unavailable: boolean
 ): AdhocVehicle {
   const source = sourceCodes.get(v.source_id) || '';
   return {
@@ -51,13 +50,12 @@ function mapVehicle(
     deploymentDate: v.deployment_date,
     unavailable,
     locationType: v.current_location_type ?? null,
-    gpsKm,
   };
 }
 
 export async function loadAdhocContext(company: string, station: string, date: string): Promise<AdhocContext> {
   const db = supabaseAdmin!;
-  const [rules, vehicles, sources, designations, states, days, km] = await Promise.all([
+  const [rules, vehicles, sources, designations, states, days] = await Promise.all([
     db.from('fleet_adhoc_reason_rules').select('*').eq('company_id', company).eq('is_active', true).order('sort_order'),
     db
       .from('fleet_vehicles')
@@ -74,12 +72,6 @@ export async function loadAdhocContext(company: string, station: string, date: s
       .eq('company_id', company)
       .eq('work_date', date)
       .is('revoked_at', null),
-    db
-      .from('fleet_daily_km')
-      .select('vehicle_no,km')
-      .eq('company_id', company)
-      .eq('movement_date', date)
-      .eq('source', 'wheelseye'),
   ]);
   let vehicleRows = vehicles.data ?? [];
   let vehiclesError = vehicles.error;
@@ -93,19 +85,16 @@ export async function loadAdhocContext(company: string, station: string, date: s
     vehiclesError = fallback.error;
     vehicleRows = (fallback.data ?? []).map((row) => ({ ...row, current_location_type: null as string | null }));
   }
-  if (vehiclesError || [rules, sources, designations, states, days, km].some((r) => r.error)) {
+  if (vehiclesError || [rules, sources, designations, states, days].some((r) => r.error)) {
     throw new Error('Vehicle checks unavailable. Please retry.');
   }
   const sourceCodes = sourceCodeMap(sources.data ?? [], designations.data ?? []);
   const terminal = new Set(states.data?.map((s) => s.status_key));
   const unavailableIds = new Set((days.data ?? []).map((d) => d.vehicle_id));
-  const kmByNo = new Map(
-    (km.data ?? []).map((row) => [normalizeAdhocVehicleNo(row.vehicle_no), Number(row.km) || 0])
-  );
   const active = vehicleRows
     .filter((v) => !terminal.has(v.status) && v.deployment_date <= date)
     .map((v) =>
-      mapVehicle(v, sourceCodes, unavailableIds.has(v.id), kmByNo.get(normalizeAdhocVehicleNo(v.vehicle_no)) ?? null)
+      mapVehicle(v, sourceCodes, unavailableIds.has(v.id))
     );
   const availableRules = (rules.data as AdhocRule[]).filter(
     (r) => !r.source_code || active.some((v) => v.source === r.source_code)
@@ -186,7 +175,7 @@ export async function lookupBreakdownVehicle(
     return { ok: false, error: 'Breakdown Vehicle applies only to company (OWN) vehicles.' };
   }
   const check = evaluateAdhocOutOnRoad(match);
-  if (!check.ok || !check.evidence) return { ok: false, error: check.error || 'Vehicle is not out on road.' };
+  if (!check.ok || !check.evidence) return { ok: false, error: check.error || 'Vehicle must be marked Breakdown in Fleet.' };
   return {
     ok: true,
     vehicle: match,
@@ -213,30 +202,19 @@ export async function prepareAdhocRequest(
   if (!rule) throw new Error('Select an available deployment reason. Refresh the form if needed.');
 
   let vehicleId: string | null = null;
-  if (isBreakdownVehicleReason(rule)) {
-    const plate = String(form.get('adhoc_vehicle_no') || '').trim();
-    const postedId = String(form.get('adhoc_vehicle_id') || '').trim();
-    const lookupPlate =
-      plate || context.vehicles.find((v) => v.id === postedId)?.number || '';
-    const lookup = await lookupBreakdownVehicle(company, station, date, lookupPlate);
-    if (!lookup.ok) throw new Error(lookup.error);
-    if (postedId && postedId !== lookup.vehicle.id) {
-      throw new Error('Verify the company vehicle number again before submitting.');
-    }
-    vehicleId = lookup.vehicle.id;
-  } else if (rule.source_code) {
+  if (rule.source_code) {
     const vehicle = String(form.get('adhoc_vehicle_id') || '');
     if (!eligibleAdhocVehicles(rule, context.vehicles, date).some((v) => v.id === vehicle)) {
       throw new Error(
         requiredAdhocStatuses(rule).length
-          ? `No eligible vehicle in the configured statuses. Contact Fleet Manager${context.contact ? ' · ' + context.contact : ''}.`
+          ? `Select a vehicle with the required Fleet status (${requiredAdhocStatuses(rule).join(", ")}). Contact Fleet Manager${context.contact ? ' · ' + context.contact : ''}.`
           : 'Select an eligible vehicle at this station.'
       );
     }
     vehicleId = vehicle;
   }
 
-  if ((rule.reason_key === 'company_breakdown' || isBreakdownVehicleReason(rule)) && !rule.approval_steps) {
+  if ((rule.source_code === 'OWN' && isBreakdownVehicleReason(rule)) && !rule.approval_steps) {
     throw new Error('Fleet approval routing is not configured. Contact the administrator.');
   }
 

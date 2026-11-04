@@ -66,4 +66,43 @@ await assert.rejects(create('company_breakdown',id(13),'2026-10-08'),/eligible v
 await db.query("update fleet_adhoc_reason_rules set required_statuses=array['breakdown'] where reason_key='company_breakdown'");
 await db.query("update fleet_vehicles set status='under_service' where id=$1",[id(13)]);
 await assert.rejects(create('company_breakdown',id(13),'2026-10-08'),/eligible vehicle status/);
+await db.exec(readFileSync('supabase/migrations/20261024140000_adhoc_connection_breakdown_vehicle.sql','utf8'));
+const strictMigration = readFileSync('supabase/migrations/20261104053902_adhoc_breakdown_requires_fleet_status.sql','utf8');
+await db.exec(strictMigration);
+await db.exec(strictMigration);
+// Every breakdown subtype must use Fleet status, including when master statuses are loosened.
+await db.exec(`update fleet_adhoc_reason_rules set required_statuses=array[]::text[];
+create table fleet_daily_km(company_id uuid,vehicle_no text,movement_date date,source text,km numeric);
+insert into fleet_daily_km values('${id(1)}','OWN1','2026-11-04','wheelseye',120);
+update fleet_vehicles set current_location_type='in_transit';`);
+for (const reason of ['company_breakdown','breakdown_vehicle','odcd_breakdown','vendor_breakdown']) {
+  const source = reason === 'odcd_breakdown' ? id(11) : reason === 'vendor_breakdown' ? id(12) : id(10);
+  await db.query('update fleet_vehicles set source_id=$1 where id=$2',[source,id(13)]);
+  for (const status of ['active','under_service']) {
+    await db.query('update fleet_vehicles set status=$1 where id=$2',[status,id(13)]);
+    await assert.rejects(create(reason,id(13),'2026-11-04'),/marked Breakdown in Fleet/);
+  }
+  await db.query("update fleet_vehicles set status='breakdown' where id=$1",[id(13)]);
+  const accepted = (await create(reason,id(13),'2026-11-04')).rows[0];
+  assert.equal(accepted.adhoc_vehicle_snapshot.status,'breakdown');
+  await assert.rejects(create(reason,id(13),'2026-11-04'),/already exists/);
+  // A later repair must not block approval of a request that was valid on submission.
+  await db.query("update fleet_vehicles set status='active' where id=$1",[id(13)]);
+  await db.query("update payment_requests set status='approved' where id=$1",[accepted.id]);
+  await db.query("update payment_requests set status='rejected',approval_status='REJECTED' where id=$1",[accepted.id]);
+}
+await db.query("update fleet_vehicles set status='breakdown',source_id=$1,station_code='ELSEWHERE' where id=$2",[id(10),id(13)]);
+await assert.rejects(create('company_breakdown',id(13),'2026-11-04'),/at this station/);
+await db.query("update fleet_vehicles set station_code='TEST' where id=$1",[id(13)]);
+await assert.rejects(create('vendor_breakdown',id(13),'2026-11-04'),/source/);
+const draft=(await db.query(`insert into payment_requests(company_id,payment_head_id,location_id,requested_by,status,adhoc_reason_key,adhoc_vehicle_id,adhoc_deployment_date)
+ values($1,$2,$3,$4,'draft','company_breakdown',$5,'2026-11-05') returning id`,[id(1),id(4),id(3),id(2),id(13)])).rows[0];
+await db.query("update fleet_vehicles set status='active' where id=$1",[id(13)]);
+await assert.rejects(db.query("update payment_requests set status='pending' where id=$1",[draft.id]),/marked Breakdown in Fleet/);
+for (const reason of ['high_volume','connection_vehicle']) {
+  const unlinked=(await create(reason,id(13),'2026-11-04')).rows[0];
+  assert.equal(unlinked.adhoc_vehicle_id,null);
+}
+await create('odcd_absent',id(14),'2026-11-04');
+console.log('Strict Fleet breakdown checks passed for all subtypes, stale drafts, history, GPS bypass, station scope and idempotency.');
 console.log('Adhoc policy: station/source/date guards, duplicate prevention, special route, revocation and XPT deduplication passed.');await db.close();
