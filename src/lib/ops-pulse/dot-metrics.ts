@@ -20,10 +20,17 @@ export function sumDot(rows: DotTotals[]): DotTotals {
   sum.dotPct = sum.total ? sum.delivered / sum.total * 100 : 0;
   return sum;
 }
-export const isDotView = (view: string) => view === 'premium' || view === 'standard';
+export const isDotView = (view: string) => view === 'dot' || view === 'premium' || view === 'standard';
 export function matchesDotMetric(row: {status: string; dotDispatched?: boolean; dotAtStation?: boolean}, header: string): boolean {
   if (header === 'Dispatched') return row.dotDispatched === true;
   if (header === 'At station') return row.dotAtStation === true;
   const status: Record<string, string> = { Delivered: 'Delivered', 'On road': 'OOR', Failed: 'Failed', Rejected: 'Rejected', 'Other / pending': 'Other / pending' };
   return !status[header] || row.status === status[header];
+}
+
+export function stationDotTotals(board: {dotVersion?:number;dotPremium?:DotTotals;dotStandard?:DotTotals}, lane:string):DotTotals|undefined {
+ if(board.dotVersion!==1) return undefined;
+ if(lane==='premium') return board.dotPremium;
+ if(lane==='standard') return board.dotStandard;
+ return board.dotPremium && board.dotStandard ? sumDot([board.dotPremium,board.dotStandard]) : undefined;
 }

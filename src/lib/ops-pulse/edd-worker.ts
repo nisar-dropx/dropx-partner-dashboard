@@ -943,6 +943,11 @@ export type LoadFlashTrackingRow = {
   shipOption: string;
   dotDispatched?: boolean;
   dotAtStation?: boolean;
+  rtsValue?: number | null;
+  lastUpdatedAt?: string;
+  rtsReason?: string;
+  rtsAgeDays?: number;
+
 };
 
 /**
@@ -980,6 +985,7 @@ export type LoadFlashBoardPayload = {
   dsrFrozenAt: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  rtsVersion?: number;
   dotVersion?: number;
   dotMetadataPending?: number;
   dotPremium?: DotTotals;
@@ -1066,7 +1072,7 @@ function parseLoadFlashDaList(value: unknown): LoadFlashBoardDa[] {
       oor: Number(da.oor) || 0,
       other: Number(da.other) || 0,
       total,
-      dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0,
+      dsrPct: total > 0 ? (delivered / total) * 100 : 0,
     });
   }
   return daDsr;
@@ -1133,12 +1139,13 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     cReturn,
     cReturnTotal,
     pickupDone,
-    pickupDonePct: Number(row.pickupDonePct ?? (cReturnTotal > 0 ? Math.round((pickupDone / cReturnTotal) * 100) : 0)) || 0,
+    pickupDonePct: cReturnTotal > 0 ? (pickupDone / cReturnTotal) * 100 : 0,
     daDsr,
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
     daDsrPremium,
     zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
     daDsrSwa: parseLoadFlashDaList(row.daDsrSwa),
+    ...(Number(row.rtsVersion) === 1 ? {rtsVersion: 1} : {}),
     ...(Number(row.dotVersion) === 1 ? { dotVersion: 1, dotMetadataPending: Number(row.dotMetadataPending) || 0, dotPremium: parseDotTotals(row.dotPremium), dotStandard: parseDotTotals(row.dotStandard) } : {}),
     daDsrStandard,
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
@@ -1336,6 +1343,9 @@ export async function fetchLoadFlashTracking(
       shipOption: String(row.shipOption ?? "").trim(),
       dotDispatched: Boolean(row.dotDispatched),
       dotAtStation: Boolean(row.dotAtStation),
+      rtsValue: row.rtsValue != null && Number.isFinite(Number(row.rtsValue)) ? Number(row.rtsValue) : null,
+      lastUpdatedAt: String(row.lastUpdatedAt || ""), rtsReason: String(row.rtsReason || ""),
+      rtsAgeDays: row.rtsAgeDays != null ? Number(row.rtsAgeDays) : undefined,
     };
   }).filter((row) => row.trackingId);
 }

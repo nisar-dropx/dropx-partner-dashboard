@@ -1,6 +1,8 @@
 "use client";
+import { RtsReport } from "./rts-report";
+import { performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
 import { dotStationTable } from "@/lib/ops-pulse/dot-report";
-import { isDotView, sumDot, matchesDotMetric, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
+import { isDotView, sumDot, stationDotTotals, matchesDotMetric, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { cReturnDetailTable, dsrStationTable, pendingCReturn, type CReturnAssociate, type BoardDetailLevel } from "@/lib/ops-pulse/board-detail-report";
 import { ReportTable } from "@/components/report-table";
 
@@ -22,7 +24,6 @@ import {
   daDsrForView,
   DSR_HEADERS,
   dsrHeatColor,
-  dsrBandLegend,
   dsrPctTextColor,
   oorTextColor,
   eddPivot,
@@ -51,7 +52,7 @@ import { stationDsrMetricRows, stationDsrReportRows, summarizeStationDsrRows, ST
 
 type Props = {
   initial: LoadFlashBoardNetwork;
-  dsrTarget?: number;
+  targets?: BoardTargets;
   stationNames?: Record<string, string>;
   clusters?: BoardCluster[];
   initialRegion?: string;
@@ -111,6 +112,7 @@ async function copyText(text: string) {
 
 function asView(value: string | undefined): StationBoardView {
   const key = String(value || "edd").toLowerCase().replace(/[^a-z]/g, "");
+  if (key === "dot" || key === "rts") return key;
   if (key === "swa") return "swa";
   if (key === "creturn") return "creturn";
   if (key === "dsr" || key === "dadsr") return "dsr";
@@ -250,7 +252,7 @@ function buildShareTable(
         { text: String(da.oor || 0), color: oorTextColor(da.oor, da.total, station.fetchedAt), bold: !!oorTextColor(da.oor, da.total, station.fetchedAt), align: "right" },
         { text: String(da.total), align: "right" },
         ...(hasOther ? [{ text: String(da.other || 0), align: "right" as const }] : []),
-        { text: da.total ? `${da.dsrPct}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct, dsrTarget) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct, dsrTarget) : undefined, align: "right" },
+        { text: da.total ? `${da.dsrPct.toFixed(2)}%` : "—", bold: true, bg: da.total ? dsrHeatColor(da.dsrPct) : undefined, color: da.total ? dsrPctTextColor(da.dsrPct) : undefined, align: "right" },
       ]);
     }
   }
@@ -265,7 +267,7 @@ function buildShareTable(
       { text: String(tot.oor), bold: true, align: "right", bg: "#edf2f8" },
       { text: String(tot.total), bold: true, align: "right", bg: "#edf2f8" },
       ...(hasOther ? [{ text: String(tot.other || 0), align: "right" as const, bold: true }] : []),
-      { text: `${tot.dsrPct}%`, bold: true, bg: dsrHeatColor(tot.dsrPct, dsrTarget), color: dsrPctTextColor(tot.dsrPct, dsrTarget), align: "right" },
+      { text: `${tot.dsrPct.toFixed(2)}%`, bold: true, bg: dsrHeatColor(tot.dsrPct), color: dsrPctTextColor(tot.dsrPct), align: "right" },
     ]);
   }
   return {
@@ -277,7 +279,7 @@ function buildShareTable(
   };
 }
 
-export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout }: Props) {
+export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout, targets = {} }: Props) {
   const [payload, setPayload] = useState(initial);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initial.run);
   const [view, setView] = useState<StationBoardView>(() => asView(initialView));
@@ -358,7 +360,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
     return {
       edd,
       cReturn,
-      pickupPct: cReturn > 0 ? Math.round((pickup / cReturn) * 100) : 0,
+      pickupPct: cReturn > 0 ? (pickup / cReturn) * 100 : 0,
       zero,
       das,
       ready: stations.filter((row) => row.hasSnapshot).length,
@@ -367,7 +369,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
 
   const regionLabel = regions.size ? STATION_BOARD_REGIONS.filter(r => regions.has(r.id)).map(r => r.label).join(" / ") : "All regions";
   const delivery = useMemo(() => boardDeliverySummary(stations, view === "zero"), [stations, view]);
-  const pct = (value: number | null) => value == null ? "—" : `${value.toFixed(1)}%`;
+  const pct = (value: number | null) => value == null ? "—" : `${value.toFixed(2)}%`;
   const reportTime = stations.map(row => row.fetchedAt).filter((at): at is string => !!at).sort().at(-1) || payload.asOf;
   const singleStation = stations.length === 1;
   const cReturnKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt])]);
@@ -427,17 +429,26 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
   const cReturnShown = needsCReturn
     ? cReturnRows.reduce((a, r) => ({ total: a.total + r.total, picked: a.picked + (r.statuses.PICKUP_DONE || 0), pending: a.pending + pendingCReturn(r.statuses, r.total) }), { total: 0, picked: 0, pending: 0 })
     : stations.reduce((a, r) => ({ total: a.total + r.board.cReturnTotal, picked: a.picked + r.board.pickupDone, pending: a.pending + pendingCReturn(r.board.cReturn, r.board.cReturnTotal) }), { total: 0, picked: 0, pending: 0 });
-  const dotValues = stations.map(station => station.board.dotVersion === 1 ? (view === "premium" ? station.board.dotPremium : station.board.dotStandard) : undefined);
+  const dotValues = stations.map(station => stationDotTotals(station.board,view));
   const dotUnavailable = isDotView(view) && dotValues.some(value => !value);
   const dotMetadataPending = stations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0);
   const dotSummary = sumDot(dotValues.filter((value): value is DotTotals => Boolean(value)));
+  const performanceTarget = view === 'premium' ? targets.premium : view === 'standard' ? targets.standard : view === 'dot' ? (targets.premium != null && targets.standard != null && dotSummary.total ? stations.reduce((n,s)=>n+(s.board.dotPremium?.total||0)*targets.premium!+(s.board.dotStandard?.total||0)*targets.standard!,0)/dotSummary.total : undefined) : view === 'creturn' ? targets.creturn : view === 'swa' ? undefined : targets.dsr;
+  function targetForRow(row: {text:string}[]) {
+    if(view !== 'dot') return performanceTarget;
+    if(targets.premium == null || targets.standard == null) return undefined;
+    const selected=row[0]?.text === 'Grand Total' ? stations : stations.filter(s=>s.stationCode === row[0]?.text);
+    const premium=selected.reduce((n,s)=>n+(s.board.dotPremium?.total||0),0);
+    const standard=selected.reduce((n,s)=>n+(s.board.dotStandard?.total||0),0);
+    return premium+standard ? (premium*targets.premium+standard*targets.standard)/(premium+standard) : undefined;
+  }
   function reportFor(blockStations: StationBoardStation[], label: string) {
     const dsrTitle =
       view === "premium" ? "Premium DOT"
         : view === "standard" ? "Standard DOT"
           : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries"
             : "DSR";
-    const table = isDotView(view) ? dotStationTable(blockStations, view as "premium" | "standard") : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
+    const table = isDotView(view) ? dotStationTable(blockStations, view as "dot" | "premium" | "standard") : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
       : isDsrFamilyView(view) && level === "station"
         ? dsrStationTable(
           blockStations,
@@ -446,9 +457,8 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
           view === "dsr" ? dsrStationInventory : undefined,
           (board) => daDsrForView(board, view),
           dsrTitle,
-          dsrTarget,
         )
-      : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode, dsrTarget);
+      : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
     const d = boardDeliverySummary(
       blockStations.map((station) => ({
         ...station,
@@ -461,9 +471,8 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
       : "";
     const historyPending = (isDsrFamilyView(view) || isDotView(view)) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
     const metadataPending = isDotView(view) ? blockStations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0) : 0;
-    return prepareBoardReport({ ...table,
-      footerNote: isDsrFamilyView(view) ? dsrBandLegend(dsrTarget) : table.footerNote,
-      compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock. ${dsrBandLegend(dsrTarget)}` : undefined,
+    return prepareBoardReport({ ...formatBoardPerformance(table, performanceTarget, targetForRow),
+      compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock.` : undefined,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending || metadataPending ? ` · Provisional (${[historyPending ? `${count(historyPending)} history checks pending` : "", metadataPending ? `${count(metadataPending)} data pending` : ""].filter(Boolean).join(" · ")})` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
@@ -481,6 +490,8 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
       rows: table.rows.map((row) => row.map((cell) => cell.text)),
       scope: table.subtitle,
       extraSheets: tidSheet,
+      cellStyles: table.rows,
+      colourRules: table.headers.flatMap((h,column)=>/^(DSR\s*%|DOT\s*%|Pickup\s*%)$/i.test(h) ? table.rows.flatMap((cells,row)=>{const target=targetForRow(cells);return target == null || !cells[column].text.includes('%') ? [] : [{column,row,target}];}) : []),
     };
   }
 
@@ -821,8 +832,8 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
     ["ageing", "Ageing"],
     ["creturn", "C-Return"],
     ["dsr", "DSR"],
-    ["premium", "Premium DOT"],
-    ["standard", "AFN Standard DOT"],
+    ["dot", "DOT"],
+    ["rts", "RTS pendency"],
     ["swa", "SWA DSR"],
     ["zero", "Zero deliveries"],
   ] as const;
@@ -863,7 +874,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
               key={key}
               type="button"
               role="tab"
-              aria-selected={view === key}
+              aria-selected={view === key || (key === "dot" && isDotView(view))}
               onClick={() => {
                 changeView(key);
               }}
@@ -884,6 +895,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
             {busy === "refresh" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
             {busy === "refresh" ? " Refreshing…" : ` Refresh ${stations.length} station${stations.length === 1 ? "" : "s"}`}
           </button>
+          {view !== "rts" && <>
           <button type="button" disabled={busy !== null || outputUnavailable} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
           </button>
@@ -902,7 +914,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
             onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: true, scope: "all" })}
           >
             {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
-          </button>
+          </button></>}
         </div>
 
         {backfillProgress || backfillNote ? (
@@ -931,8 +943,10 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
         {error ? <p className={s.error} role="alert">{error}</p> : null}
       </div>
 
+      {view === "rts" ? <RtsReport stations={stations} date={payload.businessDate} /> : <>
+      {isDotView(view) && <div className={s.segment} aria-label="DOT category">{([['dot','Overall'],['premium','Premium'],['standard','Standard']] as const).map(([key,label])=><button key={key} type="button" aria-pressed={view===key} onClick={()=>changeView(key)}>{label}</button>)}</div>}
       {hasDetailViews ? <div className={s.viewControls}>
-        {hasDetailViews ? <div className={s.segment} aria-label="Report detail">
+      {hasDetailViews ? <div className={s.segment} aria-label="Report detail">
           <button type="button" aria-pressed={level === "station"} onClick={() => setLevels(p => ({ ...p, [view]: "station" }))}>Station view</button>
           <button type="button" aria-pressed={level === "associate"} onClick={() => setLevels(p => ({ ...p, [view]: "associate" }))}>Associate detail</button>
         </div> : null}
@@ -942,7 +956,6 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
         </div> : null}
       </div> : null}
 
-      {isDsrFamilyView(view) ? <p className={s.note}>{dsrBandLegend(dsrTarget)}</p> : null}
       <div className={s.kpis} aria-live="polite">
         <article className={s.kpi}><span>Stations ready</span><strong>{isDotView(view) ? dotValues.filter(Boolean).length : totals.ready}/{stations.length}</strong></article>
         {isDotView(view) ? <>
@@ -956,13 +969,13 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
         </> : view === "creturn" ? <>
           <article className={s.kpi}><span>Total C-Return</span><strong>{detailUnavailable ? "—" : count(cReturnShown.total)}</strong></article>
           <article className={s.kpi}><span>Pending pickup</span><strong>{detailUnavailable ? "—" : count(cReturnShown.pending)}</strong></article>
-          <article className={s.kpi}><span>Pickup done</span><strong>{detailUnavailable ? "—" : count(cReturnShown.picked)} <small>{!detailUnavailable && cReturnShown.total ? `(${Math.round(cReturnShown.picked / cReturnShown.total * 100)}%)` : ""}</small></strong></article>
+          <article className={s.kpi}><span>Pickup done</span><strong>{detailUnavailable ? "—" : count(cReturnShown.picked)} <small>{!detailUnavailable && cReturnShown.total ? `(${(cReturnShown.picked / cReturnShown.total * 100).toFixed(2)}%)` : ""}</small></strong></article>
         </> : view === "ageing" ? <>
           <article className={s.kpi}><span>Ageing shipments</span><strong>{count(ageing.grandTotal.count)}</strong></article>
           <article className={s.kpi}><span>Ageing value</span><strong>₹{inr(ageing.grandTotal.amount)}</strong></article>
         </> : <>
           <article className={s.kpi}><span>EDD packages</span><strong>{count(totals.edd)}</strong></article>
-          <article className={s.kpi}><span>C-Return</span><strong>{count(totals.cReturn)} <small>· {totals.cReturn ? `${totals.pickupPct}% pickup` : "—"}</small></strong></article>
+          <article className={s.kpi}><span>C-Return</span><strong>{count(totals.cReturn)} <small>· {totals.cReturn ? `${totals.pickupPct.toFixed(2)}% pickup` : "—"}</small></strong></article>
         </>}
         {!isDotView(view) && <button type="button" className={s.kpi} aria-pressed={view === "zero"} onClick={() => changeView(view === "zero" ? "dsr" : "zero")}><span>Zero-delivery DAs ↗</span><strong>{count(totals.zero)} <small>of {totals.das} DAs</small></strong></button>}
       </div>
@@ -981,6 +994,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
           <span>{isDsrFamilyView(view) ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
         {(isDsrFamilyView(view) || isDotView(view)) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
+        {(isDsrFamilyView(view) || isDotView(view) || view === 'creturn') && <small className={s.reportMeta}>{performanceTarget == null ? 'Target not configured for this metric · neutral colours' : `Target ${performanceTarget.toFixed(2)}% · green: target met · amber: within 5 percentage points · red: below`}</small>}
         {isDotView(view) ? <small className={s.reportMeta}>Due by selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
         {isDotView(view) && dotMetadataPending > 0 ? <small className={s.reportMeta} role="status">{count(dotMetadataPending)} shipments have missing or unrecognised ship option / EDD. DOT includes confirmed eligible classes only.</small> : null}
         {dotUnavailable ? <small className={s.reportMeta} role="status">Eligible DOT inventory was not captured for this date. Refresh today to start tracking; historical gaps are shown as —.</small> : null}
@@ -1000,7 +1014,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
             <tbody>{report.rows.slice(0, report.rows.length - report.totalRows).map((row, i) => <tr key={`${report.rowStations[i]}-${i}`} className={report.groupStarts[i] ? s.groupStart : undefined}>
               {row.map((cell, column) => {
                 const header = report.headers[column];
-                const metric = ({ [STATION_DSR_PENDING_HEADER]: "eddPending", [STATION_DSR_PHYSICAL_HEADER]: "physicalAtStation", Assigned: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Outcome missing": "other" } as Record<string, StationDsrMetric>)[header];
+                const metric = ({ [STATION_DSR_PENDING_HEADER]: "eddPending", [STATION_DSR_PHYSICAL_HEADER]: "physicalAtStation", Assigned: "assigned", Total: "assigned", Delivered: "delivered", "Delivery Failed": "failed", "Delivery Rejected": "rejected", "Out on Road": "onRoad", "Outcome missing": "other" } as Record<string, StationDsrMetric>)[header];
                 const stationCode = report.rowStations[i];
                 const stationMetric = view === "dsr" && level === "station" && metric && cell.text !== "—";
                 return <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
@@ -1017,6 +1031,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
         </div>}
       </section>
 
+      </>}
       {!pivot.grandTotal && view === "edd" && stations.some((row) => row.hasSnapshot) ? (
         <p className={s.note}>If cells are empty, click <strong>Refresh</strong> to pull board data for the selected date.</p>
       ) : null}
@@ -1078,7 +1093,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
                     </div>
                     <div className={`${s.shareRow} ${s.shareTotal}`}>
                       <span>Pickup Done %</span>
-                      <strong>{selected.board.pickupDonePct}%</strong>
+                      <strong>{selected.board.pickupDonePct.toFixed(2)}%</strong>
                     </div>
                   </div>
                 </div>
@@ -1213,7 +1228,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
                         <strong>{da.failed || 0}</strong>
                         <strong>{da.rejected || 0}</strong>
                         <strong>{da.other || 0}</strong>
-                        <strong style={{ background: dsrHeatColor(da.dsrPct, dsrTarget), color: dsrPctTextColor(da.dsrPct, dsrTarget) }}>{da.dsrPct}%</strong>
+                        <strong style={{ background: performanceColour(da.dsrPct, performanceTarget).bg, color: performanceColour(da.dsrPct, performanceTarget).color }}>{da.dsrPct.toFixed(2)}%</strong>
                       </div>
                     ))}
                     {(() => {
@@ -1231,7 +1246,7 @@ export function StationBoardView({ initial, dsrTarget = 94, stationNames = {}, c
                           <strong>{tot.failed}</strong>
                           <strong>{tot.rejected}</strong>
                           <strong>{tot.other || 0}</strong>
-                          <strong style={{ background: dsrHeatColor(tot.dsrPct, dsrTarget), color: dsrPctTextColor(tot.dsrPct, dsrTarget) }}>{tot.dsrPct}%</strong>
+                          <strong style={{ background: performanceColour(tot.dsrPct, performanceTarget).bg, color: performanceColour(tot.dsrPct, performanceTarget).color }}>{tot.dsrPct.toFixed(2)}%</strong>
                         </div>
                       );
                     })()}

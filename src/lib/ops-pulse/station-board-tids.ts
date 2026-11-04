@@ -15,7 +15,7 @@ export const BOARD_TID = {
   AGEING: "BoardAgeing",
 } as const;
 
-export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard" | "swa";
+export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard" | "swa" | "dot" | "rts";
 
 const DSR_BUCKETS = [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"];
 
@@ -29,6 +29,8 @@ export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   "dsr-station": [BOARD_TID.PHYSICAL, BOARD_TID.PENDING_TODAY, BOARD_TID.EDD, BOARD_TID.AGEING, BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
   zero: DSR_BUCKETS,
   swa: DSR_BUCKETS,
+  rts: ["BoardRTS"],
+  dot: DOT_BUCKETS,
   premium: DOT_BUCKETS,
   standard: DOT_BUCKETS,
 };
@@ -44,6 +46,11 @@ export type FlashTrackingLike = {
   shipOption?: string;
   dotDispatched?: boolean;
   dotAtStation?: boolean;
+  rtsValue?: number | null;
+  lastUpdatedAt?: string;
+  rtsReason?: string;
+  rtsAgeDays?: number;
+
 };
 
 export type BoardTidExportRow = {
@@ -59,6 +66,11 @@ export type BoardTidExportRow = {
   shipOption?: string;
   dotDispatched?: boolean;
   dotAtStation?: boolean;
+  rtsValue?: number | null;
+  lastUpdatedAt?: string;
+  rtsReason?: string;
+  rtsAgeDays?: number;
+
 };
 
 function dsrStatus(bucket: string, state = ""): string {
@@ -191,15 +203,16 @@ export function mapBoardTidExportRows(
   flash: FlashTrackingLike[],
   kind: StationBoardTidKind,
 ): BoardTidExportRow[] {
+  if (kind === "rts") return flash.filter(row => row.bucket === "BoardRTS").map(row => ({...row, status: row.rtsReason || row.state, currentState:row.state, report:"RTS pendency", sourceBucket:row.bucket}));
   if (kind === "edd") return mapEdd(flash);
   if (kind === "creturn") return mapCReturn(flash);
   if (kind === "ageing") return mapAgeing(flash);
   if (kind === "dsr-station") return mapDsrStation(flash);
   if (kind === "zero") return mapDsr(flash, "zero");
   if (kind === "swa") return mapDsr(flash, "swa");
-  if (kind === "premium" || kind === "standard") return flash.filter(row => DOT_BUCKETS.includes(row.bucket) && (kind === "premium" ? isPremiumDot(row.shipOption) : isStandardDot(row.shipOption))).map(row => ({
+  if (kind === "dot" || kind === "premium" || kind === "standard") return flash.filter(row => DOT_BUCKETS.includes(row.bucket) && (kind === "dot" ? isPremiumDot(row.shipOption) || isStandardDot(row.shipOption) : kind === "premium" ? isPremiumDot(row.shipOption) : isStandardDot(row.shipOption))).map(row => ({
     ...row, status: row.bucket === "BoardDotAtStation" ? "At station" : dsrStatus(row.bucket.replace("BoardDot", "Board")), currentState: row.state,
-    report: kind === "premium" ? "Premium DOT" : "AFN Standard DOT", sourceBucket: row.bucket,
+    report: kind === "dot" ? "DOT" : kind === "premium" ? "Premium DOT" : "AFN Standard DOT", sourceBucket: row.bucket,
   }));
   return mapDsr(flash, "dsr");
 }
