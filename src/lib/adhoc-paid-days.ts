@@ -35,5 +35,14 @@ export function paidAdhocDayBreakdown(date: string, treatment: AdhocPaidDayTreat
   return { date, baseAmount: 0, workDayUnits: 0, attendanceSource: `Paid ad hoc · ${treatment.requestNo}`, lines: [{ code: "ADHOC_PAID_DAY", label: `Excluded · paid ad hoc ${treatment.requestNo}`, componentType: "amount" as const, count: 0, rate: 0, amount: 0 }], methodAmounts: [] };
 }
 export function baseOnlyAdhocLine(treatment: AdhocPaidDayTreatment) {
-  return { code: "ADHOC_BASE_EXCLUDED", label: `Van rent/base excluded · ${treatment.requestNo}`, componentType: "amount" as const, count: 0, rate: 0, amount: 0 };
+  return {
+    code: "ADHOC_BASE_EXCLUDED",
+    label: `Van rent/base excluded · ${treatment.requestNo}`,
+    componentType: "amount" as const,
+    schedule: "per_day" as const,
+    count: 0,
+    rate: 0,
+    amount: 0,
+    sortOrder: Number.MAX_SAFE_INTEGER
+  };
 }
