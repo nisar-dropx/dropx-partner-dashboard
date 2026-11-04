@@ -13,7 +13,12 @@ import {
   isLossRecoveryManagerialTarget,
 } from "./loss-recovery-controls";
 
-import { availablePayrollMonths, recoveryDirectoryWithPayroll, type RecoveryPayrollWindow } from "./loss-open-payroll";
+import {
+  availablePayrollMonths,
+  peopleRecoveryPayableForWindow,
+  recoveryDirectoryWithPayroll,
+  type RecoveryPayrollWindow,
+} from "./loss-open-payroll";
 import { lossWorkforcePayable } from "./loss-workforce-payable";
 
 export async function loadRecoveryDirectory(company: string, station: string, departedOnly = false) {
@@ -199,6 +204,11 @@ export async function loadRecoveryPayables(
       const run = Array.isArray(employeePay?.hr_payroll_runs)
         ? employeePay.hr_payroll_runs[0]
         : employeePay?.hr_payroll_runs;
+      if (employeePay) {
+        gross = Number.isFinite(Number(employeePay.gross_pay))
+          ? Math.round(Number(employeePay.gross_pay) * 100) / 100
+          : null;
+      }
       if (
         employeePay &&
         policy.people_run_statuses.includes(run?.status) &&
@@ -220,7 +230,6 @@ export async function loadRecoveryPayables(
             (Number(adjusted ? employeePay.adjusted_net_pay : employeePay.net_pay) + opsLoss) * 100,
           ) / 100,
         );
-        gross = Number.isFinite(Number(employeePay.gross_pay)) ? Math.round(Number(employeePay.gross_pay) * 100) / 100 : null;
         source = `People payroll · ${employeePay.calculation_status}`;
       } else if (employeePay) {
         source = `People payroll · ${employeePay.calculation_status || run?.status || "not ready"}`;
@@ -236,7 +245,7 @@ export async function loadRecoveryPayables(
     if (window) {
       if (!window.payroll_open) payable = 0;
       else if (person.ref.startsWith("workforce:")) payable = payable == null ? null : Math.max(0,payable - Number(window.paid));
-      else payable = payable == null || window.payable == null ? null : Math.min(payable,Number(window.payable));
+      else payable = peopleRecoveryPayableForWindow(payable, window);
     } else if (unpaidCheck) payable = 0;
     if (departed || !normalEmployment) eligible = eligible && !!window?.payroll_open && payable != null && payable > 0;
     if (payable != null && !Number.isFinite(payable)) payable = null;
