@@ -12,6 +12,8 @@ const {
   eligibleAdhocVehicles,
   evaluateAdhocOutOnRoad,
   isBreakdownVehicleReason,
+  isAdhocReplacementStatus,
+  adhocOutOnRoadEvidenceLabel,
   normalizeAdhocVehicleNo,
   usesAdhocVehicleDropdown,
 } = module.exports;
@@ -31,22 +33,29 @@ test("breakdown uses Fleet selection; unrelated reasons do not ask for a breakdo
   }
 });
 
-test("Fleet Breakdown is mandatory even with GPS movement, transit or service status", () => {
-  for (const status of ["active", "under_service", "on_leave"]) {
-    const result = evaluateAdhocOutOnRoad({ status, locationType: "in_transit", gpsKm: 12 });
+test("Fleet non-operational status governs eligibility, never GPS movement or location", () => {
+  for (const state of [undefined, {is_active:true,is_operational:true,is_terminal:false}, {is_active:false,is_operational:false,is_terminal:false}, {is_active:true,is_operational:false,is_terminal:true}, {is_active:true,is_operational:null,is_terminal:false}]) {
+    assert.equal(isAdhocReplacementStatus(state), false);
+    const result = evaluateAdhocOutOnRoad({ status: "active", replacementEligible: isAdhocReplacementStatus(state), locationType: "in_transit", gpsKm: 12 });
     assert.equal(result.ok, false);
-    assert.match(result.error, /marked Breakdown in Fleet/);
+    assert.match(result.error, /non-operational in Fleet/);
   }
-  assert.equal(evaluateAdhocOutOnRoad({ status: "breakdown", locationType: "workshop", gpsKm: 0 }).evidence, "fleet_status");
-  assert.equal(evaluateAdhocOutOnRoad({ status: "breakdown", unavailable: true }).ok, false);
+  for (const status of ["breakdown", "under_service", "on_leave", "inactive", "workshop_repair"]) {
+    const replacementEligible = isAdhocReplacementStatus({is_active:true,is_operational:false,is_terminal:false});
+    assert.equal(evaluateAdhocOutOnRoad({ status, replacementEligible, locationType:"workshop", gpsKm:0 }).evidence,"fleet_status");
+    assert.equal(evaluateAdhocOutOnRoad({ status, replacementEligible, unavailable:true }).ok,false);
+  }
+  assert.equal(evaluateAdhocOutOnRoad({ status:"breakdown" }).ok,false,"unknown status classification fails closed");
+  assert.equal(adhocOutOnRoadEvidenceLabel("fleet_status","under_service"),"Fleet status: Under service");
 });
 
 test("all breakdown reasons strictly filter Fleet, source, date and existing replacements", () => {
   for (const reason_key of ["company_breakdown", "vendor_breakdown", "odcd_breakdown", "breakdown_vehicle"]) {
     const rule = { reason_key, source_code: "OWN", required_statuses: [] };
-    const vehicle = { id: "eligible", source: "OWN", status: "breakdown", deploymentDate: "2026-10-01", unavailable: false };
-    const candidates = [vehicle, ...[{status:"active"}, {status:"under_service"}, {source:"VNV"}, {unavailable:true}, {deploymentDate:"2026-12-01"}].map((patch,i)=>({...vehicle,id:`bad${i}`,...patch}))];
-    assert.deepEqual(eligibleAdhocVehicles(rule, candidates, "2026-11-04").map(v=>v.id), ["eligible"]);
+    const vehicle = { id: "eligible", source: "OWN", status: "breakdown", replacementEligible: true, deploymentDate: "2026-10-01", unavailable: false };
+    const service = {...vehicle,id:"service",status:"under_service"};
+    const candidates = [vehicle, service, ...[{status:"active",replacementEligible:false}, {status:"sold",replacementEligible:false}, {replacementEligible:undefined}, {source:"VNV"}, {unavailable:true}, {deploymentDate:"2026-12-01"}].map((patch,i)=>({...vehicle,id:`bad${i}`,...patch}))];
+    assert.deepEqual(eligibleAdhocVehicles(rule, candidates, "2026-11-04").map(v=>v.id), ["eligible","service"]);
   }
   assert.equal(eligibleAdhocVehicles({reason_key:"odcd_absent",source_code:"ODCD",required_statuses:[]}, [{source:"ODCD",status:"active",deploymentDate:"2026-10-01",unavailable:false}], "2026-11-04").length, 1);
 });

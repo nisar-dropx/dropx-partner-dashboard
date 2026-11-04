@@ -7,6 +7,7 @@ import {
   eligibleAdhocVehicles,
   evaluateAdhocOutOnRoad,
   isBreakdownVehicleReason,
+  isAdhocReplacementStatus,
   normalizeAdhocVehicleNo,
   requiredAdhocStatuses,
   type AdhocContext,
@@ -65,7 +66,7 @@ export async function loadAdhocContext(company: string, station: string, date: s
       .eq('deployment_status', 'deployed'),
     db.from('fleet_vehicle_sources').select('id,designation_id').eq('company_id', company).eq('is_active', true),
     db.from('designations').select('id,code').eq('company_id', company),
-    db.from('fleet_vehicle_status_master').select('status_key').eq('company_id', company).eq('is_terminal', true),
+    db.from('fleet_vehicle_status_master').select('status_key,is_operational,is_terminal,is_active').eq('company_id', company),
     db
       .from('fleet_vehicle_day_availability')
       .select('vehicle_id')
@@ -89,16 +90,19 @@ export async function loadAdhocContext(company: string, station: string, date: s
     throw new Error('Vehicle checks unavailable. Please retry.');
   }
   const sourceCodes = sourceCodeMap(sources.data ?? [], designations.data ?? []);
-  const terminal = new Set(states.data?.map((s) => s.status_key));
+  const terminal = new Set(states.data?.filter((s) => s.is_terminal).map((s) => s.status_key));
+  const statusMap = new Map(states.data?.map((s) => [s.status_key, s]));
+  const replacementStatuses = (states.data ?? []).filter(isAdhocReplacementStatus).map((s) => s.status_key);
   const unavailableIds = new Set((days.data ?? []).map((d) => d.vehicle_id));
   const active = vehicleRows
     .filter((v) => !terminal.has(v.status) && v.deployment_date <= date)
-    .map((v) =>
-      mapVehicle(v, sourceCodes, unavailableIds.has(v.id))
-    );
+    .map((v) => ({
+      ...mapVehicle(v, sourceCodes, unavailableIds.has(v.id)),
+      replacementEligible: isAdhocReplacementStatus(statusMap.get(v.status)),
+    }));
   const availableRules = (rules.data as AdhocRule[]).filter(
     (r) => !r.source_code || active.some((v) => v.source === r.source_code)
-  );
+  ).map((r) => isBreakdownVehicleReason(r) ? { ...r, required_statuses: replacementStatuses } : r);
   const contactRule = (rules.data as AdhocRule[]).find((r) => r.contact_role_code);
   let contact: string | null = null;
   if (contactRule?.contact_role_code) {
@@ -175,12 +179,12 @@ export async function lookupBreakdownVehicle(
     return { ok: false, error: 'Breakdown Vehicle applies only to company (OWN) vehicles.' };
   }
   const check = evaluateAdhocOutOnRoad(match);
-  if (!check.ok || !check.evidence) return { ok: false, error: check.error || 'Vehicle must be marked Breakdown in Fleet.' };
+  if (!check.ok || !check.evidence) return { ok: false, error: check.error || 'Vehicle must be marked non-operational in Fleet.' };
   return {
     ok: true,
     vehicle: match,
     evidence: check.evidence,
-    evidenceLabel: adhocOutOnRoadEvidenceLabel(check.evidence),
+    evidenceLabel: adhocOutOnRoadEvidenceLabel(check.evidence, match.status),
   };
 }
 
@@ -206,7 +210,9 @@ export async function prepareAdhocRequest(
     const vehicle = String(form.get('adhoc_vehicle_id') || '');
     if (!eligibleAdhocVehicles(rule, context.vehicles, date).some((v) => v.id === vehicle)) {
       throw new Error(
-        requiredAdhocStatuses(rule).length
+        isBreakdownVehicleReason(rule)
+          ? 'Select a non-operational Fleet vehicle at this station.'
+          : requiredAdhocStatuses(rule).length
           ? `Select a vehicle with the required Fleet status (${requiredAdhocStatuses(rule).join(", ")}). Contact Fleet Manager${context.contact ? ' · ' + context.contact : ''}.`
           : 'Select an eligible vehicle at this station.'
       );

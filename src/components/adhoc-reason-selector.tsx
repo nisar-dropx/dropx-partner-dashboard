@@ -92,7 +92,7 @@ export function AdhocReasonSelector({
 
       {showDropdown ? (
         <>
-          <span>{breakdown ? "Breakdown vehicle *" : "Vehicle / partner being replaced *"}</span>
+          <span>{breakdown ? "Vehicle being replaced *" : "Vehicle / partner being replaced *"}</span>
           <select
             className="field"
             key={`${reason}:${location}:${date}`}
@@ -100,7 +100,7 @@ export function AdhocReasonSelector({
             required
             defaultValue=""
           >
-            <option value="">{breakdown ? "Select Fleet breakdown vehicle" : "Select vehicle / partner"}</option>
+            <option value="">{breakdown ? "Select unavailable Fleet vehicle" : "Select vehicle / partner"}</option>
             {vehicles.map((v) => (
               <option key={v.id} value={v.id}>
                 {adhocVehicleLabel(v)}
@@ -109,7 +109,7 @@ export function AdhocReasonSelector({
           </select>
           {!vehicles.length ? (
             <small role="alert">
-              {requiredAdhocStatuses(rule!).length
+              {breakdown ? "No eligible non-operational Fleet vehicle. Request blocked." : requiredAdhocStatuses(rule!).length
                 ? `No eligible vehicles recorded as ${requiredAdhocStatuses(rule!)
                     .map(adhocStatusLabel)
                     .join(" or ")}. Request blocked.`
@@ -117,7 +117,7 @@ export function AdhocReasonSelector({
               Contact Fleet Manager{data?.contact ? " · " + data.contact : ""}.
             </small>
           ) : breakdown ? (
-            <small>Fleet status: Breakdown{rule?.block_rent ? " · vehicle rent excluded for this day" : ""}.</small>
+            <small>Fleet non-operational vehicles only{rule?.block_rent ? " · vehicle rent excluded for this day" : ""}.</small>
           ) : rule?.effect_status ? (
             <small>
               Records {rule.effect_status === "on_leave" ? "On Leave" : "Breakdown"} for {date}

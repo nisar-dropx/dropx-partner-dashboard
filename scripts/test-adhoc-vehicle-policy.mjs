@@ -105,4 +105,50 @@ for (const reason of ['high_volume','connection_vehicle']) {
 }
 await create('odcd_absent',id(14),'2026-11-04');
 console.log('Strict Fleet breakdown checks passed for all subtypes, stale drafts, history, GPS bypass, station scope and idempotency.');
+// Updated rule: use Fleet master classification, including custom downtime statuses.
+await db.exec(`alter table fleet_vehicle_status_master add column is_operational boolean;
+alter table fleet_vehicle_status_master add column is_active boolean;
+alter table fleet_vehicle_status_master add column sort_order integer;
+insert into fleet_vehicle_status_master(company_id,status_key,is_terminal,is_operational,is_active,sort_order) values
+('${id(1)}','active',false,true,true,1),
+('${id(1)}','breakdown',false,false,true,2),
+('${id(1)}','under_service',false,false,true,3),
+('${id(1)}','on_leave',false,false,true,4),
+('${id(1)}','inactive',false,false,true,5),
+('${id(1)}','sold',true,false,true,6),
+('${id(1)}','returned',true,false,true,7),
+('${id(1)}','disposed',true,false,true,8),
+('${id(1)}','retired_status',false,false,false,9);`);
+const nonOperationalMigration=readFileSync('supabase/migrations/20261104064258_adhoc_non_operational_fleet_eligibility.sql','utf8');
+await db.exec(nonOperationalMigration);
+await db.exec(nonOperationalMigration);
+// Newly configured status works without editing ad hoc rules or code.
+await db.query("insert into fleet_vehicle_status_master values($1,'workshop_repair',false,false,true,10)",[id(1)]);
+for (const reason of ['company_breakdown','breakdown_vehicle','odcd_breakdown','vendor_breakdown']) {
+  const source=reason==='odcd_breakdown'?id(11):reason==='vendor_breakdown'?id(12):id(10);
+  await db.query('update fleet_vehicles set source_id=$1 where id=$2',[source,id(13)]);
+  for (const status of ['active','sold','returned','disposed','unknown','retired_status']) {
+    await db.query('update fleet_vehicles set status=$1 where id=$2',[status,id(13)]);
+    await assert.rejects(create(reason,id(13),'2026-11-06'),/non-operational in Fleet|no longer active/);
+  }
+  for (const status of ['breakdown','under_service','on_leave','inactive','workshop_repair']) {
+    await db.query('update fleet_vehicles set status=$1 where id=$2',[status,id(13)]);
+    const accepted=(await create(reason,id(13),'2026-11-06')).rows[0];
+    assert.equal(accepted.adhoc_vehicle_snapshot.status,status);
+    assert.equal((await db.query('select status from fleet_vehicle_day_availability where request_id=$1',[accepted.id])).rows[0].status,status);
+    await assert.rejects(create(reason,id(13),'2026-11-06'),/already exists/);
+    await db.query("update fleet_vehicles set status='active' where id=$1",[id(13)]);
+    await db.query("update payment_requests set status='approved' where id=$1",[accepted.id]);
+    await db.query("update payment_requests set status='rejected',approval_status='REJECTED' where id=$1",[accepted.id]);
+  }
+}
+await db.query("update fleet_vehicles set status='under_service',source_id=$1,station_code='ELSEWHERE' where id=$2",[id(10),id(13)]);
+await assert.rejects(create('company_breakdown',id(13),'2026-11-06'),/at this station/);
+await db.query("update fleet_vehicles set station_code='TEST' where id=$1",[id(13)]);
+await assert.rejects(create('vendor_breakdown',id(13),'2026-11-06'),/source/);
+const serviceDraft=(await db.query(`insert into payment_requests(company_id,payment_head_id,location_id,requested_by,status,adhoc_reason_key,adhoc_vehicle_id,adhoc_deployment_date)
+values($1,$2,$3,$4,'draft','company_breakdown',$5,'2026-11-07') returning id`,[id(1),id(4),id(3),id(2),id(13)])).rows[0];
+await db.query("update fleet_vehicle_status_master set is_operational=true where status_key='under_service'");
+await assert.rejects(db.query("update payment_requests set status='pending' where id=$1",[serviceDraft.id]),/non-operational in Fleet/);
+console.log('Non-operational Fleet eligibility passed: service, leave, inactive, custom statuses, terminal/unknown rejection, actual status preserved, stale drafts, station/source guards and duplicate prevention.');
 console.log('Adhoc policy: station/source/date guards, duplicate prevention, special route, revocation and XPT deduplication passed.');await db.close();

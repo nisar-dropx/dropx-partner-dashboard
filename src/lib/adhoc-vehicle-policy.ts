@@ -18,6 +18,8 @@ export type AdhocVehicle = {
   status: string;
   deploymentDate: string;
   unavailable: boolean;
+  // Derived from the company Fleet status master, never inferred from GPS/location.
+  replacementEligible?: boolean;
   locationType?: string | null;
   gpsKm?: number | null;
 };
@@ -42,14 +44,23 @@ export function eligibleAdhocVehicles(rule: AdhocRule, vehicles: AdhocVehicle[],
     (v) =>
       v.source === rule.source_code &&
       (!v.deploymentDate || v.deploymentDate <= date) &&
-      (!requiredAdhocStatuses(rule).length || requiredAdhocStatuses(rule).includes(v.status)) &&
+      (isBreakdownVehicleReason(rule)
+        ? v.replacementEligible === true
+        : !requiredAdhocStatuses(rule).length || requiredAdhocStatuses(rule).includes(v.status)) &&
       !v.unavailable
   );
 }
 
 export function requiredAdhocStatuses(rule: AdhocRule): string[] {
-  if (isBreakdownVehicleReason(rule)) return ['breakdown'];
   return rule.required_statuses ?? (rule.required_status ? [rule.required_status] : []);
+}
+
+export function isAdhocReplacementStatus(state: {
+  is_active: boolean;
+  is_operational: boolean;
+  is_terminal: boolean;
+} | null | undefined): boolean {
+  return state?.is_active === true && state.is_operational === false && state.is_terminal === false;
 }
 
 export function adhocStatusLabel(status: string): string {
@@ -71,27 +82,28 @@ export function adhocVehicleLabel(vehicle: {
   return [partner, vehicle.model, registration, adhocStatusLabel(vehicle.status)].filter(Boolean).join(' · ');
 }
 
-/** Compatibility lookup: only Fleet Breakdown status qualifies, never GPS or location. */
+/** Compatibility lookup: Fleet must classify the status as non-operational and non-terminal. */
 export function evaluateAdhocOutOnRoad(vehicle: {
   status: string;
   locationType?: string | null;
   gpsKm?: number | null;
   unavailable?: boolean;
+  replacementEligible?: boolean;
 }): { ok: boolean; evidence: AdhocOutOnRoadEvidence | null; error: string | null } {
   if (vehicle.unavailable) {
     return { ok: false, evidence: null, error: 'A replacement request already exists for this vehicle and date.' };
   }
-  if (vehicle.status === 'breakdown') {
+  if (vehicle.replacementEligible === true) {
     return { ok: true, evidence: 'fleet_status', error: null };
   }
   return {
     ok: false,
     evidence: null,
     error:
-      'Vehicle must be marked Breakdown in Fleet before requesting a replacement.',
+      'Vehicle must be marked non-operational in Fleet before requesting a replacement.',
   };
 }
 
-export function adhocOutOnRoadEvidenceLabel(_evidence: AdhocOutOnRoadEvidence): string {
-  return 'Fleet status: Breakdown';
+export function adhocOutOnRoadEvidenceLabel(_evidence: AdhocOutOnRoadEvidence, status: string): string {
+  return `Fleet status: ${adhocStatusLabel(status)}`;
 }
