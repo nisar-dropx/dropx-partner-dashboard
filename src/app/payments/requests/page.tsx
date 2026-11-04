@@ -11,6 +11,7 @@ import { resubmissionQuestions, resubmissionOptions, isFixedReplacementQuestion 
 import { PaymentTrackingInput } from "@/components/payment-tracking-input";
 import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
 import { AppShell } from "@/components/app-shell";
+import { AdhocDeliveryFields } from "@/components/adhoc-delivery-fields";
 import { AdhocDaFields } from "@/components/adhoc-da-fields";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PageHead } from "@/components/page-head";
@@ -37,6 +38,7 @@ import { loadApprovalSteps } from "@/lib/payment-approval-steps";
 import { loadPayAdvanceWorkerContexts, type PayAdvanceWorkerContext } from "@/lib/pay-advance-payment-context";
 import { formatApplyingMonth, formatWorkingDays, workerCodeFromDetails } from "@/lib/pay-advance-worker-facts";
 import { cancelPaymentRequest, createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
+import { normalizeDeliveryIdentityPolicy, type DeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 
 type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number; date_rule?: string | null; date_days?: number | null };
 type LocationRow = {
@@ -54,6 +56,7 @@ type PaymentHeadRow = {
   request_expense_approval: boolean;
   expense_approval_threshold: number | null;
   supported_payment_modes: PaymentMode[] | null;
+  delivery_identity_policy: DeliveryIdentityPolicy;
   payment_head_questions?: QuestionRow[] | null;
 };
 type PaymentRequestRow = {
@@ -61,6 +64,11 @@ type PaymentRequestRow = {
   adhoc_da_name: string | null;
   adhoc_provider_employee_id: string | null;
   adhoc_work_date: string | null;
+  delivery_performer_mode: string | null;
+  delivery_provider_employee_id: string | null;
+  delivery_performer_name: string | null;
+  delivery_work_date: string | null;
+  adhoc_payout_effect: string | null;
   request_no: string;
   location_id: string | null;
   location_code: string;
@@ -283,13 +291,13 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
+      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, delivery_identity_policy, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date, work_date, source_type, source_id, requested_for_name, category, details")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date, delivery_performer_mode, delivery_provider_employee_id, delivery_performer_name, delivery_work_date, adhoc_payout_effect, work_date, source_type, source_id, requested_for_name, category, details")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false });
@@ -566,7 +574,7 @@ export default async function PaymentRequestsPage({
                   const head = headById.get(request.payment_head_id);
                   return (
                     <tr key={request.id} className="payment-record">
-                      <td className="payment-cell-reference"><strong>{request.request_no}</strong>{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}</td>
+                      <td className="payment-cell-reference"><strong>{request.request_no}</strong>{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}{request.delivery_provider_employee_id ? <div><small>{request.delivery_performer_name} · {request.delivery_provider_employee_id}<br />Delivery date: {request.delivery_work_date}</small></div> : null}</td>
                       <td className="payment-cell-location">{request.location_code}</td>
                       <td className="payment-cell-head">{head?.name ?? "-"}</td>
                       <td className="payment-cell-estimate"><span className="payment-mobile-label">Estimate </span>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
@@ -637,7 +645,8 @@ export default async function PaymentRequestsPage({
                 defaultIfsc={bankRequest.ifsc}
                 savedContacts={savedContacts}
               />
-              {bankHead?.code === "ADHOC_DA" && bankRequest.location_id ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
+              {bankRequest.location_id && normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy) === "legacy_adhoc_da" ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
+              {bankRequest.location_id && !["none", "legacy_adhoc_da"].includes(normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)) ? <AdhocDeliveryFields locationId={bankRequest.location_id} policy={normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)} /> : null}
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />
@@ -832,6 +841,7 @@ export default async function PaymentRequestsPage({
                     <div><dt>Contact</dt><dd>{viewRequest.contact_no || "-"}</dd></div>
                     <div><dt>Email</dt><dd>{viewRequest.email || "-"}</dd></div>
                     {viewRequest.adhoc_provider_employee_id ? <div><dt>Adhoc DA</dt><dd>{viewRequest.adhoc_da_name} · {viewRequest.adhoc_provider_employee_id}</dd></div> : null}
+                    {viewRequest.delivery_provider_employee_id ? <div><dt>Delivery performer</dt><dd>{viewRequest.delivery_performer_name} · {viewRequest.delivery_provider_employee_id} · {viewRequest.delivery_work_date}</dd></div> : null}
                   </dl>
                 </section>
 

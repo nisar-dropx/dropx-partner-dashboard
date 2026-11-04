@@ -9,6 +9,7 @@ import { isFinanceOrAccountsRoleCode } from "@/lib/payment-finance-role";
 import { isPeopleApprovedPaymentHead } from "@/lib/people-approved-payment-heads";
 import { normalizePaymentModes } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeDeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -182,6 +183,7 @@ async function createPaymentHeadUnsafe(formData: FormData) {
   const finalApprovalRoleIds = parseRoleIds(formData, "final_approval_role_ids");
   const paymentProcessRoleIds = parseRoleIds(formData, "payment_process_role_ids");
   const supportedPaymentModes = parsePaymentModes(formData);
+  const deliveryIdentityPolicy = normalizeDeliveryIdentityPolicy(clean(formData.get("delivery_identity_policy")));
   const requestExpenseApproval = formData.get("request_expense_approval") === "yes";
   const expenseApprovalThreshold = parseOptionalAmount(formData.get("expense_approval_threshold"), "Threshold Limit");
   const questions = parseQuestions(formData);
@@ -220,6 +222,7 @@ async function createPaymentHeadUnsafe(formData: FormData) {
       final_approval_role_ids: finalApprovalRoleIds,
       payment_process_role_ids: paymentProcessRoleIds,
       supported_payment_modes: supportedPaymentModes,
+      delivery_identity_policy: deliveryIdentityPolicy,
       requires_supporting_document: questions.some((question) => question.answer_type === "file"),
       request_expense_approval: requestExpenseApproval,
       expense_approval_threshold: requestExpenseApproval ? expenseApprovalThreshold : null,
@@ -302,6 +305,7 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
   const finalApprovalRoleIds = parseRoleIds(formData, "final_approval_role_ids");
   const paymentProcessRoleIds = parseRoleIds(formData, "payment_process_role_ids");
   const supportedPaymentModes = parsePaymentModes(formData);
+  const deliveryIdentityPolicy = normalizeDeliveryIdentityPolicy(clean(formData.get("delivery_identity_policy")));
   const requestExpenseApproval = formData.get("request_expense_approval") === "yes";
   const expenseApprovalThreshold = parseOptionalAmount(formData.get("expense_approval_threshold"), "Threshold Limit");
   const isActive = formData.get("is_active") !== "false";
@@ -344,6 +348,7 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
       final_approval_role_ids: finalApprovalRoleIds,
       payment_process_role_ids: paymentProcessRoleIds,
       supported_payment_modes: supportedPaymentModes,
+      delivery_identity_policy: deliveryIdentityPolicy,
       requires_supporting_document: questions.some((question) => question.answer_type === "file"),
       request_expense_approval: requestExpenseApproval,
       expense_approval_threshold: requestExpenseApproval ? expenseApprovalThreshold : null,

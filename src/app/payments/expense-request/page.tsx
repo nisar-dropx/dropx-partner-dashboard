@@ -14,6 +14,7 @@ import { AppShell } from "@/components/app-shell";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PageHead } from "@/components/page-head";
 import { PaymentBeneficiaryFields } from "@/components/payment-beneficiary-fields";
+import { AdhocDeliveryFields } from "@/components/adhoc-delivery-fields";
 import { AdhocDaFields } from "@/components/adhoc-da-fields";
 import { PaymentRequestForm } from "@/components/payment-request-form";
 import { PendingLink } from "@/components/pending-link";
@@ -31,6 +32,7 @@ import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
 import { createExpenseRequest, resubmitExpenseRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
 import { paymentQuestionDateBoundsForValue } from "@/lib/payment-question-date-rules";
+import { normalizeDeliveryIdentityPolicy, type DeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 
 type LocationRow = {
   id: string;
@@ -58,6 +60,7 @@ type PaymentHeadRow = {
   name: string;
   requires_supporting_document: boolean;
   supported_payment_modes: PaymentMode[] | null;
+  delivery_identity_policy: DeliveryIdentityPolicy;
   payment_head_questions?: QuestionRow[] | null;
 };
 
@@ -281,7 +284,7 @@ async function loadExpenseRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
+      .select("id, code, name, requires_supporting_document, supported_payment_modes, delivery_identity_policy, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
@@ -588,7 +591,8 @@ export default async function ExpenseRequestPage({
                 defaultIfsc={bankRequest.ifsc}
                 savedContacts={savedContacts}
               />
-              {bankHead?.code === "ADHOC_DA" && bankRequest.location_id ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
+              {bankRequest.location_id && normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy) === "legacy_adhoc_da" ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
+              {bankRequest.location_id && !["none", "legacy_adhoc_da"].includes(normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)) ? <AdhocDeliveryFields locationId={bankRequest.location_id} policy={normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)} /> : null}
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />

@@ -2,6 +2,7 @@
 
 import { prepareVehiclePayment } from "@/lib/vehicle-payment-server";
 import { resubmissionQuestions } from "@/lib/payment-resubmission";
+import { deliveryIdentityFields, normalizeDeliveryIdentityPolicy } from "@/lib/adhoc-delivery-identity";
 import { adhocDaIdentityFields } from "@/lib/adhoc-da-identity";
 import { prepareAdhocRequest, validateAdhocResubmission } from "@/lib/adhoc-vehicle-server";
 
@@ -31,6 +32,13 @@ import { insertPaymentApprovalLog } from "../approvals/actions";
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text.length ? text : null;
+}
+
+function paymentIdentityFields(formData: FormData, rawPolicy: unknown) {
+  const policy = normalizeDeliveryIdentityPolicy(rawPolicy);
+  return policy === "legacy_adhoc_da"
+    ? adhocDaIdentityFields(formData)
+    : deliveryIdentityFields(formData, policy);
 }
 
 function required(value: FormDataEntryValue | null, field: string) {
@@ -540,7 +548,7 @@ export async function createPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+        .select("id, code, delivery_identity_policy, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", paymentHeadId)
         .eq("company_id", companyId)
         .single()
@@ -589,9 +597,13 @@ export async function createPaymentRequest(formData: FormData) {
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
     const requestNo = await nextPaymentRequestNo(companyId);
-    const isAdhocDa = headResult.data.code === "ADHOC_DA";
-    const workDate = isAdhocDa ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()) : new Date().toISOString().slice(0, 10);
-    const adhocFields = isAdhocDa ? adhocDaIdentityFields(formData) : {};
+    const deliveryPolicy = normalizeDeliveryIdentityPolicy(headResult.data.delivery_identity_policy);
+    const deliveryFields = paymentIdentityFields(formData, deliveryPolicy);
+    const workDate = "delivery_work_date" in deliveryFields
+      ? String(deliveryFields.delivery_work_date)
+      : "adhoc_work_date" in deliveryFields
+        ? String(deliveryFields.adhoc_work_date)
+      : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
     const legacyAccountValue = bankAccountNo ?? paymentReference ?? paymentPortal ?? locationResult.data.station_code;
     const legacyIfscValue = ifsc ?? (isUpiPayment ? "UPI" : "ONLINE");
     const legacyHolderValue = accountHolderName ?? verifiedUpiHolderName ?? submittedUpiHolderName ?? paymentPortal ?? "Online Payment";
@@ -646,7 +658,7 @@ export async function createPaymentRequest(formData: FormData) {
     }
 
     const requestPayload = withCompany({
-      ...adhocFields,
+      ...deliveryFields,
       ...adhocRequest.fields,
         ...fuelFields,
         request_no: requestNo,
@@ -755,8 +767,8 @@ export async function createPaymentRequest(formData: FormData) {
         continue;
       }
       const missingSchemaColumn = schemaMissingColumn(error.message);
-      if (isAdhocDa && missingSchemaColumn && ["source_system", "adhoc_shipment_id", "adhoc_work_date"].includes(missingSchemaColumn)) {
-        throw new Error("Adhoc DA tracking is not ready. No request was saved; contact support to complete the database migration.");
+      if (deliveryPolicy !== "none" && missingSchemaColumn && ["delivery_performer_mode", "delivery_work_date", "delivery_identity_confirmed"].includes(missingSchemaColumn)) {
+        throw new Error("Delivery identity tracking is not ready. No request was saved; contact support to complete the database migration.");
       }
       if (missingSchemaColumn && missingSchemaColumn in requestPayload) {
         delete requestPayload[missingSchemaColumn];
@@ -936,15 +948,13 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: headData, error: headError } = await admin
       .from("payment_heads")
-      .select("id, code, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+      .select("id, code, delivery_identity_policy, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
       .eq("id", request.payment_head_id)
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
     const fuelFields = await prepareVehiclePayment(companyId, headData.code, request.location_code, formData, true, request.details, true);
-    const adhocFields = headData.code === "ADHOC_DA"
-      ? adhocDaIdentityFields(formData)
-      : {};
+    const deliveryFields = paymentIdentityFields(formData, headData.delivery_identity_policy);
     if (!normalizePaymentModes(headData.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
     }
@@ -1006,7 +1016,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
     const { error: updateError } = await admin
       .from("payment_requests")
       .update({
-        ...adhocFields,
+        ...deliveryFields,
         ...fuelFields,
         amount: Number(amountText),
         payment_mode: paymentMode,
