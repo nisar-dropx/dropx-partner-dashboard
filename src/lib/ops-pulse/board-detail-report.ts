@@ -1,5 +1,5 @@
 import { CRETURN_DISPLAY, CRETURN_SHORT, CRETURN_PICKED_UP_BUCKET, pickupPctColor, pickupPctTextColor, sumDaDsr, dsrHeatColor, dsrPctTextColor, oorTextColor, type StationBoardStation } from './station-board.ts';
-import type { StationDsrInventorySummary } from './station-dsr-summary.ts';
+import { STATION_DSR_PENDING_HEADER, STATION_DSR_PHYSICAL_HEADER, type StationDsrInventorySummary } from './station-dsr-summary.ts';
 import type { BoardShareCell, BoardShareTable } from './station-board-share.ts';
 
 export type BoardDetailLevel = 'station' | 'associate';
@@ -60,7 +60,7 @@ export function dsrStationTable(
 ): BoardShareTable {
   const hasOther = stations.some(s => pickDas(s.board).some(d => (d.other || 0) > 0));
   const showInventory = Boolean(inventory) && !zeroOnly;
-  const inventoryHeaders = showInventory ? ['EDD pending at station', 'Physical at station'] : [];
+  const inventoryHeaders = showInventory ? [STATION_DSR_PENDING_HEADER, STATION_DSR_PHYSICAL_HEADER] : [];
   const headers = ['Station', 'Location', ...inventoryHeaders, 'Assigned', 'Delivered', 'Delivery Failed', 'Delivery Rejected', 'Out on Road', ...(hasOther ? ['Other / pending'] : []), 'DSR%'];
   const all = stations.flatMap(s => pickDas(s.board)).filter(d => !zeroOnly || (d.total > 0 && d.delivered === 0));
   const inventoryCells = (summary?: StationDsrInventorySummary): BoardShareCell[] => inventoryHeaders.length ? [summary ? numberCell(summary.eddPending) : { text: '—', align: 'right' }, summary ? numberCell(summary.physicalAtStation) : { text: '—', align: 'right' }] : [];
@@ -71,7 +71,7 @@ export function dsrStationTable(
     return [[{ text: s.stationCode, bold: true }, { text: names[s.stationCode] || '' }, ...inventoryCells(inventory?.[s.stationCode]), ...metrics(sum, s.fetchedAt)]];
   });
   if (rows.length) {
-    const inventoryTotal = inventory ? stations.reduce<StationDsrInventorySummary>((total, station) => ({ eddPending: total.eddPending + (inventory[station.stationCode]?.eddPending || 0), physicalAtStation: total.physicalAtStation + (inventory[station.stationCode]?.physicalAtStation || 0) }), { eddPending: 0, physicalAtStation: 0 }) : undefined;
+    const inventoryTotal = inventory && stations.every(station => inventory[station.stationCode]) ? stations.reduce<StationDsrInventorySummary>((total, station) => ({ eddPending: total.eddPending + inventory[station.stationCode].eddPending, physicalAtStation: total.physicalAtStation + inventory[station.stationCode].physicalAtStation }), { eddPending: 0, physicalAtStation: 0 }) : undefined;
     rows.push([{ text: 'Grand Total', bold: true }, { text: `${rows.length} stations` }, ...inventoryCells(inventoryTotal), ...metrics(sumDaDsr(all))]);
   }
   return { title: `${title} · Stations`, subtitle: '', headers, rows };

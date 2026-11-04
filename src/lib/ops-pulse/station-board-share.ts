@@ -18,6 +18,8 @@ export type BoardShareTable = {
   headers: string[];
   rows: BoardShareCell[][];
   footerNote?: string;
+  /** Essential metric definitions retained even in the compact image. */
+  compactNote?: string;
   /** Repeat the group label only at image page boundaries. */
   rowStations?: string[];
 };
@@ -103,7 +105,7 @@ export async function renderBoardShareImages(table: BoardShareTable, compact = f
       y = compact ? 40 : 104;
       ctx.fillStyle = "#486575";
       ctx.font = "400 14px Arial, sans-serif";
-      for (const line of compact ? [] : wrap(ctx, table.subtitle, usable)) {
+      for (const line of wrap(ctx, compact ? table.compactNote || "" : table.subtitle, usable).filter(Boolean)) {
         ctx.fillText(line, margin, y);
         y += 18;
       }

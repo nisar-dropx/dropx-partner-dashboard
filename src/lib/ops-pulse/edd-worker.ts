@@ -976,6 +976,7 @@ export type LoadFlashBoardPayload = {
   zeroDeliveriesStandard: number;
   dsrFrozenAt: string | null;
   dsrHistoryPending?: number;
+  stationInventoryVersion?: number;
   ageingByDay: Record<string, LoadFlashAgeingCell>;
   ageingByWeek: Record<string, LoadFlashAgeingCell>;
   ageingByStateWeek: Record<string, Record<string, LoadFlashAgeingCell>>;
@@ -1133,6 +1134,7 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
     dsrHistoryPending: Number(row.dsrHistoryPending) || 0,
+    stationInventoryVersion: row.stationInventoryVersion === 1 ? 1 : undefined,
     ageingByDay,
     ageingByWeek,
     ageingByStateWeek,

@@ -67,6 +67,6 @@ test('DSR station detail preserves source buckets needed for auditable station m
   {stationCode:'QLDA',trackingId:'F1',bucket:'BoardFailed',state:'DELIVERY_FAILED',edd:'2026-11-04',driverId:'D1',driverName:'DA'},
  ],'dsr-station');
  assert.deepEqual(rows.map(row=>row.sourceBucket),['BoardEDD','BoardAgeing','BoardFailed']);
- assert.equal(rows[0].status,'EDD pending');
+ assert.equal(rows[0].status,'Inducted inventory');
  assert.equal(rows[2].status,'Failed');
 });
