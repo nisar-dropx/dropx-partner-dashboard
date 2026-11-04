@@ -219,6 +219,7 @@ function parseDaDsrList(value: unknown): StationBoardDaDsr[] {
       failed: Number(da.failed) || 0,
       rejected: Number(da.rejected) || 0,
       oor: Number(da.oor) || 0,
+      other: Number(da.other) || 0,
       total,
       dsrPct: Number(da.dsrPct ?? (total > 0 ? Math.round((delivered / total) * 100) : 0)) || 0,
     });
@@ -320,6 +321,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     daDsrStandard,
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
+    dsrHistoryPending: Math.max(0, Number(row.dsrHistoryPending) || 0),
     ageingByDay,
     ageingByWeek,
     ageingByStateWeek,
@@ -762,6 +764,8 @@ export function stationBoardSheets(
         [DSR_HEADERS.failed]: da.failed,
         [DSR_HEADERS.rejected]: da.rejected,
         [DSR_HEADERS.dsrPct]: da.dsrPct,
+        "Other / unattempted": da.other || 0,
+        "History checks pending": station.board.dsrHistoryPending || 0,
         "Zero delivery": da.delivered === 0 ? "Yes" : "No",
       })),
     );
@@ -778,6 +782,8 @@ export function stationBoardSheets(
         [DSR_HEADERS.failed]: tot.failed,
         [DSR_HEADERS.rejected]: tot.rejected,
         [DSR_HEADERS.dsrPct]: tot.dsrPct,
+        "Other / unattempted": tot.other || 0,
+        "History checks pending": stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0),
         "Zero delivery": "",
       });
     }
@@ -801,6 +807,8 @@ export function stationBoardSheets(
       [DSR_HEADERS.oor]: da.oor,
       [DSR_HEADERS.failed]: da.failed,
       [DSR_HEADERS.rejected]: da.rejected,
+        "Other / unattempted": da.other || 0,
+        "History checks pending": station.board.dsrHistoryPending || 0,
       [DSR_HEADERS.dsrPct]: da.dsrPct,
     }));
     if (zeroRows.length) {
@@ -815,6 +823,8 @@ export function stationBoardSheets(
         [DSR_HEADERS.failed]: tot.failed,
         [DSR_HEADERS.rejected]: tot.rejected,
         [DSR_HEADERS.dsrPct]: tot.dsrPct,
+        "Other / unattempted": tot.other || 0,
+        "History checks pending": stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0),
       });
     }
     sheets.push({ name: "Zero deliveries", rows: zeroRows });

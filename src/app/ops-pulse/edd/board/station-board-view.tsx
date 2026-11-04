@@ -448,9 +448,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     const stats = isDsrFamilyView(view)
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
       : "";
+    const historyPending = isDsrFamilyView(view) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
     return prepareBoardReport({ ...table,
       compactNote: view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending today is included in physical stock; do not add these columns.` : undefined,
-      title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}`,
+      title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending ? ` · Provisional (${count(historyPending)} history checks pending)` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
   }
