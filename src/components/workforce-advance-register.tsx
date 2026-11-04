@@ -15,6 +15,7 @@ import {
 } from "@/lib/workforce-advance-register-view";
 
 export type WorkforceAdvanceRegisterRow = {
+  workerType?: "employee" | "contractor" | "workforce";
   id: string;
   workforceId: string;
   advanceNumber: string;
@@ -585,7 +586,7 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
   return <div className="workforce-advance-page">
     <section aria-label="Advance totals" className="workforce-advance-totals">
       <article><span>Total advances</span><strong>{money(summary.total)}</strong><small>{activeFilterCount ? `${summary.records.toLocaleString("en-IN")} of ${rows.length.toLocaleString("en-IN")} records` : `${summary.records.toLocaleString("en-IN")} records`}{summary.awaitingRegistration ? ` · ${summary.awaitingRegistration.toLocaleString("en-IN")} awaiting registration` : ""}</small></article>
-      <article><span>Deducted</span><strong className="good-text">{money(summary.deducted)}</strong><small>Already recovered or deducted through payouts</small></article>
+      <article><span>Deducted</span><strong className="good-text">{money(summary.deducted)}</strong><small>Recovered or included as a payout deduction</small></article>
       <article><span>Pending</span><strong className={summary.pending > 0 ? "negative" : "good-text"}>{money(summary.pending)}</strong><small>Balance to recover, including unregistered IDs</small></article>
     </section>
 

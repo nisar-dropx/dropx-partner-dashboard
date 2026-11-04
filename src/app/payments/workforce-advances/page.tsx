@@ -1,3 +1,5 @@
+import { applyPayoutDeductionsToAdvanceRegister } from "@/lib/advance-register-payout-deductions";
+import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import {
@@ -231,6 +233,14 @@ export default async function WorkforceAdvancesPage() {
             } satisfies WorkforceAdvanceOption;
           });
       }
+    }
+  }
+
+  if (!error && supabaseAdmin) {
+    try {
+      rows = await applyPayoutDeductionsToAdvanceRegister(supabaseAdmin, companyId, rows, (from, to, ids) => loadWorkforcePayoutRows(companyId, authorization, from, to, { workforceIds: ids }));
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "Unable to verify payout deductions.";
     }
   }
 

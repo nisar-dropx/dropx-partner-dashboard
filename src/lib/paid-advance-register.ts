@@ -85,7 +85,7 @@ export async function loadPaidAdvanceRegisterView(db: any, companyId: string): P
     const deducted = Math.min(a.amount, money(recovered.get(a.id) ?? 0));
     const pending = Math.max(0, money(a.amount - deducted));
     return {
-      id: a.id, workforceId: a.worker_id ?? "", advanceNumber: String(a.provenance?.request_number ?? a.provenance?.advance_number ?? `ADV-${a.id.slice(0, 8)}`),
+      id: a.id, workerType: a.worker_type, workforceId: a.worker_id ?? "", advanceNumber: String(a.provenance?.request_number ?? a.provenance?.advance_number ?? `ADV-${a.id.slice(0, 8)}`),
       advanceDate: a.paid_at.slice(0, 10), firstDuePeriod: a.first_due_period.slice(0, 10),
       dropxId: a.worker_code ?? "", originalDropxId: a.worker_code ?? "", identityRevision: 0,
       workforceName: a.name, designation: a.designation, location: a.station, paidLocation: a.paidStation,
