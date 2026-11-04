@@ -95,7 +95,7 @@ test("filtered rows drive totals, table pagination and the view-scoped CSV expor
   assert.match(registerComponent, /money\(summary\.deducted\)/);
   assert.match(registerComponent, /money\(summary\.pending\)/);
   assert.match(registerComponent, /const visible\s*=\s*filtered\.slice/);
-  assert.match(registerComponent, /buildWorkforceAdvanceCsv\(filtered\)/);
+  assert.match(registerComponent, /buildWorkforceAdvanceCsv\(filtered,\s*personLabel\)/);
   assert.match(registerComponent, /Export filtered CSV/);
   assert.doesNotMatch(registerComponent, /fetch\([^)]*workforce-advances[^)]*export/i);
   assert.match(registerView, /return "\\uFEFF"/);
