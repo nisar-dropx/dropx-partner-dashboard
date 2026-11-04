@@ -1,4 +1,4 @@
-const CACHE_NAME = "dropx-opspulse-static-v3";
+const CACHE_NAME = "dropx-opspulse-static-v4";
 const PRE_CACHE = [
   "/opspulse/offline.html",
   "/opspulse/offline.js",
