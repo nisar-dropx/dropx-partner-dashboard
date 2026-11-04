@@ -1,3 +1,4 @@
+import { sumDot, parseDotTotals, type DotTotals } from "./dot-metrics.ts";
 import type { StationBoardRegionId } from "./station-board-regions.ts";
 import { regionForStation, regionLabel, STATION_BOARD_REGIONS } from "./station-board-regions.ts";
 
@@ -78,6 +79,10 @@ export type StationBoardPayload = {
   dsrFrozenAt?: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  dotVersion?: number;
+  dotPremium?: DotTotals;
+  dotStandard?: DotTotals;
+  daDsrSwa?: StationBoardDaDsr[];
   ageingByDay: Record<AgeingDayBucket, AgeingBucketCell>;
   ageingByWeek: Record<string, AgeingBucketCell>;
   /** Ageing let.xlsx: State → ISO week → TID count + Sum of Order Amount (INR). */
@@ -100,15 +105,16 @@ export type StationBoardNetwork = {
   run: { id: string; status: string; stationsTotal: number; stationsDone: number; stationsOk: number; stationsFailed: number; startedAt: string; finishedAt: string | null } | null;
 };
 
-export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing" | "premium" | "standard";
+export type StationBoardView = "edd" | "creturn" | "dsr" | "zero" | "ageing" | "premium" | "standard" | "swa";
 export type AgeingBoardMode = "day" | "week";
 
 /** DSR-shaped views that share DA tables / TID drill-down. */
 export function isDsrFamilyView(view: StationBoardView): boolean {
-  return view === "dsr" || view === "zero" || view === "premium" || view === "standard";
+  return view === "dsr" || view === "zero" || view === "swa";
 }
 
 export function daDsrForView(board: StationBoardPayload, view: StationBoardView): StationBoardDaDsr[] {
+  if (view === "swa") return board.daDsrSwa ?? [];
   if (view === "premium") return board.daDsrPremium ?? [];
   if (view === "standard") return board.daDsrStandard ?? [];
   if (view === "zero") return (board.daDsr ?? []).filter((da) => da.delivered === 0 && da.total > 0);
@@ -318,6 +324,8 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     zeroDeliveries: Number(row.zeroDeliveries ?? daDsr.filter((d) => d.delivered === 0).length) || 0,
     daDsrPremium,
     zeroDeliveriesPremium: Number(row.zeroDeliveriesPremium ?? daDsrPremium.filter((d) => d.delivered === 0).length) || 0,
+    daDsrSwa: parseDaDsrList(row.daDsrSwa),
+    ...(Number(row.dotVersion) === 1 ? { dotVersion: 1, dotPremium: parseDotTotals(row.dotPremium), dotStandard: parseDotTotals(row.dotStandard) } : {}),
     daDsrStandard,
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
@@ -791,8 +799,12 @@ export function stationBoardSheets(
   };
 
   if (view === "dsr" || view === "full") pushDsrSheet("DA DSR", (board) => board.daDsr);
-  if (view === "premium" || view === "full") pushDsrSheet("Premium DOT", (board) => board.daDsrPremium ?? []);
-  if (view === "standard" || view === "full") pushDsrSheet("Standard DOT", (board) => board.daDsrStandard ?? []);
+  if (view === "swa" || view === "full") pushDsrSheet("SWA DSR", (board) => board.daDsrSwa ?? []);
+  for (const lane of ["premium", "standard"] as const) if (view === lane || view === "full") {
+    const values = stations.map(station => station.board.dotVersion === 1 ? (lane === "premium" ? station.board.dotPremium : station.board.dotStandard) : undefined);
+    const record = (station: string, value?: DotTotals): Record<string, unknown> => ({Station: station, Eligible: value?.total ?? "—", Dispatched: value?.dispatched ?? "—", "At station": value?.atStation ?? "—", "On road": value?.oor ?? "—", Delivered: value?.delivered ?? "—", Failed: value?.failed ?? "—", Rejected: value?.rejected ?? "—", "Other / pending": value?.other ?? "—", "DOT%": value?.total ? value.dotPct : "—"});
+    sheets.push({name: lane === "premium" ? "Premium DOT" : "AFN Standard DOT", rows: [...stations.map((station,i) => record(station.stationCode,values[i])),record("Grand Total", values.every(Boolean) ? sumDot(values as DotTotals[]) : undefined)]});
+  }
 
   if (view === "zero" || view === "full") {
     const zeroDas = stations.flatMap((station) =>
@@ -837,7 +849,7 @@ export function stationBoardFilename(date: string, view: StationBoardView | "ful
   const slug =
     view === "full" ? "all"
       : view === "creturn" ? "c-return"
-        : view === "dsr" ? "da-dsr"
+        : view === "swa" ? "swa-dsr" : view === "dsr" ? "da-dsr"
           : view === "zero" ? "zero-deliveries"
             : view === "ageing" ? "ageing"
               : view === "premium" ? "premium-dot"

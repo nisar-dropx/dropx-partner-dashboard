@@ -1,5 +1,5 @@
 import { CRETURN_PICKED_UP_BUCKET } from "./station-board.ts";
-import { isPremiumDot, isStandardDot } from "./ship-option-dot.ts";
+import { includesSwa, isPremiumDot, isStandardDot } from "./ship-option-dot.ts";
 
 /** Board-only TID buckets (must match amazon-edd-worker BOARD_TID_BUCKET). */
 export const BOARD_TID = {
@@ -15,9 +15,11 @@ export const BOARD_TID = {
   AGEING: "BoardAgeing",
 } as const;
 
-export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard";
+export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard" | "swa";
 
 const DSR_BUCKETS = [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"];
+
+const DOT_BUCKETS = ["BoardDotDelivered", "BoardDotOOR", "BoardDotFailed", "BoardDotRejected", "BoardDotOther", "BoardDotAtStation"];
 
 export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   edd: [BOARD_TID.EDD, "EDD"],
@@ -26,8 +28,9 @@ export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   dsr: DSR_BUCKETS,
   "dsr-station": [BOARD_TID.PHYSICAL, BOARD_TID.PENDING_TODAY, BOARD_TID.EDD, BOARD_TID.AGEING, BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"],
   zero: DSR_BUCKETS,
-  premium: DSR_BUCKETS,
-  standard: DSR_BUCKETS,
+  swa: DSR_BUCKETS,
+  premium: DOT_BUCKETS,
+  standard: DOT_BUCKETS,
 };
 
 export type FlashTrackingLike = {
@@ -39,6 +42,8 @@ export type FlashTrackingLike = {
   driverId: string;
   driverName: string;
   shipOption?: string;
+  dotDispatched?: boolean;
+  dotAtStation?: boolean;
 };
 
 export type BoardTidExportRow = {
@@ -52,6 +57,8 @@ export type BoardTidExportRow = {
   report: string;
   sourceBucket?: string;
   shipOption?: string;
+  dotDispatched?: boolean;
+  dotAtStation?: boolean;
 };
 
 function dsrStatus(bucket: string): string {
@@ -116,19 +123,17 @@ function mapAgeing(flash: FlashTrackingLike[]): BoardTidExportRow[] {
 
 function mapDsr(
   flash: FlashTrackingLike[],
-  mode: "dsr" | "zero" | "premium" | "standard",
+  mode: "dsr" | "zero" | "swa",
 ): BoardTidExportRow[] {
   const dsrBuckets = new Set(DSR_BUCKETS);
   const reportLabel =
     mode === "zero" ? "Zero deliveries"
-      : mode === "premium" ? "Premium DOT"
-        : mode === "standard" ? "Standard DOT"
+      : mode === "swa" ? "SWA DSR"
           : "DA DSR";
   let rows = flash
     .filter((row) => dsrBuckets.has(row.bucket))
     .filter((row) => {
-      if (mode === "premium") return isPremiumDot(row.shipOption);
-      if (mode === "standard") return isStandardDot(row.shipOption);
+      if (mode === "swa") return includesSwa(row.shipOption);
       return true;
     })
     .map((row) => ({
@@ -191,8 +196,11 @@ export function mapBoardTidExportRows(
   if (kind === "ageing") return mapAgeing(flash);
   if (kind === "dsr-station") return mapDsrStation(flash);
   if (kind === "zero") return mapDsr(flash, "zero");
-  if (kind === "premium") return mapDsr(flash, "premium");
-  if (kind === "standard") return mapDsr(flash, "standard");
+  if (kind === "swa") return mapDsr(flash, "swa");
+  if (kind === "premium" || kind === "standard") return flash.filter(row => DOT_BUCKETS.includes(row.bucket) && (kind === "premium" ? isPremiumDot(row.shipOption) : isStandardDot(row.shipOption))).map(row => ({
+    ...row, status: row.bucket === "BoardDotAtStation" ? "At station" : dsrStatus(row.bucket.replace("BoardDot", "Board")), currentState: row.state,
+    report: kind === "premium" ? "Premium DOT" : "AFN Standard DOT", sourceBucket: row.bucket,
+  }));
   return mapDsr(flash, "dsr");
 }
 
@@ -212,6 +220,7 @@ export function boardTidSheetRows(rows: BoardTidExportRow[]): Record<string, unk
       "Tracking ID": row.trackingId,
       Status: row.status,
       ...(row.currentState !== undefined ? { "Current Amazon state": row.currentState } : {}),
+      ...(row.dotDispatched !== undefined ? {"Dispatched today": row.dotDispatched, "Currently at station": row.dotAtStation} : {}),
       EDD: row.edd,
       "Ship Option": row.shipOption || "",
       "DA ID": row.driverId,
