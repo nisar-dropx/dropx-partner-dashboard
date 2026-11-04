@@ -2,7 +2,6 @@ import { BOARD_TID } from "./station-board-tids.ts";
 
 export type StationDsrMetric =
   | "eddPending"
-  | "eddTodayAtStation"
   | "physicalAtStation"
   | "assigned"
   | "delivered"
@@ -24,7 +23,6 @@ export type StationDsrTidRow = {
 
 export type StationDsrInventorySummary = {
   eddPending: number;
-  eddTodayAtStation: number;
   physicalAtStation: number;
 };
 
@@ -93,9 +91,6 @@ export function stationDsrMetricRows(
   if (metric === "eddPending") {
     return uniqueTrackingRows(stationRows.filter((row) => row.sourceBucket === BOARD_TID.EDD));
   }
-  if (metric === "eddTodayAtStation") {
-    return uniqueTrackingRows(stationRows.filter((row) => row.sourceBucket === BOARD_TID.EDD && row.edd === businessDate));
-  }
   if (metric === "physicalAtStation") return physicalAtStationRows(stationRows, businessDate);
   const buckets = METRIC_BUCKETS[metric];
   return uniqueTrackingRows(stationRows.filter((row) => buckets?.has(row.sourceBucket)));
@@ -107,7 +102,6 @@ export function summarizeStationDsrRows(rows: StationDsrTidRow[], businessDate: 
   for (const stationCode of codes) {
     summaries[stationCode] = {
       eddPending: stationDsrMetricRows(rows, stationCode, businessDate, "eddPending").length,
-      eddTodayAtStation: stationDsrMetricRows(rows, stationCode, businessDate, "eddTodayAtStation").length,
       physicalAtStation: stationDsrMetricRows(rows, stationCode, businessDate, "physicalAtStation").length,
     };
   }

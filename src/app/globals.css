@@ -24350,3 +24350,30 @@ td strong,
 .van-fuel-review { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 10px 12px; background: #f0f7ff; border-radius: 10px; }
 .van-fuel-pending { padding: 10px; margin: 10px 0; border: 1px solid #f1d29b; border-radius: 10px; background: #fff9ee; }
 @media (max-width: 640px) { .van-fuel-fields .form-grid.three { grid-template-columns: 1fr; } }
+
+.ops-release-update {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #f2c48d;
+  border-radius: 12px;
+  background: #fff8ec;
+  box-shadow: 0 12px 32px rgb(30 41 59 / 18%);
+  color: #6f3c14;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ops-release-update button {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #d94820;
+  color: white;
+  font: inherit;
+  cursor: pointer;
+}

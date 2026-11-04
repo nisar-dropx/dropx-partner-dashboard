@@ -21,7 +21,7 @@ test("physical-at-station keeps dispatch-eligible stock and excludes same-day ou
   assert.deepEqual(physicalAtStationRows(rows, "2026-11-04").map((item) => item.trackingId), ["FRESH", "PRIOR_RETURN"]);
 });
 
-test("station DSR summary deduplicates TIDs and keeps EDD today separate from total EDD pending", () => {
+test("station DSR summary deduplicates one actionable EDD-pending-at-station count", () => {
   const rows = [
     row("TODAY", BOARD_TID.EDD, "INDUCTED"),
     row("TODAY", BOARD_TID.EDD, "INDUCTED"),
@@ -30,6 +30,6 @@ test("station DSR summary deduplicates TIDs and keeps EDD today separate from to
     row("DEL", BOARD_TID.DELIVERED, "DELIVERED"),
   ];
   const summary = summarizeStationDsrRows(rows, "2026-11-04").QLDA;
-  assert.deepEqual(summary, { eddPending: 2, eddTodayAtStation: 1, physicalAtStation: 1 });
+  assert.deepEqual(summary, { eddPending: 2, physicalAtStation: 1 });
   assert.deepEqual(stationDsrMetricRows(rows, "QLDA", "2026-11-04", "assigned").map((item) => item.trackingId), ["DEL"]);
 });
