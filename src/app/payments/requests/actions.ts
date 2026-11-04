@@ -1,6 +1,6 @@
 "use server";
 
-import { prepareVanFuel } from "@/lib/van-fuel-server";
+import { prepareVehiclePayment } from "@/lib/vehicle-payment-server";
 import { resubmissionQuestions } from "@/lib/payment-resubmission";
 import { adhocDaIdentityFields } from "@/lib/adhoc-da-identity";
 import { prepareAdhocRequest, validateAdhocResubmission } from "@/lib/adhoc-vehicle-server";
@@ -332,7 +332,7 @@ export async function createExpenseRequest(formData: FormData) {
 
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
-    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, false);
+    const fuelFields = await prepareVehiclePayment(companyId, headResult.data.code, locationResult.data.station_code, formData, false);
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
@@ -582,7 +582,7 @@ export async function createPaymentRequest(formData: FormData) {
     }
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
-    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, true);
+    const fuelFields = await prepareVehiclePayment(companyId, headResult.data.code, locationResult.data.station_code, formData, true);
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
     const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
@@ -939,7 +939,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
-    const fuelFields = await prepareVanFuel(companyId, headData.code, request.location_code, formData, true, request.details, true);
+    const fuelFields = await prepareVehiclePayment(companyId, headData.code, request.location_code, formData, true, request.details, true);
     const adhocFields = headData.code === "ADHOC_DA"
       ? adhocDaIdentityFields(formData)
       : {};
@@ -1104,7 +1104,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
-    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, false, request.details);
+    const fuelFields = await prepareVehiclePayment(companyId, headResult.data.code, locationResult.data.station_code, formData, false, request.details);
     const normalizedApprovalStatus = String(request.approval_status ?? "").toUpperCase();
     const normalizedStatus = String(request.status ?? "").toLowerCase();
     const latestReturnedApproval = String(returnedApprovalResult.data?.action ?? "").toLowerCase() === "returned"
@@ -1322,7 +1322,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
-    const fuelFields = await prepareVanFuel(companyId, headResult.data.code, locationResult.data.station_code, formData, true, request.details);
+    const fuelFields = await prepareVehiclePayment(companyId, headResult.data.code, locationResult.data.station_code, formData, true, request.details);
     if (!normalizePaymentModes(headResult.data.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
     }
