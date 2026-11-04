@@ -584,6 +584,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setRun(next.run);
   }
 
+  // One durable selected-station queue replaces both old full-network triggers.
   async function refresh() {
     const selectedCodes = stations.map(row => row.stationCode);
     if (!selectedCodes.length) return;
