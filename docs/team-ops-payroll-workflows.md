@@ -182,6 +182,10 @@ Cluster Managers propose; they cannot approve their own proposal.
 - Never before `recovery_policy.payroll_start_month` (currently 2026-09 after bank reconciliation).
 - One instalment per person per plan per payroll: instalment n is due only when n-1 is already in an
   earlier salary month. A missed month shifts the remaining instalments; it never doubles up.
+- **Due-month window (Nov 2026):** a line scheduled for month M stays with M while that person's
+  payroll for M (and any intervening months) is still open. Later live earnings / payout estimates
+  do not show the same unpaid loss again until those earlier open months have closed. Final
+  settlement still dumps remaining instalments into the exit month.
 - **Exit:** if the person's `last_working_date` is on or before the end of the salary month, every
   remaining instalment is due in that final settlement, marked `final_settlement` and `cap_exempt`.
 - A plan whose source amount or status changed waits for review in Losses and is not deducted.

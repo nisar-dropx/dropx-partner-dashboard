@@ -3,7 +3,9 @@
  * The database decides which plan lines are due for a salary month (nl_loss_recovery_due):
  * settled before the payroll cutoff day → the previous month, an NL loss never before the month
  * after it, SLP only after its Final file, and never a line another period's latest publication
- * already carries. A line the payout cannot carry stays due and moves to the next month.
+ * already carries. Unpaid lines stay with their open scheduled month; they move forward only after
+ * those earlier open payrolls close (or on final settlement). A line this payout cannot carry
+ * stays due for a later eligible month.
  */
 
 export const LOSS_RECOVERY_CODE = "LOSS_RECOVERY";
