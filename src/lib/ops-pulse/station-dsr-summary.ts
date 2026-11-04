@@ -8,7 +8,7 @@ export type StationDsrTidRow = {
 export type StationDsrInventorySummary = { eddPending: number; physicalAtStation: number };
 export const STATION_DSR_PENDING_HEADER = "EDD pending today";
 export const STATION_DSR_PHYSICAL_HEADER = "Physical at station";
-export const STATION_DSR_INVENTORY_NOTE = "EDD pending: due on the selected date and not dispatched or attempted that day. Physical at station: all stock present, including future, overdue, held and returned parcels. Pending is included in physical; do not add the two counts.";
+export const STATION_DSR_INVENTORY_NOTE = "EDD pending: due on the selected date and never dispatched or attempted on or before that date. Physical at station: all stock present, including future, overdue, held and returned parcels. Pending is included in physical; do not add the two counts.";
 
 const OUTCOME_BUCKETS = new Set<string>([BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"]);
 const METRIC_BUCKETS: Record<StationDsrMetric, Set<string>> = {

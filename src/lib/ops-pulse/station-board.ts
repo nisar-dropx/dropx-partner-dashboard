@@ -315,7 +315,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     }
   }
   return {
-    stationInventoryVersion: row.stationInventoryVersion === 1 ? 1 : undefined,
+    stationInventoryVersion: [1, 2].includes(Number(row.stationInventoryVersion)) ? Number(row.stationInventoryVersion) : undefined,
     eddByDate,
     cReturn,
     cReturnTotal,
@@ -348,22 +348,19 @@ export function heatColor(value: number, max: number): string {
   return `rgba(${r}, ${g}, ${b}, ${0.22 + t * 0.55})`;
 }
 
-/**
- * DSR%: 100 solid green → mid yellow → 0 red.
- * heatColor(0) is transparent — that made perfect DSR look white/blank.
- */
-export function dsrHeatColor(pct: number): string {
+/** Operational DSR bands. The configured target is the dark-green threshold. */
+export function dsrBand(pct: number, target = 94) {
+  const goal = Number.isFinite(target) && target > 14 && target <= 100 ? target : 94;
   const p = Math.max(0, Math.min(100, Number(pct) || 0));
-  // Opaque green — translucent heat at the top end read as white on the board.
-  if (p >= 95) return "#1f9d57";
-  if (p <= 0) return "rgba(207, 31, 53, 0.55)";
-  const t = Math.max(0.05, 1 - p / 100);
-  return heatColor(t * 100, 100);
+  if (p >= goal) return { background: "#166534", color: "#ffffff", label: "Target met" };
+  if (p >= goal - 4) return { background: "#dcfce7", color: "#14532d", label: "Near target" };
+  if (p >= goal - 14) return { background: "#fef3c7", color: "#78350f", label: "Needs attention" };
+  return { background: "#fee2e2", color: "#991b1b", label: "Critical" };
 }
-
-/** Text on dsrHeatColor — white on deep green (high DSR), dark otherwise. */
-export function dsrPctTextColor(pct: number): string {
-  return pct >= 95 ? "#ffffff" : "#223642";
+export function dsrHeatColor(pct: number, target = 94): string { return dsrBand(pct, target).background; }
+export function dsrPctTextColor(pct: number, target = 94): string { return dsrBand(pct, target).color; }
+export function dsrBandLegend(target = 94): string {
+  return `DSR: <${target - 14}% red · ${target - 14}–<${target - 4}% amber · ${target - 4}–<${target}% light green · ≥${target}% dark green`;
 }
 
 /** Use the station snapshot time, not when an old report happens to be opened. */
@@ -773,7 +770,7 @@ export function stationBoardSheets(
         [DSR_HEADERS.failed]: da.failed,
         [DSR_HEADERS.rejected]: da.rejected,
         [DSR_HEADERS.dsrPct]: da.dsrPct,
-        "Other / unattempted": da.other || 0,
+        "Outcome missing": da.other || 0,
         "History checks pending": station.board.dsrHistoryPending || 0,
         "Zero delivery": da.delivered === 0 ? "Yes" : "No",
       })),
@@ -791,7 +788,7 @@ export function stationBoardSheets(
         [DSR_HEADERS.failed]: tot.failed,
         [DSR_HEADERS.rejected]: tot.rejected,
         [DSR_HEADERS.dsrPct]: tot.dsrPct,
-        "Other / unattempted": tot.other || 0,
+        "Outcome missing": tot.other || 0,
         "History checks pending": stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0),
         "Zero delivery": "",
       });
@@ -820,7 +817,7 @@ export function stationBoardSheets(
       [DSR_HEADERS.oor]: da.oor,
       [DSR_HEADERS.failed]: da.failed,
       [DSR_HEADERS.rejected]: da.rejected,
-        "Other / unattempted": da.other || 0,
+        "Outcome missing": da.other || 0,
         "History checks pending": station.board.dsrHistoryPending || 0,
       [DSR_HEADERS.dsrPct]: da.dsrPct,
     }));
@@ -836,7 +833,7 @@ export function stationBoardSheets(
         [DSR_HEADERS.failed]: tot.failed,
         [DSR_HEADERS.rejected]: tot.rejected,
         [DSR_HEADERS.dsrPct]: tot.dsrPct,
-        "Other / unattempted": tot.other || 0,
+        "Outcome missing": tot.other || 0,
         "History checks pending": stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0),
       });
     }

@@ -57,7 +57,7 @@ test('DSR export preserves attempt outcome alongside station receipt and unconfi
  ],'dsr');
  const sheet=boardTidSheetRows(rows);
  assert.equal(sheet[0].Status,'Failed');assert.equal(sheet[0]['Current Amazon state'],'RECEIVED');
- assert.equal(sheet[1].Status,'Other / pending');
+ assert.equal(sheet[1].Status,'Outcome not recorded');
 });
 
 test('DSR station detail preserves source buckets needed for auditable station metrics',()=>{
