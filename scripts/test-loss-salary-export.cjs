@@ -6,6 +6,7 @@ new Function('require','module','exports',js)(id=>{
  if(id==='xlsx')return XLSX;
  if(id.endsWith('/authorization'))return {getAuthorization:async()=>auth,hasPermission:a=>a.allowed};
  if(id.endsWith('/loss-recovery-workspace'))return {loadRecoveryWorkspace:async a=>{assert.equal(a.companyId,'company');loaded++;return {rows:[],lines:[],settings:null}}};
+ if(id.endsWith('/loss-debit-data'))return {loadCurrentLossPayrollMonth:async a=>{assert.equal(a.companyId,'company');return '2026-10'}};
  if(id.endsWith('/loss-recovery-queue-policy'))return {indiaMonth:()=> '2026-10'};
  if(id.endsWith('/loss-recovery-updates'))return {recoveryUpdates:()=>[],filterRecoveryUpdates:(r,f)=>{assert.equal(f.salaryScope,'earlier');assert.equal(f.station,'AAA');assert.equal(f.currentMonth,'2026-10');return r},recoveryUpdateExportRows:()=>[['Shipment ID','Salary month','Assigned amount'],['001234567890','2026-09',125.50]]};
  throw Error(id);

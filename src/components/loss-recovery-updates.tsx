@@ -17,7 +17,11 @@ export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { r
   const exportParams = new URLSearchParams({station, month, status, query, salaryScope});
   const totals = totalRecoveryUpdates(shown);
   const earlier = filterRecoveryUpdates(rows, {station, month, status, query, salaryScope:'earlier', currentMonth});
-  const earlierPeople = earlier.flatMap(row => row.people.filter(person => person.salaryMonth && person.salaryMonth < currentMonth));
+  const earlierPeople = earlier.flatMap(row => row.people.filter(person =>
+    person.sourceBalanceMonth
+      ? person.sourceBalanceMonth < currentMonth
+      : Boolean(row.payrollMonth && row.payrollMonth < currentMonth),
+  ));
   const earlierAssigned = earlierPeople.reduce((sum,person) => sum + person.amount,0);
   const paged = usePaged(shown, 25, `${station}|${month}|${status}|${query}|${salaryScope}`);
   const groups = [...new Set(shown.map(row => row.station))].sort().map(code => ({ code, ...totalRecoveryUpdates(shown.filter(row => row.station === code)) }));
@@ -27,13 +31,13 @@ export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { r
         <label>Station<select value={station} onChange={event => setStation(event.target.value)}><option value="">All stations</option>{[...new Set(rows.map(row => row.station))].sort().map(code => <option key={code}>{code}</option>)}</select></label>
         <label>Loss month<select value={month} onChange={event => setMonth(event.target.value)}><option value="">All months · till date</option>{[...new Set(rows.map(row => row.month))].sort().reverse().map(value => <option key={value} value={value}>{monthLabel(value)}</option>)}</select></label>
         <label>Recovery status<select value={status} onChange={event => setStatus(event.target.value)}><option value="">All saved updates</option>{[...new Set(rows.map(row => row.status))].sort().map(value => <option key={value} value={value}>{RECOVERY_QUEUE_LABELS[value] || value}</option>)}</select></label>
-        <label>Salary period<select disabled={earlierOnly} value={salaryScope} onChange={event => setSalaryScope(event.target.value)}><option value="all">All salary months</option><option value="earlier">Earlier salary months</option></select></label>
+        <label>Recovery balance<select disabled={earlierOnly} value={salaryScope} onChange={event => setSalaryScope(event.target.value)}><option value="all">All salary / payout balances</option><option value="earlier">Earlier held balances</option></select></label>
         <a className={styles.button} href={`/api/ops-pulse/losses/recovery/export?${exportParams}`}>Download Excel</a>
         <label>Search<input placeholder="TID, person or station" value={query} onChange={event => setQuery(event.target.value)}/></label>
         <a className={styles.button} href="/team-ops/losses/recovery-updates">Pending recovery updates →</a>
       </div>
     </section>
-    {earlierPeople.length && !earlierOnly ? <div className={styles.toolbar} style={{padding:'4px 0'}}><a className={styles.button} href="/team-ops/losses/recovery?view=earlier">Earlier salary months · {new Set(earlierPeople.map(person => person.ref)).size} people · {money(earlierAssigned)} assigned →</a></div> : null}
+    {earlierPeople.length && !earlierOnly ? <div className={styles.toolbar} style={{padding:'4px 0'}}><a className={styles.button} href="/team-ops/losses/recovery?view=earlier">Earlier held salary / payout balances · {new Set(earlierPeople.map(person => person.ref)).size} people · {money(earlierAssigned)} assigned →</a></div> : null}
     <div className={`${styles.metrics} ${styles.metrics4}`}>
       <div><span>Saved recovery TIDs</span><strong>{totals.count.toLocaleString('en-IN')}</strong><small>{money(totals.amount)} loss value · {totals.people} assigned people</small></div>
       <div><span>Pending collection</span><strong>{money(totals.outstanding)}</strong><small>Includes {money(totals.draft)} in draft payroll</small></div>
@@ -41,7 +45,7 @@ export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { r
       <div><span>Awaiting approval / review</span><strong>{totals.review.toLocaleString('en-IN')}</strong><small>Saved updates requiring attention</small></div>
     </div>
     <section className={styles.panel}>
-      <div className={styles.panelHead}><div><h2>{earlierOnly ? 'Earlier salary recovery · saved assignments' : 'Station recovery updates'}</h2><small>Salary month = planned payroll; loss month = shipment loss period. See Payroll deductions for actual debits.</small></div></div>
+      <div className={styles.panelHead}><div><h2>{earlierOnly ? 'Earlier salary / payout balance recovery · saved assignments' : 'Station recovery updates'}</h2><small>Target month is where the debit is posted. Earlier balance means a held salary or payout from before the current outstanding period. See Payroll deductions for actual status.</small></div></div>
       <div className={styles.tableWrap}><ReportTable><thead><tr><th>Station</th><th>TIDs / people</th><th>Loss value</th><th>Assigned</th><th>Recovered</th><th>Pending collection</th><th>Draft payroll</th><th>Last update</th></tr></thead>
         <tbody>{groups.map(group => <tr key={group.code}><td><button className={styles.button} onClick={() => setStation(group.code)}>{group.code}</button></td><td>{group.count} / {group.people}</td><td>{money(group.amount)}</td><td>{money(group.assigned)}</td><td>{money(group.collected)}</td><td>{money(group.outstanding)}</td><td>{money(group.draft)}</td><td>{group.updatedAt ? formatOpsDate(group.updatedAt) : '—'}</td></tr>)}</tbody></ReportTable></div>
       {!shown.length ? <p className={styles.empty}>No saved recovery updates match this selection. Open Pending recovery updates to assign final cases.</p> : null}
@@ -51,7 +55,7 @@ export function LossRecoveryUpdates({ rows, earlierOnly = false, nowMonth }: { r
       <div className={styles.tableWrap}><ReportTable><thead><tr><th>Shipment / loss month</th><th>Person · salary month / assigned</th><th>Status</th><th>Loss value</th><th>Recovered</th><th>Pending collection</th><th>Updated</th></tr></thead><tbody>
         {paged.rows.map(row => <tr key={row.key}>
           <td><a href={`/team-ops/losses/recovery-updates?case=${encodeURIComponent(row.caseKey)}&month=${encodeURIComponent(row.month)}`}>{row.tid}</a><small>{row.station} · {row.report.toUpperCase()} · {monthLabel(row.month)}</small></td>
-          <td>{row.people.length ? row.people.map(person => <div key={person.ref}><strong>{person.name || person.code}</strong><small>{person.code} · {person.designation}</small><small className={person.salaryMonth && person.salaryMonth < currentMonth ? styles.earlierSalary : undefined}>{person.salaryMonth ? `${monthLabel(person.salaryMonth)} salary${row.recurring ? ' · starts' : ''}` : 'Salary month not recorded'} · {money(person.amount)}{person.salaryMonth && person.salaryMonth < currentMonth ? ' · Earlier payroll' : ''}</small></div>) : 'No payroll allocation'}<small>{row.outcome}</small></td>
+          <td>{row.people.length ? row.people.map(person => { const balanceMonth = person.sourceBalanceMonth || row.payrollMonth; const isEarlierBalance = Boolean(balanceMonth && balanceMonth < currentMonth); return <div key={person.ref}><strong>{person.name || person.code}</strong><small>{person.code} · {person.designation}</small><small className={isEarlierBalance ? styles.earlierSalary : undefined}>{row.payrollMonth ? `${monthLabel(row.payrollMonth)} payroll / payout${row.recurring ? ' · starts' : ''}` : 'Payroll month not recorded'} · {money(person.amount)}{person.sourceBalanceMonth && person.sourceBalanceMonth !== row.payrollMonth ? ` · balance from ${monthLabel(person.sourceBalanceMonth)}` : ''}{isEarlierBalance ? ' · Earlier held balance' : ''}</small></div>; }) : 'No payroll allocation'}<small>{row.outcome}</small></td>
           <td>{RECOVERY_QUEUE_LABELS[row.status] || row.status}<small>{row.payrollMonth && row.outstanding > 0 ? `Scheduled from ${monthLabel(row.payrollMonth)}` : ''}</small></td>
           <td>{money(row.amount)}</td><td>{money(row.collected)}</td><td>{money(row.outstanding)}{row.waived > 0 ? <small>{money(row.waived)} written off</small> : null}</td>
           <td>{row.updatedAt ? formatOpsDate(row.updatedAt) : '—'}<small>{row.updatedBy}</small></td>

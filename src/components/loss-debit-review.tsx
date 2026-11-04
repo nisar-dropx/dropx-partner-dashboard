@@ -17,7 +17,7 @@ const money = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows: LossDebit[]; earlierOnly?: boolean; nowMonth?: string }) {
-  const [month, setMonth] = useState(deductionMonth("current_month")!),
+  const [month, setMonth] = useState(nowMonth || deductionMonth("current_month")!),
     [station, setStation] = useState(""),
     [person, setPerson] = useState(""),
     [designation, setDesignation] = useState(""), [salaryScope, setSalaryScope] = useState(earlierOnly ? 'earlier' : 'selected');
@@ -40,10 +40,11 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
   const params = new URLSearchParams({ month, station, person, designation, salaryScope });
   const totals = filtered.reduce(
     (a, r) => ({
-      deducted: a.deducted + (r.is_deducted ? r.amount : 0),
-      draft: a.draft + (r.is_deducted ? 0 : r.amount),
+      deducted: a.deducted + (r.payroll_status === "deducted" ? r.amount : 0),
+      draft: a.draft + (r.payroll_status === "draft" ? r.amount : 0),
+      scheduled: a.scheduled + (r.payroll_status === "scheduled" ? r.amount : 0),
     }),
-    { deducted: 0, draft: 0 },
+    { deducted: 0, draft: 0, scheduled: 0 },
   );
   return (
     <>
@@ -113,7 +114,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
           </a>
         </div>
       </section>
-      <div className={styles.metrics}>
+      <div className={`${styles.metrics} ${styles.metrics4}`}>
         <div>
           <span>Deducted · {salaryScope === 'earlier' ? 'earlier salary months' : month ? monthLabel(month) : 'all payrolls'}</span>
           <strong>{money(totals.deducted)}</strong>
@@ -123,8 +124,14 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
           <strong>{money(totals.draft)}</strong>
         </div>
         <div>
-          <span>People</span>
+          <span>Scheduled for payroll / payout</span>
+          <strong>{money(totals.scheduled)}</strong>
+          <small>Approved and included in live payable calculation</small>
+        </div>
+        <div>
+          <span>Recipients</span>
           <strong>{new Set(filtered.map((r) => r.employee_ref)).size}</strong>
+          <small>{new Set(filtered.filter(r => r.payroll_source === "people").map(r => r.employee_ref)).size} People · {new Set(filtered.filter(r => r.payroll_source === "workforce").map(r => r.employee_ref)).size} Workforce</small>
         </div>
       </div>
       {station && (
@@ -142,7 +149,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
       <section className={styles.panel}>
         <div className={styles.panelHead}>
           <h2>
-            {salaryScope === 'earlier' ? 'Earlier salary months · person-wise deductions' : station ? `${station} · People deductions` : 'Station deductions'}
+            {salaryScope === 'earlier' ? 'Earlier payroll / payout months · recipient-wise deductions' : station ? `${station} · Payroll and payout deductions` : 'Station deductions'}
           </h2>
         </div>
         <div className={styles.tableWrap}>
@@ -150,11 +157,12 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
             <thead>
               <tr>
                 <th>{station || salaryScope === 'earlier' ? 'Person / designation' : 'Station'}</th>
-                {!station && salaryScope !== 'earlier' && <th>People</th>}
+                {!station && salaryScope !== 'earlier' && <th>Recipients</th>}
                 <th>Salary month</th>
                 <th>Shipments</th>
                 <th>Deducted</th>
                 <th>Draft payroll</th>
+                <th>Scheduled</th>
                 <th />
               </tr>
             </thead>
@@ -170,6 +178,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                   <td>{g.shipments}</td>
                   <td>{money(g.deducted)}</td>
                   <td>{money(g.draft)}</td>
+                  <td>{money(g.scheduled)}<small>{money(g.peoplePayroll)} People · {money(g.workforcePayout)} Workforce</small></td>
                   <td>
                     <button
                       className={styles.button}
@@ -187,7 +196,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
         </div>
         {!groups.length && (
           <p className={styles.empty}>
-            No deductions recorded for this payroll month and selection.
+            No payroll or payout recovery is recorded for this period and selection.
             {' '}<a href="/team-ops/losses/recovery">View saved recovery updates and pending collections →</a>
           </p>
         )}
@@ -211,6 +220,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                   <th>Shipments</th>
                   <th>Deducted</th>
                   <th>Draft payroll</th>
+                  <th>Scheduled</th>
                 </tr>
               </thead>
               <tbody>
@@ -227,6 +237,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                     <td>{t.shipments}</td>
                     <td>{money(t.deducted)}</td>
                     <td>{money(t.draft)}</td>
+                    <td>{money(t.scheduled)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -242,6 +253,7 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                     <th>Loss month</th>
                     <th>Salary month</th>
                     <th>Amount</th>
+                    <th>Payroll source</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -252,7 +264,8 @@ export function LossDebitReview({ rows, earlierOnly = false, nowMonth }: { rows:
                       <td>{r.loss_month}</td>
                       <td><span className={r.payroll_month < currentMonth ? styles.earlierSalary : undefined}>{monthLabel(r.payroll_month)}</span></td>
                       <td>{money(r.amount)}</td>
-                      <td>{r.is_deducted ? "Deducted" : "Draft payroll"}</td>
+                      <td>{r.payroll_source === "workforce" ? "Workforce payout" : "People payroll"}</td>
+                      <td>{r.payroll_status === "deducted" ? "Deducted" : r.payroll_status === "draft" ? "Draft payroll" : "Scheduled"}</td>
                     </tr>
                   ))}
                 </tbody>

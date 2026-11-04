@@ -5,8 +5,7 @@ import { lossFacts } from "@/lib/ops-pulse/loss-station-summary";
 import { LossDebitReview } from "@/components/loss-debit-review";
 import { LossRecoveryUpdates } from "@/components/loss-recovery-updates";
 import { recoveryUpdates } from "@/lib/ops-pulse/loss-recovery-updates";
-import { indiaMonth } from "@/lib/ops-pulse/loss-recovery-queue-policy";
-import { loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
+import { loadCurrentLossPayrollMonth, loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
 import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
 import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
@@ -92,16 +91,19 @@ export default async function LossesSectionPage({
   if (params.section === "recovery") {
     const earlier = searchParams.view === "earlier" || searchParams.view === "earlier-payroll";
     const payroll = searchParams.view === "payroll" || searchParams.view === "earlier-payroll";
-    const view = payroll ? null : await loadRecoveryWorkspace(auth);
+    const [view, currentPayrollMonth] = await Promise.all([
+      payroll ? Promise.resolve(null) : loadRecoveryWorkspace(auth),
+      loadCurrentLossPayrollMonth(auth),
+    ]);
     return <main className={styles.workspace}>
       <LossHeader title="Recovery" intro="Saved recovery updates till date, pending collections and confirmed recoveries. Ongoing initial cases remain in Disputes & outcomes." tabs={tabs} active="recovery"/>
       <nav className={styles.toolbar} style={{ justifyContent: "flex-start" }} aria-label="Recovery views">
         <a className={!payroll && !earlier ? styles.primary : styles.button} aria-current={!payroll && !earlier ? "page" : undefined} href="/team-ops/losses/recovery">Saved recovery updates</a>
         <a className={payroll && !earlier ? styles.primary : styles.button} aria-current={payroll && !earlier ? "page" : undefined} href="/team-ops/losses/recovery?view=payroll">Payroll deductions</a>
-        <a className={earlier ? styles.primary : `${styles.button} ${styles.earlierSalary}`} aria-current={earlier ? "page" : undefined} href="/team-ops/losses/recovery?view=earlier">Earlier salary recovery</a>
+        <a className={earlier ? styles.primary : `${styles.button} ${styles.earlierSalary}`} aria-current={earlier ? "page" : undefined} href="/team-ops/losses/recovery?view=earlier">Earlier balance recovery</a>
       </nav>
-      {earlier ? <section className={styles.panel}><div className={styles.panelHead}><div><h2>Earlier salary recovery</h2><small>Salary before {monthLabel(indiaMonth())} · loss month shown separately</small></div><nav className={styles.toolbar} aria-label="Earlier salary recovery views"><a className={!payroll ? styles.primary : styles.button} href="/team-ops/losses/recovery?view=earlier">Saved assignments</a><a className={payroll ? styles.primary : styles.button} href="/team-ops/losses/recovery?view=earlier-payroll">Actual deductions</a></nav></div></section> : null}
-      {payroll ? <LossDebitReview earlierOnly={earlier} rows={await loadLossDebits(auth)}/> : view ? <LossRecoveryUpdates earlierOnly={earlier} rows={recoveryUpdates(view.rows, view.lines, view.settings?.recoverable_statuses || [], indiaMonth())}/> : null}
+      {earlier ? <section className={styles.panel}><div className={styles.panelHead}><div><h2>Earlier salary / payout balance recovery</h2><small>{payroll ? `Actual payroll / payout posted before ${monthLabel(currentPayrollMonth)}` : `Saved recovery against held balances from before ${monthLabel(currentPayrollMonth)}`} · loss month shown separately</small></div><nav className={styles.toolbar} aria-label="Earlier salary recovery views"><a className={!payroll ? styles.primary : styles.button} href="/team-ops/losses/recovery?view=earlier">Saved assignments</a><a className={payroll ? styles.primary : styles.button} href="/team-ops/losses/recovery?view=earlier-payroll">Actual deductions</a></nav></div></section> : null}
+      {payroll ? <LossDebitReview earlierOnly={earlier} nowMonth={currentPayrollMonth} rows={await loadLossDebits(auth)}/> : view ? <LossRecoveryUpdates earlierOnly={earlier} nowMonth={currentPayrollMonth} rows={recoveryUpdates(view.rows, view.lines, view.settings?.recoverable_statuses || [], currentPayrollMonth)}/> : null}
     </main>;
   }
   if (["approvals","redisputes"].includes(params.section)) {
