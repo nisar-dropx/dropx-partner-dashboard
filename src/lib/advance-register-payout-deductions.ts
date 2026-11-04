@@ -68,7 +68,7 @@ export async function applyPayoutDeductionsToAdvanceRegister(db: any, companyId:
       latest.add(identity);
       for (const line of publication.snapshot?.worksheet?.deduction_breakdown ?? []) {
         const advance = byId.get(String(line.recoveryKey ?? "").replace(/^ADVANCE:/,""));
-        if (line.code !== "ADVANCE_RECOVERY" || !String(line.recoveryKey).startsWith("ADVANCE:") || advance?.workforceId !== publication.workforce_id || (advance.workerType ?? "workforce") !== "workforce") continue;
+        if (line.code !== "ADVANCE_RECOVERY" || !String(line.recoveryKey).startsWith("ADVANCE:") || !advance || advance.workforceId !== publication.workforce_id || (advance.workerType ?? "workforce") !== "workforce") continue;
         add(applied,advance.id,publication.period_start,line.amount);
       }
     }
