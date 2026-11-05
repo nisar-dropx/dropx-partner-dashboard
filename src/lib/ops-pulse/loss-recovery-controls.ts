@@ -111,6 +111,11 @@ export function mayViewLossApprovals(auth: LossRole) {
 }
 export function mayActivateRedispute(auth: LossRole) { return !auth.readOnly && mayViewLossApprovals(auth); }
 
+/** Management breakdown is available to every Losses user except shared station mailboxes. */
+export function mayViewRedisputeBreakdown(auth: LossRole) {
+  return !roleTokens(auth).includes("LOCATION");
+}
+
 /**
  * “Already recovered” is Cluster Manager and above only.
  * Station / location actors must not see or set it — including when they have Losses edit.

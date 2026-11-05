@@ -143,7 +143,16 @@ export type Recovery = {
 export type NlCase = {
   period_closed?: boolean;
   final_seen_at?: string | null;
-  redispute?: { enabled: boolean; workflow_status: string; recovery_month: string | null } | null;
+  redispute?: {
+    enabled: boolean;
+    workflow_status: string;
+    recovery_month: string | null;
+    followup_status?: string | null;
+    updated_at?: string | null;
+    updated_by_name?: string | null;
+    tt_reference?: string | null;
+    response_details?: Record<string, unknown> | null;
+  } | null;
   source_final_nonrecoverable?: boolean;
   lifecycle_status?: string;
   lifecycle_version?: number;

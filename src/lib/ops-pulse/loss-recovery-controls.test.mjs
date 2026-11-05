@@ -10,6 +10,7 @@ import {
   defaultLossFilter,
   hasFinalLossOutcome,
   lossStatusMatches,
+  mayViewRedisputeBreakdown,
 } from './loss-recovery-controls.ts';
 import { casePhase } from './nl-dispute-policy.ts';
 test('only accountable recovery actions remain', () => {
@@ -35,6 +36,13 @@ test('already recovered is cluster and above only', () => {
   assert.equal(mayMarkAlreadyRecovered({ ...base, designationName: 'Cluster Manager' }), true);
   assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_SLPM' }), true);
   assert.equal(mayMarkAlreadyRecovered({ ...base, roleCode: 'OPERATIONS_CLM', readOnly: true }), false);
+});
+test('redispute breakdown is hidden only from station location accounts', () => {
+  assert.equal(mayViewRedisputeBreakdown({roleCode:'OPERATIONS_LOCATION'}),false);
+  assert.equal(mayViewRedisputeBreakdown({roleCode:'LOCATION'}),false);
+  assert.equal(mayViewRedisputeBreakdown({roleCode:'OPERATIONS_CLM'}),true);
+  assert.equal(mayViewRedisputeBreakdown({roleCode:'OPERATIONS_AOM'}),true);
+  assert.equal(mayViewRedisputeBreakdown({roleCode:'OPERATIONS_MP'}),true);
 });
 test('debit targets include mapped cluster and area managers, but exclude higher roles', () => {
   assert.equal(isLossRecoveryManagerialTarget({ designation: 'Cluster Manager' }), false);

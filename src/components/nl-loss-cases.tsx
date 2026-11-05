@@ -16,7 +16,6 @@ import {
   type LossSettings,
   splitRecovery,
   recoveryNeedsReview,
-  recoveryPending,
   allocationError,
   installmentSchedule,
   monthLabel,
@@ -27,7 +26,12 @@ import { eligibleInstallmentCounts } from "@/lib/ops-pulse/loss-exceptions";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { recoveryActionAllowed, departedPersonError, receivedRecoveryError } from "@/lib/ops-pulse/loss-recovery-controls";
-import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
+import {
+  isRedisputeSummaryCase,
+  recoveryDetailsUpdated,
+  stationRecoveryUpdateComplete,
+} from "@/lib/ops-pulse/loss-final-summary";
+import { redisputeStatus } from "@/lib/ops-pulse/loss-redispute-queue";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import { NlRecoveryDownloadButton } from "./nl-recovery-download-modal";
 import styles from "./nl-loss.module.css";
@@ -58,6 +62,7 @@ export function NlLossCases({
   canApprove = false,
   showPeriod = false,
   initialStatus = "pending",
+  showRedisputeBreakdown = false,
 }: {
   cases: NlCase[];
   outcomes: RecoveryOutcome[];
@@ -69,17 +74,28 @@ export function NlLossCases({
   canApprove?: boolean;
   showPeriod?: boolean;
   initialStatus?: string;
+  showRedisputeBreakdown?: boolean;
 }) {
   const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [sort, setSort] = useState("value_desc");
-  const [status, setStatus] = useState(initialStatus === "updated" ? "updated" : ["all", "recoverable"].includes(initialStatus) ? "all" : "pending");
+  const [status, setStatus] = useState(initialStatus === "redispute" && showRedisputeBreakdown ? "redispute" : initialStatus === "updated" ? "updated" : ["all", "recoverable"].includes(initialStatus) ? "all" : "pending");
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
     [active, setActive] = useState<string | null>(null);
+  const redisputeOf = (c: NlCase) => isRedisputeSummaryCase(c.redispute);
+  const caseUpdated = (c: NlCase) => showRedisputeBreakdown
+    ? recoveryDetailsUpdated(c,c.recovery,c.report === "slp")
+    : stationRecoveryUpdateComplete(c,c.recovery,c.report === "slp");
+  const hasRedisputes = showRedisputeBreakdown && cases.some(redisputeOf);
+  const matchesStatus = (c: NlCase) => status === "all" || status === "redispute"
+    ? status === "all" || showRedisputeBreakdown && redisputeOf(c)
+    : status === "updated"
+      ? caseUpdated(c) && (!showRedisputeBreakdown || !redisputeOf(c))
+      : !caseUpdated(c) && (!showRedisputeBreakdown || !redisputeOf(c));
   const shown = useMemo(
     () =>
       sortLossRows(cases.filter((c) =>
-        (status === "all" || (status === "updated") === recoveryDetailsUpdated(c,c.recovery,c.report === "slp")) &&
+        matchesStatus(c) &&
         [
           c.station_code,
           ...(c.recovery?.allocations.map(p => `${p.full_name} ${p.employee_code}`) || []),
@@ -88,13 +104,15 @@ export function NlLossCases({
           c.details.category,
           c.details.sub_category,
           c.recovery?.outcome_label,
+          c.redispute?.tt_reference,
         ]
           .join(" ")
           .toLowerCase()
           .includes(query.toLowerCase()),
       ), sort),
-    [cases, query, sort, status],
+    [cases, query, sort, status, showRedisputeBreakdown],
   );
+  const pendingCount = cases.filter((c) => !caseUpdated(c) && (!showRedisputeBreakdown || !redisputeOf(c))).length;
   const paged = usePaged(shown, 25, `${query}:${sort}:${status}`);
   const current = paged.rows;
   return (
@@ -105,12 +123,12 @@ export function NlLossCases({
           <h2>Recoverable cases</h2>
           <p>
             {shown.length} cases ·{" "}
-            {cases.filter((c) => recoveryPending(c.recovery)).length}{" "}
+            {pendingCount}{" "}
             pending update
           </p>
         </div>
         <div className={styles.toolbar}>
-          <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}><option value="pending">Pending update</option><option value="updated">Updated</option><option value="all">All recovery cases</option></select>
+          <select aria-label="Recovery status" value={status} onChange={e=>setStatus(e.target.value)}><option value="pending">Pending update</option><option value="updated">Updated</option>{hasRedisputes?<option value="redispute">Redispute</option>:null}<option value="all">All recovery cases</option></select>
           <select aria-label="Sort recovery cases" value={sort} onChange={e=>setSort(e.target.value)}>{LOSS_SORTS.filter(o=>o.value!=="cases_desc").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <input
             aria-label="Search recovery cases"
@@ -135,9 +153,9 @@ export function NlLossCases({
           <article key={`${c.month}:${c.case_key}`} className={styles.case}>
             <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
               reason={[showPeriod?c.details.period||c.month:"",c.details.category||"Unspecified reason",c.details.sub_category].filter(Boolean).join(" · ")}
-              value={money(c.amount)} date={c.recovery?.updated_at} updatedBy={c.recovery?.updated_by_name} historyCase={{month:c.month,caseKey:c.case_key}} open={active === c.month+":"+c.case_key}
+              value={money(c.amount)} date={(redisputeOf(c)?c.redispute?.updated_at:c.recovery?.updated_at)||undefined} updatedBy={(redisputeOf(c)?c.redispute?.updated_by_name:c.recovery?.updated_by_name)||undefined} historyCase={{month:c.month,caseKey:c.case_key}} open={active === c.month+":"+c.case_key}
               onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.month+":"+c.case_key?null:c.month+":"+c.case_key)}
-              status={<span className={recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?styles.done:styles.pending}>{c.period_closed?"Closed · ":""}{recoveryNeedsReview(c)?"Review needed":recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?"Details updated":"Pending update"}{c.recovery&&!c.recovery.is_deleted?" · "+c.recovery.outcome_label:""}</span>}/>
+              status={<span className={showRedisputeBreakdown&&redisputeOf(c)?styles.done:caseUpdated(c)?styles.done:styles.pending}>{c.period_closed?"Closed · ":""}{showRedisputeBreakdown&&redisputeOf(c)?`Redispute · ${redisputeStatus({enabled:!!c.redispute?.enabled,workflow_status:c.redispute?.workflow_status||undefined,followup_status:c.redispute?.followup_status||"legacy"})}`:recoveryNeedsReview(c)?"Review needed":caseUpdated(c)?"Details updated":"Pending update"}{c.recovery&&!c.recovery.is_deleted?" · "+c.recovery.outcome_label:""}</span>}/>
             {active === `${c.month}:${c.case_key}` ? (
               <RecoveryForm
                 row={c}

@@ -57,6 +57,20 @@ assert.equal(recoverableLossFacts(facts).length,1,'fully recovered cases remain 
 facts=lossFacts([row('receipt',100,{recovery:plan(100,{approval_status:'proposed',outcome_code:'already_recovered',recovery_details:{receipt_reference:'R',received_amount:'100'}})})],[],['Recoverable']);
 assert.equal(facts[0].recovered,0,'unapproved receipts are not money recovered');assert.equal(facts[0].remaining,100);
 facts=lossFacts([row('precision',0.3)],[line('precision','a',0.1),line('precision','b',0.2)],['Recoverable']);assert.equal(facts[0].remaining,0);
+facts=lossFacts([
+ row('redispute-review',30495,{redispute:{enabled:true,workflow_status:'awaiting_review',updated_at:'2026-11-02T07:06:50Z'}}),
+ row('redispute-returned',500,{redispute:{enabled:true,workflow_status:'returned',updated_at:'2026-11-03T07:06:50Z'}}),
+ row('ordinary-pending',100),
+],[],['Recoverable']);
+let redisputeTotals=totalLossFacts(facts);
+assert.deepEqual(redisputeTotals.redispute,{count:2,amount:30995},'redispute count and value are separate');
+assert.deepEqual(redisputeTotals.pending,{count:1,amount:100},'redisputes never inflate management Pending update');
+assert.equal(filterLossFacts(facts,{status:'redispute'}).length,2,'Redispute is a dedicated management filter');
+assert.equal(filterLossFacts(facts,{status:'pending_update'}).length,1,'management Pending update excludes every redispute stage');
+assert.equal(filterLossFacts(facts,{status:'updated'}).length,0,'redisputes do not inflate management Updated');
+assert.equal(filterLossFacts(facts,{status:'pending_update',stationView:true}).length,2,'station binary view keeps returned correction and ordinary recovery pending');
+assert.equal(filterLossFacts(facts,{status:'updated',stationView:true}).length,1,'station binary view treats submitted redispute as updated without exposing redispute');
+assert.equal(filterLossFacts(facts,{status:'redispute',stationView:true}).length,0,'station accounts cannot filter the management redispute bucket');
 facts=lossFacts([row('missing',100,{source_present:false,recovery:plan(100)}),row('won',100,{redispute:{workflow_status:'won'}})],[],['Recoverable']);assert.equal(facts.length,2);assert.equal(facts[0].remaining,100,'missing source with debt stays in summary');assert.equal(facts[1].remaining,0,'redispute win stops recovery without fabricating a collection');assert.equal(facts[1].recovered,0);assert.equal(recoverableLossFacts(facts).length,1,'redispute win excluded from recoverable Summary');
 console.log('PASS loss summary: scoped filters, distinct TIDs, split allocations, draft payroll, receipts, waivers, unplanned debt, initial/final and penny rounding.');
 
