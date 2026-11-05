@@ -625,8 +625,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return /aborted due to timeout|timeout|timed out|504|524|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|connection dropped|network|socket/i.test(message);
   }
 
-  /** Stations per concurrent packet (last packet uses whatever remain if <4). */
-  const BOARD_PULL_CONCURRENCY = "4";
+  /** Stations per concurrent packet — keep aligned with worker (protects Supabase). */
+  const BOARD_PULL_CONCURRENCY = "2";
 
   async function postBackfillTick(params: URLSearchParams) {
     const response = await fetch(`/api/ops-pulse/edd/board/backfill?${params}`, { method: "POST", cache: "no-store" });
@@ -750,135 +750,33 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return stillFailed;
   }
 
-  /** Full-fleet Station board Refresh — concurrent packets of up to 4. */
+  /**
+   * Full-fleet Station board Refresh — queue on the worker, then watch.
+   * Do not drive Amazon/DB packets from the browser; that stacked PostgREST
+   * "Thread killed by timeout manager" errors under Ops load.
+   */
   async function runBackfillLoop(clearSeq: number): Promise<"owner" | "watcher"> {
     backfillCursor.current = 0;
     setBackfillNote("Starting refresh…");
     setBackfillProgress({ done: 0, total: 0 });
-    {
-      const resetParams = new URLSearchParams({
-        days: "1",
-        date: payload.businessDate,
-        concurrency: BOARD_PULL_CONCURRENCY,
-        reset: "1",
-      });
-      const { response, body } = await postBackfillTick(resetParams);
-      if (!response.ok) throw new Error(String(body.error ?? "Unable to start board refresh."));
-      const total = Number(body.total ?? 0) || 0;
-      const done = Number(body.nextIndex ?? 0) || 0;
-      if (total > 0) setBackfillProgress({ done, total });
-      if (body.alreadyRunning) {
-        setBackfillNote(total ? `Refresh working · ${done}/${total}` : "Refresh working…");
-        await watchSharedRefresh(clearSeq);
-        return "watcher";
-      }
-      setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
-      await reloadBoard().catch(() => undefined);
-    }
-
-    let guard = 0;
-    const streakTimeoutsRef = { n: 0 };
-    const failedAcc = new Set<string>();
-    let stationTotal = 0;
-    while (guard < 80) {
-      guard += 1;
-      if (clearSeq !== backfillClearSeq.current) return "owner";
-      const params = new URLSearchParams({
-        days: "1",
-        date: payload.businessDate,
-        concurrency: BOARD_PULL_CONCURRENCY,
-      });
-      let response: Response;
-      let body: {
-        nextIndex?: number;
-        total?: number;
-        done?: boolean;
-        advanced?: number;
-        failed?: string[];
-        error?: string;
-        busy?: boolean;
-        deferredReason?: string;
-      };
-      try {
-        ({ response, body } = await postBackfillTick(params));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Board backfill failed.";
-        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
-          streakTimeoutsRef.n += 1;
-          setBackfillNote("Worker busy — retrying packet…");
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw err instanceof Error ? err : new Error(message);
-      }
-      if (!response.ok) {
-        const message = String(body.error ?? "Board backfill failed.");
-        if (isTransientMessage(message) && streakTimeoutsRef.n < 6) {
-          streakTimeoutsRef.n += 1;
-          setBackfillNote("Connection dropped — retrying…");
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw new Error(isTransientMessage(message)
-          ? "Worker connection dropped. Click Refresh again — it will resume cleanly."
-          : message);
-      }
-      streakTimeoutsRef.n = 0;
-      for (const key of body.failed ?? []) {
-        if (key) failedAcc.add(String(key));
-      }
-      const advanced = Number(body.advanced ?? 0) || 0;
-      const total = Number(body.total ?? 0) || 0;
-      const nextIndex = Number(body.nextIndex ?? 0) || 0;
-      if (total > 0) stationTotal = total;
-      if (body.busy && !advanced && !body.done) {
-        const deferred = String(body.deferredReason ?? "");
-        setBackfillNote(
-          deferred === "ops-live"
-            ? (total ? `Waiting for Ops Live · board ${nextIndex}/${total}` : "Waiting for Ops Live…")
-            : total && nextIndex >= total
-              ? `Refresh working · finishing recovery…`
-              : total
-                ? `Refresh working · ${nextIndex}/${total}`
-                : "Refresh working…",
-        );
-        await new Promise((r) => setTimeout(r, 1500));
-        continue;
-      }
-      if (body.done) {
-        if (total > 0) setBackfillProgress({ done: total, total });
-        backfillCursor.current = 0;
-        await reloadBoard().catch(() => undefined);
-        break;
-      }
-      if (!advanced) {
-        setBackfillNote("Worker deferred packet — retrying…");
-        await new Promise((r) => setTimeout(r, 1200));
-        continue;
-      }
-      backfillCursor.current = nextIndex;
-      const done = total ? Math.min(nextIndex, total) : nextIndex;
-      if (total > 0) setBackfillProgress({ done, total });
-      setBackfillNote(total ? `Pulling stations · ${done}/${total}` : "Pulling board data…");
-      await reloadBoard().catch(() => undefined);
-    }
-
-    let pending = [...failedAcc];
-    if (pending.length) {
-      setBackfillNote(`Main pull done · recovering ${pending.length} station${pending.length === 1 ? "" : "s"}…`);
-      pending = await runRetryPass(pending, "Recovering failed stations", streakTimeoutsRef, stationTotal);
-    }
-    if (pending.length) {
-      pending = await runRetryPass(pending, "Second recovery pass", streakTimeoutsRef, stationTotal);
-    }
-    if (pending.length) {
-      setBackfillNote(
-        `Board pull finished · ${pending.length} station${pending.length === 1 ? "" : "s"} still failed after recovery`,
-      );
-    } else if (failedAcc.size) {
-      setBackfillNote("Board pull finished · recovered all failed stations");
-    }
-    return "owner";
+    const resetParams = new URLSearchParams({
+      days: "1",
+      date: payload.businessDate,
+      concurrency: BOARD_PULL_CONCURRENCY,
+      reset: "1",
+    });
+    const { response, body } = await postBackfillTick(resetParams);
+    if (!response.ok) throw new Error(String(body.error ?? "Unable to start board refresh."));
+    const total = Number(body.total ?? 0) || 0;
+    const done = Number(body.nextIndex ?? 0) || 0;
+    if (total > 0) setBackfillProgress({ done, total });
+    setBackfillNote(
+      body.alreadyRunning
+        ? (total ? `Refresh working · ${done}/${total}` : "Refresh working…")
+        : (total ? `Queued server refresh · ${done}/${total}` : "Queued server refresh…"),
+    );
+    await watchSharedRefresh(clearSeq);
+    return body.alreadyRunning ? "watcher" : "owner";
   }
 
   /** Filtered / 1-station Refresh — concurrent Station board packets (not Ops Live). */
