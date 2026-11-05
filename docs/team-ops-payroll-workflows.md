@@ -809,6 +809,8 @@ alter loss, payroll, approval or collection records.
 
 ### Final loss-period submission (2026-11-05)
 
+The active NL route (`NlLiveReport` / `loadNlLive`) and SLP Final route (`NlLossReport`) both load period closures and show the close control immediately below the filters. NL cases in closed station/periods display read-only status and disable editing; database guards remain authoritative.
+
 NL Final and SLP Final expose **Final submit / Close period** to SLP Manager, Finance Manager, National Head and Managing Partner with loss edit access. Select exactly one loss period and the stations; confirmation lists the full station scope and explicitly includes cases hidden by reason/status filters. Closing records the actor, time, source count/value, case identities and recovery-plan snapshot in `nl_loss_period_closures`. Closure is final; the app has no reopen/delete action. It does not itself approve pending recovery exceptions or mark payroll paid.
 
 `nl_loss_close_period` and all ten manual loss mutation RPCs use the existing company recovery advisory lock, preventing save/close races. Closed periods block manual recovery, dispute, exception, approval and write-off changes, including workbooks and legacy RPCs. NL months and SLP source periods are independent; station and company scopes are preserved. New source cases in a closed period are also locked, and captured identities remain locked if source metadata changes. Source refresh and automatic payroll settlement remain permitted. No existing period is closed by the migration.

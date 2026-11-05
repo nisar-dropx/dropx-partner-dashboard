@@ -1,4 +1,5 @@
 import { LossStationTable } from "./loss-station-table";
+import { LossPeriodClose } from "./loss-period-close";
 import type { LossFact } from "@/lib/ops-pulse/loss-station-summary";
 import { LossWorkbook } from "./loss-workbook";
 import { LossMultiFilter } from "./loss-list-controls";
@@ -188,6 +189,9 @@ export function NlLiveReport({
               Reset
             </Link>
           </form>
+          {isFinal ? <LossPeriodClose key={`${v.month}:${v.station}:${v.cluster}`} report="nl"
+            period={v.month} label={monthLabel(v.month)} stations={v.closureStations}
+            closures={v.closures} canClose={v.canApprove}/> : null}
           {isFinal && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind="nl" query={new URLSearchParams({ kind: "nl", month: v.month, station: v.station || "", cluster: v.cluster || "", reason: v.reason || "" }).toString()} canUpload={v.canDispute} scope={v.station ? `stations ${v.station}` : "your stations"} /></details> : null}
           {!ledgerReady && isFinal ? <p className={styles.notice}>Payroll collections are unavailable; recovery amounts are incomplete.</p> : null}
           {isFinal && !v.station && v.cases.length ? (

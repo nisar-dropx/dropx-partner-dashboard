@@ -229,7 +229,7 @@ export function NlLiveCases({
               <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
                 reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at} updatedBy={c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name} historyCase={{month:c.month,caseKey:c.case_key}}
                 open={active === c.case_key} onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.case_key?null:c.case_key)}
-                status={<><span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{c.recoverable ? <span className={!recoveryDetailsUpdated(c,c.recovery)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!recoveryDetailsUpdated(c,c.recovery)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
+                status={<>{c.period_closed ? <span className={styles.badge}>Closed · read-only</span> : null}<span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{c.recoverable ? <span className={!recoveryDetailsUpdated(c,c.recovery)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!recoveryDetailsUpdated(c,c.recovery)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
               {active === c.case_key ? (
                 <>
 
@@ -237,12 +237,13 @@ export function NlLiveCases({
                 {historyOpen === c.case_key ? <LiveDetail
                   row={c}
                   window={window}
-                  canDispute={canDispute}
-                  canDesk={canDesk}
+                  canDispute={canDispute && !c.period_closed}
+                  canDesk={canDesk && !c.period_closed}
                 /> : null}
                 </details>
                 {!(stageView === "final" && c.recoverable) ? <LossPidTimeline month={c.month} caseKey={c.case_key}/> : null}
-                {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute} canRecovered={canRecovered} canApprove={canApprove} /> : null}
+                {c.period_closed ? <p className={styles.hint}>Closed loss period · read-only</p> : null}
+                {stageView === "final" && c.recoverable ? <RecoveryForm row={c} outcomes={outcomes} settings={settings} canEdit={canDispute && !c.period_closed} canRecovered={canRecovered && !c.period_closed} canApprove={canApprove && !c.period_closed} /> : null}
                 </>
               ) : null}
             </article>
