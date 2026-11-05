@@ -152,13 +152,19 @@ export async function loadSetupSteps(settings: ReportBotSettings, workspace: Rep
     db.from("report_bot_groups").select("id", { head: true, count: "exact" }).eq("company_id", settings.company_id).eq("is_enabled", true).eq("workspace", workspace),
     db.from("report_bot_schedules").select("id,group:report_bot_groups!inner(workspace)", { head: true, count: "exact" }).eq("company_id", settings.company_id).eq("is_active", true).eq("group.workspace", workspace)
   ]);
+  // One WhatsApp + worker for the company; Last Mile reuses Dark Store's connection.
+  const connectionSetup = SETUP_HREF;
   return [
-    { done: Boolean(settings.worker_url && settings.worker_token_hash && workerIsOnline(settings)), text: "Deploy the worker (Render, free)", href: `${SETUP_HREF}#worker` },
-    { done: settings.connection_state === "open", text: "Link a WhatsApp number", href: `${SETUP_HREF}#whatsapp` },
+    { done: Boolean(settings.worker_url && settings.worker_token_hash && workerIsOnline(settings)), text: "Deploy the worker (Render, free)", href: `${connectionSetup}#worker` },
+    {
+      done: settings.connection_state === "open",
+      text: workspace === "last_mile" ? "Use the shared WhatsApp number" : "Link a WhatsApp number",
+      href: `${connectionSetup}#whatsapp`
+    },
     { done: (groups.count ?? 0) > 0, text: "Turn on a report group", href: reportBotHref(workspace, "groups") },
     { done: (schedules.count ?? 0) > 0, text: "Add a report type and a schedule", href: reportBotHref(workspace, "reports") },
-    { done: aiKeyConfigured(settings.ai_provider), text: `Add ${aiKeyName(settings.ai_provider)} in Vercel`, href: `${SETUP_HREF}#ai` },
-    { done: settings.mode !== "off", text: "Switch the bot to Listen only", href: `${SETUP_HREF}#mode` }
+    { done: aiKeyConfigured(settings.ai_provider), text: `Add ${aiKeyName(settings.ai_provider)} in Vercel`, href: `${connectionSetup}#ai` },
+    { done: settings.mode !== "off", text: "Switch the bot to Listen only", href: `${connectionSetup}#mode` }
   ];
 }
 

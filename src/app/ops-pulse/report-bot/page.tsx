@@ -30,6 +30,7 @@ import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-view
 import { ReminderTimesField } from "@/components/report-bot-reminder-times";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { canSeeGroup } from "@/lib/report-bot/access";
 import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from "@/lib/report-bot/logic";
@@ -107,6 +108,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
+  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   // Old links to the moved tabs land on the setup page instead of a blank tab.
@@ -165,7 +167,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           <div>
             <span className={s.eyebrow}><Bot size={13} aria-hidden /> Ops Pulse · {workspace === "last_mile" ? "Last Mile" : "Dark Store"}</span>
             <h1>Report Bot</h1>
-            <p>{workspace === "last_mile" ? "Last Mile reports, groups and schedules · shared WhatsApp number." : "Report checks, reminders and reviewed replies for Dark Store groups."}</p>
+            <p>{workspace === "last_mile" ? "Last Mile reports, groups and schedules · same WhatsApp as Dark Store Report Bot." : "Report checks, reminders and reviewed replies for Dark Store groups."}</p>
           </div>
           <div className={s.formActions}>
             <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
@@ -173,7 +175,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           </div>
         </header>
 
-        {workspace === "last_mile" ? <div className={s.flash}><Smartphone size={16} /><span>{linked ? "WhatsApp connected" : "WhatsApp not connected"}{settings.connected_number ? ` · +${settings.connected_number}` : ""} · New groups start in Observe. Access: Users & Access → Designation Access → Last Mile Report Bot.</span></div> : <div className={s.tiles}>
+        {workspace === "last_mile" ? <div className={s.flash}><Smartphone size={16} /><span>{linked ? `Shared WhatsApp connected${settings.connected_number ? ` · +${settings.connected_number}` : ""}` : "Shared WhatsApp not connected — link it in Dark Store Report Bot setup"} · New groups start in Observe.</span></div> : <div className={s.tiles}>
           <Link className={s.tile} href={`${SETUP_HREF}#mode`}>
             <span className={`${s.tileIcon} ${settings.mode === "live" ? s.good : settings.mode === "listen" ? s.warn : ""}`}><Bot size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>Mode</span><div className={s.tileValue}>{modeLabel}</div><div className={s.tileHint}>{settings.mode === "live" ? "Sends reminders and replies" : settings.mode === "listen" ? "Checks photos, sends nothing" : "Not listening to groups"}</div></span>

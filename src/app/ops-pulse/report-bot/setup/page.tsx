@@ -6,6 +6,7 @@ import { ActionButton, CopyButton } from "@/components/report-bot-controls";
 import { ReportBotConnection } from "@/components/report-bot-connection";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotSetupHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { aiKeyName, ensureWorkerToken, loadReportBotSettings, portalPublicUrl, type ReportBotSettings } from "@/lib/report-bot/settings";
 import { connectWhatsApp, disconnectWhatsApp, rotateWorkerToken, saveBotSettings, saveWorkerUrl } from "../actions";
@@ -22,6 +23,7 @@ export default async function ReportBotSetupPage({ searchParams }: { searchParam
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
+  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   let settings: ReportBotSettings;
@@ -40,7 +42,8 @@ export default async function ReportBotSetupPage({ searchParams }: { searchParam
       </AppShell>
     );
   }
-  const steps = (await loadSetupSteps(settings, workspace)).map(step => ({ ...step, href: step.href.replace("/report-bot/setup", reportBotSetupHref(workspace)) }));
+  // Connection/worker live on the shared company settings (Dark Store setup). Last Mile only reuses them.
+  const steps = await loadSetupSteps(settings, workspace);
 
   return (
     <AppShell active="Report Bot setup" pageCode={pageCode}>
@@ -48,8 +51,12 @@ export default async function ReportBotSetupPage({ searchParams }: { searchParam
         <header className={s.hero}>
           <div>
             <span className={s.eyebrow}><Settings2 size={13} aria-hidden /> Settings · Shared connection</span>
-            <h1>Report Bot setup</h1>
-            <p>WhatsApp number, connection and AI settings apply to both Last Mile and Dark Store. Report rules and groups stay separate.</p>
+            <h1>{workspace === "last_mile" ? "Last Mile Report Bot setup" : "Report Bot setup"}</h1>
+            <p>
+              {workspace === "last_mile"
+                ? "Uses the same WhatsApp number and worker already linked for Dark Store. Only Last Mile groups, report types and schedules are separate."
+                : "WhatsApp number, connection and AI settings apply to both Last Mile and Dark Store. Report rules and groups stay separate."}
+            </p>
           </div>
           <Link className={s.button} href={reportBotHref(workspace)}><ArrowLeft size={15} aria-hidden />Open Report Bot</Link>
         </header>
@@ -57,12 +64,51 @@ export default async function ReportBotSetupPage({ searchParams }: { searchParam
         {await MigrationWarning()}
         <FlashMessage />
         <div className={s.connectSteps}>
-          <WorkerCard workspace={workspace} settings={settings} canEdit={canEdit} />
-          <WhatsAppCard workspace={workspace} settings={settings} canEdit={canEdit} />
-          <SettingsForm workspace={workspace} settings={settings} canEdit={canEdit} />
+          {workspace === "last_mile" ? (
+            <SharedWhatsAppCard settings={settings} />
+          ) : (
+            <>
+              <WorkerCard workspace={workspace} settings={settings} canEdit={canEdit} />
+              <WhatsAppCard workspace={workspace} settings={settings} canEdit={canEdit} />
+              <SettingsForm workspace={workspace} settings={settings} canEdit={canEdit} />
+            </>
+          )}
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function SharedWhatsAppCard({ settings }: { settings: ReportBotSettings }) {
+  const linked = settings.connection_state === "open";
+  const online = workerIsOnline(settings);
+  return (
+    <Card
+      id="whatsapp"
+      title="Shared WhatsApp"
+      icon={<span className={`${s.stepNumber} ${linked ? s.stepNumberDone : ""}`}>1</span>}
+      description="Last Mile and Dark Store share one WhatsApp linked device. Do not link a second number here."
+      action={linked ? <Badge tone="good">Connected</Badge> : <Badge tone="warn">Not linked</Badge>}
+    >
+      <div className={s.session}>
+        <div className={s.sessionState}>
+          <Badge tone={online ? "good" : "neutral"}>{online ? "Worker online" : "Worker offline"}</Badge>
+          {settings.connected_number ? <strong>+{settings.connected_number}</strong> : null}
+          {settings.connected_name ? <span className={s.hint}>{settings.connected_name}</span> : null}
+        </div>
+        <p className={s.hint} style={{ marginTop: 10 }}>
+          {linked
+            ? "This is the number already connected for Dark Store Report Bot. Last Mile groups use it automatically."
+            : "Link WhatsApp once in Dark Store Report Bot setup. Last Mile will pick up the same connection."}
+        </p>
+        <div className={s.formActions} style={{ justifyContent: "flex-start", marginTop: 12 }}>
+          <Link className={`${s.button} ${s.primary}`} href="/report-bot/setup#whatsapp">
+            <Smartphone size={15} aria-hidden />
+            {linked ? "Manage shared connection" : "Link WhatsApp in Dark Store setup"}
+          </Link>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -175,7 +221,7 @@ function WhatsAppCard({ workspace, settings, canEdit }: { workspace: ReportBotWo
       id="whatsapp"
       title="WhatsApp number"
       icon={<span className={`${s.stepNumber} ${linked ? s.stepNumberDone : ""}`}>2</span>}
-      description="Link any WhatsApp account as a linked device, for example your own number while testing. To change numbers later, unlink and link the new one; groups, schedules and history are kept."
+      description="One linked WhatsApp for the company — Dark Store and Last Mile both use it. To change numbers later, unlink and link the new one; groups, schedules and history are kept."
     >
       <div className={s.session}>
         {workerReady ? (

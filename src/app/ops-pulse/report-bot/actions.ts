@@ -19,6 +19,7 @@ import { workerRequest } from "@/lib/report-bot/worker-client";
 
 import { reportBotWorkspace, reportBotSetupHref, reportBotPage, reportBotHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
+import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 
 const FLASH_COOKIE = "dropx_report_bot_flash";
 const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings", "actions", "summary"]);
@@ -41,6 +42,7 @@ function isRedirect(error: unknown) {
 /** Runs a mutation with edit permission and turns any error into a visible message on the same tab. */
 async function mutate(tab: string, work: (context: { authorization: ReportBotAuthorization; companyId: string }) => Promise<Flash>, workspace: ReportBotWorkspace = "dark_store") {
   const authorization: ReportBotAuthorization = { ...await requirePagePermission(reportBotPage(workspace), "edit"), reportBotWorkspace: workspace };
+  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   let flash: Flash;
   try {
@@ -190,7 +192,10 @@ export async function rotateWorkerToken(form: FormData) {
 }
 
 export async function connectWhatsApp(form: FormData) {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("connection", async ({ companyId, authorization }) => {
+    if ((authorization.reportBotWorkspace ?? "dark_store") === "last_mile") {
+      throw new Error("Last Mile uses the shared WhatsApp already linked in Dark Store Report Bot setup. Link or switch the number there.");
+    }
     const settings = await loadReportBotSettings(companyId);
     const method = field(form, "method") === "code" ? "code" : "qr";
     const phone = field(form, "phone").replace(/\D/g, "");
@@ -202,7 +207,10 @@ export async function connectWhatsApp(form: FormData) {
 }
 
 export async function disconnectWhatsApp(form: FormData) {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("connection", async ({ companyId, authorization }) => {
+    if ((authorization.reportBotWorkspace ?? "dark_store") === "last_mile") {
+      throw new Error("Last Mile uses the shared WhatsApp. Unlink or switch the number in Dark Store Report Bot setup.");
+    }
     const settings = await loadReportBotSettings(companyId);
     await workerRequest(settings, "/session/logout", { method: "POST", body: {} });
     check(await reportBotDb().from("report_bot_settings").update({
