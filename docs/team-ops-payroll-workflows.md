@@ -806,3 +806,11 @@ alter loss, payroll, approval or collection records.
 - Validation: TypeScript, 62 request/payroll regression tests, and the PGlite lifecycle suite (including repeat migration, cancellation, returned edits, paid-payroll guards and restricted attendance access).
 
 - Follow-up migration `20261104081848_adhoc_driver_payout_dependency.sql` versions absence-ledger changes for advance-recovery snapshots using statement-level company locks. Insert, update, delete and truncate are covered; the 311-test payout suite and repeated-migration PGlite dependency test pass.
+
+### Final loss-period submission (2026-11-05)
+
+NL Final and SLP Final expose **Final submit / Close period** to SLP Manager, Finance Manager, National Head and Managing Partner with loss edit access. Select exactly one loss period and the stations; confirmation lists the full station scope and explicitly includes cases hidden by reason/status filters. Closing records the actor, time, source count/value, case identities and recovery-plan snapshot in `nl_loss_period_closures`. Closure is final; the app has no reopen/delete action. It does not itself approve pending recovery exceptions or mark payroll paid.
+
+`nl_loss_close_period` and all ten manual loss mutation RPCs use the existing company recovery advisory lock, preventing save/close races. Closed periods block manual recovery, dispute, exception, approval and write-off changes, including workbooks and legacy RPCs. NL months and SLP source periods are independent; station and company scopes are preserved. New source cases in a closed period are also locked, and captured identities remain locked if source metadata changes. Source refresh and automatic payroll settlement remain permitted. No existing period is closed by the migration.
+
+Validation: `pnpm test:loss-period-close`; full recovery regression suite.

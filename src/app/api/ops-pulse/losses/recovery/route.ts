@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url),
       month = url.searchParams.get("month") || "",
       key = url.searchParams.get("case") || "";
-    const { auth, scope, station, settings, caseKey, amount, report, finalSeenAt } =
+    const { auth, scope, station, settings, caseKey, amount, report, finalSeenAt, periodClosed } =
       await recoveryContext(month, key, false);
     const selectedRefs = url.searchParams.getAll("person");
     if (selectedRefs.length > 50) return reply({ error: "Select up to 50 people." }, 400);
@@ -105,10 +105,10 @@ export async function GET(request: Request) {
       // SLP is deducted only once its Final file is in; the month above is provisional until then.
       awaiting_final: report === "slp" && !finalSeenAt,
       people: people.map(recoveryPersonPayDisclosure),
-      can_propose: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && responseWindow.data?.workflow_status !== "won",
-      can_approve: mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
+      can_propose: !periodClosed && !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && responseWindow.data?.workflow_status !== "won",
+      can_approve: !periodClosed && mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
       can_recovered: false,
-      can_response: !!responseWindow.data?.enabled,
+      can_response: !periodClosed && !!responseWindow.data?.enabled,
       history: (history.data ?? []).map((event) => ({
         ...event,
         after_value: redactRecoverySnapshot(event.after_value),

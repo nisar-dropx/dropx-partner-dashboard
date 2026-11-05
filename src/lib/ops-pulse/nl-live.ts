@@ -1,3 +1,4 @@
+import { assertLossPeriodOpen } from "./loss-period-close";
 import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
 import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
@@ -315,6 +316,7 @@ export async function disputeContext(
   );
   if (row.error || !row.data || !station)
     throw Error("Case is unavailable or outside your station access.");
+  if (mode !== "view") await assertLossPeriodOpen(scope.company, month, row.data.case_key);
   const details = (row.data.details ?? {}) as NlCase["details"];
   const gate =
     row.data.source_present && row.data.data_source === "live"

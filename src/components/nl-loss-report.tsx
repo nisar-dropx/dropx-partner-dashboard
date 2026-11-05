@@ -1,3 +1,4 @@
+import { LossPeriodClose } from "./loss-period-close";
 import { LossStationTable } from "./loss-station-table";
 import { OpsLossCases } from "./ops-loss-cases";
 import type { LossFact } from "@/lib/ops-pulse/loss-station-summary";
@@ -171,6 +172,9 @@ export function NlLossReport({
           {copy.decision} · Source refreshed {time(v.monthLastSeen)}
         </span>
       </div>
+      {!initial ? <LossPeriodClose key={`${v.kind}:${v.month}:${v.station}:${v.cluster}`} report={v.kind==="nl"?"nl":"slp"}
+        period={v.month!==ALL_PERIODS&&lossFilterValues(v.month).length===1?lossFilterValues(v.month)[0]!:null}
+        label={periodLabel} stations={v.closureStations} closures={v.closures} canClose={v.canApprove}/> : null}
       {!ledgerReady && !initial ? <p className={styles.notice}>Payroll collections are unavailable; recovery amounts are incomplete.</p> : null}
       {!initial && !v.station && v.cases.length ? (
         <section className={styles.panel}>
