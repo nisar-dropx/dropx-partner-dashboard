@@ -985,6 +985,7 @@ export type LoadFlashBoardPayload = {
   dsrFrozenAt: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  historyUpdatedAt?: string;
   rtsVersion?: number;
   dotVersion?: number;
   dotMetadataPending?: number;
@@ -1154,6 +1155,7 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     zeroDeliveriesStandard: Number(row.zeroDeliveriesStandard ?? daDsrStandard.filter((d) => d.delivered === 0).length) || 0,
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
     dsrHistoryPending: Number(row.dsrHistoryPending) || 0,
+    historyUpdatedAt: typeof row.historyUpdatedAt === "string" ? row.historyUpdatedAt : undefined,
     stationInventoryVersion: [1, 2].includes(Number(row.stationInventoryVersion)) ? Number(row.stationInventoryVersion) : undefined,
     ageingByDay,
     ageingByWeek,
