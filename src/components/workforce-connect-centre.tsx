@@ -1,13 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Headphones, LockKeyhole, RefreshCw, Send, Paperclip } from "lucide-react";
+import { ChevronDown, Headphones, LockKeyhole, Mail, Paperclip, Phone, RefreshCw, Send, UsersRound } from "lucide-react";
+import type { WorkforceConnectContactContext, WorkforceConnectContactPerson } from "@/lib/workforce-connect-contacts-core";
 import styles from "./workforce-connect-centre.module.css";
 
 type Case = { id: string; case_number: string; channel: string; category: string; subject: string; description: string; status: string; urgency: string; reporter_name: string; reporter_code: string | null; reporter_designation: string | null; identity_protected: boolean; assigned_profile_id: string | null; due_at: string | null; created_at: string; last_activity_at: string };
-type Detail = { conversation: Case; owner: string; station: string; messages: Array<{ id: string; author_kind: string; visibility: string; body: string; created_at: string }>; attachments: Array<{ id: string; name: string; url: string | null }>; events: Array<{ id: string; event_type: string; to_status: string | null; created_at: string }> };
+type Detail = { conversation: Case; owner: string; station: string; contacts: WorkforceConnectContactContext | null; messages: Array<{ id: string; author_kind: string; visibility: string; body: string; created_at: string }>; attachments: Array<{ id: string; name: string; url: string | null }>; events: Array<{ id: string; event_type: string; to_status: string | null; created_at: string }> };
 const statuses: Record<string, string> = { submitted: "Submitted", acknowledged: "Acknowledged", in_review: "Under review", action_required: "Associate input needed", resolved: "Resolved", closed: "Closed", dismissed: "Dismissed" };
 const when = (value: string | null) => value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) + " IST" : "Not set";
+
+function ContactPerson({ person }: { person: WorkforceConnectContactPerson }) {
+  return <div className={styles.contactPerson}>
+    <strong>{person.name}</strong>
+    {person.role ? <small>{person.role}</small> : null}
+    <div className={styles.contactLinks}>
+      {person.phone ? <a href={`tel:${person.phone.replace(/\s/g, "")}`}><Phone size={13} />{person.phone}</a> : null}
+      {person.email ? <a href={`mailto:${person.email}`}><Mail size={13} />{person.email}</a> : null}
+      {!person.phone && !person.email ? <span>Contact unavailable</span> : null}
+    </div>
+  </div>;
+}
+
+function ContactGroup({ title, people, detail }: { title: string; people: WorkforceConnectContactPerson[]; detail?: string | null }) {
+  return <section className={styles.contactGroup}>
+    <header><small>{title}</small>{detail ? <span>{detail}</span> : null}</header>
+    {people.length ? people.map((person, index) => <ContactPerson key={`${person.name}-${index}`} person={person} />) : <p>No active contact mapped</p>}
+  </section>;
+}
 
 export function WorkforceConnectCentre({ canRespond }: { canRespond: boolean }) {
   const [channel, setChannel] = useState("connect");
@@ -104,6 +124,14 @@ export function WorkforceConnectCentre({ canRespond }: { canRespond: boolean }) 
       {detail && current ? <section className={styles.detail} aria-label="Selected conversation">
         <header className={styles.detailHead}><small>{current.case_number} · {current.urgency} priority</small><h2>{current.subject}</h2><span>{current.category} · {statuses[current.status]}</span></header>
         <div className={`${styles.panel} ${styles.identity}`}><strong>{current.reporter_name}</strong><p>{confidential ? "Identity protected. Only company-wide Connect reviewers can open this case." : [current.reporter_code, current.reporter_designation, detail.station].filter(Boolean).join(" · ")}</p></div>
+        {!confidential && detail.contacts ? <details className={`${styles.panel} ${styles.contactPanel}`}>
+          <summary><span className={styles.contactSummaryIcon}><UsersRound size={17} /></span><span><strong>Contact &amp; reporting line</strong><small>Associate · {detail.contacts.teamLeads.length} TL · {detail.contacts.clusterManagers.length} cluster manager</small></span><ChevronDown className={styles.contactChevron} size={17} /></summary>
+          <div className={styles.contactGrid}>
+            <ContactGroup title="Associate" people={[detail.contacts.associate]} />
+            <ContactGroup title="Team lead" people={detail.contacts.teamLeads} />
+            <ContactGroup title="Cluster manager" detail={detail.contacts.clusterName ? `Cluster · ${detail.contacts.clusterName}` : null} people={detail.contacts.clusterManagers} />
+          </div>
+        </details> : null}
         <div className={styles.meta}><article><small>Assigned to</small><b>{detail.owner}</b></article><article><small>Response target</small><b>{when(current.due_at)}</b></article><article><small>Reported</small><b>{when(current.created_at)}</b></article></div>
         <section className={styles.panel}><div className={styles.panelHead}><h2>Conversation</h2><small>Replies reach this associate’s Connect inbox and app notifications.</small></div>
           <div className={styles.messages}>{detail.messages.filter(item => item.visibility !== "internal").map(item => <article key={item.id} className={item.author_kind === "reporter" ? styles.reporter : styles.reply}><small>{item.author_kind === "reporter" ? current.reporter_name : "Workforce Support"}</small><p>{item.body}</p><time>{when(item.created_at)}</time></article>)}</div>

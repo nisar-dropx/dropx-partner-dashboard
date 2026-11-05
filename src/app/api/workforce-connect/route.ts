@@ -2,6 +2,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { scopedWorkforceCases, workforceConnectOpenStatuses, workforceConnectStatuses } from "@/lib/workforce-connect";
+import { loadWorkforceConnectContacts } from "@/lib/workforce-connect-contacts";
 import { deliverNotificationPush } from "@/lib/firebase-push";
 
 export const dynamic = "force-dynamic";
@@ -30,12 +31,22 @@ export async function GET(request: Request) {
       if (result.error) throw result.error;
       if (!result.data) return json({ error: "Conversation unavailable in this inbox." }, 404);
       // Do not load messages or mint file links until the case passes both scopes.
-      const [messages, files, events, owner, station] = await Promise.all([
+      const contacts = result.data.identity_protected || result.data.channel === "integrity"
+        ? Promise.resolve(null)
+        : loadWorkforceConnectContacts({
+          companyId: auth.companyId!,
+          caseId,
+          locationId: result.data.location_id,
+          reporterName: result.data.reporter_name,
+          reporterRole: result.data.reporter_designation
+        });
+      const [messages, files, events, owner, station, contactContext] = await Promise.all([
         supabaseAdmin.from("communication_case_messages").select("id,author_kind,visibility,body,created_at").eq("company_id", auth.companyId).eq("case_id", caseId).order("created_at"),
         supabaseAdmin.from("communication_case_attachments").select("id,original_name,storage_path").eq("company_id", auth.companyId).eq("case_id", caseId).order("created_at"),
         supabaseAdmin.from("communication_case_events").select("id,event_type,to_status,created_at").eq("company_id", auth.companyId).eq("case_id", caseId).order("created_at", { ascending: false }).limit(50),
         result.data.assigned_profile_id ? supabaseAdmin.from("profiles").select("full_name").eq("company_id", auth.companyId).eq("id", result.data.assigned_profile_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-        result.data.location_id ? supabaseAdmin.from("stations").select("station_code,station_name").eq("company_id", auth.companyId).eq("id", result.data.location_id).maybeSingle() : Promise.resolve({ data: null, error: null })
+        result.data.location_id ? supabaseAdmin.from("stations").select("station_code,station_name").eq("company_id", auth.companyId).eq("id", result.data.location_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+        contacts
       ]);
       for (const value of [messages, files, events, owner, station]) if (value.error) throw value.error;
       const attachments = await Promise.all((files.data ?? []).map(async (file) => {
@@ -43,7 +54,8 @@ export async function GET(request: Request) {
         return { id: file.id, name: file.original_name, url: signed.error ? null : signed.data.signedUrl };
       }));
       return json({ conversation: result.data, messages: messages.data, attachments, events: events.data,
-        owner: owner.data?.full_name ?? "Unassigned", station: station.data ? `${station.data.station_code} · ${station.data.station_name}` : "—" });
+        owner: owner.data?.full_name ?? "Unassigned", station: station.data ? `${station.data.station_code} · ${station.data.station_name}` : "—",
+        contacts: contactContext });
     }
     const channel = params.get("channel") === "integrity" ? "integrity" : "connect";
     const status = params.get("status");
