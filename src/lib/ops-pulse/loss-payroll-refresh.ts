@@ -4,7 +4,8 @@ import { createHmac } from "node:crypto";
 /** Wake People after a successful loss write. The shared secret itself never leaves this server. */
 export async function refreshLossPayroll(companyId: string) {
   const pending = { status: "pending" as const, message: "Recovery changes saved. People payroll refresh is pending and will retry when payroll is opened or during its automatic refresh." };
-  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Relay credentials are shared explicitly; database keys can differ between deployments.
+  const secret = process.env.LOSS_PAYROLL_RELAY_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!secret) return pending;
   const body = JSON.stringify({ companyId }), timestamp = String(Date.now());
   const signature = createHmac("sha256", secret).update(`dropx:loss-payroll-refresh:v1.${timestamp}.${body}`).digest("hex");
