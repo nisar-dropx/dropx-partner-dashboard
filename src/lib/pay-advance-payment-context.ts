@@ -1,9 +1,11 @@
 import "server-only";
+import { loadSalaryHoldContext, type SalaryHoldContext } from "@/lib/salary-hold-context";
 
 import { indiaMonthStart, monthEnd, workingDaysFromStatuses } from "@/lib/pay-advance-worker-facts";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type PayAdvanceWorkerContext = {
+  salaryHolds?: SalaryHoldContext[];
   name: string;
   workerCode: string;
   applyingMonth: string;
@@ -76,6 +78,10 @@ export async function loadPayAdvanceWorkerContexts(companyId: string, requests: 
     });
   }
 
+  const currentMonth = indiaMonthStart(new Date().toISOString());
+  const prior = new Date(`${currentMonth}T00:00:00Z`); prior.setUTCMonth(prior.getUTCMonth()-1);
+  const holdMonths = [...new Set([currentMonth.slice(0,7), prior.toISOString().slice(0,7), ...[...workers.values()].map(w=>w.monthStart.slice(0,7))])];
+  const salaryHolds = await loadSalaryHoldContext(companyId, [...advanceById.values()].map(a=>`${a.worker_type}:${a.worker_id}`), holdMonths);
   const attendanceByWorkerMonth = new Map<string, string[]>();
   const payByWorkerMonth = new Map<string, { ctc: number | null; gross: number | null }>();
   await Promise.all([...workers.values()].map(async (worker) => {
@@ -131,6 +137,7 @@ export async function loadPayAdvanceWorkerContexts(companyId: string, requests: 
     const key = `${advance.worker_type}:${advance.worker_id}:${monthStart}`;
     const pay = payByWorkerMonth.get(key);
     contexts.set(request.id, {
+      salaryHolds: salaryHolds.filter(h=>h.employee_ref===`${advance.worker_type}:${advance.worker_id}`),
       name: advance.worker_name || request.requestedForName || "—",
       workerCode: advance.worker_code || request.workerCode || "—",
       applyingMonth: monthStart,

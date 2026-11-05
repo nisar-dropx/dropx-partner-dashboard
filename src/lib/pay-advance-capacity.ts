@@ -1,4 +1,5 @@
 import "server-only";
+import { loadSalaryHoldContext } from "@/lib/salary-hold-context";
 
 import { ADVANCE_ELIGIBILITY_PERCENT, advanceEligibilityAmount } from "@/lib/advance-eligibility";
 import type { AuthorizationContext } from "@/lib/authorization";
@@ -78,10 +79,8 @@ async function peopleMonthBalance(companyId: string, profileType: "employee" | "
   if(due.error||items.error) throw new Error("Current paid advance deductions could not be verified.");
   const pendingDeduction=Math.max(0,(due.data??[]).reduce((sum:number,d:{amount:unknown})=>sum+Number(d.amount),0)
     -(items.data??[]).filter(i=>["pay_advance","unified_advance"].includes(i.source)).reduce((sum,i)=>sum+Number(i.amount),0));
-  const holds=(items.data??[]).filter(i=>i.code==="SALARY_HOLD");
-  const holdInNet=holds.some(i=>i.item_type==="deduction" && Number(i.amount)>0);
-  const held=holdInNet?0:holds.reduce((sum,i)=>sum+Number(i.amount),0);
-  return Math.max(0, roundPayableMoney(target - held - settled - pendingDeduction));
+  // Salary holds prevent bank release, not recovery from earned salary.
+  return Math.max(0, roundPayableMoney(target - settled - pendingDeduction));
 }
 
 export async function loadPayAdvanceCapacity(input: {
@@ -107,7 +106,9 @@ export async function loadPayAdvanceCapacity(input: {
   if (active.error) throw new Error(active.error.message);
   const committedAdvance = roundPayableMoney((active.data ?? []).filter(row=>row.id!==input.excludeRequestId).reduce((sum, row) =>
     sum + Number(row.approved_amount ?? row.requested_amount ?? 0), 0));
+  const salaryHolds = await loadSalaryHoldContext(input.companyId, [`${input.profileType}:${input.accountId}`], months);
   return {
+    salaryHolds,
     outstandingPay,
     committedAdvance,
     eligibilityPercent: ADVANCE_ELIGIBILITY_PERCENT,

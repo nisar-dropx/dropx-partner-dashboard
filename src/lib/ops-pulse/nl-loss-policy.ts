@@ -40,6 +40,7 @@ export type RecoveryPerson = {
   /** Monthly amount other plans already take from this person's salary month. */
   reserved?: number;
   salary_source?: string;
+  salary_holds?: Array<{salary_month: string; actor_name: string | null; actor_id: string | null; reason: string | null}>;
   /** Safe operational blocker; contains no People salary breakdown. */
   pay_block_reason?: string;
   /** Workforce can see payout details; People can see only the recovery ceiling. */

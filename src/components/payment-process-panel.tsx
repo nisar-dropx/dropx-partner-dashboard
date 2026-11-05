@@ -42,6 +42,7 @@ export type PaymentProcessRequest = {
   created_at: string;
   payment_head_name: string | null;
   advance_context?: {
+    salaryHolds?: Array<{salary_month: string; actor_name: string | null; actor_id: string | null; reason: string | null}>;
     name: string;
     workerCode: string;
     applyingMonth: string;
@@ -732,6 +733,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
             </div>
             <form action={processFormAction} className="panel-body" id="payment-process-action-form">
               <input name="request_id" type="hidden" value={processRequest.id} />
+              {processRequest.advance_context?.salaryHolds?.map((h, i) => <div key={i} className="modal-inline-message warn" role="note"><strong>Salary on hold · {h.salary_month}</strong><span>{h.actor_name || h.actor_id || "Actor not recorded"}{h.reason ? ` · ${h.reason}` : ""}</span></div>)}
               {processRequest.advance_context ? (
                 <div className="form-grid two" style={{ marginBottom: 16 }}>
                   <label>Person

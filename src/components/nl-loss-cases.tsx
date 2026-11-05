@@ -785,6 +785,7 @@ export function RecoveryForm({
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
                           <small className={deductionPeriod && deductionPeriod < deductionMonths.current_month ? styles.earlierSalary : undefined}>From {deductionPeriod ? monthLabel(deductionPeriod) : 'selected'} salary{deductionPeriod && deductionPeriod < deductionMonths.current_month ? ' · Earlier payroll' : ''}{plan.mode === 'installments' ? ' · first instalment' : ''}</small>
+                          {p.salary_holds?.map((h, index) => <small key={index} className={styles.pending} title="Bank payment stays held; loss recovery is allowed within available earned salary.">Salary on hold · {h.actor_name || h.actor_id || "Actor not recorded"}{h.reason ? ` · ${h.reason}` : ""}</small>)}
                           {capEnabled && selected.includes(p.ref) ? (
                             <small className={p.recovery_limit == null ? styles.pending : styles.payFacts}>
                               {salaryLoading || salaryCheckPending ? "Checking payroll…"

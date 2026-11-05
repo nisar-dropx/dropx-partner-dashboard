@@ -14,6 +14,7 @@ export type PayAdvanceReviewDetails = {
   steps: Array<{ id: string; label: string; status: string; actorName: string | null;
     actedAt: string | null; note: string | null; approvedAmount: number | null }>;
   capacity: { outstandingPay: number; maxEligibleAmount: number; committedAdvance: number;
+    salaryHolds?: Array<{salary_month: string; actor_name: string | null; actor_id: string | null; reason: string | null}>;
     eligibilityPercent: number; breakdown: Array<{ month: string; outstanding: number }> };
   requestLimit: number;
   advances: Array<{ id: string; reference: string; amount: number; paidAt: string;
