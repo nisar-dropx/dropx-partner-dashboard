@@ -46,11 +46,11 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
         <PageHead
           eyebrow="Ops Pulse · Ops Live"
           title="Live performance"
-          subtitle="The day's delivery report: how much of the morning load is delivered, what is on the road, and which stations need attention. Refresh scheduled every 30 minutes, 6:05am to 11:05pm IST."
+          subtitle="The day's delivery report: how much of the morning load is delivered, what is on the road, and which stations need attention. Refresh starts every hour on the hour IST, including overnight."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
-              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Every 30 min" : "Setup needed"}</span>
+              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Hourly · IST" : "Setup needed"}</span>
             </div>
           )}
         />
