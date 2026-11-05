@@ -41,6 +41,7 @@ import {
   closeOpenAction,
   dismissReviewItem,
   duplicateGroupConfiguration,
+  installLastMileTemplates,
   installTcc3Templates,
   previewScheduleReminders,
   reanalyseSubmission,
@@ -50,6 +51,7 @@ import {
   saveReportType,
   saveSchedule,
   seedDraftSchedulesForGroup,
+  seedLastMileSchedulesForGroup,
   sendAllWaiting,
   sendTestReminder,
   setAutoReply,
@@ -869,6 +871,19 @@ function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit
             ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed reminders.</span>}
           </div>
         ) : null}
+        {canEdit && workspace === "last_mile" ? (
+          <div className={s.formActions} style={{ marginBottom: 12 }}>
+            <BotForm workspace={workspace} action={installLastMileTemplates}>
+              <ActionButton className={`${s.button} ${s.primary}`}>Install Station board templates</ActionButton>
+            </BotForm>
+            {testingGroup ? (
+              <BotForm workspace={workspace} action={seedLastMileSchedulesForGroup}>
+                <input type="hidden" name="group_id" value={testingGroup.id} />
+                <ActionButton className={s.button} confirm="Seed Last Mile schedules on Testing (hourly 09:00–21:00 for board reports, evening EOD reminders), activate them, and set the group to Review?">Seed &amp; activate Testing reminders</ActionButton>
+              </BotForm>
+            ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed hourly 09:00–21:00 reminders.</span>}
+          </div>
+        ) : null}
         <div className={s.itemList}>
           {reportTypes.map((report) => (
             <details key={report.id} className={s.item}>
@@ -889,7 +904,7 @@ function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit
               </div>
             </details>
           ))}
-          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">{workspace === "dark_store" ? "Install TCC3 templates or add one manually." : "Add a report type to define your Last Mile checks."}</Empty> : null}
+          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">{workspace === "dark_store" ? "Install TCC3 templates or add one manually." : "Install Station board templates or add one manually."}</Empty> : null}
           {canEdit ? (
             <details className={`${s.item} ${s.addItem}`} open={!reportTypes.length}>
               <summary><span>+ Add report type</span><ChevronRight size={18} className={s.chevron} aria-hidden /></summary>
