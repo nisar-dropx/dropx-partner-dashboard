@@ -17,6 +17,12 @@ changing allocations, payroll months, recovery keys or published payments.
 Lifecycle changes now invalidate the Workforce payout dependency cache.
 Regression: `node scripts/test-loss-source-status-migration.mjs`.
 
+Follow-up `20261105124500_loss_exception_source_status_aliases.sql` makes
+`nl_loss_exception_allowed` use the same alias key, and syncs enabled
+exception grant labels when only the eDSP alias drifts. Without it, Installments
+/ Next-month saves fail after a harmless Amazon label refresh.
+Regression: `node scripts/test-loss-exception-source-status-aliases.mjs`.
+
 ## Recovery from calculated Workforce pay — 30 October 2026
 
 Pending route distance excludes only the unknown fuel allowance from calculated pay;
