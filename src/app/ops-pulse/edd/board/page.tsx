@@ -7,6 +7,7 @@ import { allowedEddSections, canViewEddAgeingPerformance, requireEddAccess } fro
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
 import { fetchLoadFlashBoard, isEddWorkerConfigured, type LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
+import { canFlashStationBoardReportBot } from "@/lib/ops-pulse/station-board-report-bot-access";
 import { EddSectionTabs } from "../edd-section-tabs";
 import { StationBoardView } from "./station-board-view";
 
@@ -89,6 +90,7 @@ export default async function StationBoardPage({
             initialClusters={String(searchParams?.clusters ?? "")}
             initialDetail={String(searchParams?.detail ?? "")}
             initialLayout={String(searchParams?.layout ?? "")}
+            canFlashReportBot={canFlashStationBoardReportBot(authorization.email)}
           />
         ) : null}
       </div>

@@ -118,6 +118,22 @@ test("send is refused unless Live and the group is enabled", () => {
   assert.match(validateSend({ ...body, client_ref: "x" }, live), /client_ref/);
 });
 
+test("send accepts an image with optional caption instead of plain text", () => {
+  const live = { mode: "live", groups: [GROUP] };
+  const image = {
+    client_ref: "0f8b2c1e-1111-2222-3333-444455556666",
+    to: GROUP,
+    image_base64: Buffer.from("png").toString("base64"),
+    mime: "image/png",
+    caption: "Station board · Testing"
+  };
+  assert.equal(validateSend(image, live), null);
+  assert.equal(validateSend({ ...image, text: undefined, caption: undefined }, live), null, "image alone is enough");
+  assert.match(validateSend({ ...image, mime: "application/pdf" }, live), /mime/);
+  assert.match(validateSend({ ...image, caption: "x".repeat(1025) }, live), /caption/);
+  assert.match(validateSend({ client_ref: image.client_ref, to: GROUP, text: "" }, live), /text/);
+});
+
 test("lru forgets the oldest entries", () => {
   const lru = new Lru(2).set("a", 1).set("b", 2).set("a", 3).set("c", 4);
   assert.deepEqual(lru.entries(), [["a", 3], ["c", 4]]);

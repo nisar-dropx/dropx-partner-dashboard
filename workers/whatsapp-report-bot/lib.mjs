@@ -303,12 +303,27 @@ export function normalizeConfig(body) {
   return { mode, groups: mode === "off" ? [] : [...new Set(groups)], include_own_messages: mode !== "off" && body?.include_own_messages === true };
 }
 
+const SEND_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/** Text and optional image/caption for portal-driven flashes (station board, etc.). */
 export function validateSend(body, config) {
   if (!body || typeof body !== "object") return "Body must be a JSON object.";
   if (typeof body.client_ref !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(body.client_ref)) return "client_ref is required.";
   if (typeof body.to !== "string" || !GROUP_JID.test(body.to)) return "to must be a group id.";
-  if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 4000) return "text must be 1 to 4000 characters.";
   if (config.mode !== "live") return "The bot is not in Live mode.";
   if (!config.groups.includes(body.to)) return "This group is not enabled in the portal.";
+
+  const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
+  if (hasImage) {
+    const mime = typeof body.mime === "string" ? body.mime : "image/jpeg";
+    if (!SEND_IMAGE_MIMES.has(mime)) return "mime must be image/jpeg, image/png or image/webp.";
+    // Base64 expands ~4/3; reject before allocating a huge buffer in the send path.
+    if (body.image_base64.length > 16_000_000) return "image is too large.";
+    const caption = typeof body.caption === "string" ? body.caption : typeof body.text === "string" ? body.text : "";
+    if (caption.length > 1024) return "caption must be at most 1024 characters.";
+    return null;
+  }
+
+  if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 4000) return "text must be 1 to 4000 characters.";
   return null;
 }

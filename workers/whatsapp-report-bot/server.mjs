@@ -393,14 +393,29 @@ async function sendToGroup(body) {
   await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
   const mentions = cleanMentions(body.mentions);
-  const sent = await session.sock.sendMessage(body.to, { text: body.text, ...(mentions.length ? { mentions } : {}) }, quoted ? { quoted } : {});
+  const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
+  let payload;
+  let messageType = "text";
+  let messageText = body.text;
+  if (hasImage) {
+    const bytes = Buffer.from(body.image_base64, "base64");
+    if (!bytes.length) throw Object.assign(new Error("image_base64 is empty."), { status: 422 });
+    if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("image is too large."), { status: 413 });
+    const caption = String(body.caption ?? body.text ?? "").trim().slice(0, 1024);
+    payload = { image: bytes, caption, mimetype: body.mime || "image/jpeg", ...(mentions.length ? { mentions } : {}) };
+    messageType = "image";
+    messageText = caption || null;
+  } else {
+    payload = { text: body.text, ...(mentions.length ? { mentions } : {}) };
+  }
+  const sent = await session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {});
   await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
   const result = { id: sent?.key?.id ?? null };
   if (result.id) {
     botMessageIds.set(result.id, true);
     const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
     chatLog.add(body.to, {
-      id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: "text", text: body.text,
+      id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: messageType, text: messageText,
       quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
       mentions
     });
@@ -491,7 +506,8 @@ async function handle(req, res) {
     return json(res, 200, { ok: true, groups: config.groups.length });
   }
   if (req.method === "POST" && url.pathname === "/send") {
-    const body = await readBody(req, 20_000);
+    // Text sends are tiny; image flashes carry base64 (up to ~16 MB JSON).
+    const body = await readBody(req, 17_000_000);
     const invalid = validateSend(body, config);
     if (invalid) return json(res, 422, { error: invalid });
     return json(res, 200, await sendToGroup(body));

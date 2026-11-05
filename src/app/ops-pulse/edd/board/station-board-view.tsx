@@ -8,7 +8,7 @@ import { ReportTable } from "@/components/report-table";
 
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, Loader2, RefreshCw, Share2, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, Copy, Download, ImageDown, LayoutList, ListOrdered, Loader2, RefreshCw, Share2, Smartphone, X } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashBoardNetwork } from "@/lib/ops-pulse/edd-worker";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import {
@@ -61,9 +61,14 @@ type Props = {
   initialClusters?: string;
   initialDetail?: string;
   initialLayout?: string;
+  /** Joseph-only: show Report Bot vs device-share chooser on WhatsApp. */
+  canFlashReportBot?: boolean;
 };
 
-type BlockBusy = "image" | "share" | null;
+type BlockBusy = "image" | "share" | "bot" | null;
+type WhatsAppTarget =
+  | { scope: "all"; key: string; label: string; blockStations: StationBoardStation[] }
+  | { scope: "station"; station: StationBoardStation };
 type TidMode = "grouped" | "day";
 type PanelMode = "card" | "tids";
 
@@ -279,7 +284,7 @@ function buildShareTable(
   };
 }
 
-export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout, targets = {} }: Props) {
+export function StationBoardView({ initial, stationNames = {}, clusters = [], initialRegion, initialView, initialStations, initialClusters, initialDetail, initialLayout, targets = {}, canFlashReportBot = false }: Props) {
   const [payload, setPayload] = useState(initial);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initial.run);
   const [view, setView] = useState<StationBoardView>(() => asView(initialView));
@@ -305,8 +310,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [detailRetry, setDetailRetry] = useState(0);
   const [dsrStationData, setDsrStationData] = useState<{ key: string; rows: StationDsrTidRow[]; error?: string } | null>(null);
   const [dsrStationRetry, setDsrStationRetry] = useState(0);
-  const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | null>(null);
+  const [busy, setBusy] = useState<"refresh" | "download" | "image" | "share" | "bot" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [whatsAppTarget, setWhatsAppTarget] = useState<WhatsAppTarget | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
   const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number } | null>(null);
   const [openStation, setOpenStation] = useState<string | null>(null);
@@ -1079,6 +1085,98 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }
   }
 
+  function requestWhatsAppShare(target: WhatsAppTarget) {
+    if (canFlashReportBot) {
+      setWhatsAppTarget(target);
+      return;
+    }
+    if (target.scope === "station") void shareStation(true, target.station);
+    else void shareBlock({ key: target.key, label: target.label, blockStations: target.blockStations, share: true, scope: "all" });
+  }
+
+  /** JPEG keeps multi-page board flashes under the portal upload limit. */
+  async function compressBoardFilesForBot(files: File[]): Promise<File[]> {
+    const out: File[] = [];
+    for (const [index, file] of files.entries()) {
+      if (file.type === "image/jpeg" && file.size <= 2.8 * 1024 * 1024) {
+        out.push(file);
+        continue;
+      }
+      try {
+        const bitmap = await createImageBitmap(file);
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          bitmap.close();
+          out.push(file);
+          continue;
+        }
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+        if (!blob) {
+          out.push(file);
+          continue;
+        }
+        out.push(new File([blob], `station-board-${index + 1}.jpg`, { type: "image/jpeg" }));
+      } catch {
+        out.push(file);
+      }
+    }
+    return out;
+  }
+
+  async function flashReportBot(target: WhatsAppTarget) {
+    const setBusyState = (value: BlockBusy) => {
+      if (target.scope === "all") setBusy(value === null ? null : value);
+      else setStationShareBusy(value);
+    };
+    setBusyState("bot");
+    setError(null);
+    setWhatsAppTarget(null);
+    try {
+      const blockStations = target.scope === "station" ? [target.station] : target.blockStations;
+      const label = target.scope === "station"
+        ? (stationNames[target.station.stationCode] || target.station.stationCode)
+        : target.label;
+      const table = reportFor(blockStations, label);
+      if (!table.rows.length) throw new Error("Nothing to flash for this selection.");
+      const rendered = await renderBoardShareImages(table);
+      if (!rendered.length) throw new Error("Could not render board images.");
+      const files = await compressBoardFilesForBot(rendered);
+      // One page per request keeps each upload under Vercel's body limit.
+      let sent = 0;
+      let groupName = "Testing";
+      for (let index = 0; index < files.length; index += 1) {
+        const form = new FormData();
+        form.set("title", table.title);
+        form.set("subtitle", table.subtitle);
+        form.set("view", view);
+        form.set("businessDate", payload.businessDate);
+        form.set("stationCount", String(blockStations.length));
+        form.set("page", String(index + 1));
+        form.set("pages", String(files.length));
+        form.set("skipCaption", index === 0 ? "0" : "1");
+        form.append("images", files[index], files[index].name || `board-${index + 1}.jpg`);
+        const response = await fetch("/api/ops-pulse/edd/board/flash-report-bot", { method: "POST", body: form });
+        const payloadJson = await response.json().catch(() => ({})) as { error?: string; sent?: number; group?: string };
+        if (!response.ok) throw new Error(payloadJson.error || "Report Bot flash failed.");
+        sent += payloadJson.sent ?? 1;
+        if (payloadJson.group) groupName = payloadJson.group;
+      }
+      setError(null);
+      setBackfillNote(`Flashed ${sent} image${sent === 1 ? "" : "s"} to ${groupName} via Report Bot.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not flash via Report Bot.");
+    } finally {
+      setBusyState(null);
+    }
+  }
+
   async function shareBlock(opts: {
     key: string;
     label: string;
@@ -1110,14 +1208,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }
   }
 
-  async function shareStation(share: boolean) {
-    if (!selected) return;
+  async function shareStation(share: boolean, station = selected) {
+    if (!station) return;
     setStationShareBusy(share ? "share" : "image");
     setError(null);
     try {
-      const table = reportFor([selected], stationNames[selected.stationCode] || selected.stationCode);
+      const table = reportFor([station], stationNames[station.stationCode] || station.stationCode);
       if (!table.rows.length) throw new Error("Nothing to share for this station.");
-      const fileName = `station-board-${payload.businessDate}-${view}-${selected.stationCode.toLowerCase()}`;
+      const fileName = `station-board-${payload.businessDate}-${view}-${station.stationCode.toLowerCase()}`;
       if (share) {
         const files = await renderBoardShareImages(table);
         const result = await shareBoardImages(files, table.title, `${table.title} · ${table.subtitle}`);
@@ -1304,9 +1402,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
             type="button"
             className={s.primary}
             disabled={busy !== null || outputUnavailable}
-            onClick={() => void shareBlock({ key: regions.size ? [...regions].join("-") : "all", label: regionLabel, blockStations: stations, share: true, scope: "all" })}
+            onClick={() => requestWhatsAppShare({
+              scope: "all",
+              key: regions.size ? [...regions].join("-") : "all",
+              label: regionLabel,
+              blockStations: stations
+            })}
           >
-            {busy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
+            {busy === "share" || busy === "bot" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
           </button></>}
         </div>
 
@@ -1449,8 +1552,13 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                 {stationShareBusy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
               </button>
               <CopyReportImage resetKey={`${selected.stationCode}-${view}-${reportTime}-${JSON.stringify(sort)}`} disabled={stationShareBusy !== null} getImages={() => { const table = reportFor([selected], selected.stationCode); return renderBoardShareImages(table, true); }} />
-              <button type="button" className={s.primary} disabled={stationShareBusy !== null} onClick={() => void shareStation(true)}>
-                {stationShareBusy === "share" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
+              <button
+                type="button"
+                className={s.primary}
+                disabled={stationShareBusy !== null}
+                onClick={() => selected && requestWhatsAppShare({ scope: "station", station: selected })}
+              >
+                {stationShareBusy === "share" || stationShareBusy === "bot" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
               </button>
               {panelMode === "tids" && !isDotView(view) ? (
                 <button type="button" onClick={() => setPanelMode("card")}>
@@ -1651,6 +1759,50 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
               </div>
             ) : null}
           </aside>
+        </div>
+      ) : null}
+      {canFlashReportBot && whatsAppTarget ? (
+        <div className={s.waChooserScrim} role="presentation" onClick={() => setWhatsAppTarget(null)}>
+          <div
+            className={s.waChooser}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wa-chooser-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <h3 id="wa-chooser-title">Send on WhatsApp</h3>
+                <p>Choose device share (current) or flash via Report Bot to the Testing group.</p>
+              </div>
+              <button type="button" className={s.iconBtn} onClick={() => setWhatsAppTarget(null)} aria-label="Close">
+                <X size={16} />
+              </button>
+            </header>
+            <div className={s.waChooserOptions}>
+              <button
+                type="button"
+                disabled={busy !== null || stationShareBusy !== null}
+                onClick={() => {
+                  const target = whatsAppTarget;
+                  setWhatsAppTarget(null);
+                  if (target.scope === "station") void shareStation(true, target.station);
+                  else void shareBlock({ key: target.key, label: target.label, blockStations: target.blockStations, share: true, scope: "all" });
+                }}
+              >
+                <strong><Smartphone size={14} aria-hidden /> Share from this device</strong>
+                <span>Opens the phone/desktop WhatsApp share sheet — same as today.</span>
+              </button>
+              <button
+                type="button"
+                disabled={busy !== null || stationShareBusy !== null}
+                onClick={() => void flashReportBot(whatsAppTarget)}
+              >
+                <strong><Bot size={14} aria-hidden /> Send via Report Bot</strong>
+                <span>Posts the board image(s) to the Testing group with a Gemini caption.</span>
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       <TrackingDetailModal trackingId={openTrackingId} stationHint={selected?.stationCode} onClose={() => setOpenTrackingId(null)} />

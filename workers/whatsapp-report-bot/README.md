@@ -83,7 +83,7 @@ link WhatsApp from Report Bot setup.
 | POST | `/session/logout` | Unlink and delete the saved login |
 | GET | `/groups` | Groups the linked number belongs to |
 | POST | `/config` | Enabled groups and mode (also pulled every minute) |
-| POST | `/send` | `{ client_ref, to, text, quoted }`; a repeated `client_ref` returns the first result instead of posting twice |
+| POST | `/send` | `{ client_ref, to, text, quoted }` or `{ client_ref, to, image_base64, mime, caption }`; a repeated `client_ref` returns the first result instead of posting twice |
 | POST | `/media` | `{ ref, record }` → image bytes, from cache or downloaded from WhatsApp |
 
 ## Operating notes
