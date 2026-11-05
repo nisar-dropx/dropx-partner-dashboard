@@ -1,6 +1,6 @@
 "use client";
 import { RtsReport } from "./rts-report";
-import { boardPerformanceTarget, performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
+import { formatAgeingPerformance, boardPerformanceTarget, performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
 import { dotStationTable } from "@/lib/ops-pulse/dot-report";
 import { isDotView, sumDot, stationDotTotals, matchesDotMetric, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { cReturnDetailTable, dsrStationTable, pendingCReturn, type CReturnAssociate, type BoardDetailLevel } from "@/lib/ops-pulse/board-detail-report";
@@ -298,8 +298,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     header: isDotView(view) ? "DOT%" : view === "creturn" ? "Pending pickup"
       : view === "zero" ? DSR_HEADERS.oor
         : isDsrFamilyView(view) ? DSR_HEADERS.dsrPct
-          : "Station",
-    direction: hasDetailViews || isDotView(view) ? "desc" : "asc",
+          : view === "ageing" ? "Total ₹" : "Station",
+    direction: hasDetailViews || isDotView(view) || view === "ageing" ? "desc" : "asc",
   };
   const [cReturnData, setCReturnData] = useState<{ key: string; rows: CReturnAssociate[]; error?: string } | null>(null);
   const [detailRetry, setDetailRetry] = useState(0);
@@ -473,7 +473,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       : "";
     const historyPending = (isDsrFamilyView(view) || isDotView(view)) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
     const metadataPending = isDotView(view) ? blockStations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0) : 0;
-    return prepareBoardReport({ ...formatBoardPerformance(table, performanceTarget, targetForRow),
+    return prepareBoardReport({ ...(view === "ageing" ? formatAgeingPerformance(table) : formatBoardPerformance(table, performanceTarget, targetForRow)),
       compactNote: isDotView(view) ? "DOT = delivered / eligible. EDD equals selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock.` : undefined,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending || metadataPending ? ` · Provisional (${[historyPending ? `${count(historyPending)} history checks pending` : "", metadataPending ? `${count(metadataPending)} data pending` : ""].filter(Boolean).join(" · ")})` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
@@ -1391,6 +1391,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         {isDotView(view) ? <small className={s.reportMeta}>EDD equals selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
         {isDotView(view) && dotMetadataPending > 0 ? <small className={s.reportMeta} role="status">{count(dotMetadataPending)} shipments have missing or unrecognised ship option / EDD. DOT includes confirmed eligible classes only.</small> : null}
         {dotUnavailable ? <small className={s.reportMeta} role="status">Eligible DOT inventory was not captured for this date. Refresh today to start tracking; historical gaps are shown as —.</small> : null}
+        {view === "ageing" ? <small className={s.reportMeta}>Higher pending value / count = red · lower = green · compared within selected filters.</small> : null}
         {needsDsrStation ? <small className={s.reportMeta}>{STATION_DSR_INVENTORY_NOTE}</small> : null}
         {needsDsrStation && (dsrStationPending || dsrStationError) ? <small role={dsrStationError ? "alert" : "status"} className={s.reportMeta}>
           {dsrStationError || "Loading pending-today and physical inventory…"}
@@ -1529,70 +1530,13 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                       {ageingMode === "week" ? " · State × ISO week" : " · promised-date age"}
                     </small>
                   </div>
-                  {ageingMode === "week" ? (() => {
-                    const local = ageingStateWeekPivot([selected], collectAgeingWeeks([selected]));
-                    const grid = `minmax(88px, 1.4fr) ${local.columns.flatMap(() => ["minmax(48px, 0.7fr)", "minmax(64px, 1fr)"]).join(" ")} minmax(48px, 0.7fr) minmax(72px, 1fr)`;
-                    return (
-                      <>
-                        <div className={s.shareColsWide} style={{ gridTemplateColumns: grid }}>
-                          <span>State</span>
-                          {local.columns.flatMap((col) => [<span key={`${col}-c`}>{col} #</span>, <span key={`${col}-a`}>{col} ₹</span>])}
-                          <span>Total #</span>
-                          <span>Total ₹</span>
-                        </div>
-                        <div className={s.shareRows}>
-                          {local.rows.map((row) => (
-                            <div key={row.state} className={s.shareRowWide} style={{ gridTemplateColumns: grid }}>
-                              <span>{row.state}</span>
-                              {local.columns.flatMap((col) => [
-                                <strong key={`${col}-c`}>{row.cells[col]?.count ? count(row.cells[col].count) : ""}</strong>,
-                                <strong key={`${col}-a`}>{row.cells[col]?.amount ? inr(row.cells[col].amount) : ""}</strong>,
-                              ])}
-                              <strong>{count(row.total.count)}</strong>
-                              <strong>{inr(row.total.amount)}</strong>
-                            </div>
-                          ))}
-                          <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: grid }}>
-                            <span>Grand Total</span>
-                            {local.columns.flatMap((col) => [
-                              <strong key={`${col}-c`}>{count(local.columnTotals[col]?.count ?? 0)}</strong>,
-                              <strong key={`${col}-a`}>{inr(local.columnTotals[col]?.amount ?? 0)}</strong>,
-                            ])}
-                            <strong>{count(local.grandTotal.count)}</strong>
-                            <strong>{inr(local.grandTotal.amount)}</strong>
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })() : (
-                    <>
-                      <div className={s.shareColsWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
-                        <span>Bucket</span><span>Count</span><span>Amount</span>
-                      </div>
-                      <div className={s.shareRows}>
-                        {AGEING_DAY_BUCKETS.map((b) => {
-                          const cell = selected.board.ageingByDay?.[b] ?? { count: 0, amount: 0 };
-                          return (
-                            <div key={b} className={s.shareRowWide} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
-                              <span>{AGEING_DAY_LABELS[b]}</span>
-                              <strong>{count(cell.count)}</strong>
-                              <strong>{inr(cell.amount)}</strong>
-                            </div>
-                          );
-                        })}
-                        {(() => {
-                          const tot = ageingPivot([selected], "day").grandTotal;
-                          return (
-                            <div className={`${s.shareRowWide} ${s.shareTotal}`} style={{ gridTemplateColumns: "minmax(88px, 1.4fr) minmax(52px, 0.7fr) minmax(88px, 1fr)" }}>
-                              <span>Grand Total</span>
-                              <strong>{count(tot.count)}</strong>
-                              <strong>{inr(tot.amount)}</strong>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </>
-                  )}
+                  {(() => {
+                    const local = reportFor([selected], selected.stationCode);
+                    return <div className={s.scroll}><ReportTable className={`${s.table} ${s.compactTable}`} reportTitle={local.title} reportExport={() => excelReport(local)}>
+                      <thead><tr>{local.headers.map(header=><th key={header}>{header}</th>)}</tr></thead>
+                      <tbody>{local.rows.map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j} style={{background:cell.bg,color:cell.color,textAlign:cell.align,fontWeight:cell.bold?650:undefined}}>{cell.text}</td>)}</tr>)}</tbody>
+                    </ReportTable></div>;
+                  })()}
                 </div>
               ) : (
                 <div className={s.shareCard}>
