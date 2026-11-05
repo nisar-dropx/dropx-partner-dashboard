@@ -1,4 +1,5 @@
 "use client";
+import { FleetStationSummary } from "./fleet-station-summary";
 import { vehicleDisplayName, vehicleDisplayDetail } from "@/lib/fleet/vehicle-display";
 import { vehicleIsOperational, vehicleIsTerminal } from "@/lib/fleet/vehicle-status-policy";
 import { FleetAttachmentPreview } from "./fleet-attachment-preview";
@@ -227,7 +228,7 @@ export function FleetControlDashboard({
   const [paymentStatuses, setPaymentStatuses] = useState<string[]>([]);
   const [paymentHeads, setPaymentHeads] = useState<string[]>([]);
   const [vehicleSort, setVehicleSort] = useState("vehicle");
-  const [vehicleView, setVehicleView] = useState<"live" | "registry">("live");
+  const [vehicleView, setVehicleView] = useState<"live" | "registry" | "summary">("live");
   const [paymentSort, setPaymentSort] = useState("date_desc");
   const [attentionTarget,setAttentionTarget]=useState<{vehicle:string;documentType?:string}|null>(null);
   const [vehicles, setVehicles] = useState(data.vehicles);
@@ -768,8 +769,9 @@ export function FleetControlDashboard({
           </> : null}
 
           {section === "vehicles" ? <section className="fc-section fc-registry-workspace">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle control</span><h1>{vehicleView === "live" ? "Live fleet status" : "Fleet registry"}</h1><p>{vehicleView === "live" ? "Station-grouped movement, availability and start-location control." : "Allocation, availability and document readiness across every station."}</p></div>{data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}</div>
-            {data.capabilities.canEditVehicles ? <FleetArchivedVehicles onLifecycle={vehicle=>{const source=sources.find(s=>s.id===vehicle.sourceId);setLifecycleVehicle({...vehicle,sourceName:source?.name,sourceCode:source?.code});}} onRestored={()=>{setFlash({type:"notice",text:"Vehicle restored as inactive and not deployed. Review it before use."});router.refresh();}}/> : null}<nav className="fc-view-switch" aria-label="Vehicle views"><button className={vehicleView === "live" ? "active" : ""} onClick={() => setVehicleView("live")} type="button"><Activity size={16} /> Live status</button><button className={vehicleView === "registry" ? "active" : ""} onClick={() => setVehicleView("registry")} type="button"><Truck size={16} /> Fleet registry</button></nav>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle control</span><h1>{vehicleView === "summary" ? "Summary & contacts" : vehicleView === "live" ? "Live fleet status" : "Fleet registry"}</h1><p>{vehicleView === "summary" ? "Owned vehicles and the people at each station." : vehicleView === "live" ? "Station-grouped movement, availability and start-location control." : "Allocation, availability and document readiness across every station."}</p></div>{data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}</div>
+            {data.capabilities.canEditVehicles ? <FleetArchivedVehicles onLifecycle={vehicle=>{const source=sources.find(s=>s.id===vehicle.sourceId);setLifecycleVehicle({...vehicle,sourceName:source?.name,sourceCode:source?.code});}} onRestored={()=>{setFlash({type:"notice",text:"Vehicle restored as inactive and not deployed. Review it before use."});router.refresh();}}/> : null}<nav className="fc-view-switch" aria-label="Vehicle views"><button className={vehicleView === "live" ? "active" : ""} onClick={() => setVehicleView("live")} type="button"><Activity size={16} /> Live status</button><button className={vehicleView === "registry" ? "active" : ""} onClick={() => setVehicleView("registry")} type="button"><Truck size={16} /> Fleet registry</button><button className={vehicleView === "summary" ? "active" : ""} onClick={() => setVehicleView("summary")} type="button"><BookOpenCheck size={16} /> Summary &amp; contacts</button></nav>
+            {vehicleView === "summary" ? <FleetStationSummary vehicles={vehicles} statuses={data.vehicleStatuses} /> : <>
             <FleetScopeFilters {...scopeProps} onStatuses={setVehicleStatuses} statusOptions={uniqueOptions(vehicles.map((item) => item.status))} statuses={vehicleStatuses} extraSummary={vehicleDeployments.map(value => value === "deployed" ? "Deployed" : "Not deployed")}><FleetMultiSelect allLabel="All deployment" label="Deployment" onChange={setVehicleDeployments} options={[{ value: "deployed", label: "Deployed" }, { value: "not_deployed", label: "Not deployed" }]} values={vehicleDeployments} /></FleetScopeFilters><div className="fc-source-quick-filters" role="group" aria-label="Vehicle source filters"><button type="button" aria-pressed={!vehicleOwnerships.length} className={!vehicleOwnerships.length?"active":""} onClick={()=>setVehicleOwnerships([])}>All <span>{sourceTotal}</span></button>{sources.filter(s=>s.isActive||sourceCounts.has(s.id)).map(source=><button key={source.id} type="button" title={sourceTitle(source)} aria-pressed={vehicleOwnerships.includes(source.id)} className={vehicleOwnerships.includes(source.id)?"active":""} onClick={()=>setVehicleOwnerships([source.id])}>{({OWN:"Own",ODCD:"ODCD",VAN:"Van Rented",VNV:"Van Vendor"} as Record<string,string>)[source.code]??source.name}<span>{sourceCounts.get(source.id)??0}</span></button>)}</div>
             {vehicleView === "live" ? <FleetVehicleLiveStatus onManage={setSelectedVehicle} vehicles={filteredVehicles} /> : <>
             <div className="fc-segment-cards fc-registry-stats"><article><small>Matching vehicles</small><strong>{filteredVehicles.length}</strong></article><article><small>Active</small><strong>{filteredVehicles.filter(v=>v.status==="active"&&v.deploymentStatus==="deployed").length}</strong></article><article><small>Under service</small><strong>{filteredVehicles.filter(v=>["under_service","breakdown"].includes(v.status)).length}</strong></article><article><small>Document attention</small><strong>{filteredVehicles.filter(v=>attentionVehicles.some(a=>a.id===v.id)).length}</strong></article></div>
@@ -787,6 +789,7 @@ export function FleetControlDashboard({
               </tbody></table></div>
               {!filteredVehicles.length ? <div className="fc-empty"><Search size={32} /><strong>No matching vehicle</strong><p>Change the search or vehicle placement filter.</p></div> : null}
             </div>
+            </>}
             </>}
           </section> : null}
 
