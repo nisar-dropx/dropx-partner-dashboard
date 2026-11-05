@@ -296,6 +296,9 @@ export function RecoveryForm({
   const deductionPeriod = plan.deduction_month || deductionMonths[option?.deduction_timing || "current_month"];
   const [designationFilter,setDesignationFilter] = useState("");
   const selectedKey = outcome === "responsible_left" ? "" : [...selected].sort().join(",");
+  const salaryCheckKey = JSON.stringify([selectedKey, deductionPeriod, row.month, row.case_key, retry]);
+  const [verifiedSalaryKey, setVerifiedSalaryKey] = useState("");
+  const salaryCheckPending = !!selectedKey && verifiedSalaryKey !== salaryCheckKey;
   useEffect(() => {
     if (!directoryReady || !selectedKey || !deductionPeriod) return;
     const controller = new AbortController();
@@ -312,6 +315,7 @@ export function RecoveryForm({
       .then(async res => { const j = await res.json(); if (!res.ok) throw Error(j.error); return j; })
       .then(j => {
         if (controller.signal.aborted) return;
+        setVerifiedSalaryKey(salaryCheckKey);
         setPeople(current => current.map(p => j.people.find((checked: RecoveryPerson) => checked.ref === p.ref) ?? p));
         if (selectedKey.split(",").some(ref => !j.people.some((p: RecoveryPerson) => p.ref === ref)))
           setSalaryError("A selected person is not eligible for payroll recovery. Review their employment details.");
@@ -319,7 +323,7 @@ export function RecoveryForm({
       .catch(e => { if (!controller.signal.aborted) setSalaryError(e.message || "Salary check failed. Reload to retry."); })
       .finally(() => { clearTimeout(timeout); if (!controller.signal.aborted) setSalaryLoading(false); });
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [directoryReady, selectedKey, row.month, row.case_key, retry, deductionPeriod]);
+  }, [directoryReady, selectedKey, row.month, row.case_key, retry, deductionPeriod, salaryCheckKey]);
   // A restricted plan (e.g. "Already recovered") can only be changed by people who may set it.
   const savedOutcome =
     recovery && !recovery.is_deleted
@@ -371,7 +375,7 @@ export function RecoveryForm({
   const receiptError = outcome === "already_recovered" ? receivedRecoveryError(details, Number(row.amount)) : "";
   const cannotSave = !!receiptError ||
     (outcome === "responsible_left" && (departedCheck.loading || !!departedCheck.error)) ||
-    (option?.allocation_required && (salaryLoading || !!salaryError)) ||
+    (option?.allocation_required && (salaryLoading || salaryCheckPending || !!salaryError)) ||
     !!validation ||
     !!reasonError ||
     (option?.remarks_required && remarks.trim().length < 5) ||
@@ -781,11 +785,12 @@ export function RecoveryForm({
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
                           <small className={deductionPeriod && deductionPeriod < deductionMonths.current_month ? styles.earlierSalary : undefined}>From {deductionPeriod ? monthLabel(deductionPeriod) : 'selected'} salary{deductionPeriod && deductionPeriod < deductionMonths.current_month ? ' · Earlier payroll' : ''}{plan.mode === 'installments' ? ' · first instalment' : ''}</small>
-                          {capEnabled && p.pay_detail_access !== "restricted" && selected.includes(p.ref) ? (
+                          {capEnabled && selected.includes(p.ref) ? (
                             <small className={p.recovery_limit == null ? styles.pending : styles.payFacts}>
-                              {p.recovery_limit == null
-                                ? p.salary_source || "Payout payable unavailable · review payout details"
-                                : p.unpaid_payroll_check ? `${p.salary_month ? monthLabel(p.salary_month) : "Selected payroll"} · max recovery ${money(p.recovery_limit)}` : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payout"}: payable ${money(p.salary_payable ?? 0)} · available ${money(limitOf(p) ?? 0)}`}
+                              {salaryLoading || salaryCheckPending ? "Checking payroll…"
+                                : p.recovery_limit == null ? p.pay_block_reason || "Recovery unavailable · refresh the payroll check"
+                                : `${p.salary_month ? monthLabel(p.salary_month) : "Selected payroll"} · max recovery ${money(p.recovery_limit)}`}
+                              {!salaryLoading && !salaryCheckPending && p.recovery_limit != null && p.pay_block_reason ? ` · ${p.pay_block_reason}` : ""}
                             </small>
                           ) : null}
                           {selected.includes(p.ref) && p.pay_detail_access === "workforce" && p.recovery_limit != null && p.salary_source ? <small>{p.salary_source}</small> : null}

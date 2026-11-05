@@ -717,6 +717,23 @@ await db.query(`select nl_loss_recovery_approve('${C}','2026-09','LEFT-NO-PAY',1
 await db.query(grantLeft('LEFT-NO-PAY',true,0));
 await db.query(waiveLeft('LEFT-NO-PAY',`employee:${uid(12)}`));
 eq('No-pay balance write-off uses explicit exception',Number((await one("select amount from nl_recovery_waivers where case_key='LEFT-NO-PAY'")).amount),1000);
+// Active People must pass the same available-pay check before saving as Workforce.
+const allProfilesGuard=readFileSync('supabase/migrations/20261105105555_loss_recovery_all_profiles_payable_guard.sql','utf8');
+await db.exec(allProfilesGuard);await db.exec(allProfilesGuard);
+await db.exec(`update nl_loss_recoveries set is_deleted=true where allocations @> '[{"ref":"employee:${uid(213)}"}]';
+update nl_recovery_payables set payable=null,eligible=true,checked_at=now(),policy_updated_at=(select updated_at from nl_loss_sources)
+ where employee_ref='employee:${uid(213)}';
+insert into nl_loss_month_cases(company_id,report,month,case_key,station_code,amount,source_status) values
+ ('${C}','nl','2026-09','ACTIVE-PAY-GUARD','BLR1',100,'Recoverable'),
+ ('${C}','nl','2026-09','ACTIVE-RESERVATION-GUARD','BLR1',100,'Recoverable');`);
+await throws('Active People missing calculation cannot save',full('ACTIVE-PAY-GUARD',`employee:${uid(213)}`),/XPT-STAFF: Recovery unavailable: payroll/);
+await db.exec(`update nl_recovery_payables set payable=50 where employee_ref='employee:${uid(213)}'`);
+await throws('Active People insufficient salary gets exact limit',full('ACTIVE-PAY-GUARD',`employee:${uid(213)}`),/XPT-STAFF: maximum available recovery is ₹50.00.*Requested ₹100.00/);
+eq('Rejected allocation leaves no recovery',(await db.query("select * from nl_loss_recoveries where case_key='ACTIVE-PAY-GUARD'")).rows.length,0);
+await db.exec(`update nl_recovery_payables set payable=100 where employee_ref='employee:${uid(213)}'`);
+await db.query(full('ACTIVE-PAY-GUARD',`employee:${uid(213)}`));
+eq('Exact available balance can be allocated',Number((await one("select allocations->0->>'amount' amount from nl_loss_recoveries where case_key='ACTIVE-PAY-GUARD'")).amount),100);
+await throws('Active People salary cannot be allocated twice',full('ACTIVE-RESERVATION-GUARD',`employee:${uid(213)}`),/maximum available recovery is ₹0.*Requested ₹100/);
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
 

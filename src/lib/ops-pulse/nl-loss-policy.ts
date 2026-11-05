@@ -40,9 +40,11 @@ export type RecoveryPerson = {
   /** Monthly amount other plans already take from this person's salary month. */
   reserved?: number;
   salary_source?: string;
-  /** Pay amounts are returned only for Workforce profiles. */
+  /** Safe operational blocker; contains no People salary breakdown. */
+  pay_block_reason?: string;
+  /** Workforce can see payout details; People can see only the recovery ceiling. */
   pay_detail_access?: "workforce" | "restricted" | "recovery_limit";
-  /** People checks are deferred to payroll; no salary readiness is disclosed. */
+  /** Readiness of the selected payroll recovery check. */
   pay_check_state?: "ready" | "unavailable" | "payroll";
   /** Saved plan lines only. */
   monthly_amount?: number;
@@ -331,21 +333,15 @@ export function allocationError(
     const thresholdError = installmentThresholdError(split.amount, schedule.length, policy);
     if (thresholdError) return `${person.employee_code}: ${thresholdError}`;
     const monthly = Math.round((schedule[0] ?? 0) * 100);
-    // People-profile payroll figures are deliberately absent from the browser.
-    // The database performs the authoritative cap and gross-pay checks on save.
-    const privatePeoplePay = person.pay_detail_access === "restricted";
-    if (capEnabled && !privatePeoplePay) {
+    // People disclose only the recoverable ceiling, never their salary breakdown.
+    if (capEnabled) {
       const limit = person.recovery_limit;
-      if (limit == null)
-        return person.pay_detail_access === "workforce" && person.salary_source
-          ? `${person.employee_code}: ${person.salary_source}`
-          : `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
-      if (monthly > Math.round(limit * 100) && person.unpaid_payroll_check)
-        return `${person.employee_code}: maximum available recovery is ₹${limit.toLocaleString("en-IN")} in ${person.salary_month}. Reduce this share or select another open payroll.`;
+      if (limit == null || !Number.isFinite(limit))
+        return `${person.employee_code}: ${person.pay_block_reason || (person.pay_detail_access === "workforce" ? person.salary_source : "") || "Recovery unavailable: payroll has not been verified for the selected month. Refresh the payroll check."}`;
       if (monthly > Math.round(limit * 100))
-        return `The monthly recovery of ₹${(monthly / 100).toLocaleString("en-IN")} for ${person.employee_code} is more than the available pay of ₹${limit.toLocaleString("en-IN")}. Spread it over more instalments.`;
+        return `${person.employee_code}: maximum available recovery is ₹${limit.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})} in ${person.salary_month || "the selected payroll"}; requested ₹${(monthly / 100).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. ${person.pay_block_reason || "Reduce this share or select another open payroll month."}`;
     }
-    if (!privatePeoplePay && person.salary_gross != null && monthly > Math.round(person.salary_gross * 100))
+    if (person.pay_detail_access !== "restricted" && person.salary_gross != null && monthly > Math.round(person.salary_gross * 100))
       return `The monthly recovery for ${person.employee_code} is more than their gross pay of ₹${person.salary_gross.toLocaleString("en-IN")}.`;
   }
   return "";

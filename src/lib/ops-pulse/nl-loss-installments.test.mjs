@@ -29,7 +29,7 @@ const person = (extra = {}) => ({ ref: "employee:1", employee_code: "D0001", ful
 const split = (amount) => [{ employee_ref: "employee:1", amount }];
 
 test("available pay applies to monthly recovery without an override", () => {
-  assert.match(allocationError(1200, split(1200), [person()], true, { mode: "full" }, 24, 50), /more than the available pay of ₹1,000/);
+  assert.match(allocationError(1200, split(1200), [person()], true, { mode: "full" }, 24, 50), /maximum available recovery is ₹1,000.00/);
   assert.equal(allocationError(900, split(900), [person()], true, { mode: "full" }, 24, 50), "");
   assert.equal(allocationError(900, split(900), [person()], true, { mode: "full", cap_override: true, cap_override_reason: "short" }), "");
   assert.equal(allocationError(1200, split(1200), [person()], true, { mode: "installments", basis: "months", value: "3" }), "");
@@ -44,9 +44,9 @@ test("schedule errors name the person", () => {
   assert.match(allocationError(1000, split(1000), [person()], false, { mode: "installments", basis: "amount", value: "1000" }), /^D0001: .*Full debit/);
 });
 
-test("People salary amounts remain server-side while the browser can still submit", () => {
+test("People cannot submit before a verified recovery ceiling is available", () => {
   const restricted = person({ pay_detail_access: "restricted", recovery_limit: undefined, override_limit: undefined, salary_gross: undefined });
-  assert.equal(allocationError(1200, split(1200), [restricted], true, { mode: "full" }, 24, 50), "");
+  assert.match(allocationError(1200, split(1200), [restricted], true, { mode: "full" }, 24, 50), /payroll has not been verified/);
 });
 
 const thresholds = { installment_thresholds_enabled: true, installment_two_month_min: 7000, installment_three_month_min: 10000, installment_extra_month_step: 5000 };

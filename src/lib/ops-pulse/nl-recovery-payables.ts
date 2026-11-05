@@ -192,6 +192,7 @@ export async function loadRecoveryPayables(
     const openMonths = availablePayrollMonths(windows,person.ref);
     const unpaidCheck = departed || month < new Date(Date.now()+330*60*1000).toISOString().slice(0,7);
     let eligible = !duplicate && (normalEmployment || !!window?.payroll_open) && (!policy.eligible_designations.length || policy.eligible_designations.some(d => d.toLowerCase() === person.designation.toLowerCase()));
+    let blockReason = "";
     let payable: number | null = null;
     let gross: number | null = null;
     // Employees/contractors use People (HRMS) payroll only; workforce uses payout worksheets only.
@@ -232,21 +233,30 @@ export async function loadRecoveryPayables(
         );
         source = `People payroll · ${employeePay.calculation_status}`;
       } else if (employeePay) {
+        blockReason = `Recovery unavailable: People payroll is ${employeePay.calculation_status || run?.status || "not ready"}. Resolve the payroll review or salary hold.`;
         source = `People payroll · ${employeePay.calculation_status || run?.status || "not ready"}`;
       }
+      if (!employeePay) blockReason = `Recovery unavailable: no People payroll calculation exists for ${month}. Calculate payroll or final settlement first.`;
     } else if (person.ref.startsWith("workforce:")) {
       const rows = payouts.rows.filter(
         (p) => p.dropxId === person.employee_code,
       );
       if (!payouts.error) ({ payable, gross, source } = lossWorkforcePayable(rows, policy.workforce_payout_statuses));
+      if (payable == null) blockReason = `Recovery unavailable: ${source}`;
     }
     // Available money excludes paid bank instructions. An issued file freezes
     // this payroll, even if its nominal remaining balance is positive.
     if (window) {
-      if (!window.payroll_open) payable = 0;
+      if (!window.payroll_open || window.processing) {
+        payable = 0;
+        blockReason = window.processing ? "Recovery unavailable: a bank payment is processing for this payroll. Resolve the bank instruction first." : "Recovery unavailable: this payroll is closed or frozen for payment. Select another open payroll month.";
+      }
       else if (person.ref.startsWith("workforce:")) payable = payable == null ? null : Math.max(0,payable - Number(window.paid));
       else payable = peopleRecoveryPayableForWindow(payable, window);
-    } else if (unpaidCheck) payable = 0;
+    } else if (unpaidCheck) {
+      payable = 0;
+      blockReason ||= `Recovery unavailable: no open unpaid payroll balance exists for ${month}. Review payroll or select another open month.`;
+    }
     if (departed || !normalEmployment) eligible = eligible && !!window?.payroll_open && payable != null && payable > 0;
     if (payable != null && !Number.isFinite(payable)) payable = null;
     if (gross != null && !Number.isFinite(gross)) gross = null;
@@ -263,6 +273,11 @@ export async function loadRecoveryPayables(
         ? null
         : Math.max(0, Math.round((payable - reserved) * 100) / 100);
     const limit = availablePay();
+    if (limit != null && limit > 0) blockReason = "";
+    else if (!blockReason && payable != null) blockReason = reserved > 0
+      ? "Recovery unavailable: other recovery allocations use the remaining payable balance. Reduce or reassign those allocations."
+      : "Recovery unavailable: no unpaid amount remains after payroll deductions and payments.";
+    if (!eligible && !duplicate && !blockReason) blockReason = "Recovery unavailable: employment or designation is not eligible for this payroll month.";
     checks.push({
       company_id: company,
       employee_ref: person.ref,
@@ -275,7 +290,7 @@ export async function loadRecoveryPayables(
       checked_at: new Date().toISOString(),
       policy_updated_at: policyUpdated,
     });
-    if (eligible || !duplicate && (departedOnly || openMonths.length > 0))
+    if (eligible || !duplicate && (selectedRefs?.includes(person.ref) || departedOnly || openMonths.length > 0))
       result.push({
         ...person,
         salary_month: month,
@@ -287,6 +302,7 @@ export async function loadRecoveryPayables(
         override_limit: limit,
         reserved,
         salary_source: source,
+        pay_block_reason: blockReason,
       });
   }
   if (checks.length) {
