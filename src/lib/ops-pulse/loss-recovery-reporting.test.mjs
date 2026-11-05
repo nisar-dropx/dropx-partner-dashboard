@@ -1,13 +1,17 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {finalRecoverySummary,recoveryDetailsUpdated} from './loss-final-summary.ts';
+import {finalRecoverySummary,recoveryDetailsUpdated,stationRecoveryUpdateComplete} from './loss-final-summary.ts';
 import {filterLossDebits,summarizeLossDebits} from './loss-debit-review.ts';
 test('Final metrics distinguish recovery updates from dispute savings and actual payroll',()=>{
  const row={amount:100,source_status:'Recoverable'};
  const plan={source_amount:100,source_status:'Recoverable',approval_status:'proposed',allocations:[{amount:100}]};
  assert.equal(recoveryDetailsUpdated(row,plan),true);
  for(const changed of [{approval_status:'returned'},{source_amount:200},{allocations:[{amount:50}]},{is_deleted:true}])assert.equal(recoveryDetailsUpdated(row,{...plan,...changed}),false);
- assert.deepEqual(finalRecoverySummary([{amount:100,recoverable:true,updated:true},{amount:50,recoverable:true,updated:false},{amount:20,recoverable:false,updated:false}]),{count:3,amount:170,updated:1,updatedAmount:100,pendingUpdate:1,pendingUpdateAmount:50,nonrecoverable:1,nonrecoverableAmount:20});
+ assert.deepEqual(finalRecoverySummary([{amount:100,recoverable:true,updated:true},{amount:50,recoverable:true,updated:false},{amount:20,recoverable:false,updated:false}]),{count:3,amount:170,updated:1,updatedAmount:100,redispute:0,redisputeAmount:0,pendingUpdate:1,pendingUpdateAmount:50,nonrecoverable:1,nonrecoverableAmount:20});
+ const separated=finalRecoverySummary([{amount:30495,recoverable:true,updated:false,redispute:true},{amount:50,recoverable:true,updated:false}]);
+ assert.deepEqual({pending:separated.pendingUpdate,redispute:separated.redispute,redisputeAmount:separated.redisputeAmount},{pending:1,redispute:1,redisputeAmount:30495});
+ assert.equal(stationRecoveryUpdateComplete({amount:30495,source_status:'Recoverable',redispute:{enabled:true,workflow_status:'awaiting_review'}},null),true,'submitted redispute is no longer a station pending update');
+ assert.equal(stationRecoveryUpdateComplete({amount:30495,source_status:'Recoverable',redispute:{enabled:true,workflow_status:'returned'}},null),false,'returned redispute still needs station correction');
 });
 test('Debit reporting combines People and Workforce scheduled, draft and deducted values',()=>{
  const base={loss_month:'2026-09',case_key:'123456789012',station_code:'A',designation:'TL',full_name:'Person',employee_code:'D1'};

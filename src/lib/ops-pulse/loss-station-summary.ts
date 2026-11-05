@@ -1,4 +1,8 @@
-import { recoveryDetailsUpdated } from "./loss-final-summary";
+import {
+  isRedisputeSummaryCase,
+  recoveryDetailsUpdated,
+  redisputeNeedsStationUpdate,
+} from "./loss-final-summary";
 import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import { casePhase } from "./nl-dispute-policy";
 import { isRecoverable, type NlCase } from "./nl-loss-policy";
@@ -7,6 +11,7 @@ import type { LedgerLine } from "./nl-recovery-ledger-view";
 export type LossFact = {
   key: string; station: string; report: "nl" | "slp"; period: string; month: string;
   stage: "initial" | "final"; amount: number; updated: boolean; recoverable: boolean;
+  redispute: boolean; redisputeStationPending: boolean; stationUpdated: boolean;
   waitingStation: boolean; waitingAmazon: boolean; recovered: number; waived: number; draft: number;
   remaining: number; updatedAt: string; sourceAt: string;
 };
@@ -45,6 +50,8 @@ export function lossFacts(rows: SourceCase[], lines: LedgerLine[], accepted: str
     const phase = casePhase({ case_status: row.details.case_status, nl_status: row.source_status, extra: row.details.extra });
     const stopped = row.redispute?.workflow_status === "won" || collections.get(keyOf(row))?.stopped || row.source_final_nonrecoverable;
     const updated = final && recoverable && !stopped && recoveryDetailsUpdated(row, row.recovery, report === "slp");
+    const redispute = final && isRedisputeSummaryCase(row.redispute);
+    const redisputeStationPending = redispute && redisputeNeedsStationUpdate(row.redispute);
     const amount = Math.max(0, cents(row.amount));
     const collection = collections.get(keyOf(row));
     // Approved receipts settle the same case as payroll; do not add the receipt a second time.
@@ -55,11 +62,17 @@ export function lossFacts(rows: SourceCase[], lines: LedgerLine[], accepted: str
     unique.set(keyOf(row), {
       key: keyOf(row), station: row.station_code, report, period: report === "nl" ? row.month : row.details.period || row.month, month: row.month,
       stage: final ? "final" : "initial", amount: amount / 100, updated, recoverable: final && recoverable && !stopped,
+      redispute,
+      redisputeStationPending,
+      stationUpdated: updated || (redispute && !redisputeStationPending),
       waitingStation: !final && report === "nl" && ["action", "respond"].includes(phase.key),
       waitingAmazon: !final && (report === "slp" || phase.key === "amazon"),
       recovered: paid / 100, waived: waived / 100, draft: (collection?.draft || 0) / 100,
       remaining: final && recoverable && !stopped ? Math.max(0, amount - paid - waived) / 100 : 0,
-      updatedAt: row.recovery && !row.recovery.is_deleted ? row.recovery.updated_at || "" : "",
+      updatedAt: [
+        row.recovery && !row.recovery.is_deleted ? row.recovery.updated_at || "" : "",
+        row.redispute?.updated_at || "",
+      ].sort().at(-1) || "",
       sourceAt: row.last_seen_at || row.source_updated_at || "",
     });
   }
@@ -90,18 +103,19 @@ export function filterLossSummaryPeriod(rows: LossFact[], report: LossFact["repo
 }
 
 export const LOSS_SUMMARY_STATUSES = [
-  ["all", "All statuses"], ["pending_update", "Pending update"], ["updated", "Details updated"],
+  ["all", "All statuses"], ["pending_update", "Pending update"], ["updated", "Details updated"], ["redispute", "Redispute"],
   ["station", "Waiting on station"], ["amazon", "Awaiting Amazon / final"],
   ["recovered", "Recovery received"], ["outstanding", "Pending recovery"], ["nonrecoverable", "Non-recoverable"],
 ] as const;
-export function filterLossFacts(rows: LossFact[], filter: { station?: string; period?: string; stage?: string; status?: string }) {
+export function filterLossFacts(rows: LossFact[], filter: { station?: string; period?: string; stage?: string; status?: string; stationView?: boolean }) {
   return rows.filter(r => (!filter.station || r.station === filter.station) && (!filter.period || r.period === filter.period || r.month === filter.period)
     && (!filter.stage || r.stage === filter.stage) && (
       !filter.status || filter.status === "all" ||
-      (filter.status === "pending_update" && r.recoverable && !r.updated) ||
-      (filter.status === "updated" && r.updated) || (filter.status === "station" && r.waitingStation) ||
+      (filter.status === "pending_update" && (filter.stationView ? r.recoverable && !r.stationUpdated : r.recoverable && !r.updated && !r.redispute)) ||
+      (filter.status === "updated" && (filter.stationView ? r.stationUpdated : r.updated && !r.redispute)) ||
+      (filter.status === "redispute" && !filter.stationView && r.redispute) || (filter.status === "station" && r.waitingStation) ||
       (filter.status === "amazon" && r.waitingAmazon) || (filter.status === "recovered" && r.recovered > 0) ||
-      (filter.status === "outstanding" && r.remaining > 0) || (filter.status === "nonrecoverable" && r.stage === "final" && !r.recoverable)
+      (filter.status === "outstanding" && r.remaining > 0) || (filter.status === "nonrecoverable" && r.stage === "final" && !r.recoverable && (filter.stationView || !r.redispute))
     ));
 }
 
@@ -127,9 +141,12 @@ export function totalLossFacts(rows: LossFact[]) {
   return { count: rows.length, amount: amount(r=>r.amount), recovered: amount(r=>r.recovered), remaining: amount(r=>r.remaining), waived: amount(r=>r.waived), draft: amount(r=>r.draft), draftCount: rows.filter(r=>r.draft>0).length,
     recoveredCount: rows.filter(r=>r.recovered>0).length, remainingCount: rows.filter(r=>r.remaining>0).length,
     recoverable: group(r=>r.recoverable),
-    updated: group(r=>r.updated), pending: group(r=>r.recoverable&&!r.updated),
+    updated: group(r=>r.updated&&!r.redispute), pending: group(r=>r.recoverable&&!r.updated&&!r.redispute),
+    redispute: group(r=>r.redispute),
+    stationUpdated: group(r=>r.stationUpdated), stationPendingUpdate: group(r=>r.recoverable&&!r.stationUpdated),
     stationPending: group(r=>r.waitingStation), amazon: group(r=>r.waitingAmazon),
-    nonrecoverable: group(r=>r.stage==="final"&&!r.recoverable),
+    nonrecoverable: group(r=>r.stage==="final"&&!r.recoverable&&!r.redispute),
+    stationNonrecoverable: group(r=>r.stage==="final"&&!r.recoverable),
     updatedAt: rows.map(r=>r.updatedAt).sort().at(-1)||"", sourceAt: rows.map(r=>r.sourceAt).sort().at(-1)||"" };
 }
 export function groupLossFacts(

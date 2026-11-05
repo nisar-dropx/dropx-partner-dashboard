@@ -41,20 +41,74 @@ export function recoveryDetailsUpdated(
     ) === Math.round(Number(row.amount) * 100)
   );
 }
+
+export type RedisputeSummaryState = {
+  enabled?: boolean;
+  workflow_status?: string | null;
+} | null | undefined;
+
+/** Redisputes have their own work queue; they are not missing recovery-plan updates. */
+export function isRedisputeSummaryCase(redispute: RedisputeSummaryState) {
+  const status = String(redispute?.workflow_status || "legacy");
+  return Boolean(
+    status === "won" ||
+      (redispute?.enabled && !["lost", "cancelled", "closed"].includes(status)),
+  );
+}
+
+/** Station evidence is still due only before submission or after a returned review. */
+export function redisputeNeedsStationUpdate(redispute: RedisputeSummaryState) {
+  return Boolean(
+    redispute?.enabled &&
+      ["awaiting_station", "returned", "legacy"].includes(
+        String(redispute.workflow_status || "legacy"),
+      ),
+  );
+}
+
+/** Existing station update views stay binary without exposing the management breakdown. */
+export function stationRecoveryUpdateComplete(
+  row: {
+    amount: number | null;
+    source_status: string | null;
+    redispute?: RedisputeSummaryState;
+  },
+  plan: any,
+  slp = false,
+) {
+  return (
+    recoveryDetailsUpdated(row, plan, slp) ||
+    (isRedisputeSummaryCase(row.redispute) &&
+      !redisputeNeedsStationUpdate(row.redispute))
+  );
+}
+
 export function finalRecoverySummary(
-  rows: { amount: number | null; recoverable: boolean; updated: boolean }[],
+  rows: {
+    amount: number | null;
+    recoverable: boolean;
+    updated: boolean;
+    redispute?: boolean;
+  }[],
 ) {
   const sum = (items: typeof rows) =>
     Math.round(items.reduce((n, r) => n + Number(r.amount || 0), 0) * 100) /
     100;
-  const updated = rows.filter((r) => r.recoverable && r.updated),
-    pending = rows.filter((r) => r.recoverable && !r.updated),
+  const updated = rows.filter(
+      (r) => r.recoverable && r.updated && !r.redispute,
+    ),
+    redispute = rows.filter((r) => r.redispute),
+    pending = rows.filter(
+      (r) => r.recoverable && !r.updated && !r.redispute,
+    ),
     excluded = rows.filter((r) => !r.recoverable);
   return {
     count: rows.length,
     amount: sum(rows),
     updated: updated.length,
     updatedAmount: sum(updated),
+    redispute: redispute.length,
+    redisputeAmount: sum(redispute),
     pendingUpdate: pending.length,
     pendingUpdateAmount: sum(pending),
     nonrecoverable: excluded.length,

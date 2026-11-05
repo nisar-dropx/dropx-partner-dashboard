@@ -14,14 +14,19 @@ import {
   type LiveWindow,
   type PhaseKey,
 } from "@/lib/ops-pulse/nl-dispute-policy";
-import { type LossSettings, type RecoveryOutcome, recoveryCsv, recoveryPending, recoveryNeedsReview } from "@/lib/ops-pulse/nl-loss-policy";
+import { type LossSettings, type RecoveryOutcome, recoveryCsv, recoveryNeedsReview } from "@/lib/ops-pulse/nl-loss-policy";
 import type { LiveCase } from "@/lib/ops-pulse/nl-live";
 import { RecoveryForm } from "./nl-loss-cases";
 import { NlRecoveryDownloadButton } from "./nl-recovery-download-modal";
 import { sortLossRows, LOSS_SORTS } from "@/lib/ops-pulse/loss-list-controls";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { lossStatusMatches } from "@/lib/ops-pulse/loss-recovery-controls";
-import { recoveryDetailsUpdated } from "@/lib/ops-pulse/loss-final-summary";
+import {
+  isRedisputeSummaryCase,
+  recoveryDetailsUpdated,
+  stationRecoveryUpdateComplete,
+} from "@/lib/ops-pulse/loss-final-summary";
+import { redisputeStatus } from "@/lib/ops-pulse/loss-redispute-queue";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 
@@ -42,6 +47,7 @@ const when = (s: string) =>
 const FILTERS = [
   { key: "pending_updates", label: "Pending update", phases: null },
   { key: "updated", label: "Updated", phases: null },
+  { key: "redispute", label: "Redispute", phases: null },
   { key: "recoverable", label: "Recoverable", phases: null },
   { key: "nonrecoverable", label: "Non-recoverable", phases: null },
   { key: "not_disputed", label: "Not disputed", phases: null },
@@ -89,6 +95,7 @@ export function NlLiveCases({
   canDesk,
   canApprove = false,
   outcomes, settings, canRecovered,
+  showRedisputeBreakdown = false,
 }: {
   month: string;
   stageView?: "initial" | "final";
@@ -99,12 +106,13 @@ export function NlLiveCases({
   canDesk: boolean;
   canApprove?: boolean;
   outcomes: RecoveryOutcome[]; settings: LossSettings | null; canRecovered: boolean;
+  showRedisputeBreakdown?: boolean;
 }) {
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   const [sort, setSort] = useState("value_desc");
   const [tracking, setTracking] = useState<{ id: string; station: string } | null>(null);
   const [filter, setFilter] = useState(
-    initialPhase === "all" ? "" : initialPhase && FILTERS.some((f) => f.key === initialPhase) ? initialPhase : stageView === "final" ? "pending_updates" : "",
+    initialPhase === "all" ? "" : initialPhase && FILTERS.some((f) => f.key === initialPhase) && (initialPhase !== "redispute" || showRedisputeBreakdown) ? initialPhase : stageView === "final" ? "pending_updates" : "",
   );
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
@@ -113,7 +121,18 @@ export function NlLiveCases({
     () => cases.map((c) => ({ c, phase: phaseOf(c) })),
     [cases],
   );
-  const matchesStatus = (key: string, c: LiveCase, phase: string) => key === "pending_updates" ? c.recoverable && !recoveryDetailsUpdated(c,c.recovery) : key === "updated" ? c.recoverable && recoveryDetailsUpdated(c,c.recovery) : lossStatusMatches(key,c.recoverable,phase);
+  const redisputeOf = (c: LiveCase) => isRedisputeSummaryCase(c.redispute);
+  const caseUpdated = (c: LiveCase) => showRedisputeBreakdown
+    ? recoveryDetailsUpdated(c,c.recovery)
+    : stationRecoveryUpdateComplete(c,c.recovery);
+  const matchesStatus = (key: string, c: LiveCase, phase: string) => key === "pending_updates"
+    ? c.recoverable && !caseUpdated(c) && (!showRedisputeBreakdown || !redisputeOf(c))
+    : key === "updated"
+      ? c.recoverable && caseUpdated(c) && (!showRedisputeBreakdown || !redisputeOf(c))
+      : key === "redispute"
+        ? showRedisputeBreakdown && redisputeOf(c)
+        : lossStatusMatches(key,c.recoverable,phase);
+  const hasRedisputes = showRedisputeBreakdown && cases.some(redisputeOf);
   const counts = (key: string) => withPhase.filter(x => matchesStatus(key, x.c, x.phase.key)).length;
   const shown = useMemo(() => {
     const phases = FILTERS.find((f) => f.key === filter)?.phases ?? null;
@@ -128,6 +147,7 @@ export function NlLiveCases({
             c.details.sub_category,
             c.details.extra?.shipment_type,
             c.request?.reason,
+            c.redispute?.tt_reference,
           ]
             .join(" ")
             .toLowerCase()
@@ -205,7 +225,7 @@ export function NlLiveCases({
         </div>
       </div>
       <div className={styles.chips} role="tablist" aria-label="Case status">
-        {FILTERS.filter(f => stageView === "final" ? !["todo", "amazon", "not_disputed", "sla_missed"].includes(f.key) : !["pending_updates", "updated", "recoverable", "nonrecoverable"].includes(f.key)).map((f) => (
+        {FILTERS.filter(f => stageView === "final" ? !["todo", "amazon", "not_disputed", "sla_missed"].includes(f.key) && (f.key !== "redispute" || hasRedisputes) : !["pending_updates", "updated", "redispute", "recoverable", "nonrecoverable"].includes(f.key)).map((f) => (
           <button
             key={f.key || "all"}
             role="tab"
@@ -227,9 +247,9 @@ export function NlLiveCases({
           return (
             <article key={c.case_key} className={styles.case}>
               <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
-                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={c.recovery?.updated_at || c.request?.updated_at} updatedBy={c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name} historyCase={{month:c.month,caseKey:c.case_key}}
+                reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={(redisputeOf(c) ? c.redispute?.updated_at : c.recovery?.updated_at || c.request?.updated_at) || undefined} updatedBy={(redisputeOf(c) ? c.redispute?.updated_by_name : c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name) || undefined} historyCase={{month:c.month,caseKey:c.case_key}}
                 open={active === c.case_key} onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.case_key?null:c.case_key)}
-                status={<>{c.period_closed ? <span className={styles.badge}>Closed · read-only</span> : null}<span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{c.recoverable ? <span className={!recoveryDetailsUpdated(c,c.recovery)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!recoveryDetailsUpdated(c,c.recovery)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
+                status={<>{c.period_closed ? <span className={styles.badge}>Closed · read-only</span> : null}<span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{showRedisputeBreakdown && redisputeOf(c) ? <span className={styles.done}>Redispute · {redisputeStatus({enabled:!!c.redispute?.enabled,workflow_status:c.redispute?.workflow_status||undefined,followup_status:c.redispute?.followup_status||"legacy"})}</span> : c.recoverable ? <span className={!caseUpdated(c)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!caseUpdated(c)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
               {active === c.case_key ? (
                 <>
 

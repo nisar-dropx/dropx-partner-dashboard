@@ -1,6 +1,15 @@
 import { loadLossPeriodClosures } from "./loss-period-close";
-import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
-import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
+import {
+  recoveryDetailsUpdated,
+  finalRecoverySummary,
+  isRedisputeSummaryCase,
+} from "./loss-final-summary";
+import {
+  mayActivateRedispute,
+  mayMarkAlreadyRecovered,
+  hasFinalLossOutcome,
+  mayViewRedisputeBreakdown,
+} from "./loss-recovery-controls";
 import "server-only";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -273,15 +282,22 @@ export async function loadRecoveryView(
       lossFilterMatches(station, r.station_code) &&
       lossFilterMatches(reason, r.reason || "Unspecified"),
   );
-  const overviewPlans=await readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations,updated_at").eq("company_id",company).in("month",[...new Set(filtered.map(r=>r.month))].length?[...new Set(filtered.map(r=>r.month))]:["__NONE__"]).order("month").order("case_key"));
-  if(overviewPlans.error) throw Error("Recovery update totals could not be loaded.");
+  const overviewMonths = [...new Set(filtered.map((r) => r.month))];
+  const [overviewPlans, responseWindows] = await Promise.all([
+    readAllRows(supabaseAdmin.from("nl_loss_recoveries").select("month,case_key,is_deleted,approval_status,outcome_code,recovery_details,source_amount,source_status,allocations,updated_at").eq("company_id",company).in("month",overviewMonths.length?overviewMonths:["__NONE__"]).order("month").order("case_key")),
+    slp
+      ? Promise.resolve({ data: [], error: null })
+      : readAllRows(supabaseAdmin.from("nl_case_response_windows").select("month,case_key,enabled,workflow_status,recovery_month,followup_status,updated_at,updated_by_name,tt_reference,response_details").eq("company_id", company).in("month", overviewMonths.length ? overviewMonths : ["__NONE__"]).order("month").order("case_key")),
+  ]);
+  if(overviewPlans.error || responseWindows.error) throw Error("Recovery update totals could not be loaded.");
   const overviewByKey=new Map((overviewPlans.data||[]).map(p=>[`${p.month}|${p.case_key}`,p]));
+  const redisputeByKey=new Map((responseWindows.data||[]).map(r=>[`${r.month}|${r.case_key}`,r]));
   const totals = matchingStations
     .map((s) => {
       const rows = filtered.filter((r) => r.station_code === s.source_code);
       return {
         ...s,
-        ...finalRecoverySummary(rows.map(r=>({...r,recoverable:true,updated:recoveryDetailsUpdated(r,overviewByKey.get(`${r.month}|${r.case_key}`),slp)}))),
+        ...finalRecoverySummary(rows.map(r=>({...r,recoverable:true,updated:recoveryDetailsUpdated(r,overviewByKey.get(`${r.month}|${r.case_key}`),slp),redispute:isRedisputeSummaryCase(redisputeByKey.get(`${r.month}|${r.case_key}`))}))),
         count: rows.length,
         amount: rows.reduce((v, r) => v + Number(r.amount || 0), 0),
       };
@@ -340,6 +356,7 @@ export async function loadRecoveryView(
       .map((r) => ({
         ...r,
         recovery: map.get(`${r.month}::${r.case_key}`) ?? null,
+        redispute: redisputeByKey.get(`${r.month}|${r.case_key}`) ?? null,
       })) as NlCase[];
   }
   const closureStations = matchingStations.filter(s => lossFilterMatches(station, s.source_code) && all.some(r => r.station_code===s.source_code && inPeriod(r))).map(s=>s.source_code);
@@ -364,7 +381,8 @@ export async function loadRecoveryView(
       source_updated_at: r.last_seen_at, source_file: "", amount: Number(r.amount || 0),
       details: { period: r.period || r.month, case_status: r.status, category: r.reason,
         in_initial: String(r.in_initial) === "true", in_final: String(r.in_final) === "true",
-        extra: { current_sla_stage: r.stage } }, recovery: overviewByKey.get(r.month + "|" + r.case_key) || null })) as NlCase[],
+        extra: { current_sla_stage: r.stage } }, recovery: overviewByKey.get(r.month + "|" + r.case_key) || null,
+      redispute: redisputeByKey.get(r.month + "|" + r.case_key) || null })) as NlCase[],
     totals: sortLossRows(totals, filters.sort),
     sort: filters.sort || "value_desc",
     phase: filters.phase || "pending_updates",
@@ -375,6 +393,7 @@ export async function loadRecoveryView(
     canEdit,
     // “Already recovered” is Cluster Manager and above only — never station/location actors.
     canRecovered: canEdit && mayMarkAlreadyRecovered(auth),
+    showRedisputeBreakdown: mayViewRedisputeBreakdown(auth),
     canMaster: hasPermission(auth, "ops_loss_master", "access"),
     canApprove: mayActivateRedispute(auth) && hasPermission(auth, "ops_losses", "edit"),
     canRefresh:

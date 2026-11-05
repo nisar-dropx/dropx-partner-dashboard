@@ -216,7 +216,7 @@ export function NlLiveReport({
               </div>
             </section>
           ) : null}
-          <LossStationTable facts={facts} title={isFinal ? "Station recovery updates" : "Station dispute overview"} initial={!isFinal} href={href({})}/>
+          <LossStationTable facts={facts} title={isFinal ? "Station recovery updates" : "Station dispute overview"} initial={!isFinal} href={href({})} showRedisputeBreakdown={isFinal && v.showRedisputeBreakdown}/>
           {v.station ? (
             <>
               <div className={styles.context}>
@@ -238,6 +238,7 @@ export function NlLiveReport({
                 outcomes={v.outcomes}
                 settings={v.settings}
                 canRecovered={v.canRecovered}
+                showRedisputeBreakdown={v.showRedisputeBreakdown}
               />
             </>
           ) : null}

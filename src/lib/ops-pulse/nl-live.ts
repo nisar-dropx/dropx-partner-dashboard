@@ -1,6 +1,15 @@
 import { assertLossPeriodOpen, loadLossPeriodClosures } from "./loss-period-close";
-import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
-import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
+import {
+  recoveryDetailsUpdated,
+  finalRecoverySummary,
+  isRedisputeSummaryCase,
+} from "./loss-final-summary";
+import {
+  mayActivateRedispute,
+  mayMarkAlreadyRecovered,
+  hasFinalLossOutcome,
+  mayViewRedisputeBreakdown,
+} from "./loss-recovery-controls";
 import "server-only";
 import {
   getAuthorization,
@@ -118,19 +127,37 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
   // Cloak publishes deadlines for the month it is currently deciding (the newest live month).
   const latestLiveMonth = ((meta.data ?? []) as LiveMeta[]).filter(r => r.data_source === "live").map(r => r.month).sort().at(-1);
   const window = month === latestLiveMonth ? storedWindow(source.data?.live_window) : {};
-  const requests = month
-    ? await readAllRows(
+  const [requests, responseWindows] = month
+    ? await Promise.all([
+        readAllRows(
         db
           .from("nl_dispute_requests")
           .select("*")
           .eq("company_id", company)
           .eq("month", month)
           .order("case_key"),
-      )
-    : { data: [], error: null };
-  if (requests.error) throw Error("Dispute requests could not be loaded.");
+        ),
+        stageView === "final"
+          ? readAllRows(
+              db
+                .from("nl_case_response_windows")
+                .select(
+                  "month,case_key,enabled,workflow_status,recovery_month,followup_status,updated_at,updated_by_name,tt_reference,response_details",
+                )
+                .eq("company_id", company)
+                .eq("month", month)
+                .order("case_key"),
+            )
+          : Promise.resolve({ data: [], error: null }),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }];
+  if (requests.error || responseWindows.error)
+    throw Error("Dispute requests could not be loaded.");
   const requestByCase = new Map(
     (requests.data ?? []).map((r) => [r.case_key as string, r as DisputeRequest]),
+  );
+  const redisputeByCase = new Map(
+    (responseWindows.data ?? []).map((r) => [r.case_key as string, r]),
   );
   const cluster = lossFilterValue(lossFilterValues(filters.cluster).filter(v => clusterOptions.some(o => o.value === v)));
   const matchingStations = stations.filter(
@@ -139,7 +166,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
   const allowed = new Set(matchingStations.map((s) => s.source_code));
   const station = lossFilterValue(lossFilterValues(filters.station).filter(v => allowed.has(v)));
   // Opens the case list on a status group: todo (waiting on station), amazon or decided.
-  const phase = ["todo", "amazon", "decided", "recoverable", "nonrecoverable", "pending_updates", "updated", "all"].includes(filters.phase ?? "")
+  const phase = ["todo", "amazon", "decided", "recoverable", "nonrecoverable", "pending_updates", "updated", "redispute", "all"].includes(filters.phase ?? "")
     ? filters.phase!
     : "";
   const monthRows = all
@@ -172,7 +199,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
       list.reduce((v, r) => v + Number(r.amount || 0), 0);
     const mine = by(["action", "respond"]);
     return {
-      ...finalRecoverySummary(rows.map(r=>({...r,recoverable:isRecoverable(r.source_status,recoveryContext.settings?.recoverable_statuses??[]),updated:recoveryDetailsUpdated(r,finalPlanByKey.get(r.case_key))}))),
+      ...finalRecoverySummary(rows.map(r=>({...r,recoverable:isRecoverable(r.source_status,recoveryContext.settings?.recoverable_statuses??[]),updated:recoveryDetailsUpdated(r,finalPlanByKey.get(r.case_key)),redispute:isRedisputeSummaryCase(redisputeByCase.get(r.case_key))}))),
       count: rows.length,
       amount: sum(rows),
       pending: mine.length,
@@ -230,6 +257,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
         period_closed: closures.some(c => c.station_code === r.station_code && c.period === r.month),
         request: requestByCase.get(r.case_key) ?? null,
         recovery: planByKey.get(r.case_key) ?? null,
+        redispute: redisputeByCase.get(r.case_key) ?? null,
         recoverable: isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []) && hasFinalLossOutcome(true, r.source_status, r.details?.case_status, r.details?.extra?.current_sla_stage),
       })) as LiveCase[];
   }
@@ -255,12 +283,14 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     overviewRows: filtered.map(r => ({ ...r, report: "nl", source_present: true,
       source_updated_at: r.last_seen_at, source_file: "", amount: Number(r.amount || 0),
       details: { case_status: r.status, category: r.reason, extra: { current_sla_stage: r.stage } },
-      recovery: finalPlanByKey.get(r.case_key) || null })) as NlCase[],
+      recovery: finalPlanByKey.get(r.case_key) || null,
+      redispute: redisputeByCase.get(r.case_key) || null })) as NlCase[],
     totals: sortLossRows(totals, filters.sort),
     sort: filters.sort || "value_desc",
     outcomes: recoveryContext.outcomes,
     settings: recoveryContext.settings,
     canRecovered: !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && mayMarkAlreadyRecovered(auth),
+    showRedisputeBreakdown: mayViewRedisputeBreakdown(auth),
     summary: tally(filtered),
     cases,
     deskQueue: (requests.data ?? []).filter(

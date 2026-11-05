@@ -24,34 +24,36 @@ const date = (s: string) => s ? new Date(s).toLocaleDateString("en-IN",{day:"2-d
 const sorts: [LossFactSort, string][] = [["amount","Value · highest first"],["station","Station · A–Z"],["count","Shipments · highest first"],["pending","Pending update · highest first"],["remaining","Pending recovery · highest first"],["recovered","Recovered · highest first"],["updatedAt","Latest update"]];
 function Pair({count,amount}:{count:number;amount:number}) { return <span className={styles.pair}><b>{count.toLocaleString("en-IN")}</b><span>{money(amount)}</span></span>; }
 
-export function LossStationTable({ facts, title, initial = false, compact = false, href, controls = true, sort: selectedSort = "amount", sortDirection = "desc", sortableHeaders = false, onSort, headerControls, selectedStatus = "all", ledgerReady = true }: {
-  facts: LossFact[]; title: string; headerControls?: ReactNode; selectedStatus?: string; ledgerReady?: boolean; initial?: boolean; compact?: boolean; href: string; controls?: boolean;
+export function LossStationTable({ facts, title, initial = false, compact = false, href, controls = true, sort: selectedSort = "amount", sortDirection = "desc", sortableHeaders = false, onSort, headerControls, selectedStatus = "all", ledgerReady = true, showRedisputeBreakdown = false }: {
+  facts: LossFact[]; title: string; headerControls?: ReactNode; selectedStatus?: string; ledgerReady?: boolean; initial?: boolean; compact?: boolean; href: string; controls?: boolean; showRedisputeBreakdown?: boolean;
   sort?: LossFactSort; sortDirection?: LossFactSortDirection; sortableHeaders?: boolean; onSort?: (sort: LossFactSort) => void;
 }) {
   const [status,setStatus] = useState("all"), [sort,setSort] = useState<LossFactSort>(selectedSort);
   const activeSort = controls ? sort : selectedSort;
   const activeDirection = controls ? (sort === "station" ? "asc" : "desc") : sortDirection;
   const activeStatus = controls ? status : selectedStatus;
-  const filtered = filterLossFacts(facts,{status:activeStatus}), rows = groupLossFacts(filtered,activeSort,activeDirection,!initial), total = totalLossFacts(filtered);
-  function stationHref(station:string) {
+  const showRedispute = showRedisputeBreakdown && facts.some((fact) => fact.redispute);
+  const filtered = filterLossFacts(facts,{status:activeStatus,stationView:!showRedisputeBreakdown}), rows = groupLossFacts(filtered,activeSort,activeDirection,!initial), total = totalLossFacts(filtered);
+  function stationHref(station:string, statusOverride = activeStatus) {
     const [path,query] = href.split("?"), q = new URLSearchParams(query);
     q.set("station",station);
-    q.set("phase",({pending_update:"pending_updates",updated:"updated",station:"todo",amazon:"amazon",nonrecoverable:"nonrecoverable"} as Record<string,string>)[activeStatus] || (compact ? "recoverable" : "all"));
+    q.set("phase",({pending_update:"pending_updates",updated:"updated",redispute:"redispute",station:"todo",amazon:"amazon",nonrecoverable:"nonrecoverable"} as Record<string,string>)[statusOverride] || (compact ? "recoverable" : "all"));
     return `${path}?${q}`;
   }
-  const metrics = (row: ReturnType<typeof totalLossFacts>) => <>
+  const metrics = (row: ReturnType<typeof totalLossFacts>, station?: string) => <>
     <td><Pair {...(initial ? {count:row.count,amount:row.amount} : row.recoverable)}/></td>
     {initial ? <>
       <td className={styles.warn}><Pair {...row.stationPending}/></td><td className={styles.info}><Pair {...row.amazon}/></td>
     </> : <>
       {compact ? <>
-        <td className={styles.warn}><Pair {...row.pending}/></td>
-        <td className={styles.good}><Pair {...row.updated}/>{ledgerReady && row.draft > 0 ? <small className={styles.draft} title="Draft payroll is not yet confirmed as recovered">Draft {money(row.draft)}</small> : null}</td>
-      </> : <><td className={styles.good}><Pair {...row.updated}/></td><td className={styles.warn}><Pair {...row.pending}/></td></>}
+        <td className={styles.warn}><Pair {...(showRedisputeBreakdown ? row.pending : row.stationPendingUpdate)}/></td>
+        <td className={styles.good}><Pair {...(showRedisputeBreakdown ? row.updated : row.stationUpdated)}/>{ledgerReady && row.draft > 0 ? <small className={styles.draft} title="Draft payroll is not yet confirmed as recovered">Draft {money(row.draft)}</small> : null}</td>
+      </> : <><td className={styles.good}><Pair {...(showRedisputeBreakdown ? row.updated : row.stationUpdated)}/></td><td className={styles.warn}><Pair {...(showRedisputeBreakdown ? row.pending : row.stationPendingUpdate)}/></td></>}
+      {showRedispute ? <td className={styles.info}>{station && row.redispute.count ? <Link href={stationHref(station,"redispute")} prefetch={false} title={`Open ${row.redispute.count} redispute tracking ID${row.redispute.count === 1 ? "" : "s"}`}><Pair {...row.redispute}/></Link> : <Pair {...row.redispute}/>}</td> : null}
       <td className={styles.good}>{ledgerReady ? <Pair count={row.recoveredCount} amount={row.recovered}/> : <span title="Payroll recovery totals unavailable">—</span>}</td>
       {!compact ? <td className={styles.info}><Pair count={row.draftCount} amount={row.draft}/></td> : null}
       <td className={styles.warn}>{ledgerReady ? <Pair count={row.remainingCount} amount={row.remaining}/> : <span title="Payroll recovery totals unavailable">—</span>}</td>
-      {!compact ? <td><Pair {...row.nonrecoverable}/></td> : null}
+      {!compact ? <td><Pair {...(showRedisputeBreakdown ? row.nonrecoverable : row.stationNonrecoverable)}/></td> : null}
     </>}
     {!compact ? <td className={styles.dates}><span title={row.updatedAt}>Updated {date(row.updatedAt)}</span><span title={row.sourceAt}>Source {date(row.sourceAt)}</span></td> : null}
   </>;
@@ -69,20 +71,21 @@ export function LossStationTable({ facts, title, initial = false, compact = fals
   const ariaSort = (key: LossFactSort): "ascending" | "descending" | undefined => activeSort === key ? (activeDirection === "asc" ? "ascending" : "descending") : undefined;
   return <section className={`${styles.panel} ${compact ? styles.compact : ""}`} aria-label={title}>
     <div className={styles.head}><h2>{title}</h2>{headerControls}{controls ? <div className={styles.controls}>
-      <select aria-label={`${title} status`} value={status} onChange={e=>setStatus(e.target.value)}>{LOSS_SUMMARY_STATUSES.filter(([key])=>initial ? ["all","station","amazon"].includes(key) : !["station","amazon"].includes(key)).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
+      <select aria-label={`${title} status`} value={status} onChange={e=>setStatus(e.target.value)}>{LOSS_SUMMARY_STATUSES.filter(([key])=>initial ? ["all","station","amazon"].includes(key) : !["station","amazon"].includes(key) && (key !== "redispute" || showRedispute)).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
       <select aria-label={`${title} sort`} value={sort} onChange={e=>setSort(e.target.value as LossFactSort)}>{sorts.map(([key,label])=><option key={key} value={key}>{!initial && key === "amount" ? "Recoverable value · highest first" : !initial && key === "count" ? "Recoverable shipments · highest first" : label}</option>)}</select>
     </div>:null}</div>
-    <div className={styles.scroll}><ReportTable><caption className={styles.caption}>Each cell shows shipment count and exact rupee value. Recoverable excludes non-recoverable cases. Updated means recovery details saved, not money recovered. Recovered includes partial collections; outstanding includes unconfirmed draft payroll.</caption><thead><tr><th aria-sort={ariaSort("station")}>{sortHeader("Station", "station")}</th><th aria-sort={ariaSort("amount")} title={initial ? "Total tracking IDs and loss value" : "Confirmed recoverable shipment count and value"}>{sortHeader(initial ? "Total shipments / value" : compact ? "Recoverable" : "Recoverable shipments / value", "amount", initial ? "Sort by loss value" : "Sort by recoverable value")}</th>
+    <div className={styles.scroll}><ReportTable><caption className={styles.caption}>Each cell shows tracking ID count and exact rupee value. Recoverable excludes non-recoverable cases. Updated means recovery details saved, not money recovered.{showRedispute ? " Redisputes are shown separately and excluded from Pending update." : ""} Recovered includes partial collections; outstanding includes unconfirmed draft payroll.</caption><thead><tr><th aria-sort={ariaSort("station")}>{sortHeader("Station", "station")}</th><th aria-sort={ariaSort("amount")} title={initial ? "Total tracking IDs and loss value" : "Confirmed recoverable shipment count and value"}>{sortHeader(initial ? "Total shipments / value" : compact ? "Recoverable" : "Recoverable shipments / value", "amount", initial ? "Sort by loss value" : "Sort by recoverable value")}</th>
       {initial ? <><th>Waiting on station</th><th>Awaiting Amazon / final</th></> : <>
         {compact ? <><th aria-sort={ariaSort("pending")}>{sortHeader("Needs update", "pending", "Sort by pending update value")}</th><th title="Saved recovery details; not confirmed collections">Updated</th></> : <><th>Updated</th><th>Pending update</th></>}
+        {showRedispute ? <th title="Active or won redisputes; click a station count to open the tracking IDs">Redispute</th> : null}
         <th aria-sort={ariaSort("recovered")} title="Shipments with full or partial confirmed recovery">{sortHeader("Recovered", "recovered")}</th>
         {!compact ? <th title="Applied in an open payroll; included in pending recovery until payroll is confirmed">Draft payroll</th> : null}
         <th aria-sort={ariaSort("remaining")} title="Amount still to collect, including draft payroll">{sortHeader(compact ? "Outstanding" : "Pending recovery", "remaining")}</th>
         {!compact ? <th>Non-recoverable</th> : null}
       </>}
       {!compact ? <th>Last dates</th> : null}</tr></thead><tbody>
-      {rows.map(row=><tr key={row.station}><th scope="row"><Link href={stationHref(row.station)} prefetch={false}>{row.station} ↗</Link>{compact?<small className={styles.stationDate}>Updated {date(row.updatedAt)}</small>:null}</th>{metrics(row)}</tr>)}
-      {!rows.length?<tr><td colSpan={initial?5:compact?6:9}>No cases match these filters.</td></tr>:null}
+      {rows.map(row=><tr key={row.station}><th scope="row"><Link href={stationHref(row.station)} prefetch={false}>{row.station} ↗</Link>{compact?<small className={styles.stationDate}>Updated {date(row.updatedAt)}</small>:null}</th>{metrics(row,row.station)}</tr>)}
+      {!rows.length?<tr><td colSpan={(initial?5:compact?6:9)+(showRedispute?1:0)}>No cases match these filters.</td></tr>:null}
     </tbody>{rows.length>0?<tfoot><tr><th scope="row">Total</th>{metrics(total)}</tr></tfoot>:null}</ReportTable></div>
   </section>;
 }
@@ -93,11 +96,12 @@ type LossSummaryStation = {
   region: string;
 };
 
-export function LossSummary({facts,ledgerReady,stations,clusterOptions}:{
+export function LossSummary({facts,ledgerReady,stations,clusterOptions,showRedisputeBreakdown=false}:{
   facts:LossFact[];
   ledgerReady:boolean;
   stations:LossSummaryStation[];
   clusterOptions:{value:string;label:string}[];
+  showRedisputeBreakdown?:boolean;
 }) {
   const [station,setStation]=useState(""),[cluster,setCluster]=useState(""),[region,setRegion]=useState(""),[status,setStatus]=useState("all");
   const [sort,setSort]=useState<LossFactSort>("amount"),[sortDirection,setSortDirection]=useState<LossFactSortDirection>("desc");
@@ -123,7 +127,7 @@ export function LossSummary({facts,ledgerReady,stations,clusterOptions}:{
       <label>Station<select value={station} onChange={e=>setStation(e.target.value)}><option value="">All my stations</option>{stationOptions.map(s=><option key={s}>{s}</option>)}</select></label>
       <label>Cluster / AOM<select value={cluster} onChange={e=>{setCluster(e.target.value);setStation("");}}><option value="">All clusters / AOMs</option>{visibleClusters.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
       <label>Region<select value={region} onChange={e=>{setRegion(e.target.value);setStation("");}}><option value="">All regions</option>{regions.map(value=><option key={value} value={value}>{value==="unmapped"?"Region not mapped":value}</option>)}</select></label>
-      <label>Status<select value={status} onChange={e=>setStatus(e.target.value)}>{LOSS_SUMMARY_STATUSES.filter(([key])=>!["station","amazon","nonrecoverable"].includes(key)).map(([k,l])=><option key={k} value={k} disabled={!ledgerReady && ["recovered","outstanding"].includes(k)}>{l}</option>)}</select></label>
+      <label>Status<select value={status} onChange={e=>setStatus(e.target.value)}>{LOSS_SUMMARY_STATUSES.filter(([key])=>!["station","amazon","nonrecoverable"].includes(key) && (key!=="redispute" || showRedisputeBreakdown && recoverable.some((fact)=>fact.redispute))).map(([k,l])=><option key={k} value={k} disabled={!ledgerReady && ["recovered","outstanding"].includes(k)}>{l}</option>)}</select></label>
       <button type="button" onClick={reset}>Reset</button>
     </div>
     {!ledgerReady?<p role="status">Payroll totals unavailable. Recovered and outstanding are hidden until they can be verified.</p>:null}
@@ -139,7 +143,7 @@ export function LossSummary({facts,ledgerReady,stations,clusterOptions}:{
           <option value="">All {report.toUpperCase()} periods</option>
         </select>
       </label>;
-      return <div key={report}><LossStationTable facts={rows} title={report.toUpperCase()} compact href={`/team-ops/losses/${report}?${q}`} controls={false} sort={sort} sortDirection={sortDirection} sortableHeaders onSort={toggleSort} headerControls={periodControl} selectedStatus={status} ledgerReady={ledgerReady}/>
+      return <div key={report}><LossStationTable facts={rows} title={report.toUpperCase()} compact href={`/team-ops/losses/${report}?${q}`} controls={false} sort={sort} sortDirection={sortDirection} sortableHeaders onSort={toggleSort} headerControls={periodControl} selectedStatus={status} ledgerReady={ledgerReady} showRedisputeBreakdown={showRedisputeBreakdown}/>
         {ledgerReady && total.waived > 0 ? <div className={styles.breakup}><span>Waived <b>{money(total.waived)}</b> · excluded from pending recovery</span></div> : null}
       </div>;
     })}</div>

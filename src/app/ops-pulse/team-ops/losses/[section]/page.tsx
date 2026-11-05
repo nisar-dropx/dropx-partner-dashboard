@@ -6,7 +6,7 @@ import { LossDebitReview } from "@/components/loss-debit-review";
 import { LossRecoveryUpdates } from "@/components/loss-recovery-updates";
 import { recoveryUpdates } from "@/lib/ops-pulse/loss-recovery-updates";
 import { loadCurrentLossPayrollMonth, loadLossDebits } from "@/lib/ops-pulse/loss-debit-data";
-import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter } from "@/lib/ops-pulse/loss-recovery-controls";
+import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter, mayViewRedisputeBreakdown } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
 import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
 import { LossExceptionsDesk } from "@/components/loss-exceptions-desk";
@@ -222,6 +222,7 @@ export default async function LossesSectionPage({
           region: String(station.region || "").trim() || "unmapped",
         }))}
         clusterOptions={scope.clusterOptions}
+        showRedisputeBreakdown={mayViewRedisputeBreakdown(auth)}
       /></main>;
   }
   const section = sections[params.section];

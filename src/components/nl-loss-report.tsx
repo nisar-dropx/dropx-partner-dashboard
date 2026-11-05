@@ -197,7 +197,7 @@ export function NlLossReport({
           </div>
         </section>
       ) : null}
-      <LossStationTable facts={facts} title={initial ? "Station initial overview" : "Station recovery overview"} initial={initial} href={href(v.station)}/>
+      <LossStationTable facts={facts} title={initial ? "Station initial overview" : "Station recovery overview"} initial={initial} href={href(v.station)} showRedisputeBreakdown={!initial && v.showRedisputeBreakdown}/>
       {!initial && v.totals.length ? <details className={styles.compactDetails}><summary>Bulk recovery update</summary><LossWorkbook kind={v.kind} query={workbookQuery.toString()} canUpload={v.canEdit} scope={v.station || "your stations"}/></details> : null}
       {v.station ? (
         <div className={styles.context}>
@@ -217,6 +217,7 @@ export function NlLossReport({
           canRecovered={v.canRecovered}
           canApprove={v.canApprove}
           showPeriod={v.month === ALL_PERIODS || lossFilterValues(v.month).length > 1}
+          showRedisputeBreakdown={v.showRedisputeBreakdown}
         />
       ) : null}
       <p className={styles.footer}>{initial ? "Initial is a report only. Confirmed SLP cases move to Final for recovery." : copy.footer}</p>
