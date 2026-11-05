@@ -18663,6 +18663,25 @@ img.dx-selfie-live {
 .dx-workforce-ui .dx-mobile-nav button { min-height: 56px; font-size: 12px; font-weight: 650; gap: 5px; }
 .dx-workforce-ui .dx-mobile-nav button span { font-size: 12px; line-height: 1.3; }
 .dx-workforce-ui .dx-mobile-nav button.active { box-shadow: 0 4px 14px #9e335f20; }
+.dx-workforce-ui .dx-mobile-nav { justify-content: center; gap: 5px; padding-inline: 12px; }
+.dx-workforce-ui .dx-mobile-nav button { max-width: 124px; }
+.dx-workforce-ui .dx-dashboard { gap: 13px; }
+.dx-workforce-ui .dx-workforce-dashboard .dx-dashboard-card { padding: 17px; }
+.dx-workforce-ui .dx-workforce-dashboard .dx-dashboard-card > header { margin-bottom: 10px; }
+.dx-workforce-ui .dx-workforce-dashboard-pay .dx-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dx-workforce-ui .dx-workforce-dashboard-pay .dx-dashboard-metric:first-child { grid-column: 1 / -1; }
+.dx-workforce-ui .dx-workforce-dashboard-pay .dx-dashboard-metric { min-height: 62px; }
+.dx-workforce-ui .dx-workforce-dashboard-pay .dx-dashboard-metric-copy strong { overflow: visible; font-size: clamp(16px, 5.2vw, 22px); text-overflow: clip; }
+.dx-workforce-ui .dx-workforce-dashboard-pay .dx-dashboard-metric-copy small { overflow: hidden; max-width: 100%; text-overflow: ellipsis; }
+.dx-workforce-dashboard-pay-loading { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 13px 2px 2px; color: #475467; }
+.dx-workforce-dashboard-pay-loading > span { width: 28px; height: 28px; flex: 0 0 auto; border: 3px solid #eceff4; border-top-color: #c64b22; border-radius: 50%; animation: dx-spin .8s linear infinite; }
+.dx-workforce-dashboard-pay-loading p { display: grid; gap: 2px; margin: 0; }
+.dx-workforce-dashboard-pay-loading strong { color: #1d2939; font-size: 14px; }
+.dx-workforce-dashboard-pay-loading small { color: #667085; }
+.dx-workforce-ui .dx-dashboard-actions > div > button { min-height: 70px; }
+.dx-workforce-ui .dx-dashboard-actions > div > button strong { font-size: 13px; line-height: 1.2; white-space: normal; }
+.dx-workforce-ui .dx-dashboard-actions > div > button small { font-size: 10px; }
+.dx-workforce-ui .dx-dashboard-actions > div > button > span { overflow: hidden; }
 .dx-workforce-ui :is(.dx-profile-pop, .dx-notification-pop) button { min-height: 44px; }
 .dx-workforce-ui :is(.dx-alert, .dx-setting-card) { font-size: 14px; line-height: 1.6; }
 @media(max-width: 600px) {

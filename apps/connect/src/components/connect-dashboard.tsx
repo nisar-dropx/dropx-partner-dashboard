@@ -236,6 +236,7 @@ export function ConnectDashboard({
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
   const [paymentSummary, setPaymentSummary] = useState<WorkforcePaymentSummary | null>(null);
+  const [paymentState, setPaymentState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
   const [payoutReviews, setPayoutReviews] = useState<WorkforcePayoutReview[]>([]);
   const now = useDashboardClock(active);
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
@@ -387,28 +388,42 @@ export function ConnectDashboard({
   useEffect(() => {
     if (variant !== "workforce" || !account.pageAccess?.includes("earnings")) {
       setPaymentSummary(null);
+      setPaymentState("idle");
       setPayoutReviews([]);
       return;
     }
     let cancelled = false;
+    const earningsController = new AbortController();
+    const payoutController = new AbortController();
+    const earningsTimeout = window.setTimeout(() => earningsController.abort(), 15_000);
+    const payoutTimeout = window.setTimeout(() => payoutController.abort(), 15_000);
+    setPaymentState("loading");
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
     Promise.all([
-      fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" }),
-      fetch(`/api/connect/earnings?${query}`, { cache: "no-store" }),
-      fetch(`/api/connect/payout-review?${query}`, { cache: "no-store" })
+      fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store", signal: earningsController.signal }),
+      fetch(`/api/connect/earnings?${query}`, { cache: "no-store", signal: earningsController.signal })
     ])
-      .then(async ([paymentsResponse, earningsResponse, payoutResponse]) => {
-        const payments = paymentsResponse.ok ? await paymentsResponse.json() as WorkforcePaymentSummary : null;
-        const earnings = earningsResponse.ok ? await earningsResponse.json() as { summary?: { grossAmount?: number } } : null;
-        const payoutPayload = payoutResponse.ok ? await payoutResponse.json() as { payouts?: WorkforcePayoutReview[] } : null;
-        return {
-          payments: payments ? { ...payments, summary: { ...payments.summary, earnings: earnings?.summary?.grossAmount ?? payments.summary.earnings } } : null,
-          payouts: Array.isArray(payoutPayload?.payouts) ? payoutPayload.payouts : []
-        };
+      .then(async ([paymentsResponse, earningsResponse]) => {
+        if (!paymentsResponse.ok || !earningsResponse.ok) throw new Error("Earnings unavailable");
+        const payments = await paymentsResponse.json() as WorkforcePaymentSummary;
+        const earnings = await earningsResponse.json() as { summary?: { grossAmount?: number } };
+        return { ...payments, summary: { ...payments.summary, earnings: earnings?.summary?.grossAmount ?? payments.summary.earnings } };
       })
-      .then((payload) => { if (!cancelled) { setPaymentSummary(payload.payments); setPayoutReviews(payload.payouts); } })
-      .catch(() => { if (!cancelled) { setPaymentSummary(null); setPayoutReviews([]); } });
-    return () => { cancelled = true; };
+      .then((payments) => { if (!cancelled) { setPaymentSummary(payments); setPaymentState("ready"); } })
+      .catch(() => { if (!cancelled) { setPaymentSummary(null); setPaymentState("unavailable"); } })
+      .finally(() => window.clearTimeout(earningsTimeout));
+    fetch(`/api/connect/payout-review?${query}`, { cache: "no-store", signal: payoutController.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ payouts?: WorkforcePayoutReview[] }> : null)
+      .then((payload) => { if (!cancelled) setPayoutReviews(Array.isArray(payload?.payouts) ? payload.payouts : []); })
+      .catch(() => { if (!cancelled) setPayoutReviews([]); })
+      .finally(() => window.clearTimeout(payoutTimeout));
+    return () => {
+      cancelled = true;
+      earningsController.abort();
+      payoutController.abort();
+      window.clearTimeout(earningsTimeout);
+      window.clearTimeout(payoutTimeout);
+    };
   }, [account.id, account.pageAccess, account.profileType, variant]);
 
   const alerts = useMemo(() => {
@@ -614,20 +629,20 @@ export function ConnectDashboard({
 
     {workforce && pageAccess.includes("earnings") ? <section className="dx-dashboard-card dx-workforce-dashboard-pay">
       <header><div><small>My pay · {paymentSummary?.period || "This month"}</small><h2>Live earnings</h2></div><button onClick={(event) => { event.stopPropagation(); onPayments(); }}>View all <ChevronRight /></button></header>
-      {paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Estimated live earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">Payment mapping is being set up. Earnings appear here once your provider ID and rate card are active.</p>}
+      {paymentState === "idle" || paymentState === "loading" ? <div className="dx-workforce-dashboard-pay-loading" role="status"><span /><p><strong>Updating your earnings…</strong><small>You can continue using the app.</small></p></div> : paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Estimated earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">{paymentState === "unavailable" ? "Earnings are taking longer than usual. Please check again shortly." : "No earnings are available for this month yet."}</p>}
     </section> : null}
 
     <section className="dx-dashboard-card dx-dashboard-actions">
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
-        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={() => onPayments()}><i className="amber"><IndianRupee /></i><span><strong>Payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
-{workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Pincode, weekly off and time off</small></span><ChevronRight /></button> : null}
+        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={() => onPayments()}><i className="amber"><IndianRupee /></i><span><strong>Payments</strong><small>Earnings &amp; advances</small></span><ChevronRight /></button> : null}
+        {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Attendance &amp; time off</small></span><ChevronRight /></button> : null}
         {!workforce && attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
         {!workforce && leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
-        {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
-        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><MessageCircleMore /></i><span><strong>Connect</strong><small>Updates, Workforce team and Speak Up</small></span><ChevronRight /></button> : null}
-        {referAllowed ? <button onClick={onRefer}><i className="green"><UsersRound /></i><span><strong>Refer &amp; Earn</strong><small>Refer a candidate and track the reward</small></span><ChevronRight /></button> : null}
+        {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Progress &amp; goals</small></span><ChevronRight /></button> : null}
+        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><MessageCircleMore /></i><span><strong>Connect</strong><small>Help &amp; updates</small></span><ChevronRight /></button> : null}
+        {referAllowed ? <button onClick={onRefer}><i className="green"><UsersRound /></i><span><strong>Refer &amp; Earn</strong><small>Refer a delivery partner</small></span><ChevronRight /></button> : null}
         {!workforce && advancesAllowed ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
         {profileAllowed && !workforce ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
       </div>

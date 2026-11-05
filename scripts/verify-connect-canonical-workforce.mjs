@@ -9,6 +9,15 @@ const connectTypes = read("apps/connect/src/lib/workforce-profiles.ts");
 const dashboardTypes = read("src/lib/workforce-profiles.ts");
 const workforcePayments = read("apps/connect/app/api/connect/workforce-payments/route.ts");
 const workforcePaymentsUi = read("apps/connect/src/components/connect-workforce-payments.tsx");
+const dashboardUi = read("apps/connect/src/components/connect-dashboard.tsx");
+const loginFlowUi = read("apps/connect/src/components/connect-login-flow.tsx");
+const mobileNavStart = loginFlowUi.lastIndexOf('<nav aria-label="Primary navigation"');
+const mobileNav = mobileNavStart >= 0 ? loginFlowUi.slice(mobileNavStart) : "";
+const workforceMobileStart = mobileNav.indexOf('isWorkforceWorkspace(account) ? <>');
+const workforceMobileEnd = mobileNav.indexOf('</> : <>', workforceMobileStart);
+const workforceMobileNav = workforceMobileStart >= 0 && workforceMobileEnd > workforceMobileStart
+  ? mobileNav.slice(workforceMobileStart, workforceMobileEnd)
+  : "";
 const migration = read("supabase/migrations/20260829153000_enforce_people_workforce_register_boundary.sql");
 const routing = read("src/lib/designation-register-routing.ts");
 
@@ -26,6 +35,8 @@ const checks = [
   [auth.includes("normalizeWorkforcePageAccess") && auth.includes("pageAccessByDesignationRole"), "Workforce designation page codes and imported designation labels resolve safely"],
   [workforcePayments.includes('`workforce_id.eq.${account.id}`') && workforcePayments.includes('and(workforce_id.is.null,') && workforcePayments.includes('.or(identityFilters.length') && workforcePayments.includes('paymentMappingForDay(mappings,row)'), "Workforce payment lookup scopes canonical identity, protects legacy aliases and respects effective dates"],
   [workforcePaymentsUi.includes("/api/connect/earnings?") && workforcePaymentsUi.includes("Estimated live earnings"), "Workforce live earnings use the active rate card when imports have no processed payout amount"],
+  [dashboardUi.includes('setPaymentState("loading")') && dashboardUi.includes("Updating your earnings…") && !dashboardUi.includes("Payment mapping is being set up"), "Workforce home distinguishes earnings loading from a genuine empty month without showing setup jargon"],
+  [workforceMobileNav.includes("<span>Home</span>") && workforceMobileNav.includes("<span>Payments</span>") && workforceMobileNav.includes("<span>Connect</span>") && workforceMobileNav.includes("<span>Performance</span>") && !workforceMobileNav.includes("<span>Work</span>") && !workforceMobileNav.includes("<span>Refer</span>"), "Workforce mobile navigation stays limited to the four primary destinations"],
   [auth.includes('nonEmployeeSelect("contractor")') && auth.includes("nonEmployeeSelect(profileType, true)"), "Each One account register is queried only with columns available on that table"],
   [auth.includes('if (profileType === "contractor")') && auth.includes('`${nonEmployeeBaseSelect}${mobileColumns},deleted_at`'), "People contractors do not depend on Workforce-only source columns"],
   [auth.includes("employeeReferences"), "Duplicate People manager and employee logins stay collapsed"],
