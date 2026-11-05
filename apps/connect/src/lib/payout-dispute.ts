@@ -370,3 +370,30 @@ export function payoutMonthForPeriod(from: string, to: string) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(to)) return to.slice(0, 7);
   return /^\d{4}-\d{2}-\d{2}$/.test(from) ? from.slice(0, 7) : "";
 }
+
+export function latestPublishedPayoutMonth(
+  payouts: Array<{ from?: string | null; to?: string | null }>,
+) {
+  return payouts
+    .map((payout) => payoutMonthForPeriod(String(payout.from ?? ""), String(payout.to ?? "")))
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+}
+
+export function activePayoutForReview<T extends {
+  reviewState?: string | null;
+  reviewUntil?: string | null;
+  publishedAt?: string | null;
+}>(payouts: T[], now = Date.now()): T | null {
+  return payouts
+    .filter((payout) => {
+      const deadline = Date.parse(String(payout.reviewUntil ?? ""));
+      return payout.reviewState === "open" && Number.isFinite(deadline) && deadline > now;
+    })
+    .sort((left, right) => {
+      const published = Date.parse(String(right.publishedAt ?? "")) - Date.parse(String(left.publishedAt ?? ""));
+      if (Number.isFinite(published) && published !== 0) return published;
+      return Date.parse(String(right.reviewUntil ?? "")) - Date.parse(String(left.reviewUntil ?? ""));
+    })[0] ?? null;
+}

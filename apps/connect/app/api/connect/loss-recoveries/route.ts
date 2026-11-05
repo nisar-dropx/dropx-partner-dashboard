@@ -141,6 +141,8 @@ export async function GET(request: Request) {
           (typeof details.remarks === "string" && details.remarks) ||
           plan.data?.remarks ||
           null,
+        caseRemarks: typeof details.remarks === "string" ? details.remarks : null,
+        recoveryRemarks: plan.data?.remarks || null,
         daName: typeof details.da_name === "string" ? details.da_name : null,
         caseAmount: Number(caseRow.data?.amount ?? row.total) || 0,
         assignedAmount: Number(row.total),

@@ -34,30 +34,32 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
  // Own mapped rates are already part of the earnings permission on the server.
  const rateCardAllowed=earningsAllowed||access.includes('rate_card');
  const firstTab:Tab=searchParams.get('tab')==='payouts'&&earningsAllowed?'statements':earningsAllowed?'earnings':advancesAllowed?'advances':'rate-card';
- const [tab,setTab]=useState<Tab>(firstTab),[month,setMonth]=useState(normalizePayoutMonth(searchParams.get('payoutMonth'))??currentPayoutMonth());
+ const requestedPayoutMonth=normalizePayoutMonth(searchParams.get('payoutMonth'));
+ const [tab,setTab]=useState<Tab>(firstTab),[earningsMonth,setEarningsMonth]=useState(currentPayoutMonth()),[payoutMonth,setPayoutMonth]=useState(requestedPayoutMonth??currentPayoutMonth());
  const [calculated,setCalculated]=useState<EarningsData|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const [reference,setReference]=useState<PaymentReference|null>(null),[referenceLoading,setReferenceLoading]=useState(false),[referenceError,setReferenceError]=useState('');
  const [expandedDate,setExpandedDate]=useState(''),[payoutLocked,setPayoutLocked]=useState(false),[payoutVisited,setPayoutVisited]=useState(firstTab==='statements');
  const generation=useRef(0),monthCache=useRef(new Map<string,{at:number;data:EarningsData}>());
+ const latestPayoutMonthApplied=useRef(Boolean(requestedPayoutMonth));
  const routeCache=useRef(createRoutePreviewCache<RouteGeometry>());
  const load=useCallback(async(force=false)=>{
-  const version=++generation.current,cached=monthCache.current.get(month);
+  const version=++generation.current,cached=monthCache.current.get(earningsMonth);
   setError('');setExpandedDate('');
   if(!force&&cached&&Date.now()-cached.at<60000){setCalculated(cached.data);setLoading(false);return;}
   setCalculated(null);setLoading(true);
   try{
-   const query=new URLSearchParams({accountId:account.id,profileType:account.profileType,month});
+   const query=new URLSearchParams({accountId:account.id,profileType:account.profileType,month:earningsMonth});
    const response=await fetch(`/api/connect/earnings?${query}`,{cache:'no-store',signal:AbortSignal.timeout(25000)});
    const result=await response.json() as EarningsData&{error?:string};
    if(!response.ok)throw new Error(result.error||'Unable to load earnings.');
-   if(result.month!==month||!result.adjustments||!Array.isArray(result.incentives?.campaigns))throw new Error('Your payment estimate could not be verified.');
+   if(result.month!==earningsMonth||!result.adjustments||!Array.isArray(result.incentives?.campaigns))throw new Error('Your payment estimate could not be verified.');
    reconcileOwnProduction(result.earnings,result.summary);
    if(version!==generation.current)return;
-   monthCache.current.set(month,{at:Date.now(),data:result});if(monthCache.current.size>3)monthCache.current.delete(monthCache.current.keys().next().value!);
+   monthCache.current.set(earningsMonth,{at:Date.now(),data:result});if(monthCache.current.size>3)monthCache.current.delete(monthCache.current.keys().next().value!);
    setCalculated(result);
   }catch(e){if(version===generation.current)setError(e instanceof Error&&e.name!=='TimeoutError'?e.message:'Earnings are taking longer than usual. Please retry.');}
   finally{if(version===generation.current)setLoading(false);}
- },[account.id,account.profileType,month]);
+ },[account.id,account.profileType,earningsMonth]);
  useEffect(()=>{if(tab!=='earnings'||!earningsAllowed)return;void load();return()=>{generation.current++;};},[load,tab,earningsAllowed]);
  const loadReference=useCallback(async()=>{
   setReferenceLoading(true);setReferenceError('');
@@ -73,13 +75,16 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
  const daily=useMemo(()=>calculated?reconcileOwnProduction(calculated.earnings,calculated.summary):[],[calculated]);
  const fuels=calculated?.routeFuel??[],pending=fuels.some(f=>f.status==='pending');
  const changeTab=(next:Tab)=>{setTab(next);if(next==='statements')setPayoutVisited(true);};
+ const visibleMonth=tab==='statements'?payoutMonth:earningsMonth;
+ const shiftVisibleMonth=(amount:number)=>tab==='statements'?setPayoutMonth(value=>shiftPayoutMonth(value,amount)):setEarningsMonth(value=>shiftPayoutMonth(value,amount));
+ const useLatestPayoutMonth=useCallback((latest:string)=>{if(latestPayoutMonthApplied.current)return;latestPayoutMonthApplied.current=true;setPayoutMonth(latest);},[]);
  return <section className={`dx-workforce-payments ${styles.page}`}>
   <div className={styles.headingRow}>
    <header className="dx-page-intro"><small>My pay</small><h1>Payments</h1><p>Your earnings, payouts and agreed rates.</p></header>
    {earningsAllowed&&tab!=='rate-card'?<div className={monthStyles.monthPicker}><span>Payment month</span><div className={monthStyles.monthControl} role="group" aria-label="Earnings and payout month">
-    <button type="button" aria-label="Previous earnings and payout month" disabled={(tab==='statements'&&payoutLocked)||loading} onClick={()=>setMonth(m=>shiftPayoutMonth(m,-1))}><ChevronLeft/></button>
-    <strong aria-live="polite"><span aria-hidden="true">{payoutMonthLabel(month)}</span><span className={monthStyles.srOnly}>Showing earnings and payouts for {payoutMonthLongLabel(month)}</span></strong>
-    <button type="button" aria-label="Next earnings and payout month" disabled={month>=currentPayoutMonth()||(tab==='statements'&&payoutLocked)||loading} onClick={()=>setMonth(m=>shiftPayoutMonth(m,1))}><ChevronRight/></button>
+    <button type="button" aria-label={`Previous ${tab==='statements'?'payout':'earnings'} month`} disabled={(tab==='statements'&&payoutLocked)||loading} onClick={()=>shiftVisibleMonth(-1)}><ChevronLeft/></button>
+    <strong aria-live="polite"><span aria-hidden="true">{payoutMonthLabel(visibleMonth)}</span><span className={monthStyles.srOnly}>Showing {tab==='statements'?'payouts':'earnings'} for {payoutMonthLongLabel(visibleMonth)}</span></strong>
+    <button type="button" aria-label={`Next ${tab==='statements'?'payout':'earnings'} month`} disabled={visibleMonth>=currentPayoutMonth()||(tab==='statements'&&payoutLocked)||loading} onClick={()=>shiftVisibleMonth(1)}><ChevronRight/></button>
    </div></div>:null}
   </div>
   {earningsAllowed ? <ConnectLossRecoveries accountId={account.id} profileType={account.profileType}/> : null}
@@ -90,10 +95,10 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
    {advancesAllowed?<button className={tab==='advances'?'active':''} onClick={()=>changeTab('advances')}><IndianRupee/>Advances</button>:null}
   </nav>
   {tab==='advances'&&advancesAllowed?<ConnectAdvances account={account} readOnly={readOnly}/>:null}
-  {payoutVisited&&earningsAllowed?<div hidden={tab!=='statements'}><AssociatePayouts accountId={account.id} profileType={account.profileType} month={month} onMonthLockChange={setPayoutLocked}/></div>:null}
+  {payoutVisited&&earningsAllowed?<div hidden={tab!=='statements'}><AssociatePayouts accountId={account.id} profileType={account.profileType} month={payoutMonth} onMonthLockChange={setPayoutLocked} onLatestMonthChange={useLatestPayoutMonth}/></div>:null}
   {tab==='earnings'&&earningsAllowed?<>
-   {loading||(!error&&calculated?.month!==month)?<div className="dx-loader"><span/><small>Loading saved earnings…</small></div>:error?<div role="alert" className="dx-alert error">{error}<button onClick={()=>void load(true)}>Retry</button></div>:calculated?<>
-    <section className="dx-workforce-payment-hero"><span><small>{payoutMonthLongLabel(month)}</small><strong>{money(calculated.summary.netAmount)}</strong><em>{pending?'Known earnings · fuel pending':'Estimated live earnings'}</em></span><button onClick={()=>changeTab('rate-card')}>View rate card <ChevronRight/></button></section>
+   {loading||(!error&&calculated?.month!==earningsMonth)?<div className="dx-loader"><span/><small>Loading saved earnings…</small></div>:error?<div role="alert" className="dx-alert error">{error}<button onClick={()=>void load(true)}>Retry</button></div>:calculated?<>
+    <section className="dx-workforce-payment-hero"><span><small>{payoutMonthLongLabel(earningsMonth)}</small><strong>{money(calculated.summary.netAmount)}</strong><em>{pending?'Known earnings · fuel pending':'Estimated live earnings'}</em></span><button onClick={()=>changeTab('rate-card')}>View rate card <ChevronRight/></button></section>
     <p className={styles.note}>Base pay and allowances {money(calculated.summary.baseAmount)} · Incentives {money(calculated.summary.incentiveAmount)} · Adjustments {money(calculated.summary.additions-calculated.summary.deductionAmount+(calculated.summary.lossRecoveryAmount||0)+(calculated.summary.advanceRecoveryAmount||0))} · Loss recovery {money(calculated.summary.lossRecoveryAmount||0)} · Advance deduction {money(calculated.summary.advanceRecoveryAmount||0)}</p>
     <p className={styles.note}>Loss recovery and advance deduction only include amounts due in this payroll month. An unpaid earlier-month balance stays with that month until its payroll runs (or until recovery has already started / that earlier payroll has closed).</p>
     <section className="dx-workforce-payment-stats"><article><CalendarDays/><span><strong>{calculated.summary.workDays}</strong><small>Eligible work days</small></span></article>{fuels.length?<><article><Route/><span><strong>{fuels.filter(f=>f.status==='ready').reduce((n,f)=>n+(f.km??0),0).toLocaleString('en-IN',{maximumFractionDigits:2})} km</strong><small>Recorded fuel distance</small></span></article><article><IndianRupee/><span><strong>{money(fuels.reduce((n,f)=>n+(f.amount??0),0))}</strong><small>Known KM fuel allowance</small></span></article></>:<article><Route/><span><strong>{daily.reduce((n,d)=>n+d.deliveries,0)}</strong><small>Recorded deliveries</small></span></article>}</section>

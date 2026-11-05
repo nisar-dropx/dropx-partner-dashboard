@@ -481,7 +481,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     const destination = connectNotificationStep(notification.route);
     if (destination) {
       setNotificationMenu(false);
-      open(destination);
+      const payoutMonth = typeof notification.data?.payoutMonth === "string" ? notification.data.payoutMonth : "";
+      const payoutQuery = destination === "payments" && notification.data?.tab === "payouts"
+        ? { tab: "payouts", ...(payoutMonth ? { payoutMonth } : {}) }
+        : {};
+      open(destination, "all", payoutQuery);
       if (destination === "connect") setConnectTarget({ caseId: String(notification.data?.caseId ?? ""), announcementId: String(notification.data?.announcementId ?? "") });
     } else if (notification.route) {
       try {
@@ -675,7 +679,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     const url=connectAccountRoute(route, targetAccount, requestedApprovalSection ?? pendingApprovalSection.current);
     return next === "activation" && targetAccount?.betaWorkspaceActive ? `${url}${url.includes("?")?"&":"?"}history=1` : url;
   }
-  function open(next: Step, nextAttendanceFilter: AttendanceFilter = "all") {
+  function open(next: Step, nextAttendanceFilter: AttendanceFilter = "all", nextQuery: Record<string, string> = {}) {
     setDrawer(false); setProfileMenu(false);
     if (next === "connect") setConnectTarget({ caseId: "", announcementId: "" });
     if (next === "attendance") setAttendanceFilter(nextAttendanceFilter);
@@ -735,7 +739,15 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     if (next === "salary") setPaymentsExpanded(true);
     setStep(next === "wfh" ? leaveRouteState(next).screen : next);
     const destination = routeForStep[next];
-    if (destination && pathname !== destination) router.push(urlFor(next));
+    if (destination && (pathname !== destination || Object.keys(nextQuery).length)) {
+      const target = urlFor(next);
+      const separator = target.indexOf("?");
+      const targetPath = separator === -1 ? target : target.slice(0, separator);
+      const targetParams = new URLSearchParams(separator === -1 ? "" : target.slice(separator + 1));
+      Object.entries(nextQuery).forEach(([key, value]) => targetParams.set(key, value));
+      const query = targetParams.toString();
+      router.push(query ? `${targetPath}?${query}` : targetPath);
+    }
   }
 
   useEffect(() => {
@@ -955,7 +967,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {step === "betaInbox" && account && isIsolatedAmazonOtpAccount(account) ? (isolatedBetaJourney ? <ConnectBetaJourneyShell account={account} registration={false}><ConnectBetaInbox key={accountKey(account)} account={account} /></ConnectBetaJourneyShell> : <ConnectBetaInbox key={accountKey(account)} account={account} />) : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} onHome={()=>open("dashboard")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
-      {step === "dashboard" && account && !isolatedBetaJourney && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
+      {step === "dashboard" && account && !isolatedBetaJourney && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={(payoutMonth) => open("payments", "all", payoutMonth ? { tab: "payouts", payoutMonth } : {})} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onOnboardingHistory={pilotAccount && account.betaWorkspaceActive && !userPreview ? () => open("activation") : undefined} onInbox={pilotAccount && !userPreview ? () => open("betaInbox") : undefined} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "salary" && account && canViewInterimSalary(account) ? <ConnectInterimSalary key={accountKey(account)} account={account} onDocuments={() => open("documents")} onAttendance={allowed(account, "attendance") ? () => open("attendance") : undefined} /> : null}

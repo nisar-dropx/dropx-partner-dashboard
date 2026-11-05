@@ -8780,6 +8780,27 @@ tr:last-child td {
 .dx-workforce-dashboard > .dx-dashboard-actions { order: 2; }
 .dx-workforce-dashboard > .dx-workforce-attendance-compact { order: 6; }
 
+.dx-workforce-payout-review {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  color: #fff;
+  background: linear-gradient(118deg, #202942, #3f3158 58%, #8d315a);
+  border: 0;
+  box-shadow: 0 16px 34px rgba(44, 34, 70, .18);
+}
+.dx-workforce-payout-review-icon { display: grid; place-items: center; width: 46px; height: 46px; color: #ffb38f; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); border-radius: 14px; }
+.dx-workforce-payout-review-icon svg { width: 22px; }
+.dx-workforce-payout-review > div { display: grid; gap: 3px; min-width: 0; }
+.dx-workforce-payout-review small { color: #ffc6ac; font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.dx-workforce-payout-review h2 { margin: 0; color: #fff; font-size: 18px; }
+.dx-workforce-payout-review p { margin: 0; color: #e9e7f0; font-size: 12px; }
+.dx-workforce-payout-review p strong { color: #fff; }
+.dx-workforce-payout-review > button { display: inline-flex; gap: 5px; align-items: center; justify-content: center; min-height: 40px; padding: 9px 12px; color: #2b2340; background: #fff; border: 0; border-radius: 11px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.dx-workforce-payout-review > button svg { width: 15px; }
+@media(max-width:620px){.dx-workforce-payout-review{grid-template-columns:42px minmax(0,1fr)}.dx-workforce-payout-review-icon{width:42px;height:42px}.dx-workforce-payout-review>button{grid-column:1/-1;width:100%}}
+
 .dx-workforce-attendance-compact {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) 18px;
@@ -18668,7 +18689,8 @@ img.dx-selfie-live {
 .dx-loss-recovery-detail dt{color:#98a2b3;font-size:11px;font-weight:700}
 .dx-loss-recovery-detail dd{margin:0;color:#101828;font-size:13px;overflow-wrap:anywhere}
 .dx-loss-recovery-detail-note{margin-top:14px}
-.dx-loss-recovery-modal{width:min(560px,calc(100vw - 28px))}
+.dx-loss-recovery-modal{width:min(520px,calc(100vw - 28px))}
 
 .dx-recovery-detail-link{display:block;margin-top:5px;border:0;background:transparent;color:#b54708;padding:6px 0;font:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .dx-loss-recovery-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}.dx-loss-recovery-detail>div{display:block;min-width:0}.dx-loss-recovery-detail dt{font-size:12px;color:#667085}.dx-loss-recovery-detail dd{margin:4px 0 0;font-size:14px;overflow-wrap:anywhere}.dx-loss-recovery-modal .dx-dialog-surface{width:100%}@media(max-width:360px){.dx-loss-recovery-detail{grid-template-columns:1fr}}
+.dx-loss-recovery-summary{display:flex;align-items:end;justify-content:space-between;gap:14px;margin:0;padding:13px 14px;color:#475467;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px}.dx-loss-recovery-summary span{font-size:12px}.dx-loss-recovery-summary strong{color:#9a3412;font-size:20px;white-space:nowrap}.dx-loss-recovery-remark{margin-top:4px;padding:13px 14px;background:#f8fafc;border:1px solid #e4e7ec;border-radius:12px}.dx-loss-recovery-remark small{color:#667085;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}.dx-loss-recovery-remark p{margin:5px 0 0;color:#101828;font-size:13px;line-height:1.5}.dx-loss-recovery-history{margin-top:12px}.dx-loss-recovery-history summary{cursor:pointer;color:#475467;font-size:12px;font-weight:700}.dx-loss-recovery-history .dx-loss-recovery-detail{margin-bottom:0}

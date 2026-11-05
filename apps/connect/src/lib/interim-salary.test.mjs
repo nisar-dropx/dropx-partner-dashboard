@@ -212,7 +212,7 @@ test('notification inbox and dashboard CTA are independently scoped; preview mak
     'next/server': { NextResponse: { json: (body, init) => Response.json(body, init) } },
     '../../../../src/lib/connect-auth': { requireConnectAccount: async () => { if (!selected) throw Error('Login expired'); return selected; } },
     '../../../../src/lib/connect-approver-identity': { resolveConnectActorUserId: async () => 'actor' },
-    '../../../../src/lib/supabase-admin': { supabaseAdmin: db }, '@/lib/dashboard-notices': { visibleDashboardNotices },
+    '../../../../src/lib/supabase-admin': { supabaseAdmin: db }, '@/lib/dashboard-notices': { visibleDashboardNotices, expiredConnectNotification: () => false },
     '@/lib/announcement-personalization-data': { personalizeNotices: async (_db, _account, rows) => rows },
     '@/lib/connect-unread': { loadConnectUnread: async () => ({ total: 2, updates: 1, cases: {} }) },
     '@/lib/announcement-notifications': { hydrateAnnouncementNotices: async (_db, _account, rows) => rows, announcementId: () => null }

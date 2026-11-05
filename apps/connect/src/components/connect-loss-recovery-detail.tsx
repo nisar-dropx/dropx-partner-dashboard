@@ -16,6 +16,8 @@ export type Recovery = {
   impactDate: string | null;
   period: string | null;
   remarks: string | null;
+  caseRemarks?: string | null;
+  recoveryRemarks?: string | null;
   daName: string | null;
   caseAmount: number;
   assignedAmount: number;
@@ -49,6 +51,16 @@ export const monthLabel = (value: string) => {
   });
 };
 
+const lossAcronyms = new Set(["COD", "GPS", "MDR", "RTO", "WRTS"]);
+const friendly = (value: string | null | undefined) => String(value ?? "")
+  .trim()
+  .split(/[_\s]+/)
+  .filter(Boolean)
+  .map((word) => lossAcronyms.has(word.toUpperCase())
+    ? word.toUpperCase()
+    : `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
+  .join(" ");
+
 function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
@@ -60,6 +72,14 @@ function DetailRow({ label, value }: { label: string; value: string | null | und
 }
 
 export function RecoveryDetail({ detail, onClose, payrollAmount, payrollLabel }: { detail: Recovery; onClose: () => void; payrollAmount?: number; payrollLabel?: string }) {
+      const lossBucket = [detail.category, detail.subCategory]
+        .filter((value, index, values) => value && values.indexOf(value) === index)
+        .map(friendly)
+        .join(" · ") || friendly(detail.reason) || "Loss recovery";
+      const status = detail.status === "redispute_won" ? "Recovery stopped"
+        : detail.status === "redispute_pending" ? "Under review"
+          : detail.approvalStatus && detail.approvalStatus !== "approved" ? "Awaiting review"
+            : detail.outstanding <= 0 ? "Recovered" : detail.deducted > 0 ? "Recovery in progress" : "Scheduled";
       return (
         <ConnectDialog
           className="dx-loss-recovery-modal"
@@ -67,34 +87,19 @@ export function RecoveryDetail({ detail, onClose, payrollAmount, payrollLabel }:
           title="Loss recovery details"
           onClose={onClose}
         >
-          {payrollAmount != null ? <p className="dx-loss-recovery-detail-note"><strong>{money(payrollAmount)}</strong> included in this {payrollLabel || "payroll"} deduction. This is already included in net pay.</p> : null}
+          {payrollAmount != null ? <p className="dx-loss-recovery-summary"><span>Deducted in this {payrollLabel || "payroll"}</span><strong>{money(payrollAmount)}</strong></p> : null}
           <dl className="dx-loss-recovery-detail">
-            <DetailRow label="Shipment ID" value={detail.tidApproximate ? `${detail.tid} (approximate)` : detail.tid} />
-            <DetailRow label="Salary month · planned start" value={detail.scheduledFromMonth ? monthLabel(detail.scheduledFromMonth) : 'Not recorded'} />
-            {detail.scheduledFromMonth && detail.scheduledFromMonth < new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit'}).format(new Date()) ? <DetailRow label="Earlier salary payroll" value="See the confirmed / draft history below for actual deductions." /> : null}
+            <DetailRow label="Tracking ID" value={detail.tidApproximate ? `${detail.tid} (approximate)` : detail.tid} />
+            <DetailRow label="Loss bucket" value={lossBucket} />
             <DetailRow label="Loss month" value={monthLabel(detail.month)} />
-            <DetailRow label="Case value" value={money(detail.caseAmount)} />
+            <DetailRow label="Loss amount" value={money(detail.caseAmount)} />
             <DetailRow label="Your share" value={money(detail.myShareAmount)} />
-            <DetailRow label="Deducted in confirmed payroll" value={money(detail.deducted)} />
-            <DetailRow label="Outstanding" value={money(detail.outstanding)} />
-            {detail.inPayroll > 0 ? <DetailRow label="In draft payroll · provisional" value={money(detail.inPayroll)} /> : null}
-            {detail.waived > 0 ? <DetailRow label="Written off" value={money(detail.waived)} /> : null}
+            <DetailRow label="Recovered from pay" value={money(detail.deducted)} />
+            <DetailRow label="Balance" value={money(detail.outstanding)} />
+            <DetailRow label="Recovery status" value={status} />
           </dl>
-          {detail.status === "redispute_won" ? <p className="dx-loss-recovery-detail-note">Redispute won. Further recovery has stopped. Any earlier deductions remain in your history; this does not record a refund.</p> : detail.status === "redispute_pending" ? <p className="dx-loss-recovery-detail-note">Redispute in progress. Further recovery is paused.</p> : detail.approvalStatus && detail.approvalStatus !== "approved" ? <p className="dx-loss-recovery-detail-note">This assignment is awaiting review and is not a confirmed payroll deduction.</p> : null}
-          {detail.deductions?.length ? <details open><summary>Payroll deduction history · {detail.deductions.length}</summary><dl className="dx-loss-recovery-detail">{detail.deductions.map(d=><DetailRow key={d.key} label={`${monthLabel(d.month)} salary · ${d.confirmed?"Confirmed":"Draft"}`} value={money(d.amount)}/>)}</dl></details> : null}
-          <details>
-            <summary>Recovery plan and reason</summary>
-            <dl className="dx-loss-recovery-detail">
-              <DetailRow label="Reason" value={detail.reason} />
-              <DetailRow label="Recovery plan" value={detail.recoveryMode === "installments" ? `${detail.installmentCount || "—"} instalments · ${money(detail.monthlyAmount)} / month` : "Full recovery"} />
-              <DetailRow label="Eligible from salary month" value={detail.scheduledFromMonth ? monthLabel(detail.scheduledFromMonth) : null} />
-              <DetailRow label="Last deduction month" value={detail.lastDeductedMonth ? monthLabel(detail.lastDeductedMonth) : null} />
-              <DetailRow label="Status" value={detail.status.replaceAll("_", " ")} />
-              <DetailRow label="Outcome" value={detail.outcomeLabel} />
-              <DetailRow label="Notes" value={detail.remarks} />
-            </dl>
-          </details>
-          <p className="dx-loss-recovery-detail-note">Approved recoveries reduce net pay in the eligible payroll calculation. Remaining amounts carry forward; completed deductions are not charged again.</p>
+          {(detail.caseRemarks || detail.recoveryRemarks || detail.remarks) ? <section className="dx-loss-recovery-remark"><small>Station / recovery remark</small><p>{detail.caseRemarks || detail.recoveryRemarks || detail.remarks}</p></section> : null}
+          {detail.deductions && detail.deductions.length > 1 ? <details className="dx-loss-recovery-history"><summary>Deduction history · {detail.deductions.length}</summary><dl className="dx-loss-recovery-detail">{detail.deductions.map(d=><DetailRow key={d.key} label={`${monthLabel(d.month)} · ${d.confirmed?"Deducted":"Scheduled"}`} value={money(d.amount)}/>)}</dl></details> : null}
         </ConnectDialog>
       );
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { announcementId, resolveAnnouncementNotices, hydrateAnnouncementNotices } from './announcement-notifications.ts';
-import { visibleDashboardNotices } from './dashboard-notices.ts';
+import { expiredConnectNotification, visibleDashboardNotices } from './dashboard-notices.ts';
 const id = '11111111-1111-4111-8111-111111111111';
 const notice = { id: 'notification', event_code: 'communication_announcement', title: 'Preview', body: 'Truncated', data: { announcementId: id, showOnDashboard: true, dashboardUntil: '2026-10-13T06:30:00.000Z' } };
 const a = { id, title: 'Full title', body: 'x'.repeat(5000), status: 'published', expires_at: null };
@@ -25,6 +25,13 @@ test('ordinary notifications are unchanged; invalid announcement IDs cannot be q
   const other = { ...notice, event_code: 'attendance_punch_in' };
   assert.deepEqual(resolveAnnouncementNotices([other], []), [other]);
   assert.equal(announcementId({ ...notice, data: { announcementId: 'unsafe' } }), null);
+});
+test('payout review notifications expire with their configurable review window', () => {
+  const deadline = '2026-11-07T06:30:00.000Z';
+  const payout = { ...notice, event_code: 'workforce_payout_review', data: { reviewUntil: deadline, tab: 'payouts', payoutMonth: '2026-10' } };
+  assert.equal(expiredConnectNotification(payout, Date.parse(deadline) - 1), false);
+  assert.equal(expiredConnectNotification(payout, Date.parse(deadline)), true);
+  assert.equal(expiredConnectNotification({ ...payout, event_code: 'attendance_punch_in' }, Date.parse(deadline)), false);
 });
 test('removed banners disappear even if old notification metadata still says enabled', () => {
   const rows = resolveAnnouncementNotices([notice], [{ ...a, show_on_dashboard: false }]);

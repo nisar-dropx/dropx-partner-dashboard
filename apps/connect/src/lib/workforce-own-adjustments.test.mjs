@@ -291,7 +291,7 @@ test('client guard contract: keyed accounts, latest response only, no silent imp
  }
  assert.match(payments,/if\(!response.ok\)throw new Error\(result.error/);
  assert.match(payments,/tab==='earnings'&&earningsAllowed/);
- assert.match(payments,/result.month!==month/);assert.match(payments,/reconcileOwnProduction\(result.earnings,result.summary\)/);
+ assert.match(payments,/result.month!==earningsMonth/);assert.match(payments,/reconcileOwnProduction\(result.earnings,result.summary\)/);
  assert.match(monthly,/data\?\.month===month/);
  assert.match(payments,/ConnectPayAdjustments ledger=\{calculated.adjustments\}/);
 });

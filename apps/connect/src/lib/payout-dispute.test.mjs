@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import {
   associatePayoutDispute,
   currentPayoutMonth,
+  activePayoutForReview,
   decodePayoutDisputeReason,
   encodePayoutDisputeReason,
   isCompleteCalendarMonth,
   legacyPayoutDisputeCategory,
   normalizePayoutMonth,
   normalizePayoutDisputeAreas,
+  latestPublishedPayoutMonth,
   payoutMonthForPeriod,
   payoutMonthLabel,
   payoutMonthLongLabel,
@@ -70,6 +72,22 @@ test("files a payout under the month in which its pay period ends", () => {
   assert.equal(payoutMonthForPeriod("2026-09-01", "2026-09-30"), "2026-09");
   assert.equal(payoutMonthForPeriod("2026-08-26", "2026-09-25"), "2026-09");
   assert.equal(payoutMonthForPeriod("invalid", "invalid"), "");
+});
+
+test("uses the latest published period for Payouts without changing the live-earnings month", () => {
+  assert.equal(latestPublishedPayoutMonth([
+    { from: "2026-09-01", to: "2026-09-30" },
+    { from: "2026-10-01", to: "2026-10-31" },
+  ]), "2026-10");
+  assert.equal(latestPublishedPayoutMonth([]), null);
+});
+
+test("keeps only an unexpired published payout review on the home screen", () => {
+  const now = Date.parse("2026-11-05T10:00:00Z");
+  const open = { id: "open", reviewState: "open", reviewUntil: "2026-11-07T10:00:00Z", publishedAt: "2026-11-05T08:00:00Z" };
+  const expired = { id: "expired", reviewState: "open", reviewUntil: "2026-11-04T10:00:00Z", publishedAt: "2026-11-03T08:00:00Z" };
+  assert.equal(activePayoutForReview([expired, open], now)?.id, "open");
+  assert.equal(activePayoutForReview([expired], now), null);
 });
 
 test("uses friendly four-stage labels for dispute workflow states", () => {

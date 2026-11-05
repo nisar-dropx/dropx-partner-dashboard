@@ -6,6 +6,7 @@ import {
   decodePayoutDisputeReason,
   isCompleteCalendarMonth,
   PAYOUT_DISPUTE_AREAS,
+  latestPublishedPayoutMonth,
   payoutMonthForPeriod,
   payoutMonthLabel,
   type AssociatePayoutDispute,
@@ -128,7 +129,7 @@ function DisputePayment({ dispute }: { dispute: AssociatePayoutDispute }) {
   </section>;
 }
 
-export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void }) {
+export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange, onLatestMonthChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void; onLatestMonthChange?: (month: string) => void }) {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -152,6 +153,8 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
       if (!response.ok || !Array.isArray(body.payouts)) throw new Error("Payout lookup failed");
       if (generation !== loadGeneration.current) return;
       setPayouts(body.payouts);
+      const latestMonth = latestPublishedPayoutMonth(body.payouts);
+      if (latestMonth) onLatestMonthChange?.(latestMonth);
       setLoadError("");
     } catch {
       if (generation !== loadGeneration.current) return;
@@ -159,7 +162,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
-  }, [query]);
+  }, [onLatestMonthChange, query]);
 
   useEffect(() => {
     setPayouts([]);

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
-import { visibleDashboardNotices } from "@/lib/dashboard-notices";
+import { expiredConnectNotification, visibleDashboardNotices } from "@/lib/dashboard-notices";
 import { personalizeNotices } from "@/lib/announcement-personalization-data";
 import { hydrateAnnouncementNotices, announcementId } from "@/lib/announcement-notifications";
 import { loadConnectUnread } from "@/lib/connect-unread";
@@ -67,7 +67,8 @@ export async function GET(request: Request) {
       return row.event_code === "REIMBURSEMENT_APPROVAL_REQUIRED" && id ? [id] : [];
     }))];
 
-    const staleIds = new Set<string>();
+    const nowMs = Date.now();
+    const staleIds = new Set<string>(rows.filter((row) => expiredConnectNotification(row, nowMs)).map((row) => row.id));
     if (requestIds.length) {
       const requests = await supabaseAdmin.from("hr_expense_claim_requests")
         .select("id,status")

@@ -1,5 +1,4 @@
 "use client";
-import { ConnectWorkforceJoining } from "./connect-workforce-joining";
 
 import {
   AlertTriangle,
@@ -14,6 +13,7 @@ import {
   LogOut,
   MessageCircleMore,
   PersonStanding,
+  ReceiptText,
   Route,
   Target,
   UserRound,
@@ -43,6 +43,7 @@ import { useDashboardClock } from "../lib/use-dashboard-clock";
 import { dashboardGreeting } from "../lib/dashboard-greeting";
 import { summarizeAttendance, type AttendanceFilter } from "../lib/attendance-summary";
 import summaryStyles from "./attendance-summary-controls.module.css";
+import { activePayoutForReview, payoutMonthForPeriod, payoutMonthLongLabel } from "@/lib/payout-dispute";
 
 type Profile = {
   editable: Record<string, string>;
@@ -113,6 +114,16 @@ type WorkforcePaymentSummary = {
   period: string;
   mapping: Array<unknown>;
   summary: { deliveries: number; earnings: number; workingDays: number; latestDate: string | null };
+};
+
+type WorkforcePayoutReview = {
+  id: string;
+  from: string;
+  to: string;
+  net: number;
+  reviewState: string;
+  reviewUntil: string | null;
+  publishedAt: string | null;
 };
 
 function localIsoDate(date = new Date()) {
@@ -208,7 +219,7 @@ export function ConnectDashboard({
   onAdvances: () => void;
   onConnect: () => void;
   onLeave: () => void;
-  onPayments: () => void;
+  onPayments: (payoutMonth?: string) => void;
   onPerformance: () => void;
   onProfile: () => void;
   onRefer: () => void;
@@ -225,6 +236,7 @@ export function ConnectDashboard({
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
   const [paymentSummary, setPaymentSummary] = useState<WorkforcePaymentSummary | null>(null);
+  const [payoutReviews, setPayoutReviews] = useState<WorkforcePayoutReview[]>([]);
   const now = useDashboardClock(active);
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   // A background staleness refresh must not blank the dashboard back to its
@@ -375,21 +387,27 @@ export function ConnectDashboard({
   useEffect(() => {
     if (variant !== "workforce" || !account.pageAccess?.includes("earnings")) {
       setPaymentSummary(null);
+      setPayoutReviews([]);
       return;
     }
     let cancelled = false;
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
     Promise.all([
       fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" }),
-      fetch(`/api/connect/earnings?${query}`, { cache: "no-store" })
+      fetch(`/api/connect/earnings?${query}`, { cache: "no-store" }),
+      fetch(`/api/connect/payout-review?${query}`, { cache: "no-store" })
     ])
-      .then(async ([paymentsResponse, earningsResponse]) => {
+      .then(async ([paymentsResponse, earningsResponse, payoutResponse]) => {
         const payments = paymentsResponse.ok ? await paymentsResponse.json() as WorkforcePaymentSummary : null;
         const earnings = earningsResponse.ok ? await earningsResponse.json() as { summary?: { grossAmount?: number } } : null;
-        return payments ? { ...payments, summary: { ...payments.summary, earnings: earnings?.summary?.grossAmount ?? payments.summary.earnings } } : null;
+        const payoutPayload = payoutResponse.ok ? await payoutResponse.json() as { payouts?: WorkforcePayoutReview[] } : null;
+        return {
+          payments: payments ? { ...payments, summary: { ...payments.summary, earnings: earnings?.summary?.grossAmount ?? payments.summary.earnings } } : null,
+          payouts: Array.isArray(payoutPayload?.payouts) ? payoutPayload.payouts : []
+        };
       })
-      .then((payload) => { if (!cancelled) setPaymentSummary(payload); })
-      .catch(() => { if (!cancelled) setPaymentSummary(null); });
+      .then((payload) => { if (!cancelled) { setPaymentSummary(payload.payments); setPayoutReviews(payload.payouts); } })
+      .catch(() => { if (!cancelled) { setPaymentSummary(null); setPayoutReviews([]); } });
     return () => { cancelled = true; };
   }, [account.id, account.pageAccess, account.profileType, variant]);
 
@@ -508,6 +526,8 @@ export function ConnectDashboard({
     : undefined;
   const attendanceRate = trackedDays ? Math.round(((fullDayCount + halfDayCount * 0.5) / trackedDays) * 100) : 0;
   const workforce = variant === "workforce";
+  const activePayoutReview = activePayoutForReview(payoutReviews, now.getTime());
+  const activePayoutMonth = activePayoutReview ? payoutMonthForPeriod(activePayoutReview.from, activePayoutReview.to) : "";
 
   return <section className={`dx-dashboard${workforce ? " dx-workforce-dashboard" : ""}`}>
     <header className="dx-dashboard-greeting">
@@ -521,7 +541,15 @@ export function ConnectDashboard({
       {!workforce ? <span className="dx-live-chip"><i />Live</span> : null}
     </header>
 
-    {workforce && !account.betaWorkspaceActive ? <ConnectWorkforceJoining key={`${account.profileType}:${account.id}`} account={account} compact /> : null}
+    {workforce && activePayoutReview ? <section className="dx-dashboard-card dx-workforce-payout-review" aria-label="Published payout ready for review">
+      <span className="dx-workforce-payout-review-icon"><ReceiptText /></span>
+      <div>
+        <small>Action required · payout review</small>
+        <h2>{payoutMonthLongLabel(activePayoutMonth)} payout is ready</h2>
+        <p>Net payable <strong>₹{Number(activePayoutReview.net || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> · review by {new Date(activePayoutReview.reviewUntil!).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} IST</p>
+      </div>
+      <button onClick={() => onPayments(activePayoutMonth)}>Review payout <ChevronRight /></button>
+    </section> : null}
     {!workforce ? <section className="dx-dashboard-card today">
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">
@@ -592,7 +620,7 @@ export function ConnectDashboard({
     <section className="dx-dashboard-card dx-dashboard-actions">
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
-        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
+        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={() => onPayments()}><i className="amber"><IndianRupee /></i><span><strong>Payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
 {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Pincode, weekly off and time off</small></span><ChevronRight /></button> : null}
         {!workforce && attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}

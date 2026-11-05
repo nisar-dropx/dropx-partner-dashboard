@@ -23,7 +23,9 @@ test('payments keep auth-scoped reads separate and guard stale earnings',()=>{
  const source=readFileSync(new URL('../components/connect-workforce-payments.tsx',import.meta.url),'utf8');
  assert.match(source,/reconcileOwnProduction\(result.earnings,result.summary\)/);
  assert.match(source,/if\(version!==generation.current\)return/);
- assert.match(source,/result.month!==month/);
+ assert.match(source,/result.month!==earningsMonth/);
+ assert.match(source,/month=\{payoutMonth\}/);
+ assert.match(source,/latestPayoutMonthApplied/);
  assert.match(source,/earningsAllowed\|\|access.includes\('rate_card'\)/);
  assert.match(source,/payment-reference/);
  assert.doesNotMatch(source,/api\/connect\/workforce-payments/);
