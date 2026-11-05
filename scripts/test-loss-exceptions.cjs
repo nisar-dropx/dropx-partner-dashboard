@@ -1,6 +1,7 @@
 const ts=require('typescript'),fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
 let auth,calls=[], conflict=false, lookups=[];
 function load(file){file=path.resolve(file);if(!path.extname(file))file+='.ts';const m={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{
+ if(id.endsWith('/loss-payroll-refresh'))return{refreshLossPayroll:async()=>({status:'synced',message:'Payroll refreshed.'})};
  if(id.endsWith('/authorization'))return{getAuthorization:async()=>auth,hasPermission:a=>!a.denied};
  if(id.endsWith('/nl-recovery-context'))return{recoveryContext:async(month,key,edit,pending)=>{if(key==='outside'||auth.readOnly||auth.denied||key==='initial'&&!pending)throw Error('Case unavailable');return{auth,scope:{company:'C'},caseKey:key,report:key==='slp-initial'?'slp':'nl',finalSeenAt:null};}};
  if(id.endsWith('/supabase-admin'))return{supabaseAdmin:{rpc:async(name,args)=>{calls.push({name,args});return conflict?{data:null,error:{code:'P0001',message:'This shipment changed. Reload before continuing.'}}:{data:{version:args.p_version+1},error:null};},from:table=>{const q={select:()=>q,eq:(k,v)=>{lookups.push([table,k,v]);return q;},maybeSingle:async()=>({data:{version:8,enabled:true},error:null})};return q;}}};

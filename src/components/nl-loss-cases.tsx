@@ -270,10 +270,11 @@ export function RecoveryForm({
   const [canPropose, setCanPropose] = useState(false);
   const [mayApproveCase,setMayApproveCase]=useState(false);
   const [canResponse, setCanResponse] = useState(false);
-  const [showRedispute, setShowRedispute] = useState(false);
+  const [showRedispute, setShowRedispute] = useState(!!row.redispute?.enabled);
   const [exceptionOptions,setExceptionOptions] = useState<{installments:boolean;next_month:string|null}>({installments:false,next_month:null});
   const [returnNote, setReturnNote] = useState("");
   useEffect(() => {
+    if (showRedispute) { setLoading(false); setDirectoryReady(false); setError(""); return; }
     const controller = new AbortController();
     let disposed = false;
     const timeout = setTimeout(() => { controller.abort(); }, 90000);
@@ -309,7 +310,7 @@ export function RecoveryForm({
       }
     })();
     return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
-  }, [row.month, row.case_key, retry]);
+  }, [row.month, row.case_key, retry, showRedispute]);
   const option = outcomes.find((o) => o.code === outcome);
   const deductionPeriod = plan.deduction_month || deductionMonths[option?.deduction_timing || "current_month"];
   const [designationFilter,setDesignationFilter] = useState("");
@@ -651,13 +652,13 @@ export function RecoveryForm({
         </p>
       ) : null}
       {!loading && directoryReady && mayEdit && !canPropose ? <p className={styles.notice}>You have view access to this recovery.</p> : null}
-      {loading ? (
-        <p role="status">Loading recovery…</p>
-      ) : showRedispute && canResponse ? (
+      {showRedispute ? (
         <>
           <label>Recovery action<select aria-label="Recovery action" value="__redispute" onChange={()=>setShowRedispute(false)}><option value="__redispute">Redispute · evidence &amp; status</option><option value="recovery">Update recovery plan</option></select></label>
-          <LossCaseResponse month={row.month} caseKey={caseKey} embedded/>
+          <LossCaseResponse month={row.month} caseKey={caseKey} embedded onSaved={onSaved || (() => router.refresh())}/>
         </>
+      ) : loading ? (
+        <p role="status">Loading recovery…</p>
       ) : (
         <form onSubmit={save}>
           <fieldset

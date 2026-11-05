@@ -86,7 +86,7 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
       const succeeded=results.filter(r=>r.ok);
       setSelected(prev=>prev.filter(k=>!succeeded.some(r=>keyOf(r)===k)));
       setErrors(results.filter(r=>!r.ok).map(r=>`${r.case_key}: ${r.error||'Could not save.'}`));
-      setMessage(`${succeeded.length} disabled. History retained; eligible recovery resumes.`);
+      setMessage(`${succeeded.length} disabled. History retained; eligible recovery resumes.${body.payroll_sync?.message ? ` ${body.payroll_sync.message}` : ''}`);
       setConfirm(false);
     }catch(e){setMessage(e instanceof Error?e.message:'Unable to disable redisputes.');}
     finally{applying.current=false;setBusy(false);}

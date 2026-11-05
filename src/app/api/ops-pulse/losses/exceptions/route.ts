@@ -1,3 +1,4 @@
+import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
 import { getAuthorization, hasPermission } from '@/lib/authorization';
 import { mayActivateRedispute } from '@/lib/ops-pulse/loss-recovery-controls';
 import { recoveryContext } from '@/lib/ops-pulse/nl-recovery-context';
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
    if(seen.has(k)) return reply({error:'Remove duplicate TID/exception rows.'},400); seen.add(k);
   }
   const results=[];
+  let payrollCompany: string | undefined;
   for (const r of body.rows) {
    try {
     const ctx=await recoveryContext(r.month,r.case_key,true,!r.enabled,!r.enabled && r.kind==='redispute');
@@ -43,9 +45,11 @@ export async function POST(request: Request) {
      results.push({month:r.month,case_key:r.case_key,kind:r.kind,ok:false,error:result.error.code==='P0001'?result.error.message.replace(/Reload before (continuing|saving)\./,'Review the refreshed status and try again.'):'Exception could not be saved. Please retry.',current:latest.error ? undefined : latest.data});
      continue;
     }
+    if (r.kind === "redispute") payrollCompany = ctx.scope.company;
     results.push({month:r.month,case_key:r.case_key,kind:r.kind,ok:true,value:result.data});
    } catch(e) { results.push({month:r.month,case_key:r.case_key,kind:r.kind,ok:false,error:e instanceof Error?e.message:'Unable to save exception.'}); }
   }
-  return reply({results});
+  const payroll_sync = payrollCompany ? await refreshLossPayroll(payrollCompany) : undefined;
+  return reply({results,payroll_sync});
  } catch(e) { return reply({error:e instanceof Error?e.message:'Unable to save exceptions.'},403); }
 }

@@ -53,7 +53,7 @@ export function LossExceptionsDesk({rows,grants,windows,canEdit,recoverableStatu
       setOverrides(prev=>{const next={...prev};for(const r of results){const value=r.ok?r.value:r.current;if(value)next[exceptionKey(r,r.kind)]=value;}return next;});
       const errors=results.filter(r=>!r.ok), successes=results.filter(r=>r.ok);
       setFailed(errors);
-      setMessage(`${successes.length} saved${errors.length?` · ${errors.length} need attention`:''}.`);
+      setMessage(`${successes.length} saved${errors.length?` · ${errors.length} need attention`:''}.${body.payroll_sync?.message ? ` ${body.payroll_sync.message}` : ''}`);
       const failedKeys=new Set(errors.map(r=>exceptionKey(r,r.kind)));
       setPreview(updates.filter(r=>failedKeys.has(exceptionKey(r,r.kind))));
       setSelected(prev=>prev.filter(key=>!successes.some(r=>exceptionKey(r)===key)));

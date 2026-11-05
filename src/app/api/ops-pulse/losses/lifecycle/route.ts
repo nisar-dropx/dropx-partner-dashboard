@@ -1,3 +1,4 @@
+import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
 import {
   approveLossRecovery,
   transitionLossLifecycle,
@@ -5,6 +6,7 @@ import {
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
@@ -44,7 +46,8 @@ export async function POST(request: Request) {
         lifecycleVersion: body.lifecycle_version,
         note: body.note ?? null,
       });
-      return reply({ ok: true, recovery: data });
+      const payroll_sync = await refreshLossPayroll(auth.companyId!);
+      return reply({ ok: true, recovery: data, payroll_sync });
     }
 
     if (action === "clarify") {
@@ -62,7 +65,8 @@ export async function POST(request: Request) {
       version: body.version,
       note: body.note ?? null,
     });
-    return reply({ ok: true, case: data });
+    const payroll_sync = await refreshLossPayroll(auth.companyId!);
+    return reply({ ok: true, case: data, payroll_sync });
   } catch (e) {
     return reply(
       { error: e instanceof Error ? e.message : "Unable to update loss lifecycle." },

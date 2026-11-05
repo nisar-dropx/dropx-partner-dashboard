@@ -734,6 +734,16 @@ await db.exec(`update nl_recovery_payables set payable=100 where employee_ref='e
 await db.query(full('ACTIVE-PAY-GUARD',`employee:${uid(213)}`));
 eq('Exact available balance can be allocated',Number((await one("select allocations->0->>'amount' amount from nl_loss_recoveries where case_key='ACTIVE-PAY-GUARD'")).amount),100);
 await throws('Active People salary cannot be allocated twice',full('ACTIVE-RESERVATION-GUARD',`employee:${uid(213)}`),/maximum available recovery is ₹0.*Requested ₹100/);
+const payrollTransitionFix=readFileSync('supabase/migrations/20261105200000_loss_redispute_payroll_refresh.sql','utf8');
+await db.exec(payrollTransitionFix);await db.exec(payrollTransitionFix);
+await db.exec(`update nl_loss_month_cases set source_status='Recoverable',source_present=true where case_key='CONTRACTOR'; update nl_case_response_windows set enabled=false,workflow_status='cancelled' where case_key='CONTRACTOR'`);
+let rv=(await one(`select version from nl_case_response_windows where case_key='CONTRACTOR'`)).version;
+await db.query(rd(rv++,'activate'));
+await db.query(rd(rv++,'response',{note:'Additional evidence submitted for review',reason:'Delivered correctly',tt_reference:'CLOAK-999',evidence_url:'https://example.com/photos',cctv_not_required:true},CM));
+await db.query(rd(rv++,'approve',{note:'Evidence reviewed independently'}));
+await mustReject('Malformed failed-redispute payroll rejected',rd(rv,'lost',{note:'Vendor declined after checking evidence',tt_reference:'POST-999',recovery_month:'2026-13'}));
+await db.query(rd(rv,'lost',{note:'Vendor declined after checking evidence',tt_reference:'POST-999',recovery_month:future}));
+eq('Latest migration accepts valid recovery payroll month',(await one(`select recovery_month from nl_case_response_windows where case_key='CONTRACTOR'`)).recovery_month,future);
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
 process.exit(fails ? 1 : 0);
 
