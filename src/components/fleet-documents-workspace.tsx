@@ -2,7 +2,7 @@
 import { FleetAttachmentPreview } from "./fleet-attachment-preview";
 import { FleetMobileSection } from "./fleet-mobile-section";
 import { FleetVehicleTypeFilter } from "./fleet-vehicle-type-filter";
-import { matchesVehicleType, vehicleTypeLabel } from "@/lib/fleet/vehicle-type";
+import { matchesVehicleType, vehicleTypeKey, vehicleTypeLabel } from "@/lib/fleet/vehicle-type";
 import { FleetVehicleMeta } from "@/components/fleet-vehicle-meta";
 import { documentApplies } from "@/lib/fleet/source-policy";
 
@@ -57,7 +57,11 @@ function validityText(row: DocumentRow) {
 export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initialDocumentType }: { data: FleetControlData; vehicles: FleetControlVehicle[]; initialVehicle?:string; initialDocumentType?:string }) {
   const router = useRouter();
   const [documents, setDocuments] = useState(data.documents);
-  const [vehicleTypes, setVehicleTypes] = useState<string[]>([]);
+  const [vehicleTypes, setVehicleTypes] = useState<string[]>(() => {
+    const target = initialVehicle ? vehicles.find(vehicle => vehicle.vehicleNo === initialVehicle) : null;
+    const ownedKeys = [...new Set(vehicles.filter(vehicle => vehicle.ownershipType === "own").map(vehicleTypeKey))];
+    return target ? [vehicleTypeKey(target)] : ownedKeys.length ? ownedKeys : ["ownership:own"];
+  });
   const [query, setQuery] = useState("");
   const [stations, setStations] = useState<string[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
@@ -65,7 +69,7 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
   const [vehicleNos, setVehicleNos] = useState<string[]>(initialVehicle?[initialVehicle]:[]);
   const [documentTypes, setDocumentTypes] = useState<string[]>(initialDocumentType?[initialDocumentType]:[]);
   const [states, setStates] = useState<string[]>([]);
-  const [workspaceMode, setWorkspaceMode] = useState<"action" | "register">("action");
+  const [workspaceMode, setWorkspaceMode] = useState<"action" | "register">("register");
   const [sort, setSort] = useState("urgency");
   const [uploadRow, setUploadRow] = useState<DocumentRow | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -85,7 +89,7 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
     return { vehicle, type, document, expiryDate, ...rowState(document, expiryDate, type, data.today) };
   })), [data.documentTypes, data.today, documents, vehicles]);
 
-  const filteredRows = useMemo(() => rows.filter((row) => {
+  const scopedRows = useMemo(() => rows.filter((row) => {
     const needle = query.trim().toLowerCase();
     const placement = data.stationOptions.find((station) => station.code === row.vehicle.stationCode);
     return matchesVehicleType(row.vehicle, vehicleTypes) && (!regions.length || regions.includes(placement?.region ?? "Unassigned region"))
@@ -93,18 +97,23 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
       && (!stations.length || stations.includes(row.vehicle.stationCode))
       && (!vehicleNos.length || vehicleNos.includes(row.vehicle.vehicleNo))
       && (!documentTypes.length || documentTypes.includes(row.type.value))
-      && (workspaceMode === "register" || ["expired", "urgent", "file_missing", "validity_missing", "due"].includes(row.state))
-      && (!states.length || states.includes(row.state))
       && (!needle || `${row.vehicle.vehicleNo} ${row.vehicle.stationCode} ${row.vehicle.model} ${row.type.label} ${row.document?.fileName ?? ""}`.toLowerCase().includes(needle));
-  }).sort((a, b) => sort === "vehicle" ? a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) || a.type.sortOrder - b.type.sortOrder : sort === "station" ? a.vehicle.stationCode.localeCompare(b.vehicle.stationCode) || a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) : sort === "expiry" ? (a.expiryDate ?? "9999").localeCompare(b.expiryDate ?? "9999") : stateRank(a.state) - stateRank(b.state) || (a.days ?? 9999) - (b.days ?? 9999)), [vehicleTypes, clusters, data.stationOptions, documentTypes, query, regions, rows, sort, states, stations, vehicleNos, workspaceMode]);
+  }), [vehicleTypes, clusters, data.stationOptions, documentTypes, query, regions, rows, stations, vehicleNos]);
+
+  const filteredRows = useMemo(() => scopedRows.filter(row =>
+    (workspaceMode === "register" || ["expired", "urgent", "file_missing", "validity_missing", "due"].includes(row.state))
+    && (!states.length || states.includes(row.state))
+  ).sort((a, b) => sort === "vehicle" ? a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) || a.type.sortOrder - b.type.sortOrder : sort === "station" ? a.vehicle.stationCode.localeCompare(b.vehicle.stationCode) || a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) : sort === "expiry" ? (a.expiryDate ?? "9999").localeCompare(b.expiryDate ?? "9999") : stateRank(a.state) - stateRank(b.state) || (a.days ?? 9999) - (b.days ?? 9999)), [scopedRows, sort, states, workspaceMode]);
 
   const counts = useMemo(() => ({
-    all: rows.length,
-    action: rows.filter((row) => ["expired", "urgent", "file_missing", "validity_missing"].includes(row.state)).length,
-    due: rows.filter((row) => row.state === "due").length,
-    current: rows.filter((row) => row.state === "current").length,
-    linked: rows.filter((row) => row.state === "linked").length
-  }), [rows]);
+    all: scopedRows.length,
+    action: scopedRows.filter((row) => ["expired", "urgent", "file_missing", "validity_missing"].includes(row.state)).length,
+    due: scopedRows.filter((row) => row.state === "due").length,
+    current: scopedRows.filter((row) => row.state === "current").length,
+    linked: scopedRows.filter((row) => row.state === "linked").length,
+    vehicles: new Set(scopedRows.map(row => row.vehicle.id)).size,
+    uploaded: scopedRows.filter(row => row.document).length
+  }), [scopedRows]);
 
   const selectedType = rows.find(row=>row.vehicle.vehicleNo===uploadVehicle && row.type.value===uploadType)?.type;
 
@@ -145,9 +154,9 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
     <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle compliance</span><h1>Vehicle documents</h1><p>Act on missing files and time-bound validity. Registration follows Fitness unless a separate RC date is recorded.</p></div>{data.capabilities.canManageDocuments ? <button className="fc-button primary" onClick={() => openUpload()} type="button"><Upload size={17} /> Upload document</button> : null}</div>
     {message ? <div className={`fc-flash ${message.tone}`}><span>{message.tone === "notice" ? <Check size={17} /> : <AlertTriangle size={17} />}{message.text}</span><button aria-label="Dismiss" onClick={() => setMessage(null)} type="button"><X size={16} /></button></div> : null}
 
-    <div className="fc-document-mode"><nav className="fc-view-switch compact"><button className={workspaceMode === "action" ? "active" : ""} onClick={() => { setWorkspaceMode("action"); setStates([]); }} type="button"><AlertTriangle size={14} /> Action queue</button><button className={workspaceMode === "register" ? "active" : ""} onClick={() => { setWorkspaceMode("register"); setStates([]); }} type="button"><FileCheck2 size={14} /> Complete register</button></nav><p>{workspaceMode === "action" ? "Only missing, expiring and overdue controls are shown." : "Every vehicle and document rule is shown."}</p></div>
+    <div className="fc-document-mode"><nav className="fc-view-switch compact"><button className={workspaceMode === "action" ? "active" : ""} onClick={() => { setWorkspaceMode("action"); setStates([]); }} type="button"><AlertTriangle size={14} /> Action queue</button><button className={workspaceMode === "register" ? "active" : ""} onClick={() => { setWorkspaceMode("register"); setStates([]); }} type="button"><FileCheck2 size={14} /> Complete register</button></nav><p>{workspaceMode === "action" ? "Only missing, expiring and overdue controls are shown." : "All document rules and uploaded files for the selected vehicles are shown."}</p></div>
     <div className="fc-document-kpis compact">
-      <button className={workspaceMode === "register" && !states.length ? "active" : ""} onClick={() => { setWorkspaceMode("register"); setStates([]); }} type="button"><small>All controls</small><strong>{counts.all}</strong><span>{vehicles.length} vehicles</span></button>
+      <button className={workspaceMode === "register" && !states.length ? "active" : ""} onClick={() => { setWorkspaceMode("register"); setStates([]); }} type="button"><small>All controls</small><strong>{counts.all}</strong><span>{counts.vehicles} vehicles · {counts.uploaded} uploaded files</span></button>
       <button className={states.length === 4 ? "active expired" : "expired"} onClick={() => { setWorkspaceMode("register"); setStates(["expired", "urgent", "file_missing", "validity_missing"]); }} type="button"><small>Action required</small><strong>{counts.action}</strong><span>Fix now</span></button>
       <button className={states.length === 1 && states[0] === "due" ? "active due" : "due"} onClick={() => { setWorkspaceMode("register"); setStates(["due"]); }} type="button"><small>Due soon</small><strong>{counts.due}</strong><span>Within reminder window</span></button>
       <button className={states.length === 1 && states[0] === "current" ? "active valid" : "valid"} onClick={() => { setWorkspaceMode("register"); setStates(["current"]); }} type="button"><small>Current</small><strong>{counts.current}</strong><span>No action</span></button>
