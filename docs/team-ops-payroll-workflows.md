@@ -1,5 +1,22 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Legacy van bank-file export — 5 November 2026
+
+Completed payment details saved before the delivery-identity policy was enabled
+remain eligible to move from approved to processing. The compatibility exception
+requires unchanged company, station, payment head, source, amounts, bank details,
+work date and delivery identity. New requests, expense-only approvals gaining an
+amount, and financial/identity edits still run the full guard. Confirmed identity
+and duplicate-payout protections remain unchanged; no identity is inferred and
+no request is marked paid by the migration.
+
+Migration `20261105121205_preserve_approved_delivery_bank_exports.sql` extends the
+previous processing-only exception, fixing whole-file export failures caused by
+legacy approved van requests. Both Dashboard and Fin use the same database trigger.
+Regression: `node scripts/test-approved-delivery-bank-export.mjs` (actual guard,
+old-failure reproduction, idempotent migration, export/re-download/settlement and
+negative checks). Included in `verify:adhoc-da`.
+
 ## Equivalent NL source labels — 5 November 2026
 
 Amazon live and historic exports use `Recoverable - Missed SLA by eDSP`,
