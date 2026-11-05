@@ -137,15 +137,15 @@ export function NlLossCases({
               reason={[showPeriod?c.details.period||c.month:"",c.details.category||"Unspecified reason",c.details.sub_category].filter(Boolean).join(" · ")}
               value={money(c.amount)} date={c.recovery?.updated_at} updatedBy={c.recovery?.updated_by_name} historyCase={{month:c.month,caseKey:c.case_key}} open={active === c.month+":"+c.case_key}
               onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.month+":"+c.case_key?null:c.month+":"+c.case_key)}
-              status={<span className={recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?styles.done:styles.pending}>{recoveryNeedsReview(c)?"Review needed":recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?"Details updated":"Pending update"}{c.recovery&&!c.recovery.is_deleted?" · "+c.recovery.outcome_label:""}</span>}/>
+              status={<span className={recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?styles.done:styles.pending}>{c.period_closed?"Closed · ":""}{recoveryNeedsReview(c)?"Review needed":recoveryDetailsUpdated(c,c.recovery,c.report==="slp")?"Details updated":"Pending update"}{c.recovery&&!c.recovery.is_deleted?" · "+c.recovery.outcome_label:""}</span>}/>
             {active === `${c.month}:${c.case_key}` ? (
               <RecoveryForm
                 row={c}
                 outcomes={outcomes}
                 settings={settings}
-                canEdit={canEdit}
-                canRecovered={canRecovered}
-                canApprove={canApprove}
+                canEdit={canEdit && !c.period_closed}
+                canRecovered={canRecovered && !c.period_closed}
+                canApprove={canApprove && !c.period_closed}
               />
             ) : null}
           </article>
@@ -276,7 +276,7 @@ export function RecoveryForm({
         setAwaitingFinal(!!j.awaiting_final);
         setPeople(j.people);
         setCanPropose(j.can_propose === true);
-        setCanResponse(j.can_response === true);
+        setCanResponse(j.can_response === true && !row.period_closed);
         setExceptionOptions(j.exception_options || {installments:false,next_month:null});
         setMayApproveCase(j.can_approve === true);
         setDirectoryReady(true);

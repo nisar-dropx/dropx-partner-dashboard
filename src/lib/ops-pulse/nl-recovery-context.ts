@@ -1,3 +1,4 @@
+import { assertLossPeriodOpen, loadLossPeriodClosures } from "./loss-period-close";
 import "server-only";
 import { hasFinalLossOutcome } from "./loss-recovery-controls";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -69,8 +70,12 @@ export async function recoveryContext(
     throw Error("Case is unavailable or outside your station access.");
   if (!allowPending && row.data.report === "nl" && !hasFinalLossOutcome(true, row.data.source_status, row.data.details?.case_status, row.data.details?.extra?.current_sla_stage))
     throw Error("Recovery is available after the final source outcome. This case is still in Initial.");
+  if (edit) await assertLossPeriodOpen(scope.company, month, row.data.case_key);
+  const closures = await loadLossPeriodClosures(scope.company, row.data.report, [station.source_code]);
+  const periodClosed = closures.some(c=>c.period===(row.data.report === "slp" ? row.data.details?.period || month : month));
   return {
     auth,
+    periodClosed,
     scope,
     station,
     settings: settings.data,

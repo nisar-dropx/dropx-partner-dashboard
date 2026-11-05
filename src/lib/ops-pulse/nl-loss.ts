@@ -1,3 +1,4 @@
+import { loadLossPeriodClosures } from "./loss-period-close";
 import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
 import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
@@ -213,9 +214,10 @@ export async function loadRecoveryView(
     .eq("company_id", company)
     .in("station_code", codes.length ? codes : ["__NONE__"]);
   if (ready) metaQuery = metaQuery.eq("report", slp ? "slp" : "nl");
-  const [meta, context] = await Promise.all([
+  const [meta, context, closures] = await Promise.all([
     readAllRows(metaQuery.order("month").order("case_key")),
     lossContext(company, kind),
+    loadLossPeriodClosures(company, slp ? "slp" : "nl", codes),
   ]);
   if (meta.error)
     throw Error("Losses could not be loaded completely. Please retry.");
@@ -340,9 +342,13 @@ export async function loadRecoveryView(
         recovery: map.get(`${r.month}::${r.case_key}`) ?? null,
       })) as NlCase[];
   }
+  const closureStations = matchingStations.filter(s => lossFilterMatches(station, s.source_code) && all.some(r => r.station_code===s.source_code && inPeriod(r))).map(s=>s.source_code);
+  cases = cases.map(c=>({...c, period_closed:closures.some(l=>l.station_code===c.station_code && l.period===(slp ? c.details?.period || c.month : c.month))}));
   const canEdit = !auth.readOnly && hasPermission(auth, "ops_losses", "edit");
   return {
     kind,
+    closures,
+    closureStations,
     ready,
     settings,
     month,
