@@ -16,14 +16,6 @@ const ACTIONS = new Set([
   "complete_processing"
 ]);
 
-function paise(value: string) {
-  if (!value) return null;
-  if (!/^-?\d+(?:\.\d{1,2})?$/.test(value)) throw new Error("Expected payout difference must be a valid rupee amount.");
-  const parsed = Math.round(Number(value) * 100);
-  if (!Number.isSafeInteger(parsed)) throw new Error("Expected payout difference is outside the supported range.");
-  return parsed;
-}
-
 function wholePaise(value: string) {
   if (!/^-?\d+$/.test(value)) return null;
   const parsed = Number(value);
@@ -66,10 +58,8 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
     if (dispute.error || !dispute.data || dispute.data.version !== expectedVersion) throw new Error("This dispute changed or is unavailable. Refresh and try again.");
     const publication = await supabaseAdmin.from("workforce_payout_publications").select("snapshot").eq("company_id", companyId).eq("id", dispute.data.publication_id).single();
     if (publication.error || !publication.data) throw new Error("The disputed payout could not be loaded. Refresh and try again.");
-    const expectedDeltaPaise = paise(text("expected_delta_rupees"));
-    if (expectedDeltaPaise == null) throw new Error("Enter the exact expected net payout difference.");
     payload.correction_plan = buildDisputeCorrectionPlan(
-      payoutDisputeCorrectionFields(dispute.data.reason, dispute.data.category, publication.data.snapshot), form, expectedDeltaPaise
+      payoutDisputeCorrectionFields(dispute.data.reason, dispute.data.category, publication.data.snapshot), form
     );
   }
   if (action === "complete_processing") {
