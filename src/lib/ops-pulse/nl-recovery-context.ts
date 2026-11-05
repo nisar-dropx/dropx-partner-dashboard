@@ -34,6 +34,7 @@ export async function recoveryContext(
     )
     .eq("company_id", scope.company)
     .maybeSingle();
+  if (settings.error) throw Error("Recovery settings could not be loaded. Retry before updating this case.");
   let row = await supabaseAdmin
     .from("nl_loss_month_cases")
     .select("*")

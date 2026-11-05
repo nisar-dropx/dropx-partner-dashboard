@@ -125,6 +125,8 @@ export async function approveLossRecovery(input: {
     .eq("month", input.month)
     .eq("case_key", ctx.caseKey)
     .maybeSingle();
+  if (plan.error) throw Error("Recovery approval details could not be loaded. Retry before approving.");
+  if (!plan.data) throw Error("No recovery plan is available for approval.");
   await assertLifecycleAction(
     ctx.auth,
     ctx.station.id,

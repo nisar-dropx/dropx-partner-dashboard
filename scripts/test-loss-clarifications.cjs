@@ -14,6 +14,7 @@ function load(file, dependencies = {}) {
     assert.equal(response.status,410);
   }
   const lifecycle = load('src/app/api/ops-pulse/losses/lifecycle/route.ts', {
+    '@/lib/ops-pulse/loss-payroll-refresh': {refreshLossPayroll: async()=>({status:'synced'})},
     '@/lib/authorization': {getAuthorization: async()=>({userId:'reviewer'}),hasPermission:()=>true},
     '@/lib/ops-pulse/nl-loss-lifecycle': new Proxy({}, {get(){return ()=>{throw Error('Retired request reached mutation');}}}),
   });

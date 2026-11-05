@@ -1,8 +1,9 @@
 const ts=require('typescript'),fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const root=process.cwd();let auth,windowEnabled=false,rpcCalls=0,lastRpc;
+const root=process.cwd();let auth,windowEnabled=false,rpcCalls=0,lastRpc,refreshCalls=0;
 const db={from(){const q=new Proxy({}, {get(_,k){if(k==='then')return resolve=>resolve({data:[],error:null});return ()=>q;}});return q;},rpc:async(name,args)=>{rpcCalls++;lastRpc=args;return {data:{version:2},error:null};}};
 function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file+='.ts';const m={exports:{}};const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;new Function('require','module','exports',code)(id=>{
  if(id in extra)return extra[id];if(id==='server-only')return{};
+ if(id.endsWith('/loss-payroll-refresh'))return{refreshLossPayroll:async()=>{refreshCalls++;return {status:'synced',message:'Payroll refreshed.'};}};
  if(id.endsWith('/authorization'))return{getAuthorization:async()=>auth,hasPermission:(a,p,act)=>!a.denied};
  if(id.endsWith('/supabase-admin'))return{ supabaseAdmin:db };
  if(id.endsWith('/approval-covers'))return{loadActiveApprovalCovers:async()=>[]};
@@ -24,7 +25,7 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  const api=load('src/app/api/ops-pulse/losses/case-response/route.ts');
  const post=(body,origin='https://ops.dropxlogistics.com')=>api.POST(new Request('https://ops.dropxlogistics.com/api/ops-pulse/losses/case-response',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({month:'2026-09',case_key:'T1',version:1,note:'Detailed response for review',...body})}));
  for(const roleCode of ['OPERATIONS_SI','OPERATIONS_CLM','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_GM','GENERAL_MANAGER']){auth={...base,roleCode};for(const action of ['activate','revoke','approve','return','tracking','won','lost'])assert.equal((await post({action})).status,403);}
- assert.equal(rpcCalls,0,'Denied roles cannot invoke a transition');
+ assert.equal(rpcCalls,0,'Denied roles cannot invoke a transition');assert.equal(refreshCalls,0,'Denied requests cannot refresh payroll');
  auth={...base,roleCode:'OWNER',isMasterOwner:true};assert.equal((await post({action:'activate'})).status,403);
  auth={...base,roleCode:'OPERATIONS_CLM'};const bulkDenied=await post({action:'bulk_activate',rows:[{month:'2026-09',case_key:'T1',version:0}]});assert.equal(bulkDenied.status,403);assert.equal(rpcCalls,0);
 
@@ -34,12 +35,14 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
  assert.equal((await post({action:'tracking',case_key:'outside'})).status,403);
  for(const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','OPERATIONS_FINMGR','OPERATIONS_MANAGING_PARTNER']){
   auth={...base,roleCode};
+  const refreshBefore=refreshCalls;
   assert.equal((await post({action:'activate',note:''})).status,200,`${roleCode} can activate without station evidence`);
+  assert.equal(refreshCalls,refreshBefore+1,'Activation refreshes payroll after saving');
   const before=rpcCalls;
   const result=await post({action:'bulk_activate',rows:[{month:'2026-09',case_key:'T1',version:0},{month:'2026-09',case_key:'outside',version:0}]});
   assert.equal(result.status,200);
   assert.deepEqual((await result.json()).results.map(r=>r.ok),[true,false]);
-  assert.equal(rpcCalls,before+1,'Only an authorised in-scope shipment reaches the database');
+  assert.equal(rpcCalls,before+1,'Only an authorised in-scope shipment reaches the database');assert.equal(refreshCalls,refreshBefore+2,'Bulk refresh occurs once for successful changes');
  }
  auth={...base,roleCode:'OPERATIONS_SLPM'};
  for(const rows of [[],[null],[{month:'bad',case_key:'T1',version:0}],Array(101).fill({month:'2026-09',case_key:'T1',version:0}),Array(2).fill({month:'2026-09',case_key:'T1',version:0})]){
@@ -61,7 +64,7 @@ function load(file,extra={}){file=path.resolve(file);if(!path.extname(file))file
   const result=await post({...evidence,cctv_url:'',cctv_not_required:value});assert.equal(result.status,403,'Only explicit true waives CCTV');
  }
  for(const field of ['evidence_url','cctv_url'])for(const value of ['http://example.com/a','javascript:alert(1)','https://user:password@example.com/a'])assert.equal((await post({...evidence,[field]:value})).status,403,'Unsafe links rejected');
- assert.equal((await post(evidence)).status,200);assert.equal(lastRpc.p_details.cctv_url,evidence.cctv_url);assert.equal(lastRpc.p_details.cctv_not_required,false);
+ const evidenceRefreshes=refreshCalls;assert.equal((await post(evidence)).status,200);assert.equal(refreshCalls,evidenceRefreshes,'Evidence submission does not alter payroll');assert.equal(lastRpc.p_details.cctv_url,evidence.cctv_url);assert.equal(lastRpc.p_details.cctv_not_required,false);
  assert.equal((await post({...evidence,cctv_not_required:true,cctv_url:''})).status,200);assert.equal(lastRpc.p_details.cctv_not_required,true);assert.equal(lastRpc.p_details.cctv_url,'');
  assert.equal((await post({...evidence,cctv_not_required:true,evidence_url:''})).status,403,'CCTV waiver never waives supporting files');
  assert.equal((await post({...evidence,reason:'x'.repeat(301)})).status,403);

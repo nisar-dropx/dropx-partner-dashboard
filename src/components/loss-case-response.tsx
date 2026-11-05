@@ -50,14 +50,17 @@ export function LossCaseResponse({
   caseKey,
   embedded = false,
   initialAction = "",
+  onSaved,
 }: {
   month: string;
   caseKey: string;
   embedded?: boolean;
   initialAction?: "" | "return";
+  onSaved?: () => void;
 }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
+    [success, setSuccess] = useState(""),
     [busy, setBusy] = useState(false),
     [revision, setRevision] = useState(0),
     [tracking, setTracking] = useState(false);
@@ -92,6 +95,8 @@ export function LossCaseResponse({
         setNote(embedded || !j.canActivate ? j.window.response_details?.note || "" : "");
         setTicket((embedded || !j.canActivate ? j.window.response_details?.tt_reference : j.window.tt_reference) || "");
         setTicketUrl(j.window.tt_url || "");
+        setDue(j.window.followup_on || "");
+        setPayMonth(j.window.recovery_month || "");
 
       })
       .catch((e) => {
@@ -105,6 +110,7 @@ export function LossCaseResponse({
     if (!canSubmit) { setError(selectedAction === "response" ? evidenceError || "Complete all required fields." : "Add a clear update (10–4000 characters)."); return; }
     setBusy(true);
     setError("");
+    setSuccess("");
     try {
       const r = await fetch("/api/ops-pulse/losses/case-response", {
         method: "POST",
@@ -127,7 +133,9 @@ export function LossCaseResponse({
       });
       const j = await r.json();
       if (!r.ok) throw Error(j.error);
+      setSuccess(j.payroll_sync?.message || "Redispute update saved.");
       setNote("");
+      onSaved?.();
       setRevision((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to save.");
@@ -144,7 +152,9 @@ export function LossCaseResponse({
   const evidenceError = stationEvidenceError({ reason, note, tt_reference: ticket,
     evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
   const validNote = note.trim().length >= 10 && note.trim().length <= 4000;
-  const canSubmit = selectedAction === "response" ? !evidenceError : !!selectedAction && validNote;
+  const canSubmit = selectedAction === "response" ? !evidenceError : !!selectedAction && validNote
+    && (!["tracking", "won", "lost"].includes(selectedAction) || ticket.trim().length >= 3)
+    && (selectedAction !== "tracking" || !!due);
   const returnEvent = state === "returned" ? data?.events.find((event) => event.action === "return") : null;
   const actionNames: Record<string, string> = {
     activate: "Activate redispute",
@@ -169,6 +179,7 @@ export function LossCaseResponse({
           {error}
         </p>
       ) : null}
+      {success ? <p role="status" className={styles.done}>{success}</p> : null}
       {!data ? (
         <p role="status">Loading shipment…</p>
       ) : (

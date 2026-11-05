@@ -7,6 +7,7 @@ const names=['save_nl_recovery','clear_nl_recovery','nl_loss_exception_set','nl_
 await db.exec(`create role anon;create role authenticated;create role service_role;
 create table nl_loss_month_cases(company_id uuid,report text,month text,case_key text,station_code text,amount numeric,details jsonb);
 create table nl_loss_recoveries(company_id uuid,month text,case_key text,is_deleted boolean,allocations jsonb);
+create table nl_case_response_windows(company_id uuid,month text,case_key text,enabled boolean);
 create table writes(name text);
 `);
 for(const name of names) await db.exec(`create function public.${name}(p_company uuid,p_month text,p_case text) returns void language plpgsql as $$ begin insert into writes values('${name}'); end $$;`);
@@ -19,7 +20,18 @@ const sql=fs.readFileSync('supabase/migrations/20261105053755_loss_period_final_
 await db.exec(sql);await db.exec(sql);
 for(const name of names) await db.query(`select ${name}($1,'2026-09','one')`,[company]);
 assert.equal((await db.query('select count(*)::int n from writes')).rows[0].n,10);
+await db.exec('alter table nl_loss_recoveries add column approval_status text');
+const guard=fs.readFileSync('supabase/migrations/20261105200100_loss_close_unfinished_reviews.sql','utf8');
+await db.exec(guard);await db.exec(guard);
 const close=()=>db.query("select nl_loss_close_period($1,'nl','2026-09',array['KLZA'],$2,'Manager') n",[company,actor]);
+await db.query("insert into nl_case_response_windows values($1,'2026-09','one',true)",[company]);
+await assert.rejects(close,/active redisputes remain/);
+await db.exec('update nl_case_response_windows set enabled=false');
+for(const status of ['proposed','needs_review','returned']) {
+ await db.query('update nl_loss_recoveries set approval_status=$1',[status]);
+ await assert.rejects(close,/approval or correction/);
+}
+await db.exec("update nl_loss_recoveries set approval_status='approved'");
 assert.equal((await close()).rows[0].n,1);assert.equal((await close()).rows[0].n,0);
 const snapshot=(await db.query('select snapshot from nl_loss_period_closures')).rows[0].snapshot;
 assert.equal(snapshot.source_value,100);assert.equal(snapshot.recovery_plans[0].allocations[0].person,'preserved');

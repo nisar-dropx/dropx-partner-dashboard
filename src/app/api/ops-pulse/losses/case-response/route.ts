@@ -1,3 +1,4 @@
+import { refreshLossPayroll } from "@/lib/ops-pulse/loss-payroll-refresh";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
@@ -8,6 +9,7 @@ import {
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { stationEvidenceError } from "@/lib/ops-pulse/loss-station-evidence";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
     status,
@@ -21,6 +23,7 @@ export async function GET(request: Request) {
       q.get("case") || "",
       false,
       true,
+      true, // Preserve scoped history even when a later source import removes the case.
     );
     const query = (table: string) =>
       supabaseAdmin!
@@ -40,7 +43,7 @@ export async function GET(request: Request) {
     ]);
     if (window.error || events.error || row.error)
       throw Error("Case response could not be loaded.");
-    if (!mayViewLossApprovals(ctx.auth) && !window.data?.enabled)
+    if (!mayViewLossApprovals(ctx.auth) && !window.data)
       return reply(
         { error: "This Shipment ID has no active response window." },
         403,
@@ -51,7 +54,7 @@ export async function GET(request: Request) {
       row: row.data,
       canActivate: mayActivateRedispute(ctx.auth),
       readOnly:
-        ctx.auth.readOnly || !hasPermission(ctx.auth, "ops_losses", "edit"),
+        ctx.periodClosed || ctx.auth.readOnly || !hasPermission(ctx.auth, "ops_losses", "edit"),
     });
   } catch (e) {
     return reply(
@@ -132,7 +135,7 @@ async function transition(b: Record<string, any>) {
         ? error.message
         : "Redispute could not be saved. Reload and retry.",
     );
-  return data;
+  return {window: data, company: ctx.scope.company};
 }
 export async function POST(request: Request) {
   try {
@@ -191,14 +194,16 @@ export async function POST(request: Request) {
         seen.add(key);
       }
       const results = [];
+      const companies = new Set<string>();
       for (const row of b.rows) {
         try {
-          const window = await transition({ ...row, action: b.action === "bulk_activate" ? "activate" : row.action });
+          const saved = await transition({ ...row, action: b.action === "bulk_activate" ? "activate" : row.action });
+          companies.add(saved.company);
           results.push({
             month: row.month,
             case_key: row.case_key,
             ok: true,
-            window,
+            window: saved.window,
           });
         } catch (e) {
           results.push({
@@ -209,9 +214,13 @@ export async function POST(request: Request) {
           });
         }
       }
-      return reply({ results });
+      const payroll_sync = companies.size ? await refreshLossPayroll([...companies][0]) : undefined;
+      return reply({ results, payroll_sync });
     }
-    return reply({ window: await transition(b) });
+    const saved = await transition(b);
+    const payroll_sync = ["activate", "revoke", "won", "lost"].includes(b.action)
+      ? await refreshLossPayroll(saved.company) : undefined;
+    return reply({ window: saved.window, payroll_sync });
   } catch (e) {
     return reply(
       { error: e instanceof Error ? e.message : "Unable to save response." },
