@@ -5,7 +5,7 @@ import test from 'node:test';
 import ts from 'typescript';
 const require=createRequire(import.meta.url);
 function compile(path,mocks={}){const m={exports:{}};new Function('require','module','exports',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText)(n=>n in mocks?mocks[n]:require(n),m,m.exports);return m.exports;}
-const core=compile('./loss-daily-snapshot.ts',{'./ops-pulse/nl-dispute-policy':compile('./ops-pulse/nl-dispute-policy.ts'),'./ops-pulse/nl-loss-policy':compile('./ops-pulse/nl-loss-policy.ts')});
+const core=compile('./loss-daily-snapshot.ts',{'./ops-pulse/nl-dispute-policy':compile('./ops-pulse/nl-dispute-policy.ts'),'./ops-pulse/nl-loss-policy':compile('./ops-pulse/nl-loss-policy.ts',{'./loss-final-summary.ts':compile('./ops-pulse/loss-final-summary.ts')})});
 const mail=compile('./loss-daily-mail.ts',{'./loss-daily-snapshot':core});
 const station={id:'s',station_code:'DEMO',source_code:'OLD',station_name:'Example station',cluster:'Example cluster manager'};
 const source={month:'2026-09',case_key:'a',report:'nl',station_code:'OLD',amount:1000,source_status:'Recoverable',source_present:true,data_source:'live',final_seen_at:null,last_seen_at:'2026-10-24T05:00:00Z',source_updated_at:null,lifecycle_status:'station_dispute_or_clarification_window',lifecycle_note:null,lifecycle_updated_at:null,details:{case_status:'pending',extra:{current_sla_stage:'eDSP2'}}};

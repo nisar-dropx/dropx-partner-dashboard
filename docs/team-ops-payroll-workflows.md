@@ -1,5 +1,22 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Equivalent NL source labels — 5 November 2026
+
+Amazon live and historic exports use `Recoverable - Missed SLA by eDSP`,
+`eDSP1` and `eDSP2` for the same recoverable outcome. Compare these exact
+aliases through `recoverySourceStatusKey` / `nl_recovery_source_status_key`
+when checking saved recovery updates and source drift. Retain the raw source
+label; do not normalize unrelated outcomes or dispute-stage permissions.
+Amount changes and genuinely different outcomes still require review.
+
+Migration `20261105052211_loss_recovery_source_status_aliases.sql` restores
+only the incident rows with matching source-event evidence and the last audited
+workflow state. Approved plans stay approved; proposed plans remain pending.
+It appends a lifecycle event with before/after and plan snapshots, without
+changing allocations, payroll months, recovery keys or published payments.
+Lifecycle changes now invalidate the Workforce payout dependency cache.
+Regression: `node scripts/test-loss-source-status-migration.mjs`.
+
 ## Recovery from calculated Workforce pay — 30 October 2026
 
 Pending route distance excludes only the unknown fuel allowance from calculated pay;

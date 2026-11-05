@@ -1,3 +1,5 @@
+import { recoverySourceStatusKey } from "./loss-final-summary.ts";
+
 export type DeductionTiming = "none" | "current_month" | "next_month";
 export type RecoveryOutcome = {
   deduction_timing: DeductionTiming;
@@ -204,7 +206,7 @@ export function recoveryNeedsReview(row: NlCase) {
     !row.recovery.is_deleted &&
     (["post_dispute", "non_recoverable", "da_left", "utr_left"].includes(row.recovery.outcome_code) || Number(row.recovery.source_amount) !== Number(row.amount) ||
       // SLP Initial → Final at the same amount is the settled loss the plan already covers.
-      (row.report !== "slp" && row.recovery.source_status !== row.source_status))
+      (row.report !== "slp" && recoverySourceStatusKey(row.recovery.source_status) !== recoverySourceStatusKey(row.source_status)))
   );
 }
 export function recoveryCsv(value: unknown) {
