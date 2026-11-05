@@ -204,7 +204,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
   const additionalPayments = additionalColumns(rows);
   const deductions = deductionColumns(rows);
   const detailHeaders = details.flatMap((item) => workforce
-    ? [`${item.exportLabel} Rate (INR)`, `${item.exportLabel} Units`, `${item.exportLabel} Amount (INR)`]
+    ? [`${item.exportLabel} Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
     : item.componentType === "production" && item.reportedCount !== undefined
     ? [`${item.exportLabel} Threshold Period`, `${item.exportLabel} Minimum Units`, `${item.exportLabel} Reported Units`, `${item.exportLabel} Threshold / Excluded Units`, `${item.exportLabel} Payable Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
     : item.componentType === "production"
@@ -248,8 +248,8 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
         const lines = row.productionBreakdown.filter(item => headIdentity(item) === headIdentity(column));
         if (!lines.length) return ["", 0, 0];
         const rates = [...new Set(lines.map(item => item.rate))].sort((left, right) => left - right);
-        return [rates.length === 1 ? rates[0] : rates.join(" / "),
-          Math.round(lines.reduce((sum, item) => sum + item.count, 0) * 100) / 100,
+        return [Math.round(lines.reduce((sum, item) => sum + item.count, 0) * 100) / 100,
+          rates.length === 1 ? rates[0] : rates.join(" / "),
           Math.round(lines.reduce((sum, item) => sum + item.amount, 0) * 100) / 100];
       }
       if (blankPayments) return column.componentType === "production" && column.reportedCount !== undefined
