@@ -20,6 +20,19 @@ test('counts only current owned fleet; keeps unavailable vehicles and respects c
   const rows = summary.ownedStationGroups(vehicles, [{ key:'retired', isOperational:false, isTerminal:true }]);
   assert.equal(rows.length, 1); assert.equal(rows[0].total, 3); assert.equal(rows[0].models.Mahindra, 2); assert.equal(rows[0].models.Piaggio, 1);
 });
+test('availability counts respect configured operating states and retain vehicle details for expansion', () => {
+  const vehicles = [
+    { id:'1',stationCode:'A',ownershipType:'own',status:'active',model:'Van',vehicleNo:'TEST1' },
+    { id:'2',stationCode:'A',ownershipType:'own',status:'breakdown',model:'Van',vehicleNo:'TEST2',expectedOperationalDate:'2026-11-07' },
+    { id:'3',stationCode:'A',ownershipType:'own',status:'limited',model:'Van',vehicleNo:'TEST3' },
+    { id:'4',stationCode:'A',ownershipType:'own',status:'retired',model:'Van',vehicleNo:'TEST4' }
+  ];
+  const [row] = summary.ownedStationGroups(vehicles, [{key:'limited',isOperational:true,isTerminal:false},{key:'retired',isOperational:false,isTerminal:true}]);
+  assert.equal(row.total,3); assert.equal(row.operational,2); assert.equal(row.nonOperational,1);
+  assert.equal(row.operational+row.nonOperational,row.total);
+  assert.equal(row.vehicles.length,row.total);
+  assert.equal(row.vehicles.find(v=>v.id==='2').expectedOperationalDate,'2026-11-07');
+});
 test('map links reject missing and invalid coordinates without inventing locations', () => {
   for (const coords of [[null,76],[10,null],[0,0],[91,76],[10,181],[NaN,76]]) assert.equal(summary.stationMapUrl(...coords), null);
   assert.equal(summary.stationMapUrl(10.5,76.2), 'https://www.google.com/maps/search/?api=1&query=10.5,76.2');
