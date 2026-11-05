@@ -18,6 +18,10 @@ export async function POST(request: Request) {
     const retryJobs = retryRaw
       ? retryRaw.split(",").map((part) => part.trim()).filter(Boolean)
       : undefined;
+    const stationsRaw = String(url.searchParams.get("stations") ?? "").trim();
+    const stations = stationsRaw
+      ? [...new Set(stationsRaw.split(",").map((part) => part.trim().toUpperCase()).filter(Boolean))]
+      : undefined;
     const reset = String(url.searchParams.get("reset") ?? "").trim() === "1";
     const outcome = await backfillLoadFlashBoard({
       days,
@@ -25,6 +29,7 @@ export async function POST(request: Request) {
       date: date || undefined,
       concurrency,
       retryJobs,
+      stations,
       reset,
     });
     return NextResponse.json(outcome);

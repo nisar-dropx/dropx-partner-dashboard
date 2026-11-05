@@ -1174,6 +1174,8 @@ export type LoadFlashBoardBackfill = {
   busy?: boolean;
   running?: boolean;
   startedAt?: string;
+  /** Board tick deferred while Ops Live owns Amazon. */
+  deferredReason?: string;
 };
 
 function workerFetchErrorMessage(error: unknown, fallback: string): string {
@@ -1193,6 +1195,8 @@ export async function backfillLoadFlashBoard(opts?: {
   concurrency?: number;
   /** Explicit failure list for end-of-run retry passes (station codes). */
   retryJobs?: string[];
+  /** Filtered Station board pull — concurrent packets for these codes only. */
+  stations?: string[];
   /** Stamp Refresh start meta before pulling (keeps prior board data). */
   reset?: boolean;
 }): Promise<LoadFlashBoardBackfill> {
@@ -1207,6 +1211,7 @@ export async function backfillLoadFlashBoard(opts?: {
   if (opts?.date) url.searchParams.set("date", opts.date);
   if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
   if (opts?.retryJobs?.length) url.searchParams.set("retryJobs", opts.retryJobs.join(","));
+  if (opts?.stations?.length) url.searchParams.set("stations", opts.stations.join(","));
   if (opts?.reset) url.searchParams.set("reset", "1");
   let response: Response;
   try {
@@ -1242,6 +1247,7 @@ export async function backfillLoadFlashBoard(opts?: {
     busy: Boolean(raw.busy),
     running: Boolean(raw.running),
     startedAt: raw.startedAt == null ? undefined : String(raw.startedAt),
+    deferredReason: raw.deferredReason == null ? undefined : String(raw.deferredReason),
   };
 }
 
