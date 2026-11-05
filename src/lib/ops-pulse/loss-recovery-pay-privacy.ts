@@ -19,29 +19,17 @@ function withoutPrivatePay<T extends Record<string, unknown>>(value: T): T {
   return copy;
 }
 
-/**
- * Only Workforce profiles may expose payout values to an Ops recovery user.
- * People employees and contractors never expose salary readiness or amounts.
- * Employment is verified on save; available pay is enforced by payroll.
- */
+/** People expose only a recovery ceiling and a safe blocker, never salary breakdowns. */
 export function recoveryPersonPayDisclosure(person: RecoveryPerson): RecoveryPerson {
-  if (isWorkforceRecoveryRef(person.ref)) {
-    return {
-      ...person,
-      pay_detail_access: "workforce",
-      pay_check_state: person.recovery_limit == null ? "unavailable" : "ready",
-    };
-  }
-  if (person.unpaid_payroll_check) return {
-    ...withoutPrivatePay(person as RecoveryPerson & Record<string, unknown>),
-    recovery_limit: person.recovery_limit,
-    pay_detail_access: "recovery_limit",
-    pay_check_state: person.recovery_limit == null ? "unavailable" : "ready",
+  const ready = person.recovery_limit != null && Number.isFinite(person.recovery_limit);
+  if (isWorkforceRecoveryRef(person.ref)) return {
+    ...person, pay_detail_access: "workforce", pay_check_state: ready ? "ready" : "unavailable",
   };
   return {
     ...withoutPrivatePay(person as RecoveryPerson & Record<string, unknown>),
-    pay_detail_access: "restricted",
-    pay_check_state: "payroll",
+    recovery_limit: ready ? person.recovery_limit : null,
+    pay_detail_access: "recovery_limit",
+    pay_check_state: ready ? "ready" : "unavailable",
   };
 }
 
@@ -63,6 +51,8 @@ export function redactRecoverySnapshot(value: unknown) {
 
 export function privacySafeRecoveryError(messageValue: unknown, includesPeopleProfile: boolean) {
   const message = String(messageValue ?? "Recovery could not be saved.");
+  // Explicit capacity messages are safe; raw salary/gross messages remain redacted.
+  if (/^[^:]+: (maximum available recovery is|Recovery unavailable:)/.test(message)) return message;
   if (!includesPeopleProfile || !/(salary|payable|take-home|gross pay|payroll)/i.test(message)) return message;
   if (/(unavailable|refresh|mapping|complete payroll)/i.test(message)) {
     return "Salary eligibility is unavailable for the selected People profile. Complete payroll or mapping and retry.";

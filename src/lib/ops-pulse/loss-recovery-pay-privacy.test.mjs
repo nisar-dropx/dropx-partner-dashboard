@@ -16,11 +16,12 @@ const pay = {
 };
 const person = (ref) => ({ ref, employee_code: "D1", full_name: "A", designation: "DA", is_active: true, ...pay });
 
-test("People recovery targets defer salary checks to payroll and expose no salary amounts", () => {
+test("People recovery targets disclose only the recoverable ceiling before save", () => {
   const disclosed = recoveryPersonPayDisclosure(person("employee:1"));
-  assert.equal(disclosed.pay_detail_access, "restricted");
-  assert.equal(disclosed.pay_check_state, "payroll");
-  for (const key of Object.keys(pay)) assert.equal(Object.hasOwn(disclosed, key), false, key);
+  assert.equal(disclosed.pay_detail_access, "recovery_limit");
+  assert.equal(disclosed.pay_check_state, "ready");
+  assert.equal(disclosed.recovery_limit,10000);
+  for (const key of Object.keys(pay).filter(key=>key!=="recovery_limit")) assert.equal(Object.hasOwn(disclosed, key), false, key);
 });
 
 test("Workforce recovery targets retain payout details", () => {
@@ -49,9 +50,9 @@ test("People salary validation errors never disclose monetary values", () => {
   assert.equal(privacySafeRecoveryError(exposed, false), exposed);
 });
 
-test("missing People payroll does not expose an unavailable-salary warning", () => {
+test("missing People payroll blocks recovery without disclosing salary", () => {
   const disclosed = recoveryPersonPayDisclosure({ ...person("contractor:1"), recovery_limit: null });
-  assert.equal(disclosed.pay_check_state, "payroll");
+  assert.equal(disclosed.pay_check_state, "unavailable");
   assert.equal(Object.hasOwn(disclosed, "salary_payable"), false);
 });
 
@@ -62,4 +63,9 @@ test("former People show recovery capacity without exposing salary breakdown", (
   assert.equal(disclosed.recovery_limit,10000);
   assert.equal(disclosed.salary_month,"2026-09");
   for(const key of ["salary_gross","salary_payable","reserved","salary_source","override_limit"]) assert.equal(Object.hasOwn(disclosed,key),false);
+});
+
+test("safe capacity and operational errors remain actionable for People",()=>{
+ for(const message of ["D1: maximum available recovery is ₹479.03 in 2026-10; requested ₹1,000.00.","D1: Recovery unavailable: no payroll calculation exists for 2026-10."])
+  assert.equal(privacySafeRecoveryError(message,true),message);
 });
