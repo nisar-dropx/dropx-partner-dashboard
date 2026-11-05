@@ -1013,6 +1013,7 @@ export type LoadFlashBoardNetwork = {
   /** True while a shared Refresh (any user / cron) is still pulling stations. */
   refreshRunning?: boolean;
   refreshDone?: number;
+  refreshFailed?: number;
   /** Stations pulled from Amazon / staged on the worker (may lead saved). */
   refreshPulled?: number;
   refreshTotal?: number;
@@ -1287,6 +1288,7 @@ export async function fetchLoadFlashBoard(date?: string, stations?: string[]): P
       finishedRaw && !Number.isNaN(Date.parse(finishedRaw)) ? finishedRaw : null,
     refreshRunning: Boolean(raw.refreshRunning),
     refreshDone: Math.max(0, Number(raw.refreshDone) || 0),
+    refreshFailed: Math.max(0, Number(raw.refreshFailed) || 0),
     refreshPulled: Math.max(0, Number(raw.refreshPulled ?? raw.refreshDone) || 0),
     refreshTotal: Math.max(0, Number(raw.refreshTotal) || 0),
     refreshOwner:

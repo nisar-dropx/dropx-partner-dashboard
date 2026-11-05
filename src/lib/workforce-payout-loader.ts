@@ -105,6 +105,13 @@ function orderPayoutLines<T extends { code: string; sortOrder?: number }>(lines:
   return sortByPaymentFieldOrder(lines, order, (line) => normalizePaymentFieldCode(line.code));
 }
 
+function workforceDesignationCode(worker: any) {
+  const related = Array.isArray(worker?.designations) ? worker.designations[0] : worker?.designations;
+  const code = String(related?.code ?? "").trim();
+  const stored = String(worker?.designation ?? "").trim();
+  return code || (/^[A-Za-z0-9_]{1,20}$/.test(stored) ? stored : "");
+}
+
 function workforceDesignation(worker: any) {
   const related = Array.isArray(worker?.designations) ? worker.designations[0] : worker?.designations;
   const code = String(related?.code ?? "").trim();
@@ -1384,7 +1391,7 @@ export async function loadWorkforcePayoutRows(
       categoryCode,
       panNumber: worker?.pan_number ?? panBySource.get(sourceId) ?? null,
       paymentSetupKey: providerPaymentSetupKey(mapping),
-      row: { id: mapping.id, reviewSubjectType: "workforce", reviewSubjectId: String(worker.id), dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: provider?.name ?? "-", paymentSourceIdentity: { stationId: String(mapping.station_id), providerIdentity: String(provider?.name ?? provider?.code ?? ""), providerMemberId: String(mapping.provider_member_id ?? "") }, model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: paymentSetupConflict ? "Payment setup conflict" : "Mapped", paymentDetailsAvailable: !paymentSetupConflict, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
+      row: { id: mapping.id, reviewSubjectType: "workforce", reviewSubjectId: String(worker.id), dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), designationCode: workforceDesignationCode(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: provider?.name ?? "-", paymentSourceIdentity: { stationId: String(mapping.station_id), providerIdentity: String(provider?.name ?? provider?.code ?? ""), providerMemberId: String(mapping.provider_member_id ?? "") }, model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: paymentSetupConflict ? "Payment setup conflict" : "Mapped", paymentDetailsAvailable: !paymentSetupConflict, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
     }];
   });
   const consolidatedProvider = consolidateProviderPayoutSegments(providerSegments);
@@ -1563,7 +1570,7 @@ export async function loadWorkforcePayoutRows(
       dropxId: String(worker?.dropx_id ?? ""),
       dropxStatus: workforcePayoutDropxStatus(worker),
       name: String(worker?.full_name ?? providerMemberName),
-      designation: worker ? workforceDesignation(worker) : "",
+      designation: worker ? workforceDesignation(worker) : "", designationCode: workforceDesignationCode(worker),
       providerMemberId,
       providerMemberName,
       paymentSourceIdentity: location?.id ? {
@@ -1732,7 +1739,7 @@ export async function loadWorkforcePayoutRows(
     const panAadhaarLinked = panAadhaarLinkedByWorkforceId.get(workforceId) === true;
     const location: any = locationId ? locationById.get(locationId) : null;
     const methodNames = paymentMethodBreakdown.map((item) => item.label);
-    const payoutRow = { id: `direct-${workforceId}-${locationId || "unassigned"}`, reviewSubjectType: "workforce", reviewSubjectId: workforceId, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationId || null, location: String(location?.station_code ?? "-"), provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, history: historyByWorkforceId.get(workforceId) ?? [], paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" } satisfies WorkforcePayoutRow;
+    const payoutRow = { id: `direct-${workforceId}-${locationId || "unassigned"}`, reviewSubjectType: "workforce", reviewSubjectId: workforceId, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), designationCode: workforceDesignationCode(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationId || null, location: String(location?.station_code ?? "-"), provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, history: historyByWorkforceId.get(workforceId) ?? [], paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" } satisfies WorkforcePayoutRow;
     payoutDeductionContextByRowId.set(payoutRow.id, { categoryCode: "workforce", panNumber: worker?.pan_number ?? null });
     return payoutRow;
   });
@@ -1925,7 +1932,7 @@ export async function loadWorkforcePayoutRows(
       dropxId: String(worker.dropx_id ?? ""),
       dropxStatus: workforcePayoutDropxStatus(worker),
       name: String(worker.full_name ?? "Workforce"),
-      designation: workforceDesignation(worker),
+      designation: workforceDesignation(worker), designationCode: workforceDesignationCode(worker),
       providerMemberId: "No provider ID",
       providerMemberName: inputLabel,
       locationId,

@@ -43,22 +43,22 @@ test("payout export keeps production detail and removes duplicate payment-method
   assert.doesNotMatch(table.headers.join("|"), /Per Packet Amount/);
   assert.deepEqual(
     table.headers.filter((header) => header.startsWith("Delivery ")),
-    ["Delivery Count", "Delivery Rate (INR)", "Delivery Amount (INR)"]
+    ["Delivery Rate (INR)", "Delivery Units", "Delivery Amount (INR)"]
   );
   assert.deepEqual(
     table.headers.filter((header) => header.startsWith("C-return ")),
-    ["C-return Count", "C-return Rate (INR)", "C-return Amount (INR)"]
+    ["C-return Rate (INR)", "C-return Units", "C-return Amount (INR)"]
   );
 });
 
-test("attendance and rent heads export rate and amount without misleading counts", () => {
+test("attendance and rent heads include the calculated units between rate and amount", () => {
   const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Workforce");
   const headers = table.headers.join("|");
 
   assert.doesNotMatch(headers, /MG Per Month Count/);
   assert.doesNotMatch(headers, /Van Rent Per Day Count/);
-  assert.match(headers, /MG Per Month Rate \(INR\)\|MG Per Month Amount \(INR\)/);
-  assert.match(headers, /Van Rent Per Day Rate \(INR\)\|Van Rent Per Day Amount \(INR\)/);
+  assert.match(headers, /MG Per Month Rate \(INR\)\|MG Per Month Units\|MG Per Month Amount \(INR\)/);
+  assert.match(headers, /Van Rent Per Day Rate \(INR\)\|Van Rent Per Day Units\|Van Rent Per Day Amount \(INR\)/);
   assert.equal(table.rows[0][table.headers.indexOf("Van Rent Per Day Rate (INR)")], 800);
   assert.equal(table.rows[0][table.headers.indexOf("Van Rent Per Day Amount (INR)")], 22400);
 });
@@ -98,14 +98,16 @@ test("payout export preserves the payment method's custom mixed field order", ()
     table.headers.filter((header) => /^(Van Rent Per Day|C-return|MG Per Month|Delivery) /.test(header)),
     [
       "Van Rent Per Day Rate (INR)",
+      "Van Rent Per Day Units",
       "Van Rent Per Day Amount (INR)",
-      "C-return Count",
       "C-return Rate (INR)",
+      "C-return Units",
       "C-return Amount (INR)",
       "MG Per Month Rate (INR)",
+      "MG Per Month Units",
       "MG Per Month Amount (INR)",
-      "Delivery Count",
       "Delivery Rate (INR)",
+      "Delivery Units",
       "Delivery Amount (INR)"
     ]
   );
@@ -114,7 +116,10 @@ test("payout export preserves the payment method's custom mixed field order", ()
 test("payout export uses human labels, exact partner IDs, and one deduction suffix", () => {
   const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Workforce");
 
-  assert.deepEqual(table.headers.slice(0, 7), ["DropX ID", "DropX Status", "Workforce Name", "Designation", "Partner Name", "Partner ID", "Location"]);
+  assert.deepEqual(table.headers.slice(0, 11), ["DropX ID", "DropX Status", "Workforce Name", "Designation", "Partner Name", "Partner ID", "Location", "Provider", "Model", "Payment Method", "Work Days"]);
+  assert.equal(table.rows[0][table.headers.indexOf("Designation")], "DR");
+  assert.ok(!table.headers.includes("Base Payment (INR)"));
+  assert.ok(!table.headers.includes("Attendance Source"));
   assert.equal(table.rows[0][table.headers.indexOf("Partner ID")], '="2000078396420"');
   assert.ok(table.headers.includes("TDS Deduction (INR)"));
   assert.equal(table.headers.some((header) => /Deduction Deduction/.test(header)), false);
@@ -253,7 +258,7 @@ test("separately configured heads with the same display name remain identifiable
   assert.ok(table.headers.includes("Recovery [RECOVERY_B] Deduction (INR)"));
 });
 
-test("the same production head at two dated rates exports both segment totals", () => {
+test("the same head has one column block across dated rates without losing units or money", () => {
   const row = {
     ...combinedMethodRow,
     productionBreakdown: [
@@ -262,18 +267,14 @@ test("the same production head at two dated rates exports both segment totals", 
     ]
   };
   const table = buildWorkforcePayoutExportTable([row], "Workforce");
-  const rate13Count = table.headers.indexOf("Delivery @ INR 13 Count");
-  const rate15Count = table.headers.indexOf("Delivery @ INR 15 Count");
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Rate (INR)")], "13 / 15");
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Units")], 150);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Amount (INR)")], 2050);
+  assert.equal(table.headers.filter(header => header.startsWith("Delivery ")).length, 3);
 
-  assert.notEqual(rate13Count, -1);
-  assert.notEqual(rate15Count, -1);
-  assert.equal(table.rows[0][rate13Count], 100);
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery @ INR 13 Amount (INR)")], 1300);
-  assert.equal(table.rows[0][rate15Count], 50);
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery @ INR 15 Amount (INR)")], 750);
 });
 
-test("thresholded production exports reported, excluded and payable units while standard production keeps Count", () => {
+test("Workforce exports payable units while Helper keeps its threshold audit columns", () => {
   const row = {
     ...combinedMethodRow,
     productionBreakdown: [
@@ -283,18 +284,40 @@ test("thresholded production exports reported, excluded and payable units while 
   };
   const table = buildWorkforcePayoutExportTable([row], "Workforce");
 
-  assert.ok(table.headers.includes("Delivery Threshold Period"));
-  assert.ok(table.headers.includes("Delivery Minimum Units"));
-  assert.ok(table.headers.includes("Delivery Reported Units"));
-  assert.ok(table.headers.includes("Delivery Threshold / Excluded Units"));
-  assert.ok(table.headers.includes("Delivery Payable Units"));
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery Threshold Period")], "month");
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery Minimum Units")], 100);
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery Reported Units")], 130);
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery Threshold / Excluded Units")], 100);
-  assert.equal(table.rows[0][table.headers.indexOf("Delivery Payable Units")], 30);
-  assert.deepEqual(
-    table.headers.filter((header) => header.startsWith("MFN ")),
-    ["MFN Count", "MFN Rate (INR)", "MFN Amount (INR)"]
-  );
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Units")], 30);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Amount (INR)")], 390);
+  assert.ok(!table.headers.some(header => /Threshold|Reported Units|Minimum Units/.test(header)));
+  assert.deepEqual(table.headers.filter(header => header.startsWith("MFN ")),
+    ["MFN Rate (INR)", "MFN Units", "MFN Amount (INR)"]);
+  const helper = buildWorkforcePayoutExportTable([row], "Helper");
+  assert.equal(helper.rows[0][helper.headers.indexOf("Delivery Reported Units")], 130);
+  assert.equal(helper.rows[0][helper.headers.indexOf("Delivery Threshold / Excluded Units")], 100);
+  assert.equal(helper.rows[0][helper.headers.indexOf("Delivery Payable Units")], 30);
+
+});
+
+test("row-specific rates share one head block and every exported row aligns with the headers", () => {
+  const second = { ...combinedMethodRow, designationCode: "MASTER_DR", designation: "Incorrect display name", productionBreakdown: [
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 10.5, rate: 15, amount: 157.5 },
+  ] };
+  const table = buildWorkforcePayoutExportTable([combinedMethodRow, second], "Workforce");
+  assert.ok(table.rows.every(row => row.length === table.headers.length));
+  assert.equal(table.headers.filter(header => header.startsWith("Delivery ")).length, 3);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Rate (INR)")], 13);
+  assert.equal(table.rows[1][table.headers.indexOf("Delivery Rate (INR)")], 15);
+  assert.equal(table.rows[1][table.headers.indexOf("Delivery Units")], 10.5);
+  assert.equal(table.rows[1][table.headers.indexOf("Designation")], "MASTER_DR");
+  assert.equal(table.rows[1][table.headers.indexOf("C-return Rate (INR)")], "");
+  assert.equal(table.rows[1][table.headers.indexOf("C-return Units")], 0);
+  const missingCode = buildWorkforcePayoutExportTable([{ ...second, designationCode: "" }], "Workforce");
+  assert.equal(missingCode.rows[0][missingCode.headers.indexOf("Designation")], "");
+});
+
+test("Helper export retains its existing identity labels, designation, base payment and attendance source", () => {
+  const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Helper");
+  assert.ok(table.headers.includes("Provider / Allocation"));
+  assert.ok(table.headers.includes("Model / Basis"));
+  assert.equal(table.rows[0][table.headers.indexOf("Base Payment (INR)")], combinedMethodRow.baseAmount);
+  assert.equal(table.rows[0][table.headers.indexOf("Attendance Source")], "Biometric");
+  assert.equal(table.rows[0][table.headers.indexOf("Designation")], "DR - Driver");
 });
