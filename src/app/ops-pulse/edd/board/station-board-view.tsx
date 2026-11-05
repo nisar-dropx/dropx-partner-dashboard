@@ -875,7 +875,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   }
 
   /** Filtered / 1-station Refresh — concurrent Station board packets (not Ops Live). */
-  async function runFilteredBoardPull(clearSeq: number, selectedCodes: string[]) {
+  async function runFilteredBoardPull(clearSeq: number, selectedCodes: string[]): Promise<"complete" | "partial" | "cancelled"> {
     const total = selectedCodes.length;
     let startIndex = 0;
     const streakTimeoutsRef = { n: 0 };
@@ -889,7 +889,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     let guard = 0;
     while (startIndex < total && guard < 80) {
       guard += 1;
-      if (clearSeq !== backfillClearSeq.current) return;
+      if (clearSeq !== backfillClearSeq.current) return "cancelled";
       const params = new URLSearchParams({
         days: "1",
         date: payload.businessDate,
@@ -959,13 +959,23 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       await reloadBoard().catch(() => undefined);
       if (body.done || startIndex >= total) break;
     }
+    if (clearSeq !== backfillClearSeq.current) return "cancelled";
     let pending = [...failedAcc];
-    if (pending.length) {
+    if (pending.length && startIndex >= total) {
       pending = await runRetryPass(pending, "Recovering failed stations", streakTimeoutsRef, total);
     }
     if (pending.length) {
       setBackfillNote(`Updated with ${pending.length} station${pending.length === 1 ? "" : "s"} still failed after recovery`);
     }
+    if (startIndex < total) {
+      setBackfillNote(
+        total === 1
+          ? `${selectedCodes[0]} still waiting — click Refresh again.`
+          : `Updated ${startIndex}/${total}. Click Refresh again to continue.`,
+      );
+      return "partial";
+    }
+    return "complete";
   }
 
   async function refresh() {
@@ -981,15 +991,21 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       // Do not kick Ops Live (that blocked board ticks and froze the UI at 35/35).
       const fleetSize = payload.stations.length;
       const filtered = selectedCodes.length > 0 && selectedCodes.length < fleetSize;
-      if (filtered) await runFilteredBoardPull(clearSeq, selectedCodes);
-      else await runBackfillLoop(clearSeq);
+      const outcome = filtered
+        ? await runFilteredBoardPull(clearSeq, selectedCodes)
+        : await runBackfillLoop(clearSeq);
+      if (clearSeq !== backfillClearSeq.current) return;
       await reloadBoard();
-      setBackfillNote("Board data updated.");
-      window.setTimeout(() => {
-        if (clearSeq !== backfillClearSeq.current) return;
-        setBackfillProgress(null);
-        setBackfillNote("");
-      }, 2500);
+      if (outcome === "partial") {
+        // Note already set by filtered pull / leave progress visible.
+      } else if (outcome !== "cancelled") {
+        setBackfillNote("Board data updated.");
+        window.setTimeout(() => {
+          if (clearSeq !== backfillClearSeq.current) return;
+          setBackfillProgress(null);
+          setBackfillNote("");
+        }, 2500);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed.";
       setError(isTransientMessage(message)
