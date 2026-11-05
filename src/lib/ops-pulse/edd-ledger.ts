@@ -5,7 +5,7 @@ import type { EddPackage, EddStationResult } from "./edd-worker";
 import { eddCanReuseHistory, eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, mergeEddVerification, type EddLookupObservation, type EddVerification } from "./edd-verification";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 import { stationEddToday } from "./station-edd";
-import { eddSourceSession, eddSourceSummaries, eddSourceHistory } from "./edd-source";
+import { eddSourceSession, eddSourceSummaries, eddSourceHistory, EddSourceBusyError } from "./edd-source";
 
 type LedgerRow = { station_code: string; tracking_id: string; source: EddPackage; source_at: string; verification: EddVerification | null; verified_at: string | null };
 export async function rememberEddLookup(stationCode:string,trackingId:string,body:EddLookupObservation) {
@@ -132,6 +132,11 @@ export async function verifyEddBatch(codes?: string[]) {
   const base = process.env.EDD_WORKER_URL?.trim().replace(/\/$/, "");
   const key = process.env.EDD_WORKER_ADMIN_KEY?.trim();
   if (!base || !key) throw new Error("Tracking connection is not configured.");
+  const { data: liveRun, error: liveError } = await supabaseAdmin.from("edd_load_flash_runs")
+    .select("id").eq("status", "running").limit(1).maybeSingle();
+  if (liveError) throw new Error("Live refresh coordination is unavailable.");
+  if (liveRun) return { verified: 0, reused: 0, failed: 0, enriched: 0, enrichmentFailed: 0,
+    ingestFailed: 0, paginationKeys: [], checked: 0, busy: true, deferred: "live-refresh" };
   // The every-minute cron passes no codes. Ingesting "all stations" there made
   // Postgres re-scan the whole ~1 GB ledger each minute; overlapping runs then
   // starved every other query until the project fell over (2026-10-06).
@@ -201,7 +206,11 @@ export async function verifyEddBatch(codes?: string[]) {
           const value=values.find(v=>v.trackingId===row.tracking_id);
           if(value) { row.source={...row.source,...Object.fromEntries(Object.entries(value).filter(([,v])=>v!=null)),ead:row.source.internalEAD||value.ead||row.source.ead};row.source_at=observedAt;freshSummaries.add(`${code}:${row.tracking_id}`); }
         }
-      } catch { enrichmentFailed++; }
+      } catch (error) {
+        if (error instanceof EddSourceBusyError) return { verified, reused, failed, enriched, enrichmentFailed,
+          ingestFailed, paginationKeys: [...paginationKeys], checked: verified + reused + failed, busy: true, deferred: "live-refresh" };
+        enrichmentFailed++;
+      }
     }
     await Promise.all([0,1].map(async () => {
       while (cursor < rows.length && Date.now() < deadline) {
@@ -249,7 +258,10 @@ export async function verifyEddBatch(codes?: string[]) {
             .eq("station_code",row.station_code).eq("tracking_id",row.tracking_id);
           if (writeError) throw new Error(writeError.message);
           verified++;
-        } catch { failed++; }
+        } catch (error) {
+          if (error instanceof EddSourceBusyError) { cursor = rows.length; break; }
+          failed++;
+        }
       }
     }));
     return { verified, reused, failed, enriched, enrichmentFailed, ingestFailed, paginationKeys:[...paginationKeys], checked: verified+reused+failed, busy: rows.length === 0 };

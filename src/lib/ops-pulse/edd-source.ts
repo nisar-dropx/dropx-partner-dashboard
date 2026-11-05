@@ -1,11 +1,9 @@
 import "server-only";
-import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 
-// Verified against amazon-edd-worker's production configuration on 9 Sep 2026.
-// Fixed origin: never send the shared session to a caller-supplied URL.
-const origin = "https://www.amazonlogistics.eu";
-type Auth = { cookie: string; x_api_usage_key: string };
+// Amazon sessions and all upstream pacing are owned by the worker.
+type Auth = { stationCode: string };
+export class EddSourceBusyError extends Error {}
 export type EddSourceSummary = {
   trackingId: string; currentPackageState?: string; estimatedArrivalDate?: number;
   promisedDeliveryDate?: number; shipOption?: string;
@@ -13,26 +11,22 @@ export type EddSourceSummary = {
 };
 
 export async function eddSourceSession(stationCode: string): Promise<Auth> {
-  if (!supabaseAdmin) throw new Error("EDD database is not configured.");
-  const { data: station, error: stationError } = await supabaseAdmin.from("edd_station_snapshots")
-    .select("account_key").eq("station_code", stationCode).maybeSingle();
-  if (stationError || !station) throw new Error("Station source account is unavailable.");
-  const { data, error } = await supabaseAdmin.from("amazon_sessions")
-    .select("cookie,x_api_usage_key").eq("account_key", station.account_key || "default")
-    .eq("status", "active").order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (error || !data?.cookie || !data?.x_api_usage_key) throw new Error("Station source session needs refresh.");
-  return data as Auth;
+  return { stationCode };
 }
 
 async function sourceRead(auth: Auth, resourcePath: string, requestBody: Record<string, unknown>) {
-  const response = await fetch(`${origin}/station/proxyapigateway/data`, {
-    method: "POST", redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(12000),
-    headers: { "content-type": "application/json", accept: "*/*", "accept-language": "en-US,en;q=0.9",
-      origin, referer: `${origin}/station/dashboard/search`, cookie: auth.cookie,
-      "x-api-usage-key": auth.x_api_usage_key, "x-requested-with": "XMLHttpRequest",
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" },
-    body: JSON.stringify({ resourcePath, httpMethod: "post", processName: "oculus", requestBody })
+  const base = process.env.EDD_WORKER_URL?.trim().replace(/\/$/, "");
+  const key = process.env.EDD_WORKER_ADMIN_KEY?.trim();
+  if (!base || !key) throw new Error("EDD worker is not configured.");
+  const operation = resourcePath === "/os/batchGetPackageSummary"
+    ? { kind: "summary", ids: requestBody.identifiers }
+    : { kind: "history", trackingId: requestBody.packageId, pageToken: requestBody.pageToken };
+  const response = await fetch(`${base}/api/admin/executive/edd/verification-read`, {
+    method: "POST", redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(95000),
+    headers: { "content-type": "application/json", "x-admin-key": key },
+    body: JSON.stringify({ stationCode: auth.stationCode, ...operation })
   });
+  if (response.status === 429) throw new EddSourceBusyError("Live refresh owns the Amazon read budget; verification will resume.");
   if (!response.ok) throw new Error(`EDD source unavailable (${response.status}).`);
   // Never log upstream HTML or credentials. Session refresh remains the worker's job.
   const body = await response.json().catch(() => null);
