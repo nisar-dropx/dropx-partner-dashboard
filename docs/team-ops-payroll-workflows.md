@@ -333,6 +333,12 @@ open → (initial approver) propose exact correction/rejection → pending_final
   actors, optimistic versioning and the state machine. Every transition is an immutable,
   version-numbered `workforce_payout_dispute_events` row.
 - A correction proposal records the exact field/current/corrected value and expected net-pay delta.
+  The initial review renders one locked field/current-value row for each item selected in DropX One,
+  including Customer Return. The current values come from the disputed publication, never editable
+  form values or a newer calculation. Approvers enter corrected values per item and one total expected
+  net-pay delta. `correction_plan.items` preserves the individual rows through final review and the
+  associate's approved-correction view; summary keys retain the v2 RPC contract. Missing publication
+  evidence blocks correction proposals rather than inventing zero. Older single-field plans still display.
   Final approval never marks that correction resolved. The processor must change the authoritative
   payout input and publish a newer revision for the same person, station and period. The processor
   attests that the approved field change was applied; completion independently verifies the newer

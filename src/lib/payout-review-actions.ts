@@ -3,6 +3,7 @@ import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
 import { notifyAssociateOfPayoutDispute } from "@/lib/payout-dispute-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { buildDisputeCorrectionPlan, payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIONS = new Set([
@@ -13,15 +14,6 @@ const ACTIONS = new Set([
   "claim_processing",
   "block_processing",
   "complete_processing"
-]);
-const CORRECTION_KINDS = new Set([
-  "attendance",
-  "workdays",
-  "production",
-  "payment_rate",
-  "additional_payment",
-  "deduction",
-  "other"
 ]);
 
 function paise(value: string) {
@@ -66,22 +58,19 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
   }
 
   const payload: Record<string, unknown> = { note: note || null, portal: ops ? "ops" : "workforce" };
+  const companyId = requireCompanyId(auth);
   if (action === "propose_correction") {
-    const kind = text("correction_kind");
-    const targetField = text("target_field").slice(0, 120);
-    const currentValue = text("current_value").slice(0, 200);
-    const proposedValue = text("proposed_value").slice(0, 200);
-    if (!CORRECTION_KINDS.has(kind)) throw new Error("Choose what needs correction.");
-    if (!targetField || !currentValue || !proposedValue) throw new Error("Enter the field, current value and corrected value.");
+    let query = supabaseAdmin.from("workforce_payout_disputes").select("reason,category,publication_id,version").eq("company_id", companyId).eq("id", disputeId);
+    if (!auth.hasAllLocationAccess) query = query.in("station_id", auth.locationScopeIds.length ? auth.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
+    const dispute = await query.single();
+    if (dispute.error || !dispute.data || dispute.data.version !== expectedVersion) throw new Error("This dispute changed or is unavailable. Refresh and try again.");
+    const publication = await supabaseAdmin.from("workforce_payout_publications").select("snapshot").eq("company_id", companyId).eq("id", dispute.data.publication_id).single();
+    if (publication.error || !publication.data) throw new Error("The disputed payout could not be loaded. Refresh and try again.");
     const expectedDeltaPaise = paise(text("expected_delta_rupees"));
     if (expectedDeltaPaise == null) throw new Error("Enter the exact expected net payout difference.");
-    payload.correction_plan = {
-      kind,
-      target_field: targetField,
-      current_value: currentValue,
-      proposed_value: proposedValue,
-      expected_delta_paise: expectedDeltaPaise
-    };
+    payload.correction_plan = buildDisputeCorrectionPlan(
+      payoutDisputeCorrectionFields(dispute.data.reason, dispute.data.category, publication.data.snapshot), form, expectedDeltaPaise
+    );
   }
   if (action === "complete_processing") {
     const publicationId = text("processed_publication_id");
@@ -99,7 +88,6 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
     };
   }
 
-  const companyId = requireCompanyId(auth);
   const result = await supabaseAdmin.rpc("workforce_dispute_transition_v2", {
     p_company: companyId,
     p_dispute: disputeId,
