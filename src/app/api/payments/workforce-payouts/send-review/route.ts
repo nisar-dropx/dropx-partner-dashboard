@@ -1,4 +1,5 @@
 import { disputeWindowDays } from "@/lib/payout-dispute-workflow-settings";
+import { payoutDisputeDeadline, payoutDisputeHours } from "@/lib/payout-dispute-window";
 import { waitUntil } from "@vercel/functions";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
@@ -419,11 +420,20 @@ export async function POST(request: Request) {
     }
     if (!supabaseAdmin) return responseError("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
+    const body = await request.json();
+    let selectedDisputeHours: number | undefined;
+    if (body?.disputeWindowHours !== undefined) {
+      try {
+        selectedDisputeHours = payoutDisputeHours(body.disputeWindowHours);
+      } catch (error) {
+        return responseError(error instanceof Error ? error.message : "Select a valid dispute window.", 400);
+      }
+    }
     const windowPolicy = await supabaseAdmin.from("workforce_payout_dispute_workflows")
       .select("review_window_days").eq("company_id", companyId).is("station_id", null).eq("is_active", true).maybeSingle();
     if (windowPolicy.error) return responseError("Dispute window could not be verified. Try again before publishing.", 503);
-    const reviewWindowDays = disputeWindowDays(windowPolicy.data?.review_window_days);
-    const body = await request.json();
+    // Older callers retain the company default; the publish dialog explicitly chooses hours.
+    const reviewWindowHours = selectedDisputeHours ?? disputeWindowDays(windowPolicy.data?.review_window_days) * 24;
     const periodStart = String(body?.periodStart ?? "");
     const periodEnd = String(body?.periodEnd ?? "");
     if (typeof body?.sendWhatsAppNotification !== "boolean") {
@@ -635,7 +645,7 @@ export async function POST(request: Request) {
         }, { headers: noStore });
       }
 
-      const reviewUntil = new Date(Date.now() + reviewWindowDays * 24 * 60 * 60 * 1000).toISOString();
+      const reviewUntil = payoutDisputeDeadline(reviewWindowHours);
       const snapshotsByHelper = new Map<string, PublicationSnapshot[]>();
       refreshedHelperEntries.forEach((entry) => {
         const { item, snapshot } = entry!;
@@ -854,7 +864,7 @@ export async function POST(request: Request) {
       expectedDependencyHash = refreshed.dependencyHash;
     }
 
-    const reviewUntil = new Date(Date.now() + reviewWindowDays * 24 * 60 * 60 * 1000).toISOString();
+    const reviewUntil = payoutDisputeDeadline(reviewWindowHours);
     const snapshotsByWorkforce = new Map<string, PublicationSnapshot[]>();
     publicationEntries.forEach(({ item, snapshot }) => {
       snapshotsByWorkforce.set(item.subject_id, [...(snapshotsByWorkforce.get(item.subject_id) ?? []), snapshot]);

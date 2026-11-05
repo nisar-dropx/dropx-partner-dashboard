@@ -7096,6 +7096,12 @@ h3 {
   margin-top: 16px;
 }
 
+.payout-dispute-window { border: 0; margin: 16px 0; padding: 0; min-width: 0; }
+.payout-dispute-window legend { font-weight: 600; margin-bottom: 8px; }
+.payout-dispute-window-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.payout-dispute-window-custom { display: flex; align-items: center; gap: 12px; margin: 10px 0 6px; font-size: 13px; }
+.payout-dispute-window-custom input { width: 104px; min-width: 0; }
+
 .confirmation-checkbox {
   display: flex;
   align-items: center;
