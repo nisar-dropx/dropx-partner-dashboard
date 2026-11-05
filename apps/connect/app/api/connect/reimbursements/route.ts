@@ -96,6 +96,29 @@ async function signedAttachments(value: Array<{ id: string; item_id: string | nu
   }));
 }
 
+async function stationCodesForIds(companyId: string, stationIds: string[] | null | undefined) {
+  const ids = [...new Set((stationIds ?? []).filter(Boolean))];
+  if (!ids.length) return [] as string[];
+  const result = await db().from("stations").select("id,station_code").eq("company_id", companyId).in("id", ids);
+  if (result.error) throw new Error(result.error.message);
+  const codeById = new Map((result.data ?? []).map((station) => [station.id, String(station.station_code ?? "").trim()]));
+  return ids.map((id) => codeById.get(id)).filter((code): code is string => Boolean(code));
+}
+
+async function claimRequestContext(companyId: string, claimRequestId: string | null | undefined) {
+  if (!claimRequestId) return { requestNote: null as string | null, visitStations: [] as string[] };
+  const result = await db().from("hr_expense_claim_requests")
+    .select("notes,visit_station_ids")
+    .eq("company_id", companyId)
+    .eq("id", claimRequestId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  return {
+    requestNote: result.data?.notes ? String(result.data.notes) : null,
+    visitStations: await stationCodesForIds(companyId, result.data?.visit_station_ids as string[] | null | undefined)
+  };
+}
+
 async function selectedAccount(request: Request, body?: Record<string, unknown>, approverAccess = false) {
   const url = new URL(request.url);
   const accountId = clean(body?.accountId ?? url.searchParams.get("accountId"));
@@ -109,7 +132,7 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
 async function approvalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind))")
+    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,claim_request_id,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
@@ -119,17 +142,22 @@ async function approvalPayload(companyId: string, userIds: string[]) {
     if (!claim || claim.status !== "pending_approval" || claim.current_step !== step.step_order) return [];
     const employee = relation(claim.employees);
     const contractor = relation(claim.contractors);
-    return [(async () => ({
-      kind: "claim" as const,
-      ...step,
-      claim: {
-        ...claim,
-        hr_expense_items: inEntryOrder(claim.hr_expense_items),
-        requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
-        requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
-        attachments: await signedAttachments(claim.hr_expense_attachments)
-      }
-    }))()];
+    return [(async () => {
+      const linkedRequest = await claimRequestContext(companyId, claim.claim_request_id as string | null | undefined);
+      return {
+        kind: "claim" as const,
+        ...step,
+        claim: {
+          ...claim,
+          hr_expense_items: inEntryOrder(claim.hr_expense_items),
+          requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+          requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+          requestNote: linkedRequest.requestNote,
+          visitStations: linkedRequest.visitStations,
+          attachments: await signedAttachments(claim.hr_expense_attachments)
+        }
+      };
+    })()];
   }));
   const journeys = await loadApprovalJourneySteps(companyId, rows.map((row) => row.claim.id), {
     table: "hr_expense_approval_steps", parentColumn: "claim_id", orderColumn: "step_order", labelColumn: "step_name",
@@ -299,12 +327,13 @@ async function expenseOversightSummary(account: ConnectAccount) {
 async function expenseOversightDetail(account: ConnectAccount, claimId: string) {
   if (!await hasOrganizationExpenseVisibility(account)) throw new Error("Organisation-wide reimbursement visibility is not available for this account.");
   const result = await db().from("hr_expense_claims")
-    .select("id,claim_no,purpose,total_claimed,total_approved,status,current_step,submitted_at,created_at,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind),hr_expense_approval_steps(id,step_order,step_name,stage_code,approver_user_id,status,decision_note,decided_at)")
+    .select("id,claim_no,purpose,total_claimed,total_approved,trip_from,trip_to,claim_request_id,status,current_step,submitted_at,created_at,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind),hr_expense_approval_steps(id,step_order,step_name,stage_code,approver_user_id,status,decision_note,decided_at)")
     .eq("company_id", account.companyId).eq("id", claimId).maybeSingle();
   if (result.error || !result.data) throw new Error(result.error?.message ?? "Reimbursement claim was not found.");
   const claim = result.data;
   const employee = relation(claim.employees);
   const contractor = relation(claim.contractors);
+  const linkedRequest = await claimRequestContext(account.companyId, claim.claim_request_id as string | null | undefined);
   const userIds = [...new Set((claim.hr_expense_approval_steps ?? []).map((step) => step.approver_user_id).filter(Boolean))];
   const profiles = userIds.length
     ? await db().from("profiles").select("id,full_name").eq("company_id", account.companyId).in("id", userIds)
@@ -317,6 +346,10 @@ async function expenseOversightDetail(account: ConnectAccount, claimId: string) 
     purpose: claim.purpose,
     total_claimed: claim.total_claimed,
     total_approved: claim.total_approved,
+    trip_from: claim.trip_from,
+    trip_to: claim.trip_to,
+    requestNote: linkedRequest.requestNote,
+    visitStations: linkedRequest.visitStations,
     status: claim.status,
     submitted_at: claim.submitted_at ?? claim.created_at,
     requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",

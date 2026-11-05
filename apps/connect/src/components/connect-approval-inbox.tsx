@@ -40,7 +40,9 @@ type ExpenseItem = {
   amount: number;
   merchant?: string | null;
   description?: string | null;
+  quantity?: number | null;
   approved_amount?: number | null;
+  reviewer_note?: string | null;
   finance_policy_snapshot?: ExpensePolicyQuote | null;
   hr_expense_categories?: { name: string } | Array<{ name: string }> | null;
 };
@@ -56,9 +58,13 @@ type ReimbursementApproval = {
     claim_no: string;
     purpose: string;
     total_claimed: number;
+    trip_from?: string | null;
+    trip_to?: string | null;
     submitted_at?: string | null;
     requesterName: string;
     requesterCode: string;
+    visitStations?: string[];
+    requestNote?: string | null;
     hr_expense_items?: ExpenseItem[];
     attachments?: Attachment[];
   };
@@ -102,6 +108,10 @@ type PaymentApproval = {
 };
 
 type ReimbursementOversightDetail = ReimbursementOversightSummary & {
+  trip_from?: string | null;
+  trip_to?: string | null;
+  visitStations?: string[];
+  requestNote?: string | null;
   items: ExpenseItem[];
   attachments: Attachment[];
   steps: Array<{ id: string; step_order: number; step_name: string; stage_code?: string | null; status: string; decision_note?: string | null; decided_at?: string | null; approver_name: string }>;
@@ -321,9 +331,106 @@ function statusLabel(status: string) {
 function expenseDocumentLabel(attachment: Attachment) {
   return attachment.document_kind === "supporting_approval" ? "Special approval proof" : "Receipt pack";
 }
+function expenseCategoryName(item: ExpenseItem) {
+  return first(item.hr_expense_categories)?.name ?? "Expense";
+}
+function expenseLineDetail(item: ExpenseItem) {
+  const parts = [item.merchant, item.description].map((value) => String(value ?? "").trim()).filter(Boolean);
+  if (Number(item.quantity) > 1) parts.push(`Qty ${item.quantity}`);
+  return parts.join(" · ") || "—";
+}
 /** What will be paid for a line: Finance's figure when set, otherwise the policy-eligible amount. */
 function expensePayable(item: ExpenseItem) {
   return Number(item.approved_amount ?? item.finance_policy_snapshot?.eligible_amount ?? item.amount);
+}
+function ExpenseClaimSummary({
+  purpose,
+  tripFrom,
+  tripTo,
+  totalClaimed,
+  totalApproved,
+  visitStations,
+  requestNote,
+  requesterCode
+}: {
+  purpose: string;
+  tripFrom?: string | null;
+  tripTo?: string | null;
+  totalClaimed: number;
+  totalApproved?: number | null;
+  visitStations?: string[];
+  requestNote?: string | null;
+  requesterCode?: string | null;
+}) {
+  return (
+    <dl className="dx-approval-facts">
+      <div><dt>Purpose</dt><dd>{purpose || "—"}</dd></div>
+      {requesterCode ? <div><dt>Employee code</dt><dd>{requesterCode}</dd></div> : null}
+      {(tripFrom || tripTo) ? (
+        <div><dt>Period</dt><dd>{tripFrom ? displayDate(tripFrom) : "—"} – {tripTo ? displayDate(tripTo) : "—"}</dd></div>
+      ) : null}
+      <div><dt>Claimed</dt><dd>{money(totalClaimed)}{totalApproved != null ? ` · approved ${money(totalApproved)}` : ""}</dd></div>
+      {visitStations?.length ? <div><dt>Visit stations</dt><dd>{visitStations.join(", ")}</dd></div> : null}
+      {requestNote ? <div><dt>Request note</dt><dd>{requestNote}</dd></div> : null}
+    </dl>
+  );
+}
+function ExpenseClaimLines({ items, showPayable = true }: { items: ExpenseItem[]; showPayable?: boolean }) {
+  if (!items.length) return <p className="dx-approval-inline-note">No expense lines were attached to this claim.</p>;
+  return (
+    <table className="dx-approval-history-table" aria-label="Expense claim lines">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Category</th>
+          <th>Details</th>
+          <th>Claimed</th>
+          {showPayable ? <th>Payable</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item) => (
+          <tr key={item.id}>
+            <td>{displayDate(item.expense_date)}</td>
+            <td>{expenseCategoryName(item)}</td>
+            <td>
+              {expenseLineDetail(item)}
+              {item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}
+              {item.reviewer_note ? <small>{item.reviewer_note}</small> : null}
+            </td>
+            <td>{money(item.amount)}</td>
+            {showPayable ? <td>{money(expensePayable(item))}</td> : null}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+function ExpenseClaimAttachments({
+  attachments,
+  title
+}: {
+  attachments?: Attachment[];
+  title: string;
+}) {
+  const files = (attachments ?? []).filter((attachment) => attachment.url);
+  if (!files.length) return null;
+  return (
+    <dl className="dx-approval-facts">
+      {files.map((attachment) => (
+        <div key={attachment.id}>
+          <dt>{expenseDocumentLabel(attachment)}</dt>
+          <dd>
+            <ConnectAttachmentViewer
+              files={[{ label: expenseDocumentLabel(attachment), url: attachment.url as string, fileName: attachment.file_name }]}
+              title={`${title} · ${expenseDocumentLabel(attachment)}`}
+              trigger={<><FileText />{attachment.file_name}</>}
+            />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 function expensePolicyState(quote?: ExpensePolicyQuote | null) {
   if (quote?.finance_adjustment) return { label: "Adjusted by Finance", tone: "warning" };
@@ -1882,17 +1989,24 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               saving={saving}
             />
           ))}
-          {reimbursements.map((approval) => (
-            <ApprovalRow
-              badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
-              eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
-              key={approval.id}
-              meta={approval.claim.purpose}
-              name={approval.claim.requesterName}
-              onReview={() => setActiveKey(`reimbursement-claim:${approval.claim.id}`)}
-              saving={saving}
-            />
-          ))}
+          {reimbursements.map((approval) => {
+            const items = approval.claim.hr_expense_items ?? [];
+            const firstLine = items[0];
+            const lineHint = firstLine
+              ? `${expenseCategoryName(firstLine)}${firstLine.merchant || firstLine.description ? ` · ${expenseLineDetail(firstLine)}` : ""}${items.length > 1 ? ` · +${items.length - 1} more` : ""}`
+              : null;
+            return (
+              <ApprovalRow
+                badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
+                eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
+                key={approval.id}
+                meta={[approval.claim.requesterCode || null, approval.claim.purpose, lineHint].filter(Boolean).join(" · ")}
+                name={approval.claim.requesterName}
+                onReview={() => setActiveKey(`reimbursement-claim:${approval.claim.id}`)}
+                saving={saving}
+              />
+            );
+          })}
           <ReimbursementApprovalHistory account={account} />
           {reporteeScope === "team" && expenseOversight.length ? <section className="dx-expense-oversight">
             <header><span><strong>Organisation reimbursement visibility</strong><small>Read-only access · approval is available only when you are the assigned reporting-manager layer.</small></span><em>{expenseOversight.length} recent</em></header>
@@ -1939,10 +2053,11 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 />
                 <dl className="dx-approval-facts">
                   <div><dt>Purpose</dt><dd>{approval.request.purpose}</dd></div>
+                  {approval.request.requesterCode ? <div><dt>Employee code</dt><dd>{approval.request.requesterCode}</dd></div> : null}
                   {(approval.request.trip_from || approval.request.trip_to) ? (
-                    <div><dt>Dates</dt><dd>{approval.request.trip_from || "—"} → {approval.request.trip_to || "—"}</dd></div>
+                    <div><dt>Period</dt><dd>{approval.request.trip_from ? displayDate(approval.request.trip_from) : "—"} – {approval.request.trip_to ? displayDate(approval.request.trip_to) : "—"}</dd></div>
                   ) : null}
-                  {approval.request.notes ? <div><dt>Notes</dt><dd>{approval.request.notes}</dd></div> : null}
+                  {approval.request.notes ? <div><dt>Request note</dt><dd>{approval.request.notes}</dd></div> : null}
                 </dl>
                 {/* Why the estimated amount is what it is - the expense-head
                     breakdown the requester entered on submission, previously
@@ -1987,8 +2102,17 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
                   eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
-                  meta={approval.claim.purpose}
+                  meta={[approval.claim.requesterCode || null, approval.claim.purpose].filter(Boolean).join(" · ")}
                   name={approval.claim.requesterName}
+                />
+                <ExpenseClaimSummary
+                  purpose={approval.claim.purpose}
+                  requesterCode={approval.claim.requesterCode}
+                  requestNote={approval.claim.requestNote}
+                  totalClaimed={approval.claim.total_claimed}
+                  tripFrom={approval.claim.trip_from}
+                  tripTo={approval.claim.trip_to}
+                  visitStations={approval.claim.visitStations}
                 />
                 {financeReview ? <section className="dx-finance-review">
                   <header>
@@ -2005,7 +2129,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                       const adjustment = quote?.finance_adjustment;
                       const editing = payableEdit?.itemId === item.id ? payableEdit : null;
                       return <div className={editing ? "row editing" : "row"} key={item.id} role="row">
-                        <span><b>{first(item.hr_expense_categories)?.name ?? "Expense"}</b><small>{displayDate(item.expense_date)}{Number(quote?.days) > 1 ? ` · ${quote?.days} days / nights` : ""}{item.merchant ? ` · ${item.merchant}` : ""}</small>{item.description ? <small>{item.description}</small> : null}</span>
+                        <span><b>{expenseCategoryName(item)}</b><small>{displayDate(item.expense_date)}{Number(quote?.days) > 1 ? ` · ${quote?.days} days / nights` : ""}{item.merchant ? ` · ${item.merchant}` : ""}</small>{item.description ? <small>{item.description}</small> : null}</span>
                         <span data-label="Claimed">{money(item.amount)}</span>
                         <span data-label="Policy rule">{expensePolicyRule(quote)}</span>
                         <span data-label="Payable">
@@ -2024,25 +2148,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                     })}
                   </div>
                   <p>Finance must verify the receipt, expense head, business-policy limit, eligible payable amount, and exception status before deciding. Use Edit to set a line's payable amount after checking a special approval; the amount sent to Payments is the payable total shown above.</p>
-                </section> : <dl className="dx-approval-facts">
-                  {items.map((item) => (
-                    <div key={item.id}><dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt><dd>{item.expense_date} · {money(item.amount)}{item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}</dd></div>
-                  ))}
-                </dl>}
-                <dl className="dx-approval-facts">
-                  {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
-                    <div key={attachment.id}>
-                      <dt>{expenseDocumentLabel(attachment)}</dt>
-                      <dd>
-                        <ConnectAttachmentViewer
-                          files={[{ label: expenseDocumentLabel(attachment), url: attachment.url as string, fileName: attachment.file_name }]}
-                          title={`${approval.claim.requesterName} · ${expenseDocumentLabel(attachment)}`}
-                          trigger={<><FileText />{attachment.file_name}</>}
-                        />
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+                </section> : <ExpenseClaimLines items={items} />}
+                <ExpenseClaimAttachments attachments={approval.claim.attachments} title={approval.claim.requesterName} />
                 <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.claim.submitted_at} submittedBy={approval.claim.requesterName} currentStep={approval.step_name} />
                 <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder={financeReview && exceptionCount ? "Required: record the policy-exception decision" : approval.step_name.includes("Policy excess") ? "Required: reason for approving this excess" : "Required when returning or rejecting"} />
                 <ApprovalToolbar
@@ -2066,10 +2173,18 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 name={claim.requesterName}
               />
               <div className="dx-oversight-status"><span><small>Status</small><strong>{statusLabel(claim.status)}</strong></span><span><small>Submitted</small><strong>{dateTime(claim.submitted_at ?? null)}</strong></span><span><small>Claimed</small><strong>{money(claim.total_claimed)}</strong></span><span><small>Approved / payable</small><strong>{claim.total_approved == null ? "Pending" : money(claim.total_approved)}</strong></span></div>
-              <dl className="dx-approval-facts">
-                {claim.items.map((item) => <div key={item.id}><dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt><dd>{displayDate(item.expense_date)} · {money(item.amount)}{item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}</dd></div>)}
-                {claim.attachments.filter((attachment) => attachment.url).map((attachment) => <div key={attachment.id}><dt>{expenseDocumentLabel(attachment)}</dt><dd><ConnectAttachmentViewer files={[{ label: attachment.file_name || "Receipt", url: attachment.url as string, fileName: attachment.file_name }]} title={`${claim.requesterName} · ${attachment.file_name || "Receipt"}`} trigger={<><FileText />{attachment.file_name}</>} /></dd></div>)}
-              </dl>
+              <ExpenseClaimSummary
+                purpose={claim.purpose}
+                requesterCode={claim.requesterCode}
+                requestNote={claim.requestNote}
+                totalApproved={claim.total_approved}
+                totalClaimed={claim.total_claimed}
+                tripFrom={claim.trip_from}
+                tripTo={claim.trip_to}
+                visitStations={claim.visitStations}
+              />
+              <ExpenseClaimLines items={claim.items} />
+              <ExpenseClaimAttachments attachments={claim.attachments} title={claim.requesterName} />
               <section className="dx-oversight-route">
                 <h3>Approval route</h3>
                 {claim.steps.map((step) => <div key={step.id}><i className={`status-${step.status}`}>{step.status === "approved" ? <Check /> : <Clock3 />}</i><span><strong>{step.approver_name} · {step.step_name}</strong><small>{statusLabel(step.status)}{step.decided_at ? ` · ${dateTime(step.decided_at)}` : ""}{step.decision_note ? ` · ${step.decision_note}` : ""}</small></span></div>)}
@@ -2240,12 +2355,7 @@ function ReimbursementApprovalHistory({ account }: { account: AppAccount }) {
               <div><dt>Claim status now</dt><dd>{statusLabel(item.claim.status ?? "")}</dd></div>
               <div><dt>Your decision</dt><dd>{statusLabel(item.status)} on {decidedOn(item.decided_at)}{item.decision_note ? ` · ${item.decision_note}` : ""}</dd></div>
             </dl>
-            {lines.length ? <table className="dx-approval-history-table"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Claimed</th><th>Payable</th></tr></thead><tbody>
-              {lines.map((line) => {
-                const category = Array.isArray(line.hr_expense_categories) ? line.hr_expense_categories[0] : line.hr_expense_categories;
-                return <tr key={line.id}><td>{displayDate(line.expense_date)}</td><td>{category?.name ?? "—"}</td><td>{[line.merchant, line.description].filter(Boolean).join(" · ") || "—"}</td><td>{money(line.amount)}</td><td>{money(expensePayable(line))}</td></tr>;
-              })}
-            </tbody></table> : null}
+            {lines.length ? <ExpenseClaimLines items={lines} /> : null}
             {item.claim.attachments?.length ? <p className="dx-approval-history-files">{item.claim.attachments.map((file) => file.url
               ? <a href={file.url} key={file.id} rel="noreferrer" target="_blank">{file.file_name}</a>
               : <span key={file.id}>{file.file_name}</span>)}</p> : null}

@@ -18446,8 +18446,9 @@ img.dx-selfie-live {
 .dx-approval-history-item[open] > summary { border-bottom: 1px solid #eaecf0; }
 .dx-approval-history-item > dl, .dx-approval-history-item > table, .dx-approval-history-item > p, .dx-approval-history-item > div { margin: 10px 12px; }
 .dx-approval-history-table { width: calc(100% - 24px); border-collapse: collapse; font-size: 12.5px; }
-.dx-approval-history-table th, .dx-approval-history-table td { padding: 6px 4px; border-bottom: 1px solid #f2f4f7; text-align: left; }
+.dx-approval-history-table th, .dx-approval-history-table td { padding: 6px 4px; border-bottom: 1px solid #f2f4f7; text-align: left; vertical-align: top; }
 .dx-approval-history-table td:last-child, .dx-approval-history-table th:last-child { text-align: right; }
+.dx-approval-history-table td small { display: block; margin-top: 2px; color: #667085; font-size: 11px; line-height: 1.45; }
 .dx-approval-history-files { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12.5px; }
 .dx-approval-history-pages { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 4px; font-size: 13px; }
 
