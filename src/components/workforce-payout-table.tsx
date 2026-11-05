@@ -79,7 +79,7 @@ export type WorkforcePayoutAttendanceRange = {
 };
 
 export type WorkforcePayoutRow = {
-  id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
+  id: string; dropxId: string; dropxStatus: string; name: string; designation: string; designationCode?: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   reviewSubjectType?: "workforce" | "helper"; reviewSubjectId?: string | null; reviewToken?: string | null; publicationDependencyHash?: string | null;
   publicationLocations?: Array<{ id: string; label: string }>;
   publicationLockState?: WorkforcePayoutPublicationLockState | null;

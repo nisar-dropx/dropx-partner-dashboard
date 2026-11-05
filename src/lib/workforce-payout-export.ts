@@ -20,6 +20,7 @@ export type WorkforcePayoutExportRow = {
   dropxStatus: string;
   name: string;
   designation: string;
+  designationCode?: string;
   providerMemberId: string;
   providerMemberName: string;
   location: string;
@@ -79,10 +80,10 @@ function componentIdentity(item: Pick<WorkforcePayoutExportComponent, "code" | "
   return `${item.code.trim().toUpperCase()}|${item.componentType}|${Number(item.rate)}|${thresholdIdentity}`;
 }
 
-function componentColumns(rows: WorkforcePayoutExportRow[]) {
+function componentColumns(rows: WorkforcePayoutExportRow[], groupHeads = false) {
   const values = new Map<string, Pick<WorkforcePayoutExportComponent, "code" | "label" | "componentType" | "rate" | "reportedCount" | "thresholdPeriod" | "thresholdMinimum" | "thresholdConfigurationMissing">>();
   for (const row of rows) for (const item of row.productionBreakdown) {
-    const identity = componentIdentity(item);
+    const identity = groupHeads ? headIdentity(item) : componentIdentity(item);
     if (values.has(identity)) continue;
     values.set(identity, {
       code: item.code,
@@ -99,6 +100,7 @@ function componentColumns(rows: WorkforcePayoutExportRow[]) {
   // field order. A CSV can contain methods with conflicting orders, so retain
   // the first visible occurrence instead of imposing a new alphabetic order.
   const items = Array.from(values.values());
+  if (groupHeads) return withUniqueLabels(items);
   const labelCounts = new Map<string, number>();
   const codeCounts = new Map<string, number>();
   const codeRateCounts = new Map<string, number>();
@@ -126,6 +128,16 @@ function componentColumns(rows: WorkforcePayoutExportRow[]) {
         : item.label;
     return { ...item, exportLabel };
   });
+}
+
+function headIdentity(item: Pick<WorkforcePayoutExportComponent, "code" | "componentType">) {
+  return `${item.code.trim().toUpperCase()}|${item.componentType}`;
+}
+
+function designationCode(row: WorkforcePayoutExportRow) {
+  if (row.designationCode !== undefined) return row.designationCode.trim();
+  const text = row.designation.trim();
+  return text.split(/\s+[-–—]\s+/).length > 1 ? text.split(/\s+[-–—]\s+/)[0] : /^[A-Za-z0-9_]{1,20}$/.test(text) ? text : "";
 }
 
 function deductionColumns(rows: WorkforcePayoutExportRow[]) {
@@ -187,10 +199,13 @@ function paymentBalanceValues(
 }
 
 export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[], subjectLabel: "Workforce" | "Helper") {
-  const details = componentColumns(rows);
+  const workforce = subjectLabel === "Workforce";
+  const details = componentColumns(rows, workforce);
   const additionalPayments = additionalColumns(rows);
   const deductions = deductionColumns(rows);
-  const detailHeaders = details.flatMap((item) => item.componentType === "production" && item.reportedCount !== undefined
+  const detailHeaders = details.flatMap((item) => workforce
+    ? [`${item.exportLabel} Rate (INR)`, `${item.exportLabel} Units`, `${item.exportLabel} Amount (INR)`]
+    : item.componentType === "production" && item.reportedCount !== undefined
     ? [`${item.exportLabel} Threshold Period`, `${item.exportLabel} Minimum Units`, `${item.exportLabel} Reported Units`, `${item.exportLabel} Threshold / Excluded Units`, `${item.exportLabel} Payable Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
     : item.componentType === "production"
       ? [`${item.exportLabel} Count`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
@@ -203,13 +218,13 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     "Partner Name",
     "Partner ID",
     "Location",
-    "Provider / Allocation",
-    "Model / Basis",
+    workforce ? "Provider" : "Provider / Allocation",
+    workforce ? "Model" : "Model / Basis",
     "Payment Method",
     "Work Days",
-    "Attendance Source",
+    ...workforce ? [] : ["Attendance Source"],
     ...detailHeaders,
-    "Base Payment (INR)",
+    ...workforce ? [] : ["Base Payment (INR)"],
     ...additionalPayments.flatMap((item) => item.calculationType === "manual_amount"
       ? [`${item.exportLabel} (INR)`]
       : [`${item.exportLabel} Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]),
@@ -228,6 +243,15 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
   const exportRows = rows.map((row) => {
     const blankPayments = !row.paymentDetailsAvailable;
     const detailValues: ExportValue[] = details.flatMap((column): ExportValue[] => {
+      if (workforce) {
+        if (blankPayments) return ["", "", ""];
+        const lines = row.productionBreakdown.filter(item => headIdentity(item) === headIdentity(column));
+        if (!lines.length) return ["", 0, 0];
+        const rates = [...new Set(lines.map(item => item.rate))].sort((left, right) => left - right);
+        return [rates.length === 1 ? rates[0] : rates.join(" / "),
+          Math.round(lines.reduce((sum, item) => sum + item.count, 0) * 100) / 100,
+          Math.round(lines.reduce((sum, item) => sum + item.amount, 0) * 100) / 100];
+      }
       if (blankPayments) return column.componentType === "production" && column.reportedCount !== undefined
         ? ["", "", "", "", "", "", ""]
         : column.componentType === "production" ? ["", "", ""] : ["", ""];
@@ -260,7 +284,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
       row.dropxId,
       row.dropxStatus,
       row.name,
-      row.designation,
+      workforce ? designationCode(row) : row.designation,
       row.providerMemberName,
       spreadsheetIdentifier(row.providerMemberId),
       row.location,
@@ -268,9 +292,9 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
       blankPayments ? "" : row.model,
       blankPayments ? "" : row.paymentMethod,
       blankPayments || row.workDaysSource.toLowerCase().includes("unavailable") ? "" : row.workDays,
-      blankPayments ? "" : row.workDaysSource,
+      ...workforce ? [] : [blankPayments ? "" : row.workDaysSource],
       ...detailValues,
-      blankPayments ? "" : row.baseAmount,
+      ...workforce ? [] : [blankPayments ? "" : row.baseAmount],
       ...additionalValues,
       blankPayments ? "" : row.additions,
       blankPayments ? "" : row.grossPayment,
