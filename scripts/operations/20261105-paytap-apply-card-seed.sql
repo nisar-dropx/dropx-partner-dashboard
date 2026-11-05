@@ -1,0 +1,55 @@
+-- Apply after 20261105120000_paytap_core_card_map.sql on project uimajyffojydenqsegjv.
+-- Seeds PayTap card last-4 → Fleet vehicle links for the company that owns the paytap-fuel endpoint.
+-- Replace :actor with a real profiles.id for that company if RPC auth is required via service role.
+
+do $$
+declare
+  cid uuid;
+  actor uuid;
+  n integer;
+  cards jsonb := $json$
+[
+  {"card_ending":"4363","vehicle_no":"KL11CB7606","kit_number":"7690004642","masked_card":"5086XXXXXXXX4363","paytap_vehicle_id":"6adc40a6ca80f83e5b223945"},
+  {"card_ending":"2698","vehicle_no":"KL11BZ9896","kit_number":"7690005214","masked_card":"5086XXXXXXXX2698","paytap_vehicle_id":"6ad8a121ca80f83e5b20284e"},
+  {"card_ending":"1781","vehicle_no":"KL11CB7565","kit_number":"7690005470","masked_card":"5086XXXXXXXX1781","paytap_vehicle_id":"6ad8a129ca80f83e5b202886"},
+  {"card_ending":"4959","vehicle_no":"KL11CC2792","kit_number":"7690005205","masked_card":"5086XXXXXXXX4959","paytap_vehicle_id":"6ad8a0f7ca80f83e5b2027df"},
+  {"card_ending":"9223","vehicle_no":"KL11BY6479","kit_number":"7690005422","masked_card":"5086XXXXXXXX9223","paytap_vehicle_id":"6adc409aca80f83e5b22390e"},
+  {"card_ending":"8142","vehicle_no":"KL11CC3037","kit_number":"7690005421","masked_card":"5086XXXXXXXX8142","paytap_vehicle_id":"6adc40b8ca80f83e5b223994"},
+  {"card_ending":"0502","vehicle_no":"KL11CB7682","kit_number":"7690004644","masked_card":"5086XXXXXXXX0502","paytap_vehicle_id":"6adc40ceca80f83e5b2239f3"},
+  {"card_ending":"6567","vehicle_no":"KL11BZ0701","kit_number":"7690005397","masked_card":"5086XXXXXXXX6567","paytap_vehicle_id":"6adc40d3ca80f83e5b223a0b"},
+  {"card_ending":"4140","vehicle_no":"KL11CC3058","kit_number":"7690005413","masked_card":"5086XXXXXXXX4140","paytap_vehicle_id":"6adc40e6ca80f83e5b223a3e"},
+  {"card_ending":"5154","vehicle_no":"KL11CA1432","kit_number":"7690005520","masked_card":"5086XXXXXXXX5154","paytap_vehicle_id":"6ad8a171ca80f83e5b202908"},
+  {"card_ending":"0114","vehicle_no":"KL11CC2832","kit_number":"7690005449","masked_card":"5086XXXXXXXX0114","paytap_vehicle_id":"6adc42c7ca80f83e5b223e80"},
+  {"card_ending":"8258","vehicle_no":"KL11CC3048","kit_number":"7690005523","masked_card":"5086XXXXXXXX8258","paytap_vehicle_id":"6adc42cdca80f83e5b223e9d"},
+  {"card_ending":"8068","vehicle_no":"KL11CC2815","kit_number":"7690005440","masked_card":"5086XXXXXXXX8068","paytap_vehicle_id":"6adc42d3ca80f83e5b223ece"},
+  {"card_ending":"4736","vehicle_no":"KL11CC2822","kit_number":"7690005439","masked_card":"5086XXXXXXXX4736","paytap_vehicle_id":"6adc42dbca80f83e5b223f1e"},
+  {"card_ending":"5684","vehicle_no":"KL11CC3016","kit_number":"7690005411","masked_card":"5086XXXXXXXX5684","paytap_vehicle_id":"6adc40c6ca80f83e5b2239da"},
+  {"card_ending":"0239","vehicle_no":"KL11BZ1894","kit_number":"7690004640","masked_card":"5086XXXXXXXX0239","paytap_vehicle_id":"6ad35c96ca80f83e5b1c66bc"},
+  {"card_ending":"1138","vehicle_no":"KL11CC3081","kit_number":"7690004641","masked_card":"5086XXXXXXXX1138","paytap_vehicle_id":"6adc40afca80f83e5b22395e"},
+  {"card_ending":"4751","vehicle_no":"KL11CC2857","kit_number":"7690005448","masked_card":"5086XXXXXXXX4751","paytap_vehicle_id":"6adc4fe7ca80f83e5b2253fc"},
+  {"card_ending":"5940","vehicle_no":"KL11CB8252","kit_number":"7690005412","masked_card":"5086XXXXXXXX5940","paytap_vehicle_id":"6adc40dfca80f83e5b223a24"},
+  {"card_ending":"0304","vehicle_no":"KL11BZ1869","kit_number":"7690005519","masked_card":"5086XXXXXXXX0304","paytap_vehicle_id":"6adc40feca80f83e5b223a98"},
+  {"card_ending":"2359","vehicle_no":"KL11CC2749","kit_number":"7690005518","masked_card":"5086XXXXXXXX2359","paytap_vehicle_id":"6adc42aaca80f83e5b223e0b"},
+  {"card_ending":"4702","vehicle_no":"KL11CC2758","kit_number":"7690005398","masked_card":"5086XXXXXXXX4702","paytap_vehicle_id":"6adc42b6ca80f83e5b223e23"},
+  {"card_ending":"0833","vehicle_no":"KL11CC3093","kit_number":"7690005438","masked_card":"5086XXXXXXXX0833","paytap_vehicle_id":"6adc4091ca80f83e5b2238f6"},
+  {"card_ending":"3043","vehicle_no":"KL11CA5156","kit_number":"7690005056","masked_card":"5086XXXXXXXX3043","paytap_vehicle_id":"6adc4085ca80f83e5b2238db"},
+  {"card_ending":"2227","vehicle_no":"KL11BZ0772","kit_number":"7690005053","masked_card":"5086XXXXXXXX2227","paytap_vehicle_id":"6adc407cca80f83e5b2238c3"},
+  {"card_ending":"7078","vehicle_no":"KL11CC3098","kit_number":"7690005420","masked_card":"5086XXXXXXXX7078","paytap_vehicle_id":"6adc40f7ca80f83e5b223a80"},
+  {"card_ending":"1922","vehicle_no":"KL11CB8204","kit_number":"7690005419","masked_card":"5086XXXXXXXX1922","paytap_vehicle_id":"6adc40ecca80f83e5b223a5f"},
+  {"card_ending":"6526","vehicle_no":"KL11BZ1872","kit_number":"7690005464","masked_card":"5086XXXXXXXX6526","paytap_vehicle_id":"6adc40bfca80f83e5b2239ac"}
+]
+$json$::jsonb;
+begin
+  select company_id into cid from public.fleet_paytap_connections
+  where endpoint_id = 'cc07a36f-3d1a-4d94-928d-394692040c58';
+  if cid is null then
+    raise exception 'PayTap connection for endpoint cc07a36f-3d1a-4d94-928d-394692040c58 was not found';
+  end if;
+  select id into actor from public.profiles where company_id = cid order by created_at nulls last limit 1;
+  if actor is null then
+    raise exception 'No profile found for company %', cid;
+  end if;
+  n := public.fleet_paytap_upsert_cards(cid, actor, cards);
+  raise notice 'Seeded % PayTap card mappings for company %', n, cid;
+end;
+$$;
