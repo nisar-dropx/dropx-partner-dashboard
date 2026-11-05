@@ -1207,7 +1207,9 @@ export async function backfillLoadFlashBoard(opts?: {
   const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/board/backfill`);
   // Refresh always pulls the selected business date only.
   url.searchParams.set("days", "1");
-  if (opts?.startIndex) url.searchParams.set("startIndex", String(opts.startIndex));
+  if (opts?.startIndex != null && Number.isFinite(opts.startIndex)) {
+    url.searchParams.set("startIndex", String(Math.max(0, opts.startIndex)));
+  }
   if (opts?.date) url.searchParams.set("date", opts.date);
   if (opts?.concurrency) url.searchParams.set("concurrency", String(opts.concurrency));
   if (opts?.retryJobs?.length) url.searchParams.set("retryJobs", opts.retryJobs.join(","));
