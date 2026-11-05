@@ -7,6 +7,7 @@ function source(relativePath) {
 }
 
 const registerPage = source("../app/payments/workforce-advances/page.tsx");
+const combinedRegisterPage = source("../app/payments/advance-register/page.tsx");
 const registerComponent = source("../components/workforce-advance-register.tsx");
 const registerView = source("./workforce-advance-register-view.ts");
 const addAdvanceRoute = source("../app/api/payments/workforce-advances/route.ts");
@@ -21,24 +22,16 @@ const recoveryHardeningMigration = source("../../supabase/migrations/20261007110
 const finalSafetyMigration = source("../../supabase/migrations/20261007112000_workforce_advance_recovery_overlap_lock_order.sql");
 const allPendingRecoveryMigration = source("../../supabase/migrations/20261007170000_workforce_advance_recovery_all_pending.sql");
 const periodDependencyMigration = source("../../supabase/migrations/20261007171000_workforce_payout_period_dependency_revisions.sql");
-const accessPages = source("./access-pages.ts");
-const accessSurface = source("./access-surface.ts");
 const importHardeningMigration = source("../../supabase/migrations/20261007111000_workforce_advance_import_hardening.sql");
 const reassignmentMigration = source("../../supabase/migrations/20261007210000_workforce_advance_reassignment.sql");
 const reassignmentPaidLocationFix = source("../../supabase/migrations/20261007211000_workforce_advance_reassignment_paid_location_fix.sql");
 const dependencyRefreshMigration = source("../../supabase/migrations/20261010045430_workforce_payout_dependency_refresh_queue.sql");
 
-test("Workforce Advance Register is shared by Dashboard and Ops with separate page codes", () => {
-  assert.match(registerPage, /currentAdminAccessSurface\(\)/);
-  assert.match(
-    registerPage,
-    /surface\s*===\s*["']ops["']\s*\?\s*["']ops_workforce_advances["']\s*:\s*["']workforce_advances["']/
-  );
-  assert.match(registerPage, /requirePagePermission\(pageCode,\s*["']access["']\)/);
-  assert.match(registerPage, /<AppShell[^>]+pageCode=\{pageCode\}/);
-  assert.match(accessPages, /code:\s*["']workforce_advances["'][^\n]+Workforce Advance Register/);
-  assert.match(accessPages, /code:\s*["']ops_workforce_advances["'][^\n]+Workforce Advance Register/);
-  assert.match(accessSurface, /["']ops_workforce_advances["']/);
+test("the retired Workforce page redirects to the combined register and is absent from navigation", () => {
+  assert.match(registerPage, /permanentRedirect\("\/payments\/advance-register"\)/);
+  for (const path of ["./app-navigation.ts", "./ops-pulse/navigation.ts", "./ops-pulse/demo/catalog.ts"]) {
+    assert.doesNotMatch(source(path), /"\/payments\/workforce-advances"/);
+  }
 });
 
 
@@ -348,13 +341,11 @@ test("advance deduction and review submission use separate row eligibility", () 
   assert.match(payoutTable, /Available for advance deduction only\./);
 });
 
-test("the unified paid register preserves canonical location visibility",()=>{
-  assert.match(registerPage,/requirePagePermission\(pageCode/);
-  assert.match(registerPage,/workforceQuery = workforceQuery.in\("location_id", scope\)/);
-  assert.match(registerPage,/\.from\("pay_advances"\)/);
-  assert.match(registerPage,/\.in\("worker_id", visibleWorkforceIds.slice/);
-  assert.match(registerPage,/const canAdd = false/);
-  assert.match(registerPage,/const canEdit = false/);
+test("the combined paid register retains company authorization and no manual entry actions", () => {
+  assert.match(combinedRegisterPage, /requirePagePermission\("payment_process", "access"\)/);
+  assert.match(combinedRegisterPage, /requireCompanyId\(authorization\)/);
+  assert.match(combinedRegisterPage, /loadPaidAdvanceRegisterView\(supabaseAdmin, companyId\)/);
+  assert.match(combinedRegisterPage, /canAdd=\{false\} canEdit=\{false\}/);
 });
 test("retired manual advance mutation endpoints return Gone",async()=>{
   for(const source of [addAdvanceRoute,bulkUploadRoute,reassignAdvanceRoute,deductAdvancesRoute]) {

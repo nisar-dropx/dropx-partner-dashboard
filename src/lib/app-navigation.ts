@@ -80,7 +80,6 @@ export const navItems: NavItem[] = [
       { code: "payable_balance", label: "Payable balance", href: "/payments/payable-balance" },
       { code: "payment_recoveries", label: "Recovery", href: "/payments/recoveries" },
       { code: "workforce_payout_disputes", label: "Disputes", href: "/payments/disputes" },
-      { code: "workforce_advances", label: "Workforce Advance Register", href: "/payments/workforce-advances" },
       { code: "payment_reports", label: "Report", href: "/payments/report" }
     ]
   },

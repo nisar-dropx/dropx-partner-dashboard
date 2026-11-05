@@ -242,7 +242,6 @@ define(
   [
     "/work-force-register",
     "/payments/workforce-payouts",
-    "/payments/workforce-advances",
     "/payments/disputes",
   ],
   "workforce",

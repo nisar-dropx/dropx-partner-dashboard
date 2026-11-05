@@ -117,7 +117,7 @@ export async function updateDeductionHead(formData: FormData) {
     .maybeSingle();
     if (existingResult.error) throw new Error(existingResult.error.message);
     if (!existingResult.data) throw new Error("Deduction head was not found.");
-    if (existingResult.data.code === "ADVANCE") throw new Error("ADVANCE is managed by the Workforce Advance Register and cannot be edited here.");
+    if (existingResult.data.code === "ADVANCE") throw new Error("ADVANCE is managed by the Advance Register and cannot be edited here.");
     const isSystemTds = existingResult.data.is_system && existingResult.data.code === "TDS";
     if (existingResult.data.is_system && !isSystemTds) throw new Error("Unsupported system deduction head.");
     const deduction = deductionValues(formData, isSystemTds);
