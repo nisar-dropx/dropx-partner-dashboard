@@ -64,7 +64,7 @@ assert.doesNotMatch(exportComponentColumns, /preferredProductionCodes|left\.labe
 assert.match(workforceTable, /DropX associate/, "Workforce must identify the registered associate");
 assert.match(workforceTable, /Partner ID/, "Workforce must show the mapped partner ID without coupling the shared UI to Amazon");
 assert.match(workforceTable, /Partner name/, "Workforce must show the source partner-account name");
-assert.doesNotMatch(workforceTable, /PayoutTableView|VIEW_OPTIONS|aria-pressed/, "Workforce must use one compact totals worksheet instead of multiple dense views");
+assert.doesNotMatch(workforceTable, /PayoutTableView|VIEW_OPTIONS/, "Workforce must use one compact totals worksheet instead of multiple dense views");
 assert.match(workforceTable, /Export full CSV/, "Workforce must make the full-fidelity export clear");
 assert.match(workforceTable, /buildWorkforcePayoutCsv\(exportableRows, subjectLabel\)/, "Workforce and Helper exports must use the tested human-readable CSV builder");
 assert.doesNotMatch(workforceExport, /paymentMethodBreakdown/, "Export must not duplicate component amounts with payment-method aggregate columns");

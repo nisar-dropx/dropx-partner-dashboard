@@ -1,5 +1,6 @@
 "use client";
 import { boardRefreshStatus } from "@/lib/ops-pulse/board-refresh-status";
+import { boardSourceStatus, withBoardSourceStatus } from "@/lib/ops-pulse/board-source-status";
 import { RtsReport } from "./rts-report";
 import { formatAgeingPerformance, boardPerformanceTarget, performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
 import { dotStationTable } from "@/lib/ops-pulse/dot-report";
@@ -458,7 +459,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         : view === "standard" ? "Standard DOT"
           : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries"
             : "DSR";
-    const table = isDotView(view) ? dotStationTable(blockStations, view as "dot" | "premium" | "standard") : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
+    const sourceTable = isDotView(view) ? dotStationTable(blockStations, view as "dot" | "premium" | "standard") : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
       : isDsrFamilyView(view) && level === "station"
         ? dsrStationTable(
           blockStations,
@@ -469,6 +470,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           dsrTitle,
         )
       : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
+    const table = withBoardSourceStatus(sourceTable, blockStations);
     const d = boardDeliverySummary(blockStations, view === "zero", board => daDsrForView(board, view));
     const stats = isDsrFamilyView(view)
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
@@ -1055,7 +1057,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       </div> : null}
 
       <div className={s.kpis} aria-live="polite">
-        <article className={s.kpi}><span>Stations ready</span><strong>{isDotView(view) ? dotValues.filter(Boolean).length : totals.ready}/{stations.length}</strong></article>
+        <article className={s.kpi}><span>Stations with data</span><strong>{isDotView(view) ? dotValues.filter(Boolean).length : totals.ready}/{stations.length}</strong></article>
         {isDotView(view) ? <>
           {([['Eligible', dotSummary.total], ['Dispatched', dotSummary.dispatched], ['At station', dotSummary.atStation], ['Delivered', dotSummary.delivered]] as const).map(([label,value]) => <article key={label} className={s.kpi}><span>{label}</span><strong>{dotUnavailable ? "—" : count(value)}</strong></article>)}
           <article className={s.kpi}><span>DOT</span><strong style={metricStyle(dotUnavailable || !dotSummary.total ? null : dotSummary.dotPct)}>{dotUnavailable || !dotSummary.total ? "—" : pct(dotSummary.dotPct)}</strong></article>
@@ -1081,7 +1083,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       <section className={s.panel}>
         <div className={s.panelHead}>
           <h3>{report.title}</h3>
-          <span>{formatOpsDate(payload.businessDate, payload.businessDate)} · Updated {formatOpsDateTime(reportTime, reportTime)}</span>
+          <span>{formatOpsDate(payload.businessDate, payload.businessDate)} · Latest station update {formatOpsDateTime(reportTime, reportTime)}</span>
           {view === "ageing" ? <div className={s.segment} aria-label="Ageing type">
             <button type="button" aria-pressed={ageingMode === "day"} onClick={() => setAgeingMode("day")}>Day buckets</button>
             <button type="button" aria-pressed={ageingMode === "week"} onClick={() => setAgeingMode("week")}>Week buckets</button>
@@ -1091,6 +1093,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <span>{stations.length} stations{isDsrFamilyView(view) ? ` · ${delivery.daCount} DAs · ${count(delivery.total)} shipments` : ""}</span>
           <span>{isDsrFamilyView(view) ? (level === "associate" && groupByStation ? "Sorted within station · percentages of total shipments" : "Sorted across stations · percentages of total shipments") : view === "creturn" ? "Pending pickup excludes picked up, cancelled and unpickupable" : "Select a station for details"}</span>
         </div>
+        {stations.some(station => boardSourceStatus(station) !== 'current') ? <small role="status" className={s.reportMeta}>
+          {stations.filter(station => boardSourceStatus(station) === 'older').length} stations have older data · {stations.filter(station => boardSourceStatus(station) === 'missing').length} not fetched. Totals cover available data.
+        </small> : null}
         {(isDsrFamilyView(view) || isDotView(view)) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
         {(isDsrFamilyView(view) || isDotView(view) || view === 'creturn') && <small className={s.reportMeta}>{performanceTarget == null ? 'Target not configured for this metric · neutral colours' : `Dark green ≥${performanceTarget.toFixed(2)}% · light green ≥${Math.max(0,performanceTarget-4).toFixed(2)}% · amber ≥${Math.max(0,performanceTarget-14).toFixed(2)}% · red below`}</small>}
         {isDotView(view) ? <small className={s.reportMeta}>EDD equals selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
@@ -1118,7 +1123,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                 const stationMetric = view === "dsr" && level === "station" && metric && cell.text !== "—";
                 return <td key={column} style={{ background: cell.bg, color: cell.color, textAlign: cell.align, fontWeight: cell.bold ? 650 : undefined }}>
                   {((header === "Station" && cell.text) || (singleStation && !report.headers.includes("Station") && column === 0 && stationCode)) ? <button type="button" className={s.stationBtn} onClick={() => openStationPanel(stationCode)}>{cell.text}</button>
-                    : isDotView(view) && column > 0 && cell.text !== "—" && header !== "DOT%" ? <button type="button" className={s.metricBtn} onClick={() => void openDotMetricPanel(stationCode, header)}>{cell.text}</button>
+                    : isDotView(view) && column > 0 && cell.text !== "—" && header !== "DOT%" && header !== "Source updated (IST)" ? <button type="button" className={s.metricBtn} onClick={() => void openDotMetricPanel(stationCode, header)}>{cell.text}</button>
                     : stationMetric ? <button type="button" className={s.metricBtn} title={`View ${header} TIDs`} onClick={() => openStationMetricPanel(stationCode, metric, `${header} · ${stationCode}`)}>{cell.text}</button>
                       : cell.text}
                 </td>;

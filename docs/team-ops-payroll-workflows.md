@@ -830,6 +830,13 @@ alter loss, payroll, approval or collection records.
 - One-time November 1 closure covers exactly 45 September disputes raised before October 16, confirmed previously settled by Managing Partner. Original rows are retained in immutable closure events; `legacy_resolution_unverified` is true. No payroll or payment amount is modified.
 - Both One and Ops show the same short ticket reference. Ops closed history includes earlier closures and rejected tickets. Complete history remains accessible; verified corrections still require a newer publication and the approved net delta.
 
+### Publish-time dispute hours — 5 November 2026
+
+- Publish Payment offers 12/24/48-hour presets (48 selected on each opening) and custom whole hours from 1 to 720. The explicit choice applies to every new Workforce or Helper publication in the selected batch, independently of WhatsApp opt-in.
+- The server validates `disputeWindowHours` before publication and passes the resulting timestamp through the existing atomic publication RPC and notification snapshot. One and dispute intake use that same saved `review_until`. Requests from older clients that omit hours retain the company default in days.
+- Existing publication deadlines are not edited. Notification retries and automatic input refresh retain the saved deadline; the separate explicit mapping-unlock/relock correction workflow keeps its existing review policy. This change requires no database migration and does not change payout amounts, mapping locks, dispute processing, or payment eligibility.
+- Regression coverage: `payout-dispute-window.test.mjs`, `send-review/route.test.mjs`, and the existing publication, refresh, WhatsApp and dispute-intake suites. Do not publish real payouts merely to test the dialog.
+
 ### Adhoc Driver replacement attendance — 4 November 2026
 
 - Ops Masters → Payment Heads → Adhoc Driver reasons controls labels, ordering and enabled status. The three fixed rule types are DCD/ODCD on leave, Driver on leave and Vehicle service.

@@ -29,6 +29,9 @@ const REGION_BY_STATION = new Map<string, StationBoardRegionId>();
 for (const region of STATION_BOARD_REGIONS) {
   for (const code of region.stations) REGION_BY_STATION.set(code, region.id);
 }
+// Sambalpur is reported by the live worker but is outside the workbook's EDSP list.
+// Classify its existing authorised rows without extending that separate allowlist.
+REGION_BY_STATION.set("HBSC", "ODCG");
 
 /** Amazon EDSP/XPT operating stations (Station Reports.xlsm Stations sheet). */
 export const AMAZON_EDSP_STATION_CODES = new Set(
@@ -51,5 +54,5 @@ export function regionLabel(id: StationBoardRegionId): string {
 export function stationsInRegion(id: StationBoardRegionId | "ALL"): readonly string[] | null {
   if (id === "ALL") return null;
   if (id === "OTHER") return [];
-  return STATION_BOARD_REGIONS.find((region) => region.id === id)?.stations ?? [];
+  return [...REGION_BY_STATION].filter(([, region]) => region === id).map(([code]) => code);
 }
