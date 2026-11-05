@@ -163,15 +163,21 @@ console.log("PASS Verified ledger rules: delivered override, HFR, same-day attem
 const sourceApi={};
 new Function("require","exports",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-source.ts",import.meta.url),"utf8")))(()=>({}),sourceApi);
 const realFetch=globalThis.fetch;
-const fakeAuth={cookie:"test-session",x_api_usage_key:"test-key"};
+const fakeAuth={stationCode:"KTUO"};
+const priorWorkerUrl=process.env.EDD_WORKER_URL, priorWorkerKey=process.env.EDD_WORKER_ADMIN_KEY;
+process.env.EDD_WORKER_URL="https://worker.example.test";
+process.env.EDD_WORKER_ADMIN_KEY="test-worker-key";
 try {
   let page=0;
   globalThis.fetch=async(url,options)=>{
-    assert.equal(url,"https://www.amazonlogistics.eu/station/proxyapigateway/data");
-    assert.equal(options.redirect,"manual","never forward the session through redirects");
+    assert.equal(url,"https://worker.example.test/api/admin/executive/edd/verification-read");
+    assert.equal(options.redirect,"manual","never forward the worker credential through redirects");
+    assert.equal(options.headers["x-admin-key"],"test-worker-key");
+    assert.equal(options.headers.cookie,undefined,"portal no longer reads or forwards Amazon sessions");
     const body=JSON.parse(options.body);
-    assert.equal(body.resourcePath,"/os/getPackageHistoryData");
-    assert.equal(body.requestBody.pageToken,page===0?null:"continuation");
+    assert.equal(body.kind,"history");
+    assert.equal(body.stationCode,"KTUO");
+    assert.equal(body.pageToken,page===0?null:"continuation");
     return Response.json(page++===0?{packageHistory:Array.from({length:20},()=>({packageState:"INDUCTED",stateTime:1788950000000})),nextPageToken:"continuation"}:{packageHistory:[{packageState:"DELIVERY_ATTEMPTED",stateTime:1788850000000}]});
   };
   const paged=await sourceApi.eddSourceHistory("sample",fakeAuth);
@@ -182,7 +188,13 @@ try {
   assert.equal((await sourceApi.eddSourceHistory("sample",fakeAuth)).historyComplete,false,"full page without token cannot prove full history");
   globalThis.fetch=async()=>Response.json({packageSummaryList:[{trackingId:"allowed",currentPackageState:"DELIVERED"},{trackingId:"outside"}]});
   assert.deepEqual((await sourceApi.eddSourceSummaries("KTUO",["allowed"],fakeAuth)).map(r=>r.trackingId),["allowed"]);
-} finally {globalThis.fetch=realFetch;}
+  globalThis.fetch=async()=>new Response('{}',{status:429});
+  await assert.rejects(sourceApi.eddSourceHistory("sample",fakeAuth),sourceApi.EddSourceBusyError);
+} finally {
+  globalThis.fetch=realFetch;
+  if(priorWorkerUrl===undefined)delete process.env.EDD_WORKER_URL;else process.env.EDD_WORKER_URL=priorWorkerUrl;
+  if(priorWorkerKey===undefined)delete process.env.EDD_WORKER_ADMIN_KEY;else process.env.EDD_WORKER_ADMIN_KEY=priorWorkerKey;
+}
 console.log("PASS Source integration contracts: fixed origin, no redirects, paginated history, conservative completeness and requested-TID filtering.");
 const pickupOnly=verification.eddHistoryFacts([{state:"IN_TRANSIT",time:"2026-09-01T12:00:00Z"},{state:"INDUCTED",time:"2026-09-09T05:00:00Z"}]);
 assert.equal(pickupOnly.firstDispatchAt,null,"pickup/inbound transit before induction is not customer dispatch");
