@@ -26,7 +26,7 @@ export function FleetDADeliveryReport({surface,onReview}:{surface:'fleet'|'ops';
  <details className="da-filter-panel"><summary>More filters{filters.region.length+filters.cluster.length+filters.source.length+filters.model.length+filters.status.length?' · applied':''}</summary><div className="da-filter-options">
  <FleetMultiSelect label="Region" allLabel="All regions" alwaysSearch values={filters.region} onChange={v=>update('region',v)} options={[...new Set(stations.map(s=>s.region||'__none'))].sort().map(s=>({value:s,label:s==='__none'?'No region':s}))}/>
  <FleetMultiSelect label="Cluster" allLabel="All clusters" alwaysSearch disabled={Boolean(report?.clusterWarning)} values={filters.cluster} onChange={v=>update('cluster',v)} options={clusters}/>
- <FleetMultiSelect label="Vehicle source" allLabel="All sources" alwaysSearch values={filters.source} onChange={v=>update('source',v)} options={report?.sources??[]}/>
+ <FleetMultiSelect label="Vehicle type" allLabel="All vehicle types" alwaysSearch values={filters.source} onChange={v=>update('source',v)} options={report?.sources??[]}/>
  <FleetMultiSelect label="Model" allLabel="All models" alwaysSearch values={filters.model} onChange={v=>update('model',v)} options={(report?.models??[]).map(m=>({value:m,label:m}))}/>
  <FleetMultiSelect label="Day status" allLabel="All statuses" alwaysSearch values={filters.status} onChange={v=>update('status',v)} options={[{value:'pending',label:'Needs update'},{value:'automatic',label:'Automatic match'},{value:'saved',label:'Saved DA'},{value:'awaiting_data',label:'Awaiting report'},{value:'not_required',label:'No work recorded'}]}/>
  </div></details></form>

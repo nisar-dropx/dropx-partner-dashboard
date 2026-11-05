@@ -1,7 +1,9 @@
 'use client';
 import { FleetMobileSection } from "./fleet-mobile-section";
-import { FleetVehicleMeta } from "@/components/fleet-vehicle-meta";
+import { FleetVehicleMeta, useFleetVehicleMetadata } from "@/components/fleet-vehicle-meta";
 
+import { FleetVehicleTypeFilter } from "./fleet-vehicle-type-filter";
+import { matchesVehicleType, vehicleTypeLabel } from "@/lib/fleet/vehicle-type";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownUp, RefreshCw, Search, Route, Fuel, Gauge, CircleAlert } from 'lucide-react';
 import { dailyFleetCsv, istDate, shiftDay, sortDailyRows, validateReportRange, type DailyFleetReport, type DailyFleetRow, type SortColumn } from '@/lib/fleet/daily-report';
@@ -30,6 +32,8 @@ export function FleetReports({ fuelReports }: { fuelReports: ReactNode }) {
   </div>;
 }
 export function DailyFleetReportView({ focus = 'mileage', stationOptions: masterStations = [] }: { focus?: 'mileage' | 'fuel'; stationOptions?: FleetControlData["stationOptions"] }) {
+  const metadata = useFleetVehicleMetadata();
+  const [vehicleTypes, setVehicleTypes] = useState<string[]>([]);
   const today = istDate();
   const yesterday = shiftDay(today, -1);
   const [range, setRange] = useState({ from: yesterday, to: yesterday });
@@ -65,7 +69,7 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [range, version]);
-  useEffect(() => { setPage(1); }, [search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, sort, pageSize]);
+  useEffect(() => { setPage(1); }, [vehicleTypes, search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, sort, pageSize]);
 
   const vehicles = report?.vehicles ?? [];
   const stationOptions = [...new Set(vehicles.map(v => v.station_code))].sort();
@@ -75,8 +79,8 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase().replace(/\s+/g, '');
     const sourcePattern = fuelSource === 'bpcl' ? /bpcl/i : fuelSource === 'iocl' ? /ioc|iocl/i : fuelSource === 'paytap' ? /paytm|paytap/i : null;
-    return sortDailyRows((report?.rows ?? []).filter(row => (!stations.length || stations.includes(row.station_code)) && (!clusters.length || clusters.includes(stationByCode.get(row.station_code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(row.station_code)?.region ?? 'Unassigned region')) && (!selectedVehicles.length || selectedVehicles.includes(row.vehicle_no)) && (!fuelTypes.length || fuelTypes.includes(row.fuel_type)) && (!statuses.length || statuses.includes(row.dataStatus)) && (!sourcePattern || row.fuelBreakdown.some((item) => sourcePattern.test(item.provider))) && (!query || `${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g, '').includes(query))).map((row) => { if (!sourcePattern) return row; const parts = row.fuelBreakdown.filter((item) => sourcePattern.test(item.provider)); const litres = parts.reduce((sum, item) => sum + item.litres, 0); const amount = parts.reduce((sum, item) => sum + item.amount, 0); return { ...row, litres:parts.every(p=>p.quantityComplete)?litres:null, estimatedLitres:parts.reduce((n,p)=>n+p.estimatedLitres,0), fuelAmount: amount, fuelTransactions: parts.reduce((sum, item) => sum + item.transactions, 0), fuelSources: parts.map((item) => item.provider), mileage: row.km !== null && litres > 0 && parts.every(p=>p.quantityComplete) ? row.km / litres : null, costPerKm: row.km !== null && row.km > 0 ? amount / row.km : null }; }), sort.column, sort.direction);
-  }, [report, search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, fuelSource, sort, stationByCode]);
+    return sortDailyRows((report?.rows ?? []).filter(row => matchesVehicleType(metadata.get(row.vehicle_no), vehicleTypes) && (!stations.length || stations.includes(row.station_code)) && (!clusters.length || clusters.includes(stationByCode.get(row.station_code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(row.station_code)?.region ?? 'Unassigned region')) && (!selectedVehicles.length || selectedVehicles.includes(row.vehicle_no)) && (!fuelTypes.length || fuelTypes.includes(row.fuel_type)) && (!statuses.length || statuses.includes(row.dataStatus)) && (!sourcePattern || row.fuelBreakdown.some((item) => sourcePattern.test(item.provider))) && (!query || `${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g, '').includes(query))).map((row) => { if (!sourcePattern) return row; const parts = row.fuelBreakdown.filter((item) => sourcePattern.test(item.provider)); const litres = parts.reduce((sum, item) => sum + item.litres, 0); const amount = parts.reduce((sum, item) => sum + item.amount, 0); return { ...row, litres:parts.every(p=>p.quantityComplete)?litres:null, estimatedLitres:parts.reduce((n,p)=>n+p.estimatedLitres,0), fuelAmount: amount, fuelTransactions: parts.reduce((sum, item) => sum + item.transactions, 0), fuelSources: parts.map((item) => item.provider), mileage: row.km !== null && litres > 0 && parts.every(p=>p.quantityComplete) ? row.km / litres : null, costPerKm: row.km !== null && row.km > 0 ? amount / row.km : null }; }), sort.column, sort.direction);
+  }, [metadata, vehicleTypes, report, search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, fuelSource, sort, stationByCode]);
   const totals = useMemo(() => rows.reduce((total, row) => {
     total.km += row.km ?? 0; total.litres += row.litres ?? 0; total.amount += row.fuelAmount ?? 0;
     if (row.km === null) total.missing++;
@@ -128,7 +132,7 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
   return <div className="daily-fleet-report">
     <header className="daily-report-heading">
       <div><span className="daily-eyebrow">{focus === 'fuel' ? 'FUEL CONTROL' : 'FLEET PERFORMANCE'}</span><h2>{focus === 'fuel' ? 'Fuel log' : 'Distance & mileage'}</h2><p>{focus === 'fuel' ? 'BPCL, IOCL and PayTap fuel activity with vehicle and station views.' : 'Daily kilometres and estimated mileage by vehicle or station.'}</p></div>
-      <FleetExportButtons report={{ title: focus === 'fuel' ? 'Fleet fuel report' : 'Fleet distance and mileage report', subtitle: `${range.from} to ${range.to} · active filters applied`, fileName: `fleet-${focus}-${range.from}-${range.to}`, headers: ['Date', 'Vehicle', 'Station', 'Model', 'Fuel type', 'Distance km', 'Fuel litres', 'Fuel amount', 'Mileage km/L', 'Cost/km', 'Transactions', 'Status', 'Providers', 'Estimated litres', 'Price sources'], rows: rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, row.km, row.litres, row.fuelAmount, row.mileage, row.costPerKm, row.fuelTransactions, statusLabel[row.dataStatus], row.fuelSources.join(', '),row.estimatedLitres,row.fuelPriceSources.map(p=>`${p.date} ${p.city}: ${p.url}`).join('; ')]) }} />
+      <FleetExportButtons report={{ title: focus === 'fuel' ? 'Fleet fuel report' : 'Fleet distance and mileage report', subtitle: `${range.from} to ${range.to} · active filters applied`, fileName: `fleet-${focus}-${range.from}-${range.to}`, headers: ['Date', 'Vehicle', 'Vehicle type', 'Station', 'Model', 'Fuel type', 'Distance km', 'Fuel litres', 'Fuel amount', 'Mileage km/L', 'Cost/km', 'Transactions', 'Status', 'Providers', 'Estimated litres', 'Price sources'], rows: rows.map(row => [row.date, row.vehicle_no, vehicleTypeLabel(metadata.get(row.vehicle_no)), row.station_code, row.model, row.fuel_type, row.km, row.litres, row.fuelAmount, row.mileage, row.costPerKm, row.fuelTransactions, statusLabel[row.dataStatus], row.fuelSources.join(', '),row.estimatedLitres,row.fuelPriceSources.map(p=>`${p.date} ${p.city}: ${p.url}`).join('; ')]) }} />
     </header>
     <FleetMobileSection title="Dates & filters" summary={`${dateLabel(range.from)}–${dateLabel(range.to)} · ${stations.join(", ") || "All stations"}`} className="fc-mobile-filters"><section className="daily-filter-card" aria-label="Daily fleet report filters">
       <div className="daily-quick-ranges" aria-label="Quick date ranges">{[['yesterday', 'Yesterday'], ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'MTD'], ['year', 'YTD']].map(([value, label]) => <button key={value} type="button" disabled={syncing} onClick={() => quickRange(value)}>{label}</button>)}<span>All dates in IST</span></div>
@@ -140,13 +144,14 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
       </form>
       {draftError ? <p className="daily-form-error" role="alert">{draftError}</p> : datesChanged ? <p className="daily-filter-note">Apply dates to update the report. Currently showing {dateLabel(range.from)}–{dateLabel(range.to)}.</p> : null}
       <div className="daily-select-filters">
+        {metadata.size > 0 && <FleetVehicleTypeFilter values={vehicleTypes} onChange={setVehicleTypes} disabled={syncing} />}
         {masterStations.length ? <FleetMultiSelect allLabel="All regions" disabled={syncing} label="Region" onChange={setRegions} options={filterOption(masterStations.map((station) => station.region))} values={regions} /> : null}
         {masterStations.length ? <FleetMultiSelect allLabel="All clusters" disabled={syncing} label="Cluster" onChange={setClusters} options={filterOption(masterStations.map((station) => station.cluster))} values={clusters} /> : null}
         <FleetMultiSelect allLabel="All permitted stations" disabled={syncing} label="Station" onChange={setStations} options={stationOptions.filter((code) => (!clusters.length || clusters.includes(stationByCode.get(code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(code)?.region ?? 'Unassigned region'))).map((value) => ({ value, label: value }))} values={stations} />
         <FleetMultiSelect allLabel="All vehicles" disabled={syncing} label="Vehicle" onChange={setSelectedVehicles} options={vehicles.filter(v => !stations.length || stations.includes(v.station_code)).map(v => ({ value: v.vehicle_no, label: v.vehicle_no, helper: `${v.model || "Model not recorded"} · ${v.station_code || "Station not mapped"}` }))} values={selectedVehicles} />
         <FleetMultiSelect allLabel="All fuel types" disabled={syncing} label="Fuel type" onChange={setFuelTypes} options={filterOption(fuelOptions)} searchable={false} values={fuelTypes} />
         <FleetMultiSelect allLabel="All vehicle-days" disabled={syncing} label="Data availability" onChange={setStatuses} options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))} values={statuses} />
-        <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setStations([]); setClusters([]); setRegions([]); setSelectedVehicles([]); setFuelTypes([]); setStatuses([]); }}>Clear filters</button>
+        <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setVehicleTypes([]); setStations([]); setClusters([]); setRegions([]); setSelectedVehicles([]); setFuelTypes([]); setStatuses([]); }}>Clear filters</button>
       </div>
       {focus === 'fuel' ? <div className="daily-source-switch"><span>Fuel source</span>{([['all','All'],['iocl','IOCL'],['bpcl','BPCL'],['paytap','PayTap']] as const).map(([value, text]) => <button className={fuelSource === value ? 'active' : ''} key={value} onClick={() => setFuelSource(value)} type="button">{text}</button>)}</div> : null}<div className="daily-group-switch"><span>Summarise by</span><button className={groupBy === 'vehicle' ? 'active' : ''} onClick={() => setGroupBy('vehicle')} type="button">Vehicle-wise</button><button className={groupBy === 'station' ? 'active' : ''} onClick={() => setGroupBy('station')} type="button">Station-wise</button></div>
     </section></FleetMobileSection>

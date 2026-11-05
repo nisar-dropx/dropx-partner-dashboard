@@ -611,3 +611,9 @@ button, input, select, textarea { font: inherit; }
 /* Keep all three vehicle views reachable on narrow screens. */
 .fc-registry-workspace > .fc-view-switch { max-width: 100%; overflow-x: auto; }
 .fc-registry-workspace > .fc-view-switch button { white-space: nowrap; flex-shrink: 0; }
+
+.fc-vehicle-type{display:inline-flex;align-items:center;width:fit-content;margin:4px 0 0;padding:3px 7px;border:1px solid #d8e9e5;border-radius:6px;background:#eef7f4;color:#23675c;font-size:10px;font-weight:650;line-height:1.4;white-space:normal}
+.fc-vehicle-meta .fc-vehicle-type{display:table}
+.fc-document-filters{grid-template-columns:minmax(190px,1.4fr) repeat(7,minmax(115px,1fr))}
+@media(max-width:1400px){.fc-document-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:700px){.fc-document-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.fc-vehicle-type{font-size:11px}}

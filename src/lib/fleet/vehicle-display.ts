@@ -1,4 +1,5 @@
-type VehicleDisplay = {
+import { vehicleTypeLabel, type VehicleTypeMetadata } from "./vehicle-type";
+type VehicleDisplay = VehicleTypeMetadata & {
   vehicleNo: string;
   ownershipType?: string | null;
   daName?: string | null;
@@ -19,5 +20,5 @@ export function vehicleDisplayName(vehicle: VehicleDisplay) {
 }
 
 export function vehicleDisplayDetail(vehicle: VehicleDisplay) {
-  return [vehicle.model?.trim() || 'Model not recorded', vehicle.stationCode || 'Station not mapped', vehicleRegistrationMissing(vehicle) ? 'Registration not added' : null].filter(Boolean).join(' · ');
+  return [vehicleTypeLabel(vehicle), vehicle.model?.trim() || 'Model not recorded', vehicle.stationCode || 'Station not mapped', vehicleRegistrationMissing(vehicle) ? 'Registration not added' : null].filter(Boolean).join(' · ');
 }

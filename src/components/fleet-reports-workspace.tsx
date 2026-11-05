@@ -6,6 +6,8 @@ import {documentApplies} from "@/lib/fleet/source-policy";
 import { vehicleSourceTitle } from "@/lib/fleet/vehicle-sources";
 
 import { Activity, CalendarDays, CircleDollarSign, ClipboardCheck, FileCheck2, Gauge, History, Search, Truck, Wrench } from "lucide-react";
+import { FleetVehicleTypeFilter } from "./fleet-vehicle-type-filter";
+import { matchesVehicleType, vehicleTypeLabel } from "@/lib/fleet/vehicle-type";
 import { useEffect, useMemo, useState } from "react";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { FleetMultiSelect } from "@/components/fleet-multi-select";
@@ -33,6 +35,7 @@ export function FleetReportsWorkspace({ data: baseData }: { data: FleetControlDa
   const [reportKey, setReportKey] = useState<ReportKey>("vehicles");
   const [from, setFrom] = useState(`${baseData.today.slice(0, 7)}-01`);
   const [to, setTo] = useState(baseData.today);
+  const [vehicleTypes,setVehicleTypes] = useState<string[]>([]);
   const [stations, setStations] = useState<string[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
   const [regions, setRegions] = useState<string[]>([]);
@@ -62,14 +65,14 @@ export function FleetReportsWorkspace({ data: baseData }: { data: FleetControlDa
     let cancelled=false;
     return ()=>{cancelled=true;clearTimeout(timer);controller.abort();};
   },[reportKey,from,to,historyKey,snapshotReport,dateError,retry]);
-  useEffect(()=>setPage(0),[reportKey,from,to,stations,clusters,regions,search]);
+  useEffect(()=>setPage(0),[vehicleTypes,reportKey,from,to,stations,clusters,regions,search]);
   const stationByCode = useMemo(() => new Map(data.stationOptions.map((item) => [item.code, item])), [data.stationOptions]);
   const inScope = (station: string) => (!stations.length || stations.includes(station)) && (!clusters.length || clusters.includes(stationByCode.get(station)?.cluster ?? "Unassigned cluster")) && (!regions.length || regions.includes(stationByCode.get(station)?.region ?? "Unassigned region"));
   const needle = search.trim().toLowerCase();
   const includes = (value: string) => !needle || value.toLowerCase().includes(needle);
   const selected = definitions.find((item) => item.key === reportKey)!;
 
-  const report = useMemo<FleetReportTable>(() => {
+  const rawReport = useMemo<FleetReportTable>(() => {
     const subtitle = `${snapshotReport ? `Current snapshot · ${data.today}` : `${from} to ${to}`} · ${stations.length ? stations.join(", ") : clusters.length ? clusters.join(", ") : regions.length ? regions.join(", ") : "All vehicle placements"}`;
     if (!historyReady) return {title:selected.label,subtitle:historyError||"Loading complete history…",fileName:"fleet-report",headers:[],rows:[]};
     if (dateError && !snapshotReport) return {title:selected.label,subtitle:dateError,fileName:"fleet-report",headers:[],rows:[]};
@@ -95,6 +98,24 @@ export function FleetReportsWorkspace({ data: baseData }: { data: FleetControlDa
     return { title: "Ad Hoc van and driver usage report", subtitle, fileName: `fleet-adhoc-${from}-${to}`, headers: ["Date", "Region", "Cluster", "Station", "Usage", "Request", "Reason", "Amount", "Status", "Source"], rows: data.adHocRows.filter((row) => row.date >= from && row.date <= to && inScope(row.stationCode) && includes(`${row.reference} ${row.paymentHeadName} ${row.reason} ${row.remark}`)).map((row) => [row.date, row.region, row.cluster, row.stationCode, row.paymentHeadName, row.reference, row.reason, row.amount, row.approvalStatus, row.source]) };
   }, [reportKey, data, from, to, stations, clusters, regions, search, stationByCode, dateError, snapshotReport, selected.label, historyReady, historyError]);
 
+  const report = useMemo<FleetReportTable>(() => {
+    const vehicleColumn = rawReport.headers.indexOf("Vehicle");
+    if (vehicleColumn < 0) return rawReport;
+    const sourceColumn = rawReport.headers.indexOf("Source");
+    const headers = [...rawReport.headers];
+    if (sourceColumn >= 0) headers[sourceColumn] = "Vehicle type";
+    else headers.splice(vehicleColumn + 1, 0, "Vehicle type");
+    const index = new Map(data.vehicles.map(v => [v.vehicleNo, v]));
+    const rows = rawReport.rows.filter(row => matchesVehicleType(index.get(String(row[vehicleColumn])), vehicleTypes)).map(row => {
+      const values = [...row];
+      const type = vehicleTypeLabel(index.get(String(row[vehicleColumn])));
+      if (sourceColumn >= 0) values[sourceColumn] = type;
+      else values.splice(vehicleColumn + 1, 0, type);
+      return values;
+    });
+    return {...rawReport, headers, rows};
+  }, [rawReport, data.vehicles, vehicleTypes]);
+
   const amount = report.rows.reduce((sum,row)=>sum+row.reduce<number>((subtotal,value,index)=>subtotal+(/amount/i.test(report.headers[index]||"")&&typeof value==="number"?value:0),0),0);
   const option = (values: string[]) => [...new Set(values.filter(Boolean))].sort().map((value) => ({ value, label: value }));
   const filteredStations = data.stationOptions.filter((station) => (!regions.length || regions.includes(station.region)) && (!clusters.length || clusters.includes(station.cluster)));
@@ -106,7 +127,7 @@ export function FleetReportsWorkspace({ data: baseData }: { data: FleetControlDa
     <div className="fc-toolbar-actions"><button type="button" className="fc-button secondary" onClick={()=>setCompactView("daily_status")}>Daily status · compact export</button><button type="button" className="fc-button secondary" onClick={()=>setCompactView("non_operational")}>Non-operational · compact export</button></div>
     <label className="fc-mobile-report-picker"><span>Choose report</span><select value={reportKey} onChange={event => setReportKey(event.target.value as ReportKey)}>{definitions.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}</select><a href="/fleet-control?section=tracking">Distance, fuel &amp; mileage →</a></label>
     <section className="fc-report-catalog">{definitions.map((item) => { const ItemIcon = item.icon; return <button className={reportKey === item.key ? "active" : ""} key={item.key} onClick={() => setReportKey(item.key)} type="button"><span><ItemIcon size={17} /></span><div><strong>{item.label}</strong><small>{item.description}</small></div></button>; })}<a href="/fleet-control?section=tracking"><span><Gauge size={17} /></span><div><strong>Distance, fuel & mileage</strong><small>Use Tracking & Efficiency for vehicle and station date-range reports</small></div></a></section>
-    {dateError && !snapshotReport ? <p role="alert" className="fc-inline-message error">{dateError}</p> : null}<p className="fc-panel-foot">{snapshotReport ? "Current snapshot; the date range does not change this report." : "Complete date-range history, paginated at source. Station grouping uses current placement. Missing GPS/status remain unrecorded."}</p>{!snapshotReport && !dateError && !historyReady ? <p role="status" className="fc-inline-message">{historyError || "Loading complete report…"}{historyError ? <button type="button" className="fc-button secondary" onClick={()=>setRetry(v=>v+1)}>Retry</button>:null}</p>:null}<section className="fc-report-builder fc-panel"><header><span><Icon size={19} /></span><div><small>Selected report</small><h2>{selected.label}</h2><p>{selected.description}</p></div>{historyReady && (!dateError || snapshotReport) ? <FleetExportButtons compact report={report} /> : null}</header><FleetMobileSection title="Report filters" summary="Tap to view or edit" className="fc-mobile-settings"><div className="fc-report-filters"><label><span>From</span><input disabled={snapshotReport} max={to || data.today} onChange={(event) => setFrom(event.target.value)} type="date" value={from} /></label><label><span>To</span><input disabled={snapshotReport} min={from} max={data.today} onChange={(event) => setTo(event.target.value)} type="date" value={to} /></label><FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={option(data.stationOptions.map((item) => item.region))} values={regions} /><FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={option(data.stationOptions.map((item) => item.cluster))} values={clusters} /><FleetMultiSelect allLabel="All placements" label="Station" onChange={setStations} options={filteredStations.map((item) => ({ value: item.code, label: item.code, helper: item.name }))} values={stations} /><label className="fc-filter-search"><span>Search</span><div><Search size={14} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Search this report" value={search} /></div></label></div></FleetMobileSection>
+    {dateError && !snapshotReport ? <p role="alert" className="fc-inline-message error">{dateError}</p> : null}<p className="fc-panel-foot">{snapshotReport ? "Current snapshot; the date range does not change this report." : "Complete date-range history, paginated at source. Station grouping uses current placement. Missing GPS/status remain unrecorded."}</p>{!snapshotReport && !dateError && !historyReady ? <p role="status" className="fc-inline-message">{historyError || "Loading complete report…"}{historyError ? <button type="button" className="fc-button secondary" onClick={()=>setRetry(v=>v+1)}>Retry</button>:null}</p>:null}<section className="fc-report-builder fc-panel"><header><span><Icon size={19} /></span><div><small>Selected report</small><h2>{selected.label}</h2><p>{selected.description}</p></div>{historyReady && (!dateError || snapshotReport) ? <FleetExportButtons compact report={report} /> : null}</header><FleetMobileSection title="Report filters" summary="Tap to view or edit" className="fc-mobile-settings"><div className="fc-report-filters">{["vehicles","lifecycle","documents","service","audits"].includes(reportKey) && <FleetVehicleTypeFilter vehicles={data.vehicles} values={vehicleTypes} onChange={setVehicleTypes}/>}<label><span>From</span><input disabled={snapshotReport} max={to || data.today} onChange={(event) => setFrom(event.target.value)} type="date" value={from} /></label><label><span>To</span><input disabled={snapshotReport} min={from} max={data.today} onChange={(event) => setTo(event.target.value)} type="date" value={to} /></label><FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={option(data.stationOptions.map((item) => item.region))} values={regions} /><FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={option(data.stationOptions.map((item) => item.cluster))} values={clusters} /><FleetMultiSelect allLabel="All placements" label="Station" onChange={setStations} options={filteredStations.map((item) => ({ value: item.code, label: item.code, helper: item.name }))} values={stations} /><label className="fc-filter-search"><span>Search</span><div><Search size={14} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Search this report" value={search} /></div></label></div></FleetMobileSection>
       <div className="fc-report-summary"><article><CalendarDays size={17} /><span><small>Period</small><strong>{snapshotReport ? `As at ${data.today}` : `${from} – ${to}`}</strong></span></article><article><Activity size={17} /><span><small>Matching rows</small><strong>{historyReady ? report.rows.length.toLocaleString("en-IN") : "—"}</strong></span></article>{amount ? <article><CircleDollarSign size={17} /><span><small>Total amount</small><strong>{money(amount)}</strong></span></article> : null}</div>
       <div className="fc-table-scroll"><table><thead><tr>{report.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{report.rows.slice(page*100, (page+1)*100).map((row, index) => <tr key={index}>{row.map((value, column) => <td data-label={report.headers[column]} key={column}>{String(value ?? "—")}</td>)}</tr>)}</tbody></table></div>{report.rows.length > 100 ? <p className="fc-report-preview-note"><button type="button" disabled={!page} onClick={()=>setPage(v=>v-1)}>Previous</button> Page {page+1} of {Math.ceil(report.rows.length/100)} · Excel/PDF include all {report.rows.length} rows; image is a compact preview. <button type="button" disabled={(page+1)*100>=report.rows.length} onClick={()=>setPage(v=>v+1)}>Next</button></p> : null}{historyReady && !report.rows.length ? <div className="fc-empty"><Activity size={32} /><strong>No matching report rows</strong><p>Change the date or placement filters.</p></div> : null}
     </section>

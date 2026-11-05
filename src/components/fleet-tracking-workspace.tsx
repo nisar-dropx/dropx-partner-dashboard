@@ -2,6 +2,9 @@
 import { FleetMobileSection } from "./fleet-mobile-section";
 
 import { Activity, AlertTriangle, ArrowDownUp, Clock3, Gauge, MapPin, RefreshCw, Route, Search, ShieldAlert } from "lucide-react";
+import { FleetVehicleMeta, useFleetVehicleMetadata } from "./fleet-vehicle-meta";
+import { FleetVehicleTypeFilter } from "./fleet-vehicle-type-filter";
+import { matchesVehicleType, vehicleTypeLabel } from "@/lib/fleet/vehicle-type";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FleetGpsExceptions, type ExceptionTarget } from '@/components/fleet-gps-exceptions';
 import type { GpsExceptionReview } from '@/lib/fleet/gps-exceptions';
@@ -59,6 +62,8 @@ const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T0
 
 
 export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { data: FleetControlData; exceptionEntry?: {target?:ExceptionTarget; day?:boolean; key:number}|null; onReviewed?:(review:GpsExceptionReview)=>void }) {
+  const metadata = useFleetVehicleMetadata();
+  const [vehicleTypes,setVehicleTypes] = useState<string[]>([]);
   const stationOptions = data.stationOptions;
   const [view, setView] = useState<"live" | "day" | "mileage" | "exceptions">(exceptionEntry ? exceptionEntry.day?"day":"exceptions" : "live");
   useEffect(() => { if(exceptionEntry) setView(exceptionEntry.day?"day":"exceptions"); }, [exceptionEntry]);
@@ -119,7 +124,7 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
     const needle = search.trim().toLowerCase();
     const filtered = (summary?.gpsLive ?? []).filter((row) => {
       const station = stationByVehicle.get(row.vehicle_no) ?? "";
-      return (!needle || `${row.vehicle_no} ${station} ${modelByVehicle.get(row.vehicle_no) ?? ""}`.toLowerCase().includes(needle))
+      return matchesVehicleType(metadata.get(row.vehicle_no), vehicleTypes) && (!needle || `${row.vehicle_no} ${station} ${modelByVehicle.get(row.vehicle_no) ?? ""}`.toLowerCase().includes(needle))
         && (!placements.length || placements.includes(station))
         && (!clusters.length || clusters.includes(stationByCode.get(station)?.cluster ?? "Unassigned cluster"))
         && (!regions.length || regions.includes(stationByCode.get(station)?.region ?? "Unassigned region"))
@@ -129,7 +134,7 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
       const order = sort.key === "speed" ? a.speed - b.speed : sort.key === "time" ? String(a.gps_time ?? "").localeCompare(String(b.gps_time ?? "")) : a.vehicle_no.localeCompare(b.vehicle_no);
       return order * (sort.direction === "asc" ? 1 : -1);
     });
-  }, [summary, stationByVehicle, modelByVehicle, stationByCode, search, placements, clusters, regions, ignition, sort]);
+  }, [metadata, vehicleTypes, summary, stationByVehicle, modelByVehicle, stationByCode, search, placements, clusters, regions, ignition, sort]);
   const selected = rows.find((row) => row.vehicle_no === selectedVehicle) ?? rows[0] ?? null;
   useEffect(()=>{routeController.current?.abort();routeController.current=null;setRoute(null);setRouteLoading(false);},[selected?.vehicle_no,movementDate]);
   const moving = rows.filter((row) => row.speed > 0).length;
@@ -173,18 +178,18 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
       </section>
       <section className="fc-tracking-layout">
         <aside className="fc-panel fc-gps-list">
-          <FleetMobileSection title="Find vehicle & filters" summary={[search,...regions,...clusters,...placements,...ignition].filter(Boolean).join(" · ") || "All tracked vehicles"} className="fc-mobile-filters"><div className="fc-gps-filters">
+          <FleetMobileSection title="Find vehicle & filters" summary={[search,...regions,...clusters,...placements,...ignition].filter(Boolean).join(" · ") || "All tracked vehicles"} className="fc-mobile-filters"><div className="fc-gps-filters"><FleetVehicleTypeFilter vehicles={data.vehicles} values={vehicleTypes} onChange={setVehicleTypes} />
             <label><span>Find vehicle</span><div><Search size={15} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Vehicle or model" value={search} /></div></label>
             <FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={option(stationOptions.map((station) => station.region))} values={regions} />
             <FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={option(stationOptions.map((station) => station.cluster))} values={clusters} />
             <FleetMultiSelect allLabel="All placements" label="Current placement" onChange={setPlacements} options={visiblePlacements.map((value) => ({ value, label: value, helper: stationByCode.get(value)?.name }))} values={placements} />
             <FleetMultiSelect allLabel="All states" label="Ignition" onChange={setIgnition} options={[{ value: "on", label: "On" }, { value: "off", label: "Off" }]} searchable={false} values={ignition} />
           </div></FleetMobileSection>
-          <div className="fc-gps-list-head"><button onClick={() => changeSort("vehicle")} type="button">Vehicle <ArrowDownUp size={12} /></button><button onClick={() => changeSort("speed")} type="button">Speed <ArrowDownUp size={12} /></button><FleetExportButtons compact report={{ title: "Fleet live GPS report", subtitle: `Generated ${isoToday()} · active filters applied`, fileName: `fleet-live-gps-${isoToday()}`, headers: ["Vehicle", "Model", "Current placement", "Speed km/h", "Ignition", "GPS time", "Latitude", "Longitude"], rows: rows.map((row) => [row.vehicle_no, modelByVehicle.get(row.vehicle_no) || "Model not recorded", stationByVehicle.get(row.vehicle_no) ?? "Unmapped", row.speed, row.ignition ? "ON" : "OFF", row.gps_time ?? "", row.latitude, row.longitude]) }} /></div>
-          <div className="fc-gps-rows">{loading ? <div className="fc-empty compact">Loading tracked vehicles…</div> : rows.map((row) => <button className={selected?.vehicle_no === row.vehicle_no ? "active" : ""} key={row.vehicle_no} onClick={() => { setSelectedVehicle(row.vehicle_no); setRoute(null); }} type="button"><span className={row.ignition ? "online" : "offline"}><i /></span><div><strong>{row.vehicle_no}</strong><small>{stationByVehicle.get(row.vehicle_no) ?? "Unmapped"} · {modelByVehicle.get(row.vehicle_no) ?? "Vehicle"}</small></div><b>{number(row.speed)} km/h</b></button>)}{!loading && !rows.length ? <div className="fc-empty compact">No GPS vehicle matches the filters.</div> : null}</div>
+          <div className="fc-gps-list-head"><button onClick={() => changeSort("vehicle")} type="button">Vehicle <ArrowDownUp size={12} /></button><button onClick={() => changeSort("speed")} type="button">Speed <ArrowDownUp size={12} /></button><FleetExportButtons compact report={{ title: "Fleet live GPS report", subtitle: `Generated ${isoToday()} · active filters applied`, fileName: `fleet-live-gps-${isoToday()}`, headers: ["Vehicle", "Vehicle type", "Model", "Current placement", "Speed km/h", "Ignition", "GPS time", "Latitude", "Longitude"], rows: rows.map((row) => [row.vehicle_no, vehicleTypeLabel(metadata.get(row.vehicle_no)), modelByVehicle.get(row.vehicle_no) || "Model not recorded", stationByVehicle.get(row.vehicle_no) ?? "Unmapped", row.speed, row.ignition ? "ON" : "OFF", row.gps_time ?? "", row.latitude, row.longitude]) }} /></div>
+          <div className="fc-gps-rows">{loading ? <div className="fc-empty compact">Loading tracked vehicles…</div> : rows.map((row) => <button className={selected?.vehicle_no === row.vehicle_no ? "active" : ""} key={row.vehicle_no} onClick={() => { setSelectedVehicle(row.vehicle_no); setRoute(null); }} type="button"><span className={row.ignition ? "online" : "offline"}><i /></span><div><strong>{row.vehicle_no}</strong><FleetVehicleMeta vehicleNo={row.vehicle_no} /></div><b>{number(row.speed)} km/h</b></button>)}{!loading && !rows.length ? <div className="fc-empty compact">No GPS vehicle matches the filters.</div> : null}</div>
         </aside>
         <article className="fc-panel fc-gps-map-panel">
-          <div className="fc-gps-detail-head"><div><small>Selected vehicle</small><h2>{selected?.vehicle_no ?? "No tracked vehicle"}</h2><p>{selected ? `${stationByVehicle.get(selected.vehicle_no) ?? "Unmapped"} · ${modelByVehicle.get(selected.vehicle_no) ?? "Vehicle"}` : "Connect WheelsEye to see live positions."}</p></div>{selected ? <div><span className={`fc-live-pill ${selected.ignition ? "on" : "off"}`}><i /> Ignition {selected.ignition ? "on" : "off"}</span><strong>{number(selected.speed)} km/h</strong></div> : null}</div>
+          <div className="fc-gps-detail-head"><div><small>Selected vehicle</small><h2>{selected?.vehicle_no ?? "No tracked vehicle"}</h2>{selected && <FleetVehicleMeta vehicleNo={selected.vehicle_no}/>}<p>{selected ? `${stationByVehicle.get(selected.vehicle_no) ?? "Unmapped"} · ${modelByVehicle.get(selected.vehicle_no) ?? "Vehicle"}` : "Connect WheelsEye to see live positions."}</p></div>{selected ? <div><span className={`fc-live-pill ${selected.ignition ? "on" : "off"}`}><i /> Ignition {selected.ignition ? "on" : "off"}</span><strong>{number(selected.speed)} km/h</strong></div> : null}</div>
           <div className="fc-map-wrap"><RouteMap currentPoint={selected ? { lat: selected.latitude, lng: selected.longitude } : null} points={route?.points ?? []} /></div>
           <div className="fc-movement-controls"><label><span>Journey date</span><input max={isoToday()} onChange={(event) => setMovementDate(event.target.value)} type="date" value={movementDate} /></label><button onClick={() => setMovementDate(shiftDate(isoToday(), -1))} type="button">Previous day</button><button onClick={() => setMovementDate(isoToday())} type="button">Today</button><button className="fc-button primary" disabled={!selected || routeLoading} onClick={loadMovement} type="button"><Route size={15} /> {routeLoading ? "Loading journey…" : "Load route & km"}</button>{selected ? <a href={`https://maps.google.com/?q=${selected.latitude},${selected.longitude}`} rel="noreferrer" target="_blank">Open current point</a> : null}</div>
           {route?.summary ? <><div className="fc-route-summary"><div><small>Route distance</small><strong>{route.summary.distanceReliable === false ? "Needs review" : `${number(route.summary.km)} km`}</strong></div><div><small>Max speed</small><strong>{number(route.summary.maxSpeed)} km/h</strong></div><div><small>Moving time</small><strong>{dayDuration(route.summary.movingMinutes)}</strong></div><div><small>GPS points</small><strong>{number(route.summary.pointCount, 0)}</strong></div></div><div className="fc-route-export"><span className={route.summary.lateNight ? "alert" : "clear"}>{route.summary.lateNight ? <><AlertTriangle size={14} /> Movement outside configured operating hours</> : <><Clock3 size={14} /> No after-hours movement</>}</span><FleetExportButtons compact report={{ title: `GPS journey · ${selected?.vehicle_no}`, subtitle: `${movementDate} · ${stationByVehicle.get(selected?.vehicle_no ?? "") ?? "Unmapped"}`, fileName: `gps-journey-${selected?.vehicle_no}-${movementDate}`, headers: ["Date", "Vehicle", "Model", "Station", "Distance km", "Moving hours", "Max speed km/h", "First movement", "Last movement", "After-hours exception", "GPS points", "Quality"], rows: [[movementDate, selected?.vehicle_no, modelByVehicle.get(selected?.vehicle_no ?? "") || "Model not recorded", stationByVehicle.get(selected?.vehicle_no ?? ""), route.summary.km, dayHours(route.summary.movingMinutes), route.summary.maxSpeed, route.summary.firstMovingAt, route.summary.lastMovingAt, route.summary.lateNight ? "Alert" : "No", route.summary.pointCount, route.summary.quality]] }} /></div></> : null}

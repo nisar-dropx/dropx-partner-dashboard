@@ -1,4 +1,5 @@
 'use client';
+import { FleetVehicleMeta } from './fleet-vehicle-meta';
 import { FleetAttachmentPreview } from './fleet-attachment-preview';
 import { useEffect, useRef, useState } from 'react';
 import { Camera, Check, ChevronRight, ClipboardCheck, Plus, Save, X } from 'lucide-react';
@@ -55,7 +56,7 @@ export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;d
  const result=await send('audit.complete',{responses,evidence,summary:values.summary,odometerKm:values.odometer || values[`item_${items.find(i=>i.category==='Usage'&&i.responseType==='number')?.id}`],sendEmail:values.sendEmail!=='no'&&data.settings.auditEmailEnabled,finding:values.finding,findingCategory:'Additional finding',severity:values.severity||'medium',actionRequired:values.action,expectedCompletionDate:values.due});setDirty(false);onDone(result.message || 'Audit submitted successfully. Your answers and evidence are saved.');
  }catch(e){setError(e instanceof Error?e.message:'Could not submit. Your answers remain here.');}finally{setBusy('');}}
  return <div className="fc-modal-backdrop"><section role="dialog" aria-modal="true" aria-label="Conduct vehicle audit" className="fc-modal fc-audit-runner">
- <header className="fc-runner-header"><div><small>{audit.stationCode} · {audit.auditMode==='physical'?'Physical inspection':'Virtual inspection'}</small><h2>{audit.vehicleNo}</h2><p>{vehicle?.model} · {answered}/{items.length} answered</p></div><button aria-label="Save and close audit" disabled={!!busy} onClick={()=>dirty?save(true):onClose()} type="button"><X size={22}/></button></header>
+ <header className="fc-runner-header"><div><small>{audit.stationCode} · {audit.auditMode==='physical'?'Physical inspection':'Virtual inspection'}</small><h2>{audit.vehicleNo}</h2><FleetVehicleMeta vehicleNo={audit.vehicleNo}/><p>{vehicle?.model} · {answered}/{items.length} answered</p></div><button aria-label="Save and close audit" disabled={!!busy} onClick={()=>dirty?save(true):onClose()} type="button"><X size={22}/></button></header>
  <div className="fc-audit-progress"><span style={{width:`${items.length?answered/items.length*100:0}%`}}/></div>
  <form onSubmit={complete} onInvalidCapture={e=>{const details=(e.target as HTMLElement).closest('details');if(details)details.open=true;}}>
  <div className="fc-runner-body" ref={bodyRef}>
