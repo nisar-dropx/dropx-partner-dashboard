@@ -646,12 +646,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return { response, body };
   }
 
-  function sharedRefreshNote(next: Pick<LoadFlashBoardNetwork, "refreshOwner" | "refreshDone" | "refreshTotal" | "refreshRunning">) {
+  function sharedRefreshNote(next: Pick<LoadFlashBoardNetwork, "refreshOwner" | "refreshDone" | "refreshPulled" | "refreshTotal" | "refreshRunning">) {
     const total = Number(next.refreshTotal ?? 0) || 0;
     const done = Number(next.refreshDone ?? 0) || 0;
+    const pulled = Number(next.refreshPulled ?? done) || 0;
     const who = next.refreshOwner === "cron" ? "Hourly refresh working" : "Refresh working";
     if (!next.refreshRunning) return "Board data updated.";
     if (total > 0 && done >= total) return `${who} · finishing recovery…`;
+    if (total && pulled > done) return `Saved ${done}/${total} · pulled ${pulled}/${total}`;
     return total ? `${who} · ${done}/${total}` : `${who}…`;
   }
 
