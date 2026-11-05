@@ -271,7 +271,7 @@ test("pending-publication bank selection keeps preliminary balances per location
   assert.equal(balances.has("unmapped"), false);
 });
 
-test("payout UI separates one-row advance recovery from complete-location notification selection", () => {
+test("payout UI allows selected Workforce locations without showing advance warnings for publication", () => {
   assert.match(payoutTable, /import\s*\{\s*isWorkforcePayoutDisplayPublishable\s*\}\s*from\s*["']@\/lib\/workforce-payout-publication-eligibility["']/);
   assert.match(
     payoutTable,
@@ -281,8 +281,9 @@ test("payout UI separates one-row advance recovery from complete-location notifi
   assert.match(payoutTable, /advanceSelectionConflictIds\s*=\s*useMemo\(\(\)\s*=>\s*duplicateAdvanceWorkforceIds\(advanceSelectedRows\)/);
   assert.match(payoutTable, /if\s*\(hasAdvanceSelectionConflict\)[\s\S]*?Select one location row per Workforce member[\s\S]*?return;/);
   assert.match(payoutTable, /disabled=\{!advanceSelectedRows\.length\s*\|\|\s*hasAdvanceSelectionConflict/);
-  assert.match(payoutTable, /title=\{hasAdvanceSelectionConflict\s*\?\s*["']Advance deduction requires one location row per Workforce member\./);
-  assert.match(payoutTable, /Publish Payment requires every publishable location row/i);
+  assert.match(payoutTable, /title=\{hasAdvanceSelectionConflict\s*\?\s*["']Select one location row per Workforce member to deduct pending advances\./);
+  assert.doesNotMatch(payoutTable, /advance-deduction-selection-help|Publish Payment requires every publishable location row/i);
+  assert.match(payoutTable, /const missingLocations = audience === "helpers"\s*\? missingPayoutNotificationLocations\(rows, reviewSelectedRows, audience\)\s*: \[\]/);
   assert.doesNotMatch(payoutTable, /maxActionSelection|actionSelectionLimitReached|actionSelectionTarget/);
   assert.match(payoutTable, /setSelected\(new Set\(selectable\.map\(\(row\)\s*=>\s*row\.id\)\)\)/);
   assert.match(payoutTable, /selectedRows\.filter\(\(row\)\s*=>\s*canSendPayoutForReview\(row,\s*audience\)\)/);

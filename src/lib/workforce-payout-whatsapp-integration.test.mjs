@@ -137,7 +137,8 @@ test("Workforce publication accepts configured zero payouts and verifies signed 
     /workforcePayoutPublicationSnapshotHash\(snapshot as PublicationSnapshot\)\s*!==\s*expected\.snapshotHash/,
     "A modified browser snapshot must be rejected before publication."
   );
-  assert.match(publisher, /workforcePayoutLocationSetHash\(submittedLocations\)[\s\S]*?Select every publishable location row/);
+  assert.doesNotMatch(publisher, /Select every publishable location row for each DropX ID/);
+  assert.match(publisher, /Select every publishable location row for each Helper/);
   assert.doesNotMatch(
     publisher,
     /selected\.some\([\s\S]{0,240}(?:gross(?:Payment|Amount)|net(?:Pay|Amount)|workDays|attendance)\s*(?:>|===?)\s*0/,

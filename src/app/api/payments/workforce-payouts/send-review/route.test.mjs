@@ -11,7 +11,7 @@ const station = "00000000-0000-4000-8000-000000000003";
 const source = fs.readFileSync(new URL("./route.ts", import.meta.url), "utf8");
 const output = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 
-function fixture({days=2, canEdit=true, policyError=false}={}) {
+function fixture({days=2, canEdit=true, policyError=false, locationSetHash="locations"}={}) {
   const calls=[]; const reads=[];
   const snapshot={schema_version:2,source:"workforce_payout_worksheet",dependency_hash:"dep",run:{period_start:"2026-10-01",period_end:"2026-10-31"},item:{workforce_id:worker,station_id:station,net_amount:100},lines:[],worksheet:{}};
   const db={
@@ -44,7 +44,7 @@ function fixture({days=2, canEdit=true, policyError=false}={}) {
     "@/lib/access-surface":{currentAdminAccessSurface:()=>"dashboard"},
     "@/lib/authorization":{getAuthorization:async()=>({userId:company,hasAllLocationAccess:false,locationScopeIds:[station]}),hasPermission:()=>canEdit},
     "@/lib/company-scope":{requireCompanyId:()=>company},
-    "@/lib/workforce-payout-review-token":{workforcePayoutReviewTokenDetails:()=>({dependencyHash:"dep",calculationHash:"calc",publicationSnapshotHash:"snapshot",locationSetHash:"locations",status:"ready"})},
+    "@/lib/workforce-payout-review-token":{workforcePayoutReviewTokenDetails:()=>({dependencyHash:"dep",calculationHash:"calc",publicationSnapshotHash:"snapshot",locationSetHash,status:"ready"})},
     "@/lib/workforce-payout-publication":{workforcePayoutLocationSetHash:()=>"locations",workforcePayoutPublicationSnapshotHash:()=>"snapshot"},
     "@/lib/stable-payout-worksheet":{isProvisionalPayoutDependencyHash:()=>false},
     "@/lib/workforce-payout-publication-limits":{chunkValues:(v)=>[v],MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION:100,MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES:1000000,WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK:100,serializedJsonByteLength:(v)=>JSON.stringify(v).length},
@@ -76,6 +76,17 @@ test("invalid supplied hours fail before reading data or publishing",async()=>{
     const f=fixture(); const response=await f.post({disputeWindowHours:hours});
     assert.equal(response.status,400); assert.equal(f.calls.length,0); assert.equal(f.reads.length,0);
   }
+});
+
+test("publishing one selected Workforce location does not require its other locations",async()=>{
+  // The signed full-location set differs from the submitted station set. The
+  // selected row must still publish, with only that station in the atomic write.
+  const f=fixture({locationSetHash:"station-and-unselected-sibling"});
+  const response=await f.post({disputeWindowHours:24});
+  assert.equal(response.status,200,JSON.stringify(await response.json()));
+  assert.equal(f.calls.length,1);
+  assert.equal(f.calls[0].p_items.length,1);
+  assert.equal(f.calls[0].p_items[0].location_id,station);
 });
 
 test("legacy callers keep company defaults; policy outages and permissions still fail closed",async()=>{

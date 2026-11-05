@@ -202,6 +202,26 @@ test("selected payout revalidation accepts unrelated churn and binds the fresh d
   );
 });
 
+test("selected payout revalidation permits one location from an unchanged multi-location member", () => {
+  const selected = row();
+  const sibling = row({ id: "mapping-2", locationId: "00000000-0000-4000-8000-000000000004" });
+  const result = revalidateSelectedWorkforcePayoutRows({
+    dependencyHash: "fresh-global-version",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    rows: [selected, sibling],
+    selections: [{
+      subjectId: selected.reviewSubjectId,
+      locationId: selected.locationId,
+      calculationHash: workforcePayoutCalculationHash(selected, "2026-09-01", "2026-09-30"),
+      locationSetHash: workforcePayoutLocationSetHash([selected.locationId, sibling.locationId])
+    }]
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.entries.length, 1);
+  assert.equal(result.entries[0].locationId, selected.locationId);
+});
+
 test("selected payout revalidation rejects an actual selected-row change", () => {
   const selected = row();
   const result = revalidateSelectedWorkforcePayoutRows({

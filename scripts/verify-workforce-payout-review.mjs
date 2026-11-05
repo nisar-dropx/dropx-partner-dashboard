@@ -40,7 +40,8 @@ assert.match(routeSource, /verifiedPublicationSnapshot\(item\.calculation_snapsh
 assert.match(routeSource, /item\.token!\.publicationSnapshotHash/);
 assert.match(routeSource, /workforcePayoutPublicationSnapshotHash/);
 assert.match(routeSource, /workforcePayoutLocationSetHash\(submittedLocations\)/);
-assert.match(routeSource, /Select every publishable location row/);
+assert.doesNotMatch(routeSource, /Select every publishable location row for each DropX ID/);
+assert.match(routeSource, /Select every publishable location row for each Helper/);
 assert.doesNotMatch(
   routeSource,
   /dependencyBefore\.hash\s*!==\s*expectedDependencyHash|dependencyAfter\.hash\s*!==\s*expectedDependencyHash/,

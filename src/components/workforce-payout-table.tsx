@@ -818,7 +818,9 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
 
   function publicationSelectionError() {
     if (!reviewSelectedRows.length) return "Select at least one payout to publish.";
-    const missingLocations = missingPayoutNotificationLocations(rows, reviewSelectedRows, audience);
+    const missingLocations = audience === "helpers"
+      ? missingPayoutNotificationLocations(rows, reviewSelectedRows, audience)
+      : [];
     if (missingLocations.length) {
       const details = missingLocations
         .map((entry) => `${entry.dropxId}${entry.name ? ` (${entry.name})` : ""}: ${entry.locations.join(", ")}`)
@@ -1127,7 +1129,6 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {holdNotice ? <div aria-live="polite" className="payout-inline-message success">{holdNotice}</div> : null}
     {mappingUnlocks.length ? <div className="payout-inline-message" role="status"><strong>{mappingUnlocks.length} mapping {mappingUnlocks.length === 1 ? "correction is" : "corrections are"} open for this month.</strong> The last stable payout remains in DropX One as revising until you relock and republish. <span>{mappingUnlocks.slice(0, 5).map((entry) => entry.dropxId || entry.name).join(", ")}{mappingUnlocks.length > 5 ? ` and ${mappingUnlocks.length - 5} more` : ""}.</span></div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
-    {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Publish Payment requires every publishable location row, so the extra row may be required for publication.</div> : null}
     {canProcessPayments && selectedRows.length > 0 && selectedBankUnavailableCount > 0 ? <div aria-live="polite" className="payout-inline-message warn">
       <strong>{bankPayoutRows.length > 0 ? `${bankPayoutRows.length.toLocaleString("en-IN")} eligible payout${bankPayoutRows.length === 1 ? "" : "s"} can be downloaded.` : "No selected payout is currently eligible for a new bank file."}</strong>{" "}
       {selectedBankUnavailableCount.toLocaleString("en-IN")} selected row{selectedBankUnavailableCount === 1 ? " is" : "s are"} excluded by the status, balance, profile, PAN, hold or publication checks shown in the table. Eligible rows remain available and are not blocked by the excluded selection.
@@ -1151,7 +1152,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       <div className="payout-selection-actions">
         {(manualSelectedRows.length || advanceSelectedRows.length) ? <PayoutActionMenu label="Edit selected">
           {canManuallyEdit && manualSelectedRows.length ? <WorkforcePayoutManualEditor audience={audience} buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status, ...manualAttendancePeriod(row, periodStart, periodEnd) }))} toDate={periodEnd} /> : null}
-          {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Publish Payment requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
+          {canDeductAdvances ? <button className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Select one location row per Workforce member to deduct pending advances." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         </PayoutActionMenu> : null}
         {canEdit ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={(event) => openPublishDialog(event.currentTarget)} title={!canPublishNotifications ? "Publish Payment is unavailable for this account." : !canPublishPeriod ? "Publish Payment is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for publishing; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Publishing…" : `Publish Payment${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" disabled={actionBusy} onClick={() => setSelected(new Set())} type="button">Clear selection</button>

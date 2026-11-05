@@ -801,17 +801,6 @@ export async function POST(request: Request) {
     }
 
     const selectedSubjects = new Set(verified.map((item) => item.subject_id));
-    for (const subjectId of selectedSubjects) {
-      const subjectItems = verified.filter((item) => item.subject_id === subjectId);
-      const expectedLocationHashes = new Set(subjectItems.map((item) => item.token!.locationSetHash));
-      const submittedLocations = subjectItems
-        .filter((item) => item.subject_id === subjectId)
-        .map((item) => String(item.location_id));
-      if (expectedLocationHashes.size !== 1
-        || workforcePayoutLocationSetHash(submittedLocations) !== [...expectedLocationHashes][0]) {
-        return responseError("Select every publishable location row for each DropX ID before sending its notification.", 409);
-      }
-    }
 
     let publicationEntries = selected.map(({ item, snapshot }) => ({
       item,
