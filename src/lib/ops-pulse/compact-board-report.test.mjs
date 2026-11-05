@@ -2,10 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { filterBoardStations, boardDeliverySummary, prepareBoardReport } from './compact-board-report.ts';
 import { normalizeBoard } from './station-board.ts';
+import { regionForStation, stationsInRegion, isAmazonEdspBoardStation } from './station-board-regions.ts';
 
 const station = (code, rows) => ({ stationCode: code, board: normalizeBoard({ daDsr: rows }), hasSnapshot: true });
 const da = (name, delivered, failed, rejected, oor) => ({ driverId:name, driverName:name, delivered, failed, rejected, oor, total:delivered+failed+rejected+oor });
 const stations = [station('KLZA',[da('A',90,5,2,3),da('B',0,2,0,8)]),station('GDRD',[da('C',1,0,0,9)])];
+test('Sambalpur remains in the OD and CG presentation filter without extending EDSP eligibility', () => {
+ assert.equal(regionForStation('HBSC'),'ODCG');
+ assert(stationsInRegion('ODCG').includes('HBSC'));
+ assert.equal(isAmazonEdspBoardStation('HBSC'),false);
+ assert.deepEqual(filterBoardStations([station('HBSC',[]),...stations],{stations:[],clusters:[],regions:['ODCG']},[]).map(s=>s.stationCode),['HBSC']);
+});
 test('station, cluster and region multi-selects intersect and never add records outside the payload',()=>{
  const clusters=[{value:'clm',label:'Manager',stations:['KLZA','GDRD','UNAUTHORISED']}];
  assert.deepEqual(filterBoardStations(stations,{stations:[],clusters:['clm'],regions:['KL']},clusters).map(s=>s.stationCode),['KLZA']);
