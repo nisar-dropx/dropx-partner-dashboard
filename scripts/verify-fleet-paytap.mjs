@@ -94,6 +94,10 @@ assert.equal((await db.query("select count(*) n from fleet_fuel_transactions whe
 await db.exec(`update fleet_vehicles set fuel_type='CNG' where company_id='${company}';`);
 assert.equal(await ingest('cng','amount-hash',{...amountOnly.fuel,transaction_id:'cng'}),'imported');
 assert.equal((await db.query("select rate from fleet_fuel_transactions where transaction_id='cng'")).rows[0].rate,null);
+// Core card map accepts CNG amount-only refill (no litre price estimation).
+assert.equal(await ingest('core-cng','core-cng-hash',{...coreParsed.fuel,transaction_id:'core-cng-txn',card_ending:'5684'},'ready',true),'imported');
+const cngFuel=(await db.query("select * from fleet_fuel_transactions where transaction_id='core-cng-txn'")).rows[0];
+assert.equal(cngFuel.product,'CNG');assert.equal(cngFuel.raw_payload.quantity_source,'not_applicable');assert.equal(cngFuel.rate,null);
 await db.query('select fleet_fuel_price_configure($1,$2,true,$3,$4)',[company,actor,'gpt-5-mini','fixture-secret-not-a-real-key']);
 assert.equal((await db.query("select has_function_privilege('authenticated','fleet_fuel_price_credentials(uuid)','execute') ok")).rows[0].ok,false);
 assert.equal((await db.query('select after_values::text v from fleet_system_logs')).rows.some(r=>r.v.includes('fixture-secret-not-a-real-key')),false);

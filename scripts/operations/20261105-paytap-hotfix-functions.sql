@@ -1,4 +1,4 @@
-﻿create or replace function public.fleet_paytap_upsert_cards(
+create or replace function public.fleet_paytap_upsert_cards(
  p_company uuid, p_actor uuid, p_cards jsonb
 ) returns integer
 language plpgsql security definer set search_path = '' as $$
@@ -119,10 +119,18 @@ begin
     join public.fleet_vehicles fv on fv.id = c.vehicle_id and fv.company_id = c.company_id
     where c.company_id = p_company and c.card_ending = card;
     plate := regexp_replace(upper(v.vehicle_no), '[^A-Z0-9]', '', 'g');
-    product := coalesce(nullif(trim(fuel->>'product'), ''), initcap(lower(trim(v.fuel_type))));
-    if lower(trim(coalesce(product, ''))) not in ('petrol', 'diesel') then
+    product := coalesce(
+     nullif(trim(fuel->>'product'), ''),
+     case lower(trim(v.fuel_type))
+      when 'petrol' then 'Petrol'
+      when 'diesel' then 'Diesel'
+      when 'cng' then 'CNG'
+      else null
+     end
+    );
+    if lower(trim(coalesce(product, ''))) not in ('petrol', 'diesel', 'cng') then
      result := 'review';
-     p_reason := format('Vehicle %s needs petrol or diesel fuel type before PayTap spend can import.', v.vehicle_no);
+     p_reason := format('Vehicle %s needs petrol, diesel or CNG fuel type before PayTap spend can import.', v.vehicle_no);
      fuel := null;
     else
      fuel := fuel || jsonb_build_object('vehicle_no', plate, 'product', product);
@@ -154,36 +162,44 @@ begin
    end if;
    price_rate := (fuel->>'rate')::numeric;
    if (fuel->>'fuel_quantity')::numeric = 0 then
-    price_meta := price_meta || jsonb_build_object('quantity_source', 'pending_price');
     price_rate := null;
-    select case when count(*) = 1 then max(nullif(trim(city), '')) end into city_name
-    from public.stations
-    where company_id = p_company and upper(trim(station_code)) = upper(trim(v.station_code));
-    if lower(trim(v.fuel_type)) in ('petrol', 'diesel')
-       and city_name is not null
-       and (lower(fuel->>'product') not in ('petrol', 'diesel') or lower(fuel->>'product') = lower(trim(v.fuel_type))) then
-     insert into public.fleet_fuel_prices(company_id, station_code, city, price_date, fuel_type)
-     values (p_company, upper(trim(v.station_code)), city_name, (fuel->>'transaction_date')::date, lower(trim(v.fuel_type)))
-     on conflict do nothing;
-     select * into price
-     from public.fleet_fuel_prices
-     where company_id = p_company
-       and station_code = upper(trim(v.station_code))
-       and price_date = (fuel->>'transaction_date')::date
-       and fuel_type = lower(trim(v.fuel_type));
+    if lower(fuel->>'product') = 'cng' or lower(trim(v.fuel_type)) = 'cng' then
+     -- CNG spend is amount-only; kg rates are not sourced from petrol/diesel price lookup.
      price_meta := price_meta || jsonb_build_object(
-      'price_id', price.id, 'price_date', price.price_date, 'price_city', price.city,
-      'price_station', price.station_code, 'price_fuel_type', price.fuel_type
+      'quantity_source', 'not_applicable',
+      'quantity_reason', 'CNG refill recorded as amount only; quantity is not estimated from litre prices.'
      );
-     if price.status = 'ready' then
-      price_rate := price.rate;
-      price_meta := price_meta || jsonb_build_object('quantity_source', 'estimated', 'price_source_url', price.source_url);
-     end if;
     else
-     price_meta := price_meta || jsonb_build_object(
-      'quantity_reason',
-      'Check the vehicle fuel type matches the payment product and the station has a unique city, then retry the event.'
-     );
+     price_meta := price_meta || jsonb_build_object('quantity_source', 'pending_price');
+     select case when count(*) = 1 then max(nullif(trim(city), '')) end into city_name
+     from public.stations
+     where company_id = p_company and upper(trim(station_code)) = upper(trim(v.station_code));
+     if lower(trim(v.fuel_type)) in ('petrol', 'diesel')
+        and city_name is not null
+        and (lower(fuel->>'product') not in ('petrol', 'diesel') or lower(fuel->>'product') = lower(trim(v.fuel_type))) then
+      insert into public.fleet_fuel_prices(company_id, station_code, city, price_date, fuel_type)
+      values (p_company, upper(trim(v.station_code)), city_name, (fuel->>'transaction_date')::date, lower(trim(v.fuel_type)))
+      on conflict do nothing;
+      select * into price
+      from public.fleet_fuel_prices
+      where company_id = p_company
+        and station_code = upper(trim(v.station_code))
+        and price_date = (fuel->>'transaction_date')::date
+        and fuel_type = lower(trim(v.fuel_type));
+      price_meta := price_meta || jsonb_build_object(
+       'price_id', price.id, 'price_date', price.price_date, 'price_city', price.city,
+       'price_station', price.station_code, 'price_fuel_type', price.fuel_type
+      );
+      if price.status = 'ready' then
+       price_rate := price.rate;
+       price_meta := price_meta || jsonb_build_object('quantity_source', 'estimated', 'price_source_url', price.source_url);
+      end if;
+     else
+      price_meta := price_meta || jsonb_build_object(
+       'quantity_reason',
+       'Check the vehicle fuel type matches the payment product and the station has a unique city, then retry the event.'
+      );
+     end if;
     end if;
    end if;
    insert into public.fleet_fuel_transactions(
@@ -202,6 +218,7 @@ begin
     result := 'imported';
     p_reason := case
      when (fuel->>'fuel_quantity')::numeric > 0 then 'Fuel record created with supplied litres.'
+     when lower(fuel->>'product') = 'cng' then 'CNG refill recorded as amount only.'
      when price_rate > 0 then 'Fuel spend recorded; litres estimated from dated location price.'
      else 'Fuel spend recorded; litres await a sourced location price or vehicle/location setup.'
     end;
