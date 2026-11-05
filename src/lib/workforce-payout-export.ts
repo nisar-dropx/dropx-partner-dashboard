@@ -246,7 +246,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
       if (workforce) {
         if (blankPayments) return ["", "", ""];
         const lines = row.productionBreakdown.filter(item => headIdentity(item) === headIdentity(column));
-        if (!lines.length) return ["", 0, 0];
+        if (!lines.length) return [0, "", 0];
         const rates = [...new Set(lines.map(item => item.rate))].sort((left, right) => left - right);
         return [Math.round(lines.reduce((sum, item) => sum + item.count, 0) * 100) / 100,
           rates.length === 1 ? rates[0] : rates.join(" / "),
