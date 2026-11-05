@@ -646,12 +646,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return { response, body };
   }
 
-  function sharedRefreshNote(next: Pick<LoadFlashBoardNetwork, "refreshOwner" | "refreshDone" | "refreshTotal" | "refreshRunning">) {
+  function sharedRefreshNote(next: Pick<LoadFlashBoardNetwork, "refreshOwner" | "refreshDone" | "refreshPulled" | "refreshTotal" | "refreshRunning">) {
     const total = Number(next.refreshTotal ?? 0) || 0;
     const done = Number(next.refreshDone ?? 0) || 0;
+    const pulled = Number(next.refreshPulled ?? done) || 0;
     const who = next.refreshOwner === "cron" ? "Hourly refresh working" : "Refresh working";
     if (!next.refreshRunning) return "Board data updated.";
     if (total > 0 && done >= total) return `${who} · finishing recovery…`;
+    if (total && pulled > done) return `Saved ${done}/${total} · pulled ${pulled}/${total}`;
     return total ? `${who} · ${done}/${total}` : `${who}…`;
   }
 
@@ -1062,7 +1064,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         form.append("images", files[index], files[index].name || `board-${index + 1}.jpg`);
         const response = await fetch("/api/ops-pulse/edd/board/flash-report-bot", { method: "POST", body: form });
         const payloadJson = await response.json().catch(() => ({})) as { error?: string; sent?: number; group?: string };
-        if (!response.ok) throw new Error(payloadJson.error || "Report Bot flash failed.");
+        if (!response.ok) {
+          const failed = payloadJson.error || "Report Bot flash failed.";
+          throw new Error(sent > 0 ? `Sent ${sent} of ${files.length} images, then failed: ${failed}` : failed);
+        }
         sent += payloadJson.sent ?? 1;
         if (payloadJson.group) groupName = payloadJson.group;
       }

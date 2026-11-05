@@ -1,4 +1,5 @@
 import { inboundServingStation } from "@/lib/inbound-serving-station";
+import { amazonProductionCounts } from "@/lib/amazon-production-counts";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
@@ -728,12 +729,11 @@ function parseAmazon(raw: RawRecord, rowNumber: number): NormalizedImport | null
     + toNumber(findValue(raw, ["Overall Delivered SWA Consumable", "Overall Delivered SWA-Consumable"]));
   const shipmentType = clean(findValue(raw, ["Shipment Type", "Type"]));
   const finalCReturn = toNumber(findValue(raw, ["final_creturn_count", "Final CReturn Count", "C Return", "C_Return"]));
-  const amazonDelivery = delivered + smd + smd2;
-  const cReturn = finalCReturn;
   const mfn = toNumber(findValue(raw, ["final_mfn_count", "Final MFN Count", "MFN"]));
   const mfnReturn = toNumber(findValue(raw, ["final_seller_returns", "Final Seller Returns", "MFN Return"]));
-  const totalDelivery = amazonDelivery + swa;
-  const totalActivity = totalDelivery + cReturn + mfn + mfnReturn;
+  const { amazonDelivery, cReturn, totalDelivery, totalActivity } = amazonProductionCounts({
+    workDate, shipmentType, delivered, smd, smd2, swa, finalCReturn, mfn, mfnReturn
+  });
   // Live Amazon shipment files do not include an assigned column. Only persist when the file supplies one.
   const assignedPresent = amazonAssignedColumnPresent(raw);
   const assignedCount = parseOptionalAssignedCount(

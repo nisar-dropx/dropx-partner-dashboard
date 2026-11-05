@@ -11,7 +11,7 @@ function compile(file,mocks={}) {
   return module.exports;
 }
 const appNav=compile('../lib/app-navigation.ts');
-const nav=compile('../lib/ops-pulse/navigation.ts',{'@/lib/app-navigation':appNav,'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:auth=>auth.allowCod}});
+const nav=compile('../lib/ops-pulse/navigation.ts',{'@/lib/app-navigation':appNav,'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:auth=>auth.allowCod},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:email=>Boolean(email)}});
 const views=['amazon_edsp','amazon_now','flipkart_odh_mdh'].map(key=>({key,label:key,items:nav.opsNavCatalogForMode(key)}));
 const codes=[...new Set(views.flatMap(view=>view.items.flatMap(item=>[item.code,...(item.permissionCodes??[]),...(item.children??[]).flatMap(child=>[child.code,...(child.permissionSections??[]).map(section=>section.code)])])))].filter(Boolean);
 const pages=codes.map(code=>({id:code,code,name:`Permission ${code}`}));
@@ -78,6 +78,14 @@ test('unfiltered configuration catalogue does not bypass live sidebar COD review
   assert.equal(hasSlip(nav.opsNavCatalogForMode('amazon_edsp')),true);
   assert.equal(hasSlip(nav.opsNavItemsForMode('amazon_edsp',{allowCod:false})),false);
   assert.equal(hasSlip(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true})),true);
+});
+
+test('Last Mile Report Bot stays under Settings and is Joseph-only in the live sidebar',()=>{
+  const hasLm=items=>items.some(item=>item.children?.some(child=>child.code==='ops_lm_report_bot'));
+  const settings=nav.opsNavCatalogForMode('amazon_edsp').find(item=>item.label==='Settings');
+  assert.equal(settings?.children?.some(child=>child.code==='ops_lm_report_bot'&&child.href==='/report-bot?workspace=last_mile'),true);
+  assert.equal(hasLm(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true})),false);
+  assert.equal(hasLm(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true,email:'tech@dropxlogistics.com'})),true);
 });
 
 

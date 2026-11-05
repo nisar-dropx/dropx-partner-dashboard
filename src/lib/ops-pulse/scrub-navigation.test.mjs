@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {activeOpsHref} from './design-navigation.ts';
 function load(file,mocks){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(file,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>mocks[id],m.exports,m);return m.exports;}
-const nav=load('./navigation.ts',{'@/lib/app-navigation':{fleetNavItem:{code:'fleet',label:'Fleet',children:[]}},'@/lib/authorization':{hasPermission:(auth,code)=>auth.pages.includes(code),isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>false}});
+const nav=load('./navigation.ts',{'@/lib/app-navigation':{fleetNavItem:{code:'fleet',label:'Fleet',children:[]}},'@/lib/authorization':{hasPermission:(auth,code)=>auth.pages.includes(code),isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>false},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:()=>false}});
 test('Scrub belongs only to Operations, live performance to Performance, COD Reports retired',()=>{
  for(const mode of ['amazon_edsp','flipkart_odh_mdh']){
   const items=nav.opsNavCatalogForMode(mode),ops=items.find(i=>i.label==='Operations'),performance=items.find(i=>i.label==='Performance');

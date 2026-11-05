@@ -250,7 +250,18 @@ export async function POST(request: Request) {
       );
     }
     const payroll_sync = await refreshLossPayroll(scope.company);
-    return reply({ recovery: result.data, payroll_sync });
+    const lifecycle = await supabaseAdmin!
+      .from("nl_loss_month_cases")
+      .select("lifecycle_version")
+      .eq("company_id", scope.company)
+      .eq("month", body.month)
+      .eq("case_key", caseKey)
+      .maybeSingle();
+    return reply({
+      recovery: result.data,
+      payroll_sync,
+      lifecycle_version: lifecycle.data?.lifecycle_version ?? null,
+    });
   } catch (e) {
     return reply(
       {

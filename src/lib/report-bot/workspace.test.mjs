@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { PGlite } from '@electric-sql/pglite';
 import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, reportBotSetupHref } from './workspace.ts';
+import { canAccessLastMileReportBot } from '../ops-pulse/last-mile-report-bot-access.ts';
 
 const require = createRequire(import.meta.url);
 const workspaceModule = { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, reportBotSetupHref };
@@ -15,10 +16,11 @@ new Function('require', 'module', 'exports', ts.transpileModule(readFileSync(new
   if (name === 'server-only') return {};
   if (name === './workspace') return workspaceModule;
   if (name === '@/lib/authorization') return { hasPermission, getAuthorization: async () => currentAuth };
+  if (name === '@/lib/ops-pulse/last-mile-report-bot-access') return { canAccessLastMileReportBot };
   return require(name);
 }, accessModule, accessModule.exports);
 const { canSeeGroup, reportBotApiAuthorization } = accessModule.exports;
-const auth = (page, all = true) => ({ companyId:'company', permissions: { [page]: {canView:true,canEdit:true} }, hasAllLocationAccess:all, locationScopeIds:['station-a'] });
+const auth = (page, all = true, email = 'tech@dropxlogistics.com') => ({ companyId:'company', email, permissions: { [page]: {canView:true,canEdit:true} }, hasAllLocationAccess:all, locationScopeIds:['station-a'] });
 
 test('workspace routes default old links to Dark Store, preserve Last Mile links and reject unknown scopes', () => {
   assert.equal(reportBotWorkspace(undefined), 'dark_store');
@@ -30,13 +32,14 @@ test('workspace routes default old links to Dark Store, preserve Last Mile links
   assert.match(reportBotChatHref('last_mile','a'), /workspace=last_mile&group=a/);
 });
 
-test('all-location access alone never grants bot access; scope and configurable page grants are both required', async () => {
+test('all-location access alone never grants bot access; scope, page grants and LM allowlist are all required', async () => {
   const lm = {location_id:'station-a',workspace:'last_mile'};
   const ds = {location_id:'station-a',workspace:'dark_store'};
   assert.equal(canSeeGroup(auth('ops_report_bot'), lm), false);
   assert.equal(canSeeGroup(auth('ops_lm_report_bot'), ds), false);
   assert.equal(canSeeGroup(auth('ops_pulse'), lm), false);
   assert.equal(canSeeGroup(auth('ops_lm_report_bot',false), lm), true);
+  assert.equal(canSeeGroup(auth('ops_lm_report_bot',false,'other@dropxlogistics.com'), lm), false,'Last Mile stays Joseph-only even with page permission');
   assert.equal(canSeeGroup(auth('ops_lm_report_bot',false), {...lm,location_id:'station-b'}), false);
   assert.equal(canSeeGroup(auth('ops_lm_report_bot',false), {...lm,location_id:null}), false);
   const both = {...auth('ops_lm_report_bot'),permissions:{...auth('ops_lm_report_bot').permissions,...auth('ops_report_bot').permissions},reportBotWorkspace:'last_mile'};
@@ -46,6 +49,8 @@ test('all-location access alone never grants bot access; scope and configurable 
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),currentAuth);
   currentAuth=auth('ops_report_bot');
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'Dark Store access cannot authorize Last Mile session requests');
+  currentAuth=auth('ops_lm_report_bot',true,'other@dropxlogistics.com');
+  assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'allowlist blocks Last Mile session requests without Joseph access');
   currentAuth=auth('ops_lm_report_bot');
   currentAuth.permissions.ops_lm_report_bot.canEdit=false;
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'permission changes apply without a hardcoded role bypass');

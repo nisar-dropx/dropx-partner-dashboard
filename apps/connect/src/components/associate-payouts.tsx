@@ -96,12 +96,14 @@ function DisputeCorrection({ dispute }: { dispute: AssociatePayoutDispute }) {
   if (!hasValues && !hasTotals) return null;
   return <section className={styles.correction} aria-label="Approved payout correction">
     <small>Approved correction</small>
-    <h4>{friendlyField(correction.targetField)}</h4>
-    {hasValues ? <p>
-      <span>{correction.currentValue ?? "Not recorded"}</span>
-      <b aria-label="changed to">→</b>
-      <strong>{correction.proposedValue ?? "Not recorded"}</strong>
-    </p> : null}
+    {(correction.items?.length ? correction.items : [correction]).map((item, index) => <div key={index}>
+      <h4>{friendlyField(item.targetField)}{"unit" in item && item.unit ? ` (${item.unit === "rupees" ? "₹" : item.unit})` : ""}</h4>
+      {item.currentValue !== null || item.proposedValue !== null ? <p>
+        <span>{item.currentValue ?? "Not recorded"}</span>
+        <b aria-label="changed to">→</b>
+        <strong>{item.proposedValue ?? "Not recorded"}</strong>
+      </p> : null}
+    </div>)}
     {correction.note ? <p className={styles.correctionNote}>{correction.note}</p> : null}
     {hasTotals ? <div className={styles.correctionTotals}>
       {correction.beforeNetPaise !== null ? <div><small>Earlier net payout</small><strong>{paiseMoney(correction.beforeNetPaise)}</strong></div> : null}

@@ -10,6 +10,7 @@ function fixture(options={}){
     '@/lib/authorization':{getAuthorization:async()=>options.signedOut?null:auth,hasPermission:()=>options.permission!==false},
     '@/lib/access-surface':{currentAdminAccessSurface:()=>options.surface??'dashboard'},
     '@/lib/workforce-connect':{scopedWorkforceCases:()=>chain,workforceConnectOpenStatuses:['submitted'],workforceConnectStatuses:['submitted','closed']},
+    '@/lib/workforce-connect-contacts':{loadWorkforceConnectContacts:async()=>options.contacts??null},
     '@/lib/firebase-push':{deliverNotificationPush:async()=>calls.push('push')},
     '@/lib/supabase-admin':{supabaseAdmin:{from(table){calls.push(['table',table]);throw Error('Unexpected protected read')},rpc:async(name,args)=>{calls.push([name,args]);return {data:null,error:null}}}}
   };

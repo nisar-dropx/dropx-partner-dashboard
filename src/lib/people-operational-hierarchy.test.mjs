@@ -142,5 +142,5 @@ test("explicit People station owner overrides stale local manager links", () => 
 
   assert.deepEqual(result?.clusterManagers.map((person) => person.name), ["CURRENT CLM"]);
   assert.deepEqual(result?.managerReportingChain.map((person) => person.name), ["CURRENT CLM", "AOM"]);
-  assert.deepEqual(result?.stationLeads, [{ name: "LOCAL TL", role: "Team Lead" }]);
+  assert.deepEqual(result?.stationLeads, [{ personId: "p-tl", name: "LOCAL TL", role: "Team Lead" }]);
 });

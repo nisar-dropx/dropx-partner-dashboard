@@ -17,6 +17,12 @@ changing allocations, payroll months, recovery keys or published payments.
 Lifecycle changes now invalidate the Workforce payout dependency cache.
 Regression: `node scripts/test-loss-source-status-migration.mjs`.
 
+Follow-up `20261105124500_loss_exception_source_status_aliases.sql` makes
+`nl_loss_exception_allowed` use the same alias key, and syncs enabled
+exception grant labels when only the eDSP alias drifts. Without it, Installments
+/ Next-month saves fail after a harmless Amazon label refresh.
+Regression: `node scripts/test-loss-exception-source-status-aliases.mjs`.
+
 ## Recovery from calculated Workforce pay — 30 October 2026
 
 Pending route distance excludes only the unknown fuel allowance from calculated pay;
@@ -327,6 +333,17 @@ open → (initial approver) propose exact correction/rejection → pending_final
   actors, optimistic versioning and the state machine. Every transition is an immutable,
   version-numbered `workforce_payout_dispute_events` row.
 - A correction proposal records the exact field/current/corrected value and expected net-pay delta.
+  The initial review renders one locked field/current-value row for each item selected in DropX One,
+  including Customer Return. The current values come from the disputed publication, never editable
+  form values or a newer calculation. Approvers enter corrected values per item. Expected net change
+  is read-only and recomputed on the server: quantity difference × the publication's unit rate;
+  rupee amounts use the direct difference, with deductions reversing the sign. Each item is rounded
+  to paise before summing. Missing/mixed unit rates and monthly/hourly Work Days cannot be guessed;
+  unchanged values still contribute zero. Overlapping Work Days/Attendance Pay or total-net/item
+  changes are rejected to prevent double counting. `correction_plan.items` preserves rates and item
+  deltas with the individual rows through final review and the
+  associate's approved-correction view; summary keys retain the v2 RPC contract. Missing publication
+  evidence blocks correction proposals rather than inventing zero. Older single-field plans still display.
   Final approval never marks that correction resolved. The processor must change the authoritative
   payout input and publish a newer revision for the same person, station and period. The processor
   attests that the approved field change was applied; completion independently verifies the newer

@@ -30,6 +30,7 @@ import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-view
 import { ReminderTimesField } from "@/components/report-bot-reminder-times";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { canSeeGroup } from "@/lib/report-bot/access";
 import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from "@/lib/report-bot/logic";
@@ -40,6 +41,7 @@ import {
   closeOpenAction,
   dismissReviewItem,
   duplicateGroupConfiguration,
+  installLastMileTemplates,
   installTcc3Templates,
   previewScheduleReminders,
   reanalyseSubmission,
@@ -49,6 +51,7 @@ import {
   saveReportType,
   saveSchedule,
   seedDraftSchedulesForGroup,
+  seedLastMileSchedulesForGroup,
   sendAllWaiting,
   sendTestReminder,
   setAutoReply,
@@ -107,6 +110,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
+  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   // Old links to the moved tabs land on the setup page instead of a blank tab.
@@ -165,7 +169,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           <div>
             <span className={s.eyebrow}><Bot size={13} aria-hidden /> Ops Pulse · {workspace === "last_mile" ? "Last Mile" : "Dark Store"}</span>
             <h1>Report Bot</h1>
-            <p>{workspace === "last_mile" ? "Last Mile reports, groups and schedules · shared WhatsApp number." : "Report checks, reminders and reviewed replies for Dark Store groups."}</p>
+            <p>{workspace === "last_mile" ? "Last Mile reports, groups and schedules · same WhatsApp as Dark Store Report Bot." : "Report checks, reminders and reviewed replies for Dark Store groups."}</p>
           </div>
           <div className={s.formActions}>
             <Badge tone={modeTone} className={s.modeBadge}>{modeLabel}</Badge>
@@ -173,7 +177,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           </div>
         </header>
 
-        {workspace === "last_mile" ? <div className={s.flash}><Smartphone size={16} /><span>{linked ? "WhatsApp connected" : "WhatsApp not connected"}{settings.connected_number ? ` · +${settings.connected_number}` : ""} · New groups start in Observe. Access: Users & Access → Designation Access → Last Mile Report Bot.</span></div> : <div className={s.tiles}>
+        {workspace === "last_mile" ? <div className={s.flash}><Smartphone size={16} /><span>{linked ? `Shared WhatsApp connected${settings.connected_number ? ` · +${settings.connected_number}` : ""}` : "Shared WhatsApp not connected — link it in Dark Store Report Bot setup"} · New groups start in Observe.</span></div> : <div className={s.tiles}>
           <Link className={s.tile} href={`${SETUP_HREF}#mode`}>
             <span className={`${s.tileIcon} ${settings.mode === "live" ? s.good : settings.mode === "listen" ? s.warn : ""}`}><Bot size={15} aria-hidden /></span>
             <span><span className={s.tileLabel}>Mode</span><div className={s.tileValue}>{modeLabel}</div><div className={s.tileHint}>{settings.mode === "live" ? "Sends reminders and replies" : settings.mode === "listen" ? "Checks photos, sends nothing" : "Not listening to groups"}</div></span>
@@ -867,6 +871,19 @@ function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit
             ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed reminders.</span>}
           </div>
         ) : null}
+        {canEdit && workspace === "last_mile" ? (
+          <div className={s.formActions} style={{ marginBottom: 12 }}>
+            <BotForm workspace={workspace} action={installLastMileTemplates}>
+              <ActionButton className={`${s.button} ${s.primary}`}>Install Station board templates</ActionButton>
+            </BotForm>
+            {testingGroup ? (
+              <BotForm workspace={workspace} action={seedLastMileSchedulesForGroup}>
+                <input type="hidden" name="group_id" value={testingGroup.id} />
+                <ActionButton className={s.button} confirm="Seed Last Mile schedules on Testing (hourly 09:00–21:00 for board reports, evening EOD reminders), activate them, and set the group to Review?">Seed &amp; activate Testing reminders</ActionButton>
+              </BotForm>
+            ) : <span className={s.hint}>Enable a WhatsApp group named exactly “Testing” to seed hourly 09:00–21:00 reminders.</span>}
+          </div>
+        ) : null}
         <div className={s.itemList}>
           {reportTypes.map((report) => (
             <details key={report.id} className={s.item}>
@@ -887,7 +904,7 @@ function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit
               </div>
             </details>
           ))}
-          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">{workspace === "dark_store" ? "Install TCC3 templates or add one manually." : "Add a report type to define your Last Mile checks."}</Empty> : null}
+          {!reportTypes.length ? <Empty icon={<FileText size={28} aria-hidden />} title="No report types yet">{workspace === "dark_store" ? "Install TCC3 templates or add one manually." : "Install Station board templates or add one manually."}</Empty> : null}
           {canEdit ? (
             <details className={`${s.item} ${s.addItem}`} open={!reportTypes.length}>
               <summary><span>+ Add report type</span><ChevronRight size={18} className={s.chevron} aria-hidden /></summary>

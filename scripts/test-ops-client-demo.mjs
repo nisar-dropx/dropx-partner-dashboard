@@ -26,6 +26,7 @@ const nav = load("src/lib/ops-pulse/navigation.ts", {
   "@/lib/app-navigation": load("src/lib/app-navigation.ts"),
   "@/lib/authorization": { hasPermission: fail, isCompanyOwner: fail },
   "@/lib/ops-pulse/cod-pending-access": { canAccessDailyCodPending: fail },
+  "@/lib/ops-pulse/last-mile-report-bot-access": { canAccessLastMileReportBot: fail },
 });
 const model = load("src/lib/ops-pulse/demo/catalog.ts");
 const surface = load("src/lib/ops-pulse/demo/surface.ts");

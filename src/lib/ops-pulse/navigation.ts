@@ -2,6 +2,7 @@ import { fleetNavItem, type NavItem } from "@/lib/app-navigation";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
 import { canAccessDailyCodPending } from "@/lib/ops-pulse/cod-pending-access";
+import { canAccessLastMileReportBot } from "@/lib/ops-pulse/last-mile-report-bot-access";
 
 export const shiftAttendanceNavItem: NavItem = { code: "ops_rostering", label: "Shift Attendance", href: "/ops-pulse?view=manpower", icon: "S" };
 
@@ -107,10 +108,13 @@ const cps: NavItem = {
   ]
 };
 
+const lastMileReportBot = { code: "ops_lm_report_bot", label: "Last Mile Report Bot", href: "/report-bot?workspace=last_mile" };
+
 const administration: NavItem[] = [
   {code:'ops_notification_settings',label:'Settings',icon:'*',children:[
     {code:'ops_notification_settings',label:'Notifications',href:'/settings/notifications'},
-    {code:'payment_settings',label:'Payout Dispute Workflow',href:'/settings/payout-disputes'}
+    {code:'payment_settings',label:'Payout Dispute Workflow',href:'/settings/payout-disputes'},
+    lastMileReportBot,
   ]},
   {
     code: "master_data",
@@ -161,10 +165,9 @@ function modelOperations(mode: OperatingMode): NavItem {
     return {
       code: "cod",
       label: "Operations",
-      permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd", "ops_lm_report_bot"],
+      permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
       icon: "O",
       children: [
-        lastMileReportBot,
         networkPlanning,
         scrub,
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
@@ -176,10 +179,9 @@ function modelOperations(mode: OperatingMode): NavItem {
   return {
     code: "cod",
     label: "Operations",
-    permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd", "ops_lm_report_bot"],
+    permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
     icon: "O",
     children: [
-      lastMileReportBot,
       networkPlanning,
       scrub,
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
@@ -192,7 +194,6 @@ function modelOperations(mode: OperatingMode): NavItem {
   };
 }
 
-const lastMileReportBot = { code: "ops_lm_report_bot", label: "Report Bot", href: "/report-bot?workspace=last_mile" };
 const networkPlanning = { code: "service_network", label: "Network Planning", href: "/service-network" };
 const scrub = { code: "edd_scrub", label: "Scrub", href: "/edd/scrub" };
 
@@ -265,7 +266,9 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   const items = opsNavCatalogForMode(mode);
+  const showLastMileReportBot = Boolean(authorization && canAccessLastMileReportBot(authorization.email));
   return items.map(item=>item.children?{...item,children:item.children
+    .filter(child => child.code !== "ops_lm_report_bot" || showLastMileReportBot)
     .filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))
     .map(child => {
       if (!authorization || !child.permissionSections?.length) return child;

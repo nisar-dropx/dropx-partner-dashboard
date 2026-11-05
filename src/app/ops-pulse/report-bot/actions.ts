@@ -15,10 +15,12 @@ import {
   type ReportBotSettings
 } from "@/lib/report-bot/settings";
 import { TCC3_REPORT_TEMPLATES } from "@/lib/report-bot/tcc3-templates";
+import { LAST_MILE_REPORT_TEMPLATES } from "@/lib/report-bot/last-mile-templates";
 import { workerRequest } from "@/lib/report-bot/worker-client";
 
 import { reportBotWorkspace, reportBotSetupHref, reportBotPage, reportBotHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
+import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 
 const FLASH_COOKIE = "dropx_report_bot_flash";
 const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings", "actions", "summary"]);
@@ -41,6 +43,7 @@ function isRedirect(error: unknown) {
 /** Runs a mutation with edit permission and turns any error into a visible message on the same tab. */
 async function mutate(tab: string, work: (context: { authorization: ReportBotAuthorization; companyId: string }) => Promise<Flash>, workspace: ReportBotWorkspace = "dark_store") {
   const authorization: ReportBotAuthorization = { ...await requirePagePermission(reportBotPage(workspace), "edit"), reportBotWorkspace: workspace };
+  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   let flash: Flash;
   try {
@@ -190,7 +193,10 @@ export async function rotateWorkerToken(form: FormData) {
 }
 
 export async function connectWhatsApp(form: FormData) {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("connection", async ({ companyId, authorization }) => {
+    if ((authorization.reportBotWorkspace ?? "dark_store") === "last_mile") {
+      throw new Error("Last Mile uses the shared WhatsApp already linked in Dark Store Report Bot setup. Link or switch the number there.");
+    }
     const settings = await loadReportBotSettings(companyId);
     const method = field(form, "method") === "code" ? "code" : "qr";
     const phone = field(form, "phone").replace(/\D/g, "");
@@ -202,7 +208,10 @@ export async function connectWhatsApp(form: FormData) {
 }
 
 export async function disconnectWhatsApp(form: FormData) {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("connection", async ({ companyId, authorization }) => {
+    if ((authorization.reportBotWorkspace ?? "dark_store") === "last_mile") {
+      throw new Error("Last Mile uses the shared WhatsApp. Unlink or switch the number in Dark Store Report Bot setup.");
+    }
     const settings = await loadReportBotSettings(companyId);
     await workerRequest(settings, "/session/logout", { method: "POST", body: {} });
     check(await reportBotDb().from("report_bot_settings").update({
@@ -596,12 +605,45 @@ export async function installTcc3Templates() {
         check(await db.from("report_bot_report_types").update(row).eq("id", existing.id), "Update type");
         updated += 1;
       } else {
-        check(await db.from("report_bot_report_types").insert({ ...row, company_id: companyId, created_by: authorization.userId }), "Create type");
+        check(await db.from("report_bot_report_types").insert({ ...row, company_id: companyId, workspace: "dark_store", created_by: authorization.userId }), "Create type");
         created += 1;
       }
     }
     return { notice: `TCC3 templates ready: ${created} created, ${updated} updated. Seed draft schedules only for the Testing group next.` };
   });
+}
+
+/** Install/update Last Mile Station board + EOD report types (by slug). Does not touch groups. */
+export async function installLastMileTemplates(form: FormData) {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const db = reportBotDb();
+    const now = new Date().toISOString();
+    let created = 0;
+    let updated = 0;
+    for (const template of LAST_MILE_REPORT_TEMPLATES) {
+      const existing = check(await db.from("report_bot_report_types").select("id").eq("company_id", companyId).eq("workspace", "last_mile").eq("slug", template.slug).maybeSingle(), "Load type") as { id: string } | null;
+      const row = {
+        name: template.name,
+        description: template.description,
+        rules: template.rules,
+        slug: template.slug,
+        category: template.category,
+        auto_reply_policy: template.auto_reply_policy,
+        subtypes: template.subtypes,
+        feedback_hint: template.feedback_hint,
+        is_active: true,
+        updated_at: now
+      };
+      if (existing) {
+        check(await db.from("report_bot_report_types").update(row).eq("id", existing.id), "Update type");
+        updated += 1;
+      } else {
+        check(await db.from("report_bot_report_types").insert({ ...row, company_id: companyId, workspace: "last_mile", created_by: authorization.userId }), "Create type");
+        created += 1;
+      }
+    }
+    return { notice: `Last Mile templates ready: ${created} created, ${updated} updated. Seed hourly schedules on Testing next.` };
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /**
@@ -673,6 +715,76 @@ export async function seedDraftSchedulesForGroup(form: FormData) {
         : `Draft schedules for ${groupRow.group_name ?? "group"}: ${seeded} created (inactive), ${skipped} already present.`
     };
   });
+}
+
+/**
+ * Seed Last Mile Station board schedules for one group. Testing activates hourly 09:00–21:00
+ * reminders; other groups get inactive drafts only.
+ */
+export async function seedLastMileSchedulesForGroup(form: FormData) {
+  await mutate("reports", async ({ authorization, companyId }) => {
+    const group = await scopedGroup(authorization, companyId, field(form, "group_id"));
+    const groupRow = check(await reportBotDb().from("report_bot_groups").select("group_name").eq("id", group.id).single(), "Load group") as { group_name: string | null };
+    const testing = isTestingGroupName(groupRow.group_name);
+    const db = reportBotDb();
+    const types = check(await db.from("report_bot_report_types").select("id,slug").eq("company_id", companyId).eq("workspace", "last_mile").not("slug", "is", null), "Load types") as Array<{ id: string; slug: string }>;
+    const bySlug = new Map(types.map((row) => [row.slug, row.id]));
+    let seeded = 0;
+    let activated = 0;
+    let skipped = 0;
+    for (const template of LAST_MILE_REPORT_TEMPLATES) {
+      if (!template.schedule) continue;
+      const reportTypeId = bySlug.get(template.slug);
+      if (!reportTypeId) throw new Error(`Install Last Mile templates first (missing ${template.slug}).`);
+      const active = testing && template.schedule.reminder_times.length > 0;
+      const existing = check(await db.from("report_bot_schedules").select("id,is_active").eq("group_id", group.id).eq("report_type_id", reportTypeId).maybeSingle(), "Check schedule") as { id: string; is_active: boolean } | null;
+      if (existing) {
+        if (testing && active && !existing.is_active) {
+          check(await db.from("report_bot_schedules").update({
+            is_active: true,
+            reminder_times: template.schedule.reminder_times,
+            due_time: template.schedule.due_time,
+            stop_when_received: template.schedule.stop_when_received,
+            schedule_kind: template.schedule.schedule_kind,
+            first_reminder_template: template.schedule.first_reminder_template,
+            followup_template: template.schedule.followup_template,
+            overdue_template: template.schedule.overdue_template,
+            updated_at: new Date().toISOString()
+          }).eq("id", existing.id), "Activate schedule");
+          activated += 1;
+        } else {
+          skipped += 1;
+        }
+        continue;
+      }
+      check(await db.from("report_bot_schedules").insert({
+        company_id: companyId,
+        group_id: group.id,
+        report_type_id: reportTypeId,
+        days_of_week: [0, 1, 2, 3, 4, 5, 6],
+        reminder_times: template.schedule.reminder_times,
+        due_time: template.schedule.due_time,
+        first_reminder_template: template.schedule.first_reminder_template,
+        followup_template: template.schedule.followup_template,
+        overdue_template: template.schedule.overdue_template,
+        is_active: active,
+        stop_when_received: template.schedule.stop_when_received,
+        review_only: template.schedule.review_only,
+        schedule_kind: template.schedule.schedule_kind,
+        created_by: authorization.userId
+      }), "Seed schedule");
+      seeded += 1;
+      if (active) activated += 1;
+    }
+    if (testing) {
+      check(await db.from("report_bot_groups").update({ mode: "review", updated_at: new Date().toISOString() }).eq("id", group.id), "Set Testing to Review");
+    }
+    return {
+      notice: testing
+        ? `Last Mile Testing schedules: ${seeded} created, ${activated} with hourly 09:00–21:00 reminders, ${skipped} unchanged. Group set to Review.`
+        : `Last Mile draft schedules for ${groupRow.group_name ?? "group"}: ${seeded} created (inactive), ${skipped} already present.`
+    };
+  }, reportBotWorkspace(form.get("workspace")));
 }
 
 /** Explicit copy of schedules (+ optional report-type link) from one group to another. Never automatic. */

@@ -204,6 +204,9 @@ export function RecoveryForm({
     old?.recovery_details || {},
   );
   const [caseKey, setCaseKey] = useState(row.case_key);
+  const [lifecycleVersion, setLifecycleVersion] = useState(
+    Number((row as { lifecycle_version?: number }).lifecycle_version) || 1,
+  );
   const [departedCheck,setDepartedCheck]=useState<DepartedPayCheck>({loading:true,error:"",month:"",amount:0});
   const [deductionMonths, setDeductionMonths] = useState<
     Record<string, string>
@@ -464,6 +467,7 @@ export function RecoveryForm({
       const j = await res.json();
       if (!res.ok) throw Error(j.error);
       setRecovery(j.recovery);
+      if (Number.isInteger(j.lifecycle_version)) setLifecycleVersion(j.lifecycle_version);
       setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. The full recovery will be included in the applicable payroll calculation.") : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
       if(onSaved)onSaved();else router.refresh();
     } catch (e) {
@@ -564,14 +568,13 @@ export function RecoveryForm({
                         month: row.month,
                         case_key: caseKey,
                         version: recovery?.version || 0,
-                        lifecycle_version:
-                          (row as { lifecycle_version?: number })
-                            .lifecycle_version ?? 1,
+                        lifecycle_version: lifecycleVersion,
                       }),
                     });
                     const j = await res.json();
                     if (!res.ok) throw Error(j.error);
                     setRecovery(j.recovery);
+                    if (Number.isInteger(j.lifecycle_version)) setLifecycleVersion(j.lifecycle_version);
                     setSuccess("Update approved. Scheduled balances remain outstanding until collected.");
                     if(onSaved)onSaved();else router.refresh();
                   } catch (e) {
@@ -597,8 +600,8 @@ export function RecoveryForm({
         <button className={styles.button} disabled={busy || returnNote.trim().length < 10} onClick={async () => {
           if (!recovery) return;
           setBusy(true); setError(""); try {
-            const res = await fetch("/api/ops-pulse/losses/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "return_to_station", month: row.month, case_key: caseKey, version: row.lifecycle_version, note: returnNote }) });
-            const j=await res.json(); if(!res.ok) throw Error(j.error); setReturnNote(""); setRecovery({...recovery,approval_status:"returned",approval_note:returnNote}); setSuccess("Returned for correction. Resubmission needs final approval again."); if(onSaved)onSaved();else router.refresh();
+            const res = await fetch("/api/ops-pulse/losses/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "return_to_station", month: row.month, case_key: caseKey, version: lifecycleVersion, note: returnNote }) });
+            const j=await res.json(); if(!res.ok) throw Error(j.error); setReturnNote(""); setRecovery({...recovery,approval_status:"returned",approval_note:returnNote}); if (Number.isInteger(j.lifecycle_version)) setLifecycleVersion(j.lifecycle_version); setSuccess("Returned for correction. Resubmission needs final approval again."); if(onSaved)onSaved();else router.refresh();
           } catch(e) {setError(e instanceof Error?e.message:"Return failed.");} finally {setBusy(false);}
         }}>Return update</button>
       </details> : null}
