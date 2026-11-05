@@ -24,6 +24,13 @@ assert.equal(parsePaytap(coreCredit,EMPTY_PAYTAP_MAPPING).state,'ignored');
 assert.equal(parsePaytap({...coreDebit,txn_date:'20260230120000'},EMPTY_PAYTAP_MAPPING).state,'review');
 assert.equal(parsePaytap({...coreDebit,txn_status:'PAYMENT_FAILED'},EMPTY_PAYTAP_MAPPING).state,'review');
 assert.equal(parsePaytap({...coreDebit,card_ending:'12'},EMPTY_PAYTAP_MAPPING).state,'review');
+// Nested mapping allowlists / amountDivisor must not block or rescale Core POS payments.
+const legacyCoreMapping=validateMapping({paths:{},paymentTypes:['payment'],successStatuses:['success'],fuelProducts:['Diesel'],amountDivisor:100,estimateMissingQuantity:true});
+assert.equal(parsePaytap(coreDebit,legacyCoreMapping).state,'ready');
+assert.equal(parsePaytap(coreDebit,legacyCoreMapping).fuel.fuel_amount,760);
+assert.equal(parsePaytap({...coreDebit,transaction_type:''},EMPTY_PAYTAP_MAPPING).state,'ready');
+assert.equal(parsePaytap({...coreDebit,amount:'₹1,234.50'},EMPTY_PAYTAP_MAPPING).fuel.fuel_amount,1234.5);
+assert.equal(parsePaytap({...coreDebit,vehicle_reg_hint:'KL 11 CC 3016'},EMPTY_PAYTAP_MAPPING).fuel.vehicle_no,'KL11CC3016');
 const db=new PGlite();
 await db.exec(`create role anon;create role authenticated;create role service_role;create schema vault;
 create table vault.secrets(id uuid primary key default gen_random_uuid(),secret text,name text);create view vault.decrypted_secrets as select id,secret decrypted_secret from vault.secrets;

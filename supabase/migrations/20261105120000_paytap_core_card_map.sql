@@ -67,7 +67,7 @@ begin
  values (
   p_company, 'change', 'fleet_paytap_cards', 'upsert', p_actor,
   (select full_name from public.profiles where id = p_actor and company_id = p_company),
-  null, jsonb_build_object('count', n)
+  '{}'::jsonb, jsonb_build_object('count', n)
  );
  return n;
 end;
@@ -123,20 +123,16 @@ begin
 
  result := p_state;
 
- -- Resolve Core card â†’ vehicle before import.
+ -- Resolve Core card → vehicle before import. Card map wins over statement plate hints.
  if p_state = 'ready' and fuel is not null then
   card := right(regexp_replace(coalesce(fuel->>'card_ending', ''), '\D', '', 'g'), 4);
   plate := regexp_replace(upper(coalesce(fuel->>'vehicle_no', '')), '[^A-Z0-9]', '', 'g');
-  if plate = '' and card ~ '^\d{4}$' then
+  if card ~ '^\d{4}$' then
    select count(*) into matches
    from public.fleet_paytap_cards c
    join public.fleet_vehicles fv on fv.id = c.vehicle_id and fv.company_id = c.company_id
    where c.company_id = p_company and c.card_ending = card;
-   if matches <> 1 then
-    result := 'review';
-    p_reason := format('Card ending %s is not linked to exactly one Fleet vehicle. Map the card under PayTap settings.', card);
-    fuel := null;
-   else
+   if matches = 1 then
     select fv.* into v
     from public.fleet_paytap_cards c
     join public.fleet_vehicles fv on fv.id = c.vehicle_id and fv.company_id = c.company_id
@@ -150,6 +146,10 @@ begin
     else
      fuel := fuel || jsonb_build_object('vehicle_no', plate, 'product', product);
     end if;
+   elsif plate = '' then
+    result := 'review';
+    p_reason := format('Card ending %s is not linked to exactly one Fleet vehicle. Map the card under PayTap settings.', card);
+    fuel := null;
    end if;
   end if;
  end if;

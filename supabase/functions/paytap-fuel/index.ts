@@ -23,7 +23,13 @@ export function verifyPaytap(raw:Buffer,timestamp:string|null,signature:string|n
 }
 function field(body:unknown,path?:string):unknown {return path?.split('.').reduce<unknown>((v,k)=>v&&typeof v==='object'&&Object.hasOwn(v,k)?(v as Record<string,unknown>)[k]:undefined,body);}
 const scalar=(value:unknown)=>typeof value==='string'||typeof value==='number'?String(value).trim():'';
-const number=(value:unknown)=>typeof value==='number'?value:typeof value==='string'&&/^\d+(\.\d+)?$/.test(value.trim())?Number(value):NaN;
+/** Parse money/qty scalars; strip ₹/INR/commas from statement exports. */
+const number=(value:unknown)=>{
+ if(typeof value==='number')return value;
+ if(typeof value!=='string')return NaN;
+ const cleaned=value.trim().replace(/^INR/i,'').replace(/[₹,\s]/g,'');
+ return /^\d+(\.\d+)?$/.test(cleaned)?Number(cleaned):NaN;
+};
 export type PaytapFuel = {transaction_id:string;vehicle_no:string;card_ending?:string|null;transaction_at:string;transaction_date:string;fuel_quantity:number;fuel_amount:number;rate:number;product:string;station_name:string|null;odometer:number|null};
 export type PaytapParseResult = {state:string;reason:string;fuel?:PaytapFuel};
 
@@ -53,28 +59,32 @@ export function normalizePaytapCardEnding(value:unknown):string{
 
 function parsePaytapCore(body:Record<string,unknown>,mapping:PaytapMapping):PaytapParseResult{
  const crdr=scalar(body.crdr).toUpperCase();
- const txnType=scalar(body.transaction_type).toUpperCase();
+ // Core debit fuel is POS; empty type is treated as POS so nested mapping allowlists cannot block Core.
+ const txnType=(scalar(body.transaction_type)||'POS').toUpperCase();
  const status=scalar(body.txn_status).toUpperCase();
  const description=scalar(body.description).toUpperCase();
  if(crdr==='CREDIT'||txnType==='B2C'||description.includes('CASHBACK')||description.includes('SURGE_CHARGE')){
   return {state:'ignored',reason:'Non-fuel PayTap credit/cashback retained without creating a fuel record.'};
  }
  if(crdr&&crdr!=='DEBIT')return {state:'review',reason:'Only DEBIT card payments are imported as fuel.'};
- const allowedTypes=(mapping.paymentTypes.length?mapping.paymentTypes:['POS']).map(x=>x.trim().toUpperCase()).filter(Boolean);
- const allowedStatuses=(mapping.successStatuses.length?mapping.successStatuses:['PAYMENT_SUCCESS']).map(x=>x.trim().toUpperCase()).filter(Boolean);
+ // Always accept Core POS + PAYMENT_SUCCESS even when nested field-mapping lists differ.
+ const allowedTypes=[...new Set(['POS',...mapping.paymentTypes.map(x=>x.trim().toUpperCase()).filter(Boolean)])];
+ const allowedStatuses=[...new Set(['PAYMENT_SUCCESS',...mapping.successStatuses.map(x=>x.trim().toUpperCase()).filter(Boolean)])];
  if(!allowedTypes.includes(txnType))return {state:'review',reason:'Event type is not an approved fuel payment type.'};
  if(!allowedStatuses.includes(status))return {state:'review',reason:'Payment is not confirmed successful. Failed, pending and reversal events need review.'};
  const id=scalar(body.ext_txn_id);
  const card=normalizePaytapCardEnding(body.card_ending);
- const amount=number(body.amount)/(mapping.amountDivisor||1);
+ // Core amounts are rupees; ignore nested amountDivisor=100 from legacy mapping.
+ const amount=number(body.amount);
  const merchant=scalar(body.merchant_name).slice(0,200)||null;
  const at=parsePaytapCompactIst(scalar(body.txn_date));
+ const plate=scalar(body.vehicle_reg_hint||body.vehicle_no).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,20);
  if(!id||id.length>200||card.length!==4||!at)return {state:'review',reason:'Missing transaction ID, card ending or PayTap timestamp.'};
  if(!Number.isFinite(amount)||Math.round(amount*100)<=0||amount>=1e10)return {state:'review',reason:'Fuel amount is missing or invalid.'};
  // Core payloads never include litres; always amount-only until dated location prices fill quantity.
  const day=new Date(at.getTime()+330*60000).toISOString().slice(0,10);
  return {state:'ready',reason:'Verified PayTap Core fuel payment',fuel:{
-  transaction_id:id,vehicle_no:'',card_ending:card,transaction_at:at.toISOString(),transaction_date:day,
+  transaction_id:id,vehicle_no:plate,card_ending:card,transaction_at:at.toISOString(),transaction_date:day,
   fuel_quantity:0,fuel_amount:Math.round(amount*100)/100,rate:0,product:'',station_name:merchant,odometer:null
  }};
 }

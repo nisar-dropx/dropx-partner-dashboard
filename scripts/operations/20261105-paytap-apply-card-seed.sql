@@ -45,7 +45,7 @@ begin
   if cid is null then
     raise exception 'PayTap connection for endpoint cc07a36f-3d1a-4d94-928d-394692040c58 was not found';
   end if;
-  select id into actor from public.profiles where company_id = cid order by created_at nulls last limit 1;
+  select id into actor from public.profiles where company_id = cid order by id limit 1;
   if actor is null then
     raise exception 'No profile found for company %', cid;
   end if;
