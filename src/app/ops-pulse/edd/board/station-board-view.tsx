@@ -375,7 +375,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const pct = (value: number | null) => value == null ? "—" : `${value.toFixed(2)}%`;
   const reportTime = stations.map(row => row.fetchedAt).filter((at): at is string => !!at).sort().at(-1) || payload.asOf;
   const singleStation = stations.length === 1;
-  const cReturnKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt])]);
+  const cReturnKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt, s.board.historyUpdatedAt, s.board.stationInventoryVersion])]);
   const needsCReturn = view === "creturn" && level === "associate";
   const detailPending = needsCReturn && cReturnData?.key !== cReturnKey;
   const detailError = needsCReturn && cReturnData?.key === cReturnKey ? cReturnData.error : undefined;
@@ -401,7 +401,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return () => controller.abort();
   }, [needsCReturn, cReturnKey, detailRetry]);
   const needsDsrStation = view === "dsr" && level === "station";
-  const dsrStationKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt])]);
+  const dsrStationKey = JSON.stringify([payload.businessDate, stations.map(s => [s.stationCode, s.fetchedAt, s.board.historyUpdatedAt, s.board.stationInventoryVersion])]);
   const dsrStationPending = needsDsrStation && dsrStationData?.key !== dsrStationKey;
   const dsrStationError = needsDsrStation && dsrStationData?.key === dsrStationKey ? dsrStationData.error : undefined;
   const dsrStationRows = dsrStationData?.key === dsrStationKey && !dsrStationData.error ? dsrStationData.rows : [];

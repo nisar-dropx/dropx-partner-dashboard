@@ -79,6 +79,7 @@ export type StationBoardPayload = {
   dsrFrozenAt?: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  historyUpdatedAt?: string;
   rtsVersion?: number;
   dotVersion?: number;
   dotMetadataPending?: number;
@@ -316,6 +317,7 @@ export function normalizeBoard(raw: unknown): StationBoardPayload {
     }
   }
   return {
+    historyUpdatedAt: typeof row.historyUpdatedAt === "string" ? row.historyUpdatedAt : undefined,
     stationInventoryVersion: [1, 2].includes(Number(row.stationInventoryVersion)) ? Number(row.stationInventoryVersion) : undefined,
     eddByDate,
     cReturn,
