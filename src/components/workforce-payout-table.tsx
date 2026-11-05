@@ -1,5 +1,6 @@
 "use client";
 import { ReportTable } from "@/components/report-table";
+import { DEFAULT_PAYOUT_DISPUTE_HOURS, MAX_PAYOUT_DISPUTE_HOURS, PAYOUT_DISPUTE_HOUR_PRESETS, payoutDisputeHours } from "@/lib/payout-dispute-window";
 
 
 import { groupWorkforceDeductionDisplay } from "@/lib/workforce-loss-recovery";
@@ -449,6 +450,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const [reviewState, setReviewState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [sendWhatsAppNotification, setSendWhatsAppNotification] = useState(false);
+  const [disputeWindowHours, setDisputeWindowHours] = useState(String(DEFAULT_PAYOUT_DISPUTE_HOURS));
   const [advanceState, setAdvanceState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const [mappingState, setMappingState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const [bankBusy, setBankBusy] = useState(false);
@@ -839,6 +841,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     publishDialogTriggerRef.current = button;
     setReviewState({ busy: false, error: "", notice: "" });
     setSendWhatsAppNotification(false);
+    setDisputeWindowHours(String(DEFAULT_PAYOUT_DISPUTE_HOURS));
     setPublishDialogOpen(true);
   }
 
@@ -859,6 +862,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     setReviewState({ busy: true, error: "", notice: "" });
     let completedChunks = 0;
     try {
+      const selectedDisputeHours = payoutDisputeHours(disputeWindowHours);
       const requestChunks = chunkPayoutRowsBySubject(reviewSelectedRows, MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION);
       const totals = { submitted: 0, appNotifications: 0, whatsappNotifications: 0 };
       for (const chunk of requestChunks) {
@@ -869,6 +873,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             periodStart,
             periodEnd,
             sendWhatsAppNotification,
+            disputeWindowHours: selectedDisputeHours,
             items: chunk.map((row) => ({
               subjectType: row.reviewSubjectType,
               subjectId: row.reviewSubjectId,
@@ -1389,6 +1394,21 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           <p className="subtle">{audience === "workforce"
             ? "This freezes each selected DropX ID’s provider mapping, remapping and direct-pay allocation for the month, then publishes the payment in DropX One."
             : "This freezes each selected Helper payout and direct-pay allocation for the month, then publishes the payment in DropX One."}</p>
+          <fieldset className="payout-dispute-window" disabled={reviewState.busy}>
+            <legend>Dispute window</legend>
+            <div aria-label="Dispute window presets" className="payout-dispute-window-presets" role="group">
+              {PAYOUT_DISPUTE_HOUR_PRESETS.map((hours) => <button
+                aria-pressed={disputeWindowHours === String(hours)}
+                className={`button compact ${disputeWindowHours === String(hours) ? "" : "secondary"}`}
+                key={hours} onClick={() => setDisputeWindowHours(String(hours))} type="button"
+              >{hours} hours{hours === DEFAULT_PAYOUT_DISPUTE_HOURS ? " (default)" : ""}</button>)}
+            </div>
+            <label className="payout-dispute-window-custom" htmlFor="payout-dispute-hours">
+              Custom hours
+              <input aria-describedby="payout-dispute-window-help" id="payout-dispute-hours" inputMode="numeric" max={MAX_PAYOUT_DISPUTE_HOURS} min={1} onChange={(event) => setDisputeWindowHours(event.target.value)} required step={1} type="number" value={disputeWindowHours} />
+            </label>
+            <p className="subtle" id="payout-dispute-window-help">Starts when published. Applies to this batch. Enter 1–720 hours.</p>
+          </fieldset>
           <div className="confirmation-checkbox-list">
             <label className="confirmation-checkbox">
               <input checked={sendWhatsAppNotification} disabled={reviewState.busy} onChange={(event) => setSendWhatsAppNotification(event.target.checked)} type="checkbox" />
