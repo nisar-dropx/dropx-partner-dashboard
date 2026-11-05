@@ -19,6 +19,15 @@ data={stations:[{id:'a',company_id:'co',station_code:'ERSE',station_name:'Statio
  let v=await loadNlLive(auth,{station:'["ERSE","SPBE"]',cluster:'["cm:cm1","aom:aom1"]',sort:'value_asc'});
  assert.equal(v.cases.length,3);assert.equal(v.totals[0].station_code,'SPBE');assert.ok(v.cases.find(c=>c.case_key==='nl:1').recovery);assert.equal(v.cases.find(c=>c.case_key==='nl:3').recoverable,false);assert.equal(v.cases.find(c=>c.case_key==='nl:1').recoverable,true);assert.ok(v.cases.every(c=>c.station_code!=='OUTSIDE'));
  let final=await loadNlLive(auth,{station:'ERSE'},'final');assert.equal(final.cases.length,2);
+ assert.deepEqual(final.closureStations,['ERSE']);
+ data.nl_loss_period_closures=[{company_id:'co',report:'nl',period:'2026-09',station_code:'ERSE',closed_at:'2026-11-05T06:00:00Z',closed_by_name:'Manager'}];
+ let closed=await loadNlLive(auth,{station:'ERSE'},'final');
+ assert.equal(closed.closures.length,1);assert.ok(closed.cases.every(c=>c.period_closed));
+ let other=await loadNlLive(auth,{station:'SPBE'},'final');assert.ok(other.cases.every(c=>!c.period_closed));
+ data.nl_loss_month_cases.push({...row('hidden','SPBE',200),reason:'Other',details:{category:'Other'}});
+ const filteredClose=await loadNlLive(auth,{reason:'Other'},'final');
+ assert.deepEqual(filteredClose.closureStations,['ERSE','SPBE'],'Close scope ignores reason filter but retains selected period and permitted stations');
+ data.nl_loss_month_cases.pop();data.nl_loss_period_closures=[];
  let pending=await loadNlLive(auth,{station:'ERSE'},'initial');assert.equal(pending.cases.length,0);
  data.nl_loss_month_cases.push({...row('pending','ERSE',200),status:'pending',stage:'eDSP2',details:{case_status:'pending',extra:{current_sla_stage:'eDSP2'}}});
  pending=await loadNlLive(auth,{station:'ERSE'},'initial');assert.equal(pending.cases.length,1);assert.equal(pending.cases[0].case_key,'pending');

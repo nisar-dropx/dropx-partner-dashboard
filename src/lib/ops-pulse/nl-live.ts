@@ -1,4 +1,4 @@
-import { assertLossPeriodOpen } from "./loss-period-close";
+import { assertLossPeriodOpen, loadLossPeriodClosures } from "./loss-period-close";
 import { recoveryDetailsUpdated, finalRecoverySummary } from "./loss-final-summary";
 import { mayActivateRedispute, mayMarkAlreadyRecovered, hasFinalLossOutcome } from "./loss-recovery-controls";
 import "server-only";
@@ -69,7 +69,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
   const { company, stations, clusterOptions } = await lossClusterScope(auth);
   const codes = stations.map((s) => s.source_code);
   const db = supabaseAdmin;
-  const [meta, source, runResult, recoveryContext] = await Promise.all([
+  const [meta, source, runResult, recoveryContext, closures] = await Promise.all([
     ready
       ? readAllRows(
           db
@@ -101,6 +101,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
       .limit(1)
       .maybeSingle(),
     lossContext(company, "nl"),
+    loadLossPeriodClosures(company, "nl", codes),
   ]);
   if (meta.error || source.error)
     throw Error("Live Cloak cases could not be loaded. Please retry.");
@@ -226,6 +227,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
       )
       .map((r) => ({
         ...r,
+        period_closed: closures.some(c => c.station_code === r.station_code && c.period === r.month),
         request: requestByCase.get(r.case_key) ?? null,
         recovery: planByKey.get(r.case_key) ?? null,
         recoverable: isRecoverable(r.source_status, recoveryContext.settings?.recoverable_statuses ?? []) && hasFinalLossOutcome(true, r.source_status, r.details?.case_status, r.details?.extra?.current_sla_stage),
@@ -233,6 +235,9 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
   }
   const inScope = new Set(filtered.map((r) => r.case_key));
   return {
+    closures,
+    // Closing covers the selected period/stations, including cases hidden by reason/status.
+    closureStations: matchingStations.filter(s => lossFilterMatches(station, s.source_code) && monthRows.some(r => r.station_code === s.source_code)).map(s => s.source_code),
     stageView,
     ready,
     month,
