@@ -15,8 +15,9 @@ export function filterBoardStations(stations: StationBoardStation[], filters: Bo
     && (!filters.regions.length || filters.regions.includes(regionForStation(s.stationCode))));
 }
 
-export function boardDeliverySummary(stations: StationBoardStation[], zeroOnly = false) {
-  const all = stations.flatMap(s => s.board.daDsr).filter(d => d.total > 0);
+export function boardDeliverySummary(stations: StationBoardStation[], zeroOnly = false,
+  selectRows: (board: StationBoardStation['board']) => StationBoardStation['board']['daDsr'] = board => board.daDsr) {
+  const all = stations.flatMap(s => selectRows(s.board)).filter(d => d.total > 0);
   const rows = zeroOnly ? all.filter(d => d.delivered === 0) : all;
   const sums = rows.reduce((a, d) => ({ total: a.total + d.total, delivered: a.delivered + d.delivered,
     failed: a.failed + d.failed, rejected: a.rejected + d.rejected, oor: a.oor + d.oor }),

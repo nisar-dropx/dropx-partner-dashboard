@@ -1,6 +1,6 @@
 "use client";
 import { RtsReport } from "./rts-report";
-import { performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
+import { boardPerformanceTarget, performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
 import { dotStationTable } from "@/lib/ops-pulse/dot-report";
 import { isDotView, sumDot, stationDotTotals, matchesDotMetric, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { cReturnDetailTable, dsrStationTable, pendingCReturn, type CReturnAssociate, type BoardDetailLevel } from "@/lib/ops-pulse/board-detail-report";
@@ -356,8 +356,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     const edd = stations.reduce((sum, row) => sum + Object.values(row.board.eddByDate).reduce((a, b) => a + b, 0), 0);
     const cReturn = stations.reduce((sum, row) => sum + row.board.cReturnTotal, 0);
     const pickup = stations.reduce((sum, row) => sum + row.board.pickupDone, 0);
-    const zero = stations.flatMap(row => row.board.daDsr).filter(da => da.total > 0 && da.delivered === 0).length;
-    const das = stations.reduce((sum, row) => sum + row.board.daDsr.length, 0);
+    const zero = stations.flatMap(row => daDsrForView(row.board, view)).filter(da => da.total > 0 && da.delivered === 0).length;
+    const das = stations.reduce((sum, row) => sum + daDsrForView(row.board, view).length, 0);
     return {
       edd,
       cReturn,
@@ -366,10 +366,10 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
       das,
       ready: stations.filter((row) => row.hasSnapshot).length,
     };
-  }, [stations]);
+  }, [stations, view]);
 
   const regionLabel = regions.size ? STATION_BOARD_REGIONS.filter(r => regions.has(r.id)).map(r => r.label).join(" / ") : "All regions";
-  const delivery = useMemo(() => boardDeliverySummary(stations, view === "zero"), [stations, view]);
+  const delivery = useMemo(() => boardDeliverySummary(stations, view === "zero", board => daDsrForView(board, view)), [stations, view]);
   const pct = (value: number | null) => value == null ? "—" : `${value.toFixed(2)}%`;
   const reportTime = stations.map(row => row.fetchedAt).filter((at): at is string => !!at).sort().at(-1) || payload.asOf;
   const singleStation = stations.length === 1;
@@ -434,7 +434,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const dotUnavailable = isDotView(view) && dotValues.some(value => !value);
   const dotMetadataPending = stations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0);
   const dotSummary = sumDot(dotValues.filter((value): value is DotTotals => Boolean(value)));
-  const performanceTarget = view === 'premium' ? targets.premium : view === 'standard' ? targets.standard : view === 'dot' ? (targets.premium != null && targets.standard != null && dotSummary.total ? stations.reduce((n,s)=>n+(s.board.dotPremium?.total||0)*targets.premium!+(s.board.dotStandard?.total||0)*targets.standard!,0)/dotSummary.total : undefined) : view === 'creturn' ? targets.creturn : view === 'swa' ? undefined : targets.dsr;
+  const performanceTarget = boardPerformanceTarget(view, targets, {
+    premium: stations.reduce((n,s)=>n+(s.board.dotPremium?.total||0),0),
+    standard: stations.reduce((n,s)=>n+(s.board.dotStandard?.total||0),0),
+  });
+  const metricStyle = (value: number | null) => value == null ? undefined : (() => {
+    const colour = performanceColour(value, performanceTarget);
+    return { backgroundColor: colour.bg, color: colour.color, borderRadius: 3, padding: '0 4px' };
+  })();
   function targetForRow(row: {text:string}[]) {
     if(view !== 'dot') return performanceTarget;
     if(targets.premium == null || targets.standard == null) return undefined;
@@ -460,20 +467,14 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           dsrTitle,
         )
       : buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode);
-    const d = boardDeliverySummary(
-      blockStations.map((station) => ({
-        ...station,
-        board: { ...station.board, daDsr: daDsrForView(station.board, view === "zero" ? "dsr" : view) },
-      })),
-      view === "zero",
-    );
+    const d = boardDeliverySummary(blockStations, view === "zero", board => daDsrForView(board, view));
     const stats = isDsrFamilyView(view)
       ? ` · DSR ${pct(d.dsrPct)} (${count(d.delivered)}) · Delivery failed ${count(d.failed)} · Rejected ${count(d.rejected)}`
       : "";
     const historyPending = (isDsrFamilyView(view) || isDotView(view)) ? blockStations.reduce((n, station) => n + (station.board.dsrHistoryPending || 0), 0) : 0;
     const metadataPending = isDotView(view) ? blockStations.reduce((n, station) => n + (station.board.dotMetadataPending || 0), 0) : 0;
     return prepareBoardReport({ ...formatBoardPerformance(table, performanceTarget, targetForRow),
-      compactNote: isDotView(view) ? "DOT = delivered / eligible. Due by selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock.` : undefined,
+      compactNote: isDotView(view) ? "DOT = delivered / eligible. EDD equals selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock.` : undefined,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending || metadataPending ? ` · Provisional (${[historyPending ? `${count(historyPending)} history checks pending` : "", metadataPending ? `${count(metadataPending)} data pending` : ""].filter(Boolean).join(" · ")})` : ""}`,
       subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
     }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
@@ -1336,16 +1337,16 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         <article className={s.kpi}><span>Stations ready</span><strong>{isDotView(view) ? dotValues.filter(Boolean).length : totals.ready}/{stations.length}</strong></article>
         {isDotView(view) ? <>
           {([['Eligible', dotSummary.total], ['Dispatched', dotSummary.dispatched], ['At station', dotSummary.atStation], ['Delivered', dotSummary.delivered]] as const).map(([label,value]) => <article key={label} className={s.kpi}><span>{label}</span><strong>{dotUnavailable ? "—" : count(value)}</strong></article>)}
-          <article className={s.kpi}><span>DOT</span><strong>{dotUnavailable || !dotSummary.total ? "—" : pct(dotSummary.dotPct)}</strong></article>
+          <article className={s.kpi}><span>DOT</span><strong style={metricStyle(dotUnavailable || !dotSummary.total ? null : dotSummary.dotPct)}>{dotUnavailable || !dotSummary.total ? "—" : pct(dotSummary.dotPct)}</strong></article>
         </> : isDsrFamilyView(view) ? <>
-          <article className={s.kpi}><span>Overall DSR</span><strong>{pct(delivery.dsrPct)} <small>({count(delivery.delivered)})</small></strong></article>
+          <article className={s.kpi}><span>{view === "swa" ? "SWA DSR" : "Overall DSR"}</span><strong style={metricStyle(delivery.dsrPct)}>{pct(delivery.dsrPct)} <small>({count(delivery.delivered)})</small></strong></article>
           <article className={s.kpi} title="Shipments with a delivery-failed outcome; rejected shipments are shown separately"><span>Delivery failed</span><strong>{count(delivery.failed)}</strong></article>
           <article className={s.kpi} title="Shipments with a delivery-rejected outcome"><span>Rejected</span><strong>{count(delivery.rejected)}</strong></article>
           <article className={s.kpi}><span>On road</span><strong>{pct(delivery.roadPct)} <small>({count(delivery.oor)})</small></strong></article>
         </> : view === "creturn" ? <>
           <article className={s.kpi}><span>Total C-Return</span><strong>{detailUnavailable ? "—" : count(cReturnShown.total)}</strong></article>
           <article className={s.kpi}><span>Pending pickup</span><strong>{detailUnavailable ? "—" : count(cReturnShown.pending)}</strong></article>
-          <article className={s.kpi}><span>Pickup done</span><strong>{detailUnavailable ? "—" : count(cReturnShown.picked)} <small>{!detailUnavailable && cReturnShown.total ? `(${(cReturnShown.picked / cReturnShown.total * 100).toFixed(2)}%)` : ""}</small></strong></article>
+          <article className={s.kpi}><span>Pickup done</span><strong style={metricStyle(detailUnavailable || !cReturnShown.total ? null : cReturnShown.picked / cReturnShown.total * 100)}>{detailUnavailable ? "—" : count(cReturnShown.picked)} <small>{!detailUnavailable && cReturnShown.total ? `(${(cReturnShown.picked / cReturnShown.total * 100).toFixed(2)}%)` : ""}</small></strong></article>
         </> : view === "ageing" ? <>
           <article className={s.kpi}><span>Ageing shipments</span><strong>{count(ageing.grandTotal.count)}</strong></article>
           <article className={s.kpi}><span>Ageing value</span><strong>₹{inr(ageing.grandTotal.amount)}</strong></article>
@@ -1371,7 +1372,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         </div>
         {(isDsrFamilyView(view) || isDotView(view)) && stations.some(s => (s.board.dsrHistoryPending || 0) > 0) ? <small role="status" className={s.reportMeta}>History reconciliation pending: {count(stations.reduce((n, s) => n + (s.board.dsrHistoryPending || 0), 0))} shipments. Totals update as Amazon history is checked.</small> : null}
         {(isDsrFamilyView(view) || isDotView(view) || view === 'creturn') && <small className={s.reportMeta}>{performanceTarget == null ? 'Target not configured for this metric · neutral colours' : `Dark green ≥${performanceTarget.toFixed(2)}% · light green ≥${Math.max(0,performanceTarget-4).toFixed(2)}% · amber ≥${Math.max(0,performanceTarget-14).toFixed(2)}% · red below`}</small>}
-        {isDotView(view) ? <small className={s.reportMeta}>Due by selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
+        {isDotView(view) ? <small className={s.reportMeta}>EDD equals selected date · DOT = delivered ÷ eligible. At station includes returned parcels; dispatched and at-station counts can overlap.</small> : null}
         {isDotView(view) && dotMetadataPending > 0 ? <small className={s.reportMeta} role="status">{count(dotMetadataPending)} shipments have missing or unrecognised ship option / EDD. DOT includes confirmed eligible classes only.</small> : null}
         {dotUnavailable ? <small className={s.reportMeta} role="status">Eligible DOT inventory was not captured for this date. Refresh today to start tracking; historical gaps are shown as —.</small> : null}
         {needsDsrStation ? <small className={s.reportMeta}>{STATION_DSR_INVENTORY_NOTE}</small> : null}
@@ -1469,7 +1470,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     </div>
                     <div className={`${s.shareRow} ${s.shareTotal}`}>
                       <span>Pickup Done %</span>
-                      <strong>{selected.board.pickupDonePct.toFixed(2)}%</strong>
+                      <strong style={metricStyle(selected.board.cReturnTotal ? selected.board.pickupDonePct : null)}>{selected.board.cReturnTotal ? `${selected.board.pickupDonePct.toFixed(2)}%` : "—"}</strong>
                     </div>
                   </div>
                 </div>

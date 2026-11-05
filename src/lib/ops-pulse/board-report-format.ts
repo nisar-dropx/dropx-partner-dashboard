@@ -1,5 +1,14 @@
 import type { BoardShareTable } from './station-board-share';
 export type BoardTargets = Partial<Record<'dsr'|'premium'|'standard'|'creturn',number>>;
+/** SWA and zero-delivery reports are DSR slices and inherit the DSR master. */
+export function boardPerformanceTarget(view:string, targets:BoardTargets, mix?:{premium:number;standard:number}) {
+  if(view === 'premium' || view === 'standard' || view === 'creturn') return targets[view];
+  if(view === 'dot') {
+    if(targets.premium == null || targets.standard == null || !mix || ! (mix.premium + mix.standard)) return undefined;
+    return (mix.premium * targets.premium + mix.standard * targets.standard) / (mix.premium + mix.standard);
+  }
+  return targets.dsr;
+}
 export function performanceColour(value:number,target?:number) {
   if(target == null || !Number.isFinite(target)) return {bg:'#f1f5f9',color:'#334155'};
   if(value >= target) return {bg:'#166534',color:'#ffffff'};
