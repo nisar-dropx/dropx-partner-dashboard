@@ -43,22 +43,22 @@ test("payout export keeps production detail and removes duplicate payment-method
   assert.doesNotMatch(table.headers.join("|"), /Per Packet Amount/);
   assert.deepEqual(
     table.headers.filter((header) => header.startsWith("Delivery ")),
-    ["Delivery Rate (INR)", "Delivery Units", "Delivery Amount (INR)"]
+    ["Delivery Units", "Delivery Rate (INR)", "Delivery Amount (INR)"]
   );
   assert.deepEqual(
     table.headers.filter((header) => header.startsWith("C-return ")),
-    ["C-return Rate (INR)", "C-return Units", "C-return Amount (INR)"]
+    ["C-return Units", "C-return Rate (INR)", "C-return Amount (INR)"]
   );
 });
 
-test("attendance and rent heads include the calculated units between rate and amount", () => {
+test("attendance and rent heads export units before rate and amount", () => {
   const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Workforce");
   const headers = table.headers.join("|");
 
   assert.doesNotMatch(headers, /MG Per Month Count/);
   assert.doesNotMatch(headers, /Van Rent Per Day Count/);
-  assert.match(headers, /MG Per Month Rate \(INR\)\|MG Per Month Units\|MG Per Month Amount \(INR\)/);
-  assert.match(headers, /Van Rent Per Day Rate \(INR\)\|Van Rent Per Day Units\|Van Rent Per Day Amount \(INR\)/);
+  assert.match(headers, /MG Per Month Units\|MG Per Month Rate \(INR\)\|MG Per Month Amount \(INR\)/);
+  assert.match(headers, /Van Rent Per Day Units\|Van Rent Per Day Rate \(INR\)\|Van Rent Per Day Amount \(INR\)/);
   assert.equal(table.rows[0][table.headers.indexOf("Van Rent Per Day Rate (INR)")], 800);
   assert.equal(table.rows[0][table.headers.indexOf("Van Rent Per Day Amount (INR)")], 22400);
 });
@@ -97,17 +97,17 @@ test("payout export preserves the payment method's custom mixed field order", ()
   assert.deepEqual(
     table.headers.filter((header) => /^(Van Rent Per Day|C-return|MG Per Month|Delivery) /.test(header)),
     [
-      "Van Rent Per Day Rate (INR)",
       "Van Rent Per Day Units",
+      "Van Rent Per Day Rate (INR)",
       "Van Rent Per Day Amount (INR)",
-      "C-return Rate (INR)",
       "C-return Units",
+      "C-return Rate (INR)",
       "C-return Amount (INR)",
-      "MG Per Month Rate (INR)",
       "MG Per Month Units",
+      "MG Per Month Rate (INR)",
       "MG Per Month Amount (INR)",
-      "Delivery Rate (INR)",
       "Delivery Units",
+      "Delivery Rate (INR)",
       "Delivery Amount (INR)"
     ]
   );
@@ -288,7 +288,7 @@ test("Workforce exports payable units while Helper keeps its threshold audit col
   assert.equal(table.rows[0][table.headers.indexOf("Delivery Amount (INR)")], 390);
   assert.ok(!table.headers.some(header => /Threshold|Reported Units|Minimum Units/.test(header)));
   assert.deepEqual(table.headers.filter(header => header.startsWith("MFN ")),
-    ["MFN Rate (INR)", "MFN Units", "MFN Amount (INR)"]);
+    ["MFN Units", "MFN Rate (INR)", "MFN Amount (INR)"]);
   const helper = buildWorkforcePayoutExportTable([row], "Helper");
   assert.equal(helper.rows[0][helper.headers.indexOf("Delivery Reported Units")], 130);
   assert.equal(helper.rows[0][helper.headers.indexOf("Delivery Threshold / Excluded Units")], 100);
