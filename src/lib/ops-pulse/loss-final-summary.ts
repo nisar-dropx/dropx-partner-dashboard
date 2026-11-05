@@ -1,3 +1,14 @@
+/** Exact aliases used by Amazon live/historic exports for the same recovery outcome. */
+export function recoverySourceStatusKey(status: string | null | undefined) {
+  return [
+    "Recoverable - Missed SLA by eDSP",
+    "Recoverable - Missed SLA by eDSP1",
+    "Recoverable - Missed SLA by eDSP2",
+  ].includes(status ?? "")
+    ? "Recoverable - Missed SLA by eDSP"
+    : status;
+}
+
 /** A saved recovery update is distinct from money deducted or an Amazon dispute win. */
 export function recoveryDetailsUpdated(
   row: { amount: number | null; source_status: string | null },
@@ -9,7 +20,7 @@ export function recoveryDetailsUpdated(
     plan.is_deleted ||
     ["returned", "needs_review"].includes(plan.approval_status) ||
     Number(plan.source_amount) !== Number(row.amount) ||
-    (!slp && plan.source_status !== row.source_status)
+    (!slp && recoverySourceStatusKey(plan.source_status) !== recoverySourceStatusKey(row.source_status))
   )
     return false;
   if (plan.outcome_code === "responsible_left")
