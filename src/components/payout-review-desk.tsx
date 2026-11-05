@@ -1,6 +1,8 @@
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { decodePayoutReviewReason } from "@/lib/payout-review-display";
+import { PAYOUT_DISPUTE_AREAS } from "@/lib/payout-dispute-areas";
+import { payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import styles from "./payout-review-desk.module.css";
 import { UrlPager, readPaging } from "./url-pager";
@@ -344,6 +346,8 @@ export async function PayoutReviewDesk({
         const sameInitialActor = dispute.initial_reviewed_by === auth.userId || dispute.proposed_by === auth.userId;
         const sameApprovalActor = sameInitialActor || dispute.final_approved_by === auth.userId;
         const plan = record(dispute.correction_plan);
+        const correctionFields = payoutDisputeCorrectionFields(dispute.reason, dispute.category, record(publication?.snapshot));
+        const missingCurrentValue = correctionFields.some(field => field.currentValue === null);
         const result = record(dispute.processing_result);
         const candidate = latestRevision.get(String(dispute.id));
         const beforePaise = netPaise(publication);
@@ -375,13 +379,14 @@ export async function PayoutReviewDesk({
                 <b>{dispute.initial_reviewed_by_name || dispute.proposed_by_name}</b> proposed <b>{dispute.proposed_decision === "rejected" ? "rejection" : "a correction"}</b>
                 {dispute.proposed_note ? <>: “{dispute.proposed_note}”</> : null} <small>{when(dispute.initial_reviewed_at || dispute.proposed_at)}</small>
                 {Object.keys(plan).length ? (
-                  <dl className={styles.plan}>
-                    <div><dt>Correction</dt><dd>{CORRECTION_KINDS.find(([key]) => key === plan.kind)?.[1] || String(plan.kind || "Other")}</dd></div>
-                    <div><dt>Field</dt><dd>{String(plan.target_field || "—")}</dd></div>
-                    <div><dt>Current</dt><dd>{plan.current_value == null ? "—" : String(plan.current_value)}</dd></div>
-                    <div><dt>Approved value</dt><dd>{plan.proposed_value == null ? "—" : String(plan.proposed_value)}</dd></div>
-                    {plan.expected_delta_paise != null ? <div><dt>Expected net change</dt><dd>{moneyFromPaise(plan.expected_delta_paise)}</dd></div> : null}
-                  </dl>
+                  <>
+                    {(Array.isArray(plan.items) && plan.items.length ? plan.items : [plan]).map((item: Row, index: number) => <dl className={styles.plan} key={index}>
+                      <div><dt>Disputed item</dt><dd>{String(item.target_field || "—")}</dd></div>
+                      <div><dt>Current{item.unit ? ` (${item.unit === "rupees" ? "₹" : item.unit})` : ""}</dt><dd>{item.current_value == null ? "—" : String(item.current_value)}</dd></div>
+                      <div><dt>Corrected value</dt><dd>{item.proposed_value == null ? "—" : String(item.proposed_value)}</dd></div>
+                    </dl>)}
+                    {plan.expected_delta_paise != null ? <p><b>Total expected net change:</b> {moneyFromPaise(plan.expected_delta_paise)}</p> : null}
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -411,16 +416,25 @@ export async function PayoutReviewDesk({
                     <form action={action} className={styles.correctionForm}>
                       <input name="dispute_id" type="hidden" value={dispute.id} />
                       <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
-                      <select name="correction_kind" required aria-label="Correction type" defaultValue="">
-                        <option value="" disabled>What needs correction?</option>
-                        {CORRECTION_KINDS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                      </select>
-                      <input name="target_field" required maxLength={120} placeholder="Field or component, e.g. work days" aria-label="Field to correct" />
-                      <input name="current_value" required maxLength={200} placeholder="Current value" aria-label="Current value" />
-                      <input name="proposed_value" required maxLength={200} placeholder="Correct value" aria-label="Correct value" />
+                      <p className={styles.correctionHelp}>Selected in DropX One. Current values are from the disputed payout revision.</p>
+                      {correctionFields.map(field => <fieldset className={styles.correctionItem} key={field.area}>
+                        <legend>{field.label}</legend>
+                        <label>Disputed item
+                          <select aria-label={`Disputed item: ${field.label}`} value={field.area} disabled>
+                            {field.area === "legacy" ? <option value="legacy">{field.label}</option> : PAYOUT_DISPUTE_AREAS.map(area => <option key={area.value} value={area.value}>{area.label}</option>)}
+                          </select>
+                        </label>
+                        <label>Current value ({field.unit === "rupees" ? "₹" : field.unit})
+                          <input value={field.currentValue ?? "Not available in published payout"} readOnly aria-label={`Current value: ${field.label}`} />
+                        </label>
+                        <label>Corrected value ({field.unit === "rupees" ? "₹" : field.unit})
+                          <input name={`corrected_${field.area}`} type="number" min="0" step="0.01" required disabled={field.currentValue === null} aria-label={`Corrected value: ${field.label}`} />
+                        </label>
+                      </fieldset>)}
+                      {missingCurrentValue ? <p role="alert" className={styles.correctionHelp}>A current value is unavailable in this publication. Review the payout evidence before proposing a correction.</p> : null}
                       <input name="expected_delta_rupees" type="number" step="0.01" required placeholder="Exact expected net change ₹" aria-label="Expected net change in rupees" />
                       <textarea name="note" required minLength={10} maxLength={1000} placeholder="Correction explanation the associate will see (at least 10 characters)" aria-label="Correction note" />
-                      <button className="button" name="transition" value="propose_correction">Send for final approval</button>
+                      <button className="button" name="transition" value="propose_correction" disabled={missingCurrentValue}>Send for final approval</button>
                     </form>
                   </details>
                   <details>

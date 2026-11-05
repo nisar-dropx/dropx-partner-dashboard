@@ -1,16 +1,6 @@
-export const PAYOUT_DISPUTE_AREAS = [
-  { value: "work_days", label: "Work Days", legacyCategory: "training" },
-  { value: "attendance_pay", label: "Attendance Pay", legacyCategory: "training" },
-  { value: "delivery", label: "Delivery", legacyCategory: "counts" },
-  { value: "pickup", label: "Pickup", legacyCategory: "counts" },
-  { value: "mfn_seller_pickup", label: "MFN / Seller Pickup", legacyCategory: "counts" },
-  { value: "allowances", label: "Allowances", legacyCategory: "other" },
-  { value: "incentive", label: "Incentive", legacyCategory: "other" },
-  { value: "deduction", label: "Deduction", legacyCategory: "loss" },
-  { value: "other", label: "Others", legacyCategory: "other" },
-] as const;
+import { PAYOUT_DISPUTE_AREAS, type PayoutDisputeArea } from "../../../../src/lib/payout-dispute-areas.ts";
+export { PAYOUT_DISPUTE_AREAS, type PayoutDisputeArea } from "../../../../src/lib/payout-dispute-areas.ts";
 
-export type PayoutDisputeArea = (typeof PAYOUT_DISPUTE_AREAS)[number]["value"];
 export type PayoutReviewState = "open" | "expired" | "revising" | "confirmed" | "unavailable";
 export type PayoutDisputeWorkflowStatus =
   | "open"
@@ -39,6 +29,7 @@ export type AssociatePayoutDispute = {
     blocked: boolean;
   };
   correction: null | {
+    items?: Array<{ targetField: string | null; currentValue: string | number | null; proposedValue: string | number | null; unit: string | null }>;
     kind: string | null;
     targetField: string | null;
     note: string | null;
@@ -246,6 +237,10 @@ export function associatePayoutDispute(
     legacyResolutionUnverified,
     workflow,
     correction: correctionVisible ? {
+      ...(Array.isArray(correctionPlan.items) ? { items: correctionPlan.items.map((item: Record<string, unknown>) => ({
+        targetField: cleanText(item.target_field), currentValue: correctionValue(item.current_value),
+        proposedValue: correctionValue(item.proposed_value), unit: cleanText(item.unit),
+      })) } : {}),
       kind: cleanText(correctionPlan.kind),
       targetField: cleanText(correctionPlan.target_field),
       note: cleanText(correctionPlan.note),

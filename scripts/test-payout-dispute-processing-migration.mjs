@@ -484,6 +484,10 @@ const plan = {
     target_field: "work_days",
     current_value: 10,
     proposed_value: 11,
+    items: [
+      { area: "work_days", kind: "workdays", target_field: "Work Days", current_value: 10, proposed_value: 11, unit: "days" },
+      { area: "customer_return", kind: "production", target_field: "Customer Return", current_value: 5, proposed_value: 6, unit: "count" }
+    ],
     expected_delta_paise: 2500
   }
 };
@@ -515,6 +519,8 @@ await throws("Stale dispute version is rejected", rpc(A2, [R2], "approve_final",
 await throws("Final routing excludes the initial reviewer and activates its fallback", rpc(A1, [R2], "approve_final", 2, {}), /active primary or fallback/);
 row = (await db.query(rpc(A2, [R4], "approve_final", 2, { note: "Checked independently" }))).rows[0];
 ok("Dashboard fallback can give final approval", row.status === "approved_for_processing" && row.version === 3);
+const savedItems = (await db.query(`select correction_plan->'items' as items from workforce_payout_disputes where id='${dispute.id}'`)).rows[0].items;
+ok("Final approval preserves each disputed item and its frozen current/corrected values", savedItems.length === 2 && savedItems.every((item, index) => Object.entries(plan.correction_plan.items[index]).every(([key, value]) => item[key] === value)));
 row = (await db.query(`
   select stage,role_id from workforce_payout_dispute_route_roles(
     '${C}',jsonb_build_array(jsonb_build_object('dispute_id','${dispute.id}','stage','processor'))
