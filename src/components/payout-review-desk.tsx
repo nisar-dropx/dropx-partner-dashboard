@@ -1,7 +1,7 @@
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { decodePayoutReviewReason } from "@/lib/payout-review-display";
-import { PAYOUT_DISPUTE_AREAS } from "@/lib/payout-dispute-areas";
+import { PayoutDisputeCorrectionInputs } from "./payout-dispute-correction-inputs";
 import { payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import styles from "./payout-review-desk.module.css";
@@ -347,7 +347,6 @@ export async function PayoutReviewDesk({
         const sameApprovalActor = sameInitialActor || dispute.final_approved_by === auth.userId;
         const plan = record(dispute.correction_plan);
         const correctionFields = payoutDisputeCorrectionFields(dispute.reason, dispute.category, record(publication?.snapshot));
-        const missingCurrentValue = correctionFields.some(field => field.currentValue === null);
         const result = record(dispute.processing_result);
         const candidate = latestRevision.get(String(dispute.id));
         const beforePaise = netPaise(publication);
@@ -384,6 +383,8 @@ export async function PayoutReviewDesk({
                       <div><dt>Disputed item</dt><dd>{String(item.target_field || "—")}</dd></div>
                       <div><dt>Current{item.unit ? ` (${item.unit === "rupees" ? "₹" : item.unit})` : ""}</dt><dd>{item.current_value == null ? "—" : String(item.current_value)}</dd></div>
                       <div><dt>Corrected value</dt><dd>{item.proposed_value == null ? "—" : String(item.proposed_value)}</dd></div>
+                      {item.unit_rate != null ? <div><dt>Published unit rate</dt><dd>₹{String(item.unit_rate)}</dd></div> : null}
+                      {item.expected_delta_paise != null ? <div><dt>Item net change</dt><dd>{moneyFromPaise(item.expected_delta_paise)}</dd></div> : null}
                     </dl>)}
                     {plan.expected_delta_paise != null ? <p><b>Total expected net change:</b> {moneyFromPaise(plan.expected_delta_paise)}</p> : null}
                   </>
@@ -416,25 +417,7 @@ export async function PayoutReviewDesk({
                     <form action={action} className={styles.correctionForm}>
                       <input name="dispute_id" type="hidden" value={dispute.id} />
                       <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
-                      <p className={styles.correctionHelp}>Selected in DropX One. Current values are from the disputed payout revision.</p>
-                      {correctionFields.map(field => <fieldset className={styles.correctionItem} key={field.area}>
-                        <legend>{field.label}</legend>
-                        <label>Disputed item
-                          <select aria-label={`Disputed item: ${field.label}`} value={field.area} disabled>
-                            {field.area === "legacy" ? <option value="legacy">{field.label}</option> : PAYOUT_DISPUTE_AREAS.map(area => <option key={area.value} value={area.value}>{area.label}</option>)}
-                          </select>
-                        </label>
-                        <label>Current value ({field.unit === "rupees" ? "₹" : field.unit})
-                          <input value={field.currentValue ?? "Not available in published payout"} readOnly aria-label={`Current value: ${field.label}`} />
-                        </label>
-                        <label>Corrected value ({field.unit === "rupees" ? "₹" : field.unit})
-                          <input name={`corrected_${field.area}`} type="number" min="0" step="0.01" required disabled={field.currentValue === null} aria-label={`Corrected value: ${field.label}`} />
-                        </label>
-                      </fieldset>)}
-                      {missingCurrentValue ? <p role="alert" className={styles.correctionHelp}>A current value is unavailable in this publication. Review the payout evidence before proposing a correction.</p> : null}
-                      <input name="expected_delta_rupees" type="number" step="0.01" required placeholder="Exact expected net change ₹" aria-label="Expected net change in rupees" />
-                      <textarea name="note" required minLength={10} maxLength={1000} placeholder="Correction explanation the associate will see (at least 10 characters)" aria-label="Correction note" />
-                      <button className="button" name="transition" value="propose_correction" disabled={missingCurrentValue}>Send for final approval</button>
+                      <PayoutDisputeCorrectionInputs key={`${dispute.id}:${dispute.version}`} fields={correctionFields} />
                     </form>
                   </details>
                   <details>

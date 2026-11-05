@@ -7,7 +7,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 test("Dashboard and Ops expose the configured three-person payout-correction flow", () => {
   const page = read("../app/payments/disputes/page.tsx");
   const routeActions = read("../app/payments/disputes/actions.ts");
-  const desk = read("../components/payout-review-desk.tsx");
+  const desk = read("../components/payout-review-desk.tsx") + read("../components/payout-dispute-correction-inputs.tsx");
   const reviewActions = read("./payout-review-actions.ts");
   const notifications = read("./payout-dispute-notifications.ts");
   const appNotifications = read("./app-notifications.ts");
@@ -40,6 +40,8 @@ test("Dashboard and Ops expose the configured three-person payout-correction flo
   assert.match(reviewActions, /hasPermission\(auth, payoutPageCode, "edit"\)/);
   assert.match(reviewActions, /notifyAssociateOfPayoutDispute/);
   assert.match(reviewActions, /Number\.isSafeInteger/);
+  assert.doesNotMatch(reviewActions, /text\("expected_delta_rupees"\)/);
+  assert.match(desk, /name="expected_delta_rupees"[\s\S]*?readOnly/);
   assert.match(desk, /name="transition" value="propose_rejection"/);
   assert.match(desk, /name="transition" value="propose_correction"/);
   assert.match(desk, /name="transition" value="approve_final"/);

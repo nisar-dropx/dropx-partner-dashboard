@@ -335,8 +335,13 @@ open → (initial approver) propose exact correction/rejection → pending_final
 - A correction proposal records the exact field/current/corrected value and expected net-pay delta.
   The initial review renders one locked field/current-value row for each item selected in DropX One,
   including Customer Return. The current values come from the disputed publication, never editable
-  form values or a newer calculation. Approvers enter corrected values per item and one total expected
-  net-pay delta. `correction_plan.items` preserves the individual rows through final review and the
+  form values or a newer calculation. Approvers enter corrected values per item. Expected net change
+  is read-only and recomputed on the server: quantity difference × the publication's unit rate;
+  rupee amounts use the direct difference, with deductions reversing the sign. Each item is rounded
+  to paise before summing. Missing/mixed unit rates and monthly/hourly Work Days cannot be guessed;
+  unchanged values still contribute zero. Overlapping Work Days/Attendance Pay or total-net/item
+  changes are rejected to prevent double counting. `correction_plan.items` preserves rates and item
+  deltas with the individual rows through final review and the
   associate's approved-correction view; summary keys retain the v2 RPC contract. Missing publication
   evidence blocks correction proposals rather than inventing zero. Older single-field plans still display.
   Final approval never marks that correction resolved. The processor must change the authoritative
