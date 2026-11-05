@@ -56,3 +56,12 @@ test('zero-delivery layout sorts across stations, repeats station codes and reta
  const byStation=prepareBoardReport(table,{header:'Station',direction:'asc'},options);
  assert.deepEqual(byStation.rows.map(row=>row[0].text),['GDRD','KLZA','KLZA','Grand Total']);
 });
+
+test('SWA cards reconcile to the selected SWA table, never the full DSR population',()=>{
+ const da=(total,delivered)=>({total,delivered,oor:2,failed:145,rejected:31});
+ const stations=[{board:{daDsr:[da(11525,9886)],daDsrSwa:[da(455,255)]}}];
+ const summary=boardDeliverySummary(stations,false,board=>board.daDsrSwa);
+ assert.equal(summary.total,455);assert.equal(summary.delivered,255);
+ assert.equal(summary.dsrPct.toFixed(2),'56.04');
+ assert.equal(summary.daCount,1);
+});

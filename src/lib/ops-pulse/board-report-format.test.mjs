@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {performanceColour,formatBoardPerformance} from './board-report-format.ts';
+import {ageingColour,formatAgeingPerformance,performanceColour,formatBoardPerformance,boardPerformanceTarget} from './board-report-format.ts';
 import {rtsTotals,rtsTable} from './rts-report.ts';
 test('target colours distinguish below, near and meeting target; missing target is neutral',()=>{
  assert.equal(performanceColour(77,94).color,'#991b1b');
@@ -25,4 +25,31 @@ test('RTS totals preserve missing versus zero value and associate shipment detai
  assert.equal(rtsTable(rows,'station').rows.length,3);
  assert.equal(rtsTable(rows,'associate').rows[0][3].text,'2');
  const table=rtsTable(rows,'shipment');assert.equal(table.rows[0][2].text,'001234567890');assert.equal(table.rows[2][4].text,'—');assert.equal(table.rows[1][4].text,'0.00');
+});
+
+test('DSR, SWA and zero-delivery reports use identical master targets and output colours',()=>{
+ const targets={dsr:94,premium:95.5,standard:93.5,creturn:85};
+ for(const view of ['dsr','swa','zero']) {
+  const target=boardPerformanceTarget(view,targets);
+  assert.equal(target,94);
+  const result=formatBoardPerformance({headers:['DSR%'],rows:[[{text:'82.35%'}],[{text:'56.04%'}],[{text:'94.00%'}]]},target);
+  assert.equal(result.rows[0][0].bg,'#fef3c7');
+  assert.equal(result.rows[1][0].bg,'#fee2e2');
+  assert.equal(result.rows[2][0].bg,'#166534');
+ }
+ assert.equal(boardPerformanceTarget('creturn',targets),85);
+ assert.equal(boardPerformanceTarget('dot',targets,{premium:3,standard:1}),95);
+});
+
+test('ageing colours higher burden red and lower green independently for value and count, excluding totals',()=>{
+ const table={headers:['Station','Total #','Total ₹'],rows:[[{text:'A'},{text:'100'},{text:'1,000'}],[{text:'B'},{text:'50'},{text:'5,000'}],[{text:'C'},{text:'10'},{text:'9,000'}],[{text:'Grand Total'},{text:'160',bg:'#edf2f8'},{text:'15,000',bg:'#edf2f8'}]]};
+ const result=formatAgeingPerformance(table);
+ assert.equal(result.rows[0][1].bg,'#fee2e2');
+ assert.equal(result.rows[0][2].bg,'#dcfce7');
+ assert.equal(result.rows[1][2].bg,'#fef3c7');
+ assert.equal(result.rows[2][2].bg,'#fee2e2');
+ assert.equal(result.rows[3][2].bg,'#edf2f8');
+ assert.equal(ageingColour(0,0,0).bg,'#dcfce7');
+ assert.equal(ageingColour(10,10,10).bg,'#fee2e2');
+ assert.equal(formatAgeingPerformance({...table,rows:table.rows.slice(0,2)}).rows[1][2].bg,'#fee2e2');
 });
