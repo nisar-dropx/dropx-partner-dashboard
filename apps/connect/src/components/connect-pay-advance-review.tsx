@@ -49,6 +49,7 @@ export function ConnectPayAdvanceReview({ accountId, profileType, approval, chil
       <div><dt>Advance to recover</dt><dd>{money(outstanding)}</dd></div>
     </dl>
     {approval.neededBy ? <p className="dx-advance-explanation">Needed by {new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(approval.neededBy))}</p> : null}
+    {data?.capacity.salaryHolds?.map((h, i) => <p key={i} className="dx-advance-explanation" role="note"><strong>Salary on hold · {h.salary_month}</strong> · {h.actor_name || h.actor_id || "Actor not recorded"}{h.reason ? ` · ${h.reason}` : ""}</p>)}
     <div className="dx-advance-decision">{children}</div>
     {error ? <div className="dx-advance-load-error" role="alert"><p>{error}</p><button type="button" onClick={() => setAttempt(n => n + 1)}>Retry review details</button></div>
       : !data ? <p role="status" className="dx-advance-explanation">Loading history…</p> : <div className="dx-advance-details">

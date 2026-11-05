@@ -1,4 +1,5 @@
 import "server-only";
+import { loadSalaryHoldContext } from "@/lib/salary-hold-context";
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -92,6 +93,7 @@ export async function loadRecoveryPayables(
         "Recovery can only be allocated to station staff and its mapped Cluster Manager or Area Operations Manager.",
       );
   }
+  const salaryHolds = await loadSalaryHoldContext(company, people.map(p => p.ref), [month]);
   const employeeIds = people
     .filter((p) => p.ref.startsWith("employee:"))
     .map((p) => p.ref.slice(9));
@@ -233,7 +235,7 @@ export async function loadRecoveryPayables(
         );
         source = `People payroll · ${employeePay.calculation_status}`;
       } else if (employeePay) {
-        blockReason = `Recovery unavailable: People payroll is ${employeePay.calculation_status || run?.status || "not ready"}. Resolve the payroll review or salary hold.`;
+        blockReason = `Recovery unavailable: People payroll is ${employeePay.calculation_status || run?.status || "not ready"}. Resolve the payroll calculation review.`;
         source = `People payroll · ${employeePay.calculation_status || run?.status || "not ready"}`;
       }
       if (!employeePay) blockReason = `Recovery unavailable: no People payroll calculation exists for ${month}. Calculate payroll or final settlement first.`;
@@ -293,6 +295,7 @@ export async function loadRecoveryPayables(
     if (eligible || !duplicate && (selectedRefs?.includes(person.ref) || departedOnly || openMonths.length > 0))
       result.push({
         ...person,
+        salary_holds: salaryHolds.filter(h => h.employee_ref === person.ref),
         salary_month: month,
         open_payroll_months: openMonths,
         unpaid_payroll_check: unpaidCheck,

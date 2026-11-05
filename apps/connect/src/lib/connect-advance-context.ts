@@ -3,7 +3,8 @@ import {createHmac} from "node:crypto";
 
 export type CurrentAdvanceCapacity = {
   outstandingPay: number; maxEligibleAmount: number; committedAdvance: number;
-  eligibilityPercent: number; breakdown: Array<{ month: string; outstanding: number }>;
+  salaryHolds?: Array<{salary_month: string; actor_name: string | null; actor_id: string | null; reason: string | null}>;
+    eligibilityPercent: number; breakdown: Array<{ month: string; outstanding: number }>;
 };
 
 export async function loadCurrentAdvanceCapacity(companyId:string,requestId:string): Promise<CurrentAdvanceCapacity> {
