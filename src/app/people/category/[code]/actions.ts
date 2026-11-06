@@ -128,7 +128,7 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
     }
 
     const [locationResult, designationResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       supabaseAdmin.from("designations").select("id, onboarding_categories, onboarding_role_ids, portal_permissions, profile_field_rules").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
     ]);
     if (locationResult.error) throw new Error(locationResult.error.message);
@@ -291,7 +291,7 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
     }
     const designation = optional(formData.get("designation")) ?? String(existing.designation ?? "");
     const [locationResult, designationResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       supabaseAdmin.from("designations").select("onboarding_categories, profile_field_rules").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
     ]);
     if (locationResult.error) throw new Error(locationResult.error.message);

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { STATION_EMAIL_EXCEPTION_NOTE_MAX, workforceProfileStatus, workforceRegisterLocations, workforceStationPolicy, workforceStationEmailError, workforceStationEmailExceptionNote, workforceStationEmailNeedsException } from "./workforce-register-policy.ts";
-const station = (id, model, provider = "Amazon", parent) => ({ id, station_code: id, parent_station_id: parent, providers: { name: provider }, location_models: { code: model } });
+const station = (id, model, provider = "Amazon", parent) => ({ id, station_code: id, parent_station_id: parent, is_active: true, providers: { name: provider }, location_models: { code: model } });
 for (const model of ["EDSP", "XPT", "AMXL"]) test(`${model} requires station email, accepting any domain and case`, () => {
   assert.equal(workforceStationPolicy(station("KOZA", model)).requiresStationEmail, true);
   for (const email of ["Akshay.KOZA@outlook.com", "akshay.koza@gmail.com", "a.b.KoZa@example.org", "sujithlal.koza1996@gmail.com"]) assert.equal(workforceStationEmailError(email, "KOZA", true), null);
@@ -27,6 +27,16 @@ test("station scope includes child XPT but not sibling, parent or Amazon Now", (
   assert.deepEqual(workforceRegisterLocations(stations, { hasAllLocationAccess: false, locationScopeIds: ["KGQE"] }).map(s => s.id), ["KGQE"]);
   assert.deepEqual(workforceRegisterLocations(stations, { hasAllLocationAccess: true, locationScopeIds: [] }).map(s => s.id), ["PEUA", "KGQE", "KOZA"]);
   assert.deepEqual(workforceRegisterLocations(stations, { hasAllLocationAccess: false, locationScopeIds: [] }), []);
+});
+test("inactive and hidden locations never appear in current workforce selectors", () => {
+  const stations = [
+    station("ACTIVE", "EDSP"),
+    { ...station("INACTIVE", "EDSP"), is_active: false },
+    { ...station("HIDDEN", "EDSP"), hide_from_location_list: true },
+    station("ACTIVE_CHILD", "XPT", "Amazon", "INACTIVE")
+  ];
+  assert.deepEqual(workforceRegisterLocations(stations, { hasAllLocationAccess: true, locationScopeIds: [] }).map(s => s.id), ["ACTIVE", "ACTIVE_CHILD"]);
+  assert.deepEqual(workforceRegisterLocations(stations, { hasAllLocationAccess: false, locationScopeIds: ["INACTIVE"] }).map(s => s.id), ["ACTIVE_CHILD"]);
 });
 test("Now policy tolerates relationship arrays and canonical model aliases", () => {
   assert.equal(workforceStationPolicy({ id: "n", providers: [{ name: "Amazon" }], location_models: [{ code: "Amazon Now" }] }).excluded, true);

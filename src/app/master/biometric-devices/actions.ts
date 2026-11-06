@@ -144,7 +144,8 @@ export async function bulkImportBiometricDevices(formData: FormData) {
     if (duplicateTerminalIds.length) throw new Error(`Row ${duplicateTerminalIds[0].rowNumber}: Device ID is duplicated in the file.`);
 
     const [locationsResult, existingResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId).eq("is_active", true).in("station_code", Array.from(new Set(rows.map((row) => row.locationCode)))),
+      supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId).eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").in("station_code", Array.from(new Set(rows.map((row) => row.locationCode)))),
       supabaseAdmin.from("biometric_devices").select("device_serial, terminal_id").eq("company_id", companyId)
     ]);
     if (locationsResult.error) throw new Error(locationsResult.error.message);

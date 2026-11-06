@@ -23,8 +23,9 @@ import {nlPeopleClusters} from "@/lib/ops-pulse/nl-loss-clusters";
 import {PeopleOwnershipRefresh} from "@/components/people-ownership-refresh";
 import {includeMappingSummaryStation} from "@/lib/provider-mapping-summary-scope";
 import type {WorkforceStation} from "@/lib/workforce-register-policy";
+import {isCurrentLocation} from "@/lib/current-location-policy";
 
-type StationRow = WorkforceStation & {station_code:string;station_name:string|null;region:string|null;is_ho:boolean|null};
+type StationRow = WorkforceStation & {station_code:string;station_name:string|null;region:string|null;is_ho:boolean|null;is_active:boolean;hide_from_location_list:boolean|null};
 type SourceRow = {provider_employee_id:unknown;provider_employee_name:unknown;station_code:unknown;work_date:unknown;outbound_months:unknown;outbound_dates:unknown};
 type MappingRow = {id:string;station_id:string|null;provider_member_id:string;workforce_id:string|null;payment_method_id:string|null;payment_values:Record<string,unknown>|null;production_threshold_config:unknown;effective_from:string;effective_to:string|null;status:string;updated_at:string};
 type WorkerRow = {id:string;dropx_id:string|null;full_name:string|null;onboarding_status:string|null};
@@ -47,14 +48,14 @@ export default async function ProviderMappingSummaryPage() {
   </AppShell>;
 
   const [stationResult, sourceResult, mappingResult, workerResult, methodResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id,station_code,station_name,region,is_ho,providers(name),location_models(code,name)").eq("company_id",companyId).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,region,is_ho,is_active,hide_from_location_list,providers(name),location_models(code,name)").eq("company_id",companyId).order("station_code"),
     supabaseAdmin.rpc("ops_cps_mapping_members",{p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id,station_id,provider_member_id,workforce_id,payment_method_id,payment_values,production_threshold_config,effective_from,effective_to,status,updated_at").eq("company_id",companyId).order("effective_from",{ascending:false}).order("updated_at",{ascending:false})),
     readAllRows(supabaseAdmin.from("workforce").select("id,dropx_id,full_name,onboarding_status").eq("company_id",companyId).is("deleted_at",null)),
     supabaseAdmin.from("payment_methods").select("id,name,production_threshold_config,payment_method_components(component_code,is_active)").eq("company_id",companyId)
   ]);
   const loadError = stationResult.error || sourceResult.error || mappingResult.error || workerResult.error || methodResult.error;
-  const stations = ((stationResult.data ?? []) as StationRow[]).filter(station => allowed(station.id) && includeMappingSummaryStation(station));
+  const stations = ((stationResult.data ?? []) as StationRow[]).filter(station => allowed(station.id) && isCurrentLocation(station) && includeMappingSummaryStation(station));
   const includedStationIds = new Set(stations.map(station => station.id));
   const includedStationCodes = new Set(stations.map(station => station.station_code.trim().toUpperCase()));
   // People is the only live ownership source. A station uses its current CLM

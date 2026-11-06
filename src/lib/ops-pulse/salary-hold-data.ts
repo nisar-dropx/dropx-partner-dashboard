@@ -401,7 +401,8 @@ export async function loadSalaryHoldWorkspace(auth: AuthorizationContext): Promi
 export async function loadHoldStations(auth: AuthorizationContext): Promise<HoldStation[]> {
   if (!supabaseAdmin) return [];
   const companyId = requireCompanyId(auth);
-  let q = supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).order("station_code").limit(1000);
+  let q = supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId)
+    .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code").limit(1000);
   if (!auth.hasAllLocationAccess) q = q.in("id", auth.locationScopeIds.length ? auth.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
   const result = await q;
   if (result.error) throw new Error("Your stations could not be loaded.");
@@ -418,7 +419,8 @@ export async function loadStationHoldTargets(auth: AuthorizationContext, station
   if (!auth.hasAllLocationAccess && !auth.locationScopeIds.includes(stationId)) throw new Error("That station is outside your access.");
   const companyId = requireCompanyId(auth);
   const [station, employees, contractors] = await Promise.all([
-    supabaseAdmin.from("stations").select("station_code").eq("company_id", companyId).eq("id", stationId).maybeSingle(),
+    supabaseAdmin.from("stations").select("station_code").eq("company_id", companyId).eq("id", stationId)
+      .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
     supabaseAdmin.from("employees").select("id,employee_code,full_name,people_lifecycle_status,designations(name)").eq("company_id", companyId).eq("location_id", stationId).eq("is_active", true).order("full_name").limit(500),
     supabaseAdmin.from("contractors").select("id,dropx_id,full_name,designation,people_lifecycle_status").eq("company_id", companyId).eq("location_id", stationId).eq("is_active", true).order("full_name").limit(500),
   ]);

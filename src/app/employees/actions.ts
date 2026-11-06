@@ -175,7 +175,8 @@ export async function createEmployee(formData: FormData) {
     }
 
     const [locationResult, designationResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id, station_code, station_name").eq("id", locationId).eq("company_id", companyId).maybeSingle(),
+      supabaseAdmin.from("stations").select("id, station_code, station_name").eq("id", locationId).eq("company_id", companyId)
+        .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       supabaseAdmin.from("designations").select("id, name, profile_field_rules, onboarding_role_ids, portal_permissions").eq("id", designationId).eq("company_id", companyId).eq("is_active", true).maybeSingle()
     ]);
     if (locationResult.error) throw new Error(locationResult.error.message);
@@ -395,7 +396,8 @@ export async function updateEmployee(formData: FormData) {
     }
 
     const [locationResult, designationResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id, station_code, station_name").eq("id", locationId).eq("company_id", companyId).maybeSingle(),
+      supabaseAdmin.from("stations").select("id, station_code, station_name").eq("id", locationId).eq("company_id", companyId)
+        .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       supabaseAdmin.from("designations").select("id, name, profile_field_rules, portal_permissions").eq("id", designationId).eq("company_id", companyId).eq("is_active", true).maybeSingle()
     ]);
     if (locationResult.error) throw new Error(locationResult.error.message);
@@ -703,7 +705,8 @@ export async function bulkImportEmployees(formData: FormData) {
     const locationCodes = Array.from(new Set(rows.map((row) => row.locationCode)));
     const designationCodes = Array.from(new Set(rows.map((row) => row.designationCode)));
     const [locationsResult, designationsResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId).in("station_code", locationCodes),
+      supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId).eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").in("station_code", locationCodes),
       supabaseAdmin.from("designations").select("id, code, onboarding_role_ids, portal_permissions").eq("company_id", companyId).eq("is_active", true).in("code", designationCodes)
     ]);
     if (locationsResult.error) throw new Error(locationsResult.error.message);

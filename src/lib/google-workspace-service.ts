@@ -585,7 +585,8 @@ async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, r
     db().from("profiles").select("id").eq("company_id", companyId)
       .ilike("email", email).eq("is_active", true).limit(1).maybeSingle(),
     db().from("stations").select("id").eq("company_id", companyId)
-      .ilike("station_email", email).eq("is_active", true).limit(1).maybeSingle()
+      .ilike("station_email", email).eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").limit(1).maybeSingle()
   ]);
   if (profileResult.error) throw new Error(profileResult.error.message);
   if (stationResult.error) throw new Error(stationResult.error.message);

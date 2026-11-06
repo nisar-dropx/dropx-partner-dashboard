@@ -271,7 +271,7 @@ export async function GET(request: NextRequest) {
   const [{ data: allEmailLocations }, { data: locationRoles }] = await Promise.all([
     supabaseAdmin
       .from("stations")
-      .select("id, station_email, is_active, company_id")
+      .select("id, station_email, is_active, hide_from_location_list, company_id")
       .not("station_email", "is", null),
     supabaseAdmin
       .from("user_roles")
@@ -279,11 +279,9 @@ export async function GET(request: NextRequest) {
       .eq("code", "LOCATION")
   ]);
 
-  const allMatchedEmailLocations = (allEmailLocations ?? []).filter(
-    (location) => emailsFromField(location.station_email).includes(email)
-  );
-  const activeEmailLocations = allMatchedEmailLocations.filter((location) => location.is_active !== false);
-  const candidateEmailLocations = (activeEmailLocations.length ? activeEmailLocations : allMatchedEmailLocations)
+  const candidateEmailLocations = (allEmailLocations ?? []).filter(
+    (location) => location.is_active === true && location.hide_from_location_list !== true && emailsFromField(location.station_email).includes(email)
+  )
     .filter((location) => !profile?.company_id || location.company_id === profile.company_id);
   const matchedCompanyIds = Array.from(new Set(candidateEmailLocations.map((location) => location.company_id).filter(Boolean)));
   const emailLocationIds = candidateEmailLocations

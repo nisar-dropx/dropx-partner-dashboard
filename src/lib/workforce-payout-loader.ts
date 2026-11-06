@@ -171,7 +171,8 @@ export async function loadWorkforcePayoutRows(
     ...scopedWorkforceIds,
     ...(scopedWorkersResult.data ?? []).flatMap((worker: any) => [worker.id, worker.source_profile_id]).filter(Boolean).map(String)
   ]);
-  let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
+  let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId)
+    .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   const [locationsResult, allLocationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult, incentivePlansResult] = await Promise.all([
     locationsQuery,

@@ -143,7 +143,8 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
   const payload = { ...patch.payload };
   if (patch.deferred.location !== undefined) {
     const location = await supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId)
-      .eq("station_code", patch.deferred.location).eq("is_active", true).maybeSingle();
+      .eq("station_code", patch.deferred.location).eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle();
     if (location.error) return failure(location.error.message);
     if (!location.data) return failure("Selected location is not available for this company.");
     const locationId = String(location.data.id);

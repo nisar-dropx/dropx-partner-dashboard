@@ -139,6 +139,7 @@ export default async function DirectPaymentAllocationsPage({
       .select("id, station_code, station_name")
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
       .order("station_code"),
     supabaseAdmin.from("payment_methods")
       .select("id, code, name, is_active, payment_method_components(component_code, component_type, label, pay_schedule, sort_order, is_active)")

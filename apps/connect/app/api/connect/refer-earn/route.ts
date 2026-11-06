@@ -26,7 +26,7 @@ export async function GET(request:NextRequest){
     const [programResult,referralResult,stationResult,sourceResult]=await Promise.all([
       db.from("workforce_referral_programs").select("id,name,reward_amount,qualification_source,qualifying_days,terms,station_id,stations(station_code,station_name)").eq("company_id",current.companyId).eq("is_active",true).lte("effective_from",today).or(`effective_to.is.null,effective_to.gte.${today}`).order("station_id",{ascending:false}).order("effective_from",{ascending:false}),
       db.from("workforce_referrals").select("id,referred_full_name,referred_country_code,referred_mobile,status,qualification_progress,qualifying_days_snapshot,reward_amount_snapshot,qualification_source_snapshot,submitted_at,qualified_at,approved_at,paid_at,stations:preferred_station_id(station_code,station_name),adjustment:workforce_adjustments!workforce_referrals_adjustment_id_fkey(status,payroll_run_id)").eq("company_id",current.companyId).eq("referrer_workforce_id",current.id).order("submitted_at",{ascending:false}),
-      db.from("stations").select("id,station_code,station_name").eq("company_id",current.companyId).eq("is_active",true).order("station_code"),
+      db.from("stations").select("id,station_code,station_name").eq("company_id",current.companyId).eq("is_active",true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
       db.from("workforce_referral_qualification_sources").select("code,name").eq("company_id",current.companyId).eq("is_active",true)
     ]);
     const firstError=[programResult,referralResult,stationResult,sourceResult].find(result=>result.error)?.error;
@@ -55,7 +55,7 @@ export async function POST(request:NextRequest){
     const [worker,program,station]=await Promise.all([
       db.from("workforce").select("id,location_id,mobile,mobile_country_code").eq("company_id",current.companyId).eq("id",current.id).is("deleted_at",null).maybeSingle(),
       db.from("workforce_referral_programs").select("id,station_id,reward_amount,qualification_source,qualifying_days,terms").eq("company_id",current.companyId).eq("id",programId).eq("is_active",true).lte("effective_from",today).or(`effective_to.is.null,effective_to.gte.${today}`).maybeSingle(),
-      db.from("stations").select("id").eq("company_id",current.companyId).eq("id",stationId).eq("is_active",true).maybeSingle()
+      db.from("stations").select("id").eq("company_id",current.companyId).eq("id",stationId).eq("is_active",true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle()
     ]);
     if(worker.error||!worker.data)throw new Error("Your Workforce profile could not be verified.");
     if(program.error||!program.data)throw new Error("Choose an active referral program.");

@@ -80,7 +80,7 @@ export default async function PositionsPage({ searchParams }: PositionPageProps)
       .eq("company_id", companyId).eq("is_active", true).order("created_at", { ascending: false }),
     supabaseAdmin.from("user_roles").select("id, code, name").eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).order("name"),
-    supabaseAdmin.from("stations").select("id, station_code, station_name, city, state").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name, city, state").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
     supabaseAdmin.from("employees").select("id, employee_code, full_name, email, location_id, designation_id, org_position_id, is_active, profile_completion_status")
       .eq("company_id", companyId).eq("is_active", true).order("full_name"),
     supabaseAdmin.from("profiles").select("id, full_name, email").eq("company_id", companyId)

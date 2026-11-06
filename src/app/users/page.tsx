@@ -365,7 +365,7 @@ async function loadDashboardLocationAccess(companyId: string) {
   if (!supabaseAdmin) return { locations: [] as Row[], error: null as string | null };
 
   const [stationsResult, profilesResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id,station_code,station_name,city,station_email").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,city,station_email").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
     supabaseAdmin.from("profiles").select("id,email,is_active,invite_method").eq("company_id", companyId).eq("is_active", true).not("email", "is", null)
   ]);
   if (stationsResult.error || profilesResult.error) {
@@ -580,7 +580,8 @@ async function loadAccessData(
     locationsPromise
   ]);
 
-  const rawLocations = (locationsResult.data ?? []) as unknown as RawLocationRow[];
+  const rawLocations = ((locationsResult.data ?? []) as unknown as RawLocationRow[])
+    .filter((location) => location.is_active && location.hide_from_location_list !== true);
   const users = (usersResult.data ?? []) as UserRow[];
 
   return {

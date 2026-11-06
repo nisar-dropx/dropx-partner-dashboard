@@ -106,6 +106,7 @@ async function canDownloadDocument(
       .select("state")
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
       .in("id", locationScopeIds);
     if (error) throw new Error(error.message);
     const allowedStates = new Set((data ?? []).map((location) => String(location.state ?? "").trim().toUpperCase()).filter(Boolean));

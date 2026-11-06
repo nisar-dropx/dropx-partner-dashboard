@@ -47,7 +47,8 @@ async function stationForAction(authorization: AuthorizationContext, stationCode
   if (!supabaseAdmin) throw new Error("Review service is unavailable.");
   const result = await supabaseAdmin.from("stations")
     .select("id,station_code,station_name,providers(code,name),location_models(code,name)")
-    .eq("company_id", requireCompanyId(authorization)).eq("station_code", stationCode).eq("is_active", true).maybeSingle();
+    .eq("company_id", requireCompanyId(authorization)).eq("station_code", stationCode).eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle();
   if (result.error || !result.data || !(authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(result.data.id))) throw new Error("This station is outside your location access.");
   return result.data as Pick<CodLocationRow, "id" | "station_code" | "station_name" | "providers" | "location_models">;
 }

@@ -11,6 +11,7 @@ import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from
 import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
 import { getSessionUser, legacySessionProfileColumns, loadSessionProfile, sessionProfileColumns } from "@/lib/session-user";
 import { TimeoutError } from "@/lib/with-timeout";
+import { currentLocationScopeIds, type CurrentLocationRow } from "@/lib/current-location-policy";
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -345,6 +346,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
         .select("id, station_email")
         .eq("company_id", companyId)
         .eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
         .not("station_email", "is", null);
       const emailLocationIds = (allEmailLocations ?? [])
         .filter((location) => normalizeEmail(location.station_email) === effectiveEmail)
@@ -387,6 +389,18 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   }
 
   const designation = companyId ? await loadPeopleDesignation(companyId, profile.id) : undefined;
+  if (!hasAllLocationAccess && locationScopeIds.length) {
+    const locationResult = await supabaseAdmin
+      .from("stations")
+      .select("id,parent_station_id,is_active,hide_from_location_list")
+      .eq("company_id", companyId);
+    locationScopeIds = locationResult.error
+      ? []
+      : currentLocationScopeIds(
+          (locationResult.data ?? []) as CurrentLocationRow[],
+          locationScopeIds
+        );
+  }
   // Report Bot is in testing: Full Stack Developers get it alongside Owners. Other
   // designations are granted through Designation Access as usual.
   if (designation?.active && designation.code === "FSD") {

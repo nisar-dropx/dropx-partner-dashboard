@@ -317,7 +317,8 @@ export async function createExpenseRequest(formData: FormData) {
     const remarks = clean(formData.get("remarks"));
 
     const [locationResult, headResult] = await Promise.all([
-      admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
+      admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId)
+        .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").single(),
       admin
         .from("payment_heads")
         .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
@@ -545,7 +546,8 @@ export async function createPaymentRequest(formData: FormData) {
     const remarks = clean(formData.get("remarks"));
 
     const [locationResult, headResult] = await Promise.all([
-      admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
+      admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId)
+        .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").single(),
       admin
         .from("payment_heads")
         .select("id, code, delivery_identity_policy, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")

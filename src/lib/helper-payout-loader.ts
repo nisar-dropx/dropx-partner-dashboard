@@ -55,7 +55,9 @@ export async function loadHelperPayoutRows(
   let locationsQuery = supabaseAdmin
     .from("stations")
     .select("id, station_code, station_name, is_active")
-    .eq("company_id", companyId);
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
   if (!authorization.hasAllLocationAccess) {
     locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   }

@@ -453,7 +453,8 @@ async function applyLocationPortalAccess(
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const stationResult = await supabaseAdmin.from("stations").select("id,station_code,station_name,station_email,is_active")
-      .eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle();
+      .eq("company_id", companyId).eq("id", locationId).eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle();
     if (stationResult.error || !stationResult.data) throw new Error(stationResult.error?.message ?? "Active location was not found.");
     const stationEmail = String(stationResult.data.station_email ?? "").trim().toLowerCase();
     if (!stationEmail || !stationEmail.endsWith("@dropxlogistics.com")) throw new Error("Add a valid DropX location mailbox in Location Master first.");
@@ -462,7 +463,8 @@ async function applyLocationPortalAccess(
       .eq("company_id", companyId).ilike("email", stationEmail).eq("is_active", true).maybeSingle();
     if (profileResult.error || !profileResult.data) throw new Error(profileResult.error?.message ?? "The location mailbox identity is not linked. Save the mailbox in Location Master, then try again.");
 
-    const sameMailboxStations = await supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("is_active", true).ilike("station_email", stationEmail);
+    const sameMailboxStations = await supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").ilike("station_email", stationEmail);
     if (sameMailboxStations.error) throw new Error(sameMailboxStations.error.message);
     const stationScopeIds = [...new Set((sameMailboxStations.data ?? []).map((station) => station.id))];
     const existingResult = await supabaseAdmin.from("company_product_memberships")

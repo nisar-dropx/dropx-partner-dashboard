@@ -699,6 +699,7 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
     .select("id")
     .eq("company_id", account.companyId)
     .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .in("id", visitStationIds);
   if (stationsCheck.error) throw new Error(stationsCheck.error.message);
   if ((stationsCheck.data ?? []).length !== visitStationIds.length) {

@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { isCurrentLocation } from "@/lib/current-location-policy";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadShipmentCountAssociateDays } from "@/lib/ops-pulse/capacity-shipments";
@@ -595,7 +596,11 @@ export const loadCodLocations = cache(async (companyId: string, locationScopeIds
     .eq("is_active", true)
     .order("station_code");
   if (error) return { locations: [] as CodLocationRow[], error: error.message };
-  const stationRows = (data ?? []) as CodLocationRow[];
+  const stationRows = ((data ?? []) as CodLocationRow[]).filter((row) => isCurrentLocation({
+    id: row.id,
+    is_active: true,
+    hide_from_location_list: row.hide_from_location_list
+  }));
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationRows.map((row) => row.id), { includeStationResponsibilities: true });
   if (hierarchy.error) {
     console.error("[people-operational-hierarchy] unable to resolve station hierarchy", { companyId, error: hierarchy.error });
@@ -621,7 +626,7 @@ export const loadCodLocations = cache(async (companyId: string, locationScopeIds
   return {
     locations: hasAllLocationAccess
       ? rows
-      : rows.filter((location) => locationScopeIds.includes(location.id) && !location.hide_from_location_list),
+      : rows.filter((location) => locationScopeIds.includes(location.id)),
     error: null
   };
 });

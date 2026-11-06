@@ -104,6 +104,8 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
         .from("stations")
         .select("id, station_code, station_name")
         .eq("company_id", companyId)
+        .eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     ]);
 
     if (deviceResult.error || locationResult.error) {
@@ -111,7 +113,9 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
     } else {
       const allowedLocationIds = new Set(authorization.locationScopeIds);
       devices = ((deviceResult.data ?? []) as RawPunchDeviceRow[]).filter((device) =>
-        authorization.hasAllLocationAccess || Boolean(device.location_id && allowedLocationIds.has(device.location_id))
+        authorization.hasAllLocationAccess
+          ? !device.location_id || allowedLocationIds.has(device.location_id)
+          : Boolean(device.location_id && allowedLocationIds.has(device.location_id))
       );
       locations = ((locationResult.data ?? []) as LocationRow[]).filter((location) =>
         authorization.hasAllLocationAccess || allowedLocationIds.has(location.id)

@@ -61,7 +61,9 @@ export async function nlStationScope(auth: AuthorizationContext) {
   let q = supabaseAdmin
     .from("stations")
     .select("id,station_code,station_name,region")
-    .eq("company_id", company);
+    .eq("company_id", company)
+    .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
   if (!auth.hasAllLocationAccess)
     q = q.in(
       "id",

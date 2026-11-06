@@ -92,6 +92,7 @@ export async function savePayoutDisputeWorkflow(formData: FormData) {
         .eq("company_id", companyId)
         .eq("id", stationId)
         .eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
         .maybeSingle();
       if (stationResult.error) throw new Error(stationResult.error.message);
       if (!stationResult.data) throw new Error("The selected station is not active or was not found.");

@@ -1,3 +1,4 @@
+import { isCurrentLocation } from "./current-location-policy.ts";
 type Relation<T> = T | T[] | null;
 export type WorkforceProfileStatusSource = {
   onboarding_status?: string | null;
@@ -68,5 +69,5 @@ export function workforceRegisterLocations<T extends WorkforceStation>(stations:
     changed = false;
     for (const s of stations) if (s.parent_station_id && ids.has(s.parent_station_id) && !ids.has(s.id)) { ids.add(s.id); changed = true; }
   }
-  return stations.filter(s => ids.has(s.id) && !workforceStationPolicy(s).excluded);
+  return stations.filter(s => ids.has(s.id) && isCurrentLocation(s) && !workforceStationPolicy(s).excluded);
 }

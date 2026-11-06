@@ -39,7 +39,7 @@ async function fetchCompanyTeamOrg(companyId: string): Promise<TeamOrgPerson[]> 
       .eq("company_id", companyId).eq("relationship_type", "solid_line").eq("is_primary", true)
       .lte("effective_from", day).or(`effective_to.is.null,effective_to.gte.${day}`)
       .order("effective_from", { ascending: false }).order("id")),
-    readAllRows(admin.from("stations").select("id,station_code,station_name").eq("company_id", companyId).order("id")),
+    readAllRows(admin.from("stations").select("id,station_code,station_name").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("id")),
     readAllRows(admin.from("hr_departments").select("id,name").eq("company_id", companyId).order("id")),
     readAllRows(admin.from("designations").select("id,code,name").eq("company_id", companyId).order("id"))
   ]);

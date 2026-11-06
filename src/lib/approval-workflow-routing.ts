@@ -239,7 +239,8 @@ async function scopedDesignationCandidates(companyId: string, designationId: str
     else {
       const requesterStation = await db().from("stations").select("region").eq("company_id", companyId).eq("id", requesterLocationId).maybeSingle();
       if (requesterStation.error || !requesterStation.data) return [];
-      const stationResult = await db().from("stations").select("id,region").eq("company_id", companyId).eq("is_active", true);
+      const stationResult = await db().from("stations").select("id,region").eq("company_id", companyId).eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
       if (stationResult.error) throw new Error(stationResult.error.message);
       if (scope === "same_region") {
         allowedLocations = new Set((stationResult.data ?? []).filter((station) => (

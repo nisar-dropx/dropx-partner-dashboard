@@ -63,7 +63,7 @@ export async function savePosition(formData: FormData) {
         ? supabaseAdmin.from("org_positions").select("id, reports_to_position_id").eq("id", reportsToPositionId).eq("company_id", companyId).eq("is_active", true).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       scopeIds.length
-        ? supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("is_active", true).in("id", scopeIds)
+        ? supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").in("id", scopeIds)
         : Promise.resolve({ data: [], error: null })
     ]);
     const lookupError = [roleResult.error, designationResult.error, parentResult.error, locationsResult.error].find(Boolean);

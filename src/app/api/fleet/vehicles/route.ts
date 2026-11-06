@@ -120,15 +120,18 @@ async function requireFleetMutationPermission(action: "add" | "edit") {
 }
 
 async function resolveFleetLocationAccess(authorization: AuthorizationContext, companyId: string) {
-  if (authorization.isMasterOwner || authorization.hasAllLocationAccess) return null;
-  if (!supabaseAdmin || !authorization.locationScopeIds.length) return [];
+  if (!supabaseAdmin) return [];
+  const allLocationAccess = authorization.isMasterOwner || authorization.hasAllLocationAccess;
+  if (!allLocationAccess && !authorization.locationScopeIds.length) return [];
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("stations")
     .select("station_code")
     .eq("company_id", companyId)
     .eq("is_active", true)
-    .in("id", authorization.locationScopeIds);
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
+  if (!allLocationAccess) query = query.in("id", authorization.locationScopeIds);
+  const { data, error } = await query;
 
   if (error) return [];
   return Array.from(new Set((data ?? [])

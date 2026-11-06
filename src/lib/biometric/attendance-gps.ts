@@ -232,6 +232,7 @@ export async function loadCompanyStationGeofences(companyId: string): Promise<St
     .select("id, station_code, station_name, latitude, longitude, geofence_radius_m")
     .eq("company_id", companyId)
     .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .not("latitude", "is", null)
     .not("longitude", "is", null)
     .limit(500);
@@ -241,6 +242,7 @@ export async function loadCompanyStationGeofences(companyId: string): Promise<St
       .select("id, station_code, station_name, latitude, longitude")
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
       .not("latitude", "is", null)
       .not("longitude", "is", null)
       .limit(500);

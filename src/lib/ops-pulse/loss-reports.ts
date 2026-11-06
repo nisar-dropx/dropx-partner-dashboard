@@ -55,7 +55,7 @@ const NONE = "00000000-0000-0000-0000-000000000000";
  */
 async function allowedStations(auth: AuthorizationContext, companyId: string) {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");
-  let stations = supabaseAdmin.from("stations").select("id,station_code,station_name").eq("company_id", companyId);
+  let stations = supabaseAdmin.from("stations").select("id,station_code,station_name,is_active,hide_from_location_list").eq("company_id", companyId);
   let settings = supabaseAdmin.from("cod_station_settings").select("location_id,portal_station_code").eq("company_id", companyId);
   if (!auth.hasAllLocationAccess) {
     const scope = auth.locationScopeIds.length ? auth.locationScopeIds : [NONE];
@@ -66,18 +66,21 @@ async function allowedStations(auth: AuthorizationContext, companyId: string) {
   if (s.error) throw new Error("Stations could not be loaded.");
   const portal = new Map((p.data ?? []).filter((r) => r.portal_station_code).map((r) => [r.location_id, String(r.portal_station_code).trim().toUpperCase()]));
   const names = new Map<string, string | null>();
+  const excluded = new Set<string>();
   for (const row of s.data ?? []) {
     const code = portal.get(row.id) || String(row.station_code ?? "").trim().toUpperCase();
-    if (code) names.set(code, row.station_name ?? null);
+    if (!code) continue;
+    if (row.is_active === true && row.hide_from_location_list !== true) names.set(code, row.station_name ?? null);
+    else excluded.add(code);
   }
-  return { codes: auth.hasAllLocationAccess ? null : new Set(names.keys()), names };
+  return { codes: auth.hasAllLocationAccess ? null : new Set(names.keys()), names, excluded };
 }
 
 export async function loadLossReport(auth: AuthorizationContext, report: LossReportKind, station?: string | null, period?: string | null): Promise<LossReportView> {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");
   const companyId = requireCompanyId(auth);
   // Scope + latest runs are independent — one round trip instead of three.
-  const [{ codes, names }, runResult, failResult] = await Promise.all([
+  const [{ codes, names, excluded }, runResult, failResult] = await Promise.all([
     allowedStations(auth, companyId),
     supabaseAdmin.from("loss_report_runs")
       .select("id,source_file,source_week,source_created_at,period_label,source_total_count,headers,station_column,amount_column,reference_column,total_rows,finished_at,checked_at")
@@ -104,14 +107,16 @@ export async function loadLossReport(auth: AuthorizationContext, report: LossRep
     if (codes) totalsQuery = totalsQuery.in("station_code", [...codes]);
     const totalsResult = await readAllRows(totalsQuery.order("station_code"));
     if (totalsResult.error) throw new Error("Station totals could not be loaded.");
-    totals = (totalsResult.data ?? []).map((r) => withName({ station_code: r.station_code, row_count: Number(r.row_count), total_amount: Number(r.total_amount) }));
+    totals = (totalsResult.data ?? []).filter((r) => !excluded.has(String(r.station_code).trim().toUpperCase()))
+      .map((r) => withName({ station_code: r.station_code, row_count: Number(r.row_count), total_amount: Number(r.total_amount) }));
   } else {
     // SLP files are small (~100 cases across all periods): one narrow query gives periods + per-period totals.
     let q = supabaseAdmin.from("loss_cases").select("station_code,amount,period,impact_date").eq("report", report);
     if (codes) q = q.in("station_code", [...codes]);
     const result = await readAllRows(q);
     if (result.error) throw new Error("Station totals could not be loaded.");
-    const all = (result.data ?? []) as Array<{ station_code: string | null; amount: number | null; period: string | null; impact_date: string | null }>;
+    const all = ((result.data ?? []) as Array<{ station_code: string | null; amount: number | null; period: string | null; impact_date: string | null }>)
+      .filter((row) => !excluded.has(String(row.station_code ?? "").trim().toUpperCase()));
     const latestByPeriod = new Map<string, string>();
     for (const r of all) if (r.period) latestByPeriod.set(r.period, [latestByPeriod.get(r.period) ?? "", r.impact_date ?? ""].sort().pop()!);
     periods = report === "potential_loss"
@@ -149,7 +154,7 @@ export async function loadLossReport(auth: AuthorizationContext, report: LossRep
 export async function loadPotentialLossRows(auth: AuthorizationContext, period: string | null): Promise<{ headers: string[]; rows: LossRow[] }> {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");
   const companyId = requireCompanyId(auth);
-  const [{ codes }, runResult] = await Promise.all([
+  const [{ codes, excluded }, runResult] = await Promise.all([
     allowedStations(auth, companyId),
     supabaseAdmin.from("loss_report_runs").select("headers").eq("report", "potential_loss").eq("status", "completed").order("started_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
@@ -159,5 +164,8 @@ export async function loadPotentialLossRows(auth: AuthorizationContext, period: 
   if (codes) q = q.in("station_code", [...codes]);
   const result = await readAllRows(q.order("period", { ascending: false }).order("station_code").order("amount", { ascending: false, nullsFirst: false }));
   if (result.error) throw new Error("Potential loss cases could not be loaded.");
-  return { headers: (runResult.data?.headers as string[] | undefined) ?? [], rows: (result.data ?? []) as LossRow[] };
+  return {
+    headers: (runResult.data?.headers as string[] | undefined) ?? [],
+    rows: ((result.data ?? []) as LossRow[]).filter((row) => !excluded.has(String(row.station_code ?? "").trim().toUpperCase()))
+  };
 }

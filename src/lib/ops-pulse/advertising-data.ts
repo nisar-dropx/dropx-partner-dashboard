@@ -25,7 +25,7 @@ export async function loadAdvertisingAdMappings(company:string) {
   readAllRows(db.from("recruitment_ads").select("meta_ad_id,ad_name,location_id").eq("company_id",company).order("id")),
   readAllRows(db.from("lead_ads").select("meta_ad_id,ad_name,station_code").eq("company_id",company).order("id")),
   readAllRows(db.from("recruitment_locations").select("id,code,station_id").eq("company_id",company).order("id")),
-  readAllRows(db.from("stations").select("id,station_code").eq("company_id",company).order("id"))]);
+  readAllRows(db.from("stations").select("id,station_code").eq("company_id",company).eq("is_active",true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("id"))]);
  if([current,legacy,locations,stations].some(r=>r.error))throw Error("Recruit ad station mappings unavailable.");
  const byId=new Map((stations.data??[]).map(s=>[s.id,s.station_code]));
  const known=new Set((stations.data??[]).map(s=>s.station_code));

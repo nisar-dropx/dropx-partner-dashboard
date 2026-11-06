@@ -228,7 +228,7 @@ export async function VendorLifecycleWorkspace({ section, errorMessage, notice }
   const [categoryResult, vendorResult, locationResult, vehicleResult, contactResult, headResult, contractResult, cycleResult] = await Promise.all([
     supabaseAdmin.from("vendor_service_categories").select("id,code,name,operating_model,allowed_payout_months,requires_invoice,payment_head_id,is_active,sort_order").eq("company_id", companyId).order("sort_order").order("name"),
     supabaseAdmin.from("vendors").select("id,full_name,dropx_id").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).order("full_name"),
-    supabaseAdmin.from("stations").select("id,station_code,station_name").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
     supabaseAdmin.from("fleet_vehicles").select("id,vehicle_no,station_code,vendor_id").eq("company_id", companyId).eq("status", "active").order("vehicle_no"),
     supabaseAdmin.from("payment_contacts").select("id,account_holder_name,bank_account_no").eq("company_id", companyId).not("verified_at", "is", null).not("bank_account_no", "is", null).order("account_holder_name"),
     supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),

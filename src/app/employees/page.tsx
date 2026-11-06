@@ -358,6 +358,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
       .select("id, station_code, station_name, location_model_id, hide_from_location_list")
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
       .order("station_code"),
     supabaseAdmin
       .from("designations")

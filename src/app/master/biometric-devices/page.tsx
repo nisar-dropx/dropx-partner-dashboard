@@ -218,6 +218,7 @@ async function loadDeviceData(companyId: string, locationScopeIds: string[], has
       .select("id, station_code, station_name, hide_from_location_list")
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
       .order("station_code")
   ]);
 
@@ -227,7 +228,7 @@ async function loadDeviceData(companyId: string, locationScopeIds: string[], has
   const allLocations = (locationsResult.data ?? []) as LocationRow[];
   const locations = hasAllLocationAccess
     ? allLocations
-    : allLocations.filter((location) => locationScopeIds.includes(location.id) && !location.hide_from_location_list);
+    : allLocations.filter((location) => locationScopeIds.includes(location.id));
   const allowedLocationIds = new Set(locations.map((location) => location.id));
   const devices = (hasAllLocationAccess
     ? (devicesResult.data ?? [])

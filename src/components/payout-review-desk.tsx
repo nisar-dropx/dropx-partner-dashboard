@@ -124,45 +124,48 @@ export async function PayoutReviewDesk({
   const searching = Boolean((params.q || "").trim());
   const payrollRun = uuid(params.run);
   const requestedStation = uuid(params.station);
-  const station = requestedStation && (!scope || scope.includes(requestedStation)) ? requestedStation : "";
   const category = params.category && params.category in CATEGORIES ? params.category : "";
   const raised = monthRange(params.month);
 
-  let disputeQuery = supabaseAdmin.from("workforce_payout_disputes").select("*").eq("company_id", company);
-  if (scope) disputeQuery = disputeQuery.in("station_id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]);
+  let stationsQuery = supabaseAdmin.from("stations").select("id,station_code").eq("company_id", company)
+    .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
+    .order("station_code").limit(1000);
+  if (scope) stationsQuery = stationsQuery.in("id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]);
+  const stationList = await stationsQuery;
+  if (stationList.error) return <p role="alert">Payout dispute locations could not load. No changes were made.</p>;
+  const permittedLocationIds = (stationList.data ?? []).map((row) => String(row.id));
+  const locationFilterIds = permittedLocationIds.length ? permittedLocationIds : ["00000000-0000-0000-0000-000000000000"];
+  const station = requestedStation && permittedLocationIds.includes(requestedStation) ? requestedStation : "";
+
+  let disputeQuery = supabaseAdmin.from("workforce_payout_disputes").select("*").eq("company_id", company)
+    .in("station_id", locationFilterIds);
   if (filteredStatuses) disputeQuery = disputeQuery.in("status", filteredStatuses);
   if (payrollRun) disputeQuery = disputeQuery.eq("payroll_run_id", payrollRun);
   if (station) disputeQuery = disputeQuery.eq("station_id", station);
   if (category) disputeQuery = disputeQuery.eq("category", category);
   if (raised) disputeQuery = disputeQuery.gte("created_at", raised.from).lt("created_at", raised.to);
 
-  let totalQuery = supabaseAdmin.from("workforce_payout_disputes").select("id", { count: "exact", head: true }).eq("company_id", company);
-  if (scope) totalQuery = totalQuery.in("station_id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]);
+  let totalQuery = supabaseAdmin.from("workforce_payout_disputes").select("id", { count: "exact", head: true }).eq("company_id", company)
+    .in("station_id", locationFilterIds);
   if (filteredStatuses) totalQuery = totalQuery.in("status", filteredStatuses);
   if (payrollRun) totalQuery = totalQuery.eq("payroll_run_id", payrollRun);
   if (station) totalQuery = totalQuery.eq("station_id", station);
   if (category) totalQuery = totalQuery.eq("category", category);
   if (raised) totalQuery = totalQuery.gte("created_at", raised.from).lt("created_at", raised.to);
 
-  let countsQuery = supabaseAdmin.from("workforce_payout_disputes").select("status").eq("company_id", company).limit(10000);
-  let stationsQuery = supabaseAdmin.from("stations").select("id,station_code").eq("company_id", company).order("station_code").limit(1000);
-  if (scope) {
-    const scopedIds = scope.length ? scope : ["00000000-0000-0000-0000-000000000000"];
-    countsQuery = countsQuery.in("station_id", scopedIds);
-    stationsQuery = stationsQuery.in("id", scopedIds);
-  }
+  const countsQuery = supabaseAdmin.from("workforce_payout_disputes").select("status").eq("company_id", company)
+    .in("station_id", locationFilterIds).limit(10000);
   const ordered = disputeQuery.order("created_at", { ascending: false }).order("id");
-  const [disputeResult, countsResult, totalResult, stationList, workflowResult] = await Promise.all([
+  const [disputeResult, countsResult, totalResult, workflowResult] = await Promise.all([
     searching ? ordered.limit(500) : ordered.range((page - 1) * size, page * size - 1),
     countsQuery,
     searching ? Promise.resolve({ count: 0, error: null }) : totalQuery,
-    stationsQuery,
     supabaseAdmin.from("workforce_payout_dispute_workflows")
       .select("id,station_id,initial_approver_role_ids,final_approver_role_ids,processor_role_ids,is_active,version")
       .eq("company_id", company)
       .eq("is_active", true)
   ]);
-  if (disputeResult.error || countsResult.error || totalResult.error || stationList.error) {
+  if (disputeResult.error || countsResult.error || totalResult.error) {
     return <p role="alert">Payout disputes could not load. No changes were made.</p>;
   }
 

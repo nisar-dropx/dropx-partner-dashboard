@@ -99,7 +99,7 @@ async function loadData(companyId: string, settingType: SettingType) {
       .eq("company_id", companyId)
       .order("setting_type"),
     supabaseAdmin.from("companies").select("name, code").eq("id", companyId).maybeSingle(),
-    supabaseAdmin.from("stations").select("id, station_code, station_name").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId).eq("is_active", true).order("code"),
     supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).order("code"),
     supabaseAdmin.from("workforce_categories").select("code, name").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name"),

@@ -75,15 +75,18 @@ type FleetLocationAccess = {
 };
 
 async function resolveFleetLocationAccess(authorization: AuthorizationContext, companyId: string): Promise<FleetLocationAccess> {
-  if (authorization.isMasterOwner || authorization.hasAllLocationAccess) return { stationCodes: null };
-  if (!supabaseAdmin || !authorization.locationScopeIds.length) return { stationCodes: [] };
+  if (!supabaseAdmin) return { stationCodes: [] };
+  const allLocationAccess = authorization.isMasterOwner || authorization.hasAllLocationAccess;
+  if (!allLocationAccess && !authorization.locationScopeIds.length) return { stationCodes: [] };
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("stations")
     .select("station_code")
     .eq("company_id", companyId)
     .eq("is_active", true)
-    .in("id", authorization.locationScopeIds);
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
+  if (!allLocationAccess) query = query.in("id", authorization.locationScopeIds);
+  const { data, error } = await query;
 
   if (error) return { stationCodes: [] };
   return {
@@ -149,7 +152,8 @@ async function loadLocations(companyId: string, stationCodes: string[] | null) {
       location_models (code, name)
     `)
     .eq("company_id", companyId)
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
 
   if (stationCodes) query = query.in("station_code", stationCodes.length ? stationCodes : ["__NO_ALLOCATED_LOCATION__"]);
 

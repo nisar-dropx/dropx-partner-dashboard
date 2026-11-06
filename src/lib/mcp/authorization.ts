@@ -10,6 +10,7 @@ import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
 import { loadSessionProfile } from "@/lib/session-user";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { MCP_SCOPE } from "@/lib/mcp/constants";
+import { currentLocationScopeIds, type CurrentLocationRow } from "@/lib/current-location-policy";
 
 const noPermission: PagePermission = { canView: false, canAdd: false, canEdit: false };
 
@@ -130,6 +131,7 @@ export async function loadAuthorizationForMcpUser(userId: string): Promise<Autho
         .select("id, station_email")
         .eq("company_id", resolvedCompanyId)
         .eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
         .not("station_email", "is", null);
       const emailLocationIds = (allEmailLocations ?? [])
         .filter((location) => normalizeEmail(location.station_email) === effectiveEmail)
@@ -168,6 +170,18 @@ export async function loadAuthorizationForMcpUser(userId: string): Promise<Autho
   }
 
   const designation = await loadPeopleDesignation(resolvedCompanyId, profile.id);
+  if (!hasAllLocationAccess && locationScopeIds.length) {
+    const locationResult = await supabaseAdmin
+      .from("stations")
+      .select("id,parent_station_id,is_active,hide_from_location_list")
+      .eq("company_id", resolvedCompanyId);
+    locationScopeIds = locationResult.error
+      ? []
+      : currentLocationScopeIds(
+          (locationResult.data ?? []) as CurrentLocationRow[],
+          locationScopeIds
+        );
+  }
   if (designation?.active && designation.code === "FSD") {
     permissions.ops_report_bot = { canView: true, canAdd: true, canEdit: true };
   }

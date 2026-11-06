@@ -30,7 +30,8 @@ export async function startAssetAudit(input: unknown) {
     if (!uuid.test(locationId)) throw new Error("Choose a location for this audit.");
     if (!current.authorization.hasAllLocationAccess && !current.authorization.locationScopeIds.includes(locationId)) throw new Error("That location is outside your audit scope.");
     const [location, number] = await Promise.all([
-      current.db.from("stations").select("station_code,station_name").eq("company_id", current.companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
+      current.db.from("stations").select("station_code,station_name").eq("company_id", current.companyId).eq("id", locationId).eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       current.db.rpc("asset_next_code", { p_company_id: current.companyId, p_prefix: "AUD" }),
     ]);
     if (location.error || !location.data || number.error || !number.data) throw new Error("Unable to start the audit for this location.");

@@ -2312,7 +2312,8 @@ export async function saveProviderFirstMapping(formData: FormData) {
 
     const [{ data: worker, error: workerError }, { data: station, error: stationError }, { data: memberMappings, error: memberMappingError }, { data: workerMapping, error: workerMappingError }] = await Promise.all([
       supabaseAdmin.from("workforce").select("id, full_name, location_id, designation_id, designation, is_active").eq("id", workforceId).eq("company_id", companyId).is("deleted_at", null).maybeSingle(),
-      supabaseAdmin.from("stations").select("id, provider_id, station_code").eq("id", stationId).eq("company_id", companyId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("stations").select("id, provider_id, station_code").eq("id", stationId).eq("company_id", companyId).eq("is_active", true)
+        .or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       supabaseAdmin.rpc("workforce_active_provider_member_mappings", {
         p_company: companyId,
         p_provider: null,

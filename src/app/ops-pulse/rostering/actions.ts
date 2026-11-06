@@ -118,6 +118,7 @@ async function authorisedStation(companyId: string, authorization: Authorization
     .eq("company_id", companyId)
     .eq("id", locationId)
     .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
   if (!result.data) throw new Error("This station is not available.");

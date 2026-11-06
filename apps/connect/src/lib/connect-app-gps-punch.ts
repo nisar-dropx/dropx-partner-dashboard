@@ -94,6 +94,7 @@ async function loadStationGeofence(locationId: string | null | undefined) {
     .select("id, station_code, station_name, latitude, longitude, geofence_radius_m")
     .eq("id", locationId)
     .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .maybeSingle();
   if (result.error || !result.data) return null;
   return {
@@ -113,6 +114,7 @@ async function loadCompanyStationGeofences(companyId: string) {
     .select("id, station_code, station_name, latitude, longitude, geofence_radius_m")
     .eq("company_id", companyId)
     .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .not("latitude", "is", null)
     .not("longitude", "is", null)
     .limit(500);

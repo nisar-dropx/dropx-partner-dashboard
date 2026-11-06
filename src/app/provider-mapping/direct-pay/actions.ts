@@ -144,6 +144,7 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
       .eq("id", person.location_id)
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
       .maybeSingle();
     if (stationResult.error) throw new Error(stationResult.error.message);
     if (!stationResult.data) {

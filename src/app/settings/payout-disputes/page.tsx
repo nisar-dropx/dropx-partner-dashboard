@@ -464,7 +464,7 @@ export default async function PayoutDisputeWorkflowSettingsPage({ searchParams }
     supabaseAdmin.from("user_roles").select("id, code, name, is_active, location_access_mode")
       .eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("stations").select("id, station_code, station_name, is_active")
-      .eq("company_id", companyId).eq("is_active", true).order("station_code"),
+      .eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
     supabaseAdmin.from("workforce_payout_dispute_workflows")
       .select("id, station_id, initial_approver_role_ids, final_approver_role_ids, processor_role_ids, is_active, version, review_window_days, updated_at")
       .eq("company_id", companyId).eq("is_active", true).order("updated_at", { ascending: false })

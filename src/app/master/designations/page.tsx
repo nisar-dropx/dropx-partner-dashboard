@@ -229,9 +229,9 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
     { code: "workers", name: "Workers", is_active: true }
   ];
 
-  const locations = hasAllLocationAccess
-    ? (locationsResult.data ?? [])
-    : (locationsResult.data ?? []).filter((location) => locationScopeIds.includes(location.id) && !location.hide_from_location_list);
+  const locations = (locationsResult.data ?? []).filter((location) =>
+    !location.hide_from_location_list && (hasAllLocationAccess || locationScopeIds.includes(location.id))
+  );
 
   return {
     designations: (designationRows as DesignationRow[]).map((designation) => ({

@@ -34,7 +34,7 @@ export default async function IncentivePlansPage({ searchParams }: { searchParam
   const [providers, models, stations, designations, plans] = await Promise.all([
     supabaseAdmin.from("providers").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("location_models").select("id,code,name,provider_id").eq("company_id", companyId).eq("is_active", true).order("code"),
-    supabaseAdmin.from("stations").select("id,station_code,station_name,provider_id,location_model_id").eq("company_id", companyId).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,provider_id,location_model_id").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code"),
     supabaseAdmin.from("designations").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("workforce_incentive_campaigns").select("id,code,name,provider_id,location_model_id,station_id,designation_id,incentive_type,cycle_type,metric,calculation_type,minimum_activity,reporting_time,minimum_present_days,allowed_late_days,attendance_required,reporting_time_required,attendance_threshold_type,maximum_absent_days,attendance_reward_type,rate_value,flat_amount,tiers,effective_from,effective_to,status,providers(name),location_models(code,name),stations(station_code),designations(code,name)").eq("company_id", companyId).order("effective_from", { ascending: false }).order("code")
   ]);

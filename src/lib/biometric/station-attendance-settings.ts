@@ -83,6 +83,8 @@ export async function loadCompanyStationAttendanceSettings(companyId: string) {
       "id, station_code, station_name, city, state, is_active, attendance_location_tracking_enabled, attendance_integrity_flags_enabled"
     )
     .eq("company_id", companyId)
+    .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .order("station_code");
 
   if (result.error) {
