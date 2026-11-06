@@ -1,21 +1,26 @@
 import type { WorkforcePayoutRow } from "../../components/workforce-payout-table.tsx";
 
-type Payout = Pick<WorkforcePayoutRow, "paymentDetailsAvailable" | "status" | "netAmount" | "grossPayment"> & Partial<Pick<WorkforcePayoutRow, "paymentMethod" | "mappingStatus" | "additions" | "deductions" | "baseAmount" | "location">>;
+type Payout = Pick<WorkforcePayoutRow, "paymentDetailsAvailable" | "status" | "netAmount" | "grossPayment"> & Partial<Pick<WorkforcePayoutRow, "paymentMethod" | "mappingStatus" | "additions" | "deductions" | "baseAmount" | "location" | "production">>;
 
 /** Missing route allowance does not erase pay already calculated by the payout engine. */
 export function lossWorkforcePayable(rows: Payout[], allowedStatuses: readonly string[]) {
   const unavailable = (source: string) => ({ payable: null, gross: null, source });
-  if (!rows.length) return unavailable("No workforce payout found for the selected salary month. Review payment mapping.");
+  if (!rows.length) return unavailable("No workforce payout row for this DropX ID in the selected month. Check its provider ID mapping or direct pay allocation.");
   if (rows.some(row => !row.paymentDetailsAvailable))
     return unavailable("Payout payment details are incomplete or conflicting. Review the payout setup.");
-  // A verified NIL mapping is deliberately unpaid, even when production exists.
-  // It must not erase pay earned at another station. Never ignore setup errors or money.
-  const unpaidNil = (row: Payout) => row.paymentMethod?.trim().toUpperCase() === "NIL"
-    && row.mappingStatus?.toLowerCase() === "mapped"
-    && ["Awaiting production", "No eligible attendance", "No eligible accrual"].includes(row.status)
-    && [row.netAmount, row.grossPayment, row.baseAmount, row.additions, row.deductions].every(value => value === 0);
-  const blocked = rows.find(row => !allowedStatuses.includes(row.status) && !unpaidNil(row)
-    && !(row.status === "Route distance pending" && allowedStatuses.includes("Ready for review")));
+  // An idle per-packet mapping earns zero at that station. Other stations can
+  // still fund recovery. Positive production without calculated pay needs review.
+  const readyForRecovery = (row: Payout) => allowedStatuses.includes(row.status)
+    || (row.status === "Route distance pending" && allowedStatuses.includes("Ready for review"));
+  const hasEarnedPay = rows.some(row => readyForRecovery(row) && row.netAmount > 0);
+  const verifiedZeroRow = (row: Payout) => {
+    if (row.mappingStatus?.toLowerCase() !== "mapped") return false;
+    if (![row.netAmount, row.grossPayment, row.baseAmount, row.additions, row.deductions].every(value => value === 0)) return false;
+    const method = row.paymentMethod?.trim().toUpperCase();
+    if (method === "PER PACKET") return hasEarnedPay && row.status === "Awaiting production" && row.production === 0;
+    return method === "NIL" && ["Awaiting production", "No eligible attendance", "No eligible accrual"].includes(row.status);
+  };
+  const blocked = rows.find(row => !readyForRecovery(row) && !verifiedZeroRow(row));
   if (blocked) {
     const next = blocked.status === "Awaiting production"
       ? "No payable earnings calculated; check production and the mapped payment rate."
