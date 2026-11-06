@@ -184,7 +184,7 @@ async function notifyPeopleTeam(input: {
     const confidential = input.channel === "integrity";
     const title = confidential
       ? `New Speak Up ${input.event === "reply" ? "message" : "case"}`
-      : `HR Help ${input.event === "reply" ? "reply" : "request"}`;
+      : `Workforce Help ${input.event === "reply" ? "reply" : "request"}`;
     const body = confidential
       ? `${input.caseNumber} · ${input.urgency === "critical" ? "Critical priority" : "Confidential review required"}`
       : `${input.caseNumber} · ${input.subject}`;

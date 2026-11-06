@@ -124,7 +124,7 @@ export async function assertConnectWfhAccess(companyId: string, workerId: string
     personId: context.engagement.person_id
   });
   if (!policy || !accessRule) {
-    throw new Error("Work from home is not enabled for your designation. Ask HR to grant access in the WFH policy.");
+    throw new Error("Work from home is not enabled for your designation. Ask the Workforce team to grant access in the WFH policy.");
   }
   return {
     context,
@@ -244,7 +244,7 @@ export async function createConnectWfhRequest(input: {
       daysByMonth.get(month)?.add(day);
     }
     for (const [month, usedDays] of daysByMonth) if (usedDays.size > access.policy.max_monthly_days) {
-      throw new Error(`The WFH limit for ${month} is ${access.policy.max_monthly_days} day(s). Change the dates or ask HR to update the People WFH master.`);
+      throw new Error(`The WFH limit for ${month} is ${access.policy.max_monthly_days} day(s). Change the dates or ask the Workforce team to update the People WFH master.`);
     }
   }
 
@@ -391,7 +391,7 @@ export async function createConnectWfhRequest(input: {
     requestNo,
     status,
     notice: status === "pending_hr"
-      ? "WFH request submitted for HR finalization."
+      ? "WFH request submitted for Workforce finalization."
       : `WFH request submitted through ${routeName}. Your manager will review it next.`
   };
 }
@@ -555,7 +555,7 @@ export async function decideConnectWfhApproval(input: {
   return {
     status,
     notice: status === "pending_hr"
-      ? "WFH approved and sent to HR for Present · WFH finalization."
+      ? "WFH approved and sent to Workforce for Present · WFH finalization."
       : status === "pending_manager"
         ? "Approved and routed to the next approver."
         : status === "returned"
@@ -592,7 +592,7 @@ export async function listConnectWfhHrApprovals(
       id: request.id,
       requestId: request.id,
       requestNo: request.request_no,
-      stepName: "HR finalization",
+      stepName: "Workforce finalization",
       stepOrder: 0,
       startDate: request.start_date,
       endDate: request.end_date,
@@ -663,7 +663,7 @@ export async function decideConnectWfhHrApproval(input: {
     .maybeSingle();
   if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "WFH request was not found.");
   if (String(existing.data.status) !== "pending_hr") {
-    throw new Error("This WFH request is no longer awaiting HR finalization.");
+    throw new Error("This WFH request is no longer awaiting Workforce finalization.");
   }
   if (!connectWorkforceMatches(access, String(existing.data.profile_type), String(existing.data.profile_id))) {
     throw new Error("This WFH request is outside your attendance scope.");
@@ -675,7 +675,7 @@ export async function decideConnectWfhHrApproval(input: {
     p_actor_user_id: actorUserId,
     p_decision: input.decision,
     p_note: input.note ?? null,
-    p_reviewer_name: input.account.name ?? input.account.reference ?? "HR reviewer",
+    p_reviewer_name: input.account.name ?? input.account.reference ?? "Workforce reviewer",
     p_default_in: defaultIn,
     p_default_out: defaultOut
   });

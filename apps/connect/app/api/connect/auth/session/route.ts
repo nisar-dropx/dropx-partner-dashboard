@@ -33,7 +33,7 @@ export async function GET() {
       // the cookie here was forcing users through PIN/biometric sign-in again.
       return NextResponse.json({
         authenticated: false,
-        error: "You don't have access to DropX One. Contact HR or your platform administrator for access."
+        error: "You don't have access to DropX One. Contact the Workforce team or your platform administrator for access."
       }, { status: 403 });
     }
     const actor = await getConnectPreviewActor(cookies().get(connectPreviewCookieName)?.value ? undefined : accounts).catch(() => null);

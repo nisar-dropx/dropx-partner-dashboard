@@ -179,9 +179,9 @@ export async function createExperienceCertificatePdf(input: {
   y -= 28;
   page.drawText("For DropX Logistics,", { x: margin, y, size: 10.5, font: regular });
   y -= 48;
-  page.drawText(input.signatoryName || "Head Human Resources", { x: margin, y, size: 10.5, font: bold });
+  page.drawText(input.signatoryName || "Head Workforce", { x: margin, y, size: 10.5, font: bold });
   y -= 14;
-  page.drawText(input.signatoryTitle || "Human Resources", { x: margin, y, size: 9.5, font: regular, color: rgb(0.35, 0.35, 0.35) });
+  page.drawText(input.signatoryTitle || "Workforce", { x: margin, y, size: 9.5, font: regular, color: rgb(0.35, 0.35, 0.35) });
 
   page.drawLine({ start: { x: margin, y: 52 }, end: { x: width - margin, y: 52 }, thickness: 0.6, color: rgb(0.88, 0.88, 0.88) });
   page.drawText(input.footerText || "System-generated Experience Certificate · DropX People & Culture", {

@@ -188,7 +188,7 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
         facts: [
           { label: "Reason", value: item.reason || "—" },
           ...(item.managerNote ? [{ label: "Manager note", value: item.managerNote }] : []),
-          ...(item.hrNote ? [{ label: "HR note", value: item.hrNote }] : [])
+          ...(item.hrNote ? [{ label: "Workforce note", value: item.hrNote }] : [])
         ],
         steps: (item.steps ?? []).map((step: { stepName: string; status: string; note?: string | null }) => ({
           name: step.stepName,
@@ -210,7 +210,7 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
         facts: [
           { label: "Reason", value: item.reason || "—" },
           ...(item.managerNote ? [{ label: "Manager note", value: item.managerNote }] : []),
-          ...(item.hrNote ? [{ label: "HR note", value: item.hrNote }] : [])
+          ...(item.hrNote ? [{ label: "Workforce note", value: item.hrNote }] : [])
         ],
         steps: (item.steps ?? []).map((step: { stepName: string; status: string; note?: string | null }) => ({
           name: step.stepName,

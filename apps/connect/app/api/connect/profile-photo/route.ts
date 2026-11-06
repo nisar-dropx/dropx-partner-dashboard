@@ -41,7 +41,7 @@ function safeError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message.trim() : "";
   if (SAFE_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix))) return message;
   if (isConnectProfilePhotoSchemaError(message)) {
-    return "Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.";
+    return "Profile photo verification is not configured on the server yet. Ask the Workforce team to apply the latest Connect database update.";
   }
   return fallback;
 }
@@ -201,7 +201,7 @@ export async function PUT(request: Request) {
       .maybeSingle();
     if (openChallenge.error) {
       if (isConnectProfilePhotoSchemaError(openChallenge.error.message)) {
-        throw new Error("Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.");
+        throw new Error("Profile photo verification is not configured on the server yet. Ask the Workforce team to apply the latest Connect database update.");
       }
       throw new Error(openChallenge.error.message);
     }
@@ -224,7 +224,7 @@ export async function PUT(request: Request) {
     }).select("id,required_match_percent,require_liveness,expires_at").single();
     if (challenge.error || !challenge.data) {
       if (isConnectProfilePhotoSchemaError(challenge.error?.message ?? "")) {
-        throw new Error("Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.");
+        throw new Error("Profile photo verification is not configured on the server yet. Ask the Workforce team to apply the latest Connect database update.");
       }
       throw new Error(challenge.error?.message ?? "Face verification could not be started.");
     }

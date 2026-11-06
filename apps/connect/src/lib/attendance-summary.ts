@@ -36,5 +36,5 @@ export function summarizeAttendance<T extends AttendanceInsightRow>(rows: T[], c
 
 export function attendanceCorrectionHint(row: { regularization?: { status: string } | null; regularizationOpen?: boolean }) {
   if (row.regularization) return `Correction ${row.regularization.status.replaceAll("_", " ")}`;
-  return row.regularizationOpen === false ? "Correction window closed · Contact HR" : "View day to review or request correction";
+  return row.regularizationOpen === false ? "Correction window closed · Contact Workforce" : "View day to review or request correction";
 }

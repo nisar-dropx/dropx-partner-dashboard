@@ -157,7 +157,7 @@ export async function createInsuranceCoverLetterpadPdf(input: {
 
   y -= 16;
   const closing =
-    "This letter is issued on company letterpad for HR and employee records. Ecards for Group Medical and Group Personal Accident are available separately in DropX One Documents.";
+    "This letter is issued on company letterpad for Workforce and employee records. Ecards for Group Medical and Group Personal Accident are available separately in DropX One Documents.";
   for (const line of wrapLine(closing, regular, 10.5, width - margin * 2)) {
     page.drawText(line, { x: margin, y, size: 10.5, font: regular, color: rgb(0.15, 0.15, 0.15) });
     y -= 15;

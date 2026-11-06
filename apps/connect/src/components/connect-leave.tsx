@@ -327,7 +327,7 @@ export function ConnectLeave({
             : selectedType.balanceMode === "earned_balance"
               ? `Earned comp off · ${selectedType.available ?? 0} available${(selectedType.lapsed ?? 0) > 0 ? ` · ${selectedType.lapsed} lapsed` : ""} · ${selectedType.used} used${selectedType.pending > 0 ? ` · ${selectedType.pending} applied` : ""}`
               : `${selectedType.allowance} yearly · ${selectedType.available ?? 0} available · ${selectedType.used} used${selectedType.pending > 0 ? ` · ${selectedType.pending} applied` : ""}`}</p> : null}
-          {!leaveMasterReady ? <p>No active leave type is available. HR can enable one in Leave Policy.</p> : null}
+          {!leaveMasterReady ? <p>No active leave type is available. The Workforce team can enable one in Leave Policy.</p> : null}
           <div className="dx-leave-dates">
             <label>From date<input disabled={noDatesAvailable} max={maximumDate} min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
             <label>To date<input disabled={noDatesAvailable} max={maximumDate} min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>

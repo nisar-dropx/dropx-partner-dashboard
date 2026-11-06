@@ -57,7 +57,7 @@ export async function renderConnectExitDocumentPdf(input: {
       registeredAddress: input.registeredAddress,
       footerText: input.footerText,
       signatoryName: input.signatoryName,
-      signatoryTitle: input.signatoryTitle || "Head Human Resources",
+      signatoryTitle: input.signatoryTitle || "Head Workforce",
       referenceNumber: reference,
       issueDate: formatDate(input.issueDateIso),
       employeeName: values.employee_name,

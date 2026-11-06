@@ -40,7 +40,7 @@ function inclusiveDays(fromDate: string, toDate: string) {
 function statusLabel(status: string) {
   switch (status) {
     case "pending_manager": return "Pending manager";
-    case "pending_hr": return "Pending HR";
+    case "pending_hr": return "Pending Workforce";
     case "approved": return "Approved · Present Business trip";
     case "returned": return "Returned";
     case "rejected": return "Rejected";
@@ -182,10 +182,10 @@ export function ConnectBusinessTrip({
                 <input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} />
               </label>
             </div>
-            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs & holidays skipped at HR apply</small> : <small className="dx-wfh-date-hint">Pick the first and last business trip day</small>}
+            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs &amp; holidays skipped when Workforce applies the request</small> : <small className="dx-wfh-date-hint">Pick the first and last business trip day</small>}
           </div>
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need a business trip?" rows={3} value={reason} /></label>
-          <p className="dx-wfh-date-hint">Peer approvals are skipped. Your reporting manager reviews first; if none, it goes to HR.</p>
+          <p className="dx-wfh-date-hint">Peer approvals are skipped. Your reporting manager reviews first; if none, it goes to the Workforce team.</p>
           <OptionalTimeOffAttachment value={attachment} onChange={setAttachment} disabled={submitting} />
           <div className="dx-leave-actions">
             <button className="dx-save" disabled={submitting || !fromDate || !toDate || reason.trim().length < 3 || requestedDays > maxDays} type="submit">
@@ -205,7 +205,7 @@ export function ConnectBusinessTrip({
               <p>{request.reason}</p>
               <TimeOffAttachmentLink attachment={request.attachment} />
               {request.managerNote ? <p>Manager: {request.managerNote}</p> : null}
-              {request.hrNote ? <p>HR: {request.hrNote}</p> : null}
+              {request.hrNote ? <p>Workforce: {request.hrNote}</p> : null}
               {["pending_manager", "returned"].includes(request.status) ? (
                 <button className="secondary" disabled={submitting} onClick={() => void withdraw(request.id)} type="button">
                   <RotateCcw />Withdraw
@@ -225,7 +225,7 @@ export function ConnectBusinessTrip({
       <header className="dx-page-intro">
         <small>Attendance</small>
         <h1>Business trip</h1>
-        <p>Request a date range. After reporting-manager approval, HR marks working days Present · Business trip.</p>
+        <p>Request a date range. After reporting-manager approval, the Workforce team marks working days Present · Business trip.</p>
       </header>
       {body}
     </section>

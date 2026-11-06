@@ -30,7 +30,7 @@ export async function resolveOneReimbursementWorkflow(input: {
     reportingChainMaxLevel: 2,
     allowMissingApprovers: true
   });
-  if (!configured) throw new Error("The reimbursement manager route is not configured for your designation. Contact HR.");
+  if (!configured) throw new Error("The reimbursement manager route is not configured for your designation. Contact the Workforce team.");
   if (!input.directRequester && !configured.steps.length) {
     throw new Error("No reporting manager is configured. Configure the reporting hierarchy before submitting a claim.");
   }
@@ -49,7 +49,7 @@ export async function resolveOneReimbursementWorkflow(input: {
     const name = String(designation.name ?? "").trim().toLowerCase().replace(/[\s-]+/g, " ");
     return code === "FINMGR" || code === "FINANCE_MANAGER" || name === "finance manager";
   }).map((designation) => designation.id));
-  const unavailable = "An active Finance Manager with a DropX One approval login is required for reimbursements. Contact HR to configure the Finance Manager.";
+  const unavailable = "An active Finance Manager with a DropX One approval login is required for reimbursements. Contact the Workforce team to configure the Finance Manager.";
   if (!financeIds.size) throw new Error(unavailable);
   const assignments = await supabaseAdmin.from("hr_work_assignments")
     .select("engagement_id").eq("company_id", input.companyId)
@@ -97,7 +97,7 @@ export async function resolveOneReimbursementWorkflow(input: {
     ? eligible.get(route.data.hr_final_fallback_person_id ?? "") : undefined;
   if (!eligible.size) throw new Error(unavailable);
   if (!preferred && eligible.size > 1) {
-    throw new Error("More than one Finance Manager is available. Ask HR to select the final Finance Manager in the reimbursement route.");
+    throw new Error("More than one Finance Manager is available. Ask the Workforce team to select the final Finance Manager in the reimbursement route.");
   }
   const finance = preferred ?? [...eligible.values()][0];
   // If Finance is also a reporting manager, retain a single final Finance step.

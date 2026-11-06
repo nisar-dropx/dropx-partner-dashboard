@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const accounts = await findConnectAccounts(countryCode, mobile);
     if (!accounts.length) {
       return NextResponse.json({
-        error: "You don't have access to DropX One. Contact HR or your platform administrator for access."
+        error: "You don't have access to DropX One. Contact the Workforce team or your platform administrator for access."
       }, { status: 403 });
     }
     await assertDeviceAllowed(accounts, request);

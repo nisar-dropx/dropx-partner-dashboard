@@ -184,7 +184,7 @@ test("keeps half day as the payable status while leading with the late warning",
   assert.equal(insight.label, "Half day");
   assert.equal(insight.headline, "Half day recorded");
   assert.match(insight.detail, /worked 5h 57m, below the full-day requirement/i);
-  assert.match(insight.detail, /company HR policy/i);
+  assert.match(insight.detail, /company attendance policy/i);
   assert.match(insight.issues[0].message, /Expected 09:30 · reported 15:19/);
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
   assert.equal(insight.needsRegularization, false);

@@ -40,7 +40,7 @@ function inclusiveDays(fromDate: string, toDate: string) {
 function statusLabel(status: string) {
   switch (status) {
     case "pending_manager": return "Pending manager";
-    case "pending_hr": return "Pending HR";
+    case "pending_hr": return "Pending Workforce";
     case "approved": return "Approved · WFH";
     case "returned": return "Returned";
     case "rejected": return "Rejected";
@@ -183,7 +183,7 @@ export function ConnectWfh({
                 <input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} />
               </label>
             </div>
-            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs & holidays skipped at HR apply</small> : <small className="dx-wfh-date-hint">Pick the first and last WFH day</small>}
+            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs &amp; holidays skipped when Workforce applies the request</small> : <small className="dx-wfh-date-hint">Pick the first and last WFH day</small>}
           </div>
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need to work from home?" rows={3} value={reason} /></label>
           <OptionalTimeOffAttachment value={attachment} onChange={setAttachment} disabled={submitting} />
@@ -205,7 +205,7 @@ export function ConnectWfh({
               <p>{request.reason}</p>
               <TimeOffAttachmentLink attachment={request.attachment} />
               {request.managerNote ? <p>Manager: {request.managerNote}</p> : null}
-              {request.hrNote ? <p>HR: {request.hrNote}</p> : null}
+              {request.hrNote ? <p>Workforce: {request.hrNote}</p> : null}
               {["pending_manager", "returned"].includes(request.status) ? (
                 <button className="secondary" disabled={submitting} onClick={() => void withdraw(request.id)} type="button">
                   <RotateCcw />Withdraw

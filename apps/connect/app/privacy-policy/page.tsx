@@ -49,7 +49,7 @@ export default function PrivacyPolicyPage() {
           <p>
             DropX One is a workforce app provided by your employer or
             engaging company (a DropX Logistics customer) for attendance
-            tracking, shift roster management, and related HR functions. It
+            tracking, shift roster management, and related workforce functions. It
             is not available to the general public — access requires an
             active employment or contractor relationship with a company
             using DropX Logistics&rsquo; systems.
@@ -122,7 +122,7 @@ export default function PrivacyPolicyPage() {
                 The app also sends a one-way hashed device identifier when
                 you sign in, so your account can be used on only one phone
                 at a time. It is not your IMEI or phone number, and your
-                employer&rsquo;s HR team can reset it if you change phones.
+                employer&rsquo;s Workforce team can reset it if you change phones.
               </p>
             </div>
           </div>
@@ -132,7 +132,7 @@ export default function PrivacyPolicyPage() {
           <h2>Payslips and other documents</h2>
           <p>
             DropX One shows your payslips, your group insurance card and
-            HR documents such as work cycle records. Insurance cards are
+            Workforce documents such as work cycle records. Insurance cards are
             obtained from your employer&rsquo;s insurance provider and held
             in Google Drive, which DropX Logistics uses as a storage
             provider; the app downloads your card directly from there.

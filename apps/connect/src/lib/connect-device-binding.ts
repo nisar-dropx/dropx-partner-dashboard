@@ -86,7 +86,7 @@ export async function assertDeviceAllowed(accounts: ConnectAccount[], request: R
   const bindings = await loadActiveBindings(gated);
   if (bindings.some((binding) => binding.device_id !== deviceId)) {
     throw new DeviceBindingError(
-      "This account is already active on another phone. Ask HR to reset your device, then sign in again."
+      "This account is already active on another phone. Ask the Workforce team to reset your device, then sign in again."
     );
   }
 }

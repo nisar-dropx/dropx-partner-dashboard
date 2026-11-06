@@ -352,9 +352,9 @@ export async function resolveConfiguredApprovalWorkflow(input: {
       const hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null);
       if (!hrResolved) {
         if (input.allowMissingApprovers) continue;
-        throw new Error("HR final approval is not available. Only the HR Head can take this step. Contact HR.");
+        throw new Error("Workforce final approval is not available. Only the Workforce Head can take this step. Contact the Workforce team.");
       }
-      hrResolved.step.step_name = input.level3StepName ?? "HR final approval";
+      hrResolved.step.step_name = input.level3StepName ?? "Workforce final approval";
       excludedPeople.add(hrResolved.candidate.personId);
       steps.push(hrResolved.step);
       continue;
@@ -362,7 +362,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     const designationId = level === 1 ? route.level_1_designation_id : level === 2 ? route.level_2_designation_id : route.hr_final_designation_id;
     if (!designationId) {
       if (input.allowMissingApprovers) continue;
-      throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approver designation is missing. Contact HR.`);
+      throw new Error(`${level === 3 ? "Workforce final" : `Level ${level}`} approver designation is missing. Contact the Workforce team.`);
     }
     const configuredScope = level === 1 ? route.level_1_search_scope : level === 2 ? route.level_2_search_scope : route.hr_final_search_scope;
     const fallbackMode = level === 1 ? route.level_1_fallback_mode : level === 2 ? route.level_2_fallback_mode : route.hr_final_fallback_mode;
@@ -430,9 +430,9 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     }
     if (!resolved) {
       if (input.allowMissingApprovers) continue;
-      throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approval is not available for this request. Contact HR.`);
+      throw new Error(`${level === 3 ? "Workforce final" : `Level ${level}`} approval is not available for this request. Contact the Workforce team.`);
     }
-    if (level === 3) resolved.step.step_name = input.level3StepName ?? "HR final approval";
+    if (level === 3) resolved.step.step_name = input.level3StepName ?? "Workforce final approval";
     else if (forceChain && level === 1) resolved.step.step_name = "Reporting manager approval";
     else if (forceChain) resolved.step.step_name = "Next reporting manager approval";
     excludedPeople.add(resolved.candidate.personId);
@@ -443,7 +443,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
       // config as the source of who counts as "HR" for this route), splice it in ahead
       // of the deferred final step, and hold this step back until after the loop.
       if (!route.hr_final_designation_id) {
-        if (!input.allowMissingApprovers) throw new Error("HR final approver designation is missing. Contact HR.");
+        if (!input.allowMissingApprovers) throw new Error("Workforce final approver designation is missing. Contact the Workforce team.");
         steps.push(resolved.step);
         continue;
       }
@@ -468,11 +468,11 @@ export async function resolveConfiguredApprovalWorkflow(input: {
         hrResolved = await findAvailable(hrFallbackCandidates, input.companyId, route.id, 3, excludedPeople, "fallback", null, "Configured designation not found");
       }
       if (!hrResolved) {
-        if (!input.allowMissingApprovers) throw new Error("HR review approval is not available for this request. Contact HR.");
+        if (!input.allowMissingApprovers) throw new Error("Workforce review approval is not available for this request. Contact the Workforce team.");
         steps.push(resolved.step);
         continue;
       }
-      hrResolved.step.step_name = "HR review";
+      hrResolved.step.step_name = "Workforce review";
       excludedPeople.add(hrResolved.candidate.personId);
       if (hrResolved.candidate.chainIndex >= 0) lastChainIndex = Math.max(lastChainIndex, hrResolved.candidate.chainIndex);
       steps.push(hrResolved.step);

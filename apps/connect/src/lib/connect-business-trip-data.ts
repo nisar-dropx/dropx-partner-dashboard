@@ -136,7 +136,7 @@ async function resolveBusinessTripManagerSteps(input: {
       };
     }
   }
-  return { routeName: "HR finalization", steps: [] as Array<{
+  return { routeName: "Workforce finalization", steps: [] as Array<{
     step_name: string;
     approver_user_id: string;
     approver_person_id: string;
@@ -156,7 +156,7 @@ export async function assertConnectBusinessTripAccess(companyId: string, workerI
     if (isWfhHardBlockedDesignation(label)) {
       throw new Error("Business trip is not available for Team Lead, Station Manager, or Store Manager roles.");
     }
-    throw new Error("Business trip is not enabled for your designation. Ask HR to grant access in the Business Trip policy.");
+    throw new Error("Business trip is not enabled for your designation. Ask the Workforce team to grant access in the Business Trip policy.");
   }
   return { context, policy: policy as ConnectBusinessTripPolicy, designationId, designation: label };
 }
@@ -360,7 +360,7 @@ export async function createConnectBusinessTripRequest(input: {
     requestNo,
     status,
     notice: status === "pending_hr"
-      ? "Business trip request submitted for HR finalization."
+      ? "Business trip request submitted for Workforce finalization."
       : `Business trip request submitted to ${routeName}. Peer approvals are skipped — your reporting manager will review it next.`
   };
 }
@@ -524,7 +524,7 @@ export async function decideConnectBusinessTripApproval(input: {
   return {
     status,
     notice: status === "pending_hr"
-      ? "Business trip approved and sent to HR for Present · Business trip finalization."
+      ? "Business trip approved and sent to Workforce for Present · Business trip finalization."
       : status === "pending_manager"
         ? "Approved and routed to the next reporting manager."
         : status === "returned"
@@ -561,7 +561,7 @@ export async function listConnectBusinessTripHrApprovals(
       id: request.id,
       requestId: request.id,
       requestNo: request.request_no,
-      stepName: "HR finalization",
+      stepName: "Workforce finalization",
       stepOrder: 0,
       startDate: request.start_date,
       endDate: request.end_date,
@@ -632,7 +632,7 @@ export async function decideConnectBusinessTripHrApproval(input: {
     .maybeSingle();
   if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "Business trip request was not found.");
   if (String(existing.data.status) !== "pending_hr") {
-    throw new Error("This business trip request is no longer awaiting HR finalization.");
+    throw new Error("This business trip request is no longer awaiting Workforce finalization.");
   }
   if (!connectWorkforceMatches(access, String(existing.data.profile_type), String(existing.data.profile_id))) {
     throw new Error("This business trip request is outside your attendance scope.");
@@ -644,7 +644,7 @@ export async function decideConnectBusinessTripHrApproval(input: {
     p_actor_user_id: actorUserId,
     p_decision: input.decision,
     p_note: input.note ?? null,
-    p_reviewer_name: input.account.name ?? input.account.reference ?? "HR reviewer",
+    p_reviewer_name: input.account.name ?? input.account.reference ?? "Workforce reviewer",
     p_default_in: defaultIn,
     p_default_out: defaultOut
   });

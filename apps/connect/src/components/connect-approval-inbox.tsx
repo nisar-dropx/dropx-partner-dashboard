@@ -465,7 +465,7 @@ function rosterStageLabel(stageType: string) {
   switch (stageType) {
     case "level_1": return "Level 1 approval";
     case "level_2": return "Level 2 approval";
-    case "hr": return "HR approval";
+    case "hr": return "Workforce approval";
     default: return "Roster approval";
   }
 }
@@ -1477,7 +1477,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
           {wfhHrApprovals.length ? (
             <>
               <header className="dx-approval-section-head">
-                <strong>HR finalization</strong>
+                <strong>Workforce finalization</strong>
                 <span>{wfhHrApprovals.length} pending</span>
               </header>
               {wfhHrApprovals.map((approval) => (
@@ -1494,7 +1494,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             </>
           ) : null}
           {!wfhApprovals.length && !wfhHrApprovals.length ? (
-            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps or HR finalizations in your reporting scope are waiting.</small></div>
+            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps or Workforce finalizations in your reporting scope are waiting.</small></div>
           ) : null}
           {(() => {
             const match = activeKey?.match(/^wfh:(manager|hr):(.+)$/);
@@ -1564,7 +1564,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
           {businessTripHrApprovals.length ? (
             <>
               <header className="dx-approval-section-head">
-                <strong>HR finalization</strong>
+                <strong>Workforce finalization</strong>
                 <span>{businessTripHrApprovals.length} pending</span>
               </header>
               {businessTripHrApprovals.map((approval) => (
@@ -1581,7 +1581,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             </>
           ) : null}
           {!businessTripApprovals.length && !businessTripHrApprovals.length ? (
-            <div className="dx-empty"><MapPinned /><strong>No business trip approvals</strong><small>No business-trip steps or HR finalizations in your reporting scope are waiting.</small></div>
+            <div className="dx-empty"><MapPinned /><strong>No business trip approvals</strong><small>No business-trip steps or Workforce finalizations in your reporting scope are waiting.</small></div>
           ) : null}
           {(() => {
             const match = activeKey?.match(/^business-trip:(manager|hr):(.+)$/);
@@ -1641,14 +1641,14 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
           {attendanceHrApprovals.length ? (
             <>
               <header className="dx-approval-section-head">
-                <strong>HR finalization</strong>
+                <strong>Workforce finalization</strong>
                 <span>{attendanceHrApprovals.length} pending</span>
               </header>
               {attendanceHrApprovals.map((approval) => renderAttendanceRow(approval, "hr"))}
             </>
           ) : null}
           {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
-            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No manager steps or HR finalizations in your attendance scope are waiting.</small></div>
+            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No manager steps or Workforce finalizations in your attendance scope are waiting.</small></div>
           ) : null}
           {(() => {
             const match = activeKey?.match(/^attendance:(manager|hr):(.+)$/);

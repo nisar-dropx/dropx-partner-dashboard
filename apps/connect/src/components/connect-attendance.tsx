@@ -619,7 +619,7 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
               || selectedInsight.payDayType === "week_off"
               || selectedInsight.payDayType === "paid_holiday"
               || selectedInsight.calendarClass === "week-off")
-              ? <small className="dx-regularization-closed">Regularization closed{selected.regularizationClosesOn ? ` on ${new Date(`${selected.regularizationClosesOn}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}` : ""} for this day. Contact HR if it needs correcting.</small>
+              ? <small className="dx-regularization-closed">Regularization closed{selected.regularizationClosesOn ? ` on ${new Date(`${selected.regularizationClosesOn}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}` : ""} for this day. Contact the Workforce team if it needs correcting.</small>
               : null}
           </footer>
         </div> : null}
@@ -1102,7 +1102,7 @@ function RegularizationSheet({
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />
-          <span><strong>Workplace CCTV proof is mandatory</strong>Upload a clear screenshot showing you were present at the workplace at the {proofTimeLabel}. The CCTV date and time must be visible; you do not need to be standing near the biometric device. No CCTV available? Contact HR for an exception review; do not upload a dummy image.</span>
+          <span><strong>Workplace CCTV proof is mandatory</strong>Upload a clear screenshot showing you were present at the workplace at the {proofTimeLabel}. The CCTV date and time must be visible; you do not need to be standing near the biometric device. No CCTV available? Contact the Workforce team for an exception review; do not upload a dummy image.</span>
         </div>
         <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : needsDualProof ? "Upload IN-time CCTV proof" : "Upload workplace CCTV proof")}</span><em>Required</em><input accept={REGULARIZATION_PROOF_ACCEPT} required={!row.regularization?.hasAttachment && !needsDualProof} type="file" onChange={(event) => {
           const file = event.target.files?.[0] ?? null;

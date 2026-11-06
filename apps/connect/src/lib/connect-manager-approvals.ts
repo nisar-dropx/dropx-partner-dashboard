@@ -311,7 +311,7 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
   const approvalRows = await Promise.all(filtered.map(async (request) => ({
     id: request.id,
     requestId: request.id,
-    stepName: "HR finalization",
+    stepName: "Workforce finalization",
     stepOrder: 0,
     workerName: request.full_name || "Team member",
     workerCode: request.dropx_id || "",
@@ -370,7 +370,7 @@ export async function decideConnectAttendanceHrApproval(
     .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
   if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
   if (!["pending_hr", "pending"].includes(String(request.data.status))) {
-    throw new Error("This attendance request is no longer awaiting HR finalization.");
+    throw new Error("This attendance request is no longer awaiting Workforce finalization.");
   }
   if (!connectWorkforceMatches(access, String(request.data.profile_type), String(request.data.profile_id))) {
     throw new Error("This attendance request is outside your approval scope.");
@@ -406,7 +406,7 @@ export async function decideConnectAttendanceHrApproval(
     p_decision: decision,
     p_review_remarks: note,
     p_reviewer_id: actorUserId,
-    p_reviewer_name: account.name ?? account.reference ?? "HR reviewer"
+    p_reviewer_name: account.name ?? account.reference ?? "Workforce reviewer"
   });
   if (result.error) throw new Error(result.error.message);
   return "Attendance correction applied to the register.";
@@ -516,7 +516,7 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
     return "Attendance step approved and routed to the next manager.";
   }
   if (result.data === "approved") return "Attendance regularization approved.";
-  if (result.data === "pending_hr") return "Manager approvals complete. Awaiting HR attendance finalization.";
+  if (result.data === "pending_hr") return "Manager approvals complete. Awaiting Workforce attendance finalization.";
   if (result.data === "returned") return "Attendance correction returned to the worker.";
   return "Attendance regularization rejected.";
 }
@@ -546,7 +546,7 @@ function rosterClock(value: string | null | undefined) {
 function rosterApprovalStageName(stageType: string) {
   if (stageType === "level_1") return "Level 1 approval";
   if (stageType === "level_2") return "Level 2 approval";
-  if (stageType === "hr") return "HR approval";
+  if (stageType === "hr") return "Workforce approval";
   return "Roster approval";
 }
 

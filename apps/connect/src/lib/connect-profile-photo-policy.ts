@@ -43,7 +43,7 @@ export async function loadConnectProfilePhotoPolicy(companyId: string): Promise<
     .maybeSingle();
   if (result.error) {
     if (isConnectProfilePhotoSchemaError(result.error.message)) {
-      throw new Error("Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.");
+      throw new Error("Profile photo verification is not configured on the server yet. Ask the Workforce team to apply the latest Connect database update.");
     }
     throw new Error(result.error.message);
   }
@@ -64,7 +64,7 @@ export async function loadConnectProfilePhotoPolicy(companyId: string): Promise<
   }, { onConflict: "company_id" }).select("profile_photo_match_percent,require_profile_photo_liveness,profile_photo_monthly_updates_limit").single();
   if (created.error || !created.data) {
     if (isConnectProfilePhotoSchemaError(created.error?.message ?? "")) {
-      throw new Error("Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.");
+      throw new Error("Profile photo verification is not configured on the server yet. Ask the Workforce team to apply the latest Connect database update.");
     }
     throw new Error(created.error?.message ?? "Identity verification policy could not be initialized.");
   }
@@ -94,7 +94,7 @@ export async function countConnectProfilePhotoUpdatesThisMonth({
     .lt("verified_at", end);
   if (result.error) {
     if (isConnectProfilePhotoSchemaError(result.error.message)) {
-      throw new Error("Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.");
+      throw new Error("Profile photo verification is not configured on the server yet. Ask the Workforce team to apply the latest Connect database update.");
     }
     throw new Error(result.error.message);
   }

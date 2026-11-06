@@ -641,7 +641,7 @@ export async function POST(request: Request) {
         throw new Error(exitCase?.status === "withdrawal_requested"
           ? "A withdrawal request is already waiting for the first approving manager."
           : ["approved", "notice_period", "clearance", "ready_to_close", "documents_ready", "closed"].includes(exitCase?.status ?? "")
-            ? "This exit request is already approved and can no longer be withdrawn. Contact HR if this needs to change."
+            ? "This exit request is already approved and can no longer be withdrawn. Contact the Workforce team if this needs to change."
             : "This exit request can no longer be withdrawn.");
       }
       const now = new Date().toISOString();

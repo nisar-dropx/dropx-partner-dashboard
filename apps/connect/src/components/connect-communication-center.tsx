@@ -110,10 +110,10 @@ export function ConnectCommunicationCenter({ account, active = true, readOnly = 
   // Keep the established People terminology intact; Workforce is presented as a
   // dedicated support channel while retaining the same secure case workflow.
   const workforce = account.workspace === "workforce";
-  const supportLabel = workforce ? "Workforce team" : "HR Help";
+  const supportLabel = workforce ? "Workforce team" : "Workforce Help";
   const supportTeamLabel = workforce ? "Workforce team" : "People & Culture";
   const supportChannelLabel = workforce ? "DIRECT WORKFORCE SUPPORT" : "DIRECT PEOPLE SUPPORT";
-  const supportConversationLabel = workforce ? "PRIVATE WORKFORCE CONVERSATION" : "PRIVATE HR CONVERSATION";
+  const supportConversationLabel = "PRIVATE WORKFORCE CONVERSATION";
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const [section, setSection] = useState<Section>("updates");
   const [settings, setSettings] = useState<ChannelSetting[]>([]);
@@ -447,7 +447,7 @@ export function ConnectCommunicationCenter({ account, active = true, readOnly = 
   const confidential = section === "speak-up";
 
   return <section className="dx-communication">
-    <header className="dx-communication-hero"><div><span><Sparkles />INFORMED · SUPPORTED · HEARD</span><h1>Connect</h1><p>{workforce ? "Company updates, direct Workforce team conversations and confidential reporting in one trusted place." : "Company updates, private HR conversations and confidential reporting in one trusted place."}</p></div><MessageCircleMore /></header>
+    <header className="dx-communication-hero"><div><span><Sparkles />INFORMED · SUPPORTED · HEARD</span><h1>Connect</h1><p>{workforce ? "Company updates, direct Workforce team conversations and confidential reporting in one trusted place." : "Company updates, private Workforce conversations and confidential reporting in one trusted place."}</p></div><MessageCircleMore /></header>
     {success ? <div className="dx-communication-alert success"><CheckCircle2 />{success}<button aria-label="Dismiss message" onClick={() => setSuccess("")}><X /></button></div> : null}
     {error ? <div className="dx-communication-alert error"><AlertTriangle />{error}<button aria-label="Dismiss error" onClick={() => setError("")}><X /></button></div> : null}
     <nav aria-label="Connect sections" className="dx-connect-tabs">

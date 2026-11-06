@@ -345,7 +345,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
             <div className="dx-roster-empty">
               <CalendarDays />
               <strong>{data?.source === "workforce" ? "Your operating schedule is not configured" : "Your roster is not configured"}</strong>
-              <small>{data?.source === "workforce" ? "Ask your Workforce manager to set your pincode and weekly off in Associate Rostering." : "Contact your HR or manager."}</small>
+              <small>{data?.source === "workforce" ? "Ask your Workforce manager to set your pincode and weekly off in Associate Rostering." : "Contact the Workforce team or your manager."}</small>
             </div>
           )}
         </div>

@@ -165,7 +165,7 @@ export async function loadExitNoticeContext(db: SupabaseClient, companyId: strin
   const warnings = [
     ...managers.map((manager, index) => !manager.email ? "Reporting manager " + (index + 1) + " has no deliverable email." : "").filter(Boolean),
     !managers.length ? "No current reporting manager is configured." : "",
-    !hrContacts.some(contact => contact.email) && !owner?.email ? "No responsible HR email resolved; check Exit access roles and scope." : ""
+    !hrContacts.some(contact => contact.email) && !owner?.email ? "No responsible Workforce email resolved; check Exit access roles and scope." : ""
   ].filter(Boolean);
   const describe = (contact: Contact | undefined) => contact ? contact.name + (contact.email ? " · " + contact.email : " · Email unavailable") : "Not configured";
   return {
@@ -214,7 +214,7 @@ export function renderExitNotice(body: string, context: ExitNoticeContext) {
     ["Designation", v.designation], ["Location / store", v.location],
     ["Contact", v.employee_email + " · " + v.employee_mobile],
     ["Reporting manager · L1", v.reporting_manager], ["Reporting manager · L2", v.second_reporting_manager],
-    ["Responsible HR", v.hr_contacts], ["Submitted", v.submitted_date],
+    ["Responsible Workforce", v.hr_contacts], ["Submitted", v.submitted_date],
     ["Requested last working day", v.requested_last_working_date],
     ["Approved last working day", v.approved_last_working_date],
     ["Notice period", v.notice_days + " days"], ["Status", v.exit_status]
@@ -222,13 +222,13 @@ export function renderExitNotice(body: string, context: ExitNoticeContext) {
   const notes = context.warnings.join(" ");
   const text = body + "\n\n" + rows.map(([label, value]) => label + ": " + value).join("\n")
     + (notes ? "\n\nRouting check: " + notes : "")
-    + "\n\nManagers — review in DropX One: " + v.review_url + "\nHR — open People: " + v.people_review_url;
+    + "\n\nManagers — review in DropX One: " + v.review_url + "\nWorkforce — open People: " + v.people_review_url;
   const html = '<!doctype html><html><body style="margin:0;background:#f4f5f8;font-family:Arial,sans-serif;color:#1b2940">'
     + '<table role="presentation" style="max-width:640px;width:100%;margin:24px auto;background:white;border:1px solid #e5e7eb;border-radius:14px"><tr><td style="padding:22px;background:#1b2940;color:white"><strong style="color:#ffb26b">DropX · People &amp; Culture</strong><h2 style="margin:10px 0 0;font-size:21px">' + escapeHtml(v.case_number) + '</h2></td></tr>'
     + '<tr><td style="padding:22px"><p style="line-height:1.6;margin:0 0 18px;white-space:pre-line">' + escapeHtml(body) + '</p><table style="width:100%;border-collapse:collapse;font-size:14px">'
     + rows.map(([label, value]) => '<tr><th scope="row" style="padding:9px;text-align:left;vertical-align:top;border-bottom:1px solid #eee;color:#637086;width:42%">' + escapeHtml(label) + '</th><td style="padding:9px;border-bottom:1px solid #eee;overflow-wrap:anywhere">' + escapeHtml(value ?? "Not recorded") + '</td></tr>').join("")
     + '</table>' + (notes ? '<p style="padding:12px;background:#fff7e6;font-size:13px">' + escapeHtml(notes) + '</p>' : "")
-    + '<p style="line-height:1.9"><a style="color:#c4471e;font-weight:bold" href="' + escapeHtml(v.review_url) + '">Review in DropX One</a> · <a style="color:#c4471e" href="' + escapeHtml(v.people_review_url) + '">Open in People (HR)</a></p>'
+    + '<p style="line-height:1.9"><a style="color:#c4471e;font-weight:bold" href="' + escapeHtml(v.review_url) + '">Review in DropX One</a> · <a style="color:#c4471e" href="' + escapeHtml(v.people_review_url) + '">Open in People (Workforce)</a></p>'
     + '<p style="font-size:12px;color:#637086">The requested last working day is not confirmed until approved. Receiving this email does not change approval ownership.</p></td></tr></table></body></html>';
   return { body: text, html };
 }

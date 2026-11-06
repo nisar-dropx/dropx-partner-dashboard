@@ -23,7 +23,7 @@ export const defaultCommunicationSettings = {
     rewardEnabled: false
   },
   connect: {
-    title: "HR Help",
+    title: "Workforce Help",
     subtitle: "A private conversation with People & Culture",
     guidance: "Ask about work, pay, attendance, reporting, policy or the app. Only you and authorised People team members can access the conversation.",
     categories: [
@@ -88,7 +88,7 @@ export function validateCommunicationSubmission(input: {
   urgency?: unknown;
 }) {
   if (!isCommunicationChannel(input.channel)) throw new Error("Select a communication channel.");
-  if (input.channel === "general") throw new Error("Updates are read-only. Use HR Help to start a conversation.");
+  if (input.channel === "general") throw new Error("Updates are read-only. Use Workforce Help to start a conversation.");
   const category = cleanCommunicationText(input.category, 80);
   const subject = cleanCommunicationText(input.subject, 140);
   const description = cleanCommunicationText(input.description, 5000);

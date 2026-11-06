@@ -86,8 +86,8 @@ function durationOutcomeDetail(row: AttendanceInsightRow, outcome: "Half Day" | 
   if (!row.punchCount && outcome === "Absent") return "No punches are recorded for this day. Marked Absent under attendance policy. Request regularization only if this is incorrect.";
   const worked = workedDuration(row.workHours);
   const reason = outcome === "Half Day"
-    ? `You worked ${worked}, below the full-day requirement. This day is marked Half Day and the applicable deduction will be made under company HR policy.`
-    : `You worked ${worked}, below the half-day requirement. This day is marked Absent and the applicable deduction will be made under company HR policy.`;
+    ? `You worked ${worked}, below the full-day requirement. This day is marked Half Day and the applicable deduction will be made under company attendance policy.`
+    : `You worked ${worked}, below the half-day requirement. This day is marked Absent and the applicable deduction will be made under company attendance policy.`;
   const remark = String(row.remark ?? "").toLowerCase();
   if (/attendance regularized/.test(remark)) {
     if (/early[\s_-]*out[\s_-]*permission/.test(remark)) {
@@ -219,7 +219,7 @@ export function attendanceDayInsight(
     issues.push({
       code: "late",
       label: `Reported ${pluralMinutes(lateMinutes)} late`,
-      message: `${rosterExpectation(row)}Late penalty applies under company HR policy. Any applicable deduction will appear in an upcoming payment.`,
+      message: `${rosterExpectation(row)}Late penalty applies under company attendance policy. Any applicable deduction will appear in an upcoming payment.`,
       tone: "amber"
     });
   }
@@ -227,7 +227,7 @@ export function attendanceDayInsight(
     issues.push({
       code: "early_out",
       label: `Early out ${pluralMinutes(earlyOutMinutes)}`,
-      message: `${row.scheduledEnd && row.scheduledEnd !== "--:--" ? `Expected shift end ${row.scheduledEnd}. ` : ""}Early-out penalty applies under company HR policy. Any applicable deduction will appear in an upcoming payment.`,
+      message: `${row.scheduledEnd && row.scheduledEnd !== "--:--" ? `Expected shift end ${row.scheduledEnd}. ` : ""}Early-out penalty applies under company attendance policy. Any applicable deduction will appear in an upcoming payment.`,
       tone: "amber"
     });
   }
@@ -235,7 +235,7 @@ export function attendanceDayInsight(
   if (payDayType === "unpaid_leave" || row.statusKind === "leave") {
     return {
       calendarClass: "leave",
-      detail: "Unpaid leave / LOP is recorded for this day (used by HRMS payroll).",
+      detail: "Unpaid leave / LOP is recorded for this day (used by Workforce payroll).",
       headline: label,
       issues: [],
       label,
@@ -248,7 +248,7 @@ export function attendanceDayInsight(
   if (payDayType === "paid_leave" || row.statusKind === "paid_leave" || row.isPaidLeave === true) {
     return {
       calendarClass: "paid-leave",
-      detail: "Paid leave is applied for this day (counts as paid time in HRMS payroll).",
+      detail: "Paid leave is applied for this day (counts as paid time in Workforce payroll).",
       headline: label,
       issues: [],
       label,
@@ -405,7 +405,7 @@ export function attendanceDayInsight(
     });
     return {
       calendarClass: "review",
-      detail: "Company HR policy marked this day for review.",
+      detail: "Company attendance policy marked this day for review.",
       headline: "Attendance needs review",
       issues,
       label: "Needs review",
@@ -442,8 +442,8 @@ export function attendanceDayInsight(
       code: "half_day",
       label: "Half day",
       message: isWeekOffDay
-        ? "You worked on your weekly off for less than a full day, so it counts as a half day under company HR policy."
-        : "Half-day deduction applies under company HR policy and will be deducted from your upcoming payment.",
+        ? "You worked on your weekly off for less than a full day, so it counts as a half day under company attendance policy."
+        : "Half-day deduction applies under company attendance policy and will be deducted from your upcoming payment.",
       tone: "amber"
     });
     return {
@@ -484,9 +484,9 @@ export function attendanceDayInsight(
   return {
     calendarClass: calendarClassForPayDayType("present", options),
     detail: late
-      ? `Reported ${pluralMinutes(lateMinutes)} late. Late penalty applies under company HR policy.`
+      ? `Reported ${pluralMinutes(lateMinutes)} late. Late penalty applies under company attendance policy.`
       : early
-        ? `Left ${pluralMinutes(earlyOutMinutes)} early. Early-out penalty applies under company HR policy.`
+        ? `Left ${pluralMinutes(earlyOutMinutes)} early. Early-out penalty applies under company attendance policy.`
         : "Your full-day attendance is complete.",
     headline: late
       ? `Reported ${pluralMinutes(lateMinutes)} late`

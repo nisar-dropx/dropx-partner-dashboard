@@ -58,15 +58,15 @@ export function planResignationSeats(tier: ResignationTier): PlannedResignationS
       return [
         { kind: "cluster_manager", label: "Cluster Manager", skippable: true },
         { kind: "business_head", label: "Business / National Head", skippable: true },
-        { kind: "hr", label: "HR approval", skippable: false }
+        { kind: "hr", label: "Workforce approval", skippable: false }
       ];
     case "mid":
       return [
         { kind: "business_head", label: "Business / National Head", skippable: true },
-        { kind: "hr", label: "HR approval", skippable: false }
+        { kind: "hr", label: "Workforce approval", skippable: false }
       ];
     case "business_head":
-      return [{ kind: "hr", label: "HR approval", skippable: false }];
+      return [{ kind: "hr", label: "Workforce approval", skippable: false }];
     case "hr":
       return [{ kind: "managing_partner", label: "Managing Partner", skippable: false }];
     case "managing_partner":
@@ -119,7 +119,7 @@ export function resolveResignationSeats(input: {
       assignedUserId: null,
       approverSource: "role",
       approverRole: seat.kind === "managing_partner" ? "OWNER" : "HR_MANAGER",
-      detail: seat.kind === "managing_partner" ? "Managing Partner / Owner queue" : "Shared HR approval queue"
+      detail: seat.kind === "managing_partner" ? "Managing Partner / Owner queue" : "Shared Workforce approval queue"
     });
   }
 
@@ -127,12 +127,12 @@ export function resolveResignationSeats(input: {
   if (!active.length) {
     resolved.push({
       kind: "hr",
-      label: "HR approval",
+      label: "Workforce approval",
       status: "resolved",
       assignedUserId: null,
       approverSource: "role",
       approverRole: "HR_MANAGER",
-      detail: "Shared HR approval queue (fallback)"
+      detail: "Shared Workforce approval queue (fallback)"
     });
   }
 
