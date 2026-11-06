@@ -50,3 +50,13 @@ test("NIL rows cannot hide money, missing mapping, or configuration failures", (
  for(const extra of [{netAmount:1},{netAmount:-1},{deductions:5},{baseAmount:undefined},{mappingStatus:"Missing"},{paymentDetailsAvailable:false},{status:"Configuration incomplete"}])
   assert.equal(lossWorkforcePayable([row(),nil(extra)],allowed).payable,null);
 });
+
+test("idle per-packet station cannot block earned pay at another station", () => {
+  const earned = row({status:"Ready for review", netAmount:3150, grossPayment:3200});
+  const idle = nil({paymentMethod:"Per Packet", production:0});
+  assert.match(lossWorkforcePayable([idle], allowed).source, /Awaiting production/);
+  assert.match(lossWorkforcePayable([idle, {...idle, location:"NLRE"}], allowed).source, /Awaiting production/);
+  assert.equal(lossWorkforcePayable([idle, earned], allowed).payable, 3150);
+  for (const extra of [{production:5}, {production:undefined}, {deductions:1}, {status:"Configuration incomplete"}, {paymentDetailsAvailable:false}])
+    assert.equal(lossWorkforcePayable([earned, {...idle, ...extra}], allowed).payable, null);
+});
