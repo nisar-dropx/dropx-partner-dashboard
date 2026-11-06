@@ -26,8 +26,12 @@ export type PayoutDisputeAttentionRow = {
 
 export type PayoutDisputeAttention = {
   pageCode: "ops_workforce_payout_disputes" | "workforce_payout_disputes";
+  /** Non-terminal disputes in scope (never resolved/rejected). */
   active: number;
+  /** Disputes still waiting on this actor's stage — the notification count. */
   awaitingYou: number;
+  /** Bell/nav/Command Center count: pending for you when editable, else active pending. */
+  pending: number;
   initial: number;
   final: number;
   processing: number;
@@ -73,6 +77,7 @@ export function preferredPayoutDisputeHref(summary: { initial: number; final: nu
 export function payoutDisputeAttentionDetail(summary: {
   active: number;
   awaitingYou: number;
+  pending: number;
   initial: number;
   final: number;
   processing: number;
@@ -83,9 +88,14 @@ export function payoutDisputeAttentionDetail(summary: {
     summary.processing ? `${summary.processing} processing` : null
   ].filter(Boolean).join(" · ");
   if (summary.awaitingYou > 0) {
-    return `${summary.awaitingYou} waiting for you · ${summary.active} active${stages ? ` (${stages})` : ""}`;
+    return `${summary.awaitingYou} pending for you${summary.active !== summary.awaitingYou ? ` · ${summary.active} still open in scope` : ""}${stages ? ` (${stages})` : ""}`;
   }
-  return `${summary.active} active${stages ? ` · ${stages}` : ""}`;
+  if (summary.pending > 0) {
+    return `${summary.pending} pending${stages ? ` · ${stages}` : ""}`;
+  }
+  return summary.active > 0
+    ? `${summary.active} open in scope · none pending for you${stages ? ` (${stages})` : ""}`
+    : "0 pending";
 }
 
 function sameActor(left: string | null | undefined, right: string | null | undefined) {
@@ -146,11 +156,12 @@ function emptyAttention(pageCode: PayoutDisputeAttention["pageCode"]): PayoutDis
     pageCode,
     active: 0,
     awaitingYou: 0,
+    pending: 0,
     initial: 0,
     final: 0,
     processing: 0,
     href: "/payments/disputes?status=active",
-    detail: "0 active"
+    detail: "0 pending"
   };
 }
 
@@ -238,17 +249,24 @@ export async function loadPayoutDisputeAttention(
     )
     : summary;
 
+  const personalPending = canEditDesk ? awaitingYou : 0;
+  // Notifications count only pending work — never resolved/rejected (those are not loaded),
+  // and for editors never tickets already past their stage.
+  const pending = canEditDesk ? personalPending : summary.active;
+
   return {
     pageCode,
     active: summary.active,
-    awaitingYou: canEditDesk ? awaitingYou : 0,
+    awaitingYou: personalPending,
+    pending,
     initial: summary.initial,
     final: summary.final,
     processing: summary.processing,
     href: preferredPayoutDisputeHref(hrefFocus),
     detail: payoutDisputeAttentionDetail({
       active: summary.active,
-      awaitingYou: canEditDesk ? awaitingYou : 0,
+      awaitingYou: personalPending,
+      pending,
       initial: summary.initial,
       final: summary.final,
       processing: summary.processing
@@ -256,7 +274,7 @@ export async function loadPayoutDisputeAttention(
   };
 }
 
-/** Bell/nav badge shows how many active disputes are in scope (how many came in). */
+/** Bell/nav badge: pending only (not completed / already-handled stages). */
 export function payoutDisputeBadgeCount(attention: PayoutDisputeAttention) {
-  return attention.active;
+  return attention.pending;
 }

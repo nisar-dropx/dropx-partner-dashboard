@@ -122,12 +122,12 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       const attention=await loadPayoutDisputeAttention(a,{stationIds:ids});
       if(!attention)throw Error('Unavailable');
       return{
-        value:attention.active?`${attention.active} open`:'None open',
-        count:attention.active,
+        value:attention.pending?`${attention.pending} pending`:'None pending',
+        count:attention.pending,
         href:attention.href,
         detail:attention.detail,
-        action:attention.awaitingYou?'Review disputes waiting for you':'Open payout disputes',
-        tone:attention.awaitingYou||attention.active?'action':'clear'
+        action:attention.pending?'Review pending disputes':'Open payout disputes',
+        tone:attention.pending?'action':'clear'
       };
     }),
     (async():Promise<AttentionItem[]>=>{

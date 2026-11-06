@@ -61,14 +61,27 @@ test("deep links prefer the single populated stage", () => {
   assert.equal(preferredPayoutDisputeHref({ initial: 1, final: 1, processing: 0, active: 2 }), "/payments/disputes?status=active");
 });
 
-test("detail distinguishes personal queue from station active totals", () => {
+test("detail distinguishes personal pending queue from other open tickets", () => {
   assert.match(
-    payoutDisputeAttentionDetail({ active: 5, awaitingYou: 2, initial: 3, final: 1, processing: 1 }),
-    /2 waiting for you · 5 active/
+    payoutDisputeAttentionDetail({ active: 5, awaitingYou: 2, pending: 2, initial: 3, final: 1, processing: 1 }),
+    /2 pending for you/
   );
   assert.equal(
-    payoutDisputeAttentionDetail({ active: 4, awaitingYou: 0, initial: 4, final: 0, processing: 0 }),
-    "4 active · 4 initial"
+    payoutDisputeAttentionDetail({ active: 4, awaitingYou: 0, pending: 4, initial: 4, final: 0, processing: 0 }),
+    "4 pending · 4 initial"
+  );
+  assert.match(
+    payoutDisputeAttentionDetail({ active: 3, awaitingYou: 0, pending: 0, initial: 0, final: 3, processing: 0 }),
+    /none pending for you/
+  );
+});
+
+test("notification statuses never include completed resolved or rejected", () => {
+  assert.equal(payoutDisputeWorkflowStage("resolved"), null);
+  assert.equal(payoutDisputeWorkflowStage("rejected"), null);
+  assert.deepEqual(
+    summarizePayoutDisputeStatuses([{ status: "resolved" }, { status: "rejected" }, { status: "open" }]),
+    { active: 1, initial: 1, final: 0, processing: 0 }
   );
 });
 
@@ -138,9 +151,35 @@ test("awaiting-you respects role route and distinct-person rules", () => {
   );
 });
 
-test("badge shows active disputes in scope so operators see how many came in", () => {
-  const attention = { active: 9, awaitingYou: 2, initial: 5, final: 3, processing: 1, pageCode: "ops_workforce_payout_disputes", href: "/payments/disputes", detail: "" };
-  assert.equal(payoutDisputeBadgeCount(attention), 9);
+test("badge counts pending only — not completed or already-handled stages", () => {
+  assert.equal(
+    payoutDisputeBadgeCount({
+      active: 9,
+      awaitingYou: 2,
+      pending: 2,
+      initial: 5,
+      final: 3,
+      processing: 1,
+      pageCode: "ops_workforce_payout_disputes",
+      href: "/payments/disputes",
+      detail: ""
+    }),
+    2
+  );
+  assert.equal(
+    payoutDisputeBadgeCount({
+      active: 4,
+      awaitingYou: 0,
+      pending: 0,
+      initial: 0,
+      final: 4,
+      processing: 0,
+      pageCode: "ops_workforce_payout_disputes",
+      href: "/payments/disputes",
+      detail: ""
+    }),
+    0
+  );
 });
 
 test("station filter never widens past the actor scope and empty selection counts as zero", () => {
