@@ -15,6 +15,7 @@ import { loadCodPendingReport } from './cod-pending-data';
 import { loadCapacitySnapshot } from './capacity-snapshot';
 import type { CodLocationRow } from './cod';
 import { isManager as isStoreAuditManager } from './store-audits/model';
+import { loadPayoutDisputeAttention } from '@/lib/payout-dispute-attention';
 import { attentionOrder, auditAttention, storeAuditAttention, codAttention, documentAttention, type AttentionDocument, type AttentionItem } from './command-attention';
 
 export function startCommandAttention(a:AuthorizationContext,locations:CodLocationRow[],today:string,mode:string,now=Date.now()) {
@@ -115,6 +116,19 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       if(docs.error||roles.error)throw Error('Unavailable');
       const s=documentAttention((docs.data??[]) as AttentionDocument[],roles.data??[],ids,a.roleId,a.hasAllLocationAccess||a.isMasterOwner,today);
       return{value:`${s.expired+s.soon} renewals`,detail:`${s.expired} expired · ${s.soon} due within 30 days · location documents only`,action:'Review documents',tone:s.expired?'urgent':s.soon?'action':'clear'};
+    }),
+    check(has('ops_workforce_payout_disputes')&&ids.length>0,'payout-disputes','Payout disputes','/payments/disputes?status=active',async()=>{
+      // Selected Command Center stations only — never widen to company-wide when the filter is empty.
+      const attention=await loadPayoutDisputeAttention(a,{stationIds:ids});
+      if(!attention)throw Error('Unavailable');
+      return{
+        value:attention.active?`${attention.active} open`:'None open',
+        count:attention.active,
+        href:attention.href,
+        detail:attention.detail,
+        action:attention.awaitingYou?'Review disputes waiting for you':'Open payout disputes',
+        tone:attention.awaitingYou||attention.active?'action':'clear'
+      };
     }),
     (async():Promise<AttentionItem[]>=>{
       const items:AttentionItem[]=[];

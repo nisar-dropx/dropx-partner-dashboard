@@ -6,6 +6,7 @@ import { loadPeopleExceptionCount } from "@/lib/people-exception-count";
 import { matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
 import { initialApprovalReadyIds } from "@/lib/payment-initial-approval-gate";
 import { countWorkforceConnectAttention } from "@/lib/workforce-connect";
+import { loadPayoutDisputeAttention, payoutDisputeBadgeCount } from "@/lib/payout-dispute-attention";
 
 export type PaymentNotificationItem = {
   key: string;
@@ -53,6 +54,7 @@ type PaymentNotificationRequest = {
 
 const EMPTY_BADGES = {
   workforce_connect: 0,
+  workforce: 0,
   people_all: 0,
   people_review: 0,
   people_exceptions: 0,
@@ -61,7 +63,9 @@ const EMPTY_BADGES = {
   payment_requests: 0,
   payment_approvals: 0,
   payment_process: 0,
-  payment_reports: 0
+  payment_reports: 0,
+  ops_workforce_payout_disputes: 0,
+  workforce_payout_disputes: 0
 };
 
 const TERMINAL_APPROVAL_STATUSES = new Set(["RE_APPROVED", "REJECTED", "RETURNED", "CANCELLED", "PROCESSING", "PROCESSED"]);
@@ -220,11 +224,34 @@ async function loadPaymentNotificationSnapshotUncached(authorization: Authorizat
     badges.workforce_connect = await countWorkforceConnectAttention(authorization).catch(() => 0);
     addItem(items, "workforce_connect", "Workforce Connect", `${badges.workforce_connect} open conversation${badges.workforce_connect === 1 ? "" : "s"}`, "/workforce-connect", badges.workforce_connect);
   }
+
+  // Payout disputes must load before the payments early-return: Ops users often have
+  // ops_workforce_payout_disputes without the dashboard `payments` parent page.
+  const disputeAttention = await loadPayoutDisputeAttention(authorization).catch(() => null);
+  if (disputeAttention) {
+    const disputeCount = payoutDisputeBadgeCount(disputeAttention);
+    badges[disputeAttention.pageCode] = disputeCount;
+    // Roll into the visible parent group on each surface.
+    if (accessSurface === "ops") badges.workforce = disputeCount;
+    else badges.payments = disputeCount;
+    addItem(
+      items,
+      disputeAttention.pageCode,
+      "Payout disputes",
+      disputeAttention.detail,
+      disputeAttention.href,
+      disputeCount
+    );
+  }
+
   badges.people_review = await loadPeopleReviewCount(authorization);
   badges.people_exceptions = await loadPeopleExceptionCount(authorization);
   badges.people_all = badges.people_review + badges.people_exceptions;
+  const disputeTotal = disputeAttention ? payoutDisputeBadgeCount(disputeAttention) : 0;
   const canSeePayments = hasPermission(authorization, "payments", "access");
-  if (!canSeePayments || !supabaseAdmin) return { total: badges.workforce_connect, badges, items };
+  if (!canSeePayments || !supabaseAdmin) {
+    return { total: badges.workforce_connect + disputeTotal, badges, items };
+  }
 
   const { data, error } = await supabaseAdmin
     .from("payment_requests")
@@ -339,10 +366,12 @@ async function loadPaymentNotificationSnapshotUncached(authorization: Authorizat
     );
   }
 
-  badges.payments = badges.expense_requests + badges.payment_requests + badges.payment_approvals + badges.payment_process;
+  // Disputes live under Workforce on Ops and under Payments on Dashboard — only roll into the matching parent.
+  badges.payments = badges.expense_requests + badges.payment_requests + badges.payment_approvals + badges.payment_process
+    + (accessSurface === "dashboard" ? disputeTotal : 0);
 
   return {
-    total: badges.payments + badges.workforce_connect,
+    total: badges.payments + badges.workforce_connect + (accessSurface === "ops" ? disputeTotal : 0),
     badges,
     items
   };

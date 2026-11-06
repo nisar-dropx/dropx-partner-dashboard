@@ -5,7 +5,7 @@ import type { StoreAudit } from './store-audits/model';
 export type AttentionItem = { key:string; title:string; value:string; detail:string; href:string; action:string; tone:'urgent'|'action'|'unknown'|'clear'; count?:number; dueAt?:string };
 export function attentionOrder(items:AttentionItem[]) {
   const rank={urgent:0,action:1,unknown:2,clear:3};
-  const order=['audits','cod','cms','people','vehicles','payments','rosters','capacity','documents'];
+  const order=['audits','cod','cms','people','vehicles','payout-disputes','payments','rosters','capacity','documents'];
   const due=(i:AttentionItem)=>i.dueAt&&Number.isFinite(Date.parse(i.dueAt))?Date.parse(i.dueAt):Infinity;
   return [...items].sort((a,b)=>rank[a.tone]-rank[b.tone]||due(a)-due(b)||(b.count??0)-(a.count??0)||order.indexOf(a.key)-order.indexOf(b.key)||a.key.localeCompare(b.key));
 }

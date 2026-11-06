@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowUpRight, ClipboardCheck, Users, Truck, Wallet, CalendarDays, FileCheck, Boxes, Banknote } from 'lucide-react';
+import { ArrowUpRight, ClipboardCheck, Users, Truck, Wallet, CalendarDays, FileCheck, Boxes, Banknote, MessageSquareWarning } from 'lucide-react';
 import { attentionOrder, type AttentionItem } from '@/lib/ops-pulse/command-attention';
 import { formatOpsDate } from '@/lib/ops-pulse/date-format';
 import styles from './ops-command-attention.module.css';
@@ -25,7 +25,7 @@ export function CommandAttentionResult({id,items}:{id:number;items:AttentionItem
   return null;
 }
 
-const icons={audits:ClipboardCheck,people:Users,vehicles:Truck,cod:Wallet,capacity:Boxes,documents:FileCheck,payments:Banknote,rosters:CalendarDays};
+const icons={audits:ClipboardCheck,people:Users,vehicles:Truck,cod:Wallet,capacity:Boxes,documents:FileCheck,'payout-disputes':MessageSquareWarning,payments:Banknote,rosters:CalendarDays};
 export function CommandAttentionView({items,today,pending=0,stations=[],station='',range}:{items:AttentionItem[];today:string;pending?:number;stations?:AttentionStation[];station?:string;range?:{from:string;to:string}}) {
   const router=useRouter();
   const [pendingNav,startTransition]=useTransition();
