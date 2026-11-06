@@ -39,7 +39,7 @@ const db = { from(table) {
   const filters = [];
   const result = () => ({ data: table === "stations" ? (scope ? { id: "station1", station_code: "QLDA" } : null)
     : table === "ops_performance_reviews" ? review : table === "ops_performance_review_steps" ? [step] : saved, count: table === "ops_performance_connections" ? (vehicleDetails ? 1 : 0) : table === "ops_performance_daily_inputs" ? (emdRecorded ? 1 : 0) : null, error: null });
-  const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); calls.push([table,k,v]); return q; }, not() { return q; }, limit() { return Promise.resolve(result()); }, maybeSingle() { return Promise.resolve(result()); }, order() { return Promise.resolve(result()); }, then(resolve,reject) { return Promise.resolve(result()).then(resolve,reject); } };
+  const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); calls.push([table,k,v]); return q; }, or(value) { calls.push([table,"or",value]); return q; }, not() { return q; }, limit() { return Promise.resolve(result()); }, maybeSingle() { return Promise.resolve(result()); }, order() { return Promise.resolve(result()); }, then(resolve,reject) { return Promise.resolve(result()).then(resolve,reject); } };
   return q;
 }, async rpc(name, args) { calls.push([name,args]); if (args.p_action === "item") saved.push({ metric_key: args.p_data.metric_key, root_cause: args.p_data.root_cause }); return { error: null }; } };
 const dependencies = {

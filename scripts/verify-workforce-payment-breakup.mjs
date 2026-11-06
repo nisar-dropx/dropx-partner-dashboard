@@ -141,7 +141,8 @@ assert.match(helperPayoutLoader, /biometricIdBelongsOnlyToProfile\(helperId, "wo
 assert.match(helperPayoutLoader, /attendanceSource:\s*"biometric"/, "Provider-independent Helper payment must calculate from biometric attendance");
 assert.match(helperPayoutLoader, /pay_schedule,sort_order,payment_fields/, "Helper payout fallback fields must load the saved payment-field order");
 assert.match(helperPayoutLoader, /const currentComponentOrder = paymentComponentOrderMap\(componentsByMethod\.get\(methodId\)[\s\S]*?lines: sortByPaymentFieldOrder/, "Existing Helper allocation values must render in the payment method's current field order");
-assert.doesNotMatch(helperPayoutLoader, /from\("stations"\)[\s\S]{0,160}\.eq\("is_active", true\)/, "Historical Helper payouts must remain visible after a station is deactivated");
+assert.match(helperPayoutLoader, /from\("stations"\)[\s\S]{0,160}\.eq\("is_active", true\)/, "The current Helper payout worksheet must follow the active-location policy");
+assert.match(helperPayoutLoader, /hide_from_location_list\.is\.null,hide_from_location_list\.eq\.false/, "The current Helper payout worksheet must exclude hidden locations");
 assert.doesNotMatch(helperPayoutLoader, /field_executive_provider_mappings|provider_member_id/, "Helper payout calculation must not require provider mapping");
 assert.match(directAllocationPage, /from\("helper_payment_allocations"\)/, "Helper payment methods must be allocatable from the direct-pay worksheet");
 assert.match(directAllocationAction, /save_helper_payment_allocation/, "Helper allocations must save through the validated Helper RPC");
