@@ -595,7 +595,7 @@ function QueuePanel({
         {!loading && !rows.length && !error ? (
           <div className="ai-empty">
             <strong>Queue is clear</strong>
-            <p>No invoices are waiting for DSP accept right now. Auto-accept will keep watching every 2 hours.</p>
+            <p>No invoices are waiting for DSP accept right now. Auto-accept will keep watching every 15 minutes.</p>
           </div>
         ) : rows.length ? (
           <div className="ai-scroll">
@@ -1392,7 +1392,7 @@ function AutomationPanel({
         <div>
           <h2>Automation</h2>
           <p>
-            Auto-accept runs every 2 hours at :15 UTC for pending DSP invoices only (cap 25 / tick). Monday 07:30 IST
+            Auto-accept runs every 15 minutes for pending DSP invoices only (cap 25 / tick). Monday 07:30 IST
             rebuilds Tally. Final P&L syncs daily at 08:00 IST.
           </p>
         </div>
