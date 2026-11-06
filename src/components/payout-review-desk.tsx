@@ -4,6 +4,7 @@ import { decodePayoutReviewReason } from "@/lib/payout-review-display";
 import { PayoutDisputeCorrectionInputs } from "./payout-dispute-correction-inputs";
 import { payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadDisputeFinanceAccess, disputeFinalRoleIds } from "@/lib/payout-dispute-finance-access";
 import styles from "./payout-review-desk.module.css";
 import { UrlPager, readPaging } from "./url-pager";
 
@@ -117,6 +118,7 @@ export async function PayoutReviewDesk({
   if (!supabaseAdmin) return <p role="alert">Payout disputes are unavailable.</p>;
 
   const company = requireCompanyId(auth);
+  const financeAccess = pageCode === "workforce_payout_disputes" ? await loadDisputeFinanceAccess(auth) : null;
   const scope = auth.hasAllLocationAccess ? null : auth.locationScopeIds;
   const requestedStatus = params.status && params.status in STATUS_FILTERS ? params.status : "active";
   const filteredStatuses = STATUS_FILTERS[requestedStatus];
@@ -267,7 +269,11 @@ export async function PayoutReviewDesk({
   const canEditPayout = hasPermission(auth, payoutPageCode, "edit") && !auth.readOnly;
   const stageAllowed = (disputeId: string, stage: WorkflowStage) => {
     const selectedRole = routeRoleByStage.get(`${disputeId}:${stage}`);
-    return Boolean(selectedRole && auth.effectiveRoleIds.includes(selectedRole));
+    const dispute = disputes.find((row) => String(row.id) === disputeId);
+    const actorRoles = stage === "final" && financeAccess
+      ? disputeFinalRoleIds(auth.effectiveRoleIds, financeAccess, String(dispute?.station_id || ""))
+      : auth.effectiveRoleIds;
+    return Boolean(selectedRole && actorRoles.includes(selectedRole));
   };
   const configFor = (dispute: Row) => {
     const snapshot = record(dispute.workflow_snapshot);

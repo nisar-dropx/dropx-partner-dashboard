@@ -3,6 +3,7 @@ import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
 import { notifyAssociateOfPayoutDispute } from "@/lib/payout-dispute-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadDisputeFinanceAccess, disputeFinalRoleIds } from "@/lib/payout-dispute-finance-access";
 import { buildDisputeCorrectionPlan, payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,6 +52,13 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
 
   const payload: Record<string, unknown> = { note: note || null, portal: ops ? "ops" : "workforce" };
   const companyId = requireCompanyId(auth);
+  let actorRoleIds = auth.effectiveRoleIds;
+  if (!ops && ["approve_final", "send_back"].includes(action)) {
+    const dispute = await supabaseAdmin.from("workforce_payout_disputes")
+      .select("station_id").eq("company_id", companyId).eq("id", disputeId).single();
+    if (dispute.error || !dispute.data) throw new Error("Dispute is unavailable. Refresh and try again.");
+    actorRoleIds = disputeFinalRoleIds(actorRoleIds, await loadDisputeFinanceAccess(auth), dispute.data.station_id);
+  }
   if (action === "propose_correction") {
     let query = supabaseAdmin.from("workforce_payout_disputes").select("reason,category,publication_id,version").eq("company_id", companyId).eq("id", disputeId);
     if (!auth.hasAllLocationAccess) query = query.in("station_id", auth.locationScopeIds.length ? auth.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
@@ -83,7 +91,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
     p_dispute: disputeId,
     p_actor: auth.userId,
     p_actor_name: auth.fullName || auth.email || "Authorised reviewer",
-    p_actor_role_ids: auth.effectiveRoleIds,
+    p_actor_role_ids: actorRoleIds,
     p_action: action,
     p_expected_version: expectedVersion,
     p_locations: auth.hasAllLocationAccess ? null : auth.locationScopeIds,

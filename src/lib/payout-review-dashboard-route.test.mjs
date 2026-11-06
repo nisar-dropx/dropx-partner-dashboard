@@ -28,7 +28,8 @@ test("Dashboard and Ops expose the configured three-person payout-correction flo
   assert.match(reviewActions, /requirePagePermissionOrThrow\(pageCode, "edit"\)/);
   assert.match(routeActions, /if \(isRedirectError\(error\)\) throw error/);
   assert.match(reviewActions, /rpc\("workforce_dispute_transition_v2"/);
-  assert.match(reviewActions, /p_actor_role_ids: auth\.effectiveRoleIds/);
+  assert.match(reviewActions, /p_actor_role_ids: actorRoleIds/);
+  assert.match(reviewActions, /disputeFinalRoleIds/);
   assert.match(reviewActions, /p_expected_version: expectedVersion/);
   assert.match(reviewActions, /"propose_correction"/);
   assert.match(reviewActions, /"propose_rejection"/);
