@@ -55,6 +55,7 @@ const db = { from(table) {
     return { data, count: table === 'ops_performance_connections' || table === 'ops_performance_daily_inputs' ? 1 : null, error: savedError && table === 'ops_performance_review_items' ? { message: 'Unavailable' } : null };
   };
   const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); calls.push([table,k,v]); return q; },
+    or(value) { calls.push([table,'or',value]); return q; },
     not() { return q; }, limit() { return Promise.resolve(result()); }, order() { return Promise.resolve(result()); }, maybeSingle() { return Promise.resolve(result()); }, then(a,b) { return Promise.resolve(result()).then(a,b); } }; return q;
 }, async rpc(name, args) { calls.push([name,args]); if (args.p_action === 'item') saved = [args.p_data]; return { error: null }; } };
 const discipline = { isDisciplineRcaKey: () => false, missingDisciplineReasons: () => [] };
