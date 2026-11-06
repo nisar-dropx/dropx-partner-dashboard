@@ -1,4 +1,5 @@
 import type { AuthorizationContext } from "@/lib/authorization";
+import { isCurrentLocation } from "@/lib/current-location-policy";
 import {
   allocationActiveOn,
   cumulativeDirectPayUnitsBefore,
@@ -54,10 +55,8 @@ export async function loadHelperPayoutRows(
 
   let locationsQuery = supabaseAdmin
     .from("stations")
-    .select("id, station_code, station_name, is_active")
-    .eq("company_id", companyId)
-    .eq("is_active", true)
-    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
+    .select("id, station_code, station_name, is_active, hide_from_location_list")
+    .eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) {
     locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   }
@@ -102,7 +101,7 @@ export async function loadHelperPayoutRows(
   const locations = locationsResult.data ?? [];
   const allowedLocationIds = new Set(locations.map((location) => String(location.id)));
   const activeLocationIds = new Set(locations
-    .filter((location) => location.is_active === true)
+    .filter((location) => isCurrentLocation(location))
     .map((location) => String(location.id)));
   const currentHelpers = (currentHelpersResult.data ?? []).filter((helper: any) => activeLocationIds.has(String(helper.location_id)));
   const allAllocations = (allocationsResult.data ?? []).filter((allocation: any) => allowedLocationIds.has(String(allocation.station_id)));
