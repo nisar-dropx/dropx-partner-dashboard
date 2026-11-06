@@ -20,6 +20,7 @@ import {
   duplicateAdvanceWorkforceIds,
   resolveWorkforcePayoutBankSelection,
   workforcePayoutMappingLockSelectionIds,
+  selectedWorkforcePayoutMappingUnlocks,
   type WorkforcePayoutPublicationLockState
 } from "@/lib/workforce-payout-action-selection";
 import { chunkedValues } from "@/lib/bounded-concurrency";
@@ -592,7 +593,10 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     () => workforcePayoutMappingLockSelectionIds(selectedRows, "locked"),
     [selectedRows]
   );
-  const relockTargets = mappingUnlocks;
+  const relockTargets = useMemo(
+    () => selectedWorkforcePayoutMappingUnlocks(selectedRows, mappingUnlocks),
+    [selectedRows, mappingUnlocks]
+  );
   const advanceSelectionConflictIds = useMemo(() => duplicateAdvanceWorkforceIds(advanceSelectedRows), [advanceSelectedRows]);
   const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
   const skippedReviewSelectionCount = selectedRows.length - reviewSelectedRows.length;
@@ -1040,9 +1044,9 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         </div>
       </div>
       {canEdit ? <div className="payout-global-actions">
-        {canManageLocks && (mappingUnlockWorkforceIds.length || relockTargets.length) ? <PayoutActionMenu label="Mapping actions">
+        {canManageLocks && (mappingUnlockWorkforceIds.length || mappingUnlocks.length) ? <PayoutActionMenu label="Mapping actions">
           {mappingUnlockWorkforceIds.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("unlock", event.currentTarget)} type="button">Unlock mapping ({mappingUnlockWorkforceIds.length} {mappingUnlockWorkforceIds.length === 1 ? "ID" : "IDs"})</button> : null}
-          {relockTargets.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish ({relockTargets.length})</button> : null}
+          {mappingUnlocks.length ? <button className="button secondary" disabled={actionBusy || !relockTargets.length} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish selected ({relockTargets.length})</button> : null}
         </PayoutActionMenu> : null}
         {canProcessPayments ? <PayoutActionMenu label="Bank & payment">
           {audience === "workforce" && (hasAllLocationAccess || holdSelections.holdItems.length > 0 || holdSelections.releaseItems.length > 0) ? <WorkforcePayoutBulkHold
@@ -1365,7 +1369,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         <div className="panel-body">
           <p id="mapping-lock-dialog-description">{mappingDialog.action === "unlock"
             ? `Unlock ${mappingUnlockWorkforceIds.length} selected DropX ID${mappingUnlockWorkforceIds.length === 1 ? "" : "s"} only for ${periodStart.slice(0, 7)}. You can then correct the provider ID mapping. The current DropX One payout stays visible as revising until relock.`
-            : `Recalculate and freeze the ${relockTargets.length} open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
+            : `Recalculate and freeze only the ${relockTargets.length} selected open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}. Other open corrections remain unlocked. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
           <div className="payout-inline-message">
             <strong>{mappingDialog.action === "unlock" ? "Selected IDs" : "Open corrections"}</strong>
             <p>{(mappingDialog.action === "unlock"

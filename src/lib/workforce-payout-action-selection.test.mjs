@@ -8,7 +8,8 @@ import {
   duplicateAdvanceWorkforceIds,
   resolveWorkforcePayoutBankSelection,
   selectedWorkforcePayoutBankRows,
-  workforcePayoutMappingLockSelectionIds
+  workforcePayoutMappingLockSelectionIds,
+  selectedWorkforcePayoutMappingUnlocks
 } from "./workforce-payout-action-selection.ts";
 
 const payoutTable = readFileSync(new URL("../components/workforce-payout-table.tsx", import.meta.url), "utf8");
@@ -16,6 +17,26 @@ const payoutPage = readFileSync(new URL("../app/payments/workforce-payouts/page.
 const payoutLoader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
 const payoutPreviewBatching = readFileSync(new URL("./payout-payment-preview-batching.ts", import.meta.url), "utf8");
 const postgrestInFilterBatching = readFileSync(new URL("./postgrest-in-filter-batching.ts", import.meta.url), "utf8");
+
+test("relock targets only selected unlocked Workforce among all open corrections", () => {
+  const unlocks = Array.from({ length: 44 }, (_, i) => ({ id: `unlock-${i}`, workforceId: `worker-${i}` }));
+  assert.deepEqual(selectedWorkforcePayoutMappingUnlocks([], unlocks), []);
+  const selected = [
+    { reviewSubjectId: "worker-6", publicationLockState: "unlocked" },
+    { reviewSubjectId: "worker-6", publicationLockState: "unlocked" },
+    { reviewSubjectId: "worker-7", publicationLockState: "locked" },
+    { reviewSubjectId: "worker-99", publicationLockState: "unlocked" }
+  ];
+  assert.deepEqual(selectedWorkforcePayoutMappingUnlocks(selected, unlocks), [unlocks[6]]);
+  assert.deepEqual(selectedWorkforcePayoutMappingUnlocks([
+    ...selected, { reviewSubjectId: "worker-20", publicationLockState: "unlocked" }
+  ], unlocks).map((entry) => entry.id), ["unlock-6", "unlock-20"]);
+  assert.match(payoutTable, /selectedWorkforcePayoutMappingUnlocks\(selectedRows, mappingUnlocks\)/);
+  assert.match(payoutTable, /Relock &amp; republish selected/);
+  assert.match(payoutTable, /disabled=\{actionBusy \|\| !relockTargets.length\}/);
+  assert.match(payoutTable, /relockTargets.map\(\(entry\) => entry.id\)/);
+  assert.doesNotMatch(payoutTable, /const relockTargets = mappingUnlocks/);
+});
 
 test("payment setup conflict rows are excluded from every payout mutation", () => {
   assert.match(payoutTable, /function canManuallyEditPayout[\s\S]*?row\.mappingStatus !== "Payment setup conflict"/);
