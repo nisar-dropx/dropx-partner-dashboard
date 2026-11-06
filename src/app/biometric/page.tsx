@@ -185,7 +185,9 @@ async function loadBiometricMonitor(companyId: string) {
     supabaseAdmin
       .from("stations")
       .select("id, station_code, station_name")
-      .eq("company_id", companyId),
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false"),
     supabaseAdmin
       .from("biometric_raw_events")
       .select("created_at, event_type, device_serial, terminal_id, trans_id, enrolment_id, punch_time, source_ip")

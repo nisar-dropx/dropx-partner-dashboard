@@ -17,6 +17,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
+import { isCurrentLocation } from "@/lib/current-location-policy";
 
 import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 
@@ -53,7 +54,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     // Payouts and mapping history remain valid after a station is deactivated.
     // Load every authorized company station so those stored mappings do not
     // disappear from this historical reconciliation screen.
-    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, parent_station_id, location_models(code)").eq("company_id", companyId).order("station_code"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, parent_station_id, is_active, hide_from_location_list, location_models(code)").eq("company_id", companyId).order("station_code"),
     readAllRows(supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation, provider_employee_id").eq("company_id", companyId).is("deleted_at", null).order("id")),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason, updated_at").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
@@ -62,7 +63,10 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   ]);
   const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error;
   const allStations = stationsResult.data ?? [];
-  const stations = allStations.filter((station) => allowed(station.id));
+  // Keep every station for historical labels, but current mapping choices and
+  // provider activity must use only locations that are operational now.
+  const stations = allStations.filter((station) => allowed(station.id) && isCurrentLocation(station));
+  const currentStationIds = new Set(stations.map((station) => station.id));
   const stationByCode = new Map(stations.map((station) => [String(station.station_code ?? "").trim().toUpperCase(), station]));
   const stationById = new Map(stations.map((station) => [String(station.id), station]));
   const activityMonths = ((providerResult.data ?? []) as ProviderMemberSource[])
@@ -89,6 +93,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const currentMappingsByWorkforce = new Map<string, Mapping[]>();
   const mappingByMember = new Map<string, Mapping>();
   for (const mapping of activeMappings) {
+    if (!mapping.station_id || !currentStationIds.has(mapping.station_id)) continue;
     if (mapping.workforce_id) {
       appendMapValue(currentMappingsByWorkforce, mapping.workforce_id, mapping);
       const current = mappingByWorkforce.get(mapping.workforce_id);
@@ -116,7 +121,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const workforceById = new Map((workersResult.data ?? []).map((worker) => [worker.id, worker]));
   const designationById = new Map((designationsResult.data ?? []).map((designation) => [String(designation.id), designation]));
   const designationByName = new Map((designationsResult.data ?? []).flatMap((designation) => [designation.name, designation.code].map((value) => [String(value ?? "").trim().toLowerCase(), designation] as const)));
-  const stationLabelById = new Map(stations.map((station) => [station.id, station.station_code]));
+  const stationLabelById = new Map(allStations.map((station) => [station.id, station.station_code]));
   const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
     .map((method) => ({
       id: method.id,
@@ -185,7 +190,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   }
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
     const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
-    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || registeredMappingByWorkforce.has(worker.id) || Boolean(designation && designation.provider_mapping_required !== false));
+    return allowed(worker.location_id) && Boolean(worker.location_id && currentStationIds.has(worker.location_id)) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || registeredMappingByWorkforce.has(worker.id) || Boolean(designation && designation.provider_mapping_required !== false));
   }).map((worker) => {
     const registeredMappings = registeredMappingByWorkforce.get(worker.id) ?? [];
     const activeWorkerMappings = currentMappingsByWorkforce.get(worker.id) ?? [];

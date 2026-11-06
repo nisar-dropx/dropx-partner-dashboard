@@ -22,7 +22,7 @@ export default async function ConversionRateRulesPage({ searchParams }: { search
   const permission = authorization.permissions.payment_methods;
   if (!supabaseAdmin) return <AppShell active="Payment Methods" pageCode="payment_methods"><PageHead title="Conversion rate rules" subtitle="Database connection is unavailable." /></AppShell>;
   const locationIds = authorization.hasAllLocationAccess ? null : authorization.locationScopeIds.length ? authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"];
-  let stationQuery = supabaseAdmin.from("stations").select("id,station_code,station_name,location_model_id").eq("company_id", companyId).order("station_code");
+  let stationQuery = supabaseAdmin.from("stations").select("id,station_code,station_name,location_model_id").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").order("station_code");
   let rulesQuery = supabaseAdmin.from("payment_conversion_rate_rules")
     .select("id,name,payment_method_id,payment_field_id,station_id,location_model_id,numerator_source,denominator_source,effective_from,effective_to,tiers").eq("company_id", companyId).order("effective_from", { ascending: false }).order("id");
   if (locationIds) { stationQuery = stationQuery.in("id", locationIds); rulesQuery = rulesQuery.in("station_id", locationIds); }

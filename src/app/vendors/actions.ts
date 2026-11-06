@@ -126,7 +126,7 @@ export async function createVendorContract(formData: FormData) {
     if (category.data.operating_model === "fleet_attendance" && !fleetVehicleId) throw new Error("Select the Fleet vehicle for a van vendor contract.");
     const [vendor, station, contact, head] = await Promise.all([
       supabaseAdmin.from("vendors").select("id,full_name,is_active").eq("company_id", companyId).eq("id", vendorId).is("deleted_at", null).maybeSingle(),
-      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).maybeSingle(),
+      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false").maybeSingle(),
       supabaseAdmin.from("payment_contacts").select("id,verified_at,bank_account_no,ifsc").eq("company_id", companyId).eq("id", paymentContactId).maybeSingle(),
       supabaseAdmin.from("payment_heads").select("id,is_active").eq("company_id", companyId).eq("id", paymentHeadId).maybeSingle()
     ]);

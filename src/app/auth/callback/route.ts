@@ -279,8 +279,11 @@ export async function GET(request: NextRequest) {
       .eq("code", "LOCATION")
   ]);
 
-  const candidateEmailLocations = (allEmailLocations ?? []).filter(
-    (location) => location.is_active === true && location.hide_from_location_list !== true && emailsFromField(location.station_email).includes(email)
+  const allMatchedEmailLocations = (allEmailLocations ?? []).filter(
+    (location) => emailsFromField(location.station_email).includes(email)
+  );
+  const candidateEmailLocations = allMatchedEmailLocations.filter(
+    (location) => location.is_active === true && location.hide_from_location_list !== true
   )
     .filter((location) => !profile?.company_id || location.company_id === profile.company_id);
   const matchedCompanyIds = Array.from(new Set(candidateEmailLocations.map((location) => location.company_id).filter(Boolean)));
