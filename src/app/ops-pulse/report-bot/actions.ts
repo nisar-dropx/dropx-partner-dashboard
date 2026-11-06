@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, type ReportBotAuthorization } from "@/lib/report-bot/access";
+import { dispatchReports, parseSlots, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
 import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isTestingGroupName, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
@@ -20,7 +21,6 @@ import { workerRequest } from "@/lib/report-bot/worker-client";
 
 import { reportBotWorkspace, reportBotSetupHref, reportBotPage, reportBotHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
-import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 
 const FLASH_COOKIE = "dropx_report_bot_flash";
 const TABS = new Set(["today", "review", "groups", "reports", "connection", "settings", "actions", "summary"]);
@@ -43,10 +43,10 @@ function isRedirect(error: unknown) {
 /** Runs a mutation with edit permission and turns any error into a visible message on the same tab. */
 async function mutate(tab: string, work: (context: { authorization: ReportBotAuthorization; companyId: string }) => Promise<Flash>, workspace: ReportBotWorkspace = "dark_store") {
   const authorization: ReportBotAuthorization = { ...await requirePagePermission(reportBotPage(workspace), "edit"), reportBotWorkspace: workspace };
-  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   let flash: Flash;
   try {
+    if (workspace === "last_mile" && ["worker","connection","settings"].includes(tab)) throw new Error("Shared connection settings require Dark Store setup access.");
     flash = await work({ authorization, companyId });
   } catch (error) {
     if (isRedirect(error)) throw error;
@@ -976,4 +976,26 @@ export async function previewScheduleReminders(form: FormData) {
     const upcoming = preview.upcoming.map((slot) => slot.label).join(", ") || "none left today";
     return { notice: `Preview (${schedule.is_active ? "active" : "draft/inactive"}): due ${formatClock(schedule.due_time)}; upcoming reminders today: ${upcoming}; ${preview.past_today} slot(s) already past.` };
   }, reportBotWorkspace(form.get("workspace")));
+}
+
+export async function saveDispatchRoutes(form: FormData) {
+  await mutate("reports",async ({authorization,companyId}) => {
+    const report = field(form,"report") as ReportKey;
+    const format = field(form,"format");
+    if (!Object.prototype.hasOwnProperty.call(dispatchReports,report) || !["photo","text","table"].includes(format)) throw new Error("Select a report and format.");
+    const times = parseSlots(field(form,"times"),report);
+    const mentions = [...new Set(field(form,"mentions").split(/[\s,]+/).filter(Boolean).map(n=>n.replace(/^\+/,"")))];
+    const question = field(form,"question");
+    if (mentions.length > 10 || mentions.some(n=>!/^\d{8,15}$/.test(n))) throw new Error("Enter up to 10 international numbers with country codes.");
+    if (question.length > 400) throw new Error("Keep the question under 400 characters.");
+    const ids = [...new Set(form.getAll("group_id").map(String))];
+    if (!ids.length || ids.length > 100) throw new Error("Select between 1 and 100 mapped Last Mile groups.");
+    const rows = await Promise.all(ids.map(async id => {
+      const g = await scopedGroup(authorization,companyId,id);
+      if (!g.location_id || !g.is_enabled) throw new Error("Enable the group and map its station first.");
+      return {company_id:companyId,group_id:id,location_id:g.location_id,report,times,format,mentions,question,pending_only:form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()};
+    }));
+    check(await reportBotDb().from("report_bot_lm_dispatch_routes").upsert(rows,{onConflict:"group_id,report"}),"Save report schedules");
+    return {notice:"Saved schedules for "+rows.length+" group(s)."};
+  },"last_mile");
 }

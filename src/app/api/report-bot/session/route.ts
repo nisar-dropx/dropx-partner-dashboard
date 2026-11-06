@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   let workspace;
   try { workspace = reportBotWorkspace(new URL(request.url).searchParams.get("workspace")); }
   catch { return NextResponse.json({ error: "Invalid workspace" }, { status: 400 }); }
+  if (workspace === "last_mile") return NextResponse.json({ error: "Manage the shared connection in Dark Store setup." }, { status: 403 });
   const authorization = await reportBotApiAuthorization("edit", workspace);
   if (!authorization) return NextResponse.json({ error: "Access denied" }, { status: 403 });
   const settings = await loadReportBotSettings(authorization.companyId!);

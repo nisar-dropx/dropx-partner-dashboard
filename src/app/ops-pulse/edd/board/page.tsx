@@ -90,7 +90,7 @@ export default async function StationBoardPage({
             initialClusters={String(searchParams?.clusters ?? "")}
             initialDetail={String(searchParams?.detail ?? "")}
             initialLayout={String(searchParams?.layout ?? "")}
-            canFlashReportBot={canFlashStationBoardReportBot(authorization.email)}
+            canFlashReportBot={canFlashStationBoardReportBot(authorization)}
           />
         ) : null}
       </div>

@@ -2,7 +2,6 @@ import { fleetNavItem, type NavItem } from "@/lib/app-navigation";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
 import { canAccessDailyCodPending } from "@/lib/ops-pulse/cod-pending-access";
-import { canAccessLastMileReportBot } from "@/lib/ops-pulse/last-mile-report-bot-access";
 
 export const shiftAttendanceNavItem: NavItem = { code: "ops_rostering", label: "Shift Attendance", href: "/ops-pulse?view=manpower", icon: "S" };
 
@@ -114,7 +113,6 @@ const administration: NavItem[] = [
   {code:'ops_notification_settings',label:'Settings',icon:'*',children:[
     {code:'ops_notification_settings',label:'Notifications',href:'/settings/notifications'},
     {code:'payment_settings',label:'Payout Dispute Workflow',href:'/settings/payout-disputes'},
-    lastMileReportBot,
   ]},
   {
     code: "master_data",
@@ -165,9 +163,10 @@ function modelOperations(mode: OperatingMode): NavItem {
     return {
       code: "cod",
       label: "Operations",
-      permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
+      permissionCodes: ["ops_lm_report_bot", "daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
       icon: "O",
       children: [
+        lastMileReportBot,
         networkPlanning,
         scrub,
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
@@ -179,9 +178,10 @@ function modelOperations(mode: OperatingMode): NavItem {
   return {
     code: "cod",
     label: "Operations",
-    permissionCodes: ["daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
+    permissionCodes: ["ops_lm_report_bot", "daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
     icon: "O",
     children: [
+      lastMileReportBot,
       networkPlanning,
       scrub,
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
@@ -266,7 +266,7 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   const items = opsNavCatalogForMode(mode);
-  const showLastMileReportBot = Boolean(authorization && canAccessLastMileReportBot(authorization.email));
+  const showLastMileReportBot = Boolean(authorization && hasPermission(authorization, "ops_lm_report_bot", "access"));
   return items.map(item=>item.children?{...item,children:item.children
     .filter(child => child.code !== "ops_lm_report_bot" || showLastMileReportBot)
     .filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))

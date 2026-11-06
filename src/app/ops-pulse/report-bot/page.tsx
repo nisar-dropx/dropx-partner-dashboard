@@ -1,3 +1,4 @@
+import { DispatchForm, type Schedule } from "./dispatch-form";
 import type { ComponentProps } from "react";
 import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotSetupHref, reportBotChatHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { loadCodLocations, locationModelName } from "@/lib/ops-pulse/cod";
@@ -30,7 +31,6 @@ import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-view
 import { ReminderTimesField } from "@/components/report-bot-reminder-times";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { canSeeGroup } from "@/lib/report-bot/access";
 import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from "@/lib/report-bot/logic";
@@ -110,7 +110,6 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
-  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   // Old links to the moved tabs land on the setup page instead of a blank tab.
@@ -143,6 +142,10 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   ]);
   const groups = ((groupsResult.data ?? []) as GroupRow[]).filter((group) => canSeeGroup(authorization, group));
   const groupIds = groups.map((group) => group.id);
+  const dispatch = workspace === "last_mile" && tab === "reports" && groupIds.length
+    ? await db.from("report_bot_lm_dispatch_routes").select("*").eq("company_id",companyId).in("group_id",groupIds).order("report") : {data:[],error:null};
+  const dispatchRoutes = (dispatch.data ?? []) as Schedule[];
+  const deliveries = dispatchRoutes.length ? await db.from("report_bot_lm_dispatch_runs").select("route_id,day,slot,status,detail").in("route_id",dispatchRoutes.map(r=>r.id)).order("created_at",{ascending:false}).limit(25) : {data:[],error:null};
   const reportTypes = (reportTypesResult.data ?? []) as ReportTypeRow[];
   const [schedulesResult, waitingCount, attentionCount] = groupIds.length ? await Promise.all([
     db.from("report_bot_schedules").select("*").eq("company_id", companyId).in("group_id", groupIds).order("due_time"),
@@ -215,6 +218,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
 
         <ReportBotNav workspace={workspace} active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
         <div className={s.formActions} style={{ marginBottom: 8 }}>
+          {workspace === "last_mile" && <Link className={s.button+" "+s.small} href={reportBotHref(workspace,"reports")+"#dispatch"}>Schedule WhatsApp reports</Link>}
           <Link className={`${s.button} ${s.small} ${tab === "actions" ? s.primary : ""}`} href={reportBotHref(workspace, "actions")}>Open actions</Link>
           <Link className={`${s.button} ${s.small} ${tab === "summary" ? s.primary : ""}`} href={reportBotHref(workspace, "summary")}>Daily site summary</Link>
         </div>
@@ -224,6 +228,11 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         {tab === "actions" ? await ActionsTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
         {tab === "summary" ? await SummaryTab({ workspace, companyId, groupIds, lookup, settings }) : null}
         {tab === "groups" ? await GroupsTab({ workspace, authorization, groups, canEdit }) : null}
+        {workspace === "last_mile" && tab === "reports" && <>
+          {dispatch.error || deliveries.error ? <p role="alert">Could not load outbound schedules or delivery history.</p> : null}
+          <DispatchForm canEdit={canEdit} schedules={dispatchRoutes} groups={groups.map(g=>({id:g.id,name:g.group_name || g.wa_group_id,mode:g.mode || "observe",mapped:Boolean(g.location_id && g.is_enabled && g.bot_in_group)}))}/>
+          {deliveries.data?.length ? <details className={s.cardBody}><summary>Recent dispatches</summary>{deliveries.data.map(r=><p key={r.route_id+r.day+r.slot}>{groups.find(g=>g.id===dispatchRoutes.find(d=>d.id===r.route_id)?.group_id)?.group_name} · {r.day} {r.slot} IST · {r.status} · {r.detail}</p>)}</details> : null}
+        </>}
         {tab === "reports" ? <ReportsTab workspace={workspace} groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
       </div>
     </AppShell>

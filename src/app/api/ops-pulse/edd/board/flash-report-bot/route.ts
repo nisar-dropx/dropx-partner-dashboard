@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     if (!authorization?.companyId) {
       return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     }
-    if (!canFlashStationBoardReportBot(authorization.email)) {
+    if (!canFlashStationBoardReportBot(authorization)) {
       return NextResponse.json({ error: "This flash option is not available for your account." }, { status: 403 });
     }
 

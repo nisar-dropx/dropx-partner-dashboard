@@ -6,7 +6,6 @@ import { ActionButton, CopyButton } from "@/components/report-bot-controls";
 import { ReportBotConnection } from "@/components/report-bot-connection";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotSetupHref, type ReportBotWorkspace } from "@/lib/report-bot/workspace";
 import { aiKeyName, ensureWorkerToken, loadReportBotSettings, portalPublicUrl, type ReportBotSettings } from "@/lib/report-bot/settings";
 import { connectWhatsApp, disconnectWhatsApp, rotateWorkerToken, saveBotSettings, saveWorkerUrl } from "../actions";
@@ -23,13 +22,12 @@ export default async function ReportBotSetupPage({ searchParams }: { searchParam
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
-  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   let settings: ReportBotSettings;
   try {
     settings = await loadReportBotSettings(companyId);
-    if (canEdit) settings = await ensureWorkerToken(settings);
+    if (canEdit && workspace === "dark_store") settings = await ensureWorkerToken(settings);
   } catch (error) {
     return (
       <AppShell active="Report Bot setup" pageCode={pageCode}>

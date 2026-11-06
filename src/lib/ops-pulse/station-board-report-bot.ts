@@ -99,7 +99,7 @@ export async function loadTestingFlashGroup(companyId: string): Promise<TestingF
     .from("report_bot_groups")
     .select("id,wa_group_id,group_name,workspace,is_enabled")
     .eq("company_id", companyId)
-    .eq("is_enabled", true);
+    .eq("workspace", "last_mile").eq("mode", "live").eq("bot_in_group", true).eq("is_enabled", true);
   if (result.error) throw new Error(result.error.message);
   const testing = (result.data ?? []).find((group) => isTestingGroupName(group.group_name));
   if (!testing?.wa_group_id) {

@@ -80,11 +80,11 @@ test('unfiltered configuration catalogue does not bypass live sidebar COD review
   assert.equal(hasSlip(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true})),true);
 });
 
-test('Last Mile Report Bot stays under Settings and is Joseph-only in the live sidebar',()=>{
+test('Last Mile Report Bot appears under Operations for a granted user',()=>{
   const hasLm=items=>items.some(item=>item.children?.some(child=>child.code==='ops_lm_report_bot'));
-  const settings=nav.opsNavCatalogForMode('amazon_edsp').find(item=>item.label==='Settings');
+  const settings=nav.opsNavCatalogForMode('amazon_edsp').find(item=>item.label==='Operations');
   assert.equal(settings?.children?.some(child=>child.code==='ops_lm_report_bot'&&child.href==='/report-bot?workspace=last_mile'),true);
-  assert.equal(hasLm(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true})),false);
+  assert.equal(hasLm(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true})),true);
   assert.equal(hasLm(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true,email:'tech@dropxlogistics.com'})),true);
 });
 

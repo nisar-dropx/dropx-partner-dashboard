@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { PGlite } from '@electric-sql/pglite';
 import { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, reportBotSetupHref } from './workspace.ts';
-import { canAccessLastMileReportBot } from '../ops-pulse/last-mile-report-bot-access.ts';
 
 const require = createRequire(import.meta.url);
 const workspaceModule = { reportBotWorkspace, reportBotPage, reportBotHref, reportBotChatHref, reportBotSetupHref };
@@ -16,7 +15,6 @@ new Function('require', 'module', 'exports', ts.transpileModule(readFileSync(new
   if (name === 'server-only') return {};
   if (name === './workspace') return workspaceModule;
   if (name === '@/lib/authorization') return { hasPermission, getAuthorization: async () => currentAuth };
-  if (name === '@/lib/ops-pulse/last-mile-report-bot-access') return { canAccessLastMileReportBot };
   return require(name);
 }, accessModule, accessModule.exports);
 const { canSeeGroup, reportBotApiAuthorization } = accessModule.exports;
@@ -32,14 +30,14 @@ test('workspace routes default old links to Dark Store, preserve Last Mile links
   assert.match(reportBotChatHref('last_mile','a'), /workspace=last_mile&group=a/);
 });
 
-test('all-location access alone never grants bot access; scope, page grants and LM allowlist are all required', async () => {
+test('all-location access alone never grants bot access; workspace page grants and location scope are required', async () => {
   const lm = {location_id:'station-a',workspace:'last_mile'};
   const ds = {location_id:'station-a',workspace:'dark_store'};
   assert.equal(canSeeGroup(auth('ops_report_bot'), lm), false);
   assert.equal(canSeeGroup(auth('ops_lm_report_bot'), ds), false);
   assert.equal(canSeeGroup(auth('ops_pulse'), lm), false);
   assert.equal(canSeeGroup(auth('ops_lm_report_bot',false), lm), true);
-  assert.equal(canSeeGroup(auth('ops_lm_report_bot',false,'other@dropxlogistics.com'), lm), false,'Last Mile stays Joseph-only even with page permission');
+  assert.equal(canSeeGroup(auth('ops_lm_report_bot',false,'other@dropxlogistics.com'), lm), true,'designation permission applies to any eligible account');
   assert.equal(canSeeGroup(auth('ops_lm_report_bot',false), {...lm,location_id:'station-b'}), false);
   assert.equal(canSeeGroup(auth('ops_lm_report_bot',false), {...lm,location_id:null}), false);
   const both = {...auth('ops_lm_report_bot'),permissions:{...auth('ops_lm_report_bot').permissions,...auth('ops_report_bot').permissions},reportBotWorkspace:'last_mile'};
@@ -50,7 +48,7 @@ test('all-location access alone never grants bot access; scope, page grants and 
   currentAuth=auth('ops_report_bot');
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'Dark Store access cannot authorize Last Mile session requests');
   currentAuth=auth('ops_lm_report_bot',true,'other@dropxlogistics.com');
-  assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'allowlist blocks Last Mile session requests without Joseph access');
+  assert.equal(await reportBotApiAuthorization('edit','last_mile'),currentAuth,'designation editors can access Last Mile');
   currentAuth=auth('ops_lm_report_bot');
   currentAuth.permissions.ops_lm_report_bot.canEdit=false;
   assert.equal(await reportBotApiAuthorization('edit','last_mile'),null,'permission changes apply without a hardcoded role bypass');
@@ -72,7 +70,7 @@ test('migration preserves DS, enforces company/workspace schedule isolation, sha
     const dsGroup=(await db.query("insert into report_bot_groups(company_id,wa_group_id) values ($1,'123@g.us') returning id",[company])).rows[0].id;
     const dsType=(await db.query("insert into report_bot_report_types(company_id,name,slug,rules) values ($1,'Daily','daily','{a}') returning id",[company])).rows[0].id;
     const allowed=['OPERATIONS_FSD','OPERATIONS_FINMGR','OPERATIONS_NH','OPERATIONS_MANAGING_PARTNER','OPERATIONS_HLM'];
-    for (const code of [...allowed,'OPERATIONS_CM','OPERATIONS_SLPM','OPERATIONS_HRM']) await db.query('insert into user_roles(company_id,code) values ($1,$2)',[company,code]);
+    for (const code of [...allowed,'OPERATIONS_CT','OPERATIONS_CM','OPERATIONS_SLPM','OPERATIONS_HRM']) await db.query('insert into user_roles(company_id,code) values ($1,$2)',[company,code]);
     await db.exec(migration);
     assert.equal((await db.query('select workspace from report_bot_groups where id=$1',[dsGroup])).rows[0].workspace,'dark_store');
     const lmGroup=(await db.query("insert into report_bot_groups(company_id,wa_group_id,workspace) values ($1,'456@g.us','last_mile') returning id,mode",[company])).rows[0];
@@ -89,7 +87,16 @@ test('migration preserves DS, enforces company/workspace schedule isolation, sha
     await db.exec('update role_page_permissions set can_view=false,can_add=false,can_edit=false');
     await db.exec(migration);
     assert.equal((await db.query('select count(*)::int n from role_page_permissions where can_view')).rows[0].n,0,'rerunning migration must preserve configured revocations');
+    await db.exec(readFileSync(new URL('../../../supabase/migrations/20261106160000_last_mile_report_dispatch.sql',import.meta.url),'utf8'));
+    const lmGrants=(await db.query('select r.code from role_page_permissions p join user_roles r on r.id=p.role_id where can_view')).rows.map(r=>r.code).sort();
+    assert.deepEqual(lmGrants,[...allowed.filter(code=>code!=='OPERATIONS_FINMGR'),'OPERATIONS_CT'].sort());
+    const location=(await db.query('insert into stations values (gen_random_uuid(),$1) returning id',[company])).rows[0].id;
+    const route=(await db.query("insert into report_bot_lm_dispatch_routes(company_id,group_id,location_id,report,times,format,pending_only) values ($1,$2,$3,'dsr','{09:00}','photo',true) returning id",[company,lmGroup.id,location])).rows[0].id;
+    const claim="insert into report_bot_lm_dispatch_runs(route_id,day,slot) values ($1,'2026-11-06','09:00')";
+    await db.query(claim,[route]);
+    await assert.rejects(db.query(claim,[route]),/duplicate key/);
     await db.exec('set role authenticated');
+    await assert.rejects(db.query('select * from report_bot_lm_dispatch_routes'),/permission denied/);
     await assert.rejects(db.query('select * from report_bot_groups'),/permission denied/);
   } finally { await db.close(); }
 });

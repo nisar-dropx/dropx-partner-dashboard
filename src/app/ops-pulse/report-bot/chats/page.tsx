@@ -5,7 +5,6 @@ import { AppShell } from "@/components/app-shell";
 import { ReportBotChats } from "@/components/report-bot-chats";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { requireLastMileReportBotAccess } from "@/lib/ops-pulse/last-mile-report-bot-gate";
 import { canSeeGroup } from "@/lib/report-bot/access";
 import { reportBotDb } from "@/lib/report-bot/settings";
 import s from "../report-bot.module.css";
@@ -18,7 +17,6 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
-  requireLastMileReportBotAccess(workspace, authorization.email);
   const companyId = requireCompanyId(authorization);
   const db = reportBotDb();
   const groupsResult = await db.from("report_bot_groups").select("id,group_name,participant_count,location_id,is_enabled,workspace")

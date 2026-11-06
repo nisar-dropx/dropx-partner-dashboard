@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
+import { dispatchLastMile } from "@/lib/report-bot/lm-dispatch";
 import { runReportBotCycle } from "@/lib/report-bot/pipeline";
 import { reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 
@@ -43,7 +44,8 @@ export async function GET(request: Request) {
   for (const row of (companies.data ?? []) as ReportBotSettings[]) {
     const settings = { ...row, auto_send_min_confidence: Number(row.auto_send_min_confidence) };
     try {
-      results.push(await runReportBotCycle(settings, deadline));
+      const [cycle, dispatch] = await Promise.allSettled([runReportBotCycle(settings, deadline), dispatchLastMile(settings, deadline)]);
+      for (const task of [cycle, dispatch]) results.push(task.status === "fulfilled" ? task.value : { error: String(task.reason) });
     } catch (error) {
       console.error("[report-bot] cycle failed", { companyId: settings.company_id, error });
       results.push({ company_id: settings.company_id, error: error instanceof Error ? error.message : "Cycle failed" });
