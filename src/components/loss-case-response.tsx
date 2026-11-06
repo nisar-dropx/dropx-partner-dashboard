@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { ImproveRedisputeRemark } from "./improve-redispute-remark";
 import { LossPidTimeline } from "./loss-pid-timeline";
@@ -59,6 +59,8 @@ export function LossCaseResponse({
   initialAction?: "" | "return";
   onSaved?: () => void;
 }) {
+  const [view, setView] = useState<"case" | "history">("case");
+  const paneId = useId();
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
@@ -169,12 +171,11 @@ export function LossCaseResponse({
   };
   return (
     <section
-      className={styles.workspace}
+      className={`${styles.workspace} ${evidenceStyles.console}`}
       style={{ maxWidth: 1000, margin: "0 auto", ...(embedded ? {padding:0} : {}) }}
     >
       {!embedded ? <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute tracking" : "Recovery"}</a> : null}
-      {embedded ? <h3>Redispute evidence &amp; status</h3> : <h1>Shipment redispute</h1>}
-      <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>
+      {embedded ? <h3>Shipment redispute</h3> : <h1>Shipment redispute</h1>}
       {error ? (
         <p role="alert" className={styles.error}>
           {error}
@@ -185,8 +186,8 @@ export function LossCaseResponse({
         <p role="status">Loading shipment…</p>
       ) : (
         <>
-          <section className={styles.panel}>
-            <div className={styles.panelHead}>
+          <section className={evidenceStyles.frame}>
+            <div className={evidenceStyles.dash}>
               <button
                 className={styles.button}
                 onClick={() => setTracking(true)}
@@ -196,7 +197,7 @@ export function LossCaseResponse({
               <strong>
                 ₹{Number(data.row.amount).toLocaleString("en-IN")}
               </strong>
-              <span>
+              <span className={evidenceStyles.signal} data-state={state}>
                 {data.window.enabled
                   ? labels[state] || state
                   : data.window.workflow_status
@@ -209,6 +210,11 @@ export function LossCaseResponse({
               stationHint={data.row.station_code}
               onClose={() => setTracking(false)}
             />
+            <div className={evidenceStyles.selector} role="group" aria-label="Redispute view">
+              <button type="button" aria-pressed={view === "case"} aria-controls={paneId + "-case"} onClick={() => setView("case")}>Evidence &amp; status</button>
+              <button type="button" aria-pressed={view === "history"} aria-controls={paneId + "-history"} onClick={() => setView("history")}>History · {data.events.length}</button>
+            </div>
+            <div hidden={view !== "case"} id={paneId + "-case"}>
             {returnEvent ? <div className={evidenceStyles.returnNote} role="status">
               <strong>Returned for correction</strong>
               <p>{returnEvent.note}</p>
@@ -237,13 +243,12 @@ export function LossCaseResponse({
               </p>
               <p>{data.row.details.extra?.partner_remarks}</p>
             </details>
-          </section>
           {!data.readOnly &&
           actions.length > 0 &&
           (data.canActivate || data.window.enabled) ? (
-            <section className={styles.panel}>
-              <form onSubmit={save} className={styles.detail}>
-                <div className={styles.formGrid}>
+            <section>
+              <form onSubmit={save} className={evidenceStyles.editor}>
+                <div className={evidenceStyles.grid}>
                   {actions.length > 1 ? <label>
                     Next action
                     <select value={selectedAction} onChange={(e) => setAction(e.target.value)}>
@@ -350,7 +355,7 @@ export function LossCaseResponse({
                     </>
                   ) : null}
                 </div>
-                <label>
+                <label className={evidenceStyles.remark}>
                     {selectedAction === "response"
                       ? "Detailed description *"
                       : selectedAction === "return" ? "Correction note to station *" : "Decision / update"}
@@ -379,8 +384,10 @@ export function LossCaseResponse({
               </form>
             </section>
           ) : null}
-          <details className={styles.compactDetails}>
-            <summary>History · {data.events.length}</summary>
+            </div>
+            <div hidden={view !== "history"} className={evidenceStyles.history} id={paneId + "-history"}>
+            <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>
+            {data.events.length === 0 && <small>No redispute updates yet.</small>}
             {data.events.map((e) => (
               <article className={styles.allocation} key={e.id}>
                 <strong>{actionNames[e.action] || e.action}</strong>
@@ -400,7 +407,8 @@ export function LossCaseResponse({
                 ) : null}
               </article>
             ))}
-          </details>
+            </div>
+          </section>
         </>
       )}
     </section>

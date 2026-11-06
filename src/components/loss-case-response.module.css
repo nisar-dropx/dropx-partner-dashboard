@@ -7,3 +7,40 @@
 .links { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12px; }
 .returnNote { margin: 8px 12px; padding: 10px 12px; border: 1px solid #f4d49b; border-radius: 8px; background: #fff7e8; color: #805015; font-size: 13px; }
 .returnNote p { margin: 5px 0; white-space: pre-wrap; }
+
+/* Smoked instrument fascia and inset selector keys, with light work surfaces. */
+.console { width: 100%; min-width: 0; box-sizing: border-box; }
+.console .frame { min-width: 0; border: 1px solid #bec8d2; border-radius: 12px; background: #fff; box-shadow: 0 2px 5px #18263a0c; }
+.dash { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 15px 16px; border-radius: 11px 11px 0 0; border-left: 4px solid #eb682f; color: #fff; background: repeating-linear-gradient(90deg,#9dadba66 0 1px,transparent 1px 9px) left 14px bottom 4px / calc(100% - 28px) 4px no-repeat, linear-gradient(110deg,#202d40,#344257); }
+.dash button { background: #142033; border: 1px solid #64748a; color: #ffcf94; font: 600 13px/1.4 ui-monospace,Consolas,monospace; border-radius: 5px; padding: 6px 9px; overflow-wrap: anywhere; }
+.dash button:hover { background: #304059; color: white; }
+.dash strong { font: 650 17px/1.2 ui-monospace,Consolas,monospace; color: #fff; }
+.signal { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; color: #f1f5f9; font-size: 12px; font-weight: 600; }
+.signal::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #f3bb6a; flex: none; }
+.signal[data-state="approved"]::before,.signal[data-state="won"]::before { background: #81d6af; }
+.signal[data-state="lost"]::before,.signal[data-state="returned"]::before { background: #ffa087; }
+.selector { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px; background: #e9edf1; border-bottom: 1px solid #cfd6de; }
+.selector button,.assist button { color: #354359; background: #fff; border: 1px solid #bfc9d4; border-bottom-width: 2px; border-radius: 5px; font: inherit; font-size: 12px; font-weight: 650; padding: 6px 12px; cursor: pointer; }
+.selector button[aria-pressed="true"] { background: #25354b; color: #fff; border-color: #25354b; border-bottom-color: #f47738; }
+.selector button:hover:not([aria-pressed="true"]),.assist button:enabled:hover { background: #fff2e8; border-color: #b36537; }
+.frame button:focus-visible,.frame summary:focus-visible { outline: 2px solid #b64d19; outline-offset: 2px; }
+.editor { display: grid; gap: 9px; padding: 10px 12px 12px; }
+.grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; align-items: stretch; }
+.grid > label,.grid > .cctv,.editor .remark { box-sizing: border-box; min-width: 0; padding: 7px 9px; background: #f6f8fa; border: 1px solid #dee4eb; border-radius: 6px; align-content: start; }
+.grid > label:focus-within,.grid > .cctv:focus-within,.editor .remark:focus-within { background: #fffaf5; border-color: #cb7442; box-shadow: inset 3px 0 #dc783d; }
+.editor label { margin: 0; }
+.editor :is(input:not([type="checkbox"]),select,textarea) { box-sizing: border-box; width: 100%; min-width: 0; background: #fff; }
+.editor textarea { resize: vertical; }
+.editor input:disabled { opacity: .55; }
+.assist { justify-self: start; max-width: 100%; }
+.assist button:disabled { opacity: .55; cursor: default; }
+.suggestion { margin-top: 7px; padding: 10px; border: 1px solid #e6c4a7; border-left: 3px solid #db783a; background: #fff9f1; border-radius: 5px; overflow-wrap: anywhere; }
+.suggestion p { margin: 5px 0 8px; }
+.history { padding: 8px 12px; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .grid { grid-template-columns: minmax(0,1fr); }
+  .dash { gap: 8px; }
+  .signal { flex-basis: 100%; }
+  .selector button,.assist button { min-height: 36px; }
+  .editor { padding: 8px; }
+}

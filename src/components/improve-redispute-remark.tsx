@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
+import ui from "./loss-case-response.module.css";
+
 export function ImproveRedisputeRemark({ month, caseKey, note, onUse, disabled }: {
   month: string; caseKey: string; note: string; onUse: (value: string) => void; disabled: boolean;
 }) {
@@ -35,12 +37,12 @@ export function ImproveRedisputeRemark({ month, caseKey, note, onUse, disabled }
       if (!controller.signal.aborted) setWorking(false);
     }
   }
-  return <div>
+  return <div className={ui.assist}>
     <button type="button" disabled={disabled || working || !note.trim()} onClick={improve}>
       {working ? "Improving…" : "Improve text"}
     </button>
     {error && <p role="alert">{error}</p>}
-    {preview && preview.original === note && <div aria-live="polite">
+    {preview && preview.original === note && <div className={ui.suggestion} aria-live="polite">
       <strong>Suggested wording</strong>
       <p style={{ whiteSpace: "pre-wrap" }}>{preview.text}</p>
       <button type="button" disabled={disabled} onClick={() => onUse(preview.text)}>Use suggestion</button>{" "}
