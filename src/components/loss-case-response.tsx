@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
+import { ImproveRedisputeRemark } from "./improve-redispute-remark";
 import { LossPidTimeline } from "./loss-pid-timeline";
 import styles from "./nl-loss.module.css";
 import { responseActions } from "@/lib/ops-pulse/loss-response-actions";
@@ -363,6 +364,10 @@ export function LossCaseResponse({
                       placeholder={selectedAction === "response" ? "Explain why the loss should be reconsidered and what the evidence shows." : selectedAction === "return" ? "Tell the station exactly what to correct before resubmitting." : undefined}
                     />
                   </label>
+                {selectedAction === "response" && (
+                  <ImproveRedisputeRemark key={JSON.stringify([month, caseKey, data.window.version])}
+                    month={month} caseKey={caseKey} note={note} onUse={setNote} disabled={busy} />
+                )}
                 <div className={styles.toolbar}>
                   <button className={styles.primary} disabled={busy || !canSubmit}>
                     {busy ? "Saving…" : actionNames[selectedAction]}
