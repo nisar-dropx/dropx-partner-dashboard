@@ -13,6 +13,7 @@ function compile(file, deps) {
   return exports;
 }
 const cod = compile("src/lib/ops-pulse/cod.ts", {
+  "@/lib/current-location-policy": compile("src/lib/current-location-policy.ts", {}),
   react: { cache: (fn) => fn },
   "@/lib/date-format": {},
   "@/lib/ops-pulse/date-format": { formatOpsDate: (v) => v ?? "-", formatOpsDateTime: (v) => v ?? "-" },
