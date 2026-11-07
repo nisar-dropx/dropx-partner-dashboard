@@ -53,16 +53,25 @@ export async function loadHelperPayoutRows(
 ) {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
 
-  let locationsQuery = supabaseAdmin
+  let currentLocationsQuery = supabaseAdmin
+    .from("stations")
+    .select("id, station_code, station_name, is_active, hide_from_location_list")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .or("hide_from_location_list.is.null,hide_from_location_list.eq.false");
+  let historicalLocationsQuery = supabaseAdmin
     .from("stations")
     .select("id, station_code, station_name, is_active, hide_from_location_list")
     .eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) {
-    locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
+    const locationScopeIds = authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE];
+    currentLocationsQuery = currentLocationsQuery.in("id", locationScopeIds);
+    historicalLocationsQuery = historicalLocationsQuery.in("id", locationScopeIds);
   }
 
-  const [locationsResult, currentHelpersResult, allocationsResult, deductionHeadsResult, paymentPolicyResult] = await Promise.all([
-    locationsQuery,
+  const [currentLocationsResult, historicalLocationsResult, currentHelpersResult, allocationsResult, deductionHeadsResult, paymentPolicyResult] = await Promise.all([
+    currentLocationsQuery,
+    historicalLocationsQuery,
     readAllRows(supabaseAdmin
       .from("helpers")
       .select("id,location_id,date_of_join")
@@ -91,16 +100,18 @@ export async function loadHelperPayoutRows(
       .order("effective_from")
   ]);
 
-  const initialError = locationsResult.error?.message
+  const initialError = currentLocationsResult.error?.message
+    || historicalLocationsResult.error?.message
     || currentHelpersResult.error?.message
     || allocationsResult.error?.message
     || deductionHeadsResult.error?.message
     || paymentPolicyResult.error?.message;
   if (initialError) return { rows: [] as WorkforcePayoutRow[], error: initialError };
 
-  const locations = locationsResult.data ?? [];
-  const allowedLocationIds = new Set(locations.map((location) => String(location.id)));
-  const activeLocationIds = new Set(locations
+  const currentLocations = currentLocationsResult.data ?? [];
+  const historicalLocations = historicalLocationsResult.data ?? [];
+  const allowedLocationIds = new Set(historicalLocations.map((location) => String(location.id)));
+  const activeLocationIds = new Set(currentLocations
     .filter((location) => isCurrentLocation(location))
     .map((location) => String(location.id)));
   const currentHelpers = (currentHelpersResult.data ?? []).filter((helper: any) => activeLocationIds.has(String(helper.location_id)));
@@ -329,7 +340,7 @@ export async function loadHelperPayoutRows(
     deductionValuesByIdentity.set(key, [...(deductionValuesByIdentity.get(key) ?? []), value]);
   }
   const verificationByHelperId = new Map((verificationResult.data ?? []).map((row: any) => [String(row.account_id), row.verified === true]));
-  const locationById = new Map(locations.map((location: any) => [String(location.id), location]));
+  const locationById = new Map(historicalLocations.map((location: any) => [String(location.id), location]));
   const historyByHelperId = new Map<string, PaymentAllocationHistoryEntry[]>();
   for (const allocation of allAllocations) {
     const helperId = String(allocation.helper_id ?? "");
