@@ -92,6 +92,16 @@ test('live mapping correction replaces stale import payout without reupload',()=
  const f=facts();f.mappings=[];let r=rebuildCps(base(),f);assert.equal(r.daily[0].da,0);assert.equal(r.daily[0].deliveries,100);assert.equal(r.daily[0].exposed_deliveries,100);
  f.mappings=facts().mappings;r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);assert.equal(r.associates[0].dropx_emp_code,'D1');assert.equal(r.daily[0].exposed_deliveries,0);
 });
+test('per-packet pay always uses shipment count and ignores route distance',()=>{
+ const f=facts();
+ f.mappings[0].payment_values={DELIVERY:3};
+ f.route_distance={enabledFrom:'2026-09-01',manual:[],rateOverrides:[],rows:[{id:'route',mapping_id:'m1',workforce_id:'w1',station_id:'station-a',work_date:'2026-09-01',status:'ready',distance_km:987.65,departure_km:10,delivery_km:967.65,return_km:10,calculated_at:'now'}]};
+ const result=rebuildCps(base(),f);
+ assert.equal(result.daily[0].deliveries,100);
+ assert.equal(result.daily[0].da,300);
+ assert.equal(result.associates[0].variable_pay,300);
+ assert.equal(result.associates[0].fuel_pay,0);
+});
 test('combined daily production minimum uses field order and each field rate',()=>{
  const f=facts();
  f.shipments[0]={...f.shipments[0],amazon_delivery:80,swa_delivery:0,total_delivery:80,total_activity:110,c_return:30};
