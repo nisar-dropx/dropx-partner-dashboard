@@ -117,6 +117,19 @@ begin
     if old.adhoc_payout_effect <> 'none'
       and lower(new.status) in ('processed', 'paid')
       and lower(old.status) not in ('processed', 'paid') then
+      -- Already-confirmed requests can be in the bank queue during rollout.
+      -- Complete their missing scope at settlement using the same saved owner,
+      -- ID and work date. Never reinterpret an already paid request.
+      if cardinality(new.delivery_payout_station_ids)=0 then
+        select r.station_ids into resolved_stations
+        from public.payment_delivery_identity_roster_v2(new.company_id,new.location_id,new.delivery_work_date) r
+        where r.provider_member_id=upper(btrim(new.delivery_provider_employee_id))
+          and r.workforce_id=new.delivery_performer_workforce_id;
+        if cardinality(resolved_stations)>0 then
+          select array_agg(distinct x order by x) into new.delivery_payout_station_ids
+          from unnest(resolved_stations || array[new.location_id]) x;
+        end if;
+      end if;
       perform public.payment_delivery_settlement_guard(new);
     end if;
     return new;

@@ -33,6 +33,8 @@ insert into payment_heads values('${head}','${company}','van_execution');
 -- An approved legacy row must remain exportable after the migration.
 insert into payment_requests(id,company_id,location_id,payment_head_id,status,amount) values(1,'${company}','${base}','${head}','approved',1200);
 `);
+// Simulate a confirmed payment already in bank processing before this release.
+await db.query(`insert into payment_requests(id,company_id,location_id,payment_head_id,status,amount,delivery_performer_mode,delivery_provider_employee_id,delivery_work_date,delivery_identity_confirmed,delivery_performer_workforce_id,adhoc_payout_effect,adhoc_client) values(7,$1,$2,$3,'processing',1200,'van_driver','DA001','2026-11-08',true,$4,'full_day','Amazon')`,[company,base,head,worker]);
 const migration=read('20261107042407_adhoc_delivery_station_family.sql');
 await db.exec(migration);await db.exec(migration);
 await db.exec(read('20261104202500_preserve_inflight_delivery_payments.sql'));
@@ -66,10 +68,12 @@ assert.equal((await db.query('select count(*)::int n from revision_audit')).rows
 await assert.rejects(()=>db.exec("update payment_requests set status='paid' where id=3"),/already has a paid ad hoc/);
 await db.exec("update payment_requests set status='paid' where id=2;update payment_requests set status='paid' where id=4");
 assert.equal((await db.query('select count(*)::int n from revision_audit')).rows[0].n,1,'Retry and separate bike DA do not create duplicate deduction/refresh');
+await db.exec("update payment_requests set status='processed' where id=7");
+assert.deepEqual((await db.query('select delivery_payout_station_ids from payment_requests where id=7')).rows[0].delivery_payout_station_ids,[base,xpt],'In-flight confirmed request captures family scope on bank confirmation');
 // A distinct work date remains payable; existing confirmed snapshots survive mapping changes.
 await insert(6,'existing_odcd','DA001',base,'2026-11-07');
 await db.exec("update field_executive_provider_mappings set status='cancelled';update payment_requests set status='paid' where id=6");
-assert.equal((await db.query('select count(*)::int n from refresh_audit')).rows[0].n,4);
+assert.equal((await db.query('select count(*)::int n from refresh_audit')).rows[0].n,6);
 for (const role of ['anon','authenticated']) {
  await db.exec(`set role ${role}`);
  await assert.rejects(()=>roster(),/permission denied/);
