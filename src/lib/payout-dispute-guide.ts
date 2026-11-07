@@ -21,6 +21,10 @@ export function disputeConcerns(issue: string, component?: GuideItem) {
   return [...(DISPUTE_ISSUES.find(i=>i.id===issue)?.reasons??[])];
 }
 export const cash = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+/** A source sync alone must not invalidate an unchanged reviewed calculation. */
+export function disputeEvidenceValues(value: unknown) {
+  return JSON.stringify(value,(key,item)=>["updated_at","updatedAt","checkedAt","dependency_hash"].includes(key)?undefined:item);
+}
 const numeric = (n: unknown): number | null => n == null || n === "" || !Number.isFinite(Number(n)) ? null : Number(n);
 export function disputeDays(snapshot: Row): Row[] {
   const days = new Map<string, Row>();

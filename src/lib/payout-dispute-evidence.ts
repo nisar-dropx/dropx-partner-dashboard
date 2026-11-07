@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { supabaseAdmin } from "./supabase-admin";
 import { loadWorkforcePayoutRows } from "./workforce-payout-loader";
 import { buildWorkforcePayoutPublicationSnapshot } from "./workforce-payout-publication-snapshot";
-import { disputeItems, cash, type DisputePricingContext } from "./payout-dispute-guide";
+import { disputeItems, cash, disputeEvidenceValues, type DisputePricingContext } from "./payout-dispute-guide";
 import type { AuthorizationContext } from "./authorization";
 import { readAllRows } from "./supabase-pagination";
 import { normalizePayoutIdentity, resolveShipmentPayoutMapping } from "./workforce-payout-population";
@@ -29,7 +29,7 @@ export async function loadDisputeEvidence(company: string, dispute: any, publica
   const station = stations.data?.find(s => s.id === dispute.station_id);
   const root = station?.parent_station_id || dispute.station_id;
   const family = new Set((stations.data ?? []).filter(s => s.id === root || s.parent_station_id === root).map(s => s.id));
-  const punches = [...new Map(attendance.flatMap(r => r.data ?? []).map(r => [r.id, r])).values()].map(p => ({ ...p, linked: family.has(p.location_id) }));
+  const punches = [...new Map(attendance.flatMap(r => r.data ?? []).map(r => [r.id, r])).values()].map(p => ({ ...p, linked: family.has(p.location_id) })).sort((a,b)=>String(a.id).localeCompare(String(b.id)));
   const currentRows = current.rows.filter(r => r.reviewSubjectId === dispute.workforce_id && r.locationId === dispute.station_id);
   const currentSnapshot = currentRows.length === 1 ? buildWorkforcePayoutPublicationSnapshot(currentRows[0], from, to, "dispute-evidence") : null;
   // Read all effective mappings at this station, including competing assignments.
@@ -73,6 +73,6 @@ export async function loadDisputeEvidence(company: string, dispute: any, publica
   }
   const data = { snapshot, currentSnapshot, punches, mappings, deliveries, sourceDetails, sourceError: current.error || sourceDetails.error || (currentRows.length !== 1 ? "Current payout could not be uniquely matched to this associate and station." : ""), pricing: { policies: policy.data ?? [], percentageDeductions: percentages, error: priceError || undefined, checkedAt: new Date().toISOString() } };
   // Only relevant financial/evidence values enter the digest, never fetch timestamps.
-  const digest = createHash("sha256").update(JSON.stringify({ currentSnapshot, punches, mappings, deliveries, sourceDetails, policies: policy.data, percentages, priceError, sourceError: data.sourceError })).digest("hex");
+  const digest = createHash("sha256").update(disputeEvidenceValues({ currentSnapshot, punches, mappings, deliveries, sourceDetails, policies: policy.data, percentages, priceError, sourceError: data.sourceError })).digest("hex");
   return { ...data, digest };
 }

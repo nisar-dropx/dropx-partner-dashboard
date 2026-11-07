@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildGuidedPlan,normalizeGuidedClaim,disputeItems,disputeDays,guidedFields} from './payout-dispute-guide.ts';
+import {buildGuidedPlan,normalizeGuidedClaim,disputeItems,disputeDays,guidedFields,disputeEvidenceValues} from './payout-dispute-guide.ts';
 import {monthlyAttendanceAmountForAggregateUnits} from './workforce-payment-policy.ts';
 const policy={effective_from:'2026-09-01',calculation_method:'earned_paid_offs',paid_off_days:4,work_units_per_paid_off:6,cap_at_monthly_amount:true};
 let cumulative=0;
@@ -21,3 +21,5 @@ test('missing attendance is not silently converted to absent',()=>{const s=struc
 test('changed monthly policy fails closed',()=>{assert.throws(()=>buildGuidedPlan(snapshot,claim,form('1'),{...context,policies:[{...policy,calculation_method:'calendar_days'}]}),/differs/);});
 test('unchanged value is not a correction',()=>{assert.throws(()=>buildGuidedPlan(snapshot,claim,form('0'),context),/No value changed/);});
 test('negative, over-one attendance and invalid numbers are rejected',()=>{for(const v of ['-1','2','0.25','NaN'])assert.throws(()=>buildGuidedPlan(snapshot,claim,form(v),context));});
+
+test('unchanged sync timestamps do not reset review; changed amounts and punch times do',()=>{const a={gross:100,route:{km:10,updatedAt:'old'},delivery:{total:28,updated_at:'old'},in_time:'08:00'};const b={...a,route:{km:10,updatedAt:'new'},delivery:{total:28,updated_at:'new'}};assert.equal(disputeEvidenceValues(a),disputeEvidenceValues(b));assert.notEqual(disputeEvidenceValues(a),disputeEvidenceValues({...b,gross:101}));assert.notEqual(disputeEvidenceValues(a),disputeEvidenceValues({...b,in_time:'10:00'}));});

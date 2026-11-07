@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 export async function testGuidedDisputes(db,{C,S,W2,A1,A2,A3,roles,ok,throws}) {
   const migration=readFileSync('supabase/migrations/20261107120000_guided_payout_disputes.sql','utf8');
-  await db.exec(migration);await db.exec(migration);ok('Guided migration is repeatable',true);
+  await db.exec(migration);await db.exec(migration);const zeroSource=readFileSync('supabase/migrations/20261107123000_dispute_zero_value_source_evidence.sql','utf8');await db.exec(zeroSource);await db.exec(zeroSource);ok('Guided migration is repeatable',true);
   const P='00000000-0000-0000-0000-000000000399';
   await db.query(`insert into workforce_payout_publications(id,company_id,workforce_id,station_id,revision,snapshot,published_at,period_start,period_end,publication_kind,review_until) values($1,$2,$3,$4,1,'{"item":{"net_amount":100}}',now(),'2026-11-01','2026-11-30','worksheet',now()+interval '2 days')`,[P,C,W2,S]);
   const claim=date=>({schema:3,issue:'attendance',component:'attendance',dates:[date],concern:'I worked but the day is missing'});
@@ -18,8 +18,10 @@ export async function testGuidedDisputes(db,{C,S,W2,A1,A2,A3,roles,ok,throws}) {
   const answered=(await db.query(`select * from workforce_payout_disputes where id=$1`,[id])).rows[0];
   ok('Existing clarification can be answered after submission window closes',!answered.details.awaiting_reply&&answered.version===3);
   await throws('Stale reply cannot overwrite history',`select workforce_reply_guided_dispute('${C}','${W2}','${id}',2,'Changed reply')`,/changed/);
-  const snapshot={lines:[{work_date:'2026-11-01',calculation_snapshot:{workDayUnits:1,paymentLines:[{code:'DELIVERY',count:28,rate:10,amount:280}]}}],worksheet:{deduction_breakdown:[{code:'LOSS_RECOVERY',amount:25,recoveryKey:'a'},{code:'LOSS_RECOVERY',amount:75,recoveryKey:'b'}]}};
+  const snapshot={lines:[{work_date:'2026-11-01',calculation_snapshot:{workDayUnits:1,paymentLines:[{code:'DELIVERY',count:28,rate:10,amount:280}]}}],worksheet:{incentive_breakdown:[{code:'INCENTIVE',amount:0}],additional_payment_breakdown:[{code:'ALLOWANCE',amount:0}],deduction_breakdown:[{code:'LOSS_RECOVERY',amount:25,recoveryKey:'a'},{code:'LOSS_RECOVERY',amount:75,recoveryKey:'b'}]}};
   const value=async item=>(await db.query('select workforce_dispute_snapshot_value($1,$2) v',[JSON.stringify(snapshot),JSON.stringify(item)])).rows[0].v;
+  ok('Known zero incentive remains verifiable',Number(await value({selector:'incentive',code:'INCENTIVE'}))===0);
+  ok('Known zero allowance remains verifiable',Number(await value({selector:'addition',code:'ALLOWANCE'}))===0);
   ok('Closure identifies exact recovery allocation',Number(await value({selector:'deduction',code:'LOSS_RECOVERY',recovery_key:'a'}))===25);
   ok('Closure verifies dated attendance',Number(await value({selector:'attendance',date:'2026-11-01'}))===1);
   ok('Same amount in a different component cannot stand in for correction',await value({selector:'count',date:'2026-11-01',code:'PICKUP'})===null);
