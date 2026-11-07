@@ -37,7 +37,7 @@ export default async function WorkedDaysPage() {
       <PageHead
         eyebrow="Workforce"
         title="Worked ID review"
-        subtitle="Biometric punch recorded, but no deliveries found under the associate’s own mapped ID. Confirm the work before deciding pay."
+        subtitle="Check biometric days and bulk attendance periods against deliveries on mapped IDs. Review differences before deciding pay."
       />
       {result.error ? (
         <p role="alert">Locations could not be loaded.</p>

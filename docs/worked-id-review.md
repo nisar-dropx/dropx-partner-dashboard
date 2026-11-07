@@ -25,4 +25,10 @@ No historical days are automatically approved or excluded by deploying this feat
 
 ## Validation
 
+**Bulk periods** compares an uploaded period's attendance quantity with distinct dates having deliveries on the associate's effective mapped IDs. Multiple IDs/reports on the same date count once. The non-negative difference is labelled days to review, never inferred absent dates. Biometric days are shown separately, not added to the uploaded total. Only the existing delivery-role/fixed-salary scope qualifies. Filters apply equally to periods. Hours, missing station reports, ambiguous mappings and unfinished periods remain explicit review conditions. No day-count shortfall is evidence only, not approval of who performed the work. The period details retain file/Excel-row provenance and mapped ID/name/date evidence. Corrections use the existing protected workforce payout input workflow; this comparison does not change attendance or pay.
+
+Daily review explains when bulk period attendance overrides the day calculation and is settled on the period end, instead of presenting an unexplained zero as a missed punch.
+
+`node --test src/lib/worked-id-bulk-period.test.mjs` checks count conservation, duplicate IDs/dates, period boundaries, missing evidence, fractional quantities and hours.
+
 `node scripts/test-worked-id-review.mjs` applies the migration twice to PGlite and exercises count conservation, multiple borrowers, stale versions, reopening, attendance exclusion, conflicting imports, mapping/source protection, finalized payout locks and private RPC access. The fixture schema contains column definitions only, with synthetic records created by the test.

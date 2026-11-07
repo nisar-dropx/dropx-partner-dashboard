@@ -8,6 +8,8 @@ import {
   hasWorkedIdFixedSalary,
 } from "./worked-id-review";
 import { workedIdTrainingRouting } from "./worked-id-training-routing";
+import { compareBulkAttendancePeriod } from "./worked-id-bulk-period";
+import { todayKolkata } from "./ops-pulse/cod";
 import {
   normalizePayoutIdentity,
   resolveShipmentPayoutMapping,
@@ -31,6 +33,28 @@ export async function loadWorkedIdReview(
     throw Error("Location unavailable.");
   const selectedStations = new Map(st.data.map((s) => [s.id, s]));
   const selectedCodes = st.data.map((s) => s.station_code);
+  const bulkResult = await readAllRows(
+    db
+      .from("workforce_payout_attendance_values")
+      .select(
+        "id,workforce_id,station_id,effective_from,effective_to,attendance_basis,quantity,source_type,source_batch_id,source_row_id,updated_at",
+      )
+      .eq("company_id", company)
+      .in("station_id", stationIds)
+      .lte("effective_from", to)
+      .gte("effective_to", from)
+      .order("id"),
+  );
+  if (bulkResult.error) throw Error(bulkResult.error.message);
+  const bulkInputs = bulkResult.data || [];
+  // Compare the entire uploaded period, even when it crosses the selected month.
+  const evidenceFrom = [
+    from,
+    ...bulkInputs.map((p) => p.effective_from),
+  ].sort()[0];
+  const evidenceTo = [to, ...bulkInputs.map((p) => p.effective_to)]
+    .sort()
+    .at(-1)!;
   const results = await Promise.all([
     readAllRows(
       db
@@ -49,8 +73,8 @@ export async function loadWorkedIdReview(
         )
         .eq("company_id", company)
         .in("status", ["active", "closed"])
-        .lte("effective_from", to)
-        .or(`effective_to.is.null,effective_to.gte.${from}`)
+        .lte("effective_from", evidenceTo)
+        .or(`effective_to.is.null,effective_to.gte.${evidenceFrom}`)
         .order("id"),
     ),
     readAllRows(
@@ -62,8 +86,8 @@ export async function loadWorkedIdReview(
         .eq("company_id", company)
         .eq("source", "biometric")
         .in("location_id", stationIds)
-        .gte("punch_date", from)
-        .lte("punch_date", to)
+        .gte("punch_date", evidenceFrom)
+        .lte("punch_date", evidenceTo)
         .order("id"),
     ),
     readAllRows(
@@ -74,8 +98,8 @@ export async function loadWorkedIdReview(
         )
         .eq("company_id", company)
         .in("station_code", selectedCodes)
-        .gte("work_date", from)
-        .lte("work_date", to)
+        .gte("work_date", evidenceFrom)
+        .lte("work_date", evidenceTo)
         .order("id"),
     ),
     readAllRows(
@@ -97,8 +121,8 @@ export async function loadWorkedIdReview(
         .eq("company_id", company)
         .in("station_id", stationIds)
         .in("status", ["active", "closed"])
-        .lte("effective_from", to)
-        .or(`effective_to.is.null,effective_to.gte.${from}`)
+        .lte("effective_from", evidenceTo)
+        .or(`effective_to.is.null,effective_to.gte.${evidenceFrom}`)
         .order("id"),
     ),
     readAllRows(
@@ -154,8 +178,9 @@ export async function loadWorkedIdReview(
     );
   // Check the candidate's IDs across stations privately. A transfer or report station
   // mismatch must not manufacture a "no delivery" attendance exception.
-  const candidateIds = new Set(
-    punches
+  const candidateIds = new Set([
+    ...bulkInputs.map((p) => p.workforce_id),
+    ...punches
       .map(
         (p) =>
           wm.get(
@@ -166,7 +191,7 @@ export async function loadWorkedIdReview(
           )?.id,
       )
       .filter(Boolean),
-  );
+  ]);
   const memberIds = [
     ...new Set(
       mids
@@ -180,18 +205,27 @@ export async function loadWorkedIdReview(
       db
         .from("cps_shipment_daily")
         .select(
-          "provider_employee_id,work_date,client,station_code,total_delivery",
+          "provider_employee_id,provider_employee_name,work_date,client,station_code,total_delivery",
         )
         .eq("company_id", company)
         .in("provider_employee_id", memberIds.slice(i, i + 100))
-        .gte("work_date", from)
-        .lte("work_date", to)
+        .gte("work_date", evidenceFrom)
+        .lte("work_date", evidenceTo)
         .order("id"),
     );
     if (result.error) throw Error(result.error.message);
     evidence.push(...(result.data || []));
   }
   const ownDelivery = new Map<string, number>();
+  const periodDeliveryEvidence: {
+    workerId: string;
+    date: string;
+    count: number;
+    providerId: string;
+    name: string;
+    visible: boolean;
+  }[] = [];
+  const conflictingEvidence: { workerId: string; date: string }[] = [];
   for (const s of evidence) {
     let a = resolve(s);
     if (a.kind === "unmapped") {
@@ -209,12 +243,27 @@ export async function loadWorkedIdReview(
       if (owners.length === 1)
         a = { kind: "mapped", workforceId: owners[0], matches };
     }
-    if (a.kind === "mapped")
+    if (a.kind === "mapped") {
+      periodDeliveryEvidence.push({
+        workerId: a.workforceId,
+        date: s.work_date,
+        count: Number(s.total_delivery || 0),
+        providerId: s.provider_employee_id,
+        name: s.provider_employee_name || "",
+        visible: selectedCodes.includes(s.station_code),
+      });
       ownDelivery.set(
         workedIdKey(a.workforceId, s.work_date),
         (ownDelivery.get(workedIdKey(a.workforceId, s.work_date)) || 0) +
           Number(s.total_delivery || 0),
       );
+    } else if (a.kind === "conflict") {
+      for (const m of a.matches)
+        conflictingEvidence.push({
+          workerId: m.workforceId,
+          date: s.work_date,
+        });
+    }
   }
   const fixed = (m: any) =>
     hasWorkedIdFixedSalary(
@@ -226,6 +275,7 @@ export async function loadWorkedIdReview(
     shipments.map((s) => `${s.station_code}|${s.work_date}`),
   );
   for (const p of punches) {
+    if (p.punch_date < from || p.punch_date > to) continue;
     let w = wm.get(
       p.account_id || p.field_executive_id || p.contractor_id || p.employee_id,
     );
@@ -354,6 +404,12 @@ export async function loadWorkedIdReview(
       };
     r.punches++;
     r.punchTimes.push(p.punch_time);
+    r.bulkPeriods = bulkInputs.filter(
+      (a) =>
+        a.workforce_id === w.id &&
+        a.station_id === stationId &&
+        active(a, p.punch_date),
+    );
     rows.set(k, r);
   }
   const reviewerIds = [...new Set(reviews.map((r) => r.updated_by))],
@@ -499,8 +555,128 @@ export async function loadWorkedIdReview(
       registered <= r.date &&
       r.trainingUsed < 2;
   }
+  const batchIds = [
+    ...new Set(bulkInputs.map((p) => p.source_batch_id).filter(Boolean)),
+  ];
+  const importRows = bulkInputs.map((p) => p.source_row_id).filter(Boolean);
+  const files = new Map<string, any>(),
+    rowNumbers = new Map<string, number>();
+  for (let i = 0; i < batchIds.length; i += 100) {
+    const result = await db
+      .from("workforce_payout_import_batches")
+      .select("id,file_name,committed_at")
+      .eq("company_id", company)
+      .in("id", batchIds.slice(i, i + 100));
+    if (result.error) throw Error(result.error.message);
+    for (const b of result.data || []) files.set(b.id, b);
+  }
+  for (let i = 0; i < importRows.length; i += 100) {
+    const result = await db
+      .from("workforce_payout_import_rows")
+      .select("id,row_number")
+      .eq("company_id", company)
+      .in("id", importRows.slice(i, i + 100));
+    if (result.error) throw Error(result.error.message);
+    for (const r of result.data || []) rowNumbers.set(r.id, r.row_number);
+  }
+  const bulkPeriods = bulkInputs.flatMap((p) => {
+    const w = wm.get(p.workforce_id),
+      location = selectedStations.get(p.station_id);
+    if (
+      !w ||
+      !location ||
+      (evidenceWorker && w.id !== evidenceWorker) ||
+      !workedIdDeliveryRoles.includes(
+        first(w.designations)?.code || w.designation,
+      )
+    )
+      return [];
+    const overlaps = (m: any) =>
+      m.effective_from <= p.effective_to &&
+      (!m.effective_to || m.effective_to >= p.effective_from);
+    const plans = mappings.filter(
+      (m) =>
+        m.station_id === p.station_id &&
+        overlaps(m) &&
+        wm.get(
+          m.workforce_id ||
+            m.contractor_id ||
+            m.employee_id ||
+            m.field_executive_id,
+        )?.id === w.id,
+    );
+    if (
+      !plans.some(fixed) &&
+      !allocations.some(
+        (a) =>
+          a.workforce_id === w.id &&
+          a.station_id === p.station_id &&
+          overlaps(a) &&
+          hasWorkedIdFixedSalary(
+            a.payment_components || [],
+            a.payment_values || {},
+          ),
+      )
+    )
+      return [];
+    const deliveries = periodDeliveryEvidence.filter(
+      (d) =>
+        d.workerId === w.id &&
+        d.date >= p.effective_from &&
+        d.date <= p.effective_to,
+    );
+    const biometricDates = punches
+      .filter(
+        (a) =>
+          a.location_id === p.station_id &&
+          wm.get(
+            a.account_id ||
+              a.field_executive_id ||
+              a.contractor_id ||
+              a.employee_id,
+          )?.id === w.id,
+      )
+      .map((a) => a.punch_date);
+    const comparison = compareBulkAttendancePeriod({
+      from: p.effective_from,
+      to: p.effective_to,
+      quantity: Number(p.quantity),
+      basis: p.attendance_basis,
+      today: todayKolkata(),
+      deliveries,
+      biometricDates,
+      reportDates: shipments
+        .filter((s) => s.station_code === location.station_code)
+        .map((s) => s.work_date),
+      mappingConflict: conflictingEvidence.some(
+        (d) =>
+          d.workerId === w.id &&
+          d.date >= p.effective_from &&
+          d.date <= p.effective_to,
+      ),
+    });
+    return [
+      {
+        ...p,
+        ...comparison,
+        workerId: w.id,
+        stationId: p.station_id,
+        stationCode: location.station_code,
+        name: w.full_name,
+        dropxId: w.dropx_id,
+        providerIds: [...new Set(plans.map((m) => m.provider_member_id))],
+        deliveries: deliveries
+          .filter((d) => d.visible)
+          .map(({ visible, workerId, ...d }) => d),
+        file: files.get(p.source_batch_id)?.file_name,
+        uploadedAt: files.get(p.source_batch_id)?.committed_at || p.updated_at,
+        sourceRow: rowNumbers.get(p.source_row_id),
+      },
+    ];
+  });
   return {
     stations: st.data,
+    bulkPeriods,
     rows: [...rows.values()]
       .filter(
         (r) =>
