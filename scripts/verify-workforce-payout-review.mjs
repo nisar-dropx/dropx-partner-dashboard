@@ -57,13 +57,15 @@ assert.match(
   "App-only publications must render as published instead of falling back to Under Review."
 );
 assert.doesNotMatch(tableSource, /Publish Payment requires all-location access/);
-assert.match(reviewActionSource, /rpc\("workforce_dispute_transition_v2"/);
+assert.match(reviewActionSource, /rpc\("workforce_dispute_transition_v3"/);
 for (const action of ["propose_correction", "propose_rejection", "approve_final", "send_back", "claim_processing", "block_processing", "complete_processing"]) {
   assert.match(reviewActionSource, new RegExp(`"${action}"`));
 }
 assert.match(reviewActionSource, /p_action: action/);
 assert.match(reviewActionSource, /p_payload: payload/);
-assert.match(reviewDeskSource, />\s*Propose payout correction\s*</);
+assert.match(reviewDeskSource, /GuidedDisputeReview/);
+assert.match(reviewActionSource, /loadDisputeEvidence/);
+assert.match(reviewActionSource, /buildGuidedPlan/);
 assert.match(reviewDeskSource, />\s*Propose rejection\s*</);
 assert.match(reviewDeskSource, /name="transition" value="approve_final"/);
 assert.match(reviewDeskSource, /name="transition" value="send_back"/);
