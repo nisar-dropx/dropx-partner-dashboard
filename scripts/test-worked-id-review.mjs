@@ -51,6 +51,11 @@ const migration = readFileSync(
 );
 await db.exec(migration);
 await db.exec(migration);
+await db.exec(`create table workforce_payout_publications(id uuid primary key,company_id uuid,workforce_id uuid,station_id uuid,period_start date,period_end date,publication_kind text);
+create table queued_worked_refresh(company_id uuid,workforce_id uuid,station_id uuid,period_start date,period_end date);
+create or replace function public.enqueue_workforce_payout_dependency_refresh(uuid,uuid,uuid,date,date,uuid) returns void language sql as 'insert into public.queued_worked_refresh values($1,$2,$3,$4,$5)';`);
+const monthMigration=readFileSync('supabase/migrations/20261107063633_worked_id_month_refresh_guards.sql','utf8');
+await db.exec(monthMigration);await db.exec(monthMigration);
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 const company = id(1),
   station = id(2),
@@ -263,10 +268,18 @@ await db.query(
   "insert into workforce_payout_payment_items(id,company_id,workforce_id,period_start,period_end,status) values($1,$2,$3,'2026-10-01','2026-10-31','processing')",
   [id(100), company, owner],
 );
-await assert.rejects(save(worker, "worked", 4, [share(30, 36)]), /bank file/);
+await assert.rejects(save(worker, "worked", 4, [share(30, 36)]), /bank-processing/);
 await db.query("delete from workforce_payout_payment_items where id=$1", [
   id(100),
 ]);
+// An early-day correction must also protect later paid sub-periods.
+await db.query("insert into workforce_payout_payment_items(id,company_id,workforce_id,period_start,period_end,status) values($1,$2,$3,'2026-10-20','2026-10-31','processing')",[id(102),company,owner]);
+await assert.rejects(save(worker,'worked',4,[share(30,36)]),/bank-processing/);
+await db.query('delete from workforce_payout_payment_items where id=$1',[id(102)]);
+for(const location of [station,id(103)])await db.query("insert into workforce_payout_publications(id,company_id,workforce_id,station_id,period_start,period_end,publication_kind) values(gen_random_uuid(),$1,$2,$3,'2026-10-20','2026-10-31','worksheet')",[company,worker,location]);
+await db.query('select refresh_worked_id_month($1,$2,$3,$4)',[company,worker,date,actor]);
+const queued=(await db.query('select period_start::text,period_end::text from queued_worked_refresh')).rows;
+assert.equal(queued.length,2);assert.ok(queued.every(r=>r.period_start==='2026-10-01'&&r.period_end==='2026-10-31'));
 await db.query(
   "insert into workforce_payout_attendance_values(id,company_id,workforce_id,effective_from,effective_to) values($1,$2,$3,'2026-10-01','2026-10-31')",
   [id(101), company, worker],

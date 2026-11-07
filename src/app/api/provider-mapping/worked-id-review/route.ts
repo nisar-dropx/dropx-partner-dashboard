@@ -68,7 +68,8 @@ export async function POST(req: Request) {
     try {
       const period = workedIdMonth(String(p.date).slice(0, 7));
       const refreshed = await refreshWorkforcePayoutPublicationJobs({
-        authorization: a,
+        // Server refresh may include the same person's prior/later station in
+        // this month. Only summary status is returned to the scoped reviewer.
         companyId: a.companyId!,
         workforceIds: result.data.affected_workforce_ids,
         periodStart: period.from,
