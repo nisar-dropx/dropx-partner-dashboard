@@ -8,7 +8,7 @@ export interface Entry {
 export interface Loss {id:string;month:string;station:string;reference:string;paise:number;outcome:string;plannedPaise:number;payrollMonth:string;responsible:string;postedPaise:number;evidence:string;pendingPayrollPaise?:number;pendingPayrollThisMonthPaise?:number;category?:string;sourcePresent?:boolean;}
 export interface Schedule {id:string;month:string;caseKey:string;station:string;payrollMonth:string;paise:number;responsible:string;note:string;version?:number;deleted?:boolean;}
 export interface DeliveryVolume {station:string;delivered:number|null;reportedDays:number;through:string|null;missingSources:string[];unit:'deliveries'|'units';}
-export interface Dimension {code:string;name:string;region:string;state:string;model:string;format?:string;cluster:string;managers:string[];isHo:boolean;}
+export interface Dimension {sourceCodes?:string[];code:string;name:string;region:string;state:string;model:string;format?:string;cluster:string;managers:string[];isHo:boolean;}
 export function reportingState(value:unknown):string {
  const state=String(value??'').trim();
  const known:Record<string,string>={AP:'Andhra Pradesh','ANDHRA PRADESH':'Andhra Pradesh',KL:'Kerala',KERALA:'Kerala',OD:'Odisha',OR:'Odisha',ODISHA:'Odisha',ORISSA:'Odisha',CG:'Chhattisgarh',CHHATTISGARH:'Chhattisgarh',KA:'Karnataka',KARNATAKA:'Karnataka',TS:'Telangana',TG:'Telangana',TELANGANA:'Telangana',UP:'Uttar Pradesh','UTTAR PRADESH':'Uttar Pradesh',TN:'Tamil Nadu','TAMIL NADU':'Tamil Nadu'};

@@ -1,13 +1,13 @@
 'use client';
 import {Fragment,useState} from 'react';
 import {money,type Entry,type Dimension} from '@/lib/finance/final-pnl/model';
-import {entryTotals,entryCoverage,groupEntries,modelLabel,statementGroups,type GroupBy} from '@/lib/finance/final-pnl/analysis';
+import {entryTotals,entryCoverage,groupEntries,modelLabel,statementGroups,sourceLocationGroups,type GroupBy} from '@/lib/finance/final-pnl/analysis';
 
-type EntryProps={entries:Entry[];canEdit:boolean;onEdit:(entry:Entry)=>void};
+type EntryProps={dimensions?:Dimension[];entries:Entry[];canEdit:boolean;onEdit:(entry:Entry)=>void};
 const sum=(entries:Entry[])=>entries.reduce((n,e)=>n+e.paise,0);
 
 /** One compact row per head; source records are rendered only after expansion. */
-export function Statement({entries,canEdit,onEdit}:EntryProps){
+export function Statement({entries,canEdit,onEdit,dimensions=[]}:EntryProps){
  const [expanded,setExpanded]=useState<Set<string>>(new Set());
  const groups=statementGroups(entries);
  return <div className="fp-statement">{(['expense','income'] as const).map(side=>{
@@ -16,7 +16,7 @@ export function Statement({entries,canEdit,onEdit}:EntryProps){
    <header><h3>{side==='expense'?'Expenses':'Income'}</h3><strong>{money(heads.reduce((n,g)=>n+g.paise,0))}</strong></header>
    {heads.map(g=><details className="fp-head" key={g.key} open={expanded.has(g.key)} onToggle={event=>{const open=event.currentTarget.open;setExpanded(previous=>{if(previous.has(g.key)===open)return previous;const next=new Set(previous);open?next.add(g.key):next.delete(g.key);return next;});}}>
     <summary><span>{g.head}</span><strong>{money(g.paise)}</strong></summary>
-    {expanded.has(g.key)&&<HeadBreakdown entries={g.entries} canEdit={canEdit} onEdit={onEdit}/>}
+    {expanded.has(g.key)&&<HeadBreakdown dimensions={dimensions} entries={g.entries} canEdit={canEdit} onEdit={onEdit}/>}
    </details>)}
    {!heads.length&&<p className="fp-empty">No {side} entries recorded.</p>}
    {side==='income'&&!heads.some(g=>g.entries.some(e=>e.recovery))&&<div className="fp-zero-row"><span>Loss recovery <small>Not recorded</small></span><strong>{money(0)}</strong></div>}
@@ -25,12 +25,18 @@ export function Statement({entries,canEdit,onEdit}:EntryProps){
 }
 
 /** First expand shows station totals, never a wall of repeated approvals. */
-export function HeadBreakdown({entries,canEdit,onEdit}:EntryProps){
+export function HeadBreakdown({entries,canEdit,onEdit,dimensions=[]}:EntryProps){
  const stations=[...new Set(entries.map(e=>e.station))].sort();
  return <div className="fp-head-body">{stations.length>1?stations.map(station=>{
   const items=entries.filter(e=>e.station===station);
-  return <Disclosure key={station} label={station} amount={sum(items)}><SourceEntries entries={items} canEdit={canEdit} onEdit={onEdit}/></Disclosure>;
- }):<SourceEntries entries={entries} canEdit={canEdit} onEdit={onEdit}/>}</div>;
+  return <Disclosure key={station} label={station} amount={sum(items)}><LocationSources dimensions={dimensions} entries={items} canEdit={canEdit} onEdit={onEdit}/></Disclosure>;
+ }):<LocationSources dimensions={dimensions} entries={entries} canEdit={canEdit} onEdit={onEdit}/>}</div>;
+}
+
+function LocationSources({entries,canEdit,onEdit,dimensions=[]}:EntryProps){
+ const groups=sourceLocationGroups(entries,dimensions);
+ if(groups.length===1&&groups[0].source===groups[0].base)return <SourceEntries entries={entries} canEdit={canEdit} onEdit={onEdit}/>;
+ return <>{groups.map(g=><Disclosure key={g.key} label={g.label} amount={g.paise}><SourceEntries entries={g.entries} canEdit={canEdit} onEdit={onEdit}/></Disclosure>)}</>;
 }
 
 function Disclosure({label,amount,children}:{label:string;amount:number;children:React.ReactNode}){
@@ -76,7 +82,7 @@ export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit,incomplete
     <th><button aria-expanded={expanded?.key===head.key} onClick={()=>toggle(head.key)}>{expanded?.key===head.key?'▾':'▸'} {head.head}</button></th>
     <td><button aria-label={`${head.head} total details`} onClick={()=>toggle(head.key)}>{money(head.paise)}</button></td>
     {groups.map(g=>{const items=head.entries.filter(e=>g.entries.includes(e));return <td key={g.key}>{items.length?<button aria-label={`${head.head} ${label(g.key)} details`} onClick={()=>toggle(head.key,g.key)}>{money(sum(items))}</button>:'—'}</td>;})}
-   </tr>{expanded?.key===head.key&&<tr className="fp-sheet-expanded"><td colSpan={groups.length+2}><div className="fp-section-head"><h3>{head.head} · {expanded.column?label(expanded.column):'All selected'} · {money(sum(selectedEntries))}</h3><button onClick={()=>setExpanded(null)}>Close detail</button></div><HeadBreakdown key={`${head.key}:${expanded.column}`} entries={selectedEntries} canEdit={canEdit} onEdit={onEdit}/></td></tr>}</Fragment>)}
+   </tr>{expanded?.key===head.key&&<tr className="fp-sheet-expanded"><td colSpan={groups.length+2}><div className="fp-section-head"><h3>{head.head} · {expanded.column?label(expanded.column):'All selected'} · {money(sum(selectedEntries))}</h3><button onClick={()=>setExpanded(null)}>Close detail</button></div><HeadBreakdown key={`${head.key}:${expanded.column}`} dimensions={dimensions} entries={selectedEntries} canEdit={canEdit} onEdit={onEdit}/></td></tr>}</Fragment>)}
    <tr className="fp-sheet-total"><th>Total {side==='expense'?'expenses':'income'}</th><td>{money(totals[side])}</td>{groups.map(g=><td key={g.key}>{money(g[side])}</td>)}</tr>
   </Fragment>)}
  </tbody><tfoot><tr><th>Recorded net P&L after allocated HO</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}{incomplete(entries)&&<small>Sources / HO incomplete</small>}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}{incomplete(g.entries)&&<small>Sources / HO incomplete</small>}</td>)}</tr></tfoot></table></div>;

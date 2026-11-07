@@ -61,3 +61,14 @@ export function entryCoverage(rows:Entry[]){
   missingExpenses:stations.filter(station=>entries.some(e=>e.station===station&&e.side==='income'&&!e.recovery)&&!entries.some(e=>e.station===station&&e.side==='expense'&&!/^(?:corporate-)?ho-allocation:/.test(e.id))),
  };
 }
+
+/** Group evidence inside a base station without creating a second P&L. Only
+ * configured children are labelled XPT; corrected entries retain source origin. */
+export function sourceLocationGroups(entries:Entry[],dimensions:Dimension[]=[]){
+ const groups=new Map<string,Entry[]>();
+ for(const e of entries.filter(e=>!e.deleted)){const code=e.sourceStation||e.station,key=`${e.station}:${code}`;const items=groups.get(key)??[];items.push(e);groups.set(key,items);}
+ return [...groups].map(([key,items])=>{const base=items[0].station,source=items[0].sourceStation||base;
+ const label=source===base?`Base station · ${base}`:/^HO(?:_|$)/i.test(source)?`HO · ${source}`:dimensions.find(d=>d.code===base)?.sourceCodes?.includes(source)?`XPT · ${source}`:`From ${source}`;
+ return {key,base,source,label,entries:items,paise:items.reduce((n,e)=>n+e.paise,0)};
+ }).sort((a,b)=>Number(b.source===b.base)-Number(a.source===a.base)||a.source.localeCompare(b.source));
+}

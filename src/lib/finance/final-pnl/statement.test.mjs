@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {statementGroups,statementHead,entryTotals,groupEntries,emptyFilters,filterEntries} from './analysis.ts';
+import {sourceLocationGroups,statementGroups,statementHead,entryTotals,groupEntries,emptyFilters,filterEntries} from './analysis.ts';
 const entry=(id,head,paise,extra={})=>({id,head,paise,side:'expense',station:'A',...extra});
 
 test('approvals and spelling variants form one Adhoc Van head without changing the source records',()=>{
@@ -58,4 +58,13 @@ test('coverage distinguishes missing invoices, missing operating costs and confi
 test('adhoc van approvals group under one head regardless of delivery performer suffix',()=>{
  assert.equal(statementHead({side:'expense',head:'Ad hoc Van (Separate DA does delivery)'}),'Adhoc Van');
  assert.equal(statementHead({side:'expense',head:'Adhoc Van'}),'Adhoc Van');
+});
+
+
+test('XPT evidence stays inside one base P&L and follows configured hierarchy only',()=>{
+ const rows=[entry('base','Fuel',100,{station:'BASE',sourceStation:'BASE'}),{...entry('child','Fuel',40,{station:'BASE'}),sourceStation:'CHILD'}, {...entry('move','Fuel',20,{station:'BASE'}),sourceStation:'OTHER'}];
+ const groups=sourceLocationGroups(rows,[{code:'BASE',sourceCodes:['BASE','CHILD']}]);
+ assert.equal(groups.reduce((n,g)=>n+g.paise,0),160);
+ assert.deepEqual(groups.map(g=>g.label),['Base station · BASE','XPT · CHILD','From OTHER']);
+ assert.equal(new Set(groups.map(g=>g.base)).size,1);
 });
