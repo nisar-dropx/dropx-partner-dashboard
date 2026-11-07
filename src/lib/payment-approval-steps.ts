@@ -1,3 +1,4 @@
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, loadEffectivePositionAccess, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { paymentRoutingDay, resolvePaymentCover } from "@/lib/payment-delegation-policy";
@@ -88,12 +89,6 @@ export async function loadApprovalSteps(companyId: string, paymentHeadId: string
   }));
 }
 
-async function stationCluster(companyId: string, locationId: string | null | undefined) {
-  if (!supabaseAdmin || !locationId) return null;
-  const result = await supabaseAdmin.from("stations").select("cluster").eq("company_id", companyId).eq("id", locationId).maybeSingle();
-  return result.data?.cluster ?? null;
-}
-
 async function stationLocationModelId(companyId: string, locationId: string | null | undefined) {
   if (!supabaseAdmin || !locationId) return null;
   const result = await supabaseAdmin.from("stations").select("location_model_id").eq("company_id", companyId).eq("id", locationId).maybeSingle();
@@ -135,7 +130,7 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
 
   // station / cluster: narrow to people whose location scope actually covers
   // the requester's station (or, for cluster, any station sharing the same
-  // stations.cluster label), and whose own stations include the requester's
+  // current People owner), and whose own stations include the requester's
   // station's business model (see candidateModelIds).
   const memberships = await supabaseAdmin
     .from("company_product_memberships")
@@ -160,13 +155,17 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
     return matched.filter((id): id is string => Boolean(id));
   }
 
-  // cluster scope: a candidate qualifies if the requester's station shares a
-  // cluster label with any station in the candidate's location_scope_ids.
-  const cluster = await stationCluster(companyId, locationId);
-  if (!cluster) return [];
-  const scopedStations = await supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("cluster", cluster);
-  if (scopedStations.error) throw new Error(scopedStations.error.message);
-  const clusterStationIds = new Set((scopedStations.data ?? []).map((row) => row.id));
+  // Cluster membership is derived from current People identities, never legacy station labels.
+  const candidateStations = [...new Set([locationId, ...rows.flatMap(row => row.location_scope_ids ?? [])])];
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, candidateStations);
+  if (hierarchy.error) throw new Error(hierarchy.error);
+  const ownersFor = (id: string) => {
+    const station = hierarchy.byLocation.get(id);
+    return (station?.clusterManagers.length ? station.clusterManagers : station?.areaOperationsManagers ?? []).map(person => person.personId);
+  };
+  const owners = new Set(ownersFor(locationId));
+  if (!owners.size) return [];
+  const clusterStationIds = new Set(candidateStations.filter(id => ownersFor(id).some(owner => owners.has(owner))));
   const inCluster = rows.filter((row) => row.has_all_location_access || (row.location_scope_ids ?? []).some((id: string) => clusterStationIds.has(id)));
   const matchedCluster = await Promise.all(inCluster.map(async (row) => (await matchesModel(row)) ? row.user_id : null));
   return matchedCluster.filter((id): id is string => Boolean(id));

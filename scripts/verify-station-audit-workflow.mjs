@@ -9,6 +9,8 @@ const planningSource = fs.readFileSync("src/lib/ops-pulse/station-audit-planning
 const planning = { exports: {} };
 new Function("module", "exports", ts.transpileModule(planningSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(planning, planning.exports);
 const mocks = {
+  "@/lib/people-operational-hierarchy": {},
+  "./nl-loss-clusters": {},
   "@/lib/ops-pulse/station-audit-query": {},
   "./station-audit-planning": planning.exports,
   "./station-audit-people": {},

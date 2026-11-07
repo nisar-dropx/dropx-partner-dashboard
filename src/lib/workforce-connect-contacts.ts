@@ -1,6 +1,6 @@
 import "server-only";
 
-import { unstable_cache } from "next/cache";
+import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -55,11 +55,7 @@ async function loadPeopleContacts(companyId: string, personIds: string[]) {
 
 async function stationDirectory(companyId: string, locationId: string) {
   if (!supabaseAdmin) throw new Error("Database unavailable");
-  const [station, hierarchy] = await Promise.all([
-    supabaseAdmin.from("stations").select("cluster,cluster_name").eq("company_id", companyId).eq("id", locationId).maybeSingle(),
-    loadPeopleOperationalHierarchy(companyId, [locationId]),
-  ]);
-  if (station.error) throw station.error;
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, [locationId]);
   if (hierarchy.error) throw new Error(hierarchy.error);
   const operational = hierarchy.byLocation.get(locationId);
   const teamLeads = operational?.stationLeads ?? [];
@@ -73,13 +69,12 @@ async function stationDirectory(companyId: string, locationId: string) {
     return workforceContactValues(person.name, person.role, values?.profile, values?.source);
   };
   return {
-    clusterName: String(station.data?.cluster_name || station.data?.cluster || "").trim() || null,
+    clusterName: nlPeopleClusters([{ id: locationId }], hierarchy.byLocation).byStation.get(locationId)?.cluster ?? null,
     teamLeads: teamLeads.map(contact),
     clusterManagers: clusterManagers.map(contact),
   };
 }
 
-const cachedStationDirectory = unstable_cache(stationDirectory, ["workforce-connect-station-directory-v1"], { revalidate: 300 });
 
 async function associateContact(companyId: string, caseId: string, name: string, role: string | null) {
   if (!supabaseAdmin) return workforceContactValues(name, role);
@@ -105,7 +100,7 @@ export async function loadWorkforceConnectContacts(input: {
   const [associate, directory] = await Promise.all([
     associateContact(input.companyId, input.caseId, input.reporterName, input.reporterRole)
       .catch(() => workforceContactValues(input.reporterName, input.reporterRole)),
-    input.locationId ? cachedStationDirectory(input.companyId, input.locationId).catch(() => null) : Promise.resolve(null),
+    input.locationId ? stationDirectory(input.companyId, input.locationId).catch(() => null) : Promise.resolve(null),
   ]);
   return {
     associate,

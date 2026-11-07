@@ -1,4 +1,6 @@
 import "server-only";
+import { loadPeopleOperationalHierarchy } from "./people-operational-hierarchy";
+import { nlPeopleClusters } from "./ops-pulse/nl-loss-clusters";
 import { supabaseAdmin } from "./supabase-admin";
 import { readAllRows } from "./supabase-pagination";
 import {
@@ -26,12 +28,15 @@ export async function loadWorkedIdReview(
   const db = supabaseAdmin;
   const st = await db
     .from("stations")
-    .select("id,station_code,station_name,region,cluster")
+    .select("id,station_code,station_name,region")
     .eq("company_id", company)
     .in("id", stationIds);
   if (st.error || st.data.length !== stationIds.length)
     throw Error("Location unavailable.");
-  const selectedStations = new Map(st.data.map((s) => [s.id, s]));
+  const hierarchy = await loadPeopleOperationalHierarchy(company, stationIds);
+  if (hierarchy.error) throw Error("Current People ownership unavailable. Please retry.");
+  const owners = nlPeopleClusters(st.data, hierarchy.byLocation);
+  const selectedStations = new Map(st.data.map((s) => [s.id, { ...s, ...owners.byStation.get(s.id)! }]));
   const selectedCodes = st.data.map((s) => s.station_code);
   const bulkResult = await readAllRows(
     db

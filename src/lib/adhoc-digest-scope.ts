@@ -100,7 +100,7 @@ async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown
 export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, domain: string, additionalEmails: string[] = [], policy?: OperationsMailPolicy) {
   const [stations, memberships, roles, profiles, personLinks, people, engagements, assignments, departments] = await Promise.all([
     allRows<AdHocMailStation>(offset => db.from("stations")
-      .select("id,station_code,station_name,station_email,city,state,region,cluster,cluster_manager,aom,is_ho,hide_from_location_list,providers(code,name),location_models(code,name)")
+      .select("id,station_code,station_name,station_email,city,state,region,is_ho,hide_from_location_list,providers(code,name),location_models(code,name)")
       .eq("company_id", companyId).eq("is_active", true).order("id").range(offset, offset + 999)),
     allRows<AdHocMembership>(offset => db.from("company_product_memberships")
       .select("user_id,role_id,has_all_location_access,location_scope_ids")
@@ -152,5 +152,10 @@ export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, 
       : m.has_all_location_access||roles.find(r=>r.id===m.role_id)?.location_access_mode==='all_locations'||m.location_scope_ids?.includes(station.id))).map(s=>s.id);
     if(ids.length && !recipients.some(r=>r.email===email)) recipients.push({email,name:profile.full_name||email,stationIds:ids});
   }
-  return { stations: included, recipients };
+  const { loadPeopleOperationalHierarchy } = await import("./people-operational-hierarchy");
+  const { nlPeopleClusters } = await import("./ops-pulse/nl-loss-clusters");
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, included.map(station => station.id));
+  if (hierarchy.error) throw new Error(hierarchy.error);
+  const owners = nlPeopleClusters(included, hierarchy.byLocation);
+  return { stations: included.map(station => ({ ...station, cluster: owners.byStation.get(station.id)!.cluster })), recipients };
 }
