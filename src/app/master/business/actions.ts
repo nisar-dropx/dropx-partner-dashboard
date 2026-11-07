@@ -12,6 +12,7 @@ export async function saveBusinessMaster(input:{kind:BusinessMasterKind;key:stri
   const code=data.station_code;
   if(code&&!c.locations.some(l=>l.station_code===code))throw Error('Choose an existing location.');
   if(['reporting_region','billing_period','shipment_reporting'].includes(input.kind)&&input.key!==code)throw Error('Mapping key must be the station code.');
+  if(input.kind==='loss_period'&&!input.remove&&records.some(r=>r.kind==='loss_period'&&r.key!==input.key&&r.data.report===data.report&&r.data.period===data.period))throw Error('This loss period already has a P&L month. Edit the existing record.');
   if(input.kind==='shipment_reporting')validateShipmentReportingParent(data,c.locations);
   if(input.kind==='billing_period'){const location=c.locations.find(l=>l.station_code===code);if(!location||location.is_ho||locationModel(location)==='NOW')throw Error('Choose a shipment-based operating station.');if(data.prior_reporting_station&&(location.pricing_model!=='xpt'||location.parent_station_code!==data.prior_reporting_station))throw Error('Earlier reporting must use this XPT’s configured parent.');}
   if(input.kind==='now_store'){

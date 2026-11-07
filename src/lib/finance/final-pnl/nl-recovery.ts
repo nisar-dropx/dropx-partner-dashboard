@@ -50,3 +50,27 @@ export function lossCategory(report:unknown,details:unknown):string{
  if(/cash on delivery|cod loss|cod shortage|cash shortage/.test(text))return 'COD loss';
  return String(report||'').toLowerCase()==='slp'?'Package loss (SLP)':'Package loss (NL)';
 }
+
+/** Approved receipt evidence and payroll settle the same case. Recognise only
+ * the increase in cumulative confirmed recovery, never the plan's assigned sum. */
+export function nlReceiptEvidence(month:string,cases:Row[],plans:Row[],evidence:ReturnType<typeof nlRecoveryEvidence>){
+ const postedByCase=new Map(evidence.postedByCase),issues=[...evidence.issues];let entries=[...evidence.entries];
+ const byCase=new Map(cases.map(c=>[`${c.month}:${c.case_key}`,c]));
+ for(const plan of plans){
+  if(plan.is_deleted||plan.outcome_code!=='already_recovered'||plan.approval_status!=='approved')continue;
+  const c=byCase.get(`${plan.month}:${plan.case_key}`),d=plan.recovery_details;
+  if(!c||c.lifecycle_status==='needs_review'||!d||paise(plan.source_amount)!==paise(c.amount)||(c.report!=='slp'&&plan.source_status!==c.source_status))continue;
+  const date=String(d.received_date??''),reference=String(d.receipt_reference??'').trim();
+  if(!/^20\d{2}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||reference.length<5)continue;
+  if(date.slice(0,7)>month)continue;
+  const amount=paise(d.received_amount);if(amount<=0||amount!==paise(c.amount))continue;
+  const caseKey=`nl:${c.month}:${c.case_key}`,payroll=postedByCase.get(caseKey)??0;
+  const current=entries.filter(e=>e.caseKey===caseKey).reduce((n,e)=>n+e.paise,0),before=payroll-current;
+  const recognized=Math.max(payroll,amount)-Math.max(before,date.slice(0,7)<month?amount:0);
+  postedByCase.set(caseKey,Math.max(payroll,amount));
+  entries=entries.filter(e=>e.caseKey!==caseKey);
+  if(recognized>0)entries.push({id:`recovery:nl:receipt:${caseKey}:${month}`,month,station:c.station_code,sourceStation:c.station_code,side:'income',head:'Loss recovery',description:`Approved recovery receipt · ${c.case_key} · payroll overlap counted once`,paise:recognized,source:'Ops Pulse approved recovery receipt',reference,date,recovery:true,caseKey});
+  if(payroll>0)issues.push(`${c.station_code}: receipt and payroll evidence overlap for ${c.case_key}; recovery is counted once using cumulative confirmed amounts.`);
+ }
+ return {...evidence,entries,postedByCase,issues};
+}

@@ -35,7 +35,7 @@ export function stationLossCategory(entry: Pick<Entry, 'side' | 'head' | 'descri
   const text = `${entry.head} ${entry.description}`;
   if (!/loss|chargeback|(?:cash|cod)\s*(?:debit|recovery|shortage|shortfall)/i.test(text)) return null;
   if (/\bcod\b|cash\s+on\s+delivery|cash\s+(?:loss|shortage|shortfall)/i.test(text)) return 'cod';
-  if (/package|parcel|shipment|\bnnl\b|\bnl\b/i.test(text)) return 'package';
+  if (/package|parcel|shipment|\bnnl\b|\bnl\b|\bslp\b/i.test(text)) return 'package';
   return 'other';
 }
 

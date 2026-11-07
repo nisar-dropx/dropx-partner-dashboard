@@ -5,7 +5,7 @@ export interface Entry {
  details?:EntryDetail[];
  version?:number;modified?:boolean;sourceChanged?:boolean;sourceHash?:string;deleted?:boolean;
 }
-export interface Loss {id:string;month:string;station:string;reference:string;paise:number;outcome:string;plannedPaise:number;payrollMonth:string;responsible:string;postedPaise:number;evidence:string;pendingPayrollPaise?:number;pendingPayrollThisMonthPaise?:number;category?:string;sourcePresent?:boolean;}
+export interface Loss {report?:string;finalRecoverable?:boolean;recognitionMonth?:string;id:string;month:string;station:string;reference:string;paise:number;outcome:string;plannedPaise:number;payrollMonth:string;responsible:string;postedPaise:number;evidence:string;pendingPayrollPaise?:number;pendingPayrollThisMonthPaise?:number;category?:string;sourcePresent?:boolean;}
 export interface Schedule {id:string;month:string;caseKey:string;station:string;payrollMonth:string;paise:number;responsible:string;note:string;version?:number;deleted?:boolean;}
 export interface DeliveryVolume {station:string;delivered:number|null;reportedDays:number;through:string|null;missingSources:string[];unit:'deliveries'|'units';}
 export interface Dimension {sourceCodes?:string[];code:string;name:string;region:string;state:string;model:string;format?:string;cluster:string;managers:string[];isHo:boolean;}
@@ -21,6 +21,7 @@ export interface Sources {
 export interface Report {
  volumes?:DeliveryVolume[];overheadPools?:OverheadPool[];excludedInactiveEntries?:number;
  dimensions?:Dimension[];
+ lossReconciliation?:{invoicePaise:number;stationPaise:number;differencePaise:number;invoiceEntries:Entry[]};
  month:string;entries:Entry[];schedules:Schedule[];losses:Loss[];stations:string[];issues:string[];capturedAt:string|null;counts:Record<string,number>;
  totals:{income:number;expense:number;profit:number;recovery:number;gst:number};
  invoices:{key:string;month:string;station:string;baseStation?:string;reference:string;date:string;taxPaise:number;totalPaise:number;issues:string[]}[];
