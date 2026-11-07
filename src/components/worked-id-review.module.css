@@ -1,0 +1,80 @@
+.review {
+  display: grid;
+  gap: 16px;
+}
+
+.review label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.review label > select,
+.review label > input,
+.review textarea,
+.split input {
+  box-sizing: border-box;
+  min-height: 38px;
+  border: 1px solid #d9dfe7;
+  border-radius: 8px;
+  background: #fff;
+  color: #17212f;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.review label > select:focus,
+.review label > input:focus,
+.review textarea:focus,
+.split input:focus {
+  outline: 2px solid #d95529;
+  outline-offset: 2px;
+}
+
+.review textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.review [role="dialog"] label + label {
+  margin-top: 14px;
+}
+
+.review [role="dialog"] label {
+  margin-bottom: 12px;
+}
+
+.split {
+  margin: 12px 0;
+}
+
+.split table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.split th,
+.split td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.split input {
+  width: 100%;
+  max-width: 100px;
+}
+
+@media (max-width: 600px) {
+  .review label {
+    width: 100%;
+  }
+  .split th,
+  .split td {
+    padding: 8px 6px;
+  }
+}
