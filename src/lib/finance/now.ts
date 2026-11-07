@@ -61,7 +61,7 @@ export function validateMaster(kind:BusinessMasterKind,value:unknown):Record<str
   throw Error('Unknown master section.');
 }
 /** Reporting parent is an explicit hierarchy relationship, never guessed from a code. */
-export function validateShipmentReportingParent(data:Record<string,any>,locations:{station_code:string;is_ho?:boolean;parent_station_code?:string|null}[]){
+export function validateShipmentReportingParent(data:Record<string,any>,locations:{station_code:string;is_ho?:boolean|null;parent_station_code?:string|null}[]){
  const station=locations.find(l=>l.station_code===data.station_code);
  if(!station||station.is_ho)throw Error('Choose an operating station.');
  if(data.mode==='parent'&&(!station.parent_station_code||station.parent_station_code!==data.parent_station_code||!locations.some(l=>l.station_code===data.parent_station_code&&!l.is_ho)))throw Error('Shipment reporting must use this location’s configured parent.');
