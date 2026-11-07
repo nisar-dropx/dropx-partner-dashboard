@@ -28,3 +28,29 @@ test('missing or malformed delivered volume cannot silently become zero or conta
  for(const units of [null,undefined,'',-1,'bad']){const result=deliveryVolumes('2026-09',[],[{station_code:'A',month:'2026-09-01',units,through_date:'2026-09-30'}],topology,[dimension('A','Kerala','NOW')])[0];assert.equal(result.delivered,null);assert.deepEqual(result.missingSources,['A']);}
  const zero=deliveryVolumes('2026-09',[{station_code:'A',work_date:'2026-09-01',shipment_present:true,deliveries:0}],[],topology,dimensions)[0];assert.equal(zero.delivered,0);assert.deepEqual(zero.missingSources,[]);
 });
+
+test('explicit XPT reporting date scopes expected feeds without inventing volume or duplicating parent data',()=>{
+ const topology=[location('A'),location('X','A')],dimensions=[dimension('A','Kerala')];
+ const record={kind:'billing_period',data:{station_code:'X',reporting_from:'2026-11-05',fixed_payout_from:'2026-10-01',prior_reporting_station:'A'}};
+ const parent={station_code:'A',work_date:'2026-10-31',shipment_present:true,deliveries:100};
+ const before=deliveryVolumes('2026-10',[parent],[],topology,dimensions,[record])[0];
+ assert.equal(before.delivered,100);assert.deepEqual(before.missingSources,[]);
+ // No explicit rule retains the conservative missing-feed check.
+ assert.deepEqual(deliveryVolumes('2026-10',[parent],[],topology,dimensions)[0].missingSources,['X']);
+ const nextParent={...parent,work_date:'2026-11-05'};
+ assert.deepEqual(deliveryVolumes('2026-11',[nextParent],[],topology,dimensions,[record])[0].missingSources,['X']);
+ const child={station_code:'X',work_date:'2026-11-05',shipment_present:true,deliveries:20};
+ const after=deliveryVolumes('2026-11',[nextParent,child],[],topology,dimensions,[record])[0];
+ assert.equal(after.delivered,120);assert.deepEqual(after.missingSources,[]);
+ // A stale pre-start child record does not prove the new feed is available.
+ assert.deepEqual(deliveryVolumes('2026-11',[nextParent,{...child,work_date:'2026-11-01'}],[],topology,dimensions,[record])[0].missingSources,['X']);
+});
+test('parent-reporting master uses parent count once and never requires an unofficial child feed',()=>{
+ const topology=[location('A'),location('X','A'),location('B')],dimensions=[dimension('A','Kerala'),dimension('B','Kerala')];
+ const rows=[{station_code:'A',work_date:'2026-10-31',shipment_present:true,deliveries:100},{station_code:'X',work_date:'2026-10-31',shipment_present:true,deliveries:20}];
+ const record={kind:'shipment_reporting',data:{station_code:'X',mode:'parent',parent_station_code:'A',source:'Confirmed'}};
+ const parent=deliveryVolumes('2026-10',rows,[],topology,dimensions,[record])[0];assert.equal(parent.delivered,100);assert.deepEqual(parent.missingSources,[]);
+ assert.deepEqual(deliveryVolumes('2026-10',rows.slice(1),[],topology,dimensions,[record])[0].missingSources,['A']);
+ const separate=deliveryVolumes('2026-10',rows,[],topology,dimensions,[{...record,data:{...record.data,mode:'separate'}}])[0];assert.equal(separate.delivered,120);
+ const invalid=deliveryVolumes('2026-10',rows.slice(0,1),[],topology,dimensions,[{...record,data:{...record.data,parent_station_code:'B'}}])[0];assert.deepEqual(invalid.missingSources,['X']);
+});

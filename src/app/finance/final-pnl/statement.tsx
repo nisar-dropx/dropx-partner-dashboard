@@ -51,25 +51,25 @@ function SourceEntries({entries,canEdit,onEdit}:EntryProps){
 function EntryEvidence({entry:e,canEdit,onEdit}:{entry:Entry;canEdit:boolean;onEdit:(entry:Entry)=>void}){
  const [page,setPage]=useState(1),details=e.details??[],pages=Math.max(1,Math.ceil(details.length/31)),current=Math.min(page,pages),sourceTotal=details.reduce((n,d)=>n+d.paise,0);
  return <div className={`fp-entry-body${e.sourceChanged?' fp-review':''}`}>
-  <div className="fp-source-line"><span>{e.station}{e.sourceStation!==e.station?` · from ${e.sourceStation}`:''} · {e.source}{e.modified?' · corrected':''}</span><button disabled={!canEdit||e.id.startsWith('ho-allocation:')} onClick={()=>onEdit(e)}>Edit entry</button></div>
+  <div className="fp-source-line"><span>{e.station}{e.sourceStation!==e.station?` · from ${e.sourceStation}`:''} · {e.source}{e.modified?' · corrected':''}</span><button disabled={!canEdit||/^(?:corporate-)?ho-allocation:/.test(e.id)} onClick={()=>onEdit(e)}>Edit entry</button></div>
   <p>{e.description}</p><small className="fp-muted">{e.reference} · {e.payrollMonth?`Payroll ${e.payrollMonth} · posted `:''}{e.date}</small>
-  {e.id.startsWith('ho-allocation:')&&<p>Derived share. Change its monthly rule in HO & shared costs.</p>}
+  {/^(?:corporate-)?ho-allocation:/.test(e.id)&&<p>Derived HO share. Review its monthly rule and source costs in HO & shared costs; station shares follow the saved allocation basis.</p>}
   {e.sourceChanged&&<p className="fp-warning">Source changed after this correction. Review the amount and allocation.</p>}
   {!!details.length&&<><div className="fp-scroll"><table className="fp-evidence-table"><thead><tr><th>Date</th><th>Source / reference</th><th>Amount</th></tr></thead><tbody>{details.slice((current-1)*31,current*31).map((d,i)=><tr key={`${d.date}:${d.reference}:${i}`}><td>{d.date}</td><td>{d.reference}<small>{d.label}</small></td><td>{money(d.paise)}</td></tr>)}</tbody><tfoot><tr><th colSpan={2}>Source total · {details.length} records</th><td>{money(sourceTotal)}</td></tr>{e.modified&&<><tr><td colSpan={2}>P&L correction</td><td>{money(e.paise-sourceTotal)}</td></tr><tr><th colSpan={2}>Included in P&L</th><td>{money(e.paise)}</td></tr></>}</tfoot></table></div>{pages>1&&<div className="fp-actions"><button disabled={current===1} onClick={()=>setPage(current-1)}>Previous records</button><small>{current} / {pages}</small><button disabled={current===pages} onClick={()=>setPage(current+1)}>Next records</button></div>}</>}
  </div>;
 }
 
 /** Spreadsheet comparison uses the same grouped entries as the two-sided P&L. */
-export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit}:EntryProps&{dimensions:Dimension[];by:GroupBy}){
+export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit,incompleteStations=[]}:EntryProps&{dimensions:Dimension[];by:GroupBy;incompleteStations?:string[]}){
  const [expanded,setExpanded]=useState<{key:string;column:string}|null>(null);
  const groups=groupEntries(entries,dimensions,by),heads=statementGroups(entries),totals=entryTotals(entries);
- const incomplete=(items:Entry[])=>{const coverage=entryCoverage(items);return !!(coverage.missingIncome.length||coverage.missingExpenses.length);};
+ const incomplete=(items:Entry[])=>{const coverage=entryCoverage(items);return items.some(e=>incompleteStations.includes(e.station))||!!(coverage.missingIncome.length||coverage.missingExpenses.length);};
  const label=(key:string)=>by==='model'?modelLabel(key):key;
  const toggle=(key:string,column='')=>setExpanded(previous=>previous?.key===key&&previous.column===column?null:{key,column});
  const selected=expanded?heads.find(g=>g.key===expanded.key):null;
  const selectedEntries=selected?.entries.filter(e=>!expanded?.column||groups.find(g=>g.key===expanded.column)?.entries.includes(e))??[];
  if(!heads.length)return <p className="fp-empty">No recorded entries match these filters.</p>;
- return <div className="fp-sheet-scroll"><table className="fp-sheet"><caption>Amounts in ₹ · Click a cost head or amount to expand · — means no recorded entry · Operating result is before corporate HO and unallocated regional HO</caption><thead><tr><th>Particulars</th><th>Total</th>{groups.map(g=><th key={g.key}>{label(g.key)}<small>{g.stations.length} station{g.stations.length!==1?'s':''}</small>{incomplete(g.entries)&&<small className="fp-pending">Sources incomplete</small>}</th>)}</tr></thead><tbody>
+ return <div className="fp-sheet-scroll"><table className="fp-sheet"><caption>Amounts in ₹ · Click a cost head or amount to expand · — means no recorded entry · Recorded result includes allocated regional and corporate HO; incomplete sources or allocations are marked</caption><thead><tr><th>Particulars</th><th>Total</th>{groups.map(g=><th key={g.key}>{label(g.key)}<small>{g.stations.length} station{g.stations.length!==1?'s':''}</small>{incomplete(g.entries)&&<small className="fp-pending">Sources / HO incomplete</small>}</th>)}</tr></thead><tbody>
   {(['expense','income'] as const).map(side=><Fragment key={side}>
    <tr className="fp-sheet-section"><th colSpan={groups.length+2}>{side==='expense'?'Expenses':'Income'}</th></tr>
    {heads.filter(g=>g.side===side).map(head=><Fragment key={head.key}><tr>
@@ -79,5 +79,5 @@ export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit}:EntryProp
    </tr>{expanded?.key===head.key&&<tr className="fp-sheet-expanded"><td colSpan={groups.length+2}><div className="fp-section-head"><h3>{head.head} · {expanded.column?label(expanded.column):'All selected'} · {money(sum(selectedEntries))}</h3><button onClick={()=>setExpanded(null)}>Close detail</button></div><HeadBreakdown key={`${head.key}:${expanded.column}`} entries={selectedEntries} canEdit={canEdit} onEdit={onEdit}/></td></tr>}</Fragment>)}
    <tr className="fp-sheet-total"><th>Total {side==='expense'?'expenses':'income'}</th><td>{money(totals[side])}</td>{groups.map(g=><td key={g.key}>{money(g[side])}</td>)}</tr>
   </Fragment>)}
- </tbody><tfoot><tr><th>Operating profit / loss</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}{incomplete(entries)&&<small>Sources incomplete</small>}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}{incomplete(g.entries)&&<small>Sources incomplete</small>}</td>)}</tr></tfoot></table></div>;
+ </tbody><tfoot><tr><th>Recorded net P&L after allocated HO</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}{incomplete(entries)&&<small>Sources / HO incomplete</small>}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}{incomplete(g.entries)&&<small>Sources / HO incomplete</small>}</td>)}</tr></tfoot></table></div>;
 }

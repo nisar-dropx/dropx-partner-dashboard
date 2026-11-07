@@ -16,7 +16,7 @@ export function statementHead(e:Pick<Entry,'side'|'head'>){
  if(e.side!=='expense')return head;
  if(/^(?:vehicle rent|van rental expenses)(?:\s*[·:–—-]|$)/i.test(head))return 'Vehicle rent';
  if(/^vehicle run(?:\s*[·:–—-]|$)/i.test(head))return 'Vehicle run';
- if(/^(?:ad[ -]?hoc van|van ad[ -]?hoc)(?:\s*[·:–—-]|$)/i.test(head))return 'Adhoc Van';
+ if(/^(?:ad[ -]?hoc van|van ad[ -]?hoc)(?:\s*[·:–—(-]|$)/i.test(head))return 'Adhoc Van';
  const aliases:Record<string,string>={
   'van fuel':'Vehicle fuel','van fuel expenses':'Vehicle fuel','iocl fuel':'Vehicle fuel','bpcl fuel':'Vehicle fuel',
   'vehicle service/maintanace':'Vehicle maintenance','vehicle maintanance expenses':'Vehicle maintenance',
@@ -27,7 +27,7 @@ export function statementHead(e:Pick<Entry,'side'|'head'>){
  };
  return aliases[head.toLowerCase()]??head;
 }
-const headOrder=['Workforce payouts','Helper payouts','UTR salaries','Manager share','HO salaries','Vehicle run','Vehicle rent','Vehicle fuel','Vehicle maintenance','Adhoc Van','Adhoc Driver','Adhoc DA / WM','Facility rent and maintenance','Electricity Bill','Broadband','Drinking Water','Water Bill','Cleaning Expenses','Stationery','Loss chargeback','Regional HO allocation'];
+const headOrder=['Workforce payouts','Helper payouts','UTR salaries','Manager share','HO salaries','Vehicle run','Vehicle rent','Vehicle fuel','Vehicle maintenance','Adhoc Van','Adhoc Driver','Adhoc DA / WM','Facility rent and maintenance','Electricity Bill','Broadband','Drinking Water','Water Bill','Cleaning Expenses','Stationery','Loss chargeback','Regional HO allocation','Corporate HO allocation'];
 export function statementGroups(entries:Entry[]){
  const groups=new Map<string,{key:string;head:string;side:Entry['side'];entries:Entry[];paise:number}>();
  for(const entry of entries){if(entry.deleted)continue;const head=statementHead(entry),key=entry.side+':'+head.toLowerCase();const group=groups.get(key)??{key,head,side:entry.side,entries:[],paise:0};group.entries.push(entry);group.paise+=entry.paise;groups.set(key,group);}
@@ -58,6 +58,6 @@ export function entryCoverage(rows:Entry[]){
  const entries=rows.filter(e=>!e.deleted),stations=[...new Set(entries.map(e=>e.station))];
  return {
   missingIncome:stations.filter(station=>entries.some(e=>e.station===station&&e.side==='expense')&&!entries.some(e=>e.station===station&&e.side==='income'&&!e.recovery)),
-  missingExpenses:stations.filter(station=>entries.some(e=>e.station===station&&e.side==='income'&&!e.recovery)&&!entries.some(e=>e.station===station&&e.side==='expense'&&!e.id.startsWith('ho-allocation:'))),
+  missingExpenses:stations.filter(station=>entries.some(e=>e.station===station&&e.side==='income'&&!e.recovery)&&!entries.some(e=>e.station===station&&e.side==='expense'&&!/^(?:corporate-)?ho-allocation:/.test(e.id))),
  };
 }

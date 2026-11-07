@@ -10,7 +10,7 @@ export type NowRate = {
 };
 export type NowStore = { station_code: string; category: string; city: string; rate_key: string; effective_from: string; effective_to?: string | null; monthly_mg_override?: string | null };
 export type NowVolume = { station_code: string; month: string; through_date: string; units: number; incentive_percent: number | null; note: string; revision?: number };
-export type BusinessMasterKind = 'now_rate' | 'now_store' | 'cost_head' | 'contract' | 'overhead' | 'insight' | 'reporting_region' | 'billing_period';
+export type BusinessMasterKind = 'now_rate' | 'now_store' | 'cost_head' | 'contract' | 'overhead' | 'insight' | 'reporting_region' | 'billing_period' | 'shipment_reporting';
 export type MasterRecord = { id: string; kind: BusinessMasterKind; key: string; label: string; data: Record<string, any>; revision: number; deleted_at: string | null; updated_at: string };
 export type CostContract = { head_key: string; station_code: string; vendor: string; amount: string; frequency: 'monthly' | 'annual' | 'once'; effective_from: string; effective_to?: string | null; settlement_heads: string[]; reference: string };
 export type OverheadRule = { station_code: string; mode: 'regional' | 'corporate'; recipient_codes: string[]; effective_from: string; effective_to?: string | null };
@@ -26,6 +26,12 @@ const integer=(v:unknown,label:string)=>{const n=Number(v);if(v===''||v==null||!
 export function validateMaster(kind:BusinessMasterKind,value:unknown):Record<string,any> {
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid master record.');
   const v=value as Record<string,any>;
+  if(kind==='shipment_reporting'){
+    if(!['separate','parent'].includes(v.mode))throw Error('Choose separate or parent shipment reporting.');
+    const station_code=text(v.station_code,'Station',40),parent_station_code=v.mode==='parent'?text(v.parent_station_code,'Reporting parent',40):null;
+    if(!/^[A-Za-z0-9_.:-]+$/.test(station_code)||(parent_station_code&&(!/^[A-Za-z0-9_.:-]+$/.test(parent_station_code)||parent_station_code===station_code)))throw Error('Choose a valid, different reporting parent.');
+    return {station_code,mode:v.mode,parent_station_code,source:text(v.source,'Confirmation source',500)};
+  }
   if(kind==='billing_period')return validateBillingPeriod(v);
   if(kind==='reporting_region')return {station_code:text(v.station_code,'Station / store',40),region:text(v.region,'Region',100)};
   if(kind==='cost_head')return {description:String(v.description??'').slice(0,500)};
@@ -53,6 +59,12 @@ export function validateMaster(kind:BusinessMasterKind,value:unknown):Record<str
     return {...dated,station_code:text(v.station_code,'HO location'),mode:v.mode,recipient_codes:[...new Set(v.recipient_codes)]};
   }
   throw Error('Unknown master section.');
+}
+/** Reporting parent is an explicit hierarchy relationship, never guessed from a code. */
+export function validateShipmentReportingParent(data:Record<string,any>,locations:{station_code:string;is_ho?:boolean;parent_station_code?:string|null}[]){
+ const station=locations.find(l=>l.station_code===data.station_code);
+ if(!station||station.is_ho)throw Error('Choose an operating station.');
+ if(data.mode==='parent'&&(!station.parent_station_code||station.parent_station_code!==data.parent_station_code||!locations.some(l=>l.station_code===data.parent_station_code&&!l.is_ho)))throw Error('Shipment reporting must use this location’s configured parent.');
 }
 export function validateNowVolume(value:unknown):NowVolume {
   const v=value as NowVolume;

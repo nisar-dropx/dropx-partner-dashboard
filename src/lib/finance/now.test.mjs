@@ -19,3 +19,15 @@ test('billing master keeps payout and reporting dates separate and requires a so
  assert.throws(()=>n.validateMaster('billing_period',{...data,source:''}),/confirmation source/);
  assert.throws(()=>n.validateMaster('billing_period',{...data,reporting_from:'2026-09-31'}),/valid/);
 });
+
+test('shipment reporting validates mode, evidence and configured parent without name assumptions',()=>{
+ const raw={station_code:'CHILD',mode:'parent',parent_station_code:'BASE',source:'Confirmed by operations'};
+ const data=n.validateMaster('shipment_reporting',raw);assert.deepEqual(data,raw);
+ const locations=[{station_code:'CHILD',parent_station_code:'BASE'},{station_code:'BASE'},{station_code:'OTHER'}];
+ assert.doesNotThrow(()=>n.validateShipmentReportingParent(data,locations));
+ assert.throws(()=>n.validateShipmentReportingParent({...data,parent_station_code:'OTHER'},locations),/configured parent/);
+ assert.throws(()=>n.validateMaster('shipment_reporting',{...raw,parent_station_code:'CHILD'}),/different/);
+ assert.throws(()=>n.validateMaster('shipment_reporting',{...raw,source:''}),/Confirmation source/);
+ assert.throws(()=>n.validateMaster('shipment_reporting',{...raw,mode:'unknown'}),/Choose/);
+ assert.equal(n.validateMaster('shipment_reporting',{...raw,mode:'separate'}).parent_station_code,null);
+});

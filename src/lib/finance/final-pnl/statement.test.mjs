@@ -53,3 +53,9 @@ test('coverage distinguishes missing invoices, missing operating costs and confi
  assert.deepEqual(entryCoverage(rows),{missingIncome:['B'],missingExpenses:['A']});
  assert.equal(entryCoverage([...rows,entry('removed','Pay',200,{deleted:true})]).missingExpenses[0],'A');
 });
+
+
+test('adhoc van approvals group under one head regardless of delivery performer suffix',()=>{
+ assert.equal(statementHead({side:'expense',head:'Ad hoc Van (Separate DA does delivery)'}),'Adhoc Van');
+ assert.equal(statementHead({side:'expense',head:'Adhoc Van'}),'Adhoc Van');
+});

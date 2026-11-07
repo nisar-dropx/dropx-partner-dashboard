@@ -2,7 +2,7 @@
 import {revalidatePath} from 'next/cache';
 import {financeContext,canWritePricing} from '@/lib/finance/data';
 import {loadBusinessMaster,locationModel} from '@/lib/finance/business-master';
-import {validateMaster,type BusinessMasterKind} from '@/lib/finance/now';
+import {validateMaster,validateShipmentReportingParent,type BusinessMasterKind} from '@/lib/finance/now';
 export async function saveBusinessMaster(input:{kind:BusinessMasterKind;key:string;label:string;data:unknown;revision:number;remove?:boolean}) {
  try {
   const c=await financeContext('finance_pricing');
@@ -11,7 +11,8 @@ export async function saveBusinessMaster(input:{kind:BusinessMasterKind;key:stri
   const data=validateMaster(input.kind,input.data),records=await loadBusinessMaster(c);
   const code=data.station_code;
   if(code&&!c.locations.some(l=>l.station_code===code))throw Error('Choose an existing location.');
-  if(['reporting_region','billing_period'].includes(input.kind)&&input.key!==code)throw Error('Region mapping key must be the station code.');
+  if(['reporting_region','billing_period','shipment_reporting'].includes(input.kind)&&input.key!==code)throw Error('Mapping key must be the station code.');
+  if(input.kind==='shipment_reporting')validateShipmentReportingParent(data,c.locations);
   if(input.kind==='billing_period'){const location=c.locations.find(l=>l.station_code===code);if(!location||location.is_ho||locationModel(location)==='NOW')throw Error('Choose a shipment-based operating station.');if(data.prior_reporting_station&&(location.pricing_model!=='xpt'||location.parent_station_code!==data.prior_reporting_station))throw Error('Earlier reporting must use this XPT’s configured parent.');}
   if(input.kind==='now_store'){
    if(!c.locations.some(l=>l.station_code===code&&locationModel(l)==='NOW'))throw Error('Choose an Amazon Now store.');
@@ -28,6 +29,6 @@ export async function saveBusinessMaster(input:{kind:BusinessMasterKind;key:stri
   if(!input.remove&&['now_store','overhead'].includes(input.kind)&&records.some(r=>r.kind===input.kind&&r.key!==input.key&&r.data.station_code===code&&r.data.effective_from<=(data.effective_to||'9999-12-31')&&(r.data.effective_to||'9999-12-31')>=data.effective_from))throw Error('Effective dates overlap an existing record for this location.');
   const r=await c.db.rpc('finance_save_business_master',{p_company:c.companyId,p_actor:c.authorization.userId,p_kind:input.kind,p_key:input.key,p_label:input.label.trim(),p_data:data,p_revision:input.revision,p_delete:!!input.remove});
   if(r.error)throw Error(r.error.message.includes('Record changed')?'This record changed. Reload before saving.':'Unable to save. No changes were applied.');
-  revalidatePath('/master/business');revalidatePath('/finance/profitability');return {ok:true as const};
+  revalidatePath('/master/business');revalidatePath('/finance/profitability');revalidatePath('/finance/final-pnl');return {ok:true as const};
  }catch(e){return {ok:false as const,error:e instanceof Error?e.message:'Unable to save.'};}
 }
