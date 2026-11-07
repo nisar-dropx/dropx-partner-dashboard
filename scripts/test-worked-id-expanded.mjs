@@ -42,6 +42,9 @@ export async function testExpandedWorkedReview(
   );
   await db.exec(sql);
   await db.exec(sql);
+  const evidenceMigration = readFileSync("supabase/migrations/20261107081651_worked_id_training_mapping_evidence.sql", "utf8");
+  await db.exec(evidenceMigration);
+  await db.exec(evidenceMigration);
   const batch = (entries, who = actor) =>
     db.query("select save_workforce_worked_id_batch($1,$2,$3) result", [
       company,
@@ -198,6 +201,9 @@ export async function testExpandedWorkedReview(
   );
   await assert.rejects(batch([entry("reopened", 7)]), /cannot be reopened/);
   await batch([entry("approve_training", 7)], manager);
+  await assert.rejects(db.query("update field_executive_provider_mappings set provider_member_id='CHANGED' where workforce_id=$1", [owner]), /buddy training/i);
+  await assert.rejects(db.query("update field_executive_provider_mappings set payment_values='{}' where workforce_id=$1", [worker]), /buddy training/i);
+  await assert.rejects(db.query("insert into workforce_worked_id_reviews(company_id,workforce_id,station_id,work_date,decision,reason,updated_by) values($1,$2,$3,$4,'not_worked','No work',$5)", [company,owner,station,date,actor]), /buddy training/i);
   assert.equal(
     (
       await db.query(
