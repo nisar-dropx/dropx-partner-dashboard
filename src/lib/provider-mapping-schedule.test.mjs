@@ -49,3 +49,14 @@ test('history resolves real reviewer and IST time without attributing an unknown
  assert.equal(mappingAuditForRow(m,[{...event,details:{...event.details,effective_from:'2026-09-01'}}],names)[0].actor,'User not recorded');
  assert.match(mappingAuditDateTime(event.created_at),/Tue.*13.*Oct.*2026.*07:30 pm IST/);
 });
+test('history attributes service-role batches to the system instead of the recorded user UUID',()=>{
+ const m={id:'m',workforce_id:'w',provider_id:'p',provider_member_id:'111',station_id:'a',effective_from:'2026-10-01',created_by:'recorded-user',created_at:'2026-11-06T11:55:00Z',updated_at:'2026-11-07T10:00:00Z'};
+ const created={id:'system-created',workforce_id:'w',event_code:'provider_mapping_system_created',actor_id:null,actor_name:'System automation',created_at:m.created_at,details:{mapping_id:m.id}};
+ const corrected={id:'system-corrected',workforce_id:'w',event_code:'provider_mapping_system_corrected',actor_id:null,actor_name:'System automation',created_at:m.updated_at,details:{mapping_id:m.id}};
+ const history=mappingAuditForRow(m,[created,corrected],new Map([['recorded-user','Sujan']]));
+ assert.deepEqual(history.map(row=>[row.action,row.actor]),[
+  ['System correction','System automation'],
+  ['Created by system operation','System automation']
+ ]);
+ assert.ok(!history.some(row=>row.actor==='Sujan'));
+});
