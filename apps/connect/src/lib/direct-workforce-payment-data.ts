@@ -139,7 +139,7 @@ export async function loadDirectPaymentContext(input: {
   const accrualFrom = [input.from, input.employmentFrom || input.from].sort().at(-1)!;
   const accrualTo = [input.to, input.employmentTo || input.to].sort()[0];
   if (accrualFrom > accrualTo) return { ...setup, attendance: [] as DirectAttendanceDay[], days: [] };
-  const attendanceResult = await db().from("attendance_daily")
+  const attendanceResult = await db().from("workforce_payout_attendance_facts")
     .select("id,punch_date,status,in_time,out_time,work_minutes")
     .eq("company_id", input.companyId)
     .or(attendanceIdentityFilter({ id: input.workforceId, source_profile_id: input.sourceProfileId ?? null, source_profile_type: input.sourceProfileType ?? null }))
