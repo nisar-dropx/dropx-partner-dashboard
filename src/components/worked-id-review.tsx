@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchableSelect } from "./searchable-select";
 import { FleetMultiSelect } from "./fleet-multi-select";
+import { WorkedIdBulkPeriods } from "./worked-id-bulk-periods";
 import {
   workedIdCounts,
   workedIdMetrics,
@@ -164,6 +165,17 @@ export function WorkedIdReview({
   const groups = [...new Set(rows.map((r: any) => r.workerId))]
     .map((id) => ({ id, rows: rows.filter((r: any) => r.workerId === id) }))
     .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name));
+  const bulkScoped = (data?.bulkPeriods || []).filter(
+    (p: any) =>
+      scope.has(p.stationId) &&
+      `${p.name} ${p.dropxId} ${p.providerIds.join(" ")} ${p.stationCode} ${p.effective_from} ${p.effective_to}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
+  const bulkRows = bulkScoped.filter(
+    (p: any) =>
+      show === "all" || (show === "pending" ? p.needsReview : !p.needsReview),
+  );
   const current = drafts[0]?.row;
   function patch(index: number, value: Partial<Draft>) {
     setDrafts((a) => a.map((d, i) => (i === index ? { ...d, ...value } : d)));
@@ -506,8 +518,14 @@ export function WorkedIdReview({
         <label>
           Status
           <select value={show} onChange={(e) => setShow(e.target.value)}>
-            <option value="pending">Needs review / approval</option>
-            <option value="reviewed">Reviewed</option>
+            <option value="pending">
+              {view === "bulk"
+                ? "Needs period review"
+                : "Needs review / approval"}
+            </option>
+            <option value="reviewed">
+              {view === "bulk" ? "No day-count shortfall" : "Reviewed"}
+            </option>
             <option value="all">All statuses</option>
           </select>
         </label>
@@ -535,6 +553,12 @@ export function WorkedIdReview({
           history. Buddy training is restricted to the DropX registration month,
           at most two days in total, and needs separate CM/AOM approval.
         </p>
+        <p>
+          Bulk periods compare uploaded attendance totals against distinct
+          delivery dates on mapped IDs. Bulk and biometric attendance are not
+          added together. A period shortfall flags a discrepancy; it does not
+          mark particular dates absent or reduce pay.
+        </p>
       </details>
       {notice && !current && <p role="status">{notice}</p>}
       {error && !current && (
@@ -542,43 +566,51 @@ export function WorkedIdReview({
           {error}
         </p>
       )}
-      <div className={styles.tabs} aria-label="Review reasons">
-        {[
-          ["all", "All cases"],
-          ["zero", "No own-ID deliveries"],
-          ["unmapped", "No own ID"],
-          ["report", "Report missing"],
-          ["training", "Training approval"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            aria-pressed={caseType === key}
-            onClick={() => setCaseType(key)}
-          >
-            {label}{" "}
-            <strong>
-              {
-                statusRows.filter(
-                  (r: any) =>
-                    key === "all" ||
-                    (key === "training"
-                      ? r.training?.status === "pending"
-                      : category(r) === key),
-                ).length
-              }
-            </strong>
-          </button>
-        ))}
-      </div>
+      {view !== "bulk" && (
+        <div className={styles.tabs} aria-label="Review reasons">
+          {[
+            ["all", "All cases"],
+            ["zero", "No own-ID deliveries"],
+            ["unmapped", "No own ID"],
+            ["report", "Report missing"],
+            ["training", "Training approval"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              aria-pressed={caseType === key}
+              onClick={() => setCaseType(key)}
+            >
+              {label}{" "}
+              <strong>
+                {
+                  statusRows.filter(
+                    (r: any) =>
+                      key === "all" ||
+                      (key === "training"
+                        ? r.training?.status === "pending"
+                        : category(r) === key),
+                  ).length
+                }
+              </strong>
+            </button>
+          ))}
+        </div>
+      )}
       <section className="panel">
         <div className="panel-head">
           <div>
             <h2>
-              {error ? "Cases unavailable" : `${groups.length} associates · ${rows.length} day cases`}
+              {error
+                ? "Cases unavailable"
+                : view === "bulk"
+                  ? `${new Set(bulkRows.map((p: any) => p.workerId)).size} associates · ${bulkRows.length} bulk periods`
+                  : `${groups.length} associates · ${rows.length} day cases`}
             </h2>
             <p className="subtle">
-              {scope.size} permitted stations · Punch found, delivery evidence
-              needs review
+              {scope.size} permitted stations ·{" "}
+              {view === "bulk"
+                ? "Bulk attendance days compared with mapped-ID delivery days"
+                : "Punch found, delivery evidence needs review"}
             </p>
           </div>
           <div className={styles.tabs}>
@@ -594,12 +626,23 @@ export function WorkedIdReview({
             >
               Day view
             </button>
+            <button
+              aria-pressed={view === "bulk"}
+              onClick={() => setView("bulk")}
+            >
+              Bulk periods ·{" "}
+              {bulkScoped.filter((p: any) => p.needsReview).length} flagged
+            </button>
           </div>
         </div>
         {loading ? (
           <p className="panel-body">Loading all permitted stations…</p>
         ) : error ? (
-          <p className="panel-body">Refresh to load the cases before reviewing.</p>
+          <p className="panel-body">
+            Refresh to load the cases before reviewing.
+          </p>
+        ) : view === "bulk" ? (
+          <WorkedIdBulkPeriods periods={bulkRows} month={month} />
         ) : (
           <div className="table-wrap">
             <table>
@@ -948,22 +991,59 @@ export function WorkedIdReview({
                         <div>
                           <small>Current calculated earning</small>
                           <strong>
-                            {payAvailable
-                              ? money(
-                                  calculated.reduce(
-                                    (n: number, x: any) => n + x.baseAmount,
-                                    0,
-                                  ),
-                                )
-                              : payError
-                                ? "Unavailable"
-                                : pay === null
-                                  ? "Loading…"
-                                  : "Unavailable"}
+                            {r.bulkPeriods?.some(
+                              (p: any) =>
+                                p.effective_from !== p.effective_to &&
+                                r.date !== p.effective_to,
+                            ) &&
+                            payAvailable &&
+                            calculated.every((x: any) => x.baseAmount === 0)
+                              ? "Included in bulk period"
+                              : payAvailable
+                                ? money(
+                                    calculated.reduce(
+                                      (n: number, x: any) => n + x.baseAmount,
+                                      0,
+                                    ),
+                                  )
+                                : payError
+                                  ? "Unavailable"
+                                  : pay === null
+                                    ? "Loading…"
+                                    : "Unavailable"}
                           </strong>
-                          <span>For this date, before deductions</span>
+                          <span>
+                            {r.bulkPeriods?.length
+                              ? "Bulk attendance applies; see period details below"
+                              : "For this date, before deductions"}
+                          </span>
                         </div>
                       </div>
+                      {!!r.bulkPeriods?.length && (
+                        <div className={styles.warning}>
+                          {r.bulkPeriods.map((p: any) => (
+                            <p key={p.id}>
+                              <strong>
+                                Bulk upload · {p.quantity} {p.attendance_basis}
+                              </strong>{" "}
+                              · {p.effective_from} – {p.effective_to}. Period
+                              salary is posted on {p.effective_to}; ₹0 on
+                              another date does not mean this punch was missed.
+                            </p>
+                          ))}
+                          <button
+                            className="button secondary compact"
+                            onClick={() => {
+                              setQuery(r.dropxId);
+                              setShow("all");
+                              setView("bulk");
+                              close();
+                            }}
+                          >
+                            View bulk period comparison
+                          </button>
+                        </div>
+                      )}
                       {r.reviewElsewhere && (
                         <p className={styles.error}>
                           This day was already reviewed at {r.reviewElsewhere}.
