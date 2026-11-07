@@ -19,5 +19,44 @@ row=await calculate();assert.equal(row.baseAmount,1000,'Daily/monthly MG also ex
 assert.equal(row.dailyBreakdown.find(d=>d.date==='2026-10-12').baseAmount,0);
 }
 
+// Exercise real mapped payouts, with rent and delivery components together.
+for (const monthly of [false,true]) for (const effect of ['full_day','base_only']) {
+ fixture('Amazon');
+ data.field_executive_provider_mappings[0].payment_values={DELIVERY:17,RENT:monthly?31000:1000};
+ data.payment_method_components.push({is_active:true,company_id:'company',payment_method_id:'method',component_code:'RENT',component_type:'amount',payment_fields:{id:'rent',code:'RENT',label:'ODCD rent',field_type:'amount',pay_schedule:monthly?'per_month':'per_day',calculation_type:monthly?'fixed_monthly':'fixed_daily',calculation_source:'attendance_eligibility'}});
+ // The same delivery ID has base-station and XPT payment mappings.
+ data.stations.push({...data.stations[0],id:'xpt',station_code:'XPT'});
+ data.field_executive_provider_mappings.push({...data.field_executive_provider_mappings[0],id:'xpt-mapping',station_id:'xpt'});
+ data.cps_shipment_daily.push(...data.cps_shipment_daily.map(r=>({...r,station_code:'XPT'})));
+ const all=async()=>{const r=await loadWorkforcePayoutRows('company',{hasAllLocationAccess:true,locationScopeIds:[]},'2026-10-12','2026-10-13',{includeLossRecoveries:false});assert.equal(r.error,null);return r.rows;};
+ let rows=await all();assert.equal(rows.reduce((n,r)=>n+r.baseAmount,0),10120,'Baseline: rent plus variable in both mappings');
+ const payment={company_id:'company',location_id:'station',adhoc_client:'Amazon',delivery_identity_confirmed:true,delivery_work_date:'2026-10-12',delivery_provider_employee_id:'001234567890',delivery_performer_workforce_id:'worker',delivery_payout_station_ids:['station','xpt'],adhoc_payout_effect:effect,request_no:'VAN-TEST',status:'paid'};
+ data.payment_requests=[payment];rows=await all();
+ for (const row of rows) {
+  assert.equal(row.baseAmount,effect==='full_day'?2700:4060,`${monthly?'Monthly':'Daily'} rent ${effect}: correct base/XPT amount`);
+  const day=row.dailyBreakdown.find(d=>d.date==='2026-10-12');
+  assert.equal(day.baseAmount,effect==='full_day'?0:1360,'Driver has no normal pay; ODCD keeps exactly variable delivery');
+  assert.equal(row.dailyBreakdown.find(d=>d.date==='2026-10-13').baseAmount,2700,'Adjacent day unchanged');
+  assert.equal(day.lines.filter(l=>l.code==='DELIVERY').reduce((n,l)=>n+l.count,0),effect==='full_day'?0:80,'Variable counts retained only for ODCD');
+ }
+ // Scope filtering must not lose the parent request when calculating only XPT.
+ const scoped=await loadWorkforcePayoutRows('company',{hasAllLocationAccess:false,locationScopeIds:['xpt']},'2026-10-12','2026-10-13',{includeLossRecoveries:false});
+ assert.equal(scoped.error,null);assert.equal(scoped.rows.length,1);assert.equal(scoped.rows[0].baseAmount,effect==='full_day'?2700:4060);
+ data.payment_requests[0].status='approved';rows=await all();assert.equal(rows.reduce((n,r)=>n+r.baseAmount,0),10120,'Unpaid approval never silently deducts');
+ data.payment_requests[0]={...payment,delivery_payout_station_ids:['station']};rows=await all();assert.equal(rows.find(r=>r.locationId==='xpt').baseAmount,5060,'Unrelated/unsnapshotted mapping untouched');
+}
+console.log('PASS real Workforce payouts: van driver full day zero; ODCD variable retained/rent removed, daily/monthly rent, parent and XPT, scoped XPT, adjacent-day and paid-only isolation.');
+
+// Variable incentives must follow the same day exclusion as delivery production.
+for(const effect of ['full_day','base_only']) {
+ fixture('Amazon');
+ data.cps_shipment_daily.forEach((r,i)=>r.id=`delivery-${i}`);
+ data.workforce_incentive_campaigns=[{id:'bonus',company_id:'company',code:'BONUS',name:'Delivery bonus',provider_id:'provider',location_model_id:'model',station_id:null,designation_id:null,incentive_type:'performance',cycle_type:'daily',metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:0,rate_value:1,flat_amount:0,maximum_amount:null,minimum_activity:0,tiers:[],effective_from:'2026-10-01',effective_to:'2026-10-31',status:'active',approved_at:'2026-10-01'}];
+ let row=await calculate();assert.equal(row.incentiveAmount,180);
+ data.payment_requests=[{company_id:'company',location_id:'station',adhoc_client:'Amazon',delivery_identity_confirmed:true,delivery_work_date:'2026-10-12',delivery_provider_employee_id:'001234567890',delivery_performer_workforce_id:'worker',delivery_payout_station_ids:['station'],adhoc_payout_effect:effect,request_no:'INCENTIVE-TEST',status:'paid'}];
+ row=await calculate();assert.equal(row.incentiveAmount,effect==='full_day'?100:180,'Driver day cannot earn variable incentive; ODCD keeps variable incentive');
+}
+console.log('PASS Workforce variable incentives: driver day excluded, ODCD production retained.');
+
 paymentsError=true;const failed=await loadWorkforcePayoutRows('company',{hasAllLocationAccess:true,locationScopeIds:[]},'2026-10-12','2026-10-13',{includeLossRecoveries:false});assert.match(failed.error,/verify paid ad hoc/);assert.equal(failed.rows.length,0);
 console.log('PASS actual Workforce loader: Amazon and Flipkart amounts/counts, paid-only date isolation, daily and monthly MG across EDSP/ODH/MDH, legacy safety, fail closed on exclusion lookup failure.');})().catch(e=>{console.error(e);process.exitCode=1});

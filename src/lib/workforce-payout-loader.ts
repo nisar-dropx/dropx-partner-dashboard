@@ -2,7 +2,7 @@ import { driverAbsentDayBreakdown } from "@/lib/adhoc-driver";
 import { applyWorkforcePaidAdvances } from "@/lib/workforce-paid-advances";
 import "server-only";
 import { conversionMetricSources, resolveConversionRate, type ConversionRateRule } from "@/lib/conversion-rate-rules";
-import { baseOnlyAdhocLine, paidAdhocDays, paidAdhocDayBreakdown, type AdhocPaidDayTreatment } from "@/lib/adhoc-paid-days";
+import { deliveryPayoutStations, baseOnlyAdhocLine, paidAdhocDays, paidAdhocDayBreakdown, type AdhocPaidDayTreatment } from "@/lib/adhoc-paid-days";
 import { adhocPaidDayKey } from "@/lib/adhoc-da-identity";
 import { loadRouteDistanceContext } from "@/lib/workforce-route-distance-data";
 import { isKilometreField, kilometreRate, routeFuelForDay, type RouteDistanceContext } from "@/lib/workforce-route-distance";
@@ -200,7 +200,7 @@ export async function loadWorkforcePayoutRows(
     mapping.field_executive_id
   ].some((identity) => identity && scopedIdentityIds.has(String(identity)));
   const paidDaysResult = await readAllRows(admin.from("payment_requests")
-    .select("location_id,adhoc_client,adhoc_provider_employee_id,adhoc_work_date,status,adhoc_payout_policy,request_no,delivery_identity_confirmed,delivery_provider_employee_id,delivery_work_date,delivery_performer_workforce_id,adhoc_payout_effect")
+    .select("location_id,adhoc_client,adhoc_provider_employee_id,adhoc_work_date,status,adhoc_payout_policy,request_no,delivery_payout_station_ids,delivery_identity_confirmed,delivery_provider_employee_id,delivery_work_date,delivery_performer_workforce_id,adhoc_payout_effect")
     .eq("company_id", companyId)
     .or("and(source_system.eq.OPS_ADHOC_DA,adhoc_payout_policy.eq.work_day),delivery_identity_confirmed.eq.true")
     .in("status", ["processed", "paid"])
@@ -297,7 +297,10 @@ export async function loadWorkforcePayoutRows(
       ? { requestNo: String(payment.request_no), effect: payment.adhoc_payout_effect as "full_day" | "base_only", workforceId: String(payment.delivery_performer_workforce_id) }
       : null;
     if (directTreatment && paymentDate) {
-      paidWorkforceDays.set(`${directTreatment.workforceId}|${payment.location_id}|${paymentDate}`, directTreatment);
+      for (const stationId of deliveryPayoutStations(payment)) {
+        const key = `${directTreatment.workforceId}|${stationId}|${paymentDate}`;
+        if (paidWorkforceDays.get(key)?.effect !== "full_day") paidWorkforceDays.set(key, directTreatment);
+      }
       continue;
     }
     const matches = allMappings.filter((mapping: any) => String(mapping.station_id) === payment.location_id
@@ -1457,13 +1460,13 @@ export async function loadWorkforcePayoutRows(
           stationId: String(location.id),
           // Only an actual timestamp can satisfy reporting-time eligibility.
           // Shipment-derived and aggregate attendance intentionally remain null.
-          inTime: !absentDay(String(worker.id), date) && record?.in_time ? String(record.in_time) : null
+          inTime: !absentDay(String(worker.id), date) && !paidDayForMapping(mapping, date) && record?.in_time ? String(record.in_time) : null
         });
       }
     }
     for (const daily of providerDailyRowsFor(mapping)) {
       const workDate = String(daily.work_date ?? "");
-      if (workDate < fromDate || workDate > toDate || absentDay(String(worker.id), workDate)) continue;
+      if (workDate < fromDate || workDate > toDate || absentDay(String(worker.id), workDate) || paidDayForMapping(mapping, workDate)?.effect === "full_day") continue;
       group.sources.push({
         id: `${String(mapping.id)}:${String(daily.id)}`,
         workDate,

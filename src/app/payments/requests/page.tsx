@@ -647,7 +647,7 @@ export default async function PaymentRequestsPage({
                 savedContacts={savedContacts}
               />
               {bankRequest.location_id && normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy) === "legacy_adhoc_da" ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
-              {bankRequest.location_id && !["none", "legacy_adhoc_da"].includes(normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)) ? <AdhocDeliveryFields locationId={bankRequest.location_id} policy={normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)} /> : null}
+              {bankRequest.location_id && !["none", "legacy_adhoc_da"].includes(normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)) ? <AdhocDeliveryFields initialWorkDate={bankRequest.work_date} locationId={bankRequest.location_id} policy={normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)} /> : null}
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />

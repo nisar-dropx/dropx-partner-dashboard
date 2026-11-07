@@ -58,3 +58,14 @@ test('pre-activation bank rows can finish without weakening new-request identity
  assert.match(migration,/old\.delivery_identity_confirmed is false[\s\S]*?lower\(old\.status\) in \('processing', 'processed', 'paid'\)[\s\S]*?lower\(new\.status\) in \('processing', 'processed', 'paid'\)/);
  assert.match(migration,/new\.company_id[\s\S]*?new\.adhoc_client[\s\S]*?is not distinct from row\([\s\S]*?old\.company_id[\s\S]*?old\.adhoc_client/);
 });
+
+test('confirmed station snapshots expand only their mapped ID/date; full-day wins regardless of order',()=>{
+ const linked={...record,delivery_identity_confirmed:true,delivery_provider_employee_id:'ODCD123',delivery_work_date:'2026-11-04',delivery_performer_workforce_id:'worker-1',delivery_payout_station_ids:['CHM-ID','XPT-ID'],adhoc_payout_effect:'base_only'};
+ for(const records of [[linked,{...linked,adhoc_payout_effect:'full_day'}],[{...linked,adhoc_payout_effect:'full_day'},linked]]) {
+  const days=paidAdhocDays(records);assert.equal(days.size,2);
+  for(const station of linked.delivery_payout_station_ids) assert.equal(days.get(adhocPaidDayKey(station,linked.adhoc_client,'ODCD123','2026-11-04')).effect,'full_day');
+  assert.equal(days.has(adhocPaidDayKey('OTHER',linked.adhoc_client,'ODCD123','2026-11-04')),false);
+ }
+ assert.equal(paidAdhocDays([{...linked,delivery_payout_station_ids:[]}]).size,1,'Legacy confirmed rows preserve their original station');
+ assert.equal(paidAdhocDays([{...linked,delivery_identity_confirmed:false}]).size,1,'Unconfirmed snapshots cannot expand a legacy deduction');
+});

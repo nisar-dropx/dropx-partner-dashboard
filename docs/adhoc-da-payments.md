@@ -1,5 +1,15 @@
 # Adhoc DA / Wishmaster payments
 
+## Van / ODCD station-family handling (7 November 2026)
+
+The shared Payment Requests and Expense Request payment-details form uses the request work date and a date-effective mapping roster for the configured base station and linked XPTs. It searches name, DropX ID or provider ID without requiring a shipment import. Unmapped or ambiguous IDs remain blocked; failed roster loads show a retry action. Legacy Ad hoc DA / Wishmaster callers retain their import roster.
+
+The database resolves the owner and freezes `delivery_payout_station_ids` from that ID's mappings within the same company/provider family. Browser-supplied station/owner values are not trusted. Bank-processed/paid van-driver requests exclude all normal pay for the ID/date; existing ODCD delivery excludes rent/base only and retains variable delivery earnings. The shared Workforce loader applies these rules to every snapshotted station, including an XPT-only view. Variable incentives follow the same full-day exclusion. Other dates and unpaid requests remain unchanged.
+
+Settlement uses the company payroll lock, rejects overlapping paid requests, pending Workforce bank files and finalized Workforce payouts at any affected station, and refreshes all affected payout publications. Already paid requests retain their original station scope. Confirmed requests already in bank processing capture any missing family scope at settlement only when the saved ID still resolves to the same owner. This migration does not rewrite payment history, approve requests or pay anyone. Approved legacy bank exports remain compatible.
+
+Apply only `20261107042407_adhoc_delivery_station_family.sql` before promoting the updated shared application. Verification: `verify:adhoc-da` includes the twice-applied migration, real roster API, and actual Workforce-loader amounts for daily/monthly rent, base/XPT scopes, paid-only/date isolation, failed dependency reads and incentives. TypeScript and Workforce payout regressions also pass.
+
 ## Current work-date policy (25 October 2026)
 
 OpsPulse and Dashboard share the payment form and Workforce calculation. The associate selector now reads Amazon or Flipkart imports according to the configured station provider. It returns the latest record for each distinct provider ID across import history, so a fortnightly report does not hide people absent on its final day.
