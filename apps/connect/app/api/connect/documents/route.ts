@@ -82,6 +82,38 @@ export async function GET(request: Request) {
       return NextResponse.json({ url: signed.data.signedUrl });
     }
 
+    // Snapshot refresh can wipe hr_pay_documents while bank lines stay Paid — recreate before listing.
+    if (profileType === "employee" || profileType === "contractor") {
+      const paid = await supabaseAdmin.from("hr_payroll_bank_lines")
+        .select("run_id")
+        .eq("company_id", account.companyId)
+        .eq("worker_type", profileType)
+        .eq("worker_id", account.id)
+        .eq("status", "paid");
+      if (!paid.error) {
+        const paidRunIds = [...new Set((paid.data ?? []).map((row) => String(row.run_id)).filter(Boolean))];
+        if (paidRunIds.length) {
+          const existing = await supabaseAdmin.from("hr_pay_documents")
+            .select("run_id")
+            .eq("company_id", account.companyId)
+            .eq("worker_type", profileType)
+            .eq("worker_id", account.id)
+            .is("revoked_at", null)
+            .in("run_id", paidRunIds);
+          const have = new Set((existing.data ?? []).map((row) => String(row.run_id)));
+          for (const runId of paidRunIds) {
+            if (have.has(runId)) continue;
+            // Best-effort: listing still runs even if sync cannot recreate a slip this request.
+            await supabaseAdmin.rpc("hr_sync_paid_pay_documents", {
+              p_company_id: account.companyId,
+              p_run_id: runId,
+              p_actor_user_id: null
+            });
+          }
+        }
+      }
+    }
+
     const [pay, issued, exit, types, requests, insurance] = await Promise.all([
       supabaseAdmin.from("hr_pay_documents")
         .select("id,run_id,document_type,document_number,period_label,period_start,period_end,published_at,updated_at")

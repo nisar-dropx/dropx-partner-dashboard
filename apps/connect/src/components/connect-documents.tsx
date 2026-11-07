@@ -25,9 +25,9 @@ type DocumentRow = {
 
 // cover-letterpad is a synthetic insurance row (not a UUID card id).
 
-// The document list is kept on the phone and only refetched after this long (or when the person
-// taps refresh), so opening Documents doesn't query Supabase every time.
-const LIST_CACHE_MS = 6 * 60 * 60 * 1000;
+// Short cache only — payslips appear as soon as payroll marks a person Paid, and a 6-hour
+// cache previously hid newly issued slips until the person force-cleared app storage.
+const LIST_CACHE_MS = 2 * 60 * 1000;
 const payMayChangeNote = "These figures may change if payroll is updated later.";
 const isWorkCycle = (document: DocumentRow) => /work\s*_?cycle/i.test(document.category);
 const isInsurance = (document: DocumentRow) =>
@@ -114,7 +114,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
   const [viewing, setViewing] = useState<DocumentRow | null>(null);
   const [downloadingId, setDownloadingId] = useState("");
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
-  const listCacheKey = `dropx_documents:v5:${account.profileType}:${account.id}`;
+  const listCacheKey = `dropx_documents:v6:${account.profileType}:${account.id}`;
 
   const load = useCallback(async (background = false, force = false) => {
     if (!background) setLoading(true);
@@ -157,9 +157,10 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to download this document."); }
     finally { setDownloadingId(""); }
   }
-  setReload(() => load(true));
+  // Keep-alive re-entry and first open must hit the network — never reuse a stale empty payslip list.
+  setReload(() => { void load(true, true); });
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(false, true); }, [load]);
 
   async function submitRequest(event: FormEvent) {
     event.preventDefault();
@@ -311,7 +312,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
     {error ? <div className="dx-alert error">{error}<button onClick={() => void load(false, true)}>Retry</button></div> : null}
     <nav aria-label="Document categories" className="dx-document-tabs">{tabs.map((tab) => { const Icon = tab.icon; return <button aria-current={section === tab.key ? "page" : undefined} className={section === tab.key ? "active" : ""} key={tab.key} onClick={() => setSection(tab.key)}><Icon /><span>{tab.label}</span><b>{tab.count}</b></button>; })}</nav>
     {loading ? <div className="dx-loader"><span /><small>Loading secure documents…</small></div> : null}
-    {!loading && section !== "requests" && !rows.length ? <div className="dx-document-empty"><FileText /><strong>No {tabs.find((tab) => tab.key === section)?.label.toLowerCase()} yet</strong><small>{section === "payslips" ? "Completed payroll publishes your document here automatically." : "Use Request document if you need a Workforce-issued record that is not available."}</small></div> : null}
+    {!loading && section !== "requests" && !rows.length ? <div className="dx-document-empty"><FileText /><strong>No {tabs.find((tab) => tab.key === section)?.label.toLowerCase()} yet</strong><small>{section === "payslips" ? "Your pay document appears here once the bank payment is marked paid. Pull to refresh if it was just confirmed." : "Use Request document if you need a Workforce-issued record that is not available."}</small></div> : null}
     {!loading && section !== "requests" && rows.length ? <div className="dx-document-list">{rows.map((document) => <article className="is-openable" key={`${document.kind}:${document.id}`} onClick={() => openDocument(document)} onKeyDown={(event) => { if (event.key === "Enter") openDocument(document); }} role="button" tabIndex={0}>
       <i>{document.kind === "pay" ? <WalletCards /> : isInsurance(document) ? <HeartPulse /> : isWorkCycle(document) ? <CalendarClock /> : <FileText />}</i>
       <div><span><em>{title(document.category)}</em>{document.expiresOn ? <small>{isInsurance(document) ? "Valid till" : "Expires"} {date(`${document.expiresOn}T00:00:00`)}</small> : null}</span><strong>{document.title}</strong><p>{document.subtitle}</p><small>{document.fileName} · {document.kind === "insurance" ? "Updated" : "Published"} {date(document.publishedAt)}</small>{document.mayChange ? <span className="dx-pay-may-change">{payMayChangeNote}</span> : null}</div>
