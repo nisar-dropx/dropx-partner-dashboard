@@ -7,36 +7,38 @@ import type { DeliveryIdentityPolicy, DeliveryPerformerMode } from "@/lib/adhoc-
 type RosterResponse = { options?: SearchableSelectOption[]; client?: string; error?: string };
 
 const modeCopy: Record<Exclude<DeliveryPerformerMode, "standalone_odcd">, { label: string; effect: string }> = {
-  van_driver: { label: "Van driver performed the deliveries", effect: "The normal payout for this ID/date will be excluded." },
+  van_driver: { label: "Van driver performed the deliveries", effect: "Once this ad hoc payment is paid, all normal pay for this delivery ID on this date is excluded across its base-station and XPT mappings." },
   bike_da: { label: "Existing bike DA performed the deliveries", effect: "Captured for audit only; the DA's normal payout remains." },
-  existing_odcd: { label: "Existing ODCD accompanied the van", effect: "Only per-shipment pay remains; van rent/base pay is excluded for this date." }
+  existing_odcd: { label: "Existing ODCD DA performed the deliveries", effect: "Once this ad hoc payment is paid, this date’s rent/base pay is excluded across the ID’s base-station and XPT mappings. Variable delivery pay remains." }
 };
 
-export function AdhocDeliveryFields({ locationId, policy }: { locationId: string; policy: DeliveryIdentityPolicy }) {
-  const [workDate, setWorkDate] = useState(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
+export function AdhocDeliveryFields({ locationId, policy, initialWorkDate }: { locationId: string; policy: DeliveryIdentityPolicy; initialWorkDate?: string | null }) {
+  const [workDate, setWorkDate] = useState(() => initialWorkDate || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
   const [mode, setMode] = useState<DeliveryPerformerMode>(policy === "paid_associate_day" ? "standalone_odcd" : "van_driver");
   const [options, setOptions] = useState<SearchableSelectOption[]>([]);
   const [selected, setSelected] = useState("");
   const [manual, setManual] = useState(false);
   const [providerId, setProviderId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
     setOptions([]); setSelected(""); setManual(false); setProviderId(""); setMessage(""); setLoading(Boolean(locationId && workDate));
     if (!locationId || !workDate) return;
-    const query = new URLSearchParams({ location: locationId, date: workDate, strict: "1" });
+    const query = new URLSearchParams({ location: locationId, date: workDate, strict: "1", family: "1" });
     fetch(`/api/payments/adhoc-das?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const body = await response.json() as RosterResponse;
         if (!response.ok) throw new Error(body.error || "Unable to load mapped IDs.");
-        if (!controller.signal.aborted) setOptions(body.options ?? []);
+        if (!Array.isArray(body.options)) throw new Error("The DA list could not be loaded. Retry.");
+        if (!controller.signal.aborted) setOptions(body.options);
       })
       .catch((error) => { if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "Unable to load mapped IDs."); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [locationId, workDate]);
+  }, [locationId, workDate, retry]);
 
   const effect = policy === "paid_associate_day"
     ? "This separately paid day will be excluded from the normal payout."
@@ -62,7 +64,7 @@ export function AdhocDeliveryFields({ locationId, policy }: { locationId: string
         {!manual ? (
           <label>
             ID used / mapped owner *
-            <SearchableSelect disabled={!locationId || loading} name="delivery_shipment_id" onValueChange={setSelected} options={options} placeholder={loading ? "Loading mapped IDs…" : "Search ID, name or DropX ID"} required value={selected} />
+            <SearchableSelect disabled={!locationId || loading} name="delivery_provider_employee_id" onValueChange={setSelected} options={options} placeholder={loading ? "Loading mapped IDs…" : "Search ID, name or DropX ID"} required value={selected} />
           </label>
         ) : (
           <label>
@@ -71,7 +73,7 @@ export function AdhocDeliveryFields({ locationId, policy }: { locationId: string
           </label>
         )}
       </div>
-      {message ? <p role="alert">{message}</p> : null}
+      {message ? <p role="alert">{message} <button type="button" className="button secondary compact" onClick={() => setRetry(n => n + 1)}>Retry DA list</button></p> : !loading && locationId ? <p className="subtle">{options.length ? `${options.length} mapped delivery IDs · base station and linked XPTs` : "No uniquely mapped DAs for this date. Check the station family's ID Mapping or choose another work date."}</p> : null}
       <button className="button secondary compact" disabled={!locationId || loading} onClick={() => { setManual((current) => !current); setSelected(""); setProviderId(""); }} type="button">
         {manual ? "Choose mapped ID" : "Enter exact ID"}
       </button>

@@ -65,6 +65,7 @@ type PaymentHeadRow = {
 };
 
 type PaymentRequestRow = {
+  work_date: string | null;
   details: unknown;
   id: string;
   location_id: string | null;
@@ -291,7 +292,7 @@ async function loadExpenseRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("details, id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_mode, payment_portal, payment_reference, created_at")
+      .select("work_date, details, id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_mode, payment_portal, payment_reference, created_at")
       .eq("company_id", companyId)
       .is("amount", null)
       .order("created_at", { ascending: false });
@@ -593,7 +594,7 @@ export default async function ExpenseRequestPage({
                 savedContacts={savedContacts}
               />
               {bankRequest.location_id && normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy) === "legacy_adhoc_da" ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
-              {bankRequest.location_id && !["none", "legacy_adhoc_da"].includes(normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)) ? <AdhocDeliveryFields locationId={bankRequest.location_id} policy={normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)} /> : null}
+              {bankRequest.location_id && !["none", "legacy_adhoc_da"].includes(normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)) ? <AdhocDeliveryFields initialWorkDate={bankRequest.work_date} locationId={bankRequest.location_id} policy={normalizeDeliveryIdentityPolicy(bankHead?.delivery_identity_policy)} /> : null}
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />
