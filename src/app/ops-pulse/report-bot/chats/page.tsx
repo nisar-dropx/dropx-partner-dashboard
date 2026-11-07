@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, MessageCircle, Settings2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { ReportBotChats } from "@/components/report-bot-chats";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup } from "@/lib/report-bot/access";
 import { reportBotDb } from "@/lib/report-bot/settings";
@@ -19,7 +19,7 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const db = reportBotDb();
-  const groupsResult = await db.from("report_bot_groups").select("id,group_name,participant_count,location_id,is_enabled,workspace")
+  const groupsResult = await db.from("report_bot_groups").select("id,group_name,participant_count,location_id,is_enabled,workspace,mode")
     .eq("company_id", companyId).eq("workspace", workspace).eq("is_enabled", true).order("group_name");
   const groups = (groupsResult.data ?? []).filter((group) => canSeeGroup(authorization, group));
   const ids = groups.map((group) => group.id);
@@ -43,6 +43,7 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
       id: group.id,
       name: group.group_name ?? "Unnamed group",
       size: group.participant_count,
+      canSend: !!group.location_id && (group.mode === "review" || group.mode === "live"),
       preview: latest.get(group.id)?.preview ?? null,
       lastAt: latest.get(group.id)?.at ?? null
     }))
@@ -64,7 +65,7 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
           </div>
         </header>
         <ReportBotNav workspace={workspace} active="chats" />
-        <ReportBotChats groups={chatGroups} initialGroupId={initial} />
+        <ReportBotChats groups={chatGroups} initialGroupId={initial} manualPosts={workspace === "last_mile" && hasPermission(authorization, pageCode, "edit")} />
       </div>
     </AppShell>
   );

@@ -5,7 +5,7 @@ import { ArrowLeft, Bot, Camera, FileText, Image as ImageIcon, Loader2, MapPin, 
 import s from "@/app/ops-pulse/report-bot/report-bot.module.css";
 import { ImageModal } from "@/components/report-bot-image-viewer";
 
-type ChatGroup = { id: string; name: string; size: number | null; preview: string | null; lastAt: string | null };
+type ChatGroup = { canSend: boolean; id: string; name: string; size: number | null; preview: string | null; lastAt: string | null };
 type Quoted = { id: string; from: string | null; type: string; text: string | null };
 type Message = {
   id: string; from: string | null; name: string | null; from_me: boolean; bot: boolean; ts: number; type: string; text: string | null;
@@ -135,9 +135,50 @@ function Bubble({ message, names, onOpenImage, byId }: { message: Message; names
   );
 }
 
-export function ReportBotChats({ groups, initialGroupId }: { groups: ChatGroup[]; initialGroupId: string | null }) {
+function GroupComposer({group, onSent}: {group: ChatGroup; onSent: () => void}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const pending = useRef(false);
+  const reference = useRef("");
+  if (!group.canSend) return <footer className={s.chatFoot}>In Groups, map this group to a station and choose Review or Live to send.</footer>;
+  async function send() {
+    if (pending.current || !text.trim()) return;
+    pending.current = true;
+    setBusy(true);
+    setNotice("");
+    try {
+      reference.current ||= crypto.randomUUID();
+      const r = await fetch("/api/report-bot/chats", {method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({group:group.id, text, reference:reference.current})});
+      const receipt = await r.json();
+      if (!r.ok || !receipt.id) throw new Error(receipt.error || "WhatsApp did not confirm this message.");
+      setText("");
+      reference.current = "";
+      setNotice("Sent to " + group.name);
+      onSent();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Could not confirm the send.");
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  }
+  return <footer className={s.chatFoot}>
+    <form className={s.formActions} onSubmit={e => {e.preventDefault(); void send();}}>
+      <input className={s.input} aria-label={"Message " + group.name} placeholder={"Message " + group.name}
+        maxLength={4000} value={text} disabled={busy} onChange={e => {setText(e.target.value); reference.current = ""; setNotice("");}}/>
+      <button className={s.button} disabled={busy || !text.trim()}>{busy ? "Sending…" : "Send"}</button>
+    </form><small role="status">{notice}</small>
+  </footer>;
+}
+
+export function ReportBotChats({ groups, initialGroupId, manualPosts }: { manualPosts: boolean; groups: ChatGroup[]; initialGroupId: string | null }) {
   const [activeId, setActiveId] = useState<string | null>(initialGroupId);
-  const [data, setData] = useState<ChatPayload | null>(null);
+  const [loadedData, setData] = useState<ChatPayload | null>(null);
+  const data = loadedData?.group.id === activeId ? loadedData : null;
+  const currentGroup = useRef(activeId);
+  currentGroup.current = activeId;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -152,12 +193,14 @@ export function ReportBotChats({ groups, initialGroupId }: { groups: ChatGroup[]
       const response = await fetch(`/api/report-bot/chats?group=${groupId}`, { cache: "no-store" });
       const payload = await response.json() as ChatPayload & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Could not load this chat.");
+      if (currentGroup.current !== groupId) return;
       setData(payload);
       setError(null);
     } catch (loadError) {
+      if (currentGroup.current !== groupId) return;
       setError(loadError instanceof Error ? loadError.message : "Could not load this chat.");
     } finally {
-      if (!quiet) setLoading(false);
+      if (!quiet && currentGroup.current === groupId) setLoading(false);
     }
   }, []);
 
@@ -253,7 +296,7 @@ export function ReportBotChats({ groups, initialGroupId }: { groups: ChatGroup[]
                 );
               })}
             </div>
-            <footer className={s.chatFoot}>Read-only view of the group. Replies are approved on the Review tab.</footer>
+            {manualPosts ? <GroupComposer key={active.id} group={active} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
           </>
         ) : (
           <div className={s.chatEmpty}>

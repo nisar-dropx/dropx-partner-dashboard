@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { ActionButton } from "@/components/report-bot-controls";
+import { LastMileGroupDirectory } from "@/components/last-mile-group-directory";
 import { GroupPicker } from "@/components/report-bot-group-picker";
 import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-viewer";
 import { ReminderTimesField } from "@/components/report-bot-reminder-times";
@@ -218,6 +219,8 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
 
         <ReportBotNav workspace={workspace} active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
         <div className={s.formActions} style={{ marginBottom: 8 }}>
+          {workspace === "last_mile" && <Link className={s.button+" "+s.small} href={reportBotHref(workspace,"groups")}>Choose WhatsApp groups</Link>}
+          {workspace === "last_mile" && <Link className={s.button+" "+s.small} href={reportBotChatHref(workspace)}>Open group chats</Link>}
           {workspace === "last_mile" && <Link className={s.button+" "+s.small} href={reportBotHref(workspace,"reports")+"#dispatch"}>Schedule WhatsApp reports</Link>}
           <Link className={`${s.button} ${s.small} ${tab === "actions" ? s.primary : ""}`} href={reportBotHref(workspace, "actions")}>Open actions</Link>
           <Link className={`${s.button} ${s.small} ${tab === "summary" ? s.primary : ""}`} href={reportBotHref(workspace, "summary")}>Daily site summary</Link>
@@ -604,11 +607,12 @@ async function GroupsTab({ workspace, authorization, groups, canEdit }: { worksp
   const active = groups.filter((group) => group.is_enabled);
   return (
     <>
+    {workspace === "last_mile" && canEdit && <LastMileGroupDirectory stations={stores} />}
     <Card
       title="WhatsApp groups"
       icon={<Users size={18} aria-hidden />}
       description="Observe: classify only · Review: approve replies · Live: automatic eligible replies. Reminders run in Review and Live."
-      action={canEdit ? <GroupPicker workspace={workspace} action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
+      action={canEdit && workspace === "dark_store" ? <GroupPicker workspace={workspace} action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
       flush
     >
       {storeError ? <div className={s.cardBody}><p className={s.hint} role="alert">{storeError}</p></div> : null}
@@ -662,7 +666,7 @@ async function GroupsTab({ workspace, authorization, groups, canEdit }: { worksp
         </div>
       ) : (
         <Empty icon={<Users size={28} aria-hidden />} title="No groups on the bot yet">
-          {canEdit ? <>Press <strong>Add or remove groups</strong> and tick the report groups.</> : "An editor adds the report groups here."}
+          {workspace === "last_mile" && canEdit ? "Choose a group and its station above." : canEdit ? <>Press <strong>Add or remove groups</strong> and tick the report groups.</> : "An editor adds the report groups here."}
           {workspace === "dark_store" ? <> The WhatsApp number must be <Link href={`${SETUP_HREF}#whatsapp`}>linked</Link> first.</> : <> Uses the existing shared WhatsApp connection.</>}
         </Empty>
       )}

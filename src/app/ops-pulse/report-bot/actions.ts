@@ -1,5 +1,6 @@
 "use server";
 
+import { pushWorkerConfig } from "@/lib/report-bot/push-config";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -76,24 +77,6 @@ function requiredText(form: FormData, name: string, label: string, max: number) 
 function check<T>(result: { data: T | null; error: { message: string } | null }, context: string): T {
   if (result.error) throw new Error(`${context}: ${result.error.message}`);
   return result.data as T;
-}
-
-/** Best effort: the worker also polls config every minute, so a failure here only delays it. */
-async function pushWorkerConfig(settings: ReportBotSettings) {
-  if (!settings.worker_url || !settings.worker_token) return;
-  const groups = settings.mode === "off"
-    ? []
-    : (check(await reportBotDb().from("report_bot_groups").select("wa_group_id").eq("company_id", settings.company_id).eq("is_enabled", true), "Load groups") ?? [])
-      .map((group: { wa_group_id: string }) => group.wa_group_id);
-  try {
-    await workerRequest(settings, "/config", {
-      method: "POST",
-      timeoutMs: 5000,
-      body: { mode: settings.mode, groups, include_own_messages: settings.mode !== "off" && settings.include_own_messages }
-    });
-  } catch {
-    // The worker picks the change up on its next config poll.
-  }
 }
 
 async function scopedGroup(authorization: ReportBotAuthorization, companyId: string, groupId: string) {
@@ -228,6 +211,7 @@ export async function disconnectWhatsApp(form: FormData) {
  */
 export async function saveGroupSelection(form: FormData) {
   await mutate("groups", async ({ authorization, companyId }) => {
+    if (authorization.reportBotWorkspace === "last_mile") throw new Error("Add Last Mile groups using the station group directory.");
     // New groups have no store yet, so only people who see every store may add them.
     if (!authorization.hasAllLocationAccess) throw new Error("Only users with access to all stores can add or remove groups.");
     let picked: Array<{ id?: unknown; subject?: unknown; size?: unknown }>;
@@ -257,7 +241,9 @@ export async function saveGroupSelection(form: FormData) {
         // mode defaults to observe on insert; never reset an existing group's Observe/Review/Live here.
         last_synced_at: now,
         updated_at: now
-      })), { onConflict: "company_id,wa_group_id" }), "Save groups");
+      })), { onConflict: "company_id,wa_group_id", ignoreDuplicates: true }), "Save groups");
+      const saved = check(await db.from("report_bot_groups").update({is_enabled:true,bot_in_group:true,last_synced_at:now,updated_at:now}).eq("company_id",companyId).eq("workspace",workspace).in("wa_group_id",selected.map(g=>String(g.id))).select("id"), "Enable groups");
+      if (saved.length !== new Set(selected.map(g=>g.id)).size) throw new Error("Group ownership changed. Refresh the group selection.");
     }
     const keep = new Set(selected.map((group) => group.id as string));
     const enabled = check(await db.from("report_bot_groups").select("id,wa_group_id").eq("company_id", companyId).eq("workspace", workspace).eq("is_enabled", true), "Load groups") as Array<{ id: string; wa_group_id: string }>;
