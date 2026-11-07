@@ -1,5 +1,19 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Inline re-dispute tracking — 7 November 2026
+
+Exceptions → Redispute tracking uses compact expandable cards instead of a wide table.
+Review and history stay inside the selected shipment. `LossCaseResponse.inline` changes
+presentation only; unlike `embedded` it does not force the station-only evidence editor.
+Existing scoped APIs, independent review, version checks and evidence rules remain authoritative.
+Successful updates refresh the card from the returned window. Filters, sorting, scoped Excel
+export and batch disabling remain available.
+
+Supporting files and CCTV use the shared in-app preview, including image/PDF zoom, video
+controls and source-host Google Drive/document previews. Full size expands inside the app;
+opening the original file in a new window remains explicit. Restricted/unsupported source
+files retain a fallback link; preview never changes sharing or proxies files through a third party.
+
 ## Legacy van bank-file export — 5 November 2026
 
 Completed payment details saved before the delivery-identity policy was enabled

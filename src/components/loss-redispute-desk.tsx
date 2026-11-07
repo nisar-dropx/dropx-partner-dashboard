@@ -1,9 +1,8 @@
 "use client";
-import { ReportTable } from "@/components/report-table";
-
-import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { LossPidTimeline } from "./loss-pid-timeline";
+import { LossCaseResponse } from "./loss-case-response";
+import { LossEvidencePreview } from "./loss-evidence-preview";
+import { useOpsReportExport } from "./ops-design-context";
 import { redisputeStage, redisputeStatus } from "@/lib/ops-pulse/loss-redispute-queue";
 import { compareReportValues } from "@/lib/report-table-values";
 import type { ExcelReport } from "@/lib/download-report-excel";
@@ -12,6 +11,7 @@ import type { StationEvidence } from "@/lib/ops-pulse/loss-station-evidence";
 import { ListPager, usePaged } from "./list-pager";
 import styles from "./nl-loss.module.css";
 import ui from "./loss-exceptions-desk.module.css";
+import cards from "./loss-redispute-desk.module.css";
 export type RedisputeWindow = {
   submitted_by?: string | null;
   response_details?: Partial<StationEvidence>;
@@ -37,7 +37,9 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
   const [overrides,setOverrides]=useState<Record<string,RedisputeWindow>>({});
   const [selected,setSelected]=useState<string[]>([]),[confirm,setConfirm]=useState(false);
   const [note,setNote]=useState('No longer required');
-  const [historyCase,setHistoryCase]=useState<RedisputeWindow|null>(null);
+  const [active,setActive]=useState<{key:string;view:'case'|'history';action:''|'return';request:number}|null>(null);
+  const [exporting,setExporting]=useState(false);
+  const mayExport=useOpsReportExport();
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [errors,setErrors]=useState<string[]>([]);
   const [query,setQuery]=useState(''),[stage,setStage]=useState('open');
@@ -62,7 +64,6 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
   };
   const shown=searched.filter(w=>matches(w,stage)).sort((a,b)=>compareReportValues(sortValue(a,sorting.key),sortValue(b,sorting.key),sorting.direction));
   const paged=usePaged(shown,25,`${stage}|${query}|${station}|${cluster}|${region}|${submission}|${sorting.key}|${sorting.direction}`);
-  function sortHeader(key:SortKey,label:string){const active=sorting.key===key;return <th aria-sort={active?(sorting.direction==='asc'?'ascending':'descending'):'none'}><button type="button" className={ui.sortHeader} onClick={()=>setSorting({key,direction:active&&sorting.direction==='asc'?'desc':'asc'})}>{label}<span aria-hidden="true">{active?(sorting.direction==='asc'?' ↑':' ↓'):' ↕'}</span></button></th>;}
   function exportReport():ExcelReport{return {
     title:'Redispute tracking',scope:`All ${shown.length} matching records; stage: ${stage}; station: ${station||'all'}; cluster: ${clusterLabels.get(cluster)||'all'}; region: ${region||'all'}; submission: ${submission||'all'}; search: ${query||'none'}`,
     headers:['Shipment ID','Station','Cluster / AOM','Region','Loss type','Loss month','Shipment value (INR)','Status','Station submission','Reason','Description','Cloak ticket ID','Supporting files','CCTV not required','CCTV link','Vendor ticket reference','Vendor ticket URL','Follow-up date','Updated by','Updated at (IST)','Recovery payroll month'],
@@ -70,7 +71,8 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
   };}
   const selectable=paged.rows.filter(w=>w.enabled);
   const chosen=current.filter(w=>w.enabled&&selected.includes(keyOf(w)));
-  const href=(w:RedisputeWindow)=>'/team-ops/losses/vendor-response?'+new URLSearchParams({month:w.month,case:w.case_key});
+  function open(w:RedisputeWindow,view:'case'|'history'='case',action:''|'return'='') { setActive(previous=>({key:keyOf(w),view,action,request:(previous?.request||0)+1})); }
+  async function download(){if(!mayExport||exporting)return;setExporting(true);try{const {downloadReportExcel}=await import('@/lib/download-report-excel');await downloadReportExcel(exportReport());}catch{setMessage('Export unavailable. Please retry.');}finally{setExporting(false);}}
   function clearSelection(){setSelected([]);setConfirm(false);}
   async function disable(){
     if(!canActivate||!chosen.length||applying.current)return;
@@ -91,9 +93,10 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
     }catch(e){setMessage(e instanceof Error?e.message:'Unable to disable redisputes.');}
     finally{applying.current=false;setBusy(false);}
   }
-  return <section className={`${styles.panel} ${ui.desk}`} aria-busy={busy}>
+  return <section className={`${styles.panel} ${ui.desk} ${cards.desk}`} aria-busy={busy}>
     <div className={styles.panelHead}><div><h2>Redispute tracking</h2><small>{shown.length} shipments · ₹{shown.reduce((sum,w)=>sum+(byKey.get(keyOf(w))?.amount||0),0).toLocaleString('en-IN',{maximumFractionDigits:2})}</small></div>
       <input aria-label="Find redispute or Shipment ID" placeholder="Search Shipment ID, station or ticket" value={query} disabled={busy} onChange={e=>{setQuery(e.target.value);clearSelection();}}/>
+      {mayExport?<button type="button" className={styles.button} disabled={exporting} onClick={()=>void download()}>{exporting?'Preparing…':'Excel · all results'}</button>:null}
     </div>
     <div className={ui.controls}>
       <label>Station<select value={station} disabled={busy} onChange={e=>{setStation(e.target.value);clearSelection();}}><option value="">All stations</option>{stations.map(s=><option key={s.station} value={s.station}>{s.station}</option>)}</select></label>
@@ -102,26 +105,30 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
       <label>Station update<select value={submission} disabled={busy} onChange={e=>{setSubmission(e.target.value);clearSelection();}}><option value="">All updates</option><option value="pending">Not submitted</option><option value="submitted">Submitted</option><option value="returned">Returned for correction</option></select></label>
       <button type="button" className={styles.button} disabled={busy} onClick={()=>{setStation('');setCluster('');setRegion('');setSubmission('');setQuery('');setStage('open');clearSelection();}}>Reset</button>
     </div>
-    <div className={ui.controls}>{stages.map(([s,label])=><button type="button" key={s} className={stage===s?styles.primary:styles.button} aria-pressed={stage===s} disabled={busy} onClick={()=>{setStage(s);clearSelection();}}>{label} · {searched.filter(w=>matches(w,s)).length}</button>)}</div>
-    <p className={ui.help}>Station submits → manager reviews → vendor ticket → outcome.</p>
-    {canActivate?<div className={ui.actions}><strong>{chosen.length} selected</strong><button type="button" className={styles.button} disabled={busy||!chosen.length} onClick={()=>setConfirm(true)}>Disable selected ({chosen.length})</button>{selected.length?<button type="button" className={styles.button} disabled={busy} onClick={clearSelection}>Clear</button>:null}<small>Select up to 100 enabled shipments.</small></div>:null}
+    <div className={cards.stages}>{stages.map(([s,label])=><button type="button" key={s} aria-pressed={stage===s} disabled={busy} onClick={()=>{setStage(s);clearSelection();}}>{label}<span>{searched.filter(w=>matches(w,s)).length}</span></button>)}</div>
+    <div className={cards.listTools}>
+      {canActivate?<label className={cards.selectAll}><input type="checkbox" aria-label="Select enabled redisputes on this page" disabled={busy||!selectable.length} checked={!!selectable.length&&selectable.every(w=>selected.includes(keyOf(w)))} onChange={e=>{setSelected(e.target.checked?selectable.slice(0,100).map(keyOf):[]);setConfirm(false);}}/>Select page</label>:null}
+      {chosen.length?<><strong>{chosen.length} selected</strong><button type="button" className={styles.button} disabled={busy} onClick={()=>setConfirm(true)}>Disable selected</button><button type="button" className={styles.button} disabled={busy} onClick={clearSelection}>Clear</button></>:null}
+      <label className={cards.sort}>Sort<select aria-label="Sort redisputes" value={sorting.key} onChange={e=>setSorting(s=>({...s,key:e.target.value as SortKey}))}>{[['updated','Last updated'],['value','Value'],['shipment','Shipment ID'],['status','Status'],['evidence','Station reason'],['ticket','Ticket']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+      <button type="button" className={styles.button} aria-label={sorting.direction==='desc'?'Sort ascending':'Sort descending'} onClick={()=>setSorting(s=>({...s,direction:s.direction==='desc'?'asc':'desc'}))}>{sorting.direction==='desc'?'↓ Descending':'↑ Ascending'}</button>
+    </div>
     {confirm&&chosen.length?<div className={styles.redisputeRemove}><strong>Disable {chosen.length} redisputes?</strong><select aria-label="Disable reason" value={note} disabled={busy} onChange={e=>setNote(e.target.value)}>{['No longer required','Enabled by mistake','Continue with recovery','Duplicate redispute'].map(n=><option key={n}>{n}</option>)}</select><button type="button" className={styles.primary} disabled={busy} onClick={()=>void disable()}>{busy?'Disabling…':'Confirm disable'}</button><button type="button" className={styles.button} disabled={busy} onClick={()=>setConfirm(false)}>Cancel</button><small>Station submissions close and eligible recovery resumes. Evidence and history remain available.</small></div>:null}
     {message?<div role="status" className={ui.result}>{message}{errors.length?<ul>{errors.map((e,i)=><li key={i}>{e}</li>)}</ul>:null}</div>:null}
-    <div className={styles.tableWrap}><ReportTable className={styles.ledgerTable} reportExport={exportReport}><thead><tr>
-      {canActivate?<th><input type="checkbox" aria-label="Select enabled redisputes on this page" disabled={busy||!selectable.length} checked={!!selectable.length&&selectable.every(w=>selected.includes(keyOf(w)))} onChange={e=>{setSelected(e.target.checked?selectable.slice(0,100).map(keyOf):[]);setConfirm(false);}}/></th>:null}
-      {sortHeader('shipment','Shipment / station')}{sortHeader('value','Value')}{sortHeader('status','Status')}{sortHeader('evidence','Station evidence')}{sortHeader('ticket','Ticket reference')}{sortHeader('updated','Last update / follow-up')}<th>Action</th>
-    </tr></thead><tbody>{paged.rows.map(w=>{const row=byKey.get(keyOf(w)),response=w.response_details;return <tr key={keyOf(w)}>
-      {canActivate?<td><input type="checkbox" aria-label={`Select ${w.case_key}, ${w.month}`} checked={selected.includes(keyOf(w))&&w.enabled} disabled={busy||!w.enabled||(!selected.includes(keyOf(w))&&chosen.length>=100)} onChange={e=>{setSelected(prev=>e.target.checked?[...prev,keyOf(w)]:prev.filter(k=>k!==keyOf(w)));setConfirm(false);}}/></td>:null}
-      <td><Link href={href(w)}>{row?.details.tid||w.case_key}</Link><small>{row?.station_code} · {w.month}</small></td>
-      <td>₹{(row?.amount||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
-      <td>{redisputeStatus(w)}{w.recovery_month?<small>Payroll {w.recovery_month}</small>:null}</td>
-      <td>{response?.reason?<details><summary>{response.reason}</summary><p>{response.note}</p>{response.tt_reference?<small>Cloak ticket: {response.tt_reference}</small>:null}{response.evidence_url&&/^https:\/\//i.test(response.evidence_url)?<a href={response.evidence_url} target="_blank" rel="noreferrer">Supporting files ↗</a>:null}{response.cctv_not_required === true ? <small>CCTV not required</small> : response.cctv_url && /^https:\/\//i.test(response.cctv_url) ? <small><a href={response.cctv_url} target="_blank" rel="noreferrer">CCTV footage ↗</a></small> : null}</details>:<span>Not submitted</span>}</td>
-      <td>{w.tt_url&&/^https?:\/\//i.test(w.tt_url)?<a href={w.tt_url} target="_blank" rel="noreferrer">{w.tt_reference||'Open ticket'} ↗</a>:w.tt_reference||'Not filed'}</td>
-      <td>{w.updated_by_name}<small>{new Date(w.updated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}</small>{w.followup_on?<small>Follow-up {w.followup_on}</small>:null}</td>
-      <td><Link className={styles.button} href={href(w)}>{redisputeStage(w)==='review'?'Review evidence':redisputeStage(w)==='ticket'?'Ticket / outcome':'View details'}</Link> {canActivate && redisputeStage(w)==='review' ? <Link className={styles.button} href={`${href(w)}&action=return`}>Return for correction</Link> : null} <button type="button" className={styles.button} onClick={()=>setHistoryCase(w)}>History</button></td>
-    </tr>;})}</tbody></ReportTable></div>
+    <div className={cards.list}>{paged.rows.map(w=>{const row=byKey.get(keyOf(w)),response=w.response_details,isOpen=active?.key===keyOf(w),id=`redispute-${encodeURIComponent(keyOf(w))}`;return <article key={keyOf(w)} className={cards.card} data-open={isOpen} aria-label={`${row?.station_code||''} ${row?.details.tid||w.case_key}`}>
+      <div className={cards.cardHead}>
+        {canActivate?<input type="checkbox" aria-label={`Select ${w.case_key}, ${w.month}`} checked={selected.includes(keyOf(w))&&w.enabled} disabled={busy||!w.enabled||(!selected.includes(keyOf(w))&&chosen.length>=100)} onChange={e=>{setSelected(prev=>e.target.checked?[...prev,keyOf(w)]:prev.filter(k=>k!==keyOf(w)));setConfirm(false);}}/>:null}
+        <button type="button" className={cards.identity} aria-expanded={isOpen} aria-controls={id} onClick={()=>isOpen?setActive(null):open(w)}><strong>{row?.station_code} · {row?.details.tid||w.case_key}</strong><small>{row?.report?.toUpperCase()||'NL'} · {w.month}</small></button>
+        <span className={cards.status} data-stage={redisputeStage(w)}>{redisputeStatus(w)}</span>
+        <strong className={cards.amount}>₹{(row?.amount||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong>
+        <div className={cards.cardActions}><button type="button" className={styles.button} onClick={()=>isOpen?setActive(null):open(w)} aria-expanded={isOpen} aria-controls={id}>{isOpen?'Close ↑':redisputeStage(w)==='review'?'Review ↓':redisputeStage(w)==='ticket'?'Update ↓':'Details ↓'}</button><button type="button" className={styles.button} onClick={()=>open(w,'history')}>History</button></div>
+      </div>
+      <div className={cards.meta}><span className={cards.reason} title={response?.reason}>{response?.reason||'Station evidence pending'}</span>{w.followup_on?<span>Follow-up {w.followup_on}</span>:null}<span>{w.updated_by_name||'Updated'} · {new Date(w.updated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'})} IST</span></div>
+      {isOpen?<div id={id} className={cards.expanded}>
+        <div className={cards.files}>{w.tt_url&&/^https:\/\//i.test(w.tt_url)?<a href={w.tt_url} target="_blank" rel="noopener noreferrer">Vendor ticket {w.tt_reference} ↗</a>:w.tt_reference?<small>Ticket {w.tt_reference}</small>:null}</div>
+        <LossCaseResponse key={w.version} month={w.month} caseKey={w.case_key} inline initialView={active.view} viewRequest={active.request} initialAction={active.action} onSaved={saved=>{setOverrides(prev=>({...prev,[keyOf(w)]:saved}));setMessage(`${row?.details.tid||w.case_key}: update saved.`);}}/>
+      </div>:null}
+    </article>;})}</div>
     {!shown.length?<p className={styles.empty}>No redisputes match this view.</p>:null}
-    {historyCase?<LossPidTimeline key={keyOf(historyCase)} month={historyCase.month} caseKey={historyCase.case_key} revision={current.find(w=>keyOf(w)===keyOf(historyCase))?.updated_at} initiallyOpen/>:null}
     <ListPager page={paged.page} pages={paged.pages} size={paged.size} total={paged.total} onPage={paged.setPage} onSize={paged.setSize} label="redisputes"/>
   </section>;
 }

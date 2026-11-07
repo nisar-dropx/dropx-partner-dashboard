@@ -1,5 +1,6 @@
 .dialog{border:1px solid #dfe5ee;padding:0;margin:auto;width:min(900px,94vw);max-width:98vw;max-height:94dvh;border-radius:14px;background:#fff;color:#172033;box-shadow:0 24px 70px #0f172a40}
 .dialog::backdrop{background:#0f172a85}.expanded{width:98vw}
+.frame{width:100%;height:calc(100% - 30px);min-height:200px;border:0;background:white}.video{display:block;width:100%;height:calc(100% - 30px);object-fit:contain}.fallback{display:block;margin-top:8px;color:#52627a;font-size:11px}
 .panel{display:flex;flex-direction:column;height:min(78dvh,800px);overflow:hidden}.expanded .panel{height:94dvh}
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;background:#fff}
 .toolbar strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:100px}
