@@ -1,3 +1,4 @@
+import { DisputeHistory } from "./dispute-history";
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { decodePayoutReviewReason } from "@/lib/payout-review-display";
@@ -114,17 +115,18 @@ export async function PayoutReviewDesk({
   auth: AuthorizationContext;
   pageCode?: string;
   action: (form: FormData) => Promise<void>;
-  params?: { status?: string; q?: string; run?: string; page?: string; size?: string; station?: string; category?: string; month?: string };
+  params?: { view?: string; status?: string; q?: string; run?: string; page?: string; size?: string; station?: string; category?: string; month?: string };
 }) {
   if (!supabaseAdmin) return <p role="alert">Payout disputes are unavailable.</p>;
 
   const company = requireCompanyId(auth);
   const financeAccess = pageCode === "workforce_payout_disputes" ? await loadDisputeFinanceAccess(auth) : null;
   const scope = auth.hasAllLocationAccess ? null : auth.locationScopeIds;
-  const requestedStatus = params.status && params.status in STATUS_FILTERS ? params.status : "mine";
+  const view = params.view === "team" || (params.status && params.status !== "mine" && !params.view) ? "team" : "mine";
+  const requestedStatus = params.status && params.status !== "mine" && params.status in STATUS_FILTERS ? params.status : "active";
   const filteredStatuses = STATUS_FILTERS[requestedStatus];
   const { page, size } = readPaging(params.page, params.size, 25);
-  const searching = Boolean((params.q || "").trim()) || requestedStatus === "mine" || Boolean(params.month);
+  const searching = Boolean((params.q || "").trim()) || view === "mine" || Boolean(params.month);
   const payrollRun = uuid(params.run);
   const requestedStation = uuid(params.station);
   const category = params.category && params.category in CATEGORIES ? params.category : "";
@@ -137,6 +139,8 @@ export async function PayoutReviewDesk({
   if (stationList.error) return <p role="alert">Payout dispute locations could not load. No changes were made.</p>;
   const permittedLocationIds = (stationList.data ?? []).map((row) => String(row.id));
   const locationFilterIds = permittedLocationIds.length ? permittedLocationIds : ["00000000-0000-0000-0000-000000000000"];
+  const managerResult = await supabaseAdmin.rpc("workforce_dispute_management_stations", {p_company:company,p_actor:auth.userId,p_roles:auth.effectiveRoleIds,p_stations:permittedLocationIds});
+  const managementStations = new Set<string>((managerResult.error?[]:managerResult.data??[]).map((r:{station_id:string})=>r.station_id));
   const station = requestedStation && permittedLocationIds.includes(requestedStation) ? requestedStation : "";
 
   let disputeQuery = supabaseAdmin.from("workforce_payout_disputes").select("*").eq("company_id", company)
@@ -256,12 +260,13 @@ export async function PayoutReviewDesk({
   const query = (params.q || "").trim().toLowerCase();
   const matched = disputes.filter((dispute) => {
     if (params.month && period(publications.get(String(dispute.publication_id))).start.slice(0,7) !== params.month) return false;
-    if (requestedStatus === "mine") {
+    if (view === "mine") {
       const stage = routeStage(dispute.status);
       const selectedRole = routeRoleByStage.get(`${dispute.id}:${stage}`);
       const roles = stage === "final" && financeAccess ? disputeFinalRoleIds(auth.effectiveRoleIds, financeAccess, String(dispute.station_id)) : auth.effectiveRoleIds;
-      if (!hasPermission(auth,pageCode,"edit") || !selectedRole || !roles.includes(selectedRole) || dispute.details?.awaiting_reply) return false;
+      if (auth.readOnly || !hasPermission(auth,pageCode,"edit") || (!selectedRole || !roles.includes(selectedRole)) && !(stage!=="processor" && managementStations.has(dispute.station_id)) || dispute.details?.awaiting_reply) return false;
       if (stage === "final" && (dispute.initial_reviewed_by===auth.userId || dispute.proposed_by===auth.userId)) return false;
+      if (stage === "processor" && !hasPermission(auth,pageCode.startsWith("ops_")?"ops_workforce_payouts":"workforce_payouts","edit")) return false;
       if (stage === "processor" && (dispute.initial_reviewed_by===auth.userId || dispute.final_approved_by===auth.userId || (dispute.processor_id && dispute.processor_id!==auth.userId))) return false;
     }
     const worker = record(record(publications.get(String(dispute.publication_id))?.snapshot).item);
@@ -280,7 +285,7 @@ export async function PayoutReviewDesk({
     const actorRoles = stage === "final" && financeAccess
       ? disputeFinalRoleIds(auth.effectiveRoleIds, financeAccess, String(dispute?.station_id || ""))
       : auth.effectiveRoleIds;
-    return Boolean(selectedRole && actorRoles.includes(selectedRole));
+    return Boolean(selectedRole && actorRoles.includes(selectedRole)) || (stage!=="processor" && managementStations.has(String(dispute?.station_id)));
   };
   const configFor = (dispute: Row) => {
     const snapshot = record(dispute.workflow_snapshot);
@@ -317,10 +322,12 @@ export async function PayoutReviewDesk({
           <strong>Approval routing could not be verified.</strong> Action buttons are hidden to prevent the wrong primary or fallback role from acting. Refresh the page; no dispute data was changed.
         </div>
       ) : null}
+      <nav className={styles.queueTabs} aria-label="Dispute queue"><a className={view==="mine"?styles.queueActive:undefined} href="/payments/disputes?view=mine">Needs my action</a><a className={view==="team"?styles.queueActive:undefined} href="/payments/disputes?view=team">My team / allocation</a></nav>
       <form method="get" className={styles.filters}>
+        <input type="hidden" name="view" value={view}/>
         <input name="q" type="search" aria-label="Search disputes" placeholder="Search associate, DropX ID or reason" defaultValue={params.q} />
         <select name="status" aria-label="Dispute status" defaultValue={requestedStatus}>
-          <option value="mine">Pending with me</option>
+          
           <option value="active">All active stages</option>
           <option value="initial">Initial review</option>
           <option value="final">Final approval</option>
@@ -384,7 +391,7 @@ export async function PayoutReviewDesk({
                   {[stationCode.get(dispute.station_id), decoded.areas.join(" · ") || CATEGORIES[dispute.category] || String(dispute.category).replaceAll("_", " ")].filter(Boolean).join(" · ")} · raised {when(dispute.created_at)}
                 </small>
               </div>
-              <span className={`${styles.pill} ${status.cls}`}>{status.label}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}><span className={`${styles.pill} ${status.cls}`}>{status.label}</span><DisputeHistory events={events as any} ticket={disputeId} worker={workerLabel}/></div>
             </header><span className={styles.ticketMeta}>{dispute.details?.awaiting_reply ? "Awaiting associate reply" : dispute.processor_name || (routeStage(dispute.status)==="initial" ? "Initial reviewer" : routeStage(dispute.status)==="final" ? "Final approver" : "Payout processor")} · {Math.max(0,Math.floor((Date.now()-Date.parse(dispute.updated_at||dispute.created_at))/86400000))}d</span></summary>
             <div className={styles.ticketBody}>
             {decoded.reason ? <p>{decoded.reason}</p> : null}
@@ -511,12 +518,7 @@ export async function PayoutReviewDesk({
               )
             ) : null}
 
-            {events.length ? (
-              <details className={styles.history}>
-                <summary>Workflow history ({events.length})</summary>
-                <ol>{events.map((event) => <li key={event.id}><span>{event.message}</span><small>{event.actor_name} · {when(event.created_at)}</small></li>)}</ol>
-              </details>
-            ) : null}
+
             {((canFinal&&["pending_final_approval","in_review"].includes(dispute.status))||(canProcess&&["approved_for_processing","processing","processing_blocked"].includes(dispute.status)))&&plan.schema!==3?<form action={action} className={styles.simpleAction}><input name="dispute_id" type="hidden" value={dispute.id}/><input name="expected_version" type="hidden" value={dispute.version}/><input name="note" type="hidden" value="Revalidate the specific item and recalculate gross, deductions and net using current evidence."/><button name="transition" value="return_review" className="button secondary">Return for guided recalculation</button></form>:null}
             </div>
           </details>
@@ -525,7 +527,7 @@ export async function PayoutReviewDesk({
 
       {!shown.length ? <section className={styles.card}>No disputes match this view.</section> : null}
       <section className={styles.card} style={{ padding: 0 }}>
-        <UrlPager basePath="/payments/disputes" params={{ status: requestedStatus, q: params.q, run: payrollRun || undefined, station: station || undefined, category: category || undefined, month: raised ? params.month : undefined }} total={total} page={page} size={size} label="disputes" />
+        <UrlPager basePath="/payments/disputes" params={{ view, status: requestedStatus, q: params.q, run: payrollRun || undefined, station: station || undefined, category: category || undefined, month: raised ? params.month : undefined }} total={total} page={page} size={size} label="disputes" />
       </section>
     </div>
   );
