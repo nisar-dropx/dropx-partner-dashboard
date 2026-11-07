@@ -85,5 +85,11 @@ export async function testDisputeApplication(db,{C,S,A1,A2,ok}) {
  await db.query('select workforce_note_dispute_application_retry($1,$2,$3)',[C,attendance.D,'Temporary publication fetch error']);
  job=(await db.query('select * from workforce_dispute_application_jobs where dispute_id=$1',[attendance.D])).rows[0];ok('Applied source stays in verification after refresh failure',job.state==='awaiting_publication'&&job.applied_at!==null&&job.attempts===1);
  ok('Retry recorder is service-only',!(await db.query(`select has_function_privilege('authenticated','workforce_note_dispute_application_retry(uuid,uuid,text)','execute') allowed`)).rows[0].allowed);
+ const concurrency=readFileSync('supabase/migrations/20261107151500_dispute_application_concurrent_retry.sql','utf8');await db.exec(concurrency);await db.exec(concurrency);
+ await db.query('select workforce_pause_dispute_application($1,$2,$3)',[C,attendance.D,'Another worker saw the newly applied source']);
+ job=(await db.query('select * from workforce_dispute_application_jobs where dispute_id=$1',[attendance.D])).rows[0];ok('A stale worker cannot pause an already-applied correction',job.state==='awaiting_publication'&&job.attempts===1);
+ await db.query(`update workforce_payout_disputes set status='processing' where id=$1`,[attendance.D]);await db.query('select workforce_pause_dispute_application($1,$2,$3)',[C,attendance.D,'Manual processor claimed this correction']);
+ await db.query('select workforce_note_dispute_application_retry($1,$2,$3)',[C,attendance.D,'Late background failure']);
+ job=(await db.query('select * from workforce_dispute_application_jobs where dispute_id=$1',[attendance.D])).rows[0];ok('Explicit manual processing stays paused despite a late worker retry',job.state==='blocked'&&job.attempts===3);
 }
 
