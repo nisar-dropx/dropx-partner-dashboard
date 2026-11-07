@@ -27,7 +27,11 @@ const checks = [
   [resolver.includes('worker: { tables: ["helpers", "workforce_helpers", "workforce_pickers"]'), "Raw Punches must resolve canonical Helpers before the legacy Helper tables."],
   [resolver.includes('match: "serial"') && resolver.includes('match: "terminal"') && resolver.includes('match: "network"'), "Location resolution must support serial, terminal, and network fallbacks."],
   [!page.includes("__no_devices__") && !exportRoute.includes("__no_devices__") && !exportRoute.includes("__no_authorized_devices__"), "Empty device filters must not pass non-uuid sentinels into device_id."],
-  [page.includes("skipQuery") && exportRoute.includes("deviceScopeEmpty"), "Empty device or mapping scope must short-circuit instead of querying."]
+  [page.includes("skipQuery") && exportRoute.includes("deviceScopeEmpty"), "Empty device or mapping scope must short-circuit instead of querying."],
+  // All-location users must keep devices with a location_id even when locationScopeIds is empty.
+  [!/hasAllLocationAccess\s*\?\s*!device\.location_id\s*\|\|/.test(page), "All-location Raw Punches must not filter devices against an empty locationScopeIds set."],
+  [/hasAllLocationAccess[\s\S]{0,80}\|\| !device\.location_id[\s\S]{0,40}allowedLocationIds\.has\(device\.location_id\)/.test(page),
+    "Raw Punches device scope must match Device Master for all-location users."]
 ];
 
 for (const [passed, message] of checks) {

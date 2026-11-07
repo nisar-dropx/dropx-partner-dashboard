@@ -70,8 +70,11 @@ export async function GET(request: NextRequest) {
     }
 
     const allowedLocationIds = new Set(authorization.locationScopeIds);
+    // Match Device Master / Raw Punches page: all-location access keeps every device.
     const devices = ((deviceResult.data ?? []) as RawPunchDeviceRow[]).filter((device) =>
-      authorization.hasAllLocationAccess || Boolean(device.location_id && allowedLocationIds.has(device.location_id))
+      authorization.hasAllLocationAccess
+        || !device.location_id
+        || allowedLocationIds.has(device.location_id)
     );
     const locations = ((locationResult.data ?? []) as LocationRow[]).filter((location) =>
       authorization.hasAllLocationAccess || allowedLocationIds.has(location.id)

@@ -112,10 +112,13 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       error = deviceResult.error?.message ?? locationResult.error?.message ?? "Unable to load report filters.";
     } else {
       const allowedLocationIds = new Set(authorization.locationScopeIds);
+      // Match Device Master: all-location users see every device. Do not require
+      // location_id ∈ locationScopeIds when scope is empty under hasAllLocationAccess —
+      // that incorrectly zeroed the Device filter and broke location resolution.
       devices = ((deviceResult.data ?? []) as RawPunchDeviceRow[]).filter((device) =>
         authorization.hasAllLocationAccess
-          ? !device.location_id || allowedLocationIds.has(device.location_id)
-          : Boolean(device.location_id && allowedLocationIds.has(device.location_id))
+          || !device.location_id
+          || allowedLocationIds.has(device.location_id)
       );
       locations = ((locationResult.data ?? []) as LocationRow[]).filter((location) =>
         authorization.hasAllLocationAccess || allowedLocationIds.has(location.id)
