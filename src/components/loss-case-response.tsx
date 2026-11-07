@@ -3,6 +3,8 @@ import { useEffect, useId, useState } from "react";
 import { TrackingDetailModal } from "./tracking-detail-modal";
 import { ImproveRedisputeRemark } from "./improve-redispute-remark";
 import { LossPidTimeline } from "./loss-pid-timeline";
+import { LossEvidencePreview } from "./loss-evidence-preview";
+import type { RedisputeWindow } from "./loss-redispute-desk";
 import styles from "./nl-loss.module.css";
 import { responseActions } from "@/lib/ops-pulse/loss-response-actions";
 import { stationEvidenceError, type StationEvidence } from "@/lib/ops-pulse/loss-station-evidence";
@@ -50,16 +52,23 @@ export function LossCaseResponse({
   month,
   caseKey,
   embedded = false,
+  inline = false,
+  initialView = "case",
+  viewRequest = 0,
   initialAction = "",
   onSaved,
 }: {
   month: string;
   caseKey: string;
   embedded?: boolean;
+  inline?: boolean;
+  initialView?: "case" | "history";
+  viewRequest?: number;
   initialAction?: "" | "return";
-  onSaved?: () => void;
+  onSaved?: (window: RedisputeWindow) => void;
 }) {
-  const [view, setView] = useState<"case" | "history">("case");
+  const [view, setView] = useState<"case" | "history">(initialView);
+  useEffect(()=>setView(initialView),[initialView,viewRequest]);
   const paneId = useId();
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
@@ -77,6 +86,7 @@ export function LossCaseResponse({
     [ticketUrl, setTicketUrl] = useState(""),
     [due, setDue] = useState(""),
     [payMonth, setPayMonth] = useState("");
+  useEffect(()=>setAction(initialAction),[initialAction]);
   useEffect(() => {
     const controller = new AbortController();
     fetch(
@@ -138,7 +148,7 @@ export function LossCaseResponse({
       if (!r.ok) throw Error(j.error);
       setSuccess(j.payroll_sync?.message || "Redispute update saved.");
       setNote("");
-      onSaved?.();
+      onSaved?.(j.window);
       setRevision((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to save.");
@@ -172,10 +182,10 @@ export function LossCaseResponse({
   return (
     <section
       className={`${styles.workspace} ${evidenceStyles.console}`}
-      style={{ maxWidth: 1000, margin: "0 auto", ...(embedded ? {padding:0} : {}) }}
+      style={{ maxWidth: inline ? "none" : 1000, margin: "0 auto", ...(embedded || inline ? {padding:0} : {}) }}
     >
-      {!embedded ? <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute tracking" : "Recovery"}</a> : null}
-      {embedded ? <h3>Shipment redispute</h3> : <h1>Shipment redispute</h1>}
+      {!embedded && !inline ? <a href={data?.canActivate ? "/team-ops/losses/exceptions?view=redisputes" : `/team-ops/losses/recovery-updates?${new URLSearchParams({month,case:caseKey})}`}>← {data?.canActivate ? "Redispute tracking" : "Recovery"}</a> : null}
+      {!inline && (embedded ? <h3>Shipment redispute</h3> : <h1>Shipment redispute</h1>)}
       {error ? (
         <p role="alert" className={styles.error}>
           {error}
@@ -187,7 +197,7 @@ export function LossCaseResponse({
       ) : (
         <>
           <section className={evidenceStyles.frame}>
-            <div className={evidenceStyles.dash}>
+            {!inline ? <div className={evidenceStyles.dash}>
               <button
                 className={styles.button}
                 onClick={() => setTracking(true)}
@@ -204,7 +214,7 @@ export function LossCaseResponse({
                     ? labels[state]
                     : "Not activated"}
               </span>
-            </div>
+            </div>:null}
             <TrackingDetailModal
               trackingId={tracking ? data.row.details.tid || null : null}
               stationHint={data.row.station_code}
@@ -213,6 +223,7 @@ export function LossCaseResponse({
             <div className={evidenceStyles.selector} role="group" aria-label="Redispute view">
               <button type="button" aria-pressed={view === "case"} aria-controls={paneId + "-case"} onClick={() => setView("case")}>Evidence &amp; status</button>
               <button type="button" aria-pressed={view === "history"} aria-controls={paneId + "-history"} onClick={() => setView("history")}>History · {data.events.length}</button>
+              {inline?<button type="button" onClick={()=>setTracking(true)}>Shipment tracking</button>:null}
             </div>
             <div hidden={view !== "case"} id={paneId + "-case"}>
             {returnEvent ? <div className={evidenceStyles.returnNote} role="status">
@@ -221,7 +232,7 @@ export function LossCaseResponse({
               <small>{returnEvent.actor_name} · {new Date(returnEvent.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small>
             </div> : null}
             {data.window.response_details?.reason ? (
-              <details className={styles.compactDetails} open>
+              <details className={`${styles.compactDetails} ${evidenceStyles.context}`} open>
                 <summary>Station submission</summary>
                 <strong>{data.window.response_details.reason}</strong>
                 <p>{data.window.response_details.note}</p>
@@ -234,7 +245,7 @@ export function LossCaseResponse({
                 deductions remain unchanged.
               </p>
             ) : null}
-            <details className={styles.compactDetails}>
+            <details className={`${styles.compactDetails} ${evidenceStyles.context}`}>
               <summary>Earlier vendor context</summary>
               <p>
                 {data.row.details.extra?.nl_remarks ||
@@ -386,7 +397,7 @@ export function LossCaseResponse({
           ) : null}
             </div>
             <div hidden={view !== "history"} className={evidenceStyles.history} id={paneId + "-history"}>
-            <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>
+            {view === "history" ? <LossPidTimeline month={month} caseKey={caseKey} revision={revision}/>:null}
             {data.events.length === 0 && <small>No redispute updates yet.</small>}
             {data.events.map((e) => (
               <article className={styles.allocation} key={e.id}>
@@ -401,9 +412,7 @@ export function LossCaseResponse({
                 {e.action === "response" && e.tracking?.details?.reason ? <strong>{e.tracking.details.reason}</strong> : null}
                 <p>{e.note}</p>
                 {e.action === "response" && e.tracking?.details ? <EvidenceLinks details={e.tracking.details} /> : e.evidence_url ? (
-                  <a href={e.evidence_url} target="_blank" rel="noreferrer">
-                    Evidence ↗
-                  </a>
+                  <LossEvidencePreview href={e.evidence_url} label="Evidence" className={styles.button}/>
                 ) : null}
               </article>
             ))}
@@ -418,8 +427,8 @@ export function LossCaseResponse({
 function EvidenceLinks({ details }: { details: Partial<StationEvidence> }) {
   return <div className={evidenceStyles.links}>
     {details.tt_reference ? <span>Cloak ticket: {details.tt_reference}</span> : null}
-    {details.evidence_url ? <a href={details.evidence_url} target="_blank" rel="noreferrer">Supporting files ↗</a> : null}
+    {details.evidence_url ? <LossEvidencePreview href={details.evidence_url} label="Supporting files" className={styles.button}/> : null}
     {details.cctv_not_required === true ? <span>CCTV not required</span> : details.cctv_url ?
-      <a href={details.cctv_url} target="_blank" rel="noreferrer">CCTV footage ↗</a> : null}
+      <LossEvidencePreview href={details.cctv_url} label="CCTV footage" className={styles.button}/> : null}
   </div>;
 }
