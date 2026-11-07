@@ -1,4 +1,5 @@
 "use client";
+import { AssociateDisputeRequest } from "./associate-dispute-request";
 import { RecoveryDetailButton } from "./connect-loss-recovery-detail";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -129,7 +130,7 @@ function DisputePayment({ dispute }: { dispute: AssociatePayoutDispute }) {
   </section>;
 }
 
-export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange, onLatestMonthChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void; onLatestMonthChange?: (month: string) => void }) {
+export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange, onLatestMonthChange, onTrackDisputes, readOnly=false }: { accountId: string; profileType: string; month: string; readOnly?: boolean; onTrackDisputes?: () => void; onMonthLockChange?: (locked: boolean) => void; onLatestMonthChange?: (month: string) => void }) {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -335,43 +336,14 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         </div> : <p className={styles.emptyLine}>Bank details are not available for this payout.</p>}
       </section>
 
-      {(payout.canDispute || payout.disputes.length) ? <div className={styles.disputeToggle}>
-        <div><strong>{payout.canDispute ? "Something looks incorrect?" : "Dispute history"}</strong><small>{payout.canDispute ? "Raise one dispute and select every affected payment area." : `${payout.disputes.length} dispute${payout.disputes.length === 1 ? "" : "s"} recorded for this payout.`}</small></div>
+      {payout.canDispute ? <div className={styles.disputeToggle}>
+        <div><strong>{payout.canDispute ? "Something looks incorrect?" : "Dispute history"}</strong><small>{payout.canDispute ? "Choose the issue and affected dates." : `${payout.disputes.length} dispute${payout.disputes.length === 1 ? "" : "s"} recorded for this payout.`}</small></div>
         <button type="button" aria-expanded={showDisputes} aria-controls="payout-dispute-section" onClick={toggleDisputeSection}>{showDisputes ? "Close" : payout.canDispute ? "Raise dispute" : "View disputes"}</button>
       </div> : null}
 
-      {showDisputes ? <section ref={disputeSectionRef} id="payout-dispute-section" className={styles.disputes} tabIndex={-1} aria-labelledby="payout-dispute-heading">
-        <header className={styles.disputeHeading}><small>Payout review</small><h3 id="payout-dispute-heading">{payout.canDispute ? "Raise a dispute" : "Dispute history"}</h3></header>
-        {payout.canDispute ? <form onSubmit={(event) => void send(event, payout)} className={styles.form}>
-          <div className={styles.disputeIdentity}><div><small>Month / pay period</small><strong>{periodLabel(payout.from, payout.to)}</strong></div><div><small>Employee code</small><strong>{payout.dropxId}</strong></div><div><small>Name</small><strong>{payout.name}</strong></div><div><small>Station</small><strong>{payout.station || "—"}</strong></div></div>
-          <fieldset className={styles.areas}><legend>Select dispute for *</legend><div>
-            {PAYOUT_DISPUTE_AREAS.map((area) => <label key={area.value}><input type="checkbox" name="categories" value={area.value} checked={disputeAreas.includes(area.value)} onChange={(event) => setDisputeAreas((current) => event.target.checked ? [...current, area.value] : current.filter((item) => item !== area.value))}/><span>{area.label}</span></label>)}
-          </div></fieldset>
-          <label>Your dispute *<textarea name="reason" required minLength={10} maxLength={1800} placeholder="Mention the date, amount or count, what is incorrect, and what you expected." /></label>
-          <button disabled={busy}>{busy ? "Sending…" : "Send dispute"}</button>
-        </form> : <p>{reviewMessage} Contact Workforce if a later correction is required.</p>}
+      <p><button type="button" onClick={onTrackDisputes}>Track requests · Dispute history →</button></p>
+      {showDisputes && payout.canDispute ? <section ref={disputeSectionRef} id="payout-dispute-section" tabIndex={-1} aria-label="Raise a dispute"><AssociateDisputeRequest key={payout.publicationId} payout={payout} query={query} readOnly={readOnly} onSaved={()=>{setShowDisputes(false);setNotice("Request sent. Open Disputes to track its status.");void load();}}/></section> : null}
 
-        <section className={styles.history}>{payout.canDispute ? <h3>Dispute history</h3> : null}
-          {payout.disputes.map((dispute: AssociatePayoutDispute) => {
-            const decoded = decodePayoutDisputeReason(dispute.reason);
-            return <article key={dispute.id} className={styles.disputeRecord}><header><div><b>{decoded.areas.length ? decoded.areas.join(" · ") : String(dispute.category).replaceAll("_", " ")}</b><small>Ticket {dispute.id.slice(0, 8).toUpperCase()} · Raised {localTime(dispute.created_at)} IST</small></div></header>
-              {decoded.reason ? <p>{decoded.reason}</p> : null}
-              <DisputeProgress dispute={dispute} />
-              <DisputeCorrection dispute={dispute} />
-              {dispute.resolution ? <section className={styles.disputeDecision} aria-label="Final dispute decision"><small>Final decision</small><p>{dispute.resolution}</p></section> : null}
-              {dispute.timeline.length ? <section className={styles.disputeTimeline} aria-label="Dispute comments">
-                <small>Updates and comments</small>
-                <ol>{dispute.timeline.map((event, index) => <li key={`${event.createdAt}:${index}`}>
-                  <div><strong>{event.label}</strong><time>{event.createdAt ? `${localTime(event.createdAt)} IST` : ""}</time></div>
-                  <p>{event.comment}</p>
-                </li>)}</ol>
-              </section> : null}
-              <DisputePayment dispute={dispute} />
-            </article>;
-          })}
-          {!payout.disputes.length ? <p>No disputes raised for this month.</p> : null}
-        </section>
-      </section> : null}
     </>}
   </section>;
 }

@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentStatus } from "./workforce-payment-status";
 import { associatePayoutDispute, payoutReviewState } from "./payout-dispute";
 import { publishedPayoutBreakdown } from "./published-payout-breakdown";
+import { disputeItems, disputeDays } from "../../../../src/lib/payout-dispute-guide";
 import {
   loadPayoutMappingRevisionState,
   payoutMappingPublicationState,
@@ -50,6 +51,17 @@ async function rows(query: any): Promise<Row[]> {
     if ((page.data ?? []).length < 500) return result;
   }
   throw new Error("Payout history needs team review.");
+}
+
+/** Ticket history is independent of publication visibility and mapping relocks. */
+export async function loadAssociateDisputeHistory(company: string, worker: string) {
+  const db=supabaseAdmin!;
+  const disputes=await rows(db.from("workforce_payout_disputes").select("*").eq("company_id",company).eq("workforce_id",worker).order("created_at",{ascending:false}).order("id"));
+  const publications=new Map<string,Row>(),events=new Map<string,Row[]>();
+  const pubIds=[...new Set(disputes.flatMap(d=>[d.publication_id,d.processed_publication_id]).filter(Boolean))];
+  for(let i=0;i<pubIds.length;i+=100) for(const p of await rows(db.from("workforce_payout_publications").select("id,snapshot,period_start,period_end,published_at").eq("company_id",company).eq("workforce_id",worker).in("id",pubIds.slice(i,i+100)).order("id"))) publications.set(p.id,p);
+  for(let i=0;i<disputes.length;i+=100) for(const e of await rows(db.from("workforce_payout_dispute_events").select("id,dispute_id,actor_name,portal,message,event_type,created_at").eq("company_id",company).in("dispute_id",disputes.slice(i,i+100).map(d=>d.id)).order("created_at").order("id"))) events.set(e.dispute_id,[...(events.get(e.dispute_id)??[]),e]);
+  return disputes.map(d=>{const p=publications.get(d.publication_id);return {...associatePayoutDispute(d,p,publications.get(d.processed_publication_id),null,events.get(d.id)??[]),month:String(p?.period_end||p?.snapshot?.run?.period_end||"").slice(0,7),station:p?.snapshot?.item?.station_code||""};});
 }
 
 function detailLines(lines: Row[]) {
@@ -158,6 +170,8 @@ function payoutOutput({
     attendanceRanges: breakdown.attendanceRanges,
     lines: detail,
     disputes,
+    disputeItems: snapshot ? disputeItems(snapshot) : [],
+    disputeDays: snapshot ? disputeDays(snapshot).map(({ date, units, attendanceKnown, deliveries, deliveryKnown }) => ({ date, units, attendanceKnown, deliveries, deliveryKnown })) : [],
   };
 }
 

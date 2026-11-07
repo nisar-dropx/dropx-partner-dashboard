@@ -17,8 +17,8 @@ const adapterCleanup = readFileSync(
 );
 const reviewActions = readFileSync(new URL("./payout-review-actions.ts", import.meta.url), "utf8");
 
-test("portal payout review uses v2 and never calls the one-step decide RPC", () => {
-  assert.match(reviewActions, /workforce_dispute_transition_v2/);
+test("portal payout review uses validated v3 and never calls the one-step decide RPC", () => {
+  assert.match(reviewActions, /workforce_dispute_transition_v3/);
   assert.doesNotMatch(reviewActions, /workforce_decide_payout_dispute/);
   assert.doesNotMatch(reviewActions, /workforce_dispute_step/);
 });

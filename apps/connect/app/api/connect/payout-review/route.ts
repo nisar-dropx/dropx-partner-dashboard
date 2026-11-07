@@ -1,8 +1,10 @@
 import {NextRequest,NextResponse} from 'next/server';
-import {payoutIdentity,loadAssociatePayouts} from '@/lib/associate-payouts';
+import {payoutIdentity,loadAssociatePayouts,loadAssociateDisputeHistory} from '@/lib/associate-payouts';
 import {supabaseAdmin} from '@/lib/supabase-admin';
 import {encodePayoutDisputeReason,legacyPayoutDisputeCategory,normalizePayoutDisputeAreas} from '@/lib/payout-dispute';
 import {loadPayoutMappingRevisionState,payoutMappingPublicationState} from '@/lib/payout-mapping-relocks';
+import {normalizeGuidedClaim,claimDescription,DISPUTE_ISSUES} from '@/lib/payout-dispute-guide';
+import {randomUUID} from 'node:crypto';
 export const dynamic='force-dynamic';
 const headers={'Cache-Control':'private, no-store','Vary':'Cookie'};
 const legacyCategories=new Set(['counts','training','loss','tds','other']);
@@ -39,17 +41,49 @@ async function ownReviewPublication(company:string,worker:string,publicationId:s
  return publication.data;
 }
 export async function GET(request:NextRequest){
- try{const {company,worker,subjectType}=await payoutIdentity(request);const payouts=await loadAssociatePayouts(company,worker,subjectType);return NextResponse.json({payouts:payouts.map(p=>({...p,bankAccount:p.bankAccount?'•••• '+p.bankAccount.slice(-4):'Not recorded'}))},{headers});}
+ try{const {company,worker,subjectType}=await payoutIdentity(request);if(request.nextUrl.searchParams.get('view')==='disputes')return NextResponse.json({disputes:subjectType==='helper'?[]:await loadAssociateDisputeHistory(company,worker)},{headers});const payouts=await loadAssociatePayouts(company,worker,subjectType);return NextResponse.json({payouts:payouts.map(p=>({...p,bankAccount:p.bankAccount?'•••• '+p.bankAccount.slice(-4):'Not recorded'}))},{headers});}
  catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to load payouts.'},{status:400,headers});}
 }
 export async function POST(request:NextRequest){
+ let uploadedPath:string|null=null;
  try{
   if(request.headers.get('origin')!==request.nextUrl.origin)return NextResponse.json({error:'Invalid request origin'},{status:403,headers});
-  const {company,worker,subjectType}=await payoutIdentity(request),body=await request.json();
+  const {company,worker,subjectType}=await payoutIdentity(request);
+  const multipart=request.headers.get('content-type')?.includes('multipart/form-data');
+  const form=multipart?await request.formData():null;
+  const body=form?JSON.parse(String(form.get('payload')||'{}')):await request.json();
   if(subjectType==='helper')throw new Error('Helper payout disputes are not available from DropX One. Contact Workforce for assistance.');
+  if(body.operation==='reply'){
+   const result=await supabaseAdmin!.rpc('workforce_reply_guided_dispute',{p_company:company,p_workforce:worker,p_dispute:text(body.disputeId),p_version:Number(body.version),p_message:validReason(body.message,3)});
+   if(result.error)throw new Error(result.error.code==='P0001'?result.error.message:'Reply could not be saved.');
+   return NextResponse.json({ok:true},{headers});
+  }
   if(body.operation!=='create')throw new Error('Unsupported dispute action.');
    const publicationId=text(body.publicationId);
    await ownReviewPublication(company,worker,publicationId);
+   if(body.details){
+    const pub=await supabaseAdmin!.from('workforce_payout_publications').select('snapshot').eq('company_id',company).eq('workforce_id',worker).eq('id',publicationId).single();
+    if(pub.error)throw new Error('Refresh to load the payout.');
+    const details=normalizeGuidedClaim(pub.data.snapshot,body.details);
+    const file=form?.get('attachment');
+    if(file instanceof File&&file.size){
+     if(file.size>4*1024*1024||!['image/jpeg','image/png','image/webp','application/pdf'].includes(file.type))throw new Error('Optional attachment: JPG, PNG, WebP or PDF, up to 4 MB.');
+     const bytes=Buffer.from(await file.arrayBuffer());
+     const magic=file.type==='application/pdf'?bytes.subarray(0,5).toString()==='%PDF-':file.type==='image/png'?bytes.subarray(0,8).toString('hex')==='89504e470d0a1a0a':file.type==='image/jpeg'?bytes[0]===255&&bytes[1]===216:bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP';
+     if(!magic)throw new Error('This attachment does not match its file type.');
+     uploadedPath=`${company}/payout-disputes/${worker}/${randomUUID()}`;
+     const upload=await supabaseAdmin!.storage.from('employee-profile-documents').upload(uploadedPath,bytes,{contentType:file.type,upsert:false});
+     if(upload.error)throw new Error('Attachment could not be uploaded. Retry, or submit without it.');
+     details.attachment={path:uploadedPath,name:file.name.replace(/[^a-zA-Z0-9._ -]/g,'_').slice(0,120)};
+    }
+    const area=DISPUTE_ISSUES.find(i=>i.id===details.issue)!.area;
+    const category=legacyPayoutDisputeCategory([area]);
+    const reason=encodePayoutDisputeReason([area],claimDescription(pub.data.snapshot,details));
+    const result=await supabaseAdmin!.rpc('workforce_raise_guided_payout_dispute',{p_company:company,p_workforce:worker,p_publication:publicationId,p_category:category,p_reason:reason,p_details:details});
+    if(result.error)throw new Error(result.error.code==='P0001'?result.error.message:'Request could not be saved. Please retry.');
+    uploadedPath=null;
+    return NextResponse.json({ok:true},{headers});
+   }
    const reason=validReason(body.reason,10),areas=normalizePayoutDisputeAreas(body.categories);
    // Keep cached clients from the previous single-select form working during deployment.
    const legacy=text(body.category);
@@ -60,5 +94,5 @@ export async function POST(request:NextRequest){
    const result=await supabaseAdmin!.rpc('workforce_raise_payout_dispute',{p_company:company,p_workforce:worker,p_publication:publicationId,p_category:category,p_reason:encodedReason});
    if(result.error)throw new Error('The dispute could not be sent. Refresh and try again.');
   return NextResponse.json({ok:true},{headers});
- }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to send dispute.'},{status:400,headers});}
+ }catch(e){if(uploadedPath)await supabaseAdmin!.storage.from('employee-profile-documents').remove([uploadedPath]);return NextResponse.json({error:e instanceof Error?e.message:'Unable to send dispute.'},{status:400,headers});}
 }

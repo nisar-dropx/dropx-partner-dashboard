@@ -857,3 +857,13 @@ NL Final and SLP Final expose **Final submit / Close period** to SLP Manager, Fi
 `nl_loss_close_period` and all ten manual loss mutation RPCs use the existing company recovery advisory lock, preventing save/close races. Closed periods block manual recovery, dispute, exception, approval and write-off changes, including workbooks and legacy RPCs. NL months and SLP source periods are independent; station and company scopes are preserved. New source cases in a closed period are also locked, and captured identities remain locked if source metadata changes. Source refresh and automatic payroll settlement remain permitted. No existing period is closed by the migration.
 
 Validation: `pnpm test:loss-period-close`; full recovery regression suite.
+
+
+### Guided payout disputes (7 November 2026)
+
+- Schema-3 requests identify the actual published payment/deduction and affected dates. Deductions retain the exact loss recovery key. Optional private attachments never replace system evidence.
+- OpsPulse defaults to Pending with me. Open a ticket to load current payout, dated ID mappings, imported delivery activity, linked parent/XPT punches, route evidence and selected deduction sources. No missing import is presented as proof of absence.
+- Initial and final decisions require fresh evidence. A changed evidence digest forces a refresh/review. Monthly attendance corrections include the configured earned paid offs and percentage deductions. Ambiguous policies/rates or unsupported threshold/hourly calculations fail closed for source review.
+- The v3 transition wraps the existing independently assigned, versioned three-person v2 workflow. Closure checks each selected date/item in the original and revised publications, as well as the existing net-delta, station, period, publication-age and bank-instruction safeguards. Older monetary proposals must return to guided review before completion; migration does not change their decisions.
+- Clarification keeps the request open (and bank blocking). Associates reply on the same ticket even after the new-request deadline. One Payments > Disputes reads ticket history independently of current mapping/publication visibility.
+- Migration: supabase/migrations/20261107120000_guided_payout_disputes.sql. Verification: src/lib/payout-dispute-guide.test.mjs and scripts/test-payout-dispute-processing-migration.mjs. Do not submit production financial changes merely to test the UI.

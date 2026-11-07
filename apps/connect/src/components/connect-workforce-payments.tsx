@@ -14,6 +14,7 @@ import type {OwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
 import type {PaymentReference} from '@/lib/payment-reference';
 import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production-breakdown';
+import {AssociateDisputeCenter} from './associate-dispute-center';
 import {AssociatePayouts} from './associate-payouts';
 import {ConnectLossRecoveries} from './connect-loss-recoveries';
 import {currentPayoutMonth,normalizePayoutMonth,payoutMonthLabel,payoutMonthLongLabel,shiftPayoutMonth} from '@/lib/payout-dispute';
@@ -22,7 +23,7 @@ import styles from './connect-workforce-payments.module.css';
 
 type Daily=OwnProductionDay&{production:Array<{label:string;unit?:string;count:number;rate:number;amount:number}>};
 type EarningsData={month:string;routeFuel?:DailyRouteFuel[];summary:{workDays:number;grossAmount:number;netAmount:number;baseAmount:number;incentiveAmount:number;additions:number;deductionAmount:number;advanceRecoveryAmount?:number;lossRecoveryAmount?:number;lossRecoveryDeferred?:number};adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary;earnings:Array<{id:string;location:string;paymentMethod:string;daily:Daily[]}>};
-type Tab='earnings'|'statements'|'advances'|'rate-card';
+type Tab='earnings'|'statements'|'advances'|'rate-card'|'disputes';
 const money=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
 const date=(d:string)=>new Date(`${d}T00:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
 export function ConnectWorkforcePayments({account,readOnly=false}:{account:AppAccount;readOnly?:boolean}){
@@ -33,7 +34,7 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
  const earningsAllowed=access.includes('earnings'),advancesAllowed=access.includes('advances');
  // Own mapped rates are already part of the earnings permission on the server.
  const rateCardAllowed=earningsAllowed||access.includes('rate_card');
- const firstTab:Tab=searchParams.get('tab')==='payouts'&&earningsAllowed?'statements':earningsAllowed?'earnings':advancesAllowed?'advances':'rate-card';
+ const firstTab:Tab=searchParams.get('tab')==='disputes'&&earningsAllowed?'disputes':searchParams.get('tab')==='payouts'&&earningsAllowed?'statements':earningsAllowed?'earnings':advancesAllowed?'advances':'rate-card';
  const requestedPayoutMonth=normalizePayoutMonth(searchParams.get('payoutMonth'));
  const [tab,setTab]=useState<Tab>(firstTab),[earningsMonth,setEarningsMonth]=useState(currentPayoutMonth()),[payoutMonth,setPayoutMonth]=useState(requestedPayoutMonth??currentPayoutMonth());
  const [calculated,setCalculated]=useState<EarningsData|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
@@ -81,7 +82,7 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
  return <section className={`dx-workforce-payments ${styles.page}`}>
   <div className={styles.headingRow}>
    <header className="dx-page-intro"><small>My pay</small><h1>Payments</h1><p>Earnings, payouts and rates in one place.</p></header>
-   {earningsAllowed&&tab!=='rate-card'?<div className={monthStyles.monthPicker}><span>Payment month</span><div className={monthStyles.monthControl} role="group" aria-label="Earnings and payout month">
+   {earningsAllowed&&tab!=='rate-card'&&tab!=='disputes'?<div className={monthStyles.monthPicker}><span>Payment month</span><div className={monthStyles.monthControl} role="group" aria-label="Earnings and payout month">
     <button type="button" aria-label={`Previous ${tab==='statements'?'payout':'earnings'} month`} disabled={(tab==='statements'&&payoutLocked)||loading} onClick={()=>shiftVisibleMonth(-1)}><ChevronLeft/></button>
     <strong aria-live="polite"><span aria-hidden="true">{payoutMonthLabel(visibleMonth)}</span><span className={monthStyles.srOnly}>Showing {tab==='statements'?'payouts':'earnings'} for {payoutMonthLongLabel(visibleMonth)}</span></strong>
     <button type="button" aria-label={`Next ${tab==='statements'?'payout':'earnings'} month`} disabled={visibleMonth>=currentPayoutMonth()||(tab==='statements'&&payoutLocked)||loading} onClick={()=>shiftVisibleMonth(1)}><ChevronRight/></button>
@@ -93,9 +94,11 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
    {earningsAllowed?<button className={tab==='statements'?'active':''} onClick={()=>changeTab('statements')}><ReceiptText/>Payouts</button>:null}
    {rateCardAllowed?<button className={tab==='rate-card'?'active':''} onClick={()=>changeTab('rate-card')}><WalletCards/>Rate card</button>:null}
    {advancesAllowed?<button className={tab==='advances'?'active':''} onClick={()=>changeTab('advances')}><IndianRupee/>Advances</button>:null}
+   {earningsAllowed?<button className={tab==='disputes'?'active':''} onClick={()=>changeTab('disputes')}><ReceiptText/>Disputes</button>:null}
   </nav>
+  {tab==='disputes'&&earningsAllowed?<AssociateDisputeCenter accountId={account.id} profileType={account.profileType} readOnly={readOnly}/>:null}
   {tab==='advances'&&advancesAllowed?<ConnectAdvances account={account} readOnly={readOnly}/>:null}
-  {payoutVisited&&earningsAllowed?<div hidden={tab!=='statements'}><AssociatePayouts accountId={account.id} profileType={account.profileType} month={payoutMonth} onMonthLockChange={setPayoutLocked} onLatestMonthChange={useLatestPayoutMonth}/></div>:null}
+  {payoutVisited&&earningsAllowed?<div hidden={tab!=='statements'}><AssociatePayouts accountId={account.id} profileType={account.profileType} month={payoutMonth} onMonthLockChange={setPayoutLocked} onLatestMonthChange={useLatestPayoutMonth} readOnly={readOnly} onTrackDisputes={()=>changeTab('disputes')}/></div>:null}
   {tab==='earnings'&&earningsAllowed?<>
    {loading||(!error&&calculated?.month!==earningsMonth)?<div className="dx-loader"><span/><small>Loading saved earnings…</small></div>:error?<div role="alert" className="dx-alert error">{error}<button onClick={()=>void load(true)}>Retry</button></div>:calculated?<>
     <section className="dx-workforce-payment-hero"><span><small>{payoutMonthLongLabel(earningsMonth)}</small><strong>{money(calculated.summary.netAmount)}</strong><em>{pending?'Known earnings · fuel pending':'Estimated live earnings'}</em></span><button onClick={()=>changeTab('rate-card')}>View rate card <ChevronRight/></button></section>
