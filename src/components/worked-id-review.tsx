@@ -301,6 +301,7 @@ export function WorkedIdReview({
   function close() {
     payRequest.current++;
     setDrafts([]);
+    setError("");
   }
   useEffect(() => {
     if (!current) return;
