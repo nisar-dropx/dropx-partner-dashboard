@@ -18,6 +18,8 @@ create table payment_requests(
  id int primary key,company_id uuid,location_id uuid,payment_head_id uuid,source_system text,status text,approval_status text,amount numeric,amount_requested numeric,amount_approved numeric,work_date date,payment_mode text,bank_account_no text,beneficiary_account_no text,beneficiary_account_number text,ifsc text,beneficiary_ifsc text,account_holder_name text,beneficiary_account_holder text,
  delivery_performer_mode text,delivery_work_date date,delivery_shipment_id uuid,delivery_provider_employee_id text,delivery_performer_workforce_id uuid,delivery_performer_name text,delivery_identity_confirmed boolean not null default false,adhoc_payout_effect text default 'none',adhoc_client text,updated_at timestamptz,updated_by uuid,processing_started_at timestamptz,bank_utr text,bank_status text,requested_for_name text);
 create table workforce_payout_effective_paid_allocations(company_id uuid,credited_workforce_id uuid,station_id uuid,period_start date,period_end date);
+create table workforce_payout_payment_items(id uuid,company_id uuid,workforce_id uuid,status text,period_start date,period_end date);
+create table workforce_payout_payment_allocations(payment_item_id uuid,company_id uuid,station_id uuid,instruction_amount_snapshot numeric);
 create table workforce_payroll_runs(id uuid,company_id uuid,status text,period_start date,period_end date);
 create table workforce_payroll_items(payroll_run_id uuid,company_id uuid,workforce_id uuid,status text);
 create table refresh_audit(company_id uuid,worker_id uuid,station_id uuid,start_date date,end_date date);
@@ -62,6 +64,10 @@ await assert.rejects(()=>db.exec('delete from payment_requests where id=2'),/can
 await db.query('insert into workforce_payout_effective_paid_allocations values($1,$2,$3,$4,$5)',[company,worker,xpt,'2026-11-01','2026-11-30']);
 await assert.rejects(()=>db.exec("update payment_requests set status='paid' where id=2"),/finalized Workforce payout/);
 await db.exec('delete from workforce_payout_effective_paid_allocations');
+await db.query('insert into workforce_payout_payment_items values($1,$2,$3,$4,$5,$6)',[id(40),company,worker,'processing','2026-11-01','2026-11-30']);
+await db.query('insert into workforce_payout_payment_allocations values($1,$2,$3,$4)',[id(40),company,xpt,1000]);
+await assert.rejects(()=>db.exec("update payment_requests set status='paid' where id=2"),/pending bank file/,'A pending XPT bank transfer also prevents double payment');
+await db.exec("update workforce_payout_payment_items set status='cancelled'");
 await db.exec("update payment_requests set status='paid' where id=2");
 assert.deepEqual((await db.query('select station_id from refresh_audit order by station_id')).rows.map(r=>r.station_id),[base,xpt]);
 assert.equal((await db.query('select count(*)::int n from revision_audit')).rows[0].n,1);

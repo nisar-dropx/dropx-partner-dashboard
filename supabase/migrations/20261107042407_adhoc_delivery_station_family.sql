@@ -62,10 +62,15 @@ begin
  if exists(select 1 from public.workforce_payout_effective_paid_allocations a where a.company_id=p.company_id
   and a.credited_workforce_id=p.delivery_performer_workforce_id and a.station_id=any(targets)
   and p.delivery_work_date between a.period_start and a.period_end)
+ or exists(select 1 from public.workforce_payout_payment_items i
+  join public.workforce_payout_payment_allocations a on a.payment_item_id=i.id and a.company_id=i.company_id
+  where i.company_id=p.company_id and i.workforce_id=p.delivery_performer_workforce_id
+   and i.status='processing' and a.station_id=any(targets) and a.instruction_amount_snapshot>0
+   and p.delivery_work_date between i.period_start and i.period_end)
  or exists(select 1 from public.workforce_payroll_runs r join public.workforce_payroll_items i on i.payroll_run_id=r.id and i.company_id=r.company_id
   where r.company_id=p.company_id and i.workforce_id=p.delivery_performer_workforce_id and r.status in ('approved','paid') and i.status<>'excluded'
   and p.delivery_work_date between r.period_start and r.period_end)
- then raise exception 'This work date is already in a finalized Workforce payout. Finance must review it before paying ad hoc'; end if;
+ then raise exception 'This work date is already in a finalized Workforce payout or pending bank file. Finance must review it before paying ad hoc'; end if;
  perform public.workforce_bump_payout_period_dependency_revision(p.company_id,p.delivery_work_date);
  foreach target in array targets loop
   perform public.enqueue_workforce_payout_dependency_refresh(p.company_id,p.delivery_performer_workforce_id,target,p.delivery_work_date,p.delivery_work_date,p.updated_by);
