@@ -25,7 +25,9 @@ const checks = [
   [exportButton.includes("Preparing Excel") && exportButton.includes('role="alert"'), "The export must show progress and a usable error."],
   [mapping.includes("existingByProfile") && mapping.includes("config.tables"), "Mapping filters must validate the real People or Workforce profile rather than trusting a stale enrolment link."],
   [resolver.includes('worker: { tables: ["helpers", "workforce_helpers", "workforce_pickers"]'), "Raw Punches must resolve canonical Helpers before the legacy Helper tables."],
-  [resolver.includes('match: "serial"') && resolver.includes('match: "terminal"') && resolver.includes('match: "network"'), "Location resolution must support serial, terminal, and network fallbacks."]
+  [resolver.includes('match: "serial"') && resolver.includes('match: "terminal"') && resolver.includes('match: "network"'), "Location resolution must support serial, terminal, and network fallbacks."],
+  [!page.includes("__no_devices__") && !exportRoute.includes("__no_devices__") && !exportRoute.includes("__no_authorized_devices__"), "Empty device filters must not pass non-uuid sentinels into device_id."],
+  [page.includes("skipQuery") && exportRoute.includes("deviceScopeEmpty"), "Empty device or mapping scope must short-circuit instead of querying."]
 ];
 
 for (const [passed, message] of checks) {

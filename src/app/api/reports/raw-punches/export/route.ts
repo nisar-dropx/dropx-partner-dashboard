@@ -107,7 +107,15 @@ export async function GET(request: NextRequest) {
     ]));
     const includeUnmapped = mapping.includes("unmapped");
 
+    const locationDeviceIds = selectedLocations.length ? devicesForLocation.map((device) => device.id) : null;
+    // device_id is uuid — empty device scope must short-circuit, never use string sentinels.
+    const deviceScopeEmpty = (!authorization.hasAllLocationAccess && !allowedDeviceIds.length)
+      || (locationDeviceIds != null && locationDeviceIds.length === 0)
+      || (mapping.length > 0 && mapping.length < 3 && !includeUnmapped && !includedIds.length);
+
     async function loadRawEventBatch(offset: number, includeCount = false) {
+      if (deviceScopeEmpty) return { rows: [] as RawPunchRow[], total: 0 };
+
       let query = admin
         .from("biometric_raw_events")
         .select(
@@ -122,13 +130,8 @@ export async function GET(request: NextRequest) {
         .order("created_at", { ascending: false })
         .order("id", { ascending: false });
 
-      if (!authorization.hasAllLocationAccess) {
-        query = allowedDeviceIds.length ? query.in("device_id", allowedDeviceIds) : query.eq("device_id", "__no_authorized_devices__");
-      }
-      if (selectedLocations.length) {
-        const locationDeviceIds = devicesForLocation.map((device) => device.id);
-        query = locationDeviceIds.length ? query.in("device_id", locationDeviceIds) : query.eq("device_id", "__no_devices__");
-      }
+      if (!authorization.hasAllLocationAccess) query = query.in("device_id", allowedDeviceIds);
+      if (locationDeviceIds) query = query.in("device_id", locationDeviceIds);
       if (selectedDevices.length) query = query.in("device_id", selectedDevices);
       if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
       if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
@@ -136,7 +139,7 @@ export async function GET(request: NextRequest) {
 
       if (mapping.length && mapping.length < 3) {
         if (!includeUnmapped) {
-          query = includedIds.length ? query.in("enrolment_id", includedIds) : query.eq("enrolment_id", "__no_matching_profiles__");
+          query = query.in("enrolment_id", includedIds);
         } else if (!mapping.includes("people") || !mapping.includes("workforce")) {
           const filters = ["enrolment_id.is.null"];
           if (includedIds.length) filters.push(`enrolment_id.in.(${includedIds.map((id) => `"${id.replaceAll('"', '\\"')}"`).join(",")})`);
@@ -183,7 +186,8 @@ export async function GET(request: NextRequest) {
           ? []
           : allowedDeviceIds;
     const scopeProcessingByDevice = selectedDevices.length > 0 || selectedLocations.length > 0 || !authorization.hasAllLocationAccess;
-    const [processingPunches, processingAlerts] = rows.length && enrichProcessingHistory ? await Promise.all([
+    const processingScopeEmpty = scopeProcessingByDevice && !processingDeviceIds.length;
+    const [processingPunches, processingAlerts] = rows.length && enrichProcessingHistory && !processingScopeEmpty ? await Promise.all([
       (async () => {
         const result: RawPunchResultRow[] = [];
         for (let offset = 0; ; offset += batchSize) {
@@ -192,9 +196,7 @@ export async function GET(request: NextRequest) {
             .select("raw_event_id, profile_type, account_id, employee_id, field_executive_id, worker_status, calculated")
             .eq("company_id", companyId)
             .order("punch_time", { ascending: false });
-          if (scopeProcessingByDevice) {
-            query = processingDeviceIds.length ? query.in("device_id", processingDeviceIds) : query.eq("device_id", "__no_authorized_devices__");
-          }
+          if (scopeProcessingByDevice) query = query.in("device_id", processingDeviceIds);
           if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
           if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
           const response = await query.range(offset, offset + batchSize - 1);
@@ -213,9 +215,7 @@ export async function GET(request: NextRequest) {
             .select("raw_event_id, alert_type, message, created_at")
             .eq("company_id", companyId)
             .order("created_at", { ascending: false });
-          if (scopeProcessingByDevice) {
-            query = processingDeviceIds.length ? query.in("device_id", processingDeviceIds) : query.eq("device_id", "__no_authorized_devices__");
-          }
+          if (scopeProcessingByDevice) query = query.in("device_id", processingDeviceIds);
           if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
           if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
           const response = await query.range(offset, offset + batchSize - 1);

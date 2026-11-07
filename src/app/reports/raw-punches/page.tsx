@@ -128,7 +128,12 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       const selectedLocations = selectedValues(searchParams.location, locations.map((location) => location.id));
       const devicesForLocation = selectedLocations.length ? devices.filter((device) => Boolean(device.location_id && selectedLocations.includes(device.location_id))) : devices;
       const selectedDevices = selectedValues(searchParams.device, devicesForLocation.map((device) => device.id));
-      if (authorization.hasAllLocationAccess || allowedDeviceIds.length) {
+      const locationDeviceIds = selectedLocations.length ? devicesForLocation.map((device) => device.id) : null;
+      // device_id is uuid — never filter with string sentinels. Empty device scope = no rows.
+      let skipQuery = (!authorization.hasAllLocationAccess && !allowedDeviceIds.length)
+        || (locationDeviceIds != null && locationDeviceIds.length === 0);
+
+      if (!skipQuery && (authorization.hasAllLocationAccess || allowedDeviceIds.length)) {
         let query = supabaseAdmin
           .from("biometric_raw_events")
           .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, employee_code, payload, punch_time, received_at, event_type, source_ip, worker_status, created_at", { count: "exact" })
@@ -144,10 +149,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
           .order("id", { ascending: false });
 
         if (!authorization.hasAllLocationAccess) query = query.in("device_id", allowedDeviceIds);
-        if (selectedLocations.length) {
-          const locationDeviceIds = devicesForLocation.map((device) => device.id);
-          query = locationDeviceIds.length ? query.in("device_id", locationDeviceIds) : query.eq("device_id", "__no_devices__");
-        }
+        if (locationDeviceIds) query = query.in("device_id", locationDeviceIds);
         if (selectedDevices.length) query = query.in("device_id", selectedDevices);
         if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
         if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
@@ -165,7 +167,8 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
             ]));
             const includeUnmapped = mapping.includes("unmapped");
             if (!includeUnmapped) {
-              query = includedIds.length ? query.in("enrolment_id", includedIds) : query.eq("enrolment_id", "__no_matching_profiles__");
+              if (!includedIds.length) skipQuery = true;
+              else query = query.in("enrolment_id", includedIds);
             } else if (!mapping.includes("people") || !mapping.includes("workforce")) {
               const filters = ["enrolment_id.is.null"];
               if (includedIds.length) filters.push(`enrolment_id.in.(${includedIds.map((id) => `"${id.replaceAll('"', '\\"')}"`).join(",")})`);
@@ -177,12 +180,14 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
           }
         }
 
-        const result = error ? null : await query.range((page - 1) * pageSize, page * pageSize - 1);
-        if (result?.error) {
-          error = result.error.message;
-        } else if (result) {
-          rows = (result.data ?? []) as RawPunchRow[];
-          total = result.count ?? rows.length;
+        if (!error && !skipQuery) {
+          const result = await query.range((page - 1) * pageSize, page * pageSize - 1);
+          if (result.error) {
+            error = result.error.message;
+          } else {
+            rows = (result.data ?? []) as RawPunchRow[];
+            total = result.count ?? rows.length;
+          }
         }
       }
     }
