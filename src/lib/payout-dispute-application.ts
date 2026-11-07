@@ -24,8 +24,9 @@ export async function processApprovedDisputes(input:{companyId?:string;disputeId
   let state=job.state;
   if(state!=="awaiting_publication"){
    const evidence=await loadDisputeEvidence(job.company_id,d,p,auth);
-   if(evidence.sourceError||evidence.digest!==d.correction_plan?.evidence_digest){
-    await supabaseAdmin.rpc("workforce_pause_dispute_application",{p_company:job.company_id,p_dispute:d.id,p_message:evidence.sourceError||"Source records changed after Finance approval. Return for fresh review before applying."});
+   if(evidence.sourceError)throw Error(evidence.sourceError);
+   if(evidence.digest!==d.correction_plan?.evidence_digest){
+    await supabaseAdmin.rpc("workforce_pause_dispute_application",{p_company:job.company_id,p_dispute:d.id,p_message:"Source records changed after Finance approval. Return for fresh review before applying."});
     results.push({id:d.id,state:"blocked"});continue;
    }
    const applied=await supabaseAdmin.rpc("workforce_apply_approved_dispute",{p_company:job.company_id,p_dispute:d.id});
@@ -46,8 +47,8 @@ export async function processApprovedDisputes(input:{companyId?:string;disputeId
   } catch(error) {
    const message=error instanceof Error?error.message:"Source verification failed.";
    // Isolate failures so one unavailable source cannot starve other approved requests.
-   if(job.state!=="awaiting_publication")await supabaseAdmin.rpc("workforce_pause_dispute_application",{p_company:job.company_id,p_dispute:job.dispute_id,p_message:message});
-   results.push({id:job.dispute_id,state:"needs_attention",error:message});
+   await supabaseAdmin.rpc("workforce_note_dispute_application_retry",{p_company:job.company_id,p_dispute:job.dispute_id,p_message:message});
+   results.push({id:job.dispute_id,state:"retry",error:message});
   }
  }
  return results;

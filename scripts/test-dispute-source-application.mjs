@@ -79,5 +79,11 @@ export async function testDisputeApplication(db,{C,S,A1,A2,ok}) {
  const finish=async balance=>(await db.query(`select * from workforce_dispute_transition_v3($1,$2,$3,'Finance test',$4,'approve_final',1,array[$5]::uuid[],$6)`,[C,final.D,A2,actorRoles,S,JSON.stringify({note:'Checked this complete loss correction.',loss_balance:balance})])).rows[0];
  try{await finish(null);ok('Final approval without a balance choice is atomic',false);}catch{ok('Final approval without a balance choice is atomic',(await db.query('select status from workforce_payout_disputes where id=$1',[final.D])).rows[0].status==='pending_final_approval');}
  const saved=await finish({treatment:'write_off',reason:'Checked the disputed assignment.'});ok('Final approval returns the current audit version and queues application',saved.status==='approved_for_processing'&&saved.version===3&&(await db.query('select state from workforce_dispute_application_jobs where dispute_id=$1',[final.D])).rows[0].state==='queued');
+ const retry=readFileSync('supabase/migrations/20261107151000_dispute_application_retry.sql','utf8');await db.exec(retry);await db.exec(retry);
+ await db.query('select workforce_note_dispute_application_retry($1,$2,$3)',[C,final.D,'Temporary source fetch error']);
+ let job=(await db.query('select * from workforce_dispute_application_jobs where dispute_id=$1',[final.D])).rows[0];ok('Transient source failure consumes one retry, not all attempts',job.state==='blocked'&&job.attempts===1);
+ await db.query('select workforce_note_dispute_application_retry($1,$2,$3)',[C,attendance.D,'Temporary publication fetch error']);
+ job=(await db.query('select * from workforce_dispute_application_jobs where dispute_id=$1',[attendance.D])).rows[0];ok('Applied source stays in verification after refresh failure',job.state==='awaiting_publication'&&job.applied_at!==null&&job.attempts===1);
+ ok('Retry recorder is service-only',!(await db.query(`select has_function_privilege('authenticated','workforce_note_dispute_application_retry(uuid,uuid,text)','execute') allowed`)).rows[0].allowed);
 }
 
