@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchableSelect } from "./searchable-select";
 import { FleetMultiSelect } from "./fleet-multi-select";
+import { PeopleOwnershipRefresh } from "./people-ownership-refresh";
 import { WorkedIdBulkPeriods } from "./worked-id-bulk-periods";
 import {
   workedIdCounts,
@@ -14,7 +15,8 @@ type Location = {
   station_code: string;
   station_name: string;
   region?: string | null;
-  cluster?: string | null;
+  cluster: string;
+  clusterKeys: string[];
 };
 type Draft = {
   row: any;
@@ -72,10 +74,12 @@ const choices = (a: string[]) =>
 export function WorkedIdReview({
   locations,
   initialMonth,
+  managerOptions,
   canEdit,
 }: {
   locations: Location[];
   initialMonth: string;
+  managerOptions: { value: string; label: string }[];
   canEdit: boolean;
 }) {
   const request = useRef(0),
@@ -133,18 +137,26 @@ export function WorkedIdReview({
     setDrafts([]);
     void load();
   }, [month, allIds]);
+  const managerRevision = managerOptions.map(option => option.value).sort().join(",");
+  useEffect(() => {
+    const valid = new Set(managerOptions.map(option => option.value));
+    setClusters(previous => previous.filter(key => valid.has(key)));
+  }, [managerRevision]);
+  const currentLocations = new Map(locations.map(location => [location.id, location]));
+  const currentRow = (row: any) => ({ ...row, cluster: currentLocations.get(row.stationId)?.cluster ?? "Not mapped in People" });
   const regional = locations.filter(
     (l) => !regions.length || regions.includes(l.region || "Unassigned"),
   );
   const geographic = regional.filter(
-    (l) => !clusters.length || clusters.includes(l.cluster || "Unassigned"),
+    (l) => !clusters.length || l.clusterKeys.some(key => clusters.includes(key)),
   );
+  const managerKeys = new Set(regional.filter(l => !stations.length || stations.includes(l.id)).flatMap(l => l.clusterKeys));
   const scope = new Set(
     geographic
       .filter((l) => !stations.length || stations.includes(l.id))
       .map((l) => l.id),
   );
-  const scoped = (data?.rows || []).filter(
+  const scoped = (data?.rows || []).map(currentRow).filter(
     (r: any) =>
       scope.has(r.stationId) &&
       `${r.name} ${r.dropxId} ${r.providerIds.join(" ")} ${r.stationCode} ${r.date}`
@@ -165,7 +177,7 @@ export function WorkedIdReview({
   const groups = [...new Set(rows.map((r: any) => r.workerId))]
     .map((id) => ({ id, rows: rows.filter((r: any) => r.workerId === id) }))
     .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name));
-  const bulkScoped = (data?.bulkPeriods || []).filter(
+  const bulkScoped = (data?.bulkPeriods || []).map(currentRow).filter(
     (p: any) =>
       scope.has(p.stationId) &&
       `${p.name} ${p.dropxId} ${p.providerIds.join(" ")} ${p.stationCode} ${p.effective_from} ${p.effective_to}`
@@ -463,6 +475,7 @@ export function WorkedIdReview({
   }
   return (
     <div className={styles.review}>
+      <PeopleOwnershipRefresh paused={saving || drafts.length > 0} />
       <section className={`panel ${styles.filters}`}>
         <FleetMultiSelect
           alwaysSearch
@@ -478,10 +491,10 @@ export function WorkedIdReview({
         />
         <FleetMultiSelect
           alwaysSearch
-          label="Clusters"
+          label="Cluster / AOM"
           allLabel="All clusters"
           values={clusters}
-          options={choices(regional.map((l) => l.cluster || "Unassigned"))}
+          options={managerOptions.filter(option => managerKeys.has(option.value))}
           onChange={(v) => {
             setClusters(v);
             setStations([]);

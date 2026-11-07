@@ -2,7 +2,10 @@ import test from 'node:test';import assert from 'node:assert/strict';import ts f
 import {summarizeActivity} from './amazon-now-activity-summary.ts';
 import {shiftDay,renderNowDigest} from './amazon-now-digest-view.ts';
 function compile(path,mocks={}){const code=ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;const m={exports:{}};new Function('require','module','exports',code)(n=>{if(!(n in mocks))throw Error(n);return mocks[n]},m,m.exports);return m.exports;}
-const scope=compile('./adhoc-digest-scope.ts');
+const scope=compile('./adhoc-digest-scope.ts',{
+ './people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>({byLocation:new Map([['now',{clusterManagers:[{personId:'current-manager',name:'Current People Manager'}]}]]),error:null})},
+ './ops-pulse/nl-loss-clusters':compile('./ops-pulse/nl-loss-clusters.ts'),
+});
 test('Amazon Now recipients exclude LM, non-operations people, other domains and unassigned stores',()=>{
  const stations=[{id:'now',station_code:'TCC3',providers:{code:'AMAZON'},location_models:{code:'NOW'},station_email:'store@example.com'},{id:'other',station_code:'TTA5',providers:{code:'AMAZON'},location_models:{code:'NOW'}},{id:'lm',station_code:'KTUR',providers:{code:'AMAZON'},location_models:{code:'EDSP'}}];
  const roles=[{id:'manager',code:'OPERATIONS_CLM',location_access_mode:'scoped'},{id:'store',code:'OPERATIONS_LOCATION',location_access_mode:'scoped'}];
@@ -76,4 +79,5 @@ test('additional Amazon Now accounts retain current location scope and reject mi
  const db={from(t){const q={select:()=>q,eq:()=>q,order:()=>q,range:async()=>({data:tables[t]||[],error:null})};return q}};
  const result=await scope.loadAdHocMailScope(db,'c','example.com',['ct@example.com','owner@example.com','store@example.com','removed@example.com'],{stationFilter:scope.isAmazonNowMailStation,roleCodes:['NO_DEFAULT_RECIPIENTS'],allowAdditionalProductMembers:true});
  assert.deepEqual(result.recipients.map(r=>[r.email,r.stationIds]),[['ct@example.com',['now']],['owner@example.com',['now','other']],['store@example.com',['now']]]);
+ assert.deepEqual(result.stations.map(s=>[s.id,s.cluster]),[['now','Current People Manager'],['other','Not mapped in People']]);
 });

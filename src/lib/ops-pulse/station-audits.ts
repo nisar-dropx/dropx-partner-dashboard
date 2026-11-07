@@ -1,3 +1,5 @@
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import { nlPeopleClusters } from "./nl-loss-clusters";
 import { allAuditRows, auditRowsForIds } from "@/lib/ops-pulse/station-audit-query";
 import "server-only";
 import { loadAuditAssignees, type AuditAssignee } from "./station-audit-people";
@@ -655,13 +657,15 @@ export async function loadAuditStations(
   }
   const result = await query;
   if (result.error) throw new Error(result.error.message);
-  return ((result.data ?? []) as AuditStation[]).filter((station) =>
-    isStationAuditEligible(station, settings),
-  );
+  const stations = ((result.data ?? []) as AuditStation[]).filter(station => isStationAuditEligible(station, settings));
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stations.map(station => station.id));
+  if (hierarchy.error) throw new Error(hierarchy.error);
+  const owners = nlPeopleClusters(stations, hierarchy.byLocation);
+  return stations.map(station => ({ ...station, cluster: owners.byStation.get(station.id)!.cluster, cluster_name: null }));
 }
 
 const stationColumns =
-  "id,station_code,station_name,city,cluster,cluster_name,region,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email,location_model_id,is_ho";
+  "id,station_code,station_name,city,region,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email,location_model_id,is_ho";
 const auditColumns =
   "*,ops_audit_types(code,name,requires_video_link,default_response_hours,video_link_help),stations(station_code,station_name,city,cluster,cluster_name)";
 

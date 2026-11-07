@@ -25,7 +25,7 @@ function database(tables,failTable=null) {
     }}; return q;
   }};
 }
-function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=false,excludeArea=false,failTable=null}={}) {
+function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=false,excludeArea=false,failTable=null,peopleOwners=null,peopleError=null}={}) {
   const company='co';
   const member=(user_id,role_id,locations=['NLRE'])=>({company_id:company,user_id,role_id,product_code:'operations',is_active:true,has_all_location_access:false,location_scope_ids:locations});
   const profile=(id,role_id)=>({company_id:company,id,role_id,full_name:id,is_active:true});
@@ -43,6 +43,7 @@ function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=fals
   const db=database(tables,failTable);
   const routing=compile('./payment-approval-steps.ts',{
     '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/payment-stage-policy':stage,
+    '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>({error:peopleError,byLocation:new Map(Object.entries(peopleOwners??{}).map(([id,personId])=>[id,{clusterManagers:personId?[{personId}]:[],areaOperationsManagers:[]}]))})},
     '@/lib/payment-delegation-policy':{...cover,paymentRoutingDay:()=> '2026-10-14'},
     '@/lib/position-access':{findPositionApprover:async()=>null,loadEffectivePositionAccess:async()=>({roleIds:[],locationScopeIds:[],hasAllLocationAccess:false}),roleIdsWithPageEditAccess:async(_c,roles)=>new Set(roles)},
     '@/lib/payment-reporting-hierarchy':{loadPaymentReportingHierarchy:async()=>({
@@ -51,6 +52,25 @@ function routingFixture({leave=false,chain=false,wrongScope=false,cancelled=fals
   });
   return {routing,tables,db};
 }
+
+test('cluster routes use current People ownership and retain station access checks',async()=>{
+  const {routing,tables}=routingFixture({peopleOwners:{NLRE:'current-manager',OTHER:'current-manager',OLD:'former-manager'}});
+  tables.stations.push({id:'OTHER',company_id:'co',location_model_id:'EDSP',cluster:'different old label'},{id:'OLD',company_id:'co',location_model_id:'EDSP',cluster:'same old label'});
+  tables.stations[0].cluster='same old label';
+  tables.company_product_memberships.find(row=>row.user_id==='cluster').location_scope_ids=['NLRE','OTHER'];
+  const step={id:'cluster-route',step_order:1,is_required:true,candidates:[{role_id:'cm',scope:'cluster'}]};
+  assert.equal((await routing.resolveStepApprover('co',step,'NLRE')).userId,'cluster');
+  tables.company_product_memberships.find(row=>row.user_id==='cluster').location_scope_ids=['OLD'];
+  assert.equal(await routing.resolveStepApprover('co',step,'NLRE'),null);
+});
+test('missing or failed People ownership never falls back to a legacy cluster label',async()=>{
+  const step={id:'cluster-route',step_order:1,is_required:true,candidates:[{role_id:'cm',scope:'cluster'}]};
+  const missing=routingFixture();
+  missing.tables.stations[0].cluster='old-manager';
+  assert.equal(await missing.routing.resolveStepApprover('co',step,'NLRE'),null);
+  const failed=routingFixture({peopleError:'People unavailable'});
+  await assert.rejects(()=>failed.routing.resolveStepApprover('co',step,'NLRE'),/People unavailable/);
+});
 
 test('payment request lifecycle writes stay canonical and never retry plain APPROVED',()=>{
   assert.deepEqual(paymentRequestUpdateAttempts({status:'approved',approval_status:'FINAL_APPROVED'}),[
