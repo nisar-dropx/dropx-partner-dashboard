@@ -49,7 +49,7 @@ test("payment setup conflict rows are excluded from every payout mutation", () =
 });
 
 test("attendance loading and ownership retain the station identity", () => {
-  assert.match(payoutLoader, /attendance_daily"\)[\s\S]*?\.select\("id,workforce_id,employee_id,contractor_id,field_executive_id,location_id,station_code,punch_date/);
+  assert.match(payoutLoader, /workforce_payout_attendance_facts"\)[\s\S]*?\.select\("id,workforce_id,employee_id,contractor_id,field_executive_id,location_id,station_code,punch_date/);
   assert.match(payoutLoader, /providerAttendanceLocationKey\(canonicalWorkforceId, stationId, row\.punch_date\)/);
   assert.match(payoutLoader, /attendanceOwnerOn\(String\(worker\.id\), String\(mapping\.station_id\), date\)/);
 });
