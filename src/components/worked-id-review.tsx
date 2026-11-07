@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
+import styles from "./worked-id-review.module.css";
 import {
   workedIdCounts,
   workedIdMetrics,
@@ -209,7 +210,7 @@ export function WorkedIdReview({
     }
   }
   return (
-    <>
+    <div className={styles.review}>
       <section className="panel">
         <div
           className="panel-body"
@@ -529,7 +530,7 @@ export function WorkedIdReview({
                               </option>
                             </select>
                           </label>
-                          <div className="table-wrap">
+                          <div className={`table-wrap ${styles.split}`}>
                             <table>
                               <thead>
                                 <tr>
@@ -628,7 +629,7 @@ export function WorkedIdReview({
                   delivery counts are reassigned.
                 </p>
               )}
-              <label style={{ display: "block", marginTop: 16 }}>
+              <label style={{ marginTop: 16 }}>
                 Reason / work confirmed
                 <textarea
                   disabled={!canEdit || saving}
@@ -669,6 +670,6 @@ export function WorkedIdReview({
           </section>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }
