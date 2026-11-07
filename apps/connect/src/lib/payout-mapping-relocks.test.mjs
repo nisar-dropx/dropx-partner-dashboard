@@ -1,3 +1,4 @@
+import * as guided from "../../../../src/lib/payout-dispute-guide.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -192,6 +193,7 @@ function payoutLoaderFixture({ publications = [], items = [], runs = [], revisio
     },
   };
   const mocks = {
+    "../../../../src/lib/payout-dispute-guide": guided,
     "@/lib/supabase-admin": { supabaseAdmin: db },
     "@/lib/connect-auth": {},
     "./workforce-payment-status": paymentStatus,
