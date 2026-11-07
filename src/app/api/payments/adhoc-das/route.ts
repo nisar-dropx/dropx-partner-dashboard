@@ -5,7 +5,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const auth = await getAuthorization();
-  if (!auth || !hasPermission(auth, "payment_requests", "add")) return Response.json({ error: "Payment request access denied." }, { status: 403 });
+  // Both request forms use this read-only picker. Station users may only have
+  // Expense Requests access, and user preview deliberately blocks add/edit.
+  // Authorize the lookup like the pages; company/station checks still apply below.
+  if (!auth || (!hasPermission(auth, "expense_requests", "access") && !hasPermission(auth, "payment_requests", "access"))) {
+    return Response.json({ error: "Expense or payment request access required to load DAs." }, { status: 403 });
+  }
   if (!supabaseAdmin) return Response.json({ error: "Database unavailable." }, { status: 503 });
   const params = new URL(request.url).searchParams;
   const location = params.get("location") || "";
