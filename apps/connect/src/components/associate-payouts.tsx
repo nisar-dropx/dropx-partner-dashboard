@@ -67,7 +67,7 @@ function signedPaise(value: number) {
   return paiseMoney(0);
 }
 
-function DisputeProgress({ dispute }: { dispute: AssociatePayoutDispute }) {
+export function DisputeProgress({ dispute }: { dispute: AssociatePayoutDispute }) {
   const steps = ["Initial approval", "Final approval", "Payout correction", "Completed"];
   const rejected = dispute.status === "rejected";
   return <>
@@ -90,7 +90,7 @@ function DisputeProgress({ dispute }: { dispute: AssociatePayoutDispute }) {
   </>;
 }
 
-function DisputeCorrection({ dispute }: { dispute: AssociatePayoutDispute }) {
+export function DisputeCorrection({ dispute }: { dispute: AssociatePayoutDispute }) {
   const correction = dispute.correction;
   if (!correction) return null;
   const hasValues = correction.currentValue !== null || correction.proposedValue !== null;
@@ -115,7 +115,7 @@ function DisputeCorrection({ dispute }: { dispute: AssociatePayoutDispute }) {
   </section>;
 }
 
-function DisputePayment({ dispute }: { dispute: AssociatePayoutDispute }) {
+export function DisputePayment({ dispute }: { dispute: AssociatePayoutDispute }) {
   const payment = dispute.payment;
   if (!payment) return null;
   return <section className={styles.disputePayment} aria-label="Payment status for this correction">
@@ -338,11 +338,11 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
 
       {payout.canDispute ? <div className={styles.disputeToggle}>
         <div><strong>{payout.canDispute ? "Something looks incorrect?" : "Dispute history"}</strong><small>{payout.canDispute ? "Choose the issue and affected dates." : `${payout.disputes.length} dispute${payout.disputes.length === 1 ? "" : "s"} recorded for this payout.`}</small></div>
-        <button type="button" aria-expanded={showDisputes} aria-controls="payout-dispute-section" onClick={toggleDisputeSection}>{showDisputes ? "Close" : payout.canDispute ? "Raise dispute" : "View disputes"}</button>
+        <button type="button" aria-expanded={showDisputes} aria-controls="payout-dispute-section" onClick={payout.canDispute ? toggleDisputeSection : onTrackDisputes}>{showDisputes ? "Close" : payout.canDispute ? "Raise dispute" : "View disputes"}</button>
       </div> : null}
 
       <p><button type="button" onClick={onTrackDisputes}>Track requests · Dispute history →</button></p>
-      {showDisputes && payout.canDispute ? <section ref={disputeSectionRef} id="payout-dispute-section" tabIndex={-1} aria-label="Raise a dispute"><AssociateDisputeRequest key={payout.publicationId} payout={payout} query={query} readOnly={readOnly} onSaved={()=>{setShowDisputes(false);setNotice("Request sent. Open Disputes to track its status.");void load();}}/></section> : null}
+      {showDisputes && payout.canDispute ? <section ref={disputeSectionRef} id="payout-dispute-section" tabIndex={-1} aria-labelledby="payout-dispute-heading" className={styles.disputes}><h3 id="payout-dispute-heading">Raise a dispute</h3><AssociateDisputeRequest key={payout.publicationId} payout={payout} query={query} readOnly={readOnly} onSaved={()=>{setShowDisputes(false);setNotice("Request sent. Open Disputes to track its status.");void load();}}/></section> : null}
 
     </>}
   </section>;
