@@ -60,6 +60,12 @@ export function workedIdShareError(
 }
 export const workedIdKey = (worker: string, date: string) =>
   `${worker}|${date}`;
+export function workedIdErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  if (/<(?:!doctype|html|head|body)\b/i.test(message) || /SSL handshake|fetch failed/i.test(message))
+    return "The database connection is temporarily unavailable. Refresh and try again.";
+  return message;
+}
 export function workedIdMonth(month: string) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))
     throw Error("Select a valid month.");

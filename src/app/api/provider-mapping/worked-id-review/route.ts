@@ -2,7 +2,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadWorkedIdReview } from "@/lib/worked-id-review-data";
-import { workedIdMonth } from "@/lib/worked-id-review";
+import { workedIdMonth, workedIdErrorMessage } from "@/lib/worked-id-review";
 import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 import { workedIdTrainingRouting } from "@/lib/worked-id-training-routing";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
@@ -105,7 +105,7 @@ export async function GET(req: Request) {
     );
   } catch (e) {
     return Response.json(
-      { error: e instanceof Error ? e.message : "Could not load review." },
+      { error: workedIdErrorMessage(e, "Could not load review.") },
       { status: 400, headers },
     );
   }
@@ -212,7 +212,7 @@ export async function POST(req: Request) {
     );
   } catch (e) {
     return Response.json(
-      { error: e instanceof Error ? e.message : "Review was not saved." },
+      { error: workedIdErrorMessage(e, "Review was not saved.") },
       { status: 400, headers },
     );
   }
