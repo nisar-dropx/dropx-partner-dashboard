@@ -15,7 +15,7 @@ export default async function WorkedDaysPage() {
     company = requireCompanyId(a);
   const result = await supabaseAdmin!
     .from("stations")
-    .select("id,station_code,station_name")
+    .select("id,station_code,station_name,region,cluster")
     .eq("company_id", company)
     .order("station_code");
   const locations = (result.data || []).filter(
@@ -37,7 +37,7 @@ export default async function WorkedDaysPage() {
       <PageHead
         eyebrow="Workforce"
         title="Worked ID review"
-        subtitle="Confirm who worked behind each provider ID. Review a day, split shared deliveries, or mark not worked."
+        subtitle="Biometric punch recorded, but no deliveries found under the associate’s own mapped ID. Confirm the work before deciding pay."
       />
       {result.error ? (
         <p role="alert">Locations could not be loaded.</p>

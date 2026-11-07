@@ -301,4 +301,6 @@ assert.equal(
 console.log(
   "Worked ID migration applied twice; conservation, shared work, version conflicts, reopen, attendance exclusion, paid locks and access checks passed.",
 );
+const {testExpandedWorkedReview}=await import('./test-worked-id-expanded.mjs');
+await testExpandedWorkedReview(db,{id,company,station,worker,owner,third,actor,source,method,date,share});
 await db.close();
