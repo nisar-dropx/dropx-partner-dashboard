@@ -95,7 +95,7 @@ export function LossRedisputeDesk({rows,windows,canActivate,stations=[],clusterO
   }
   return <section className={`${styles.panel} ${ui.desk} ${cards.desk}`} aria-busy={busy}>
     <div className={styles.panelHead}><div><h2>Redispute tracking</h2><small>{shown.length} shipments · ₹{shown.reduce((sum,w)=>sum+(byKey.get(keyOf(w))?.amount||0),0).toLocaleString('en-IN',{maximumFractionDigits:2})}</small></div>
-      <input aria-label="Find redispute or Shipment ID" placeholder="Search Shipment ID, station or ticket" value={query} disabled={busy} onChange={e=>{setQuery(e.target.value);clearSelection();}}/>
+      <input className={cards.search} aria-label="Find redispute or Shipment ID" placeholder="Search Shipment ID, station or ticket" value={query} disabled={busy} onChange={e=>{setQuery(e.target.value);clearSelection();}}/>
       {mayExport?<button type="button" className={styles.button} disabled={exporting} onClick={()=>void download()}>{exporting?'Preparing…':'Excel · all results'}</button>:null}
     </div>
     <div className={ui.controls}>
