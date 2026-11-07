@@ -1,0 +1,20 @@
+"use client";
+import {useState} from "react";
+import {useRouter} from "next/navigation";
+import {GuidedDisputeReview} from "./guided-dispute-review";
+import {DisputeBalanceChoice} from "./dispute-balance-choice";
+import {lossDisputeReduction} from "../lib/payout-dispute-balance";
+import s from "./guided-dispute.module.css";
+export type BulkDisputeRow={id:string;version:number;name:string;station:string;plan:any;details:any};
+export function DisputeBulkApproval({rows}:{rows:BulkDisputeRow[]}){
+ const router=useRouter(),[selected,setSelected]=useState<string[]>([]),[checks,setChecks]=useState<Record<string,any>>({}),[busy,setBusy]=useState(false),[results,setResults]=useState<any[]>([]),[error,setError]=useState("");
+ const completed=new Set(results.filter(r=>r.ok).map(r=>r.id)),shown=rows.filter(r=>!completed.has(r.id));
+ const patch=(id:string,value:any)=>setChecks(old=>({...old,[id]:{...old[id],...value}}));
+ const ready=(r:BulkDisputeRow)=>{const c=checks[r.id];return c?.digest===r.plan.evidence_digest&&c?.reviewed&&!c?.error&&(!lossDisputeReduction(r.plan)||(c?.treatment&&c?.reason?.trim().length>=10));};
+ async function approve(){setBusy(true);setError("");try{const response=await fetch("/api/payments/payout-disputes/bulk",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:selected.map(id=>({id,version:rows.find(r=>r.id===id)!.version,...checks[id]}))})});const body=await response.json();if(!response.ok)throw Error(body.error);setResults(old=>[...old.filter(r=>!selected.includes(r.id)),...body.results]);setSelected(old=>old.filter(id=>!body.results.some((r:any)=>r.id===id&&r.ok)));router.refresh();}catch(e){setError(e instanceof Error?e.message:"Approval failed.");}finally{setBusy(false);}}
+ if(!rows.length)return null;
+ return <details className={s.panel}><summary><b>Finance · approve multiple</b> <small>{shown.length} eligible on this page</small></summary><p className={s.muted}>Select up to 10. Open evidence and confirm each correction before approving.</p>
+ {shown.map(row=>{const c=checks[row.id],failure=results.find(r=>r.id===row.id&&!r.ok);return <div key={row.id} className={s.panel}><label><input type="checkbox" style={{width:"auto"}} disabled={busy||(!selected.includes(row.id)&&selected.length>=10)} checked={selected.includes(row.id)} onChange={e=>setSelected(old=>e.target.checked?[...old,row.id]:old.filter(id=>id!==row.id))}/> <b>{row.name}</b> · {row.station} · Net change ₹{(Number(row.plan.expected_delta_paise)/100).toLocaleString("en-IN")}</label>
+ {selected.includes(row.id)?<><table className={s.table}><thead><tr><th>Correction / day</th><th>Published</th><th>Proposed value</th></tr></thead><tbody>{row.plan.items.map((item:any,i:number)=><tr key={i}><td>{item.target_field}</td><td>{item.current_value}</td><td>{item.proposed_value}</td></tr>)}</tbody></table><GuidedDisputeReview id={row.id} version={row.version} details={row.details} editable={false} action={async()=>{}} onEvidence={data=>patch(row.id,{digest:data?.digest??"",reviewed:false,error:data?.sourceError||(data&&data.digest!==row.plan.evidence_digest?"Source changed. Send back for fresh review.":"")})}/><DisputeBalanceChoice plan={row.plan} onChange={value=>patch(row.id,value)}/>{c?.error?<p className={s.error}>{c.error}</p>:null}<label><input type="checkbox" style={{width:"auto"}} disabled={!c?.digest||!!c?.error} checked={!!c?.reviewed} onChange={e=>patch(row.id,{reviewed:e.target.checked})}/> Evidence, proposed correction and payout impact checked</label></>:null}{failure?<p role="alert" className={s.error}>{failure.error}</p>:null}</div>;})}
+ {error?<p role="alert" className={s.error}>{error}</p>:null}{completed.size?<p role="status">{completed.size} approved. Application status appears in the dispute.</p>:null}<div className={s.actions}><button type="button" disabled={busy||!selected.length||selected.some(id=>!ready(rows.find(r=>r.id===id)!))} onClick={()=>void approve()}>{busy?"Approving…":`Approve selected (${selected.length})`}</button></div></details>;
+}

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { disputeDays, disputeItems } from "../lib/payout-dispute-guide";
+import { disputeDays, disputeItems, publishedDayCount } from "../lib/payout-dispute-guide";
 import { attendanceDateChoices, attendanceLabel } from "../lib/dispute-presentation";
 import s from "./guided-dispute.module.css";
 
@@ -15,6 +15,7 @@ export function DisputeDayEvidence({data,draft}:{data:any;draft:any}) {
   const days=disputeDays(data.snapshot),current=disputeDays(data.currentSnapshot??{});
   const selected=new Set<string>(draft.dates??[]);
   const item=disputeItems(data.snapshot).find(i=>i.key===draft.component);
+  const countClaims=draft.counts?.length?draft.counts:null;
   const imports=(data.deliveries??[]).filter((r:any)=>r.mappingStatus==="mapped");
   const deliveryDates=new Set(imports.filter((r:any)=>Number(r.total_delivery)>0).map((r:any)=>r.work_date));
   const focus=selected.size?days.filter(d=>selected.has(d.date)):draft.issue==="attendance"&&draft.concern?attendanceDateChoices(days,draft.issue,draft.concern):days.filter(d=>!d.attendanceKnown||Number(d.units)<1||attendanceLabel(d)!==attendanceLabel(current.find(n=>n.date===d.date)));
@@ -31,7 +32,7 @@ export function DisputeDayEvidence({data,draft}:{data:any;draft:any}) {
   }
   return <>
     <div className={s.evidenceBar}><span><b>{selected.size?`${selected.size} disputed date${selected.size===1?"":"s"}`:"Days to check"}</b> · {data.snapshot.item?.work_days??"—"} published work days · {deliveryDates.size} days with imported deliveries</span><button type="button" onClick={()=>setAll(!all)}>{all?"Disputed / flagged dates":"View full month"}</button></div>
-    {!rows.length?<p className={s.muted}>Choose the affected dates, or open the full month to check another day.</p>:<div className={s.scroll}><table className={s.table}><thead><tr><th>Date</th><th>Attendance now</th>{showItem?<th>{item.label} · now</th>:null}{showActivity?<th>Imported activity</th>:null}{showRoute?<th>Route distance</th>:null}<th>Evidence</th></tr></thead><tbody>{rows.map(d=>{
+    {!rows.length?<p className={s.muted}>Choose the affected dates, or open the full month to check another day.</p>:<div className={s.scroll}><table className={s.table}><thead><tr><th>Date</th><th>Attendance now</th>{showItem?<th>{countClaims?"Disputed counts":`${item.label} · now`}</th>:null}{showActivity?<th>Imported activity</th>:null}{showRoute?<th>Route distance</th>:null}<th>Evidence</th></tr></thead><tbody>{rows.map(d=>{
       const now=current.find(n=>n.date===d.date);
       const source=imports.filter((r:any)=>r.work_date===d.date);
       const count=(key:string)=>source.reduce((n:number,r:any)=>n+Number(r[key]??0),0);
@@ -40,7 +41,7 @@ export function DisputeDayEvidence({data,draft}:{data:any;draft:any}) {
       const mappings=(data.mappings??[]).filter((m:any)=>m.effectiveFrom<=d.date&&(!m.effectiveTo||m.effectiveTo>=d.date));
       return <tr key={d.date}><td><b>{new Date(`${d.date}T00:00:00Z`).toLocaleDateString("en-IN",{day:"numeric",month:"short",timeZone:"UTC"})}</b></td>
         <td><Comparison before={attendanceLabel(d)} current={attendanceLabel(now)}/>{d.attendanceKnown&&Number(d.units)===0&&count("total_delivery")>0?<small className={s.warn}>Deliveries found · not counted in payout</small>:null}</td>
-        {showItem?<td><Comparison before={itemValue(d)} current={itemValue(now)}/></td>:null}
+        {showItem?<td>{countClaims?countClaims.filter((row:any)=>row.date===d.date).map((row:any)=>{const component=disputeItems(data.snapshot).find(i=>i.key===row.component);return <div key={row.component}><b>{component?.label}</b><small>In payout: {component?publishedDayCount(d,component.code)??"Unavailable":"Unavailable"} · Now: {component?publishedDayCount(now,component.code)??"Unavailable":"Unavailable"}</small><small className={s.claimValue}>Associate claims: {row.value}</small></div>;}):<Comparison before={itemValue(d)} current={itemValue(now)}/>}</td>:null}
         {showActivity?<td>{source.length?<><b>{count("total_delivery")} deliveries</b><small>{count("c_return")} returns · {count("mfn")} pickups</small></>:"No verified import"}{(data.deliveries??[]).some((r:any)=>r.work_date===d.date&&r.mappingStatus!=="mapped")?<small className={s.warn}>Check ID mapping</small>:null}</td>:null}
         {showRoute?<td>{fuel?<><b>{fuel.km==null?"Distance pending":`${fuel.km} km`}</b><small>{fuel.status} · {fuel.reason||fuel.source}</small></>:"No distance record"}</td>:null}
         <td><details><summary>View records</summary><p><b>Mapped ID</b> {mappings.map((m:any)=>m.providerMemberId).join(", ")||"No dated mapping"}</p>{source.map((r:any)=><p key={r.id}>{r.client} · {r.provider_employee_id}<br/>Imported {time(r.updated_at)} IST</p>)}{punches.length?punches.map((p:any)=><p key={p.id}>{p.station_code} · {p.status}<br/>In: {time(p.in_time)} · Out: {time(p.out_time)}<br/>{p.linked?"Same / linked station":"Other station · check assignment"}</p>):<p>No punch record. Check source completeness before deciding.</p>}{fuel?<small>Distance updated {time(fuel.updatedAt)} IST</small>:null}</details></td>

@@ -17,7 +17,7 @@ export async function reviewPayout(form: FormData) {
       propose_rejection: "Rejection proposed. A different final approver must confirm it.",
       approve_final: result.status === "rejected"
         ? "Rejection approved and shared with the associate."
-        : "Correction approved and sent to the payout processor.",
+        : "Correction approved. Source application and revised payout verification are queued; follow progress in the dispute.",
       send_back: "Proposal sent back for initial review.",
       claim_processing: "Processing task claimed. Correct the payout source and publish a revised payout.",
       block_processing: "Processing marked as blocked.",

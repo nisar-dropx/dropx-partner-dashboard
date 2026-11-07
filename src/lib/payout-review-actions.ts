@@ -7,6 +7,9 @@ import { loadDisputeFinanceAccess, disputeFinalRoleIds } from "@/lib/payout-disp
 import { payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 import { buildGuidedPlan, normalizeGuidedClaim } from "@/lib/payout-dispute-guide";
 import { loadDisputeEvidence } from "@/lib/payout-dispute-evidence";
+import { validateLossBalance } from "@/lib/payout-dispute-balance";
+import { waitUntil } from "@vercel/functions";
+import { processApprovedDisputes } from "@/lib/payout-dispute-application";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIONS = new Set([
@@ -68,6 +71,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
     if (!auth.hasAllLocationAccess) query = query.in("station_id", auth.locationScopeIds.length ? auth.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
     const dispute = await query.single();
     if (dispute.error || !dispute.data || dispute.data.version !== expectedVersion) throw new Error("This dispute changed or is unavailable. Refresh and try again.");
+    if(action==="approve_final"&&dispute.data.proposed_decision==="resolved")payload.loss_balance=validateLossBalance(dispute.data.correction_plan,text("loss_balance_treatment"),text("loss_balance_reason"));
     const publication = await supabaseAdmin.from("workforce_payout_publications").select("*").eq("company_id", companyId).eq("id", dispute.data.publication_id).single();
     if (publication.error || !publication.data) throw new Error("The disputed payout could not be loaded. Refresh and try again.");
     {
@@ -121,6 +125,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
 
   const saved = result.data as Record<string, unknown> | null;
   if (!saved) throw new Error("The dispute was updated but its new status could not be confirmed.");
+  if(action==="approve_final"&&saved.status==="approved_for_processing")waitUntil(processApprovedDisputes({companyId,disputeId,authorization:auth}).catch(error=>console.error("Approved dispute application will retry",error)));
   try {
     await notifyAssociateOfPayoutDispute({ action, companyId, dispute: saved });
   } catch (error) {

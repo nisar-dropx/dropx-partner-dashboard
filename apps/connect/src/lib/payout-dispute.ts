@@ -1,4 +1,5 @@
 import { PAYOUT_DISPUTE_AREAS, type PayoutDisputeArea } from "../../../../src/lib/payout-dispute-areas.ts";
+import { disputeItems, disputeDays, publishedDayCount } from "./payout-dispute-guide.ts";
 export { PAYOUT_DISPUTE_AREAS, type PayoutDisputeArea } from "../../../../src/lib/payout-dispute-areas.ts";
 
 export type PayoutReviewState = "open" | "expired" | "revising" | "confirmed" | "unavailable";
@@ -15,6 +16,7 @@ export type PayoutDisputeWorkflowStatus =
 export type AssociatePayoutDispute = {
   version?: number;
   details?: Record<string, any>;
+  countClaims?: Array<{date: string; label: string; published: number | null; claimed: number}>;
   id: string;
   category: string;
   reason: string;
@@ -232,6 +234,12 @@ export function associatePayoutDispute(
     id: String(dispute.id ?? ""),
     version: Number(dispute.version ?? 1),
     details: { ...dispute.details, attachment: undefined },
+    countClaims: Array.isArray(dispute.details?.counts) ? dispute.details.counts.map((row: Record<string, any>) => {
+      const snapshot = originalPublication && typeof originalPublication === "object" ? (originalPublication as Record<string, any>).snapshot ?? {} : {};
+      const item = disputeItems(snapshot).find(item => item.key === row.component);
+      const day = disputeDays(snapshot).find(day => day.date === row.date);
+      return {date: row.date, label: item?.label ?? "Activity count", published: item ? publishedDayCount(day,item.code) : null, claimed: row.value};
+    }) : [],
     category: String(dispute.category ?? "other"),
     reason: String(dispute.reason ?? ""),
     status,

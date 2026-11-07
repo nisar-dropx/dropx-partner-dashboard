@@ -27,6 +27,9 @@ const summary = recoverableLossFacts(facts), summaryTotal = totalLossFacts(summa
 assert.equal(summary.length,3,'Summary includes only confirmed recoverable NL and SLP TIDs');
 assert.equal(summaryTotal.amount,250,'Initial and non-recoverable values never enter Summary');
 assert.equal(summaryTotal.recovered,50);assert.equal(summaryTotal.remaining,190);assert.equal(summaryTotal.waived,10);
+assert.equal(summaryTotal.waivedCount,1,'one shipment with a partial write-off');
+assert.equal(filterLossFacts(summary,{status:'write_off'}).length,1,'write-off filter includes partial write-offs');
+assert.equal(groupLossFacts(summary,'waived')[0].station,'AAA','write-off value can be sorted');
 assert.equal(summaryTotal.amount,summaryTotal.recovered+summaryTotal.remaining+summaryTotal.waived);
 assert.equal(filterLossFacts(summary,{station:'BBB'}).length,1,'station filter excludes SLP Initial');
 assert.equal(filterLossFacts(summary,{status:'pending_update'}).length,2);

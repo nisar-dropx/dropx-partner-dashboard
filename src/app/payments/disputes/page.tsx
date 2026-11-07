@@ -6,6 +6,7 @@ import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { reviewPayout } from "./actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 type SearchParams = {
   error?: string;

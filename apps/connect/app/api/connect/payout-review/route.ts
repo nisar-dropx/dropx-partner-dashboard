@@ -78,7 +78,7 @@ export async function POST(request:NextRequest){
     }
     const area=DISPUTE_ISSUES.find(i=>i.id===details.issue)!.area;
     const category=legacyPayoutDisputeCategory([area]);
-    const reason=encodePayoutDisputeReason([area],claimDescription(pub.data.snapshot,details));
+    const reason=encodePayoutDisputeReason([area],claimDescription(pub.data.snapshot,details)).slice(0,2000);
     const result=await supabaseAdmin!.rpc('workforce_raise_guided_payout_dispute',{p_company:company,p_workforce:worker,p_publication:publicationId,p_category:category,p_reason:reason,p_details:details});
     if(result.error)throw new Error(result.error.code==='P0001'?result.error.message:'Request could not be saved. Please retry.');
     uploadedPath=null;
