@@ -261,7 +261,7 @@ export async function loadWorkforcePayoutRows(
       values: sourceIds,
       loadBatch: (sourceIdChunk) => admin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, designation_id, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIdChunk)
     }),
-    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("id, provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return, delivery_assigned_count" + conversionSelect).eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
+    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("workforce_payout_shipment_facts").select("id, provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return, delivery_assigned_count" + conversionSelect).eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     loadPostgrestInFilterBatches({
       values: contractorIds,
@@ -414,7 +414,7 @@ export async function loadWorkforcePayoutRows(
     .map((mapping: any) => allStationCodeById.get(String(mapping.station_id)) ?? "")
     .filter(Boolean))];
   const hiddenThresholdMetricsResult = hiddenThresholdStationCodes.length
-    ? await readAllRows(supabaseAdmin.from("cps_shipment_daily")
+    ? await readAllRows(supabaseAdmin.from("workforce_payout_shipment_facts")
       .select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return" + conversionSelect)
       .eq("company_id", companyId)
       .in("station_code", hiddenThresholdStationCodes)
@@ -435,7 +435,7 @@ export async function loadWorkforcePayoutRows(
   const attendanceResult = attendanceIdentityGroups.some((group) => group.ids.length) ? await (async () => {
     const jobs = attendanceIdentityGroups.flatMap((group) => chunkedValues(group.ids, 100)
       .map((ids) => ({ column: group.column, ids })));
-    const results = await mapWithConcurrency(jobs, 4, async (job) => readAllRows(admin.from("attendance_daily")
+    const results = await mapWithConcurrency(jobs, 4, async (job) => readAllRows(admin.from("workforce_payout_attendance_facts")
           .select("id,workforce_id,employee_id,contractor_id,field_executive_id,location_id,station_code,punch_date,status,in_time,out_time,work_minutes")
           .eq("company_id", companyId)
           .in(job.column, job.ids)

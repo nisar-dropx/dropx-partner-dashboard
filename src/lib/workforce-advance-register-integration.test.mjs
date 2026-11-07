@@ -169,6 +169,14 @@ test("high-frequency attendance and shipment revisions are scoped to the payout 
 test("recovery hardening versions all loader inputs and preserves FIFO audit history", () => {
   const loaderTables = new Set([...payoutLoader.matchAll(/\.from\(["']([^"']+)["']\)/g)].map((match) => match[1]));
   for (const table of loaderTables) {
+    if (table === "workforce_payout_shipment_facts" || table === "workforce_payout_attendance_facts") {
+      const review = source("../../supabase/migrations/20261107055448_workforce_worked_id_review.sql");
+      assert.match(review, new RegExp(`create or replace view public\\.${table}`));
+      assert.match(review, /workforce_bump_payout_period_dependency_revision\(p_company,p_date\)/);
+      assert.match(review, /from public\.cps_shipment_daily/);
+      assert.match(review, /from public\.attendance_daily/);
+      continue;
+    }
     if (table === "payment_adhoc_driver_absences") {
       const absenceDependency = source("../../supabase/migrations/20261104081848_adhoc_driver_payout_dependency.sql");
       assert.match(absenceDependency, /public\.payment_adhoc_driver_absences/);

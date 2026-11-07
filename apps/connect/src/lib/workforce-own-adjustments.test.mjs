@@ -197,12 +197,12 @@ test('route shares fixed daily pay across provider IDs but retains each ID trace
  const card={id:'card',provider_id:'provider',station_id:'station',designation_id:null,pay_type:'fixed_daily',effective_from:from,effective_to:to,status:'active',fixed_amount:800,guarantee_amount:0,delivery_rate:0,return_rate:0,mfn_rate:0,mfn_return_rate:0,fuel_rate:0};
  const mappings=['A','B'].map(id=>({id,provider_member_id:id,provider_id:'provider',station_id:'station',providers:{name:'Provider'},payment_methods:{name:'Fixed daily'}}));
  const source=mappings.map((m,n)=>({id:'source-'+n,provider_employee_id:m.id,work_date:from,station_code:'TEST',client:'Provider',total_delivery:n?50:10,total_activity:n?50:10,c_return:0,mfn:0,mfn_return:0}));
- const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?source:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:[],error:null}));
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='workforce_payout_shipment_facts'?source:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
  assert.equal(response.status,200,JSON.stringify(body));assert.equal(body.earnings.length,2);assert.equal(body.summary.workDays,1);assert.equal(body.summary.baseAmount,800);assert.equal(body.summary.netAmount,800);
  assert.deepEqual(body.earnings.map(e=>e.baseAmount),[133.33,666.67]);
  assert.equal(body.earnings[0].daily[0].calculationSource,'workforce_rate_card');assert.equal(body.earnings[0].daily[0].payType,'fixed_daily');assert.equal(body.earnings[0].daily[0].deliveries,10);
- assert.ok(db.calls.filter(q=>q.table==='cps_shipment_daily').every(q=>operation(q,'eq','company_id','company')));
+ assert.ok(db.calls.filter(q=>q.table==='workforce_payout_shipment_facts').every(q=>operation(q,'eq','company_id','company')));
 });
 
 test('route adds provider attendance heads once while production remains shipment-driven',async()=>{
@@ -212,7 +212,7 @@ test('route adds provider attendance heads once while production remains shipmen
  const sources=[{id:'source-1',provider_employee_id:'A',work_date:'2026-09-01',station_code:'TEST',client:'Provider',total_delivery:10,total_activity:10,c_return:0,mfn:0,mfn_return:0},{id:'source-3',provider_employee_id:'A',work_date:'2026-09-03',station_code:'TEST',client:'Provider',total_delivery:5,total_activity:5,c_return:0,mfn:0,mfn_return:0}];
  const attendance=[{id:'attendance-1',punch_date:'2026-09-01',status:'P',work_minutes:480},{id:'attendance-2',punch_date:'2026-09-02',status:'HD',work_minutes:240},{id:'attendance-3',punch_date:'2026-09-03',status:'A',work_minutes:0}];
  const allocation={provider_id:'provider',provider_model_id:null,provider_production_metrics:{source_key:'total_delivery'},payment_fields:{code:'DELIVERY',label:'Delivery',field_type:'production'}};
- const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?[mapping]:q.table==='cps_shipment_daily'?sources:q.table==='attendance_daily'?attendance:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='payment_field_provider_metrics'?[allocation]:[],error:null}));
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?[mapping]:q.table==='workforce_payout_shipment_facts'?sources:q.table==='workforce_payout_attendance_facts'?attendance:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='payment_field_provider_metrics'?[allocation]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(item=>item.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
  assert.equal(response.status,200,JSON.stringify(body));
  assert.deepEqual(body.earnings[0].daily.map(day=>[day.date,day.baseAmount]),[['2026-09-03',50],['2026-09-02',400],['2026-09-01',900]]);
@@ -241,7 +241,7 @@ test('route applies one monthly combined minimum across provider IDs and never f
  const card={id:'card',provider_id:'provider',station_id:'station',designation_id:null,pay_type:'fixed_daily',effective_from:from,effective_to:to,status:'active',fixed_amount:5000};
  const run=async snapshot=>{
   const mappings=makeMappings(snapshot);
-  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST',location_model_id:null}]:q.table==='payment_field_provider_metrics'?allocations:q.table==='workforce_rate_cards'?[card]:[],error:null}));
+  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='workforce_payout_shipment_facts'?sources:q.table==='stations'?[{id:'station',station_code:'TEST',location_model_id:null}]:q.table==='payment_field_provider_metrics'?allocations:q.table==='workforce_rate_cards'?[card]:[],error:null}));
   const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(mapping=>mapping.provider_member_id===row.provider_employee_id))(request());
   return {response,body:await response.json()};
  };
@@ -262,7 +262,7 @@ test('route reconciles daily incentives and adjustments separately without leaki
  const sources=mappings.map((m,n)=>({id:'source-'+n,provider_employee_id:m.id,work_date:from,station_code:'TEST',client:'Provider',total_delivery:n?50:10,total_activity:n?50:10,c_return:0,mfn:0,mfn_return:0}));
  const card={id:'card',provider_id:'provider',station_id:'station',designation_id:null,pay_type:'fixed_daily',effective_from:from,effective_to:to,status:'active',fixed_amount:800};
  const campaign={id:'campaign',company_id:'company',name:'Approved reward',provider_id:'provider',station_id:'station',designation_id:'DA',metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:45,rate_value:12,flat_amount:0,maximum_amount:null,effective_from:from,effective_to:to,status:'active',approved_at:'2026-08-31T00:00:00Z',owner_note:'PRIVATE'};
- const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:q.table==='workforce_incentive_campaigns'?[campaign]:q.table==='workforce_adjustments'?[row(),row({id:'deduction',adjustment_type:'deduction',amount:25})]:[],error:null}));
+ const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='workforce_payout_shipment_facts'?sources:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:q.table==='workforce_incentive_campaigns'?[campaign]:q.table==='workforce_adjustments'?[row(),row({id:'deduction',adjustment_type:'deduction',amount:25})]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
  assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155,lossRecoveryAmount:0,lossRecoveryDeferred:0,advanceRecoveryAmount:0});
  assert.equal(body.earnings.reduce((sum,e)=>sum+e.grossAmount,0),980);assert.equal(body.earnings.flatMap(e=>e.daily).reduce((sum,e)=>sum+e.amount,0),980);
@@ -328,7 +328,7 @@ test('earnings combines road kilometres with delivery pay exactly once on the sa
  ];
  const mapping={id:'A',provider_member_id:'A',provider_id:'provider',station_id:'station',workforce_id:'person',payment_method_id:'method',payment_values:{DELIVERY:10,KM_RUN:3},effective_from:from,effective_to:to,status:'active',providers:{name:'Provider'},payment_methods:{id:'method',name:'Delivery and fuel',payment_method_components:components}};
  const shipment={id:'source',provider_employee_id:'A',work_date:from,station_code:'TEST',client:'Provider',total_delivery:8,total_activity:8};
- const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?[mapping]:q.table==='cps_shipment_daily'?[shipment]:q.table==='stations'?[{id:'station',station_code:'TEST'}]:[],error:null}));
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?[mapping]:q.table==='workforce_payout_shipment_facts'?[shipment]:q.table==='stations'?[{id:'station',station_code:'TEST'}]:[],error:null}));
  const routeContext={enabledFrom:from,manual:[],rateOverrides:[],rows:[{id:'route',workforce_id:'person',station_id:'station',mapping_id:'A',work_date:from,status:'ready',reason:null,distance_km:41.7039,departure_km:19.7952,delivery_km:1.9004,return_km:20.0083,calculated_at:'2026-09-02T00:00:00Z'}]};
  const response=await earningsRoute(db,async()=>account,all=>all[0],routeContext)(request()),body=await response.json();
  assert.equal(response.status,200,JSON.stringify(body));

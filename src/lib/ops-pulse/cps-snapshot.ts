@@ -65,7 +65,7 @@ const snapshot = cache(
         .order("effective_from"),
       readAllRows(
         supabaseAdmin
-          .from("attendance_daily")
+          .from("workforce_payout_attendance_facts")
           .select(
             "id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes",
           )

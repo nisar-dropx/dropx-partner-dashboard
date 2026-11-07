@@ -149,7 +149,7 @@ export async function GET(request: NextRequest) {
     assertNoProviderDirectOverlap({allocations:currentDirect.allocations,mappings:currentMappings,from:currentPeriod.from,to:currentEnd});
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
     const [dailyResult,providerAttendanceResult] = await Promise.all([providerMemberIds.length
-      ? supabaseAdmin.from("cps_shipment_daily")
+      ? supabaseAdmin.from("workforce_payout_shipment_facts")
         .select("id,work_date,station_code,client,provider_employee_id,provider_employee_name,total_activity,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
         .eq("company_id", account.companyId)
         .in("provider_employee_id", providerMemberIds)
@@ -158,7 +158,7 @@ export async function GET(request: NextRequest) {
         .order("work_date", { ascending: false })
       : Promise.resolve({ data: [], error: null }),
       workforce?.id && mappings.length
-        ? supabaseAdmin.from("attendance_daily").select("id,punch_date,status,in_time,out_time,work_minutes")
+        ? supabaseAdmin.from("workforce_payout_attendance_facts").select("id,punch_date,status,in_time,out_time,work_minutes")
           .eq("company_id",account.companyId).or(attendanceIdentityFilter(workforce)).gte("punch_date",period.from).lte("punch_date",periodEnd).order("punch_date")
         : Promise.resolve({data:[],error:null})
     ]);

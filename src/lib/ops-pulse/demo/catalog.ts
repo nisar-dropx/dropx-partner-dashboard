@@ -49,6 +49,18 @@ function define(
     definitions[path] = { kind, description, columns, examples, action };
 }
 define(
+  ["/provider-id-mapping/worked-days"],
+  "review",
+  "Confirm the provider ID used on a biometric day, split shared deliveries, or exclude a not-worked day.",
+  ["Associate", "Work date", "Worked ID", "Deliveries", "Decision"],
+  [
+    ["Alex Rao", "26 Oct 2026", "SAMPLE-DA-104", "42 of 70", "Shared work"],
+    ["Maya Das", "26 Oct 2026", "SAMPLE-DA-108", "36 of 36", "Borrowed ID"],
+    ["Leena Shah", "26 Oct 2026", "None", "0", "Needs review"],
+  ],
+  "Review day",
+);
+define(
   ["/"],
   "dashboard",
   "A connected view of today’s operation, priorities and cost.",
