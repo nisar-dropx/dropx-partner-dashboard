@@ -782,5 +782,7 @@ row=(await db.query(managerStep(MA,'propose_rejection',1))).rows[0];ok('Manageme
 await throws('Management cannot self approve its own validation',managerStep(MA,'approve_final',row.version),/another|different|proposed/i);
 row=(await db.query(managerStep(MB,'approve_final',row.version))).rows[0];ok('Independent scoped manager can finalize review',row.status==='rejected');
 await db.exec(`update user_roles set is_active=false where id='${MR}';`);ok('Deactivated management role loses access immediately',!await managementAllowed(MA));
+const {testDisputeApplication}=await import('./test-dispute-source-application.mjs');
+await testDisputeApplication(db,{C,S,A1,A2,ok});
 console.log(failures ? `${failures} FAILED` : "ALL PASSED");
 process.exit(failures ? 1 : 0);

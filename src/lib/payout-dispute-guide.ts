@@ -10,17 +10,28 @@ export const DISPUTE_ISSUES = [
   { id: "salary", label: "Salary / payment rate", area: "attendance_pay", reasons: ["Wrong salary amount", "Wrong payment rate", "Wrong effective dates", "Payment missing"] },
   { id: "allowance", label: "Incentive / allowance", area: "allowances", reasons: ["Payment missing", "Wrong amount", "Please check eligibility"] },
 ] as const;
-export type GuidedClaim = { schema: 3; issue: string; component: string; dates: string[]; concern: string; expected: string; note: string; attachment?: { path: string; name: string } };
+export type DailyCountClaim = { date: string; component: string; value: number };
+export type GuidedClaim = { schema: 3; issue: string; component: string; dates: string[]; concern: string; expected: string; note: string; counts?: DailyCountClaim[]; attachment?: { path: string; name: string } };
 export type GuideItem = { key: string; code: string; label: string; kind: string; amount: number; rate: number | null; units: number | null; recoveryKey?: string };
 export function disputeConcerns(issue: string, component?: GuideItem) {
   if(issue === "deduction" && component) {
     if(/TDS/i.test(component.code)) return ["Wrong TDS amount", "PAN details need checking", "Please explain my TDS"];
-    if(component.recoveryKey || /LOSS/i.test(component.code)) return ["Wrong loss amount", "Already recovered", "Not my loss", "Please explain this loss"];
-    if(/ADVANCE/i.test(component.code)) return ["Wrong advance recovery", "Already recovered", "Not my advance", "Please explain this advance"];
+    if(component.recoveryKey || /LOSS/i.test(component.code)) return ["Not my loss", "Wrongly deducted", "Already recovered", "Wrong loss amount", "Please explain this loss"];
+    if(/ADVANCE/i.test(component.code)) return ["Not my advance", "Wrongly deducted", "Already recovered", "Wrong advance recovery", "Please explain this advance"];
   }
   return [...(DISPUTE_ISSUES.find(i=>i.id===issue)?.reasons??[])];
 }
 export const cash = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+export const isDailyCountConcern = (claim: {issue?: string; concern?: string}) => claim.issue === "production" && !!claim.concern && !/rate/i.test(claim.concern);
+export const needsExpectedValue = (claim: {issue?: string; concern?: string}) => !isDailyCountConcern(claim) && !(claim.issue === "deduction" && /not my|wrongly deducted|already recovered|explain|PAN/i.test(claim.concern ?? ""));
+export function productionItems(items: GuideItem[]) {
+  return items.filter((item, index) => item.kind === "production" && items.findIndex(other => other.kind === "production" && other.code === item.code) === index);
+}
+export function publishedDayCount(day: Row | undefined, code: string): number | null {
+  const lines = (day?.lines ?? []).filter((line: Row) => line.code === code);
+  if (!lines.length || lines.some((line: Row) => numeric(line.count) === null)) return null;
+  return lines.reduce((sum: number, line: Row) => sum + Number(line.count), 0);
+}
 /** A source sync alone must not invalidate an unchanged reviewed calculation. */
 export function disputeEvidenceValues(value: unknown) {
   return JSON.stringify(value,(key,item)=>["updated_at","updatedAt","checkedAt","dependency_hash"].includes(key)?undefined:item);
@@ -67,22 +78,46 @@ export function normalizeGuidedClaim(snapshot: Row, raw: Row): GuidedClaim {
   const dates = [...new Set(Array.isArray(raw.dates) ? raw.dates.map(String) : [])].sort() as string[];
   if (!["deduction","allowance"].includes(issue.id) && (!dates.length || dates.length > 31 || dates.some(d => !available.has(d)))) throw new Error("Select the affected dates from this payout.");
   const note = String(raw.note ?? "").trim().slice(0, 1000);
-  const expected = String(raw.expected ?? "").trim();
+  const expected = needsExpectedValue(raw) ? String(raw.expected ?? "").trim() : "";
   if (expected && (!/^\d+(\.\d{1,2})?$/.test(expected) || Number(expected) > 1e7)) throw new Error("Enter a valid expected value, or leave it blank.");
-  return { schema: 3, issue: issue.id, component: component.key, dates: ["deduction","allowance"].includes(issue.id) ? [] : dates, concern: raw.concern, expected, note };
+  let counts: DailyCountClaim[] | undefined;
+  if (raw.counts !== undefined) {
+    if (!isDailyCountConcern(raw) || !Array.isArray(raw.counts) || !raw.counts.length || raw.counts.length > 124) throw new Error("Enter the correct counts for your selected dates.");
+    const items = productionItems(disputeItems(snapshot)), days = disputeDays(snapshot), seen = new Set<string>();
+    counts = [];
+    for (const row of raw.counts) {
+      const item = items.find(item => item.key === row?.component);
+      const day = days.find(day => day.date === row?.date);
+      if (!item || !day || !dates.includes(row.date)) throw new Error("Choose a published delivery or return item on a selected date.");
+      const key = `${row.date}:${item.code}`;
+      if (seen.has(key)) throw new Error("Each daily count can only be included once.");
+      seen.add(key);
+      if (row.value === "" || row.value == null || !/^\d+$/.test(String(row.value)) || Number(row.value) > 1e7) throw new Error("Enter whole-number counts, including 0 when needed.");
+      const current = publishedDayCount(day, item.code);
+      if (current === null) throw new Error(`${item.label}: no published count for ${row.date}. Ask the payout team to refresh this source.`);
+      if (Number(row.value) !== current) counts.push({ date: row.date, component: item.key, value: Number(row.value) });
+    }
+    if (dates.some(date => !counts!.some(row => row.date === date))) throw new Error("Change at least one count for each selected date, or unselect that date.");
+    counts.sort((a, b) => a.date.localeCompare(b.date) || a.component.localeCompare(b.component));
+  }
+  return { schema: 3, issue: issue.id, component: component.key, dates: ["deduction","allowance"].includes(issue.id) ? [] : dates, concern: raw.concern, expected, note, ...(counts ? { counts } : {}) };
 }
 export function claimDescription(snapshot: Row, claim: GuidedClaim) {
   const item = disputeItems(snapshot).find(i => i.key === claim.component)!;
-  return `${item.label}: ${claim.concern}${claim.dates.length ? ` · ${claim.dates.join(", ")}` : ""}${claim.expected ? ` · Expected ${claim.expected}` : ""}${claim.note ? `\n${claim.note}` : ""}`;
+  const counts = claim.counts?.map(row => `${row.date} · ${disputeItems(snapshot).find(item => item.key === row.component)?.label}: ${row.value}`).join("; ");
+  return `${claim.counts ? "Daily activity" : item.label}: ${claim.concern}${counts ? ` · ${counts}` : claim.dates.length ? ` · ${claim.dates.join(", ")}` : ""}${claim.expected ? ` · Expected ${claim.expected}` : ""}${claim.note ? `\n${claim.note}` : ""}`.slice(0, 2000);
 }
-export type GuidedField = { key: string; label: string; date: string; code: string; recoveryKey?: string; selector: string; current: number; unit: string; rate: number | null; lines?: Row[] };
+export type GuidedField = { key: string; label: string; date: string; code: string; recoveryKey?: string; selector: string; current: number; claimed?: number; unit: string; rate: number | null; lines?: Row[] };
 export function guidedFields(snapshot: Row, claim: GuidedClaim): GuidedField[] {
   const component = disputeItems(snapshot).find(i => i.key === claim.component);
   if (!component) return [];
   if (claim.issue === "deduction") return [{ key: "value_0", label: component.label, date: "", code: component.code, recoveryKey: component.recoveryKey, selector: "deduction", current: component.amount, unit: "₹", rate: 1 }];
   if (claim.issue === "allowance") return [{key:"value_0",label:component.label,date:"",code:component.code,selector:component.key.startsWith("incentive:")?"incentive":"addition",current:component.amount,unit:"₹",rate:1}];
   const days = disputeDays(snapshot);
-  return claim.dates.map((date, i) => {
+  const targets = claim.counts ?? claim.dates.map(date => ({date, component: claim.component}));
+  return targets.map((target, i) => {
+    const date = target.date;
+    const component = disputeItems(snapshot).find(item => item.key === target.component)!;
     const day = days.find(d => d.date === date);
     if (!day) throw new Error(`Payout evidence is unavailable for ${date}.`);
     if (claim.issue === "attendance") {
@@ -97,6 +132,7 @@ export function guidedFields(snapshot: Row, claim: GuidedClaim): GuidedField[] {
     if (selector !== "amount" && (rates.length !== 1 || rates[0] === null)) throw new Error("Multiple or missing rates: check the dated payment mappings first.");
     return { key: `value_${i}`, label: component.label, date, code: component.code, selector,
       current: selector === "rate" ? Number(rates[0]) : lines.reduce((n: number, l: Row) => n + Number(l[selector] ?? 0), 0),
+      ...("value" in target ? {claimed: Number(target.value)} : {}),
       unit: selector === "count" ? claim.issue === "fuel" ? "km" : "count" : "₹", rate: rates.length === 1 ? numeric(rates[0]) : null, lines };
   });
 }
@@ -110,6 +146,7 @@ export function buildGuidedPlan(snapshot: Row, claim: GuidedClaim, form: FormDat
     const raw = String(form.get(field.key) ?? "");
     if (!/^\d+(\.\d{1,2})?$/.test(raw) || Number(raw) > 1e7) throw new Error(`Enter the validated ${field.unit} for ${field.date || field.label}.`);
     const proposed = Number(raw);
+    if (claim.issue === "production" && field.selector === "count" && !Number.isInteger(proposed)) throw new Error("Delivery, return and pickup counts must be whole numbers.");
     if (field.selector === "attendance" && ![0, 0.5, 1].includes(proposed)) throw new Error("A day must be absent (0), half day (0.5), or present (1).");
     let delta = 0;
     if (field.selector === "count") {

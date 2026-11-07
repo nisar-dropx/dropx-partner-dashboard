@@ -8,6 +8,10 @@ import styles from "./payout-review-desk.module.css";
 import { UrlPager, readPaging } from "./url-pager";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { GuidedDisputeReview } from "./guided-dispute-review";
+import guide from "./guided-dispute.module.css";
+import { attendanceLabel } from "../lib/dispute-presentation";
+import { DisputeBalanceChoice } from "./dispute-balance-choice";
+import { DisputeBulkApproval } from "./dispute-bulk-approval";
 
 type Row = Record<string, any>;
 type WorkflowRoleKey = "initial_approver_role_ids" | "final_approver_role_ids" | "processor_role_ids";
@@ -302,6 +306,8 @@ export async function PayoutReviewDesk({
     return date.toISOString().slice(0, 7);
   });
   const count = (statuses: string[]) => (countsResult.data ?? []).filter((row) => statuses.includes(row.status)).length;
+  const applications=shown.length?await supabaseAdmin.from("workforce_dispute_application_jobs").select("dispute_id,state,last_error,applied_at,publication_id").eq("company_id",company).in("dispute_id",shown.map(d=>d.id)):{data:[],error:null};
+  const applicationById=new Map((applications.data??[]).map(row=>[row.dispute_id,row]));
 
   return (
     <div className={styles.desk}>
@@ -354,6 +360,7 @@ export async function PayoutReviewDesk({
         <a className="button secondary" href="/payments/disputes">Reset</a>
       </form>
 
+      <DisputeBulkApproval rows={shown.filter(d=>canEditDesk&&["in_review","pending_final_approval"].includes(d.status)&&d.proposed_decision==="resolved"&&d.correction_plan?.schema===3&&stageAllowed(String(d.id),"final")&&d.initial_reviewed_by!==auth.userId&&d.proposed_by!==auth.userId).map(d=>{const worker=record(record(publications.get(String(d.publication_id))?.snapshot).item);return {id:String(d.id),version:Number(d.version),name:[worker.worker_name,worker.dropx_id].filter(Boolean).join(" · "),station:stationCode.get(d.station_id)||"",plan:d.correction_plan,details:d.details};})}/>
       {shown.map((dispute) => {
         const publication = publications.get(String(dispute.publication_id));
         const worker = record(record(publication?.snapshot).item);
@@ -396,6 +403,8 @@ export async function PayoutReviewDesk({
             <div className={styles.ticketBody}>
             {decoded.reason ? <p>{decoded.reason}</p> : null}
             <GuidedDisputeReview id={disputeId} version={dispute.version || 1} details={dispute.details?.schema===3?dispute.details:{...dispute.details,...plan.claim}} editable={dispute.status==="open" && canInitial} action={action}/>
+            {applicationById.has(disputeId)?<div className={guide.guidance}><b>{({queued:"Approved · applying correction",awaiting_publication:"Source updated · verifying revised payout",completed:"Applied · payout verified",blocked:"Approved · application needs attention"} as Record<string,string>)[applicationById.get(disputeId)!.state]}</b>{applicationById.get(disputeId)!.last_error?<small style={{display:"block"}}>{applicationById.get(disputeId)!.last_error}</small>:null}</div>:null}
+            {dispute.details?.loss_balance?<p className={guide.muted}>Reduced loss balance: <b>{dispute.details.loss_balance.treatment==="write_off"?"Write off":"Keep outstanding"}</b> · {dispute.details.loss_balance.reason}</p>:null}
 
             {["pending_final_approval", "in_review", "approved_for_processing", "processing", "processing_blocked", "resolved"].includes(dispute.status) && dispute.proposed_decision ? (
               <div className={styles.proposal}>
@@ -403,12 +412,10 @@ export async function PayoutReviewDesk({
                 {dispute.proposed_note ? <>: “{dispute.proposed_note}”</> : null} <small>{when(dispute.initial_reviewed_at || dispute.proposed_at)}</small>
                 {Object.keys(plan).length ? (
                   <>
-                    {(Array.isArray(plan.items) && plan.items.length ? plan.items : [plan]).map((item: Row, index: number) => <dl className={styles.plan} key={index}>
-                      <div><dt>Disputed item</dt><dd>{String(item.target_field || "—")}</dd></div>
-                      <div><dt>Current{item.unit ? ` (${item.unit === "rupees" ? "₹" : item.unit})` : ""}</dt><dd>{item.current_value == null ? "—" : String(item.current_value)}</dd></div>
-                      <div><dt>Corrected value</dt><dd>{item.proposed_value == null ? "—" : String(item.proposed_value)}</dd></div>
-                      {item.unit_rate != null && !["₹","rupees"].includes(item.unit) ? <div><dt>Applicable rate</dt><dd>₹{String(item.unit_rate)}</dd></div> : null}
-                    </dl>)}
+                    <div className={guide.scroll}><table className={guide.table}><thead><tr><th>Item / date</th><th>In payout</th><th>Validated correction</th><th>Rate</th></tr></thead><tbody>{(Array.isArray(plan.items) && plan.items.length ? plan.items : [plan]).map((item: Row, index: number) => {
+                      const display=(value:any)=>value==null?"—":item.selector==="attendance"?attendanceLabel({attendanceKnown:true,units:Number(value)}):`${value}${item.unit?` ${item.unit==="rupees"?"₹":item.unit}`:""}`;
+                      return <tr key={index}><td>{String(item.target_field||"—")}</td><td>{display(item.current_value)}</td><td>{display(item.proposed_value)}</td><td>{item.unit_rate!=null&&!["₹","rupees"].includes(item.unit)?`₹${item.unit_rate}`:"—"}</td></tr>;
+                    })}</tbody></table></div>
                     {plan.expected_delta_paise != null ? <p><b>Total expected net change:</b> {moneyFromPaise(plan.expected_delta_paise)}</p> : null}
                     {plan.totals?<p>Gross ₹{plan.totals.gross_before} → ₹{plan.totals.gross_after} · Deductions ₹{plan.totals.deductions_before} → ₹{plan.totals.deductions_after} · Net ₹{plan.totals.net_before} → ₹{plan.totals.net_after}</p>:null}
                   </>
@@ -458,6 +465,7 @@ export async function PayoutReviewDesk({
                       <input name="dispute_id" type="hidden" value={dispute.id} />
                       <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
                       <input name="note" maxLength={1000} placeholder="Final approval note (optional)" aria-label="Final approval note" />
+                      <DisputeBalanceChoice plan={plan}/>
                       <label><input type="checkbox" name="evidence_reviewed" required/> Evidence and payout impact checked</label>
                       <button className="button" name="transition" value="approve_final">{dispute.proposed_decision === "rejected" ? "Confirm rejection" : "Approve correction for processing"}</button>
                     </form>

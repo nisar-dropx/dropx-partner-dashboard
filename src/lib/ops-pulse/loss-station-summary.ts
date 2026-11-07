@@ -20,7 +20,7 @@ export type LossSummaryStationDimension = {
   clusterKeys: string[];
   region: string;
 };
-export type LossFactSort = "amount" | "station" | "count" | "pending" | "remaining" | "recovered" | "updatedAt";
+export type LossFactSort = "amount" | "station" | "count" | "pending" | "remaining" | "recovered" | "waived" | "updatedAt";
 export type LossFactSortDirection = "asc" | "desc";
 type SourceCase = NlCase & { final_seen_at?: string | null; last_seen_at?: string };
 const cents = (n: unknown) => Math.round((Number(n) || 0) * 100);
@@ -105,7 +105,7 @@ export function filterLossSummaryPeriod(rows: LossFact[], report: LossFact["repo
 export const LOSS_SUMMARY_STATUSES = [
   ["all", "All statuses"], ["pending_update", "Pending update"], ["updated", "Details updated"], ["redispute", "Redispute"],
   ["station", "Waiting on station"], ["amazon", "Awaiting Amazon / final"],
-  ["recovered", "Recovery received"], ["outstanding", "Pending recovery"], ["nonrecoverable", "Non-recoverable"],
+  ["recovered", "Recovery received"], ["outstanding", "Unrecovered"], ["write_off", "Write-off"], ["nonrecoverable", "Non-recoverable"],
 ] as const;
 export function filterLossFacts(rows: LossFact[], filter: { station?: string; period?: string; stage?: string; status?: string; stationView?: boolean }) {
   return rows.filter(r => (!filter.station || r.station === filter.station) && (!filter.period || r.period === filter.period || r.month === filter.period)
@@ -115,7 +115,7 @@ export function filterLossFacts(rows: LossFact[], filter: { station?: string; pe
       (filter.status === "updated" && (filter.stationView ? r.stationUpdated : r.updated && !r.redispute)) ||
       (filter.status === "redispute" && !filter.stationView && r.redispute) || (filter.status === "station" && r.waitingStation) ||
       (filter.status === "amazon" && r.waitingAmazon) || (filter.status === "recovered" && r.recovered > 0) ||
-      (filter.status === "outstanding" && r.remaining > 0) || (filter.status === "nonrecoverable" && r.stage === "final" && !r.recoverable && (filter.stationView || !r.redispute))
+      (filter.status === "write_off" && r.waived > 0) || (filter.status === "outstanding" && r.remaining > 0) || (filter.status === "nonrecoverable" && r.stage === "final" && !r.recoverable && (filter.stationView || !r.redispute))
     ));
 }
 
@@ -139,7 +139,7 @@ export function totalLossFacts(rows: LossFact[]) {
     return { count: selected.length, amount: selected.reduce((n,r) => n + cents(r.amount), 0) / 100 };
   };
   return { count: rows.length, amount: amount(r=>r.amount), recovered: amount(r=>r.recovered), remaining: amount(r=>r.remaining), waived: amount(r=>r.waived), draft: amount(r=>r.draft), draftCount: rows.filter(r=>r.draft>0).length,
-    recoveredCount: rows.filter(r=>r.recovered>0).length, remainingCount: rows.filter(r=>r.remaining>0).length,
+    waivedCount: rows.filter(r=>r.waived>0).length, recoveredCount: rows.filter(r=>r.recovered>0).length, remainingCount: rows.filter(r=>r.remaining>0).length,
     recoverable: group(r=>r.recoverable),
     updated: group(r=>r.updated&&!r.redispute), pending: group(r=>r.recoverable&&!r.updated&&!r.redispute),
     redispute: group(r=>r.redispute),
@@ -160,8 +160,8 @@ export function groupLossFacts(
   return groups.sort((a,b) => {
     if (sort === "station") return factor * a.station.localeCompare(b.station);
     if (sort === "updatedAt") return factor * a.updatedAt.localeCompare(b.updatedAt) || a.station.localeCompare(b.station);
-    const left = sort === "count" ? (recoverableTotals ? a.recoverable.count : a.count) : sort === "recovered" ? a.recovered : sort === "remaining" ? a.remaining : sort === "pending" ? a.pending.amount : recoverableTotals ? a.recoverable.amount : a.amount;
-    const right = sort === "count" ? (recoverableTotals ? b.recoverable.count : b.count) : sort === "recovered" ? b.recovered : sort === "remaining" ? b.remaining : sort === "pending" ? b.pending.amount : recoverableTotals ? b.recoverable.amount : b.amount;
+    const left = sort === "count" ? (recoverableTotals ? a.recoverable.count : a.count) : sort === "waived" ? a.waived : sort === "recovered" ? a.recovered : sort === "remaining" ? a.remaining : sort === "pending" ? a.pending.amount : recoverableTotals ? a.recoverable.amount : a.amount;
+    const right = sort === "count" ? (recoverableTotals ? b.recoverable.count : b.count) : sort === "waived" ? b.waived : sort === "recovered" ? b.recovered : sort === "remaining" ? b.remaining : sort === "pending" ? b.pending.amount : recoverableTotals ? b.recoverable.amount : b.amount;
     return factor * (left - right) || a.station.localeCompare(b.station);
   });
 }

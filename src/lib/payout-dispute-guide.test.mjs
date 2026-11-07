@@ -23,3 +23,52 @@ test('unchanged value is not a correction',()=>{assert.throws(()=>buildGuidedPla
 test('negative, over-one attendance and invalid numbers are rejected',()=>{for(const v of ['-1','2','0.25','NaN'])assert.throws(()=>buildGuidedPlan(snapshot,claim,form(v),context));});
 
 test('unchanged sync timestamps do not reset review; changed amounts and punch times do',()=>{const a={gross:100,route:{km:10,updatedAt:'old'},delivery:{total:28,updated_at:'old'},in_time:'08:00'};const b={...a,route:{km:10,updatedAt:'new'},delivery:{total:28,updated_at:'new'}};assert.equal(disputeEvidenceValues(a),disputeEvidenceValues(b));assert.notEqual(disputeEvidenceValues(a),disputeEvidenceValues({...b,gross:101}));assert.notEqual(disputeEvidenceValues(a),disputeEvidenceValues({...b,in_time:'10:00'}));});
+
+function dailyCountFixture(){
+ const s=structuredClone(baseSnapshot);
+ for(const [code,label,count,rate] of [['DELIVERY','Delivery',50,10],['C_RETURN','Customer return',3,5]]){
+  const line={code,label,count,rate,amount:count*rate,schedule:'per_unit',componentType:'production'};
+  s.lines[9].calculation_snapshot.paymentLines.push(line);
+  s.lines[10].calculation_snapshot.paymentLines.push({...line,count:10,amount:10*rate});
+  s.worksheet.production_breakdown.push(line);
+ }
+ const items=disputeItems(s).filter(i=>i.kind==='production');
+ return {s,items,raw:{issue:'production',component:items[0].key,concern:'Count is incorrect',dates:['2026-10-10'],counts:[{date:'2026-10-10',component:items[0].key,value:52},{date:'2026-10-10',component:items[1].key,value:5}]}};
+}
+test('daily delivery and return claims preserve separate inputs and exact pay impact',()=>{
+ const {s,raw}=dailyCountFixture(),claim=normalizeGuidedClaim(s,raw),fields=guidedFields(s,claim),f=new FormData();
+ assert.equal(fields.length,2);assert.deepEqual(fields.map(f=>[f.code,f.current,f.claimed]),[['DELIVERY',50,52],['C_RETURN',3,5]].sort((a,b)=>('earning:'+a[0]).localeCompare('earning:'+b[0])));
+ for(const field of fields){f.set(field.key,String(field.claimed));f.set(`checked_${field.key}`,'on');}
+ const p=buildGuidedPlan(s,claim,f,context);assert.equal(p.expected_delta_paise,2970);assert.equal(p.items.length,2);
+ f.delete(`checked_${fields[1].key}`);assert.throws(()=>buildGuidedPlan(s,claim,f,context),/supporting evidence/);
+ assert.deepEqual(normalizeGuidedClaim(s,claim),claim);
+});
+test('several dates work; unchanged items are omitted and unchanged dates must be unselected',()=>{
+ const {s,items,raw}=dailyCountFixture();raw.dates.push('2026-10-11');raw.counts.push({date:'2026-10-11',component:items[0].key,value:11});raw.counts[1].value=3;
+ const c=normalizeGuidedClaim(s,raw);assert.equal(c.counts.length,2);assert.equal(guidedFields(s,c).length,2);
+ raw.counts[2].value=10;assert.throws(()=>normalizeGuidedClaim(s,raw),/each selected date/);
+});
+test('daily claims reject unknown items, unknown dates, fractions, duplicates, empty and missing counts',()=>{
+ const {s,raw}=dailyCountFixture();
+ for(const replacement of [{component:'attendance'},{date:'2026-10-09'},{value:-1},{value:1.5},{value:''},{value:null}]){
+  const bad=structuredClone(raw);Object.assign(bad.counts[0],replacement);assert.throws(()=>normalizeGuidedClaim(s,bad));
+ }
+ assert.throws(()=>normalizeGuidedClaim(s,{...raw,counts:[raw.counts[0],raw.counts[0]]}),/only be included once/);
+ assert.throws(()=>normalizeGuidedClaim(s,{...raw,counts:[]}),/correct counts/);
+ s.lines[9].calculation_snapshot.paymentLines=[];assert.throws(()=>normalizeGuidedClaim(s,raw),/no published count/);
+});
+test('reviewer may validate a different whole-number count, never silently accept a claim',()=>{
+ const {s,raw}=dailyCountFixture(),c=normalizeGuidedClaim(s,raw),fields=guidedFields(s,c),f=new FormData();
+ for(const field of fields){f.set(field.key,String(field.current));f.set(`checked_${field.key}`,'on');}
+ assert.throws(()=>buildGuidedPlan(s,c,f,context),/No value changed/);
+ f.set(fields[0].key,'4.5');assert.throws(()=>buildGuidedPlan(s,c,f,context),/whole numbers/);
+ f.set(fields[0].key,'4');assert.ok(buildGuidedPlan(s,c,f,context));
+});
+test('ownership and wrongful deduction claims need no replacement amount',()=>{
+ const s=structuredClone(baseSnapshot);s.worksheet.deduction_breakdown.push({code:'LOSS_RECOVERY',label:'Loss',amount:500,recoveryKey:'2026-09|tid|worker'});
+ const item=disputeItems(s).find(i=>i.code==='LOSS_RECOVERY');
+ for(const concern of ['Not my loss','Wrongly deducted','Already recovered','Please explain this loss']){
+  const c=normalizeGuidedClaim(s,{issue:'deduction',component:item.key,concern,expected:'999'});
+  assert.equal(c.expected,'');assert.deepEqual(c.dates,[]);assert.equal(guidedFields(s,c)[0].current,500);
+ }
+});

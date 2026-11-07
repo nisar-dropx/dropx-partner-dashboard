@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
+import { processApprovedDisputes } from "@/lib/payout-dispute-application";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -22,7 +23,9 @@ export async function GET(request: Request) {
   }
 
   try {
+    const disputeApplications=await processApprovedDisputes({deadlineAtMs:Math.min(deadlineAtMs,Date.now()+60_000)}).catch(error=>{console.error("Dispute application retry failed",error);return [{state:"retry",error:"Application retry failed"}];});
     const result = await refreshWorkforcePayoutPublicationJobs({ deadlineAtMs, limit: 100 });
+    const disputeVerification=await processApprovedDisputes({deadlineAtMs,verifyOnly:true}).catch(error=>{console.error("Dispute verification retry failed",error);return [{state:"retry",error:"Verification retry failed"}];});
     const hasOperationalFailure = result.warnings.some((warning) =>
       warning.code ? OPERATIONAL_FAILURE_WARNING_CODES.has(warning.code) : false
     );
@@ -48,7 +51,7 @@ export async function GET(request: Request) {
     if (degraded || result.warnings.length) console.warn(JSON.stringify(log));
     else console.info(JSON.stringify(log));
     return NextResponse.json(
-      { ...result, healthy: !degraded },
+      { ...result, disputeApplications,disputeVerification,healthy: !degraded },
       { status: degraded ? 503 : 200, headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {

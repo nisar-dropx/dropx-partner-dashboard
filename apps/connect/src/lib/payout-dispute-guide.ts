@@ -1,1 +1,1 @@
-export * from "../../../../src/lib/payout-dispute-guide";
+export * from "../../../../src/lib/payout-dispute-guide.ts";
