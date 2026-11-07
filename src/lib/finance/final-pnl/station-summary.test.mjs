@@ -21,19 +21,19 @@ test('recovery improves net but never increases corporate allocation weight; cha
  assert.equal(row.corporateHo,5001);assert.equal(row.revenue,60000);assert.equal(row.recovery,90000);
  assert.equal(row.chargebacks,20000);assert.equal(row.directExpense,30000);assert.equal(row.operatingExpense,10000);assert.equal(row.net,112499);
 });
-test('missing station revenue prevents redistributed corporate cost and false final zero',()=>{
+test('missing station revenue keeps the current result numeric and flags the missing allocation',()=>{
  const report=fixture();report.entries=report.entries.filter(e=>e.id!=='b');const result=buildStationSummary(report);
- for(const code of ['A','B']){const row=result.rows.find(row=>row.station===code);assert.equal(row.corporateHo,null);assert.equal(row.net,null);assert.match(row.issues.join(' '),/revenue for B/);}
+ for(const code of ['A','B']){const row=result.rows.find(row=>row.station===code);assert.equal(row.corporateHo,null);assert.equal(row.net,code==='A'?47500:-17501);assert.equal(row.complete,false);assert.match(row.issues.join(' '),/revenue for B/);}
  assert.equal(result.rows.find(row=>row.station==='N').corporateHo,2501);assert.equal(result.unallocatedCorporate,7502);
 });
 test('unallocated corporate pools affect only configured verticals',()=>{
  const report=fixture();report.overheadPools=[pool('HO_MJR',{rule:{recipient_models:['EDSP']},unallocated:10003,allocated:0,corporateShares:[],issue:'Missing revenue'})];
- const rows=buildStationSummary(report).rows;assert.equal(rows.find(row=>row.station==='A').net,null);assert.equal(rows.find(row=>row.station==='N').net,20000);
+ const rows=buildStationSummary(report).rows;assert.equal(rows.find(row=>row.station==='A').net,47500);assert.equal(rows.find(row=>row.station==='A').complete,false);assert.equal(rows.find(row=>row.station==='N').net,20000);
 });
 test('regional pending scope, missing expenses and unknown assignment remain visible',()=>{
  const report=fixture();report.entries=report.entries.filter(e=>e.id!=='n-cost');report.entries.push(entry('unmapped','Unmapped · X','expense',100));
  report.overheadPools.push(pool('HO_AP',{mode:'regional',rule:{recipient_codes:['B']},unallocated:500,total:500,allocated:0,corporateShares:[]}));
- const result=buildStationSummary(report);assert.equal(result.rows.find(row=>row.station==='B').regionalHoPending,true);assert.equal(result.rows.find(row=>row.station==='B').net,null);assert.equal(result.rows.find(row=>row.station==='A').complete,true);assert.equal(result.rows.find(row=>row.station==='N').net,null);assert.equal(result.unassignedEntries.length,1);
+ const result=buildStationSummary(report);assert.equal(result.rows.find(row=>row.station==='B').regionalHoPending,true);assert.equal(result.rows.find(row=>row.station==='B').net,9998);assert.equal(result.rows.find(row=>row.station==='B').complete,false);assert.equal(result.rows.find(row=>row.station==='A').complete,true);assert.equal(result.rows.find(row=>row.station==='N').net,27499);assert.equal(result.rows.find(row=>row.station==='N').complete,false);assert.equal(result.unassignedEntries.length,1);
 });
 test('deleted records and HO locations do not become station amounts; zero recorded revenue is distinct from missing',()=>{
  const report=fixture();report.stations.push('HO_CLT');report.entries.push(entry('deleted','A','expense',999999,{deleted:true}));report.entries.find(e=>e.id==='b').paise=0;

@@ -31,7 +31,7 @@ export function monthValue(value:unknown):string{
  if(typeof value!=='string'||!/^20\d{2}-(0[1-9]|1[0-2])$/.test(value))throw Error('Choose a valid month.');return value;
 }
 export function paise(value:unknown):number{const n=Number(value);if(value===null||value===undefined||!Number.isFinite(n)||Math.abs(n)>1e10)throw Error('Invalid financial amount in source.');return Math.round(n*100);}
-export function money(value:number){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value/100);}
+export function money(value:number){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value===0?0:value/100);}
 export function previousMonth(now=new Date()){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit'}).formatToParts(now);const y=Number(parts.find(p=>p.type==='year')!.value),m=Number(parts.find(p=>p.type==='month')!.value);return `${m===1?y-1:y}-${String(m===1?12:m-1).padStart(2,'0')}`;}
 export function monthEnd(month:string){monthValue(month);const [year,m]=month.split('-').map(Number);return new Date(Date.UTC(year!,m!,0)).toISOString().slice(0,10);}
 export function baseStations(stations:{id:string;station_code:string;parent_station_id:string|null;is_ho?:boolean}[],aliases:{location_id:string;portal_station_code:string|null}[]){

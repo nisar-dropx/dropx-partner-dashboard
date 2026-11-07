@@ -1,13 +1,16 @@
 'use client';
 import {Fragment,useState} from 'react';
+import {pnlDisplayEntries} from '@/lib/finance/final-pnl/presentation';
+import {PnlAlerts} from './alerts';
 import {money,type Entry,type Dimension} from '@/lib/finance/final-pnl/model';
-import {entryTotals,entryCoverage,groupEntries,modelLabel,statementGroups,sourceLocationGroups,type GroupBy} from '@/lib/finance/final-pnl/analysis';
+import {entryTotals,groupEntries,modelLabel,statementGroups,sourceLocationGroups,type GroupBy} from '@/lib/finance/final-pnl/analysis';
 
 type EntryProps={dimensions?:Dimension[];entries:Entry[];canEdit:boolean;onEdit:(entry:Entry)=>void};
 const sum=(entries:Entry[])=>entries.reduce((n,e)=>n+e.paise,0);
 
 /** One compact row per head; source records are rendered only after expansion. */
-export function Statement({entries,canEdit,onEdit,dimensions=[]}:EntryProps){
+export function Statement({entries:sourceEntries,canEdit,onEdit,dimensions=[]}:EntryProps){
+ const entries=pnlDisplayEntries(sourceEntries),edit=(entry:Entry)=>{const original=sourceEntries.find(e=>e.id===entry.id);if(original)onEdit(original);};
  const [expanded,setExpanded]=useState<Set<string>>(new Set());
  const groups=statementGroups(entries);
  return <div className="fp-statement">{(['expense','income'] as const).map(side=>{
@@ -16,10 +19,10 @@ export function Statement({entries,canEdit,onEdit,dimensions=[]}:EntryProps){
    <header><h3>{side==='expense'?'Expenses':'Income'}</h3><strong>{money(heads.reduce((n,g)=>n+g.paise,0))}</strong></header>
    {heads.map(g=><details className="fp-head" key={g.key} open={expanded.has(g.key)} onToggle={event=>{const open=event.currentTarget.open;setExpanded(previous=>{if(previous.has(g.key)===open)return previous;const next=new Set(previous);open?next.add(g.key):next.delete(g.key);return next;});}}>
     <summary><span>{g.head}</span><strong>{money(g.paise)}</strong></summary>
-    {expanded.has(g.key)&&<HeadBreakdown dimensions={dimensions} entries={g.entries} canEdit={canEdit} onEdit={onEdit}/>}
+    {expanded.has(g.key)&&<HeadBreakdown dimensions={dimensions} entries={g.entries} canEdit={canEdit} onEdit={edit}/>}
    </details>)}
    {!heads.length&&<p className="fp-empty">No {side} entries recorded.</p>}
-   {side==='income'&&!heads.some(g=>g.entries.some(e=>e.recovery))&&<div className="fp-zero-row"><span>Loss recovery <small>Not recorded</small></span><strong>{money(0)}</strong></div>}
+   {side==='expense'&&!heads.some(g=>g.entries.some(e=>e.recovery))&&<div className="fp-zero-row"><span>Loss recovery <small>No confirmed recovery recorded</small></span><strong>{money(0)}</strong></div>}
   </section>;
  })}</div>;
 }
@@ -66,24 +69,25 @@ function EntryEvidence({entry:e,canEdit,onEdit}:{entry:Entry;canEdit:boolean;onE
 }
 
 /** Spreadsheet comparison uses the same grouped entries as the two-sided P&L. */
-export function ComparisonSheet({entries,dimensions,by,canEdit,onEdit,incompleteStations=[]}:EntryProps&{dimensions:Dimension[];by:GroupBy;incompleteStations?:string[]}){
+export function ComparisonSheet({entries:sourceEntries,dimensions,by,canEdit,onEdit,alertsByStation={}}:EntryProps&{dimensions:Dimension[];by:GroupBy;alertsByStation?:Record<string,string[]>}){
+ const entries=pnlDisplayEntries(sourceEntries),edit=(entry:Entry)=>{const original=sourceEntries.find(e=>e.id===entry.id);if(original)onEdit(original);};
  const [expanded,setExpanded]=useState<{key:string;column:string}|null>(null);
  const groups=groupEntries(entries,dimensions,by),heads=statementGroups(entries),totals=entryTotals(entries);
- const incomplete=(items:Entry[])=>{const coverage=entryCoverage(items);return items.some(e=>incompleteStations.includes(e.station))||!!(coverage.missingIncome.length||coverage.missingExpenses.length);};
+ const alerts=(items:Entry[])=>[...new Set(items.flatMap(e=>alertsByStation[e.station]??[]))];
  const label=(key:string)=>by==='model'?modelLabel(key):key;
  const toggle=(key:string,column='')=>setExpanded(previous=>previous?.key===key&&previous.column===column?null:{key,column});
  const selected=expanded?heads.find(g=>g.key===expanded.key):null;
  const selectedEntries=selected?.entries.filter(e=>!expanded?.column||groups.find(g=>g.key===expanded.column)?.entries.includes(e))??[];
  if(!heads.length)return <p className="fp-empty">No recorded entries match these filters.</p>;
- return <div className="fp-sheet-scroll"><table className="fp-sheet"><caption>Amounts in ₹ · Click a cost head or amount to expand · — means no recorded entry · Recorded result includes allocated regional and corporate HO; incomplete sources or allocations are marked</caption><thead><tr><th>Particulars</th><th>Total</th>{groups.map(g=><th key={g.key}>{label(g.key)}<small>{g.stations.length} station{g.stations.length!==1?'s':''}</small>{incomplete(g.entries)&&<small className="fp-pending">Sources / HO incomplete</small>}</th>)}</tr></thead><tbody>
+ return <div className="fp-sheet-scroll"><table className="fp-sheet"><caption>Amounts in ₹ · Click a cost head or amount to expand · — means no recorded entry · Current P&L includes allocated HO · Losses reduce income; confirmed recovery reduces expenses</caption><thead><tr><th>Particulars</th><th>Total</th>{groups.map(g=><th key={g.key}>{label(g.key)}<small>{g.stations.length} station{g.stations.length!==1?'s':''}</small><PnlAlerts label={label(g.key)} issues={alerts(g.entries)}/></th>)}</tr></thead><tbody>
   {(['expense','income'] as const).map(side=><Fragment key={side}>
    <tr className="fp-sheet-section"><th colSpan={groups.length+2}>{side==='expense'?'Expenses':'Income'}</th></tr>
    {heads.filter(g=>g.side===side).map(head=><Fragment key={head.key}><tr>
     <th><button aria-expanded={expanded?.key===head.key} onClick={()=>toggle(head.key)}>{expanded?.key===head.key?'▾':'▸'} {head.head}</button></th>
     <td><button aria-label={`${head.head} total details`} onClick={()=>toggle(head.key)}>{money(head.paise)}</button></td>
     {groups.map(g=>{const items=head.entries.filter(e=>g.entries.includes(e));return <td key={g.key}>{items.length?<button aria-label={`${head.head} ${label(g.key)} details`} onClick={()=>toggle(head.key,g.key)}>{money(sum(items))}</button>:'—'}</td>;})}
-   </tr>{expanded?.key===head.key&&<tr className="fp-sheet-expanded"><td colSpan={groups.length+2}><div className="fp-section-head"><h3>{head.head} · {expanded.column?label(expanded.column):'All selected'} · {money(sum(selectedEntries))}</h3><button onClick={()=>setExpanded(null)}>Close detail</button></div><HeadBreakdown key={`${head.key}:${expanded.column}`} dimensions={dimensions} entries={selectedEntries} canEdit={canEdit} onEdit={onEdit}/></td></tr>}</Fragment>)}
+   </tr>{expanded?.key===head.key&&<tr className="fp-sheet-expanded"><td colSpan={groups.length+2}><div className="fp-section-head"><h3>{head.head} · {expanded.column?label(expanded.column):'All selected'} · {money(sum(selectedEntries))}</h3><button onClick={()=>setExpanded(null)}>Close detail</button></div><HeadBreakdown key={`${head.key}:${expanded.column}`} dimensions={dimensions} entries={selectedEntries} canEdit={canEdit} onEdit={edit}/></td></tr>}</Fragment>)}
    <tr className="fp-sheet-total"><th>Total {side==='expense'?'expenses':'income'}</th><td>{money(totals[side])}</td>{groups.map(g=><td key={g.key}>{money(g[side])}</td>)}</tr>
   </Fragment>)}
- </tbody><tfoot><tr><th>Recorded net P&L after allocated HO</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}{incomplete(entries)&&<small>Sources / HO incomplete</small>}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}{incomplete(g.entries)&&<small>Sources / HO incomplete</small>}</td>)}</tr></tfoot></table></div>;
+ </tbody><tfoot><tr><th>Current P&L</th><td className={totals.profit<0?'fp-loss':'fp-gain'}>{money(totals.profit)}</td>{groups.map(g=><td key={g.key} className={g.profit<0?'fp-loss':'fp-gain'}>{money(g.profit)}</td>)}</tr></tfoot></table></div>;
 }

@@ -15,8 +15,8 @@ export interface StationPnlSummary {
   corporateHo: number | null;
   corporateEntries: Entry[];
   recordedProfit: number;
-  net: number | null;
-  profit: number | null;
+  net: number;
+  profit: number;
   complete: boolean;
   issues: string[];
 }
@@ -78,7 +78,7 @@ export function buildStationSummary(report: Report) {
         station, dimension: dimension(report, station), entries, revenue, recovery,
         directExpense, operatingExpense: directExpense - chargebacks, chargebacks, lossBreakdown,
         regionalHo, regionalHoPending: false, corporateHo: 0, corporateEntries: [],
-        recordedProfit, net: null, profit: null, complete: false, issues
+        recordedProfit, net: recordedProfit, profit: recordedProfit, complete: false, issues
       };
     });
   const issues: string[] = [];
@@ -140,7 +140,8 @@ export function buildStationSummary(report: Report) {
     row.issues = [...new Set(row.issues)];
     row.complete = !row.issues.length && row.corporateHo !== null && !row.regionalHoPending;
     row.recordedProfit -= sum(row.corporateEntries);
-    row.net = row.complete ? row.recordedProfit : null;
+    // Coverage is an alert, not a reason to hide the current recorded result.
+    row.net = row.recordedProfit;
     row.profit = row.net;
   }
   const stationCodes = new Set(rows.map(row => row.station));
