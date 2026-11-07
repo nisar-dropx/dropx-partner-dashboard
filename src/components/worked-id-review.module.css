@@ -2,6 +2,353 @@
   display: grid;
   gap: 16px;
 }
+.filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 14px;
+  padding: 16px;
+  position: relative;
+  z-index: 2;
+  overflow: visible !important;
+}
+.filters :global(.fc-multi-select) {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: #475569;
+}
+.filters :global(.fc-multi-select) > button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  min-height: 38px;
+  border: 1px solid #d9dfe7;
+  border-radius: 8px;
+  background: white;
+  color: #17212f;
+  cursor: pointer;
+}
+.filters :global(.fc-multi-select) > button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filters :global(.fc-multi-menu) {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: max(100%, 260px);
+  max-width: calc(100vw - 40px);
+  z-index: 60;
+  background: white;
+  border: 1px solid #dce4ef;
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 12px 28px #17243b26;
+}
+.filters :global(.fc-multi-menu-head) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.filters :global(.fc-multi-menu) button {
+  border: 0;
+  background: white;
+  color: #30425d;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.filters :global(.fc-multi-search) {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+.filters :global(.fc-multi-search) input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dce4ef;
+  border-radius: 6px;
+  padding: 7px;
+  font-size: 13px;
+}
+.filters :global(.fc-multi-options) {
+  max-height: 240px;
+  overflow: auto;
+}
+.filters :global(.fc-multi-options) > button,
+.filters :global(.fc-multi-all) {
+  width: 100%;
+  text-align: left;
+}
+.filters :global(.fc-multi-options) > button > span,
+.filters :global(.fc-multi-all) > span {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+.filters :global(.fc-multi-options) > button:global(.selected) {
+  background: #fff3e9;
+}
+.filters :global(.fc-multi-menu) small {
+  display: block;
+  color: #738197;
+  font-size: 11px;
+}
+.filters :global(.fc-multi-menu) svg {
+  flex-shrink: 0;
+}
+.scope {
+  font-size: 13px;
+  color: #526176;
+}
+.scope summary,
+.payDetails summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.scope p {
+  max-width: 1100px;
+  margin: 8px 0;
+}
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tabs button {
+  border: 1px solid #dce3ea;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: white;
+  color: #475569;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tabs button[aria-pressed="true"] {
+  background: #fff1e9;
+  border-color: #dc683c;
+  color: #883413;
+}
+.tabs strong {
+  margin-left: 5px;
+}
+.sub {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+}
+.punch {
+  color: #16734c;
+  font-weight: 600;
+}
+.error {
+  color: #b42318;
+  margin: 8px 0;
+}
+.warning {
+  background: #fff7e8;
+  border: 1px solid #f1d6a4;
+  color: #80501c;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin: 10px 0;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: #14243588;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.dialog {
+  width: min(1100px, 100%);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden !important;
+  margin: 0 !important;
+}
+.dialog > header {
+  flex-shrink: 0;
+}
+.dialogBody {
+  overflow: auto;
+  padding: 16px;
+  min-height: 0;
+}
+.footer {
+  padding: 14px 16px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  background: white;
+}
+.footer .error {
+  width: 100%;
+}
+.footer > span {
+  font-size: 12px;
+  color: #64748b;
+}
+.bulk {
+  padding: 14px;
+  background: #f5f7fa;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.bulkFields {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr);
+  gap: 12px;
+  align-items: end;
+  margin-top: 12px;
+}
+.bulkFields > button {
+  justify-self: start;
+}
+.dayCard {
+  border: 1px solid #dce4eb;
+  border-radius: 10px;
+  margin: 10px 0;
+  background: white;
+  overflow: visible;
+}
+.dayCard > summary {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px;
+  cursor: pointer;
+  background: #f8fafc;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.dayCard > summary > span {
+  font-size: 12px;
+  color: #64748b;
+}
+.dayBody {
+  padding: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+.review .check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+}
+.review .check input {
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: #d95529;
+}
+.evidence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.evidence > div {
+  display: grid;
+  gap: 4px;
+  background: #f5f8fa;
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+.evidence small {
+  color: #64748b;
+}
+.evidence strong {
+  font-size: 16px;
+  color: #243447;
+}
+.evidence span {
+  font-size: 12px;
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+.payDetails {
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.payDetails > div {
+  margin: 12px 0;
+}
+.payDetails ul {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+.payDetails p {
+  margin: 5px 0;
+}
+.share {
+  border: 1px solid #dce4eb;
+  border-radius: 10px;
+  padding: 14px;
+  margin: 12px 0;
+}
+@media (max-width: 800px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .evidence {
+    grid-template-columns: 1fr;
+  }
+  .dayCard > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .overlay {
+    padding: 8px;
+  }
+  .dialogBody {
+    padding: 10px;
+  }
+  .bulkFields {
+    grid-template-columns: 1fr;
+  }
+  .dialog {
+    max-height: 96vh;
+  }
+}
+@media (max-width: 500px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
+  .footer > button {
+    width: 100%;
+  }
+}
 
 .review label {
   display: flex;

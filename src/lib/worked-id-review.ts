@@ -9,6 +9,26 @@ export const workedIdMetrics = [
   "delivery_assigned_count",
   "pickup_assigned_count",
 ] as const;
+export const workedIdDeliveryRoles = ["DA", "DCD", "ODCD", "WM"];
+export const workedIdSalaryCodes = [
+  "MG_PER_DAY",
+  "MG_PER_MONTH",
+  "FIXED_PAY_PER_DAY",
+  "FIXED_PAY_PER_MONTH",
+];
+export function hasWorkedIdFixedSalary(
+  components: any[],
+  values: Record<string, unknown>,
+) {
+  return components.some(
+    (c) =>
+      c.is_active !== false &&
+      c.active !== false &&
+      (c.component_type || c.type) === "amount" &&
+      workedIdSalaryCodes.includes(c.component_code || c.code) &&
+      Number(values[c.component_code || c.code]) > 0,
+  );
+}
 export type WorkedMetric = (typeof workedIdMetrics)[number];
 export function workedIdCounts(row: Record<string, unknown>) {
   return Object.fromEntries(
