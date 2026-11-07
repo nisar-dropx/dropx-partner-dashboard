@@ -573,7 +573,7 @@ export function WorkedIdReview({
         <div className="panel-head">
           <div>
             <h2>
-              {groups.length} associates · {rows.length} day cases
+              {error ? "Cases unavailable" : `${groups.length} associates · ${rows.length} day cases`}
             </h2>
             <p className="subtle">
               {scope.size} permitted stations · Punch found, delivery evidence
@@ -597,6 +597,8 @@ export function WorkedIdReview({
         </div>
         {loading ? (
           <p className="panel-body">Loading all permitted stations…</p>
+        ) : error ? (
+          <p className="panel-body">Refresh to load the cases before reviewing.</p>
         ) : (
           <div className="table-wrap">
             <table>

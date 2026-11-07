@@ -92,7 +92,7 @@ export async function loadWorkedIdReview(
       db
         .from("workforce_payment_allocations")
         .select(
-          "workforce_id,station_id,effective_from,effective_to,payment_values,payment_components,payment_methods(name)",
+          "workforce_id,station_id,effective_from,effective_to,payment_values,payment_components,payment_methods:payment_methods!workforce_payment_allocations_method_company_fk(name)",
         )
         .eq("company_id", company)
         .in("station_id", stationIds)

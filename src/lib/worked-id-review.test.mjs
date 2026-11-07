@@ -7,7 +7,14 @@ import {
   workedIdMonth,
   hasWorkedIdFixedSalary,
   workedIdDeliveryRoles,
+  workedIdErrorMessage,
 } from "./worked-id-review.ts";
+test("upstream HTML is replaced by a short recovery message while review errors remain specific", () => {
+  assert.equal(workedIdErrorMessage(new Error('<!DOCTYPE html><html><title>525 SSL handshake failed</title></html>'), 'Failed'),
+    'The database connection is temporarily unavailable. Refresh and try again.');
+  assert.equal(workedIdErrorMessage(new Error('Only the assigned Cluster Manager may approve.'), 'Failed'),
+    'Only the assigned Cluster Manager may approve.');
+});
 test("only salary/MG qualifies, never rent, ODCD variable, fuel, zero rates or excluded roles", () => {
   const c = (code) => ({
     component_code: code,
