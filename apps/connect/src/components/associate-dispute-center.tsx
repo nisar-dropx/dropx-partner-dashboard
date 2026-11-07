@@ -1,5 +1,6 @@
 "use client";
 import { useCallback,useEffect,useState } from "react";
+import {DisputeProgress,DisputeCorrection,DisputePayment} from "./associate-payouts";
 import s from "../../../../src/components/guided-dispute.module.css";
 import { decodePayoutDisputeReason } from "../lib/payout-dispute";
 const money=(v:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR"}).format(v);
@@ -19,9 +20,9 @@ export function AssociateDisputeCenter({accountId,profileType,readOnly=false}:{a
     {shown.map(d=><details key={d.id} className={s.panel}><summary><b>{decodePayoutDisputeReason(d.reason).areas.join(" · ")||d.category}</b> · {d.month}<br/><span className={d.details?.awaiting_reply?s.warn:s.ok}>{d.details?.awaiting_reply?"Your reply is needed":d.workflow.label}</span><small className={s.muted}> · {d.station} · {when(d.updated_at)}</small></summary>
       <p>{decodePayoutDisputeReason(d.reason).reason}</p>
       {d.details?.awaiting_reply?<form onSubmit={e=>void reply(e,d)}><p className={s.error}>{d.details.question}</p><textarea name="message" required minLength={3} maxLength={1000} rows={2} placeholder="Write your reply"/><div className={s.actions}><button type="submit" disabled={busy===d.id||readOnly}>Send reply</button></div></form>:null}
-      {d.correction?<div className={s.totals}><div><span>{d.correction.netChangeVerified?"Published correction":"Approved · awaiting correction"}</span><b>{d.correction.deltaPaise==null?"Amount being checked":money(d.correction.deltaPaise/100)}</b></div><div><span>Payment</span><b>{d.payment?.status||"Not confirmed paid"}</b></div></div>:null}
+      <DisputeProgress dispute={d}/><DisputeCorrection dispute={d}/><DisputePayment dispute={d}/>
       {d.legacyResolutionUnverified?<p className={s.muted}>Historical closure · no verified revised payout linked.</p>:null}
-      {d.resolution?<p><b>Decision:</b> {d.resolution}</p>:null}
+      {d.resolution?<p aria-label="Final dispute decision"><b>Decision:</b> {d.resolution}</p>:null}
       <ol>{d.timeline.map((t:any,i:number)=><li key={i}><b>{t.label}</b> <small>{when(t.createdAt)}</small><p>{t.comment}</p></li>)}</ol>
       <small className={s.muted}>Ticket {d.id.slice(0,8).toUpperCase()}</small>
     </details>)}

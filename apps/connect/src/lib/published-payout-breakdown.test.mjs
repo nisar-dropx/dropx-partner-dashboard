@@ -86,21 +86,23 @@ test("payment information contains bank details only", () => {
   assert.doesNotMatch(paymentInformation, /payout\.(?:dropxId|name|station|providerIds|paymentReference|paymentDate)/);
 });
 
-test("payout disputes stay with Workforce and the associate view has no conversation or reply controls", () => {
-  const component = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
+test("payout requests are guided and replies stay inside the separate dispute tracker", () => {
+  const component = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8") + readFileSync(new URL("../components/associate-dispute-center.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../components/associate-payouts.module.css", import.meta.url), "utf8");
   const route = readFileSync(new URL("../../app/api/connect/payout-review/route.ts", import.meta.url), "utf8");
   const loader = readFileSync(new URL("./associate-payouts.ts", import.meta.url), "utf8");
 
   assert.match(component, /Dispute sent to Workforce for review\./);
   assert.match(component, /operation: ["']create["']/);
-  assert.match(component, /aria-controls="payout-dispute-section"[\s\S]*onClick=\{toggleDisputeSection\}/);
+  assert.match(component, /aria-controls="payout-dispute-section"[\s\S]*onClick=\{payout.canDispute \? toggleDisputeSection : onTrackDisputes\}/);
   assert.match(component, /ref=\{disputeSectionRef\} id="payout-dispute-section"[\s\S]*tabIndex=\{-1\} aria-labelledby="payout-dispute-heading"/);
   assert.match(component, /id="payout-dispute-heading"[\s\S]*Raise a dispute/);
   assert.match(component, /useEffect\(\(\) => \{\s*if \(!showDisputes\) return;[\s\S]*disputeSectionRef\.current\?\.focus\(\{ preventScroll: true \}\)[\s\S]*scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)[\s\S]*\}, \[showDisputes\]\)/);
   assert.match(styles, /\.disputes[\s\S]*scroll-margin-top:\s*88px/);
-  assert.doesNotMatch(component, /Dispute a deduction|openDeductionDispute|setDisputeAreas\(\["deduction"\]\)|station team|Send reply|event\.actor_name|operation: disputeId \? ["']reply["']/i);
+  assert.doesNotMatch(component, /Dispute a deduction|openDeductionDispute|setDisputeAreas\(\["deduction"\]\)|station team|operation: disputeId \? ["']reply["']/i);
 
+  assert.match(component, /operation:"reply"/);
+  assert.match(route, /workforce_reply_guided_dispute/);
   assert.match(route, /body\.operation\s*!==\s*["']create["']/);
   assert.doesNotMatch(route, /workforce_reply_payout_dispute|ownOpenDispute/);
   assert.match(loader, /workforce_payout_dispute_events/);
@@ -108,7 +110,7 @@ test("payout disputes stay with Workforce and the associate view has no conversa
 });
 
 test("associate payout disputes show approvals, correction progress and final payment context", () => {
-  const component = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
+  const component = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8") + readFileSync(new URL("../components/associate-dispute-center.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../components/associate-payouts.module.css", import.meta.url), "utf8");
   const loader = readFileSync(new URL("./associate-payouts.ts", import.meta.url), "utf8");
 
