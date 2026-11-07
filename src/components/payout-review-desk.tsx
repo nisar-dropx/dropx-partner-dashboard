@@ -1,12 +1,12 @@
 import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { decodePayoutReviewReason } from "@/lib/payout-review-display";
-import { PayoutDisputeCorrectionInputs } from "./payout-dispute-correction-inputs";
-import { payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadDisputeFinanceAccess, disputeFinalRoleIds } from "@/lib/payout-dispute-finance-access";
 import styles from "./payout-review-desk.module.css";
 import { UrlPager, readPaging } from "./url-pager";
+import { readAllRows } from "@/lib/supabase-pagination";
+import { GuidedDisputeReview } from "./guided-dispute-review";
 
 type Row = Record<string, any>;
 type WorkflowRoleKey = "initial_approver_role_ids" | "final_approver_role_ids" | "processor_role_ids";
@@ -23,6 +23,7 @@ const NONTERMINAL = [
   "processing_blocked"
 ];
 const STATUS_FILTERS: Record<string, string[] | null> = {
+  mine: NONTERMINAL,
   active: NONTERMINAL,
   initial: ["open"],
   final: ["in_review", "pending_final_approval"],
@@ -120,17 +121,16 @@ export async function PayoutReviewDesk({
   const company = requireCompanyId(auth);
   const financeAccess = pageCode === "workforce_payout_disputes" ? await loadDisputeFinanceAccess(auth) : null;
   const scope = auth.hasAllLocationAccess ? null : auth.locationScopeIds;
-  const requestedStatus = params.status && params.status in STATUS_FILTERS ? params.status : "active";
+  const requestedStatus = params.status && params.status in STATUS_FILTERS ? params.status : "mine";
   const filteredStatuses = STATUS_FILTERS[requestedStatus];
   const { page, size } = readPaging(params.page, params.size, 25);
-  const searching = Boolean((params.q || "").trim());
+  const searching = Boolean((params.q || "").trim()) || requestedStatus === "mine" || Boolean(params.month);
   const payrollRun = uuid(params.run);
   const requestedStation = uuid(params.station);
   const category = params.category && params.category in CATEGORIES ? params.category : "";
   const raised = monthRange(params.month);
 
   let stationsQuery = supabaseAdmin.from("stations").select("id,station_code").eq("company_id", company)
-    .eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
     .order("station_code").limit(1000);
   if (scope) stationsQuery = stationsQuery.in("id", scope.length ? scope : ["00000000-0000-0000-0000-000000000000"]);
   const stationList = await stationsQuery;
@@ -145,7 +145,6 @@ export async function PayoutReviewDesk({
   if (payrollRun) disputeQuery = disputeQuery.eq("payroll_run_id", payrollRun);
   if (station) disputeQuery = disputeQuery.eq("station_id", station);
   if (category) disputeQuery = disputeQuery.eq("category", category);
-  if (raised) disputeQuery = disputeQuery.gte("created_at", raised.from).lt("created_at", raised.to);
 
   let totalQuery = supabaseAdmin.from("workforce_payout_disputes").select("id", { count: "exact", head: true }).eq("company_id", company)
     .in("station_id", locationFilterIds);
@@ -153,13 +152,12 @@ export async function PayoutReviewDesk({
   if (payrollRun) totalQuery = totalQuery.eq("payroll_run_id", payrollRun);
   if (station) totalQuery = totalQuery.eq("station_id", station);
   if (category) totalQuery = totalQuery.eq("category", category);
-  if (raised) totalQuery = totalQuery.gte("created_at", raised.from).lt("created_at", raised.to);
 
   const countsQuery = supabaseAdmin.from("workforce_payout_disputes").select("status").eq("company_id", company)
     .in("station_id", locationFilterIds).limit(10000);
   const ordered = disputeQuery.order("created_at", { ascending: false }).order("id");
   const [disputeResult, countsResult, totalResult, workflowResult] = await Promise.all([
-    searching ? ordered.limit(500) : ordered.range((page - 1) * size, page * size - 1),
+    searching ? readAllRows(ordered) : ordered.range((page - 1) * size, page * size - 1),
     countsQuery,
     searching ? Promise.resolve({ count: 0, error: null }) : totalQuery,
     supabaseAdmin.from("workforce_payout_dispute_workflows")
@@ -257,6 +255,15 @@ export async function PayoutReviewDesk({
 
   const query = (params.q || "").trim().toLowerCase();
   const matched = disputes.filter((dispute) => {
+    if (params.month && period(publications.get(String(dispute.publication_id))).start.slice(0,7) !== params.month) return false;
+    if (requestedStatus === "mine") {
+      const stage = routeStage(dispute.status);
+      const selectedRole = routeRoleByStage.get(`${dispute.id}:${stage}`);
+      const roles = stage === "final" && financeAccess ? disputeFinalRoleIds(auth.effectiveRoleIds, financeAccess, String(dispute.station_id)) : auth.effectiveRoleIds;
+      if (!hasPermission(auth,pageCode,"edit") || !selectedRole || !roles.includes(selectedRole) || dispute.details?.awaiting_reply) return false;
+      if (stage === "final" && (dispute.initial_reviewed_by===auth.userId || dispute.proposed_by===auth.userId)) return false;
+      if (stage === "processor" && (dispute.initial_reviewed_by===auth.userId || dispute.final_approved_by===auth.userId || (dispute.processor_id && dispute.processor_id!==auth.userId))) return false;
+    }
     const worker = record(record(publications.get(String(dispute.publication_id))?.snapshot).item);
     const searchable = [worker.worker_name, worker.dropx_id, dispute.reason, dispute.category]
       .map((value) => String(value ?? "").toLowerCase()).join(" ");
@@ -313,6 +320,7 @@ export async function PayoutReviewDesk({
       <form method="get" className={styles.filters}>
         <input name="q" type="search" aria-label="Search disputes" placeholder="Search associate, DropX ID or reason" defaultValue={params.q} />
         <select name="status" aria-label="Dispute status" defaultValue={requestedStatus}>
+          <option value="mine">Pending with me</option>
           <option value="active">All active stages</option>
           <option value="initial">Initial review</option>
           <option value="final">Final approval</option>
@@ -330,7 +338,7 @@ export async function PayoutReviewDesk({
           <option value="">All categories</option>
           {Object.entries(CATEGORIES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
         </select>
-        <select name="month" aria-label="Raised in" defaultValue={raised ? params.month : ""}>
+        <select name="month" aria-label="Pay period" defaultValue={raised ? params.month : ""}>
           <option value="">Any month</option>
           {monthOptions.map((month) => <option key={month} value={month}>{new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" })}</option>)}
         </select>
@@ -354,9 +362,7 @@ export async function PayoutReviewDesk({
         const canProcess = canEditDesk && canEditPayout && hasWorkflow && stageAllowed(disputeId, "processor");
         const sameInitialActor = dispute.initial_reviewed_by === auth.userId || dispute.proposed_by === auth.userId;
         const sameApprovalActor = sameInitialActor || dispute.final_approved_by === auth.userId;
-        const plan = record(dispute.correction_plan);
-        const correctionFields = payoutDisputeCorrectionFields(dispute.reason, dispute.category, record(publication?.snapshot));
-        const result = record(dispute.processing_result);
+        const plan = record(dispute.correction_plan);        const result = record(dispute.processing_result);
         const candidate = latestRevision.get(String(dispute.id));
         const beforePaise = netPaise(publication);
         const afterPaise = netPaise(candidate);
@@ -368,8 +374,8 @@ export async function PayoutReviewDesk({
           q: String(worker.dropx_id || "")
         }).toString()}`;
         return (
-          <article className={styles.card} key={dispute.id}>
-            <header>
+          <details className={`${styles.card} ${styles.ticket}`} key={dispute.id}>
+            <summary><header>
               <div>
                 <h2>{workerLabel}</h2>
                 <small>Ticket {String(dispute.id).slice(0, 8).toUpperCase()} · </small>
@@ -379,8 +385,10 @@ export async function PayoutReviewDesk({
                 </small>
               </div>
               <span className={`${styles.pill} ${status.cls}`}>{status.label}</span>
-            </header>
+            </header><span className={styles.ticketMeta}>{dispute.details?.awaiting_reply ? "Awaiting associate reply" : dispute.processor_name || (routeStage(dispute.status)==="initial" ? "Initial reviewer" : routeStage(dispute.status)==="final" ? "Final approver" : "Payout processor")} · {Math.max(0,Math.floor((Date.now()-Date.parse(dispute.updated_at||dispute.created_at))/86400000))}d</span></summary>
+            <div className={styles.ticketBody}>
             {decoded.reason ? <p>{decoded.reason}</p> : null}
+            <GuidedDisputeReview id={disputeId} version={dispute.version || 1} details={dispute.details?.schema===3?dispute.details:{...dispute.details,...plan.claim}} editable={dispute.status==="open" && canInitial} action={action}/>
 
             {["pending_final_approval", "in_review", "approved_for_processing", "processing", "processing_blocked", "resolved"].includes(dispute.status) && dispute.proposed_decision ? (
               <div className={styles.proposal}>
@@ -392,10 +400,10 @@ export async function PayoutReviewDesk({
                       <div><dt>Disputed item</dt><dd>{String(item.target_field || "—")}</dd></div>
                       <div><dt>Current{item.unit ? ` (${item.unit === "rupees" ? "₹" : item.unit})` : ""}</dt><dd>{item.current_value == null ? "—" : String(item.current_value)}</dd></div>
                       <div><dt>Corrected value</dt><dd>{item.proposed_value == null ? "—" : String(item.proposed_value)}</dd></div>
-                      {item.unit_rate != null ? <div><dt>Published unit rate</dt><dd>₹{String(item.unit_rate)}</dd></div> : null}
-                      {item.expected_delta_paise != null ? <div><dt>Item net change</dt><dd>{moneyFromPaise(item.expected_delta_paise)}</dd></div> : null}
+                      {item.unit_rate != null && !["₹","rupees"].includes(item.unit) ? <div><dt>Applicable rate</dt><dd>₹{String(item.unit_rate)}</dd></div> : null}
                     </dl>)}
                     {plan.expected_delta_paise != null ? <p><b>Total expected net change:</b> {moneyFromPaise(plan.expected_delta_paise)}</p> : null}
+                    {plan.totals?<p>Gross ₹{plan.totals.gross_before} → ₹{plan.totals.gross_after} · Deductions ₹{plan.totals.deductions_before} → ₹{plan.totals.deductions_after} · Net ₹{plan.totals.net_before} → ₹{plan.totals.net_after}</p>:null}
                   </>
                 ) : null}
               </div>
@@ -422,22 +430,15 @@ export async function PayoutReviewDesk({
               canInitial ? (
                 <div className={styles.initialActions}>
                   <details>
-                    <summary>Propose payout correction</summary>
-                    <form action={action} className={styles.correctionForm}>
-                      <input name="dispute_id" type="hidden" value={dispute.id} />
-                      <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
-                      <PayoutDisputeCorrectionInputs key={`${dispute.id}:${dispute.version}`} fields={correctionFields} />
-                    </form>
-                  </details>
-                  <details>
                     <summary>Propose rejection</summary>
-                    <form action={action} className={styles.simpleAction}>
+                    <form id={`reject-${disputeId}`} action={action} className={styles.simpleAction}>
                       <input name="dispute_id" type="hidden" value={dispute.id} />
                       <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
                       <input name="note" required minLength={10} maxLength={1000} placeholder="Reason the associate will see (at least 10 characters)" aria-label="Rejection reason" />
                       <button className="button secondary" name="transition" value="propose_rejection">Send rejection for final approval</button>
                     </form>
                   </details>
+                  <form action={action} className={styles.simpleAction}><input name="dispute_id" type="hidden" value={dispute.id}/><input name="expected_version" type="hidden" value={dispute.version}/><input name="note" minLength={5} maxLength={1000} required placeholder="What should the associate clarify?" aria-label="Clarification question"/><button name="transition" value="request_clarification" className="button secondary">Ask associate</button></form>
                 </div>
               ) : <p className={styles.hint}>{hasWorkflow ? "Waiting for a configured initial approver." : "No workflow is configured for this station."}</p>
             ) : null}
@@ -446,10 +447,11 @@ export async function PayoutReviewDesk({
               sameInitialActor ? <p className={styles.hint}>You performed the initial review. A different final approver must decide.</p>
                 : canFinal ? (
                   <div className={styles.finalActions}>
-                    <form action={action} className={styles.simpleAction}>
+                    <form id={`final-${disputeId}`} action={action} className={styles.simpleAction}>
                       <input name="dispute_id" type="hidden" value={dispute.id} />
                       <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
                       <input name="note" maxLength={1000} placeholder="Final approval note (optional)" aria-label="Final approval note" />
+                      <label><input type="checkbox" name="evidence_reviewed" required/> Evidence and payout impact checked</label>
                       <button className="button" name="transition" value="approve_final">{dispute.proposed_decision === "rejected" ? "Confirm rejection" : "Approve correction for processing"}</button>
                     </form>
                     <form action={action} className={styles.simpleAction}>
@@ -515,7 +517,9 @@ export async function PayoutReviewDesk({
                 <ol>{events.map((event) => <li key={event.id}><span>{event.message}</span><small>{event.actor_name} · {when(event.created_at)}</small></li>)}</ol>
               </details>
             ) : null}
-          </article>
+            {((canFinal&&["pending_final_approval","in_review"].includes(dispute.status))||(canProcess&&["approved_for_processing","processing","processing_blocked"].includes(dispute.status)))&&plan.schema!==3?<form action={action} className={styles.simpleAction}><input name="dispute_id" type="hidden" value={dispute.id}/><input name="expected_version" type="hidden" value={dispute.version}/><input name="note" type="hidden" value="Revalidate the specific item and recalculate gross, deductions and net using current evidence."/><button name="transition" value="return_review" className="button secondary">Return for guided recalculation</button></form>:null}
+            </div>
+          </details>
         );
       })}
 

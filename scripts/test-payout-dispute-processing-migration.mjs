@@ -764,5 +764,7 @@ ok("Live route configuration applies twice with two-day policy", policy.review_w
 row=(await db.query(`select workforce_payout_dispute_role_can_edit('${C}','${R3}','ops_workforce_payouts') allowed`)).rows[0];
 ok("Accounts processing has required payout permission", row.allowed);
 
+const {testGuidedDisputes}=await import('./test-guided-payout-dispute-migration.mjs');
+await testGuidedDisputes(db,{C,S,W2,A1,A2,A3,roles:[R0,R1,R2,R3,R4,R5,R6,R7,R8,R9],ok,throws});
 console.log(failures ? `${failures} FAILED` : "ALL PASSED");
 process.exit(failures ? 1 : 0);

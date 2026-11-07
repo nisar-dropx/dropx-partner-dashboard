@@ -13,6 +13,8 @@ export type PayoutDisputeWorkflowStatus =
   | "in_review";
 
 export type AssociatePayoutDispute = {
+  version?: number;
+  details?: Record<string, any>;
   id: string;
   category: string;
   reason: string;
@@ -228,6 +230,8 @@ export function associatePayoutDispute(
 
   return {
     id: String(dispute.id ?? ""),
+    version: Number(dispute.version ?? 1),
+    details: { ...dispute.details, attachment: undefined },
     category: String(dispute.category ?? "other"),
     reason: String(dispute.reason ?? ""),
     status,

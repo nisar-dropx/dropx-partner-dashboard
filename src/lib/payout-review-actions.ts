@@ -4,10 +4,13 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { notifyAssociateOfPayoutDispute } from "@/lib/payout-dispute-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadDisputeFinanceAccess, disputeFinalRoleIds } from "@/lib/payout-dispute-finance-access";
-import { buildDisputeCorrectionPlan, payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
+import { payoutDisputeCorrectionFields } from "@/lib/payout-dispute-corrections";
+import { buildGuidedPlan, normalizeGuidedClaim } from "@/lib/payout-dispute-guide";
+import { loadDisputeEvidence } from "@/lib/payout-dispute-evidence";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIONS = new Set([
+  "request_clarification", "return_review",
   "propose_correction",
   "propose_rejection",
   "approve_final",
@@ -38,6 +41,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
 
   const text = (key: string) => String(form.get(key) || "").trim();
   const action = text("transition");
+  if(action === "approve_final" && text("evidence_reviewed") !== "on") throw new Error("Confirm the evidence and calculated payout impact before final approval.");
   const disputeId = text("dispute_id");
   const expectedVersion = Number(text("expected_version"));
   const note = text("note").slice(0, 1000);
@@ -53,22 +57,38 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
   const payload: Record<string, unknown> = { note: note || null, portal: ops ? "ops" : "workforce" };
   const companyId = requireCompanyId(auth);
   let actorRoleIds = auth.effectiveRoleIds;
-  if (!ops && ["approve_final", "send_back"].includes(action)) {
+  if (!ops && ["approve_final", "send_back", "return_review"].includes(action)) {
     const dispute = await supabaseAdmin.from("workforce_payout_disputes")
       .select("station_id").eq("company_id", companyId).eq("id", disputeId).single();
     if (dispute.error || !dispute.data) throw new Error("Dispute is unavailable. Refresh and try again.");
     actorRoleIds = disputeFinalRoleIds(actorRoleIds, await loadDisputeFinanceAccess(auth), dispute.data.station_id);
   }
-  if (action === "propose_correction") {
-    let query = supabaseAdmin.from("workforce_payout_disputes").select("reason,category,publication_id,version").eq("company_id", companyId).eq("id", disputeId);
+  if (["propose_correction", "propose_rejection", "approve_final"].includes(action)) {
+    let query = supabaseAdmin.from("workforce_payout_disputes").select("*").eq("company_id", companyId).eq("id", disputeId);
     if (!auth.hasAllLocationAccess) query = query.in("station_id", auth.locationScopeIds.length ? auth.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
     const dispute = await query.single();
     if (dispute.error || !dispute.data || dispute.data.version !== expectedVersion) throw new Error("This dispute changed or is unavailable. Refresh and try again.");
-    const publication = await supabaseAdmin.from("workforce_payout_publications").select("snapshot").eq("company_id", companyId).eq("id", dispute.data.publication_id).single();
+    const publication = await supabaseAdmin.from("workforce_payout_publications").select("*").eq("company_id", companyId).eq("id", dispute.data.publication_id).single();
     if (publication.error || !publication.data) throw new Error("The disputed payout could not be loaded. Refresh and try again.");
-    payload.correction_plan = buildDisputeCorrectionPlan(
-      payoutDisputeCorrectionFields(dispute.data.reason, dispute.data.category, publication.data.snapshot), form
-    );
+    {
+      const evidence = await loadDisputeEvidence(companyId, dispute.data, publication.data, auth);
+      if (evidence.sourceError) throw new Error(evidence.sourceError);
+      if (text("evidence_digest") !== evidence.digest) throw new Error("Open or refresh this request's evidence and check the latest records before deciding.");
+      payload.evidence_digest = evidence.digest;
+      if (action === "propose_correction") {
+        if (text("evidence_digest") !== evidence.digest) throw new Error("Supporting records changed. Reload evidence and check the latest values.");
+        const raw = dispute.data.details?.schema === 3 ? dispute.data.details : JSON.parse(text("guided_claim") || "{}");
+        const claim = normalizeGuidedClaim(publication.data.snapshot, raw);
+        if (dispute.data.details?.schema !== 3) {
+          const allowed = payoutDisputeCorrectionFields(dispute.data.reason, dispute.data.category, publication.data.snapshot).map(f => f.area);
+          const economic = ["attendance", "salary"].includes(claim.issue) ? ["work_days", "attendance_pay"] : claim.issue === "deduction" ? ["deduction", "legacy"] : claim.issue === "production" ? ["delivery", "customer_return", "pickup", "mfn_seller_pickup", "legacy"] : ["allowances", "incentive", "legacy"];
+          if (!allowed.some(a => economic.includes(a))) throw new Error("Select the item covered by this request. Ask the associate to clarify a different issue.");
+        }
+        payload.correction_plan = { ...buildGuidedPlan(publication.data.snapshot, claim, form, evidence.pricing), evidence_digest: evidence.digest };
+      } else if (action === "approve_final" && dispute.data.proposed_decision === "resolved" && dispute.data.correction_plan?.evidence_digest !== evidence.digest) {
+        throw new Error("Source records changed after initial review. Send back for a fresh calculation before approving.");
+      }
+    }
   }
   if (action === "complete_processing") {
     const publicationId = text("processed_publication_id");
@@ -86,7 +106,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
     };
   }
 
-  const result = await supabaseAdmin.rpc("workforce_dispute_transition_v2", {
+  const result = await supabaseAdmin.rpc("workforce_dispute_transition_v3", {
     p_company: companyId,
     p_dispute: disputeId,
     p_actor: auth.userId,
