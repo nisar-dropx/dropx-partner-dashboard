@@ -9,6 +9,7 @@ type Group = {
   size: number;
   enabled: boolean;
   stationIds: string[];
+  regionalEligible: boolean;
 };
 type Station = {
   id: string;
@@ -120,6 +121,7 @@ export function LastMileGroupDirectory({ stations }: { stations: Station[] }) {
             onChange={(e) => setStation(e.target.value)}
           >
             <option value="">Choose station</option>
+            {selected?.regionalEligible ? <option value="__regional__">Regional / Internal group · source selected in schedule</option> : null}
             {stations
               .filter((l) => selected?.stationIds.includes(l.id))
               .map((l) => (

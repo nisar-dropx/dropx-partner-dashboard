@@ -394,10 +394,19 @@ async function sendToGroup(body) {
   await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
   const mentions = cleanMentions(body.mentions);
   const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
+  const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
   let payload;
   let messageType = "text";
   let messageText = body.text;
-  if (hasImage) {
+  if (hasDocument) {
+    const bytes = Buffer.from(body.document_base64, "base64");
+    if (!bytes.length) throw Object.assign(new Error("document_base64 is empty."), { status: 422 });
+    if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("document is too large."), { status: 413 });
+    const caption = String(body.caption ?? "").trim().slice(0, 1024);
+    payload = { document: bytes, fileName: body.filename, mimetype: body.mime, caption, ...(mentions.length ? { mentions } : {}) };
+    messageType = "document";
+    messageText = caption || body.filename;
+  } else if (hasImage) {
     const bytes = Buffer.from(body.image_base64, "base64");
     if (!bytes.length) throw Object.assign(new Error("image_base64 is empty."), { status: 422 });
     if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("image is too large."), { status: 413 });

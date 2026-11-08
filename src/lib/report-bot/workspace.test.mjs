@@ -95,8 +95,19 @@ test('migration preserves DS, enforces company/workspace schedule isolation, sha
     const claim="insert into report_bot_lm_dispatch_runs(route_id,day,slot) values ($1,'2026-11-06','09:00')";
     await db.query(claim,[route]);
     await assert.rejects(db.query(claim,[route]),/duplicate key/);
+    await db.exec(readFileSync(new URL('../../../supabase/migrations/20261108193000_last_mile_configurable_edd_flash.sql',import.meta.url),'utf8'));
+    const migrated=(await db.query('select scope_type,source_location_ids,formats from report_bot_lm_dispatch_routes where id=$1',[route])).rows[0];
+    assert.equal(migrated.scope_type,'station');
+    assert.deepEqual(migrated.source_location_ids,[location]);
+    assert.deepEqual(migrated.formats,['photo']);
+    await db.query("update report_bot_lm_dispatch_routes set location_id=null,scope_type='region',source_location_ids='{}',source_region_codes='{KL,AP}',formats='{photo,excel}',times=array(select to_char(time '07:00' + i*interval '30 minutes','HH24:MI') from generate_series(0,30) i),schedule_start='07:00',schedule_end='22:00',interval_minutes=30,source_rule='today_edd_at_station_never_attempted' where id=$1",[route]);
+    assert.equal((await db.query('select cardinality(times)::int n from report_bot_lm_dispatch_routes where id=$1',[route])).rows[0].n,31);
+    const outputRun=(await db.query("insert into report_bot_lm_dispatch_runs(route_id,day,slot) values ($1,'2026-11-06','09:30') returning id",[route])).rows[0].id;
+    await db.query("insert into report_bot_lm_dispatch_run_outputs(run_id,output_key,status) values ($1,'photo','sent')",[outputRun]);
+    await assert.rejects(db.query("insert into report_bot_lm_dispatch_run_outputs(run_id,output_key) values ($1,'photo')",[outputRun]),/duplicate key/);
     await db.exec('set role authenticated');
     await assert.rejects(db.query('select * from report_bot_lm_dispatch_routes'),/permission denied/);
+    await assert.rejects(db.query('select * from report_bot_lm_dispatch_run_outputs'),/permission denied/);
     await assert.rejects(db.query('select * from report_bot_groups'),/permission denied/);
   } finally { await db.close(); }
 });

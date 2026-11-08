@@ -71,7 +71,7 @@ async function directory(request?: Request) {
           stations,
           auth.hasAllLocationAccess,
         );
-        if (!locations.length) return [];
+        if (!locations.length && (!auth.hasAllLocationAccess || (owner && owner.workspace !== "last_mile"))) return [];
         return [
           {
             id: group.id,
@@ -79,6 +79,7 @@ async function directory(request?: Request) {
             size: group.size,
             enabled: !!owner?.is_enabled,
             stationIds: locations.map((l) => l.id),
+            regionalEligible: auth.hasAllLocationAccess,
           },
         ];
       })
@@ -90,7 +91,7 @@ async function directory(request?: Request) {
       );
     const chosen = groups.find(
       (g) =>
-        g.id === selection.group && g.stationIds.includes(selection.station),
+        g.id === selection.group && (g.stationIds.includes(selection.station) || (g.regionalEligible && selection.station === "__regional__")),
     );
     if (!chosen)
       return NextResponse.json(
@@ -106,7 +107,7 @@ async function directory(request?: Request) {
     const values = {
       group_name: chosen.name,
       participant_count: chosen.size,
-      location_id: selection.station,
+      location_id: selection.station === "__regional__" ? null : selection.station,
       is_enabled: true,
       bot_in_group: true,
       mode: "observe",

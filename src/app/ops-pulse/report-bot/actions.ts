@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, type ReportBotAuthorization } from "@/lib/report-bot/access";
-import { dispatchReports, parseSlots, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
+import { dispatchReports, scheduleSlots, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
 import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isTestingGroupName, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
@@ -967,19 +967,47 @@ export async function previewScheduleReminders(form: FormData) {
 export async function saveDispatchRoutes(form: FormData) {
   await mutate("reports",async ({authorization,companyId}) => {
     const report = field(form,"report") as ReportKey;
-    const format = field(form,"format");
-    if (!Object.prototype.hasOwnProperty.call(dispatchReports,report) || !["photo","text","table"].includes(format)) throw new Error("Select a report and format.");
-    const times = parseSlots(field(form,"times"),report);
+    if (!Object.prototype.hasOwnProperty.call(dispatchReports,report)) throw new Error("Select a report.");
+    const scopeType = field(form,"scope_type");
+    if (!['station','region'].includes(scopeType)) throw new Error("Choose station or region scope.");
+    const formats = [...new Set(form.getAll("format").map(String))];
+    if (!formats.length || formats.some(value => !["photo","text","excel"].includes(value))) throw new Error("Choose at least one output format.");
+    const scheduleStart = field(form,"schedule_start"), scheduleEnd = field(form,"schedule_end");
+    const intervalMinutes = Number(field(form,"interval_minutes"));
+    const times = scheduleSlots(scheduleStart,scheduleEnd,intervalMinutes);
     const mentions = [...new Set(field(form,"mentions").split(/[\s,]+/).filter(Boolean).map(n=>n.replace(/^\+/,"")))];
     const question = field(form,"question");
     if (mentions.length > 10 || mentions.some(n=>!/^\d{8,15}$/.test(n))) throw new Error("Enter up to 10 international numbers with country codes.");
     if (question.length > 400) throw new Error("Keep the question under 400 characters.");
     const ids = [...new Set(form.getAll("group_id").map(String))];
     if (!ids.length || ids.length > 100) throw new Error("Select between 1 and 100 mapped Last Mile groups.");
+    const scope = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+    if (scope.error) throw new Error("Active source locations could not be loaded.");
+    const lastMileLocations = scope.locations.filter(location=>!location.is_ho && !location.hide_from_location_list && locationModelName(location).toUpperCase() !== "NOW");
+    const activeById = new Map(lastMileLocations.map(location => [location.id,location]));
+    const sourceLocationIds = [...new Set(form.getAll("source_location_id").map(String))];
+    const sourceRegionCodes = [...new Set(form.getAll("source_region_code").map(String).map(value=>value.trim()).filter(Boolean))];
+    if (scopeType === "station") {
+      if (!sourceLocationIds.length || sourceLocationIds.length > 100 || sourceLocationIds.some(id=>!activeById.has(id))) throw new Error("Choose between 1 and 100 active source stations in your scope.");
+    } else {
+      if (!authorization.hasAllLocationAccess) throw new Error("Regional Internal LM schedules require all-location access.");
+      const availableRegions = new Set(lastMileLocations.map(location=>String(location.region || "").trim()).filter(Boolean));
+      if (!sourceRegionCodes.length || sourceRegionCodes.length > 25 || sourceRegionCodes.some(region=>!availableRegions.has(region))) throw new Error("Choose one or more active regions from the location master.");
+    }
     const rows = await Promise.all(ids.map(async id => {
       const g = await scopedGroup(authorization,companyId,id);
-      if (!g.location_id || !g.is_enabled) throw new Error("Enable the group and map its station first.");
-      return {company_id:companyId,group_id:id,location_id:g.location_id,report,times,format,mentions,question,pending_only:form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()};
+      if (!g.is_enabled) throw new Error("Enable the destination group first.");
+      return {
+        company_id:companyId,group_id:id,
+        location_id:scopeType === "station" ? sourceLocationIds[0] : null,
+        scope_type:scopeType,
+        source_location_ids:scopeType === "station" ? sourceLocationIds : [],
+        source_region_codes:scopeType === "region" ? sourceRegionCodes : [],
+        report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
+        schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
+        source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",
+        mentions,question,pending_only:form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()
+      };
     }));
     check(await reportBotDb().from("report_bot_lm_dispatch_routes").upsert(rows,{onConflict:"group_id,report"}),"Save report schedules");
     return {notice:"Saved schedules for "+rows.length+" group(s)."};
