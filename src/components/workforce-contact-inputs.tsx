@@ -34,16 +34,28 @@ export function WorkforceMobileInput({
   name = "mobile",
   placeholder = "Enter mobile number",
   required,
+  checkRejoin = false,
   ...props
-}: SharedInputProps) {
+}: SharedInputProps & { checkRejoin?: boolean }) {
   const [value, setValue] = useState(() => digitsOnly(String(defaultValue ?? "")).slice(0, 10));
+  const [matches,setMatches]=useState<{id:string;dropx_id:string;full_name:string;canRejoin:boolean}[]>([]);
+  const [lookupError,setLookupError]=useState('');
+  useEffect(()=>{
+    setMatches([]);setLookupError('');
+    if(!checkRejoin || value.length!==10) return;
+    const controller=new AbortController();
+    const timer=setTimeout(()=>{void fetch(`/api/ops-pulse/workforce-lifecycle?mobile=${encodeURIComponent(value)}`,{signal:controller.signal,cache:'no-store'})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setMatches(data.matches||[]);})
+      .catch(error=>{if(!controller.signal.aborted)setLookupError('Could not check existing profiles. Retry before creating a new ID.');});},350);
+    return()=>{clearTimeout(timer);controller.abort();};
+  },[value,checkRejoin]);
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     setValue(digitsOnly(event.target.value).slice(0, 10));
   }
 
   return (
-    <input
+    <><input
       {...props}
       autoComplete="tel-national"
       className={className}
@@ -58,6 +70,8 @@ export function WorkforceMobileInput({
       type="text"
       value={value}
     />
+    {matches.map(match=><small key={match.id} style={{display:'block'}} role="status">{match.full_name} · {match.dropx_id} already exists. <a href={`/work-force-register?section=lifecycle&profile=${match.id}`}>{match.canRejoin?'Rejoin / reactivate':'View existing profile'}</a></small>)}
+    {lookupError?<small role="alert">{lookupError}</small>:null}</>
   );
 }
 
