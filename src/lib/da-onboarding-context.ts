@@ -10,7 +10,7 @@ export async function onboardingContext(request:Request,stationId:string,action:
  const auth=await getAuthorization();
  if(!auth?.companyId)throw new OnboardingError('Sign in to continue.',401);
  if(!hasPermission(auth,'delivery_associates',action)||(action!=='access'&&(auth.readOnly||auth.isPreview)))throw new OnboardingError('You do not have access to this action.',403);
- if(action!=='access'&&request.headers.get('origin')!==new URL(request.url).origin)throw new OnboardingError('Reload the page before making changes.',403);
+ if(!['GET','HEAD','OPTIONS'].includes(request.method)&&action!=='access'&&request.headers.get('origin')!==new URL(request.url).origin)throw new OnboardingError('Reload the page before making changes.',403);
  const stations=await loadOpsWorkforceLocations(auth.companyId,auth);
  const station=stations.find(s=>s.id===stationId&&workforceStationPolicy(s).requiresStationEmail);
  if(!station)throw new OnboardingError('Select a station within your access.',403);

@@ -17,6 +17,10 @@ const route=load('src/app/api/ops-pulse/da-onboarding/invite/route.ts');const or
 const body={id,stationId:station,name:'Example Associate',mobile:'9000000000',designationId:role,reportedOn:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'})};
 const post=(b=body,o=origin)=>route.POST(new Request(origin+'/api/ops-pulse/da-onboarding/invite',{method:'POST',headers:{Origin:o,'Content-Type':'application/json'},body:JSON.stringify(b)}));
 (async()=>{
+ const settingsRequest=new Request(origin+'/api/ops-pulse/da-onboarding/invite?station='+station);
+ let settings=await route.GET(settingsRequest);assert.equal(settings.status,200);assert.deepEqual((await settings.json()).roles.map(r=>r.code),['DA']);
+ fixture.auth.allowed=false;assert.equal((await route.GET(settingsRequest)).status,403);fixture.auth.allowed=true;
+
  assert.equal((await post(body,'https://other.test')).status,403);fixture.auth.readOnly=true;assert.equal((await post()).status,403);fixture.auth.readOnly=false;fixture.auth.isPreview=true;assert.equal((await post()).status,403);fixture.auth.isPreview=false;
  assert.equal((await post({...body,stationId:'unauthorized'})).status,403);assert.equal((await post({...body,designationId:'hk'})).status,403);assert.equal(fixture.created,0);assert.equal(fixture.generated,0);
  fixture.identity=true;assert.equal((await post()).status,409);assert.equal(fixture.created,0);fixture.identity=false;
