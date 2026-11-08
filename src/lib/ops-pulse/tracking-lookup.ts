@@ -37,6 +37,18 @@ export type TrackingLookupResult =
       lockerName: string | null;
       history: PackageHistoryEvent[];
     }
+  | {
+      status: "snapshot";
+      trackingId: string;
+      stationCode: string;
+      stationName: string | null;
+      packageStatus: string | null;
+      driverName: string | null;
+      driverId: string | null;
+      promisedDeliveryTime: string | null;
+      sourceBucket: string;
+      message: string;
+    }
   | { status: "not_found" }
   | { status: "not_configured" };
 

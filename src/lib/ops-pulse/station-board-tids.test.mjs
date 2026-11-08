@@ -18,6 +18,14 @@ test("mapBoardTidExportRows prefers BoardEDD and maps Ageing / zero DSR filters"
   assert.deepEqual(edd.map((row) => row.trackingId), ["T1"]);
   assert.equal(edd[0].report, "EDD");
 
+  const today = mapBoardTidExportRows([
+    { stationCode: "KGQC", trackingId: "TODAY-1", bucket: "BoardPendingToday", state: "INDUCTED", edd: "2026-11-08", driverId: "", driverName: "" },
+    { stationCode: "KGQC", trackingId: "OTHER", bucket: "BoardEDD", state: "INDUCTED", edd: "2026-11-08", driverId: "", driverName: "" },
+  ], "edd-today");
+  assert.deepEqual(today.map((row) => row.trackingId), ["TODAY-1"]);
+  assert.equal(today[0].status, "Due today · never attempted");
+  assert.equal(today[0].sourceBucket, "BoardPendingToday");
+
   const ageing = mapBoardTidExportRows(flash, "ageing");
   assert.deepEqual(ageing.map((row) => row.trackingId), ["T3"]);
 

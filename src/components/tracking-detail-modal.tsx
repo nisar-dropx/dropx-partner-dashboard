@@ -26,11 +26,13 @@ function formatAmount(value: number | null) {
 export function TrackingDetailModal({
   trackingId,
   stationHint,
+  businessDate,
   onClose,
   onLookupComplete
 }: {
   trackingId: string | null;
   stationHint?: string;
+  businessDate?: string;
   onClose: () => void;
   onLookupComplete?: (result: Extract<TrackingLookupResult, { status: "found" }>) => void;
 }) {
@@ -47,6 +49,7 @@ export function TrackingDetailModal({
     const url = new URL("/api/ops-pulse/tracking-lookup", window.location.origin);
     url.searchParams.set("trackingId", trackingId);
     if (stationHint) url.searchParams.set("stationCode", stationHint);
+    if (businessDate) url.searchParams.set("date", businessDate);
     fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
@@ -67,7 +70,7 @@ export function TrackingDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [trackingId, stationHint]);
+  }, [trackingId, stationHint, businessDate]);
 
   useEffect(() => {
     if (!trackingId) return;
@@ -134,6 +137,19 @@ export function TrackingDetailModal({
                 </ol>
               </>
             ) : null}
+          </>
+        ) : result.status === "snapshot" ? (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <span className="tracking-search-state-pill">{result.packageStatus ?? "Saved EDD record"}</span>
+            </div>
+            <p className="tracking-search-message warn">{result.message}</p>
+            <dl className="tracking-search-detail">
+              <div><dt>Station</dt><dd>{result.stationCode}{result.stationName ? ` — ${result.stationName}` : ""}</dd></div>
+              <div><dt>Driver</dt><dd>{result.driverName || result.driverId || "—"}</dd></div>
+              <div><dt>Promised by</dt><dd>{formatDateTime(result.promisedDeliveryTime)}</dd></div>
+              <div><dt>Board source</dt><dd>{result.sourceBucket === "BoardPendingToday" ? "Today EDD pending" : "EDD inventory"}</dd></div>
+            </dl>
           </>
         ) : result.status === "not_found" ? (
           <p className="tracking-search-message">
