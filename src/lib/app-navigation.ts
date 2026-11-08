@@ -57,6 +57,10 @@ export const navItems: NavItem[] = [
       { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" }
     ]
   },
+  { code: "delivery_associates", label: "Workforce", icon: "+", children: [
+    { code: "delivery_associates", label: "Onboarding & lifecycle", href: "/workforce/onboarding" },
+    { code: "delivery_associates", label: "Existing onboarding", href: "/workforce" }
+  ] },
   { code: "executive_id_onboarding", label: "Executive ID Onboarding", href: "/executive-id-onboarding", icon: "ID" },
   { code: "provider_mapping", label: "ID Mapping", href: "/provider-id-mapping", icon: "<>" },
   { code: "provider_mapping", label: "Worked ID review", href: "/provider-id-mapping/worked-days", icon: "WD" },
