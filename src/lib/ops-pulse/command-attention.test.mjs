@@ -139,11 +139,12 @@ test('payout dispute attention is skipped when no selected stations remain in sc
 });
 
 test('BGC priority opens only requested information within selected Amazon stations',async()=>{
- const f=fixture(['ops_amazon_da'],false,null,true);
+ assert.deepEqual(await fixture(['ops_amazon_da'],false,null,true).run(),[]);
+ const f=fixture(['workforce_onboarding','ops_amazon_da'],false,null,true);
  const item=(await f.run()).find(i=>i.key==='idfy');
  assert.equal(item.count,2);assert.equal(item.action,'Resolve BGC');assert.equal(item.tone,'urgent');
  assert.deepEqual(f.calls,[['idfy',['a']]]);assert.match(item.href,/stations=a/);
- assert.deepEqual(await fixture(['ops_amazon_da'],false,null,false).run(),[]);
- assert.deepEqual(await fixture(['ops_amazon_da'],false,null,true).run('amazon_now'),[]);
- assert.equal((await fixture(['ops_amazon_da'],true,null,true).run())[0].tone,'unknown');
+ assert.deepEqual(await fixture(['workforce_onboarding','ops_amazon_da'],false,null,false).run(),[]);
+ assert.deepEqual(await fixture(['workforce_onboarding','ops_amazon_da'],false,null,true).run('amazon_now'),[]);
+ assert.equal((await fixture(['workforce_onboarding','ops_amazon_da'],true,null,true).run())[0].tone,'unknown');
 });

@@ -1,0 +1,27 @@
+const fs=require('node:fs'),assert=require('node:assert/strict'),ts=require('typescript');
+const source=fs.readFileSync('src/lib/authorization.ts','utf8');
+const m={exports:{}};
+new Function('require','module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(name=>{
+ if(name==='react')return {cache:f=>f};
+ if(name==='next/cache')return {unstable_cache:f=>f};
+ if(name==='@/lib/access-pages')return {accessPages:[]};
+ if(name==='./mapping-summary-access')return {inheritsMappingSummaryAccess:()=>false};
+ return {};
+},m,m.exports);
+const {hasPermission}=m.exports;
+const none={canView:false,canAdd:false,canEdit:false},full={canView:true,canAdd:true,canEdit:true};
+const owner={companyId:'c',isMasterOwner:true,roleCode:'OWNER',hasAllLocationAccess:true,locationScopeIds:[],permissions:{delivery_associates:full,ops_amazon_da:full}};
+for(const action of ['access','view','add','edit'])assert.equal(hasPermission(owner,'workforce_onboarding',action),false,'owner/location access cannot bypass explicit rollout grant');
+assert.equal(hasPermission(owner,'delivery_associates','access'),true,'existing register unchanged');
+owner.permissions.workforce_onboarding=full;
+for(const action of ['access','view','add','edit'])assert.equal(hasPermission(owner,'workforce_onboarding',action),true);
+owner.readOnly=true;assert.equal(hasPermission(owner,'workforce_onboarding','view'),true);assert.equal(hasPermission(owner,'workforce_onboarding','edit'),false);
+owner.readOnly=false;owner.permissions.workforce_onboarding=none;assert.equal(hasPermission(owner,'workforce_onboarding','access'),false,'revocation respected');
+const manager={...owner,isMasterOwner:false,roleCode:'MANAGER',permissions:{workforce_onboarding:{canView:true,canAdd:false,canEdit:false}}};
+assert.equal(hasPermission(manager,'workforce_onboarding','view'),true);assert.equal(hasPermission(manager,'workforce_onboarding','add'),false);
+for(const f of ['src/lib/app-navigation.ts','src/lib/ops-pulse/navigation.ts'])assert.match(fs.readFileSync(f,'utf8'),/code: "workforce_onboarding"[^\n]*label: "Workforce onboarding"/);
+assert.match(fs.readFileSync('src/components/workforce-onboarding-hub.tsx','utf8'),/requirePagePermission\('workforce_onboarding','access'\)/);
+assert.match(fs.readFileSync('src/app/api/ops-pulse/da-onboarding/route.ts','utf8'),/hasPermission\(auth,'workforce_onboarding','access'\)/);
+assert.match(fs.readFileSync('src/lib/da-onboarding-context.ts','utf8'),/hasPermission\(auth,'workforce_onboarding',action\)/);
+assert.match(fs.readFileSync('src/lib/access-pages.ts','utf8'),/activePages.filter\(\(page\) => page.code !== "workforce_onboarding"\)/);
+console.log('Workforce onboarding access: explicit master grant, owner deny, revocation, preview writes, independent register, menu and API guards passed.');

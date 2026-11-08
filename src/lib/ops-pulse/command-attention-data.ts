@@ -139,7 +139,7 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       if(has('ops_rostering'))items.push({key:'rosters',title:'Your roster approvals',href:'/rostering?view=approvals',value:data.rosterCount===null?'Unavailable':`${data.rosterCount} plans pending`,detail:'Unique plans assigned to you · across authorized LM + DS locations',action:'Review plans',tone:data.rosterCount===null?'unknown':data.rosterCount?'action':'clear'});
       return items;
     })(),
-    check(mode!=='amazon_now'&&has('ops_amazon_da')&&selected.some(amazonDeskLocation),'idfy','IDfy insufficiencies','/workforce/onboarding?view=bgc-pending',async()=>{
+    check(mode!=='amazon_now'&&has('workforce_onboarding')&&has('ops_amazon_da')&&selected.some(amazonDeskLocation),'idfy','IDfy insufficiencies','/workforce/onboarding?view=bgc-pending',async()=>{
       const data=await loadAmazonDaAttention(a,ids);
       if(!data)throw Error('Unavailable');
       return {value:data.count?`${data.count} need information`:'Check status',count:data.count,href:data.href,
