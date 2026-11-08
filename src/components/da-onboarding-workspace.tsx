@@ -8,8 +8,9 @@ type Props=React.ComponentProps<typeof DAOnboardingDesk>&{initialTab?:string};
 /** Keep provider progress and DropX registration as separate, permission-scoped workspaces. */
 export function DAOnboardingWorkspace({initialTab,...props}:Props){
  const router=useRouter(),path=usePathname();
- const tab=props.canAmazon&&!['joiners','registration'].includes(initialTab||'')?'amazon':'registration';
- const [station,setStation]=useState(props.initialStation||props.stations.find(s=>s.supported)?.id||'');
+ const registrationLink=['joiners','registration'].includes(initialTab||'')||(!initialTab&&(!!props.initialStations?.length||props.initialView==='bgc-pending'));
+ const tab=props.canAmazon&&!registrationLink?'amazon':'registration';
+ const [station,setStation]=useState(props.initialStation||props.initialStations?.[0]||props.stations.find(s=>s.supported)?.id||'');
  function navigate(next:string){const q=new URLSearchParams(window.location.search);q.set('tab',next);if(station)q.set('station',station);q.delete('view');router.push(path+'?'+q);}
  return <div className={styles.desk}>
   <nav className={styles.workspaceTabs} aria-label="DA onboarding workspace">

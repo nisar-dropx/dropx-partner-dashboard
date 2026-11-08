@@ -16,7 +16,7 @@ export function filterDA(rows:ScopedDA[],f:DAFilters){const terms=f.query.toLowe
 export function daExportRows(rows:ScopedDA[]){return rows.map(r=>({
  Station:r.stationCode,Name:r.name,Mobile:r.phone||'',Email:r.email||'','DropX ID':r.owner?.dropx_id||'','DropX owner':r.owner?.full_name||'',
  'Provider employee ID':r.owner?.provider_employee_id||'','Amazon transporter ID':r.amazon?.transporterId||r.guided?.driverId||'','Amazon profile ID':r.amazon?.providerId||r.guided?.amazonProfileId||'',
- Status:r.status,'Account source':r.origin,'Next action':r.next,'Registration status':r.guided?.registration||r.owner?.onboarding_status||'',
+ Status:r.status,'Account source':r.origin,'Next action':r.next,'Registration status':r.owner?.onboarding_status||r.guided?.registration||'',
  'Onboarding step':r.amazon?.stage||'','Steps completed':r.amazon?.completedSteps??'','Total steps':r.amazon?.totalSteps??'',
  Qualifications:r.amazon?.qualifications||'','Licence expiry':r.amazon?.licenseExpiry||'','BGC status':r.amazon?.bgc?.status||r.guided?.bgc||'Not checked',
  'Address verification':r.amazon?.bgc?.address?.label||'Not checked','IDfy checked at':r.amazon?.bgc?.checkedAt||'',
