@@ -9,13 +9,18 @@ import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import {
   loadCortexBoard,
   loadCortexStations,
-  pickCortexStation,
 } from "@/lib/ops-pulse/cortex-data";
 
 export const dynamic = "force-dynamic";
 
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+const selectedIds = (value: string | string[] | undefined) =>
+  (Array.isArray(value) ? value : [value || ""])
+    .flatMap((item) => item.split(","))
+    .map((item) => item.trim())
+    .filter(Boolean);
+const MAX_SELECTED_STATIONS = 8;
 
 export default async function CortexPerformancePage({
   searchParams = {},
@@ -73,17 +78,30 @@ export default async function CortexPerformancePage({
     auth.locationScopeIds,
     auth.hasAllLocationAccess,
   );
-  const station = pickCortexStation(stations, one(searchParams.station));
+  const allowedIds = new Set(stations.map((station) => station.id));
+  const requestedStationIds = selectedIds(searchParams.stations ?? searchParams.station)
+    .filter((id) => allowedIds.has(id))
+    .slice(0, MAX_SELECTED_STATIONS);
+  const effectiveStationIds = requestedStationIds.length
+    ? requestedStationIds
+    : stations[0]
+      ? [stations[0].id]
+      : [];
+  const selectedStations = effectiveStationIds
+    .map((id) => stations.find((station) => station.id === id))
+    .filter((station): station is NonNullable<typeof station> => Boolean(station));
   const query = one(searchParams.q) || "";
 
-  let board = null;
+  let boards: Awaited<ReturnType<typeof loadCortexBoard>>[] = [];
   let loadError = scope.error ? "Station access could not be loaded." : "";
   if (!stations.length && !loadError) {
     loadError =
       "No Amazon EDSP/XPT stations with a service area are in your approved locations.";
-  } else if (station) {
+  } else if (selectedStations.length) {
     try {
-      board = await loadCortexBoard({ companyId, station, date });
+      boards = await Promise.all(
+        selectedStations.map((station) => loadCortexBoard({ companyId, station, date })),
+      );
     } catch (e) {
       loadError = e instanceof Error ? e.message : "Cortex board could not be loaded.";
     }
@@ -112,9 +130,10 @@ export default async function CortexPerformancePage({
         ) : (
           <CortexWorkspace
             stations={stations}
-            board={board}
+            boards={boards}
+            selectedStationIds={effectiveStationIds}
             initialQuery={query}
-            key={`${station?.id || "none"}-${date}`}
+            key={`${effectiveStationIds.join(",") || "none"}-${date}`}
           />
         )}
       </div>
