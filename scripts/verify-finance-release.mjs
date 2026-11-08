@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 // Kept in the Finance project's platform build command as well as package.json.
 // A main/Dashboard checkout without the full Finance product must fail to build.
 const required = [
+  'src/app/payments/people-payroll/page.tsx',
+  'src/app/payments/loss-clearance/page.tsx',
+  'src/app/api/payments/people-payroll/route.ts',
+  'src/app/api/payments/loss-clearance/route.ts',
+  'src/lib/payment-release-access.ts',
   'src/app/finance/page.tsx',
   'src/app/finance/business/pnl-workspace.tsx',
   'src/app/finance/business/details/route.ts',

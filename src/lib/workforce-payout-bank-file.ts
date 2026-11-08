@@ -46,7 +46,7 @@ export type WorkforceFedOnePaymentInstruction = {
 export type WorkforceFedOneWorkbookOptions = {
   debitAccountNumber: string;
   instructions: readonly WorkforceFedOnePaymentInstruction[];
-  referencePrefix?: "WF" | "WP" | "HP";
+  referencePrefix?: "WF" | "WP" | "HP" | "HR";
   valueDate: string;
 };
 
@@ -161,9 +161,9 @@ export function isValidWorkforceBankIfsc(value: unknown) {
   return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizeWorkforceBankIfsc(value));
 }
 
-export function isValidWorkforceBankReference(value: unknown, referencePrefix: "WF" | "WP" | "HP" = "WF") {
+export function isValidWorkforceBankReference(value: unknown, referencePrefix: "WF" | "WP" | "HP" | "HR" = "WF") {
   const reference = normalizeWorkforceBankReference(value);
-  const pattern = referencePrefix === "HP"
+  const pattern = referencePrefix === "HR" ? /^HR[A-F0-9]{24}$/ : referencePrefix === "HP"
     ? /^HP[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/
     : /^(?:WF|WP)[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/;
   return reference.length <= 64 && pattern.test(reference);
