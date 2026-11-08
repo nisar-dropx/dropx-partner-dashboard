@@ -49,7 +49,7 @@ function define(
     definitions[path] = { kind, description, columns, examples, action };
 }
 define(
-  ["/workforce/amazon-onboarding"], "workforce",
+  ["/workforce/amazon-onboarding", "/workforce/onboarding"], "workforce",
   "Station-scoped Amazon onboarding, current status and recorded user actions.",
   ["Associate", "Amazon status", "Current step", "Next action"],
   [
