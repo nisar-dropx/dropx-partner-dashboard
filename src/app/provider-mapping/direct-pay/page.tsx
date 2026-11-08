@@ -294,7 +294,9 @@ export default async function DirectPaymentAllocationsPage({
     />
     {!paymentSettingsEntry ? <>
       <nav aria-label="ID mapping views" className="performance-tabs">
-        <Link href="/provider-id-mapping">Provider member first</Link>
+        <Link href="/provider-id-mapping">ID & pay mapping</Link>
+        <Link href="/provider-id-mapping?view=days">Daily ID usage</Link>
+        <Link href="/provider-id-mapping?view=review">Worked ID review</Link>
         <Link className="active" href="/provider-mapping/direct-pay">Direct pay allocations</Link>
         {canViewSummary ? <Link href="/provider-id-mapping/summary">Mapping summary</Link> : null}
       </nav>

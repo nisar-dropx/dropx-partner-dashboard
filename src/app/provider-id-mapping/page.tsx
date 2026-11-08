@@ -39,7 +39,7 @@ function appendMapValue<Key, Value>(map: Map<Key, Value[]>, key: Key, value: Val
 }
 
 export default async function ProviderIdMappingPage({searchParams}: {searchParams?: {q?:string;station?:string;month?:string;mapping?:string;view?:string}}) {
-  if (searchParams?.view === 'days') return <DailyIdUsageSection month={searchParams.month}/>;
+  if (searchParams?.view === 'days' || searchParams?.view === 'review') return <DailyIdUsageSection month={searchParams.month} review={searchParams.view === 'review'}/>;
   const pageCode = currentProviderMappingPageCode();
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
@@ -304,7 +304,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
   return <AppShell active="ID Mapping" pageCode={pageCode}>
     <div className={workspace.workspace}><PageHead eyebrow="Workforce" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
-    <nav className={workspace.nav} aria-label="ID mapping views"><Link aria-current="page" href="/provider-id-mapping">ID & pay mapping</Link><Link href="/provider-id-mapping?view=days">Daily ID usage</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>{canViewSummary?<Link href="/provider-id-mapping/summary">Mapping summary</Link>:null}</nav>
+    <nav className={workspace.nav} aria-label="ID mapping views"><Link aria-current="page" href="/provider-id-mapping">ID & pay mapping</Link><Link href="/provider-id-mapping?view=days">Daily ID usage</Link><Link href="/provider-id-mapping?view=review">Worked ID review</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>{canViewSummary?<Link href="/provider-id-mapping/summary">Mapping summary</Link>:null}</nav>
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}

@@ -6,7 +6,8 @@ export function responseActions({enabled, state, canManage, stationView, readOnl
   if (stationView) return ["awaiting_station", "returned", "legacy"].includes(state) ? ["response"] : [];
   if (!canManage) return [];
   if (state === "awaiting_review") return ["approve", "return"];
-  if (["approved", "with_vendor"].includes(state)) return ["tracking", "won", "lost"];
+  if (state === "approved") return ["tracking"];
+  if (state === "with_vendor") return ["tracking", "won", "lost"];
   // Enable/disable belongs to Manage exceptions and the tracking queue, never this form.
   return [];
 }

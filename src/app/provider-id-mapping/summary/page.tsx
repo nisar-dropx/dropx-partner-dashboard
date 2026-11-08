@@ -114,7 +114,9 @@ export default async function ProviderMappingSummaryPage() {
   return <AppShell active="Mapping Summary" pageCode={pageCode}>
     <PageHead eyebrow="Source-of-truth bridge" title="Mapping summary" subtitle="Station-level ID and payment mapping health, with drill-down to every missing record." />
     <nav className="performance-tabs" aria-label="ID mapping views">
-      {canOpenMapping?<Link href="/provider-id-mapping">Provider member first</Link>:null}
+      {canOpenMapping?<Link href="/provider-id-mapping">ID & pay mapping</Link>:null}
+      {canOpenMapping?<Link href="/provider-id-mapping?view=days">Daily ID usage</Link>:null}
+      {canOpenMapping?<Link href="/provider-id-mapping?view=review">Worked ID review</Link>:null}
       {canOpenMapping?<Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>:null}
       <Link className="active" href="/provider-id-mapping/summary">Mapping summary</Link>
     </nav>
