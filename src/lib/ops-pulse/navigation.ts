@@ -181,7 +181,7 @@ function modelOperations(mode: OperatingMode): NavItem {
   return {
     code: "cod",
     label: "Operations",
-    permissionCodes: ["ops_lm_report_bot", "daily_submission", "cod_validation", "cod_portal_checks", "station_edd", "delivery_associates"],
+    permissionCodes: ["ops_lm_report_bot", "daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
     icon: "O",
     children: [
       lastMileReportBot,
