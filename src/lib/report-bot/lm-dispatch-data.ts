@@ -7,6 +7,7 @@ import { CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
 import { stationDotTotals, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
+import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
@@ -80,7 +81,13 @@ export async function loadEodDigest(stationCodes: string[], day: string): Promis
     creturn.push({Station:station.stationCode,Total:total,"Picked up":picked,"Pending pickup":Math.max(0,total-picked),"Pickup %":total ? `${(picked/total*100).toFixed(1)}%` : "—"});
   }
   if (!stations.length) throw new Error("No current station snapshots are available for this region.");
-  return {asOf:stamps.sort().at(-1) || network.asOf,missingStations,dsr,dot,creturn};
+  return {
+    asOf: stamps.sort().at(-1) || network.asOf,
+    missingStations,
+    dsr: orderEodDsrRows(dsr),
+    dot: orderEodDotRows(dot),
+    creturn: orderEodCReturnRows(creturn),
+  };
 }
 
 export async function loadDispatchReport(key: ReportKey, company: string, location: string, code: string, day: string): Promise<DispatchReport> {
