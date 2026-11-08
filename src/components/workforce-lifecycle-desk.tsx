@@ -2,7 +2,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { lifecycleQueues, workforceLifecycleActions, type WorkforceLifecycleRow } from '@/lib/workforce-lifecycle-policy';
-type Desk={rows:WorkforceLifecycleRow[];stations:{id:string;code:string}[];canManage:boolean;events:{id:string;workforce_id:string;action:string;reason:string;created_at:string}[]};
+type Desk={rows:WorkforceLifecycleRow[];stations:{id:string;code:string}[];canManage:boolean;
+ automation:{enabled:boolean;updatedAt:string|null};
+ failures:{workforce_id:string;error:string;attempted_at:string;attempts:number}[];
+ events:{id:string;workforce_id:string;action:string;reason:string;created_at:string}[]};
 const labels:Record<string,string>={inactivate:'Make inactive',reactivate:'Reactivate',offboard:'Offboard',rejoin:'Rejoin'};
 export function WorkforceLifecycleDesk({selectedId}:{selectedId?:string}) {
  const [data,setData]=useState<Desk|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -33,7 +36,19 @@ export function WorkforceLifecycleDesk({selectedId}:{selectedId?:string}) {
   {notice?<div className="panel message-panel" role="status"><div className="panel-body">{notice}</div></div>:null}
   {!data&&!error?<p role="status">Checking registration and delivery evidence…</p>:null}
   {data?<>
-   <div style={{display:'flex',flexWrap:'wrap',gap:8}}>{['registration_overdue','delivery_inactive','registration_exception','delivery_exception','inactive','offboarded'].map(key=><button key={key} className={`button ${queue===key?'':'secondary'}`} onClick={()=>setQueue(key)}>{lifecycleQueues[key]} · {data.rows.filter(r=>r.queue===key).length}</button>)}</div>
+   <section className="panel"><div className="panel-body" role="status">
+    <strong>{data.automation.enabled?'Automatic lifecycle checks enabled':'Review mode · automatic status changes paused'}</strong>
+    <p style={{margin:'6px 0 0'}}>{data.automation.enabled?'Eligible records are checked hourly. Exceptions stay available for review.':'Review the export before enabling automatic exits or inactivation. No scheduled status changes will run.'}</p>
+    <details style={{marginTop:8}}><summary>How the lifecycle works</summary><ol>
+     <li>Onboarding: track the associate’s next action. Submitted cases awaiting Amazon or IDfy go to Exceptions.</li>
+     <li>Active: use the normal associate workspace. Keep onboarding records and the mailbox available.</li>
+     <li>15 days unfinished: recheck responses and work evidence before exit.</li>
+     <li>30 days without deliveries: check all linked IDs, stations and attendance before inactivation.</li>
+     <li>Closed station: review final exit only after checking work at other stations.</li>
+     <li>Return: use the existing mobile and DropX ID for Reactivate or Rejoin.</li>
+    </ol></details>
+   </div></section>
+   <div style={{display:'flex',flexWrap:'wrap',gap:8}}>{['registration_overdue','delivery_inactive','closed_station_exit','registration_exception','delivery_exception','inactive','offboarded'].map(key=><button key={key} className={`button ${queue===key?'':'secondary'}`} onClick={()=>setQueue(key)}>{lifecycleQueues[key]} · {data.rows.filter(r=>r.queue===key).length}</button>)}</div>
    <section className="panel"><div className="panel-body" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
     <input className="field" style={{flex:'1 1 240px'}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, DropX ID, Amazon ID or mobile" aria-label="Find associate"/>
     <select className="select" aria-label="Station" value={station} onChange={e=>setStation(e.target.value)}><option value="">All permitted stations</option>{data.stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select>
@@ -45,6 +60,7 @@ export function WorkforceLifecycleDesk({selectedId}:{selectedId?:string}) {
      <td><strong>{lifecycleQueues[row.queue]}</strong><div className="subtle">Registration: {row.onboarding_status}</div></td>
      <td>Delivery: {row.last_delivery||'No mapped history'}<br/><small>Punch: {row.last_punch||'Not recorded'}</small></td>
      <td style={{maxWidth:420}}><p style={{margin:'0 0 8px'}}>{row.reason}</p><small className="subtle">Delivery feed: {row.feed_through||'Unavailable'} · {row.feed_days}/30 days</small>
+      {data.failures.filter(f=>f.workforce_id===row.id).map(f=><details key={f.workforce_id}><summary>Automatic update needs review · {f.attempts} attempt(s)</summary><p>{f.error}</p><small>Last attempt: {new Date(f.attempted_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}</small></details>)}
       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>{data.canManage?workforceLifecycleActions(row).map(action=><button key={action} className="button secondary" onClick={()=>{setSelection({row,action});setReason('');}}>{labels[action]}</button>):<small>Finance / Managing Partner / National Head to decide</small>}
       <Link href={`/work-force-register?view=${row.id}`}>Profile</Link>{row.provider_ids?<Link href="/workforce/amazon-onboarding">Amazon status</Link>:null}</div>
       <details style={{marginTop:8}}><summary>History</summary>{data.events.filter(e=>e.workforce_id===row.id).map(e=><p key={e.id}>{new Date(e.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})} · {labels[e.action]||e.action}<br/>{e.reason}</p>)}</details>
