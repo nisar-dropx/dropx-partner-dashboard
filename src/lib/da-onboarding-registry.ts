@@ -1,6 +1,6 @@
 import type { AmazonDaPerson } from './amazon-da-desk-types';
 export type GuidedDA={id:string;full_name:string;alias_email:string;mobile:string;biometric_id:string;status:string;closed_at:string|null;duplicate_identity_detected:boolean;inbox_status:string;driverId?:string|null;amazonProfileId?:string|null;amazonStatus?:string|null;registration?:string|null;bgc?:string|null;uan?:string|null;learning?:string|null;observedAt?:string|null;syncError?:string|null};
-export type DAOwner={id:string;full_name:string;dropx_id:string|null;email:string|null;onboarding_status:string;provider_employee_id:string|null};
+export type DAOwner={id:string;full_name:string;dropx_id:string|null;email:string|null;onboarding_status:string;lifecycle_status?:string|null;provider_employee_id:string|null};
 export type DALink={workforce_id:string;amazon_provider_id:string|null;transporter_id:string|null};
 export type DARow={key:string;name:string;email:string|null;phone:string|null;amazon:AmazonDaPerson|null;guided:GuidedDA|null;owner:DAOwner|null;conflict:boolean;status:string;next:string;origin:string};
 const norm=(s:string|null|undefined)=>(s||'').trim().toLowerCase();
@@ -11,7 +11,7 @@ export function mergeDARegistry(amazon:AmazonDaPerson[],guided:GuidedDA[],owners
  const unique=[...new Map(amazon.map(p=>[p.providerId,p])).values()];
  function add(a:AmazonDaPerson|null,g:GuidedDA|null,o:DAOwner|null,conflict=false){
   if(g)usedGuided.add(g.id);if(o)usedOwners.add(o.id);
-  const status=a?.status||(g?.closed_at?'CLOSED':g?.amazonStatus)||(g?'ONBOARDING':'ID_NOT_LINKED');
+  const status=a?.status||(g?.closed_at?'CLOSED':g?.amazonStatus)||(g?'ONBOARDING':o?.lifecycle_status&&['inactive','offboarded','closed'].includes(o.lifecycle_status)?o.lifecycle_status.toUpperCase():'ID_NOT_LINKED');
   const active=status.toUpperCase()==='ACTIVE',closed=['OFFBOARDED','CLOSED','INACTIVE'].includes(status.toUpperCase());
   const needsReview=conflict||Boolean(g?.duplicate_identity_detected);
   rows.push({key:a?.providerId||g?.id||o!.id,name:a?.name||g?.full_name||o!.full_name,email:a?.email||g?.alias_email||o?.email||null,phone:a?.phone||g?.mobile||null,amazon:a,guided:g,owner:o,conflict:needsReview,status,

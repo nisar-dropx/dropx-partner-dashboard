@@ -17,6 +17,6 @@ export async function GET(request:Request){
  if(!selected)return reply({error:'Select a station within your access.'},403);
  if(!workforceStationPolicy(selected).requiresStationEmail)return reply({error:'Automated onboarding is currently available for Amazon EDSP, XPT and AMXL stations.'},400);
  if(!supabaseAdmin)throw Error('Onboarding storage unavailable');
- return reply(await loadDARegistry(supabaseAdmin,auth.companyId,selected.id,amazon,guided));
+ return reply(await loadDARegistry(supabaseAdmin,auth.companyId,selected.id,amazon,guided,new URL(request.url).searchParams.get('archive')==='1'));
  }catch{return reply({error:'Could not load DA onboarding. Please retry.'},503);}
 }

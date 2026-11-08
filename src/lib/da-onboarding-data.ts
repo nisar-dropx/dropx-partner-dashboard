@@ -4,7 +4,7 @@ import {betaUanProgress} from './workforce-onboarding-evidence';
 import {mergeDARegistry,type GuidedDA,type DAOwner,type DALink} from './da-onboarding-registry';
 import type {AmazonDaList,AmazonDaPerson} from './amazon-da-desk-types';
 import {callWorkforceAmazonWorker} from './workforce-amazon-worker';
-export async function loadDARegistry(db:SupabaseClient,companyId:string,stationId:string,amazonAccess:boolean,guidedAccess:boolean){
+export async function loadDARegistry(db:SupabaseClient,companyId:string,stationId:string,amazonAccess:boolean,guidedAccess:boolean,includeClosed=false){
  const warnings:string[]=[];
  async function source<T>(label:string,work:()=>Promise<T[]>) {try{return await work();}catch{warnings.push(`${label} unavailable. Refresh to retry; the list may be incomplete.`);return [] as T[];}}
  async function amazon(view:string){
@@ -19,9 +19,9 @@ export async function loadDARegistry(db:SupabaseClient,companyId:string,stationI
  }
  const observed:string[]=[];
  const [onboarding,active,closed,guided,owners]=await Promise.all([
-  amazonAccess?source('Amazon onboarding',()=>amazon('onboarding')):[],amazonAccess?source('Amazon associates',()=>amazon('associates')):[],amazonAccess?source('Amazon history',()=>amazon('offboarded')):[],
+  amazonAccess?source('Amazon onboarding',()=>amazon('onboarding')):[],amazonAccess?source('Amazon associates',()=>amazon('associates')):[],amazonAccess&&includeClosed?source('Amazon history',()=>amazon('offboarded')):[],
   guidedAccess?source<GuidedDA>('System registrations',()=>allClientIdRows((from,to)=>db.from('workforce_amazon_email_pilot_candidates').select('id,full_name,alias_email,mobile,biometric_id,status,closed_at,duplicate_identity_detected,inbox_status').eq('company_id',companyId).eq('station_id',stationId).order('id').range(from,to))):[],
-  source<DAOwner>('DropX owners',()=>allClientIdRows((from,to)=>db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,provider_employee_id').eq('company_id',companyId).eq('location_id',stationId).is('deleted_at',null).order('id').range(from,to)))
+  source<DAOwner>('DropX owners',()=>allClientIdRows((from,to)=>db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,lifecycle_status,provider_employee_id').eq('company_id',companyId).eq('location_id',stationId).is('deleted_at',null).order('id').range(from,to)))
  ]);
  if(!amazonAccess)warnings.push('Amazon status access is not enabled for your role. Ask an administrator for Amazon DA access.');
  const links:DALink[]=[];
