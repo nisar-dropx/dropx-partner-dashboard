@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { facetRows } from "@/lib/dependent-filters";
 import { DailyIdUsageTable } from "./daily-id-usage-table";
 import { SearchableSelect } from "./searchable-select";
 import { FleetMultiSelect } from "./fleet-multi-select";
@@ -134,14 +135,6 @@ export function WorkedIdReview({
     setDrafts([]);
     void load();
   }, [month, allIds]);
-  const managerRevision = managerOptions
-    .map((option) => option.value)
-    .sort()
-    .join(",");
-  useEffect(() => {
-    const valid = new Set(managerOptions.map((option) => option.value));
-    setClusters((previous) => previous.filter((key) => valid.has(key)));
-  }, [managerRevision]);
   const currentLocations = new Map(
     locations.map((location) => [location.id, location]),
   );
@@ -150,46 +143,121 @@ export function WorkedIdReview({
     cluster:
       currentLocations.get(row.stationId)?.cluster ?? "Not mapped in People",
   });
-  const regional = locations.filter(
-    (l) => !regions.length || regions.includes(l.region || "Unassigned"),
-  );
-  const geographic = regional.filter(
-    (l) =>
-      !clusters.length || l.clusterKeys.some((key) => clusters.includes(key)),
-  );
-  const managerKeys = new Set(
-    regional
-      .filter((l) => !stations.length || stations.includes(l.id))
-      .flatMap((l) => l.clusterKeys),
-  );
+  const statusOptions = dailyUsage
+    ? [
+        { value: "gaps", label: "Attendance / delivery gaps" },
+        { value: "locked", label: "Payment locked" },
+        { value: "reviewed", label: "Work reviewed" },
+        { value: "evidence", label: "Daily evidence available" },
+        { value: "none", label: "No daily evidence" },
+      ]
+    : [
+        {
+          value: "pending",
+          label:
+            view === "bulk" ? "Needs period review" : "Needs review / approval",
+        },
+        {
+          value: "reviewed",
+          label: view === "bulk" ? "No day-count shortfall" : "Reviewed",
+        },
+      ];
+  const reviewFacets = useMemo(() => {
+    const locationById = new Map(locations.map((l) => [l.id, l]));
+    const items: any[] =
+      view === "bulk" ? data?.bulkPeriods || [] : data?.rows || [];
+    return facetRows<any, "region" | "cluster" | "station" | "status">(
+      items,
+      {
+        region: {
+          selected: regions,
+          values: (r) => locationById.get(r.stationId)?.region || "Unassigned",
+        },
+        cluster: {
+          selected: clusters,
+          values: (r) => locationById.get(r.stationId)?.clusterKeys || [],
+        },
+        station: { selected: stations, values: (r) => r.stationId },
+        status: {
+          selected: show === "all" ? [] : [show],
+          values: (r) =>
+            view === "bulk"
+              ? r.needsReview
+                ? "pending"
+                : "reviewed"
+              : !dailyUsage
+                ? pending(r)
+                  ? "pending"
+                  : "reviewed"
+                : [
+                    ...(r.lockReason ? ["locked"] : []),
+                    ...(["worked", "not_worked"].includes(r.decision)
+                      ? ["reviewed"]
+                      : []),
+                    ...(r.punches || r.ownDeliveries ? ["evidence"] : ["none"]),
+                    ...(!r.lockReason &&
+                    !["worked", "not_worked"].includes(r.decision) &&
+                    r.hasStationDeliveryData &&
+                    ((r.punches > 0 && !r.ownDeliveries) ||
+                      (!r.punches && r.ownDeliveries > 0))
+                      ? ["gaps"]
+                      : []),
+                  ],
+        },
+      },
+      (r) =>
+        `${r.name} ${r.dropxId} ${(r.providerIds || []).join(" ")} ${(r.usages || []).map((u: any) => `${u.providerId} ${u.providerName} ${u.ownerName}`).join(" ")} ${r.stationCode} ${r.date || ""}`
+          .toLowerCase()
+          .includes(query.trim().toLowerCase()),
+    );
+  }, [
+    locations,
+    data,
+    view,
+    dailyUsage,
+    regions,
+    clusters,
+    stations,
+    show,
+    query,
+  ]);
   const scope = new Set(
-    geographic
-      .filter((l) => !stations.length || stations.includes(l.id))
+    locations
+      .filter(
+        (l) =>
+          (!regions.length || regions.includes(l.region || "Unassigned")) &&
+          (!clusters.length ||
+            l.clusterKeys.some((k) => clusters.includes(k))) &&
+          (!stations.length || stations.includes(l.id)),
+      )
       .map((l) => l.id),
   );
-  const scoped = (data?.rows || [])
-    .map(currentRow)
-    .filter(
-      (r: any) =>
-        scope.has(r.stationId) &&
-        `${r.name} ${r.dropxId} ${r.providerIds.join(" ")} ${(r.usages || []).map((u: any) => `${u.providerId} ${u.providerName} ${u.ownerName}`).join(" ")} ${r.stationCode} ${r.date}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
-    );
-  const statusRows = scoped.filter(
-    (r: any) =>
-      show === "all" || (show === "pending" ? pending(r) : !pending(r)),
+  const statusRows = useMemo(
+    () => reviewFacets.rows.map(currentRow),
+    [reviewFacets],
   );
-  const rows = statusRows.filter(
-    (r: any) =>
-      caseType === "all" ||
-      (caseType === "training"
-        ? r.training?.status === "pending"
-        : category(r) === caseType),
+  const rows = useMemo(
+    () =>
+      statusRows.filter(
+        (r: any) =>
+          caseType === "all" ||
+          (caseType === "training"
+            ? r.training?.status === "pending"
+            : category(r) === caseType),
+      ),
+    [statusRows, caseType],
   );
-  const groups = [...new Set(rows.map((r: any) => r.workerId))]
-    .map((id) => ({ id, rows: rows.filter((r: any) => r.workerId === id) }))
-    .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name));
+  const groups = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    for (const r of rows) {
+      const list = grouped.get(r.workerId) || [];
+      list.push(r);
+      grouped.set(r.workerId, list);
+    }
+    return [...grouped]
+      .map(([id, rows]) => ({ id, rows }))
+      .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name));
+  }, [rows]);
   const bulkScoped = (data?.bulkPeriods || [])
     .map(currentRow)
     .filter(
@@ -199,7 +267,7 @@ export function WorkedIdReview({
           .toLowerCase()
           .includes(query.toLowerCase()),
     );
-  const bulkRows = bulkScoped.filter(
+  const bulkRows = reviewFacets.rows.filter(
     (p: any) =>
       show === "all" || (show === "pending" ? p.needsReview : !p.needsReview),
   );
@@ -501,7 +569,7 @@ export function WorkedIdReview({
     }
   }
   return (
-    <div className={styles.review}>
+    <div className={`${styles.review} ${dailyUsage ? styles.daily : ""}`}>
       <PeopleOwnershipRefresh paused={saving || drafts.length > 0} />
       <section className={`panel ${styles.filters}`}>
         <FleetMultiSelect
@@ -509,36 +577,36 @@ export function WorkedIdReview({
           label="Regions"
           allLabel="All permitted regions"
           values={regions}
-          options={choices(locations.map((l) => l.region || "Unassigned"))}
-          onChange={(v) => {
-            setRegions(v);
-            setClusters([]);
-            setStations([]);
-          }}
+          options={reviewFacets.options(
+            "region",
+            choices([
+              ...locations.map((l) => l.region || "Unassigned"),
+              ...regions,
+            ]),
+          )}
+          onChange={setRegions}
         />
         <FleetMultiSelect
           alwaysSearch
           label="Cluster / AOM"
           allLabel="All clusters"
           values={clusters}
-          options={managerOptions.filter((option) =>
-            managerKeys.has(option.value),
-          )}
-          onChange={(v) => {
-            setClusters(v);
-            setStations([]);
-          }}
+          options={reviewFacets.options("cluster", managerOptions)}
+          onChange={setClusters}
         />
         <FleetMultiSelect
           alwaysSearch
           label="Stations"
           allLabel="All permitted stations"
           values={stations}
-          options={geographic.map((l) => ({
-            value: l.id,
-            label: `${l.station_code} · ${l.station_name}`,
-            helper: [l.cluster, l.region].filter(Boolean).join(" · "),
-          }))}
+          options={reviewFacets.options(
+            "station",
+            locations.map((l) => ({
+              value: l.id,
+              label: `${l.station_code} · ${l.station_name}`,
+              helper: [l.cluster, l.region].filter(Boolean).join(" · "),
+            })),
+          )}
           onChange={setStations}
         />
         <label>
@@ -560,24 +628,42 @@ export function WorkedIdReview({
         <label>
           Status
           <select value={show} onChange={(e) => setShow(e.target.value)}>
-            <option value="pending">
-              {view === "bulk"
-                ? "Needs period review"
-                : "Needs review / approval"}
-            </option>
-            <option value="reviewed">
-              {view === "bulk" ? "No day-count shortfall" : "Reviewed"}
-            </option>
             <option value="all">All statuses</option>
+            {reviewFacets.options("status", statusOptions).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
         </label>
-        <button
-          className="button secondary"
-          disabled={loading}
-          onClick={() => void load()}
-        >
-          Refresh
-        </button>
+        <div className={styles.filterActions}>
+          <button
+            className="button secondary compact"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            Refresh
+          </button>
+          {(regions.length > 0 ||
+            clusters.length > 0 ||
+            stations.length > 0 ||
+            query ||
+            show !== "all") && (
+            <button
+              className="button secondary compact"
+              onClick={() => {
+                setRegions([]);
+                setClusters([]);
+                setStations([]);
+                setQuery("");
+                setShow("all");
+                setCaseType("all");
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       </section>
       {!dailyUsage && (
         <details className={styles.scope}>
@@ -648,9 +734,13 @@ export function WorkedIdReview({
             <h2>
               {error
                 ? "Cases unavailable"
-                : view === "bulk"
-                  ? `${new Set(bulkRows.map((p: any) => p.workerId)).size} associates · ${bulkRows.length} bulk periods`
-                  : `${groups.length} associates · ${rows.length} day cases`}
+                : loading
+                  ? "Loading daily evidence…"
+                  : dailyUsage
+                    ? "Daily activity"
+                    : view === "bulk"
+                      ? `${new Set(bulkRows.map((p: any) => p.workerId)).size} associates · ${bulkRows.length} bulk periods`
+                      : `${groups.length} associates · ${rows.length} day cases`}
             </h2>
             <p className="subtle">
               {scope.size} permitted stations ·{" "}

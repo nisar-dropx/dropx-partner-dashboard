@@ -1,3 +1,4 @@
+import workspace from "@/components/id-mapping-workspace.module.css";
 import { providerMappingEntryFilters } from "@/lib/provider-mapping-navigation";
 import { DailyIdUsageSection } from "@/components/daily-id-usage-section";
 import { cookies } from "next/headers";
@@ -302,11 +303,11 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const clusterKeysByStation = Object.fromEntries([...(clusters?.byStation ?? [])].map(([id, value]) => [id, value.clusterKeys]));
 
   return <AppShell active="ID Mapping" pageCode={pageCode}>
-    <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
-    <nav className="performance-tabs" aria-label="ID mapping views"><Link className="active" href="/provider-id-mapping">Provider member first</Link><Link href="/provider-id-mapping?view=days">Daily ID usage</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>{canViewSummary?<Link href="/provider-id-mapping/summary">Mapping summary</Link>:null}</nav>
+    <div className={workspace.workspace}><PageHead eyebrow="Workforce" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
+    <nav className={workspace.nav} aria-label="ID mapping views"><Link aria-current="page" href="/provider-id-mapping">ID & pay mapping</Link><Link href="/provider-id-mapping?view=days">Daily ID usage</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>{canViewSummary?<Link href="/provider-id-mapping/summary">Mapping summary</Link>:null}</nav>
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
     {!loadError ? <ProviderFirstMappingWorksheet clusterOptions={clusters?.options ?? []} clusterKeysByStation={clusterKeysByStation} clusterFilterUnavailable={Boolean(hierarchy.error)} lookupEntries={lookupEntries} initialOutboundMonth={entryFilters.month} initialMappingStatus={entryFilters.mapping} shipmentMonths={[...shipmentMonths, today.slice(0, 7)]} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
-  </AppShell>;
+  </div></AppShell>;
 }

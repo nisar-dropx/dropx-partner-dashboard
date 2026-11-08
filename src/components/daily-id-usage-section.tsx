@@ -1,3 +1,4 @@
+import workspace from "@/components/id-mapping-workspace.module.css";
 import Link from "next/link";
 import { AppShell } from "./app-shell";
 import { PageHead } from "./page-head";
@@ -45,33 +46,37 @@ export async function DailyIdUsageSection({ month }: { month?: string }) {
       : previous.toISOString().slice(0, 7);
   return (
     <AppShell active="ID Mapping" pageCode={code}>
-      <PageHead
-        eyebrow="ID & pay mapping"
-        title="Daily ID usage"
-        subtitle="See who owns each ID, who worked on it, and review selected dates before payout."
-      />
-      <nav className="performance-tabs" aria-label="ID mapping views">
-        <Link href="/provider-id-mapping">Provider member first</Link>
-        <Link className="active" href="/provider-id-mapping?view=days">
-          Daily ID usage
-        </Link>
-        <Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>
-        <Link href="/provider-id-mapping/worked-days">Worked ID review</Link>
-      </nav>
-      {result.error || hierarchy.error ? (
-        <p role="alert">Unable to load permitted stations. Please refresh.</p>
-      ) : (
-        <WorkedIdReview
-          dailyUsage
-          locations={locations.map((s) => ({
-            ...s,
-            ...owners!.byStation.get(s.id)!,
-          }))}
-          managerOptions={owners!.options}
-          initialMonth={initialMonth}
-          canEdit={canEditProviderMappings(auth)}
+      <div className={workspace.workspace}>
+        <PageHead
+          eyebrow="ID & pay mapping"
+          title="Daily ID usage"
+          subtitle="See who owns each ID, who worked on it, and review selected dates before payout."
         />
-      )}
+        <nav className={workspace.nav} aria-label="ID mapping views">
+          <Link href="/provider-id-mapping">ID & pay mapping</Link>
+          <Link aria-current="page" href="/provider-id-mapping?view=days">
+            Daily ID usage
+          </Link>
+          <Link href="/provider-mapping/direct-pay">
+            Direct pay allocations
+          </Link>
+          <Link href="/provider-id-mapping/worked-days">Worked ID review</Link>
+        </nav>
+        {result.error || hierarchy.error ? (
+          <p role="alert">Unable to load permitted stations. Please refresh.</p>
+        ) : (
+          <WorkedIdReview
+            dailyUsage
+            locations={locations.map((s) => ({
+              ...s,
+              ...owners!.byStation.get(s.id)!,
+            }))}
+            managerOptions={owners!.options}
+            initialMonth={initialMonth}
+            canEdit={canEditProviderMappings(auth)}
+          />
+        )}
+      </div>
     </AppShell>
   );
 }

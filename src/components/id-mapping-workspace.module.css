@@ -1,0 +1,212 @@
+.workspace {
+  --id-blue: #1967d2;
+  --id-ink: #202124;
+  --id-muted: #5f6368;
+  color: var(--id-ink);
+}
+.nav {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  width: fit-content;
+  max-width: 100%;
+  overflow: auto;
+  background: #eaf0f8;
+  border-radius: 14px;
+  margin: 0 0 20px;
+}
+.nav a {
+  padding: 10px 17px;
+  white-space: nowrap;
+  border-radius: 10px;
+  color: #526174;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.nav a[aria-current="page"] {
+  background: white;
+  color: #1967d2;
+  box-shadow: 0 1px 4px #23354c14;
+}
+.nav a:hover {
+  background: #ffffffa8;
+}
+.workspace :global(.panel) {
+  border: 1px solid #e1e5eb;
+  border-radius: 16px;
+  box-shadow: none;
+}
+.workspace :global(.panel-head) {
+  padding: 16px 20px;
+}
+.workspace :global(.panel-head h2) {
+  font-size: 16px;
+  letter-spacing: -0.2px;
+}
+.workspace :global(.panel-head p) {
+  font-size: 12px;
+  margin: 4px 0 0;
+  color: #687585;
+}
+.workspace :global(.button) {
+  border-radius: 9px;
+  min-height: 34px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.workspace :global(.button:not(.secondary)) {
+  background: #1967d2;
+  border-color: #1967d2;
+  color: white;
+}
+.workspace :global(.button.secondary) {
+  background: white;
+  border-color: #dce2e9;
+  color: #34465c;
+}
+.workspace :global(.button:disabled) {
+  opacity: 0.45;
+}
+.workspace :global(.button:focus-visible),
+.workspace summary:focus-visible,
+.workspace a:focus-visible {
+  outline: 2px solid #1967d2;
+  outline-offset: 3px;
+}
+.workspace :global(.provider-first-rows) {
+  padding: 0 14px 14px;
+  display: block;
+}
+.mapping {
+  background: white;
+  border: 1px solid #e1e7ef;
+  border-radius: 12px;
+  margin: 8px 0;
+}
+.mapping[open] {
+  border-color: #b8cdeb;
+}
+.mapping > summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 30px minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(
+      120px,
+      1fr
+    ) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 16px;
+}
+.mapping > summary::-webkit-details-marker {
+  display: none;
+}
+.mapping > summary:hover {
+  background: #f7faff;
+  border-radius: 12px;
+}
+.mapping > summary > span {
+  min-width: 0;
+}
+.mapping > summary strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.mapping > summary small {
+  display: block;
+  font-size: 11px;
+  color: #687585;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.chevron {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  background: #f0f4f9;
+  border-radius: 50%;
+}
+.mapping[open] .chevron svg {
+  transform: rotate(90deg);
+}
+.mapping :global(.mapping-row-card) {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid #e7edf4;
+  box-shadow: none;
+  border-radius: 0 0 12px 12px;
+  background: #fbfcff;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 20px;
+  padding: 5px 9px;
+  background: #edf3fd;
+  color: #285d9d;
+  white-space: nowrap;
+}
+.badge[data-tone="warning"] {
+  background: #fef4df;
+  color: #8a5a11;
+}
+.badge[data-tone="success"] {
+  background: #e7f4ed;
+  color: #23724f;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: 1px solid #e8ecf1;
+  font-size: 12px;
+  color: #697586;
+}
+.toolbar > span:first-child {
+  margin-right: auto;
+}
+.workspace :global(.provider-first-filters) {
+  background: #fafbfd;
+  border-bottom: 1px solid #e5eaf0;
+  padding: 16px 20px;
+}
+.workspace :global(.provider-mapping-lookup .panel-head) {
+  padding: 12px 18px;
+}
+.workspace :global(.provider-mapping-lookup .panel-head h2) {
+  font-size: 13px;
+}
+.workspace :global(.provider-mapping-lookup .panel-head p) {
+  display: none;
+}
+@media (max-width: 800px) {
+  .mapping > summary {
+    grid-template-columns: 24px 1fr auto;
+    gap: 10px;
+    padding: 12px;
+  }
+  .mapping > summary > span:nth-child(3),
+  .mapping > summary > span:nth-child(4) {
+    grid-column: 2;
+  }
+  .mapping > summary > span:last-child {
+    grid-column: 3;
+    grid-row: 1 / 4;
+  }
+  .nav {
+    width: 100%;
+  }
+  .nav a {
+    padding: 9px 12px;
+  }
+}

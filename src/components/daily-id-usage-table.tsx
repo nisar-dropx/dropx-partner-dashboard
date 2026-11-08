@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import styles from "./daily-id-usage-table.module.css";
+import { useEffect, useMemo, useState } from "react";
 import { dailyUsageStatus } from "@/lib/daily-id-usage";
 
 export function DailyIdUsageTable({
@@ -10,139 +12,175 @@ export function DailyIdUsageTable({
   onReview: (rows: any[]) => void;
 }) {
   const [by, setBy] = useState("associate"),
-    [expanded, setExpanded] = useState(""),
+    [expanded, setExpanded] = useState<Set<string>>(() => new Set()),
     [page, setPage] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
-  const groups = new Map<
-    string,
-    { name: string; detail: string; rows: any[] }
-  >();
-  for (const r of rows) {
-    const entries =
-      by === "associate"
-        ? [{ key: r.workerId, name: r.name, detail: r.dropxId }]
-        : (r.usages?.length
-            ? r.usages
-            : [{ providerId: "", providerName: "No provider ID", client: "" }]
-          ).map((u: any) => ({
-            key: `${r.stationId}|${u.client}|${u.providerId}`,
-            name: u.providerId || "No provider ID",
-            detail: `${u.providerName || ""} · ${r.stationCode}`,
-          }));
-    for (const e of entries) {
-      const g: { name: string; detail: string; rows: any[] } = groups.get(
-        e.key,
-      ) || { name: e.name, detail: e.detail, rows: [] };
-      if (!g.rows.some((x) => x.key === r.key)) g.rows.push(r);
-      groups.set(e.key, g);
+  const entries = useMemo(() => {
+    const groups = new Map<
+      string,
+      { name: string; detail: string; rows: any[] }
+    >();
+    for (const r of rows) {
+      const entries =
+        by === "associate"
+          ? [{ key: r.workerId, name: r.name, detail: r.dropxId }]
+          : (r.usages?.length
+              ? r.usages
+              : [{ providerId: "", providerName: "No provider ID", client: "" }]
+            ).map((u: any) => ({
+              key: `${r.stationId}|${u.client}|${u.providerId}`,
+              name: u.providerId || "No provider ID",
+              detail: `${u.providerName || ""} · ${r.stationCode}`,
+            }));
+      for (const e of entries) {
+        const g: { name: string; detail: string; rows: any[] } = groups.get(
+          e.key,
+        ) || { name: e.name, detail: e.detail, rows: [] };
+        if (!g.rows.some((x) => x.key === r.key)) g.rows.push(r);
+        groups.set(e.key, g);
+      }
     }
-  }
-  const entries = [...groups.entries()].sort((a, b) =>
-    a[1].name.localeCompare(b[1].name),
-  );
+    return [...groups.entries()].sort((a, b) =>
+      a[1].name.localeCompare(b[1].name),
+    );
+  }, [rows, by]);
   useEffect(() => {
     setPage(0);
-    setExpanded("");
+    setExpanded(new Set());
     setSelected([]);
-  }, [rows.length, by]);
+  }, [rows, by]);
   const picked = rows.filter((r) => selected.includes(r.key));
   const validSelection =
     picked.length > 0 &&
     picked.length <= 31 &&
     new Set(picked.map((r) => r.workerId)).size === 1;
+  const pageEntries = entries.slice(page * 30, (page + 1) * 30);
+  const editable = (r: any) =>
+    !r.lockReason && r.hasPaySetup && !r.reviewElsewhere;
+  const mismatch = (r: any) =>
+    !r.lockReason &&
+    !["worked", "not_worked"].includes(r.decision) &&
+    r.hasStationDeliveryData &&
+    ((r.punches > 0 && !r.ownDeliveries) ||
+      (!r.punches && r.ownDeliveries > 0));
+  const metrics = [
+    [new Set(rows.map((r) => r.workerId)).size, "Associates"],
+    [rows.filter((r) => r.punches > 0).length, "Days with biometric punch"],
+    [rows.filter(mismatch).length, "Attendance / delivery gaps"],
+    [rows.filter((r) => r.lockReason).length, "Payment-locked days"],
+  ];
   return (
-    <div className="panel-body">
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          alignItems: "center",
-          marginBottom: 12,
-        }}
-      >
-        <button
-          className="button secondary compact"
-          aria-pressed={by === "associate"}
-          onClick={() => setBy("associate")}
-        >
-          By associate
-        </button>
-        <button
-          className="button secondary compact"
-          aria-pressed={by === "provider"}
-          onClick={() => setBy("provider")}
-        >
-          By provider ID
-        </button>
+    <div className={styles.desk}>
+      <div className={styles.overview}>
+        {metrics.map(([value, label]) => (
+          <div className={styles.metric} key={label}>
+            <strong>{Number(value).toLocaleString("en-IN")}</strong>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+      <div className={styles.toolbar}>
+        <div className={styles.segmented} aria-label="Group daily usage">
+          <button
+            aria-pressed={by === "associate"}
+            onClick={() => setBy("associate")}
+          >
+            By associate
+          </button>
+          <button
+            aria-pressed={by === "provider"}
+            onClick={() => setBy("provider")}
+          >
+            By provider ID
+          </button>
+        </div>
         <span>
-          {entries.length} {by === "associate" ? "associates" : "IDs"} ·{" "}
-          {rows.length} associate days
+          {entries.length.toLocaleString("en-IN")}{" "}
+          {by === "associate" ? "associates" : "IDs"} ·{" "}
+          {rows.length.toLocaleString("en-IN")} associate days
         </span>
         <button
-          className="button primary compact"
-          disabled={!validSelection}
-          onClick={() => onReview(picked)}
+          className="button secondary compact"
+          onClick={() => setExpanded(new Set(pageEntries.map(([key]) => key)))}
         >
-          Review {picked.length || ""} selected days
+          Expand page
         </button>
-        {picked.length > 0 && (
-          <button
-            className="button secondary compact"
-            onClick={() => setSelected([])}
-          >
-            Clear selection
-          </button>
-        )}
-        {picked.length > 0 && !validSelection && (
-          <span role="alert">Select up to 31 days for one associate.</span>
-        )}
-      </div>
-      {entries.slice(page * 30, (page + 1) * 30).map(([key, g]) => (
-        <details
-          key={key}
-          open={expanded === key}
-          onToggle={(e) => {
-            if (e.currentTarget.open) setExpanded(key);
-          }}
-          style={{
-            borderBottom: "1px solid var(--border-color, #ddd)",
-            padding: "12px 0",
-          }}
+        <button
+          className="button secondary compact"
+          onClick={() => setExpanded(new Set())}
         >
+          Collapse all
+        </button>
+      </div>
+      {pageEntries.map(([key, g]) => (
+        <details key={key} open={expanded.has(key)} className={styles.group}>
           <summary
-            style={{ cursor: "pointer" }}
             onClick={(e) => {
               e.preventDefault();
-              setExpanded(expanded === key ? "" : key);
+              setExpanded((v) => {
+                const next = new Set(v);
+                next.has(key) ? next.delete(key) : next.add(key);
+                return next;
+              });
             }}
           >
-            <strong>{g.name}</strong> · {g.detail} ·{" "}
-            {new Set(g.rows.map((r) => r.date)).size} days ·{" "}
-            {new Set(g.rows.map((r) => r.stationCode)).size} stations
-          </summary>
-          {expanded === key && (
-            <>
-              {by === "associate" && (
-                <button
-                  className="button secondary compact"
-                  style={{ margin: "10px 0" }}
-                  onClick={() =>
-                    setSelected(
-                      g.rows
-                        .filter((r) => !r.lockReason && r.hasPaySetup)
-                        .map((r) => r.key),
-                    )
-                  }
-                >
-                  Select available days
-                </button>
+            <span className={styles.avatar}>
+              {by === "provider"
+                ? "ID"
+                : g.name
+                    .split(" ")
+                    .slice(0, 2)
+                    .map((v: string) => v[0])
+                    .join("")}
+            </span>
+            <span className={styles.identity}>
+              <strong>{g.name}</strong>
+              <small>{g.detail}</small>
+            </span>
+            <span className={styles.groupMeta}>
+              <span>{new Set(g.rows.map((r) => r.date)).size} days</span>
+              <span>
+                {new Set(g.rows.map((r) => r.stationCode)).size} stations
+              </span>
+              {g.rows.some(mismatch) && (
+                <span className={styles.status} data-tone="warning">
+                  {g.rows.filter(mismatch).length} gaps
+                </span>
               )}
-              <div className="table-wrap">
+              {g.rows.some((r) => r.lockReason) && (
+                <span className={styles.status} data-tone="locked">
+                  {g.rows.filter((r) => r.lockReason).length} locked
+                </span>
+              )}
+            </span>
+            <ChevronRight
+              size={17}
+              className={styles.chevron}
+              aria-hidden="true"
+            />
+          </summary>
+          {expanded.has(key) && (
+            <>
+              <div className={styles.groupActions}>
+                {by === "associate" && (
+                  <button
+                    className="button secondary compact"
+                    onClick={() =>
+                      setSelected(g.rows.filter(editable).map((r) => r.key))
+                    }
+                  >
+                    Select available days
+                  </button>
+                )}
+                <span>
+                  Select dates to review together. Locked days stay read-only.
+                </span>
+              </div>
+              <div className={styles.tableWrap}>
                 <table>
                   <thead>
                     <tr>
-                      <th>Select</th>
+                      <th aria-label="Select day"></th>
                       <th>Date / station</th>
                       <th>
                         {by === "associate"
@@ -157,13 +195,13 @@ export function DailyIdUsageTable({
                   </thead>
                   <tbody>
                     {g.rows.map((r) => (
-                      <tr key={r.key}>
+                      <tr key={r.key} data-selected={selected.includes(r.key)}>
                         <td>
                           <input
                             type="checkbox"
                             aria-label={`Select ${r.name} ${r.date} ${r.stationCode}`}
                             checked={selected.includes(r.key)}
-                            disabled={!!r.lockReason || !r.hasPaySetup}
+                            disabled={!editable(r)}
                             onChange={(e) =>
                               setSelected((v) =>
                                 e.target.checked
@@ -174,22 +212,23 @@ export function DailyIdUsageTable({
                           />
                         </td>
                         <td>
-                          {r.date}
-                          <br />
+                          {new Date(`${r.date}T12:00:00Z`).toLocaleDateString(
+                            "en-GB",
+                            { day: "2-digit", month: "short" },
+                          )}
                           <small>{r.stationCode}</small>
                         </td>
                         <td>
                           {by === "provider" ? (
                             <>
                               <strong>{r.name}</strong>
-                              <br />
+
                               <small>{r.dropxId}</small>
                             </>
                           ) : (
                             (r.usages || []).map((u: any, i: number) => (
                               <div key={i}>
                                 <strong>{u.providerId}</strong> {u.providerName}
-                                <br />
                                 <small>
                                   {u.borrowed ? "Used from" : "Owner"}:{" "}
                                   {u.ownerName} · {u.ownerDropxId}
@@ -221,7 +260,7 @@ export function DailyIdUsageTable({
                                   )
                               : (r.adjustedDeliveries ?? r.ownDeliveries)}
                           </strong>
-                          <br />
+
                           <small>
                             {by === "provider"
                               ? "On this ID"
@@ -230,10 +269,30 @@ export function DailyIdUsageTable({
                         </td>
                         <td>
                           {r.payMethod || "Not configured"}
-                          <br />
-                          <strong>{dailyUsageStatus(r)}</strong>
+
+                          <div>
+                            <span
+                              className={styles.status}
+                              data-tone={
+                                r.lockReason
+                                  ? "locked"
+                                  : mismatch(r)
+                                    ? "warning"
+                                    : ["worked", "not_worked"].includes(
+                                          r.decision,
+                                        )
+                                      ? "success"
+                                      : ""
+                              }
+                            >
+                              {dailyUsageStatus(r)}
+                            </span>
+                          </div>
                           {r.lockReason && (
-                            <div role="note">{r.lockReason}</div>
+                            <details>
+                              <summary>Why locked?</summary>
+                              <small>{r.lockReason}</small>
+                            </details>
                           )}
                         </td>
                         <td>
@@ -241,7 +300,7 @@ export function DailyIdUsageTable({
                             className="button secondary compact"
                             onClick={() => onReview([r])}
                           >
-                            {r.lockReason ? "View details" : "Review / update"}
+                            {r.lockReason ? "View details" : "Review"}
                           </button>
                         </td>
                       </tr>
@@ -253,16 +312,14 @@ export function DailyIdUsageTable({
           )}
         </details>
       ))}
-      {!entries.length && <p>No mapped days match these filters.</p>}
+      {!entries.length && (
+        <div className={styles.empty}>
+          <strong>No matching days</strong>
+          <p>Change or clear the filters to see more records.</p>
+        </div>
+      )}
       {entries.length > 30 && (
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            marginTop: 12,
-          }}
-        >
+        <div className={styles.pagination}>
           <button
             className="button secondary compact"
             disabled={!page}
@@ -279,6 +336,30 @@ export function DailyIdUsageTable({
             onClick={() => setPage((p) => p + 1)}
           >
             Next
+          </button>
+        </div>
+      )}
+      {picked.length > 0 && (
+        <div className={styles.selection}>
+          <span>
+            {picked.length} days selected
+            {validSelection ? ` · ${picked[0].name}` : ""}
+          </span>
+          {!validSelection && (
+            <span role="alert">Choose up to 31 days for one associate.</span>
+          )}
+          <button
+            className="button secondary compact"
+            onClick={() => setSelected([])}
+          >
+            Clear
+          </button>
+          <button
+            className="button primary compact"
+            disabled={!validSelection}
+            onClick={() => onReview(picked)}
+          >
+            Review selected days
           </button>
         </div>
       )}
