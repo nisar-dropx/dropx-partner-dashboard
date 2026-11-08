@@ -15,7 +15,7 @@ export const BOARD_TID = {
   AGEING: "BoardAgeing",
 } as const;
 
-export type StationBoardTidKind = "edd" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard" | "swa" | "dot" | "rts";
+export type StationBoardTidKind = "edd" | "edd-today" | "creturn" | "dsr" | "dsr-station" | "zero" | "ageing" | "premium" | "standard" | "swa" | "dot" | "rts";
 
 const DSR_BUCKETS = [BOARD_TID.DELIVERED, BOARD_TID.FAILED, BOARD_TID.REJECTED, BOARD_TID.OOR, BOARD_TID.OTHER, "Failed", "Rejected"];
 
@@ -23,6 +23,7 @@ const DOT_BUCKETS = ["BoardDotDelivered", "BoardDotOOR", "BoardDotFailed", "Boar
 
 export const BOARD_TID_KIND_BUCKETS: Record<StationBoardTidKind, string[]> = {
   edd: [BOARD_TID.EDD, "EDD"],
+  "edd-today": [BOARD_TID.PENDING_TODAY],
   creturn: [BOARD_TID.CRETURN, "Pickup"],
   ageing: [BOARD_TID.AGEING],
   dsr: DSR_BUCKETS,
@@ -94,6 +95,23 @@ function mapEdd(flash: FlashTrackingLike[]): BoardTidExportRow[] {
       driverId: row.driverId,
       driverName: row.driverName,
       report: "EDD",
+    }))
+    .filter((row) => row.trackingId);
+}
+
+function mapEddToday(flash: FlashTrackingLike[]): BoardTidExportRow[] {
+  return flash
+    .filter((row) => row.bucket === BOARD_TID.PENDING_TODAY)
+    .map((row) => ({
+      stationCode: row.stationCode,
+      trackingId: row.trackingId,
+      sourceBucket: row.bucket,
+      status: "Due today · never attempted",
+      currentState: row.state || "",
+      edd: row.edd || "",
+      driverId: row.driverId,
+      driverName: row.driverName,
+      report: "Today EDD pending",
     }))
     .filter((row) => row.trackingId);
 }
@@ -204,6 +222,7 @@ export function mapBoardTidExportRows(
   kind: StationBoardTidKind,
 ): BoardTidExportRow[] {
   if (kind === "rts") return flash.filter(row => row.bucket === "BoardRTS").map(row => ({...row, status: row.rtsReason || row.state, currentState:row.state, report:"RTS pendency", sourceBucket:row.bucket}));
+  if (kind === "edd-today") return mapEddToday(flash);
   if (kind === "edd") return mapEdd(flash);
   if (kind === "creturn") return mapCReturn(flash);
   if (kind === "ageing") return mapAgeing(flash);

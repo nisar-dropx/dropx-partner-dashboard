@@ -12,7 +12,7 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const KINDS = new Set<StationBoardTidKind>(["edd", "creturn", "dsr", "dsr-station", "zero", "ageing", "premium", "standard", "swa", "dot", "rts"]);
+const KINDS = new Set<StationBoardTidKind>(["edd", "edd-today", "creturn", "dsr", "dsr-station", "zero", "ageing", "premium", "standard", "swa", "dot", "rts"]);
 
 /**
  * Station-wise tracking IDs for Station board drill-down / Excel All TIDs sheet.

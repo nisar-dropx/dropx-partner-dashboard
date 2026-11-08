@@ -21,7 +21,7 @@ function todayKolkata() {
 export default async function StationBoardPage({
   searchParams,
 }: {
-  searchParams?: { date?: string; region?: string; view?: string; stations?: string; clusters?: string; detail?: string; layout?: string };
+  searchParams?: { date?: string; region?: string; view?: string; stations?: string; clusters?: string; detail?: string; layout?: string; eddMode?: string };
 }) {
   const authorization = await requireEddAccess("edd_station_board");
   const companyId = requireCompanyId(authorization);
@@ -90,6 +90,7 @@ export default async function StationBoardPage({
             initialClusters={String(searchParams?.clusters ?? "")}
             initialDetail={String(searchParams?.detail ?? "")}
             initialLayout={String(searchParams?.layout ?? "")}
+            initialEddMode={String(searchParams?.eddMode ?? "")}
             canFlashReportBot={canFlashStationBoardReportBot(authorization)}
           />
         ) : null}
