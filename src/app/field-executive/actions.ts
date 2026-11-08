@@ -1358,7 +1358,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
 export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
   const authorization = await requirePagePermission("delivery_associates", "edit");
   const requestedStatus = String(formData.get("return_status") ?? "").trim().toLowerCase();
-  const destination = formData.get("return_path") ? `${safeReturnPath(formData)}?` : `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "mapping", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
+  const destination = formData.get("amazon_desk_return") === "1" ? `/workforce/amazon-onboarding?view=invite&station=${encodeURIComponent(String(formData.get("amazon_desk_station")||""))}` : formData.get("return_path") ? `${safeReturnPath(formData)}?` : `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "mapping", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
     const companyId = requireCompanyId(authorization);
