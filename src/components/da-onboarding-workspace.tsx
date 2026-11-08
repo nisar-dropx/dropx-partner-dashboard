@@ -12,7 +12,7 @@ export function DAOnboardingWorkspace({initialTab,...props}:Props){
  const tab=props.canAmazon&&!registrationLink?'amazon':'registration';
  const [station,setStation]=useState(props.initialStation||props.initialStations?.[0]||props.stations.find(s=>s.supported)?.id||'');
  function navigate(next:string){const q=new URLSearchParams(window.location.search);q.set('tab',next);if(station)q.set('station',station);q.delete('view');router.push(path+'?'+q);}
- return <div className={styles.desk}>
+ return <div className={styles.workspace}>
   <nav className={styles.workspaceTabs} aria-label="DA onboarding workspace">
    {props.canAmazon?<button aria-current={tab==='amazon'?'page':undefined} onClick={()=>navigate('amazon')}><strong>Amazon onboarding</strong><span>Amazon IDs, dependencies & verification</span></button>:null}
    <button aria-current={tab==='registration'?'page':undefined} onClick={()=>navigate('registration')}><strong>DropX registration & ownership</strong><span>Registration, system email & ID links</span></button>
