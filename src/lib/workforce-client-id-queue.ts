@@ -112,3 +112,20 @@ export async function loadClientIdMappings(db: SupabaseClient, companyId: string
     .eq("company_id", companyId).neq("status", "cancelled")
     .order("effective_from", { ascending: false }).order("id").range(from, to));
 }
+
+/** Narrow invitation checks to exact canonical/legacy identities in this station's list. */
+export async function loadClientIdMappingsForWorkers(db:SupabaseClient, companyId:string, workers:ClientIdWorker[]) {
+  const keys = new Map<string,Set<string>>([['workforce_id',new Set(workers.map(w=>w.id))]]);
+  for(const worker of workers) {
+    const column=({field_executive:'field_executive_id',contractor:'contractor_id',employee:'employee_id'} as Record<string,string>)[worker.source_profile_type];
+    if(column&&worker.source_profile_id){if(!keys.has(column))keys.set(column,new Set());keys.get(column)!.add(worker.source_profile_id);}
+  }
+  const result=new Map<string,ClientIdMapping>();
+  for(const [column,values] of keys){const ids=[...values];for(let start=0;start<ids.length;start+=100){
+    const rows=await allClientIdRows<ClientIdMapping>((from,to)=>db.from('field_executive_provider_mappings')
+      .select('id,workforce_id,field_executive_id,contractor_id,employee_id,provider_id,station_id,provider_member_id,effective_from,effective_to,status')
+      .eq('company_id',companyId).neq('status','cancelled').in(column,ids.slice(start,start+100)).order('id').range(from,to));
+    for(const row of rows)result.set(row.id,row);
+  }}
+  return [...result.values()];
+}

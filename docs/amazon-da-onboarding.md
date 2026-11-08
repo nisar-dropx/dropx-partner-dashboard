@@ -14,6 +14,22 @@ mapping, partner ID and station-configuration guards. New registration remains
 in the existing guided Workforce/DropX One flow. No station-transfer action is
 available. Amazon offboarding does not silently change DropX employment/payroll.
 
+Lists load 24 verified associates at a time. Search and status filters run across
+the source roster, not only the visible cards. Source JSON is kept in a private
+worker cache for at most two minutes; initial verified pages for 30 seconds.
+Current station authorization is checked before a cache hit. Refresh bypasses
+both caches. Pagination restarts explicitly if its source snapshot expires.
+The displayed update time is the source time. Status mutations never use cached
+station membership or operational status. Browser memory keeps at most eight
+views for 25 seconds and is cleared on actions/refresh.
+
+Photos lazy-load from approved Amazon image hosts or through a protected proxy.
+The latter requires current OpsPulse station access and a signed, five-minute
+grant bound to company/station/profile/transporter. Amazon cookies stay inside
+the worker and are never forwarded on image-host redirects. Images are bounded
+to 1 MB, raster MIME types only, and retained only in the user's private browser
+cache for five minutes. No image blobs or new rows are stored in Supabase.
+
 Offboarding, inactivity and invitation resend are explicitly confirmed. The server
 captures user ID, name, designation/role, station, exact Amazon profile ID, reason,
 remarks and expected status before contacting Amazon. The actor/name cannot be

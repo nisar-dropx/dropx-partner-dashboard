@@ -1,9 +1,10 @@
 export type AmazonDaPerson = {
-  providerId: string; name: string; transporterId: string | null; status: string;
+  providerId: string; name: string; transporterId: string | null; status: string; photoUrl?:string|null;photoTicket?:string|null;
   email: string | null; phone: string | null; stage: string | null; nextAction: string | null;
   progress: number | null; completedSteps: number | null; totalSteps: number | null;
   health: string | null; qualifications: string | null; licenseExpiry: string | null;
 };
+export type AmazonDaList = { rows:AmazonDaPerson[];checkedAt:string;nextOffset:number|null;snapshot:string;reset?:boolean };
 export type AmazonDaOption = { action: 'OFFBOARD' | 'INACTIVATE'; reasonCode: string; label: string };
 export type AmazonDaProfile = {person: AmazonDaPerson; options: AmazonDaOption[]; canResend: boolean; checkedAt: string};
 export type AmazonDaCommand = {
