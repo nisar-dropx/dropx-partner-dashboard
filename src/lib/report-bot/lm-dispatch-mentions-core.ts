@@ -1,0 +1,53 @@
+export type PresencePunch = {
+  workerType: "employee" | "contractor";
+  workerId: string;
+  locationId: string | null;
+  punchLabel: string;
+  punchTime: string;
+  source: string | null;
+  id?: string;
+};
+
+export function normalizeWhatsAppNumber(value: string | null | undefined) {
+  let digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length === 10) digits = `91${digits}`;
+  else if (digits.length === 11 && digits.startsWith("0")) digits = `91${digits.slice(1)}`;
+  return /^\d{8,15}$/.test(digits) ? digits : null;
+}
+
+function workerKey(workerType: string, workerId: string) {
+  return `${workerType}:${workerId}`;
+}
+
+function eventOrder(row: PresencePunch) {
+  const stamp = Date.parse(row.punchTime);
+  return Number.isFinite(stamp) ? stamp : 0;
+}
+
+/**
+ * Returns workers whose latest event is a biometric In at their current People
+ * station. A later Out, a manual-only In, or a punch at an old station excludes
+ * the worker.
+ */
+export function presentWorkerKeys(punches: PresencePunch[], expectedLocationByWorker: Map<string, string>) {
+  const latest = new Map<string, PresencePunch>();
+  for (const row of punches) {
+    const key = workerKey(row.workerType, row.workerId);
+    const current = latest.get(key);
+    const newer = !current || eventOrder(row) > eventOrder(current) ||
+      (eventOrder(row) === eventOrder(current) && String(row.id ?? "") > String(current.id ?? ""));
+    if (newer) latest.set(key, row);
+  }
+  const present = new Set<string>();
+  for (const [key, row] of latest) {
+    if (String(row.source ?? "").trim().toLowerCase() !== "biometric") continue;
+    if (!/^in\d*$/i.test(String(row.punchLabel ?? "").trim())) continue;
+    if (!row.locationId || row.locationId !== expectedLocationByWorker.get(key)) continue;
+    present.add(key);
+  }
+  return present;
+}
+
+export function attendanceWorkerKey(workerType: "employee" | "contractor", workerId: string) {
+  return workerKey(workerType, workerId);
+}

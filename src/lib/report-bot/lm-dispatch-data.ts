@@ -4,12 +4,17 @@ import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
 import { CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
+import { stationDotTotals, type DotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
 export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unverifiedStations: string[]; pending: boolean };
+export type EodDsrRow = { Station:string; Assigned:number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "Other / pending":number; "DSR %":string };
+export type EodDotRow = { Station:string; Eligible:number|string; Dispatched:number|string; "At station":number|string; "On road":number|string; Delivered:number|string; Failed:number|string; Rejected:number|string; "Other / pending":number|string; "DOT %":string };
+export type EodCReturnRow = { Station:string; Total:number; "Picked up":number; "Pending pickup":number; "Pickup %":string };
+export type EodDigest = { asOf:string; missingStations:string[]; dsr:EodDsrRow[]; dot:EodDotRow[]; creturn:EodCReturnRow[] };
 export function istDay(now: Date) { return new Date(+now + 330 * 60000).toISOString().slice(0, 10); }
 function fresh(stamp: string | null, day: string) {
   const at = Date.parse(stamp || "");
@@ -51,7 +56,35 @@ export async function loadTodayEddSnapshot(stationCodes: string[], day: string):
   return { asOf, stations, unverifiedStations, pending: stations.some(row => row.count > 0) };
 }
 
+export async function loadEodDigest(stationCodes: string[], day: string): Promise<EodDigest> {
+  const requested = [...new Set(stationCodes.map(code => code.trim().toUpperCase()).filter(Boolean))];
+  if (!requested.length) throw new Error("No active source stations are configured.");
+  const network = await fetchLoadFlashBoard(day, requested);
+  const allowed = new Set(requested);
+  const stations = network.stations.filter(row => allowed.has(row.stationCode) && row.businessDate === day && row.hasSnapshot);
+  const missingStations = requested.filter(code => !stations.some(row => row.stationCode === code));
+  const dsr:EodDsrRow[] = [];
+  const dot:EodDotRow[] = [];
+  const creturn:EodCReturnRow[] = [];
+  const stamps:string[] = [];
+  for (const station of stations.sort((a,b)=>a.stationCode.localeCompare(b.stationCode))) {
+    stamps.push(fresh(station.fetchedAt, day));
+    const das = station.board.daDsr;
+    const sum = (key:"delivered"|"failed"|"rejected"|"oor"|"total") => das.reduce((total,row)=>total+Number(row[key] || 0),0);
+    const assigned = sum("total"), delivered = sum("delivered");
+    const known = delivered + sum("failed") + sum("rejected") + sum("oor");
+    dsr.push({Station:station.stationCode,Assigned:assigned,Delivered:delivered,"Delivery failed":sum("failed"),Rejected:sum("rejected"),"On road":sum("oor"),"Other / pending":Math.max(0,assigned-known),"DSR %":assigned ? `${(delivered/assigned*100).toFixed(1)}%` : "—"});
+    const totals:DotTotals|undefined = stationDotTotals(station.board,"dot");
+    dot.push(totals ? {Station:station.stationCode,Eligible:totals.total,Dispatched:totals.dispatched,"At station":totals.atStation,"On road":totals.oor,Delivered:totals.delivered,Failed:totals.failed,Rejected:totals.rejected,"Other / pending":totals.other,"DOT %":`${totals.dotPct.toFixed(1)}%`} : {Station:station.stationCode,Eligible:"—",Dispatched:"—","At station":"—","On road":"—",Delivered:"—",Failed:"—",Rejected:"—","Other / pending":"—","DOT %":"—"});
+    const total = Number(station.board.cReturnTotal || 0), picked = Number(station.board.cReturn.PICKUP_DONE || 0);
+    creturn.push({Station:station.stationCode,Total:total,"Picked up":picked,"Pending pickup":Math.max(0,total-picked),"Pickup %":total ? `${(picked/total*100).toFixed(1)}%` : "—"});
+  }
+  if (!stations.length) throw new Error("No current station snapshots are available for this region.");
+  return {asOf:stamps.sort().at(-1) || network.asOf,missingStations,dsr,dot,creturn};
+}
+
 export async function loadDispatchReport(key: ReportKey, company: string, location: string, code: string, day: string): Promise<DispatchReport> {
+  if (key === "eod") throw new Error("Final EOD is generated at regional scope.");
   if (key === "slip") {
     const [r] = await loadCodPendingReport(reportBotDb(), company, [location], false, day);
     if (!r) throw new Error("No COD slip report for this station.");

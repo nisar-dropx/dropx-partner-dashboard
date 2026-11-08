@@ -136,11 +136,12 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
     );
   }
 
-  const [groupsResult, reportTypesResult, steps, dispatchLocationResult] = await Promise.all([
+  const [groupsResult, reportTypesResult, steps, dispatchLocationResult, dispatchDesignationResult] = await Promise.all([
     db.from("report_bot_groups").select("*").eq("company_id", companyId).eq("workspace", workspace).order("group_name"),
     db.from("report_bot_report_types").select("*").eq("company_id", companyId).eq("workspace", workspace).order("name"),
     loadSetupSteps(settings),
-    workspace === "last_mile" ? loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess) : Promise.resolve({locations:[],error:null})
+    workspace === "last_mile" ? loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess) : Promise.resolve({locations:[],error:null}),
+    workspace === "last_mile" ? db.from("designations").select("code,name").eq("company_id",companyId).eq("is_active",true).order("name") : Promise.resolve({data:[],error:null})
   ]);
   const groups = ((groupsResult.data ?? []) as GroupRow[]).filter((group) => canSeeGroup(authorization, group));
   const groupIds = groups.map((group) => group.id);
@@ -237,7 +238,8 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           {dispatch.error || deliveries.error ? <p role="alert">Could not load outbound schedules or delivery history.</p> : null}
           <DispatchForm canEdit={canEdit} schedules={dispatchRoutes}
             groups={groups.map(g=>({id:g.id,name:g.group_name || g.wa_group_id,mode:g.mode || "observe",available:Boolean(g.is_enabled && g.bot_in_group)}))}
-            locations={dispatchLocations.map(location=>({id:location.id,station_code:location.station_code,station_name:location.station_name,region:location.region || null,model:locationModelName(location)}))}/>
+            locations={dispatchLocations.map(location=>({id:location.id,station_code:location.station_code,station_name:location.station_name,region:location.region || null,model:locationModelName(location)}))}
+            designations={(dispatchDesignationResult.data||[]).flatMap(row=>row.code&&row.name?[{code:String(row.code).toUpperCase(),name:String(row.name)}]:[])}/>
           {deliveries.data?.length ? <details className={s.cardBody}><summary>Recent dispatches</summary>{deliveries.data.map(r=><p key={r.route_id+r.day+r.slot}>{groups.find(g=>g.id===dispatchRoutes.find(d=>d.id===r.route_id)?.group_id)?.group_name} · {r.day} {r.slot} IST · {r.status} · {r.detail}</p>)}</details> : null}
         </>}
         {tab === "reports" ? <ReportsTab workspace={workspace} groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}

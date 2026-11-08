@@ -3,7 +3,8 @@ import sharp from "sharp";
 import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
 import { dispatchReports, type ReportKey } from "./lm-dispatch-config";
-import { istDay, loadDispatchReport, loadTodayEddSnapshot, type TodayEddSnapshot } from "./lm-dispatch-data";
+import { istDay, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
+import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
 import { reportBotDb, type ReportBotSettings } from "./settings";
 import { workerRequest } from "./worker-client";
 
@@ -12,6 +13,7 @@ type Route = {
   id: string; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
+  mention_manager_policy?: MentionManagerPolicy; mention_present_designation_codes?: string[];
 };
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; report_code?:string };
 type SourceStationRow = SourceStation & { is_ho:boolean|null; hide_from_location_list:boolean|null; location_models:{code:string|null}|Array<{code:string|null}>|null };
@@ -30,6 +32,21 @@ async function photo(title: string, rows: [string,string|number][]) {
     return '<rect y="'+y+'" width="900" height="34" fill="'+(index%2 ? "#f2f5f9" : "#fff")+'"/><text x="18" y="'+(y+23)+'">'+xml(label.slice(0,75))+'</text><text x="875" text-anchor="end" y="'+(y+23)+'" font-weight="700">'+xml(value)+'</text>';
   }).join("");
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="'+(50+visible.length*34)+'" font-family="Arial,sans-serif" font-size="18"><rect width="900" height="50" fill="#193456"/><text x="18" y="32" fill="white" font-weight="700">'+xml(title)+'</text>'+body+'</svg>';
+  return (await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64");
+}
+
+async function tablePhoto(title:string, columns:string[], rows:Array<Array<string|number>>, note="") {
+  const columnWidth = Math.max(120,Math.min(230,Math.floor(1780/columns.length)));
+  const width = Math.max(900,columns.length*columnWidth);
+  const rowHeight = 36, titleHeight = note ? 82 : 54;
+  const allRows = rows.slice(0,55);
+  const header = columns.map((label,index)=>`<rect x="${index*columnWidth}" y="${titleHeight}" width="${columnWidth}" height="${rowHeight}" fill="#dce8f6"/><text x="${index*columnWidth+10}" y="${titleHeight+24}" font-weight="700">${xml(label.slice(0,26))}</text>`).join("");
+  const body = allRows.map((row,rowIndex)=>row.map((value,columnIndex)=>{
+    const y=titleHeight+rowHeight*(rowIndex+1),align=columnIndex===0?"start":"end",x=columnIndex===0?columnIndex*columnWidth+10:(columnIndex+1)*columnWidth-10;
+    return `<rect x="${columnIndex*columnWidth}" y="${y}" width="${columnWidth}" height="${rowHeight}" fill="${rowIndex%2 ? "#f2f5f9":"#fff"}"/><text x="${x}" y="${y+24}" text-anchor="${align}"${rowIndex===allRows.length-1?' font-weight="700"':""}>${xml(value)}</text>`;
+  }).join("")).join("");
+  const subtitle=note?`<text x="16" y="70" fill="#c9d7e7" font-size="15">${xml(note.slice(0,180))}</text>`:"";
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${titleHeight+rowHeight*(allRows.length+1)}" font-family="Arial,sans-serif" font-size="16"><rect width="${width}" height="${titleHeight}" fill="#193456"/><text x="16" y="34" fill="white" font-size="21" font-weight="700">${xml(title)}</text>${subtitle}${header}${body}</svg>`;
   return (await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64");
 }
 
@@ -80,13 +97,13 @@ async function routeSources(route:Route, company:string):Promise<SourceStation[]
   return stations;
 }
 
-function eddOutputs(route:Route, snapshot:TodayEddSnapshot, sources:SourceStation[], header:string, caption:string, day:string):Promise<SendOutput[]> {
+function eddOutputs(route:Route, snapshot:TodayEddSnapshot, sources:SourceStation[], header:string, caption:string, day:string, mentionNumbers:string[]):Promise<SendOutput[]> {
   const labels = new Map(sources.map(row=>[row.station_code,row.station_name ? `${row.station_code} · ${row.station_name}` : row.station_code]));
   const active = snapshot.stations.filter(row=>row.count>0);
   const coverage = snapshot.unverifiedStations.length ? `Coverage pending: ${snapshot.unverifiedStations.join(", ")}` : "";
   const formats = route.formats?.length ? route.formats : [route.format === "table" ? "text" : route.format];
   const outputs:SendOutput[] = [];
-  const mentions = route.mentions.map(number=>number+"@s.whatsapp.net");
+  const mentions = mentionNumbers.map(number=>number+"@s.whatsapp.net");
   if (formats.includes("text")) {
     const lines = [header,coverage,...active.flatMap(station=>[`${labels.get(station.stationCode) || station.stationCode}: ${station.count}`, ...station.trackingIds.map(row=>row.trackingId)]),caption].filter(Boolean);
     splitText(lines).forEach((text,index)=>outputs.push({key:`text_${String(index+1).padStart(3,"0")}`,body:{text,...(index===0&&mentions.length?{mentions}:{})}}));
@@ -102,6 +119,37 @@ function eddOutputs(route:Route, snapshot:TodayEddSnapshot, sources:SourceStatio
     outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`EDD_${scope.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:header,...(mentions.length?{mentions}:{})}});
   }
   return Promise.all(tasks).then(()=>outputs.sort((a,b)=>a.key.localeCompare(b.key)));
+}
+
+function sumNumeric<T extends Record<string,string|number>>(rows:T[],key:string) {
+  return rows.reduce((sum,row)=>sum+(typeof row[key]==="number" ? Number(row[key]) : 0),0);
+}
+
+async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string):Promise<SendOutput[]> {
+  const mentions=(route.mentions||[]).map(number=>number+"@s.whatsapp.net");
+  const note=[`As of ${asIst(digest.asOf)}`,digest.missingStations.length?`Snapshot pending: ${digest.missingStations.join(", ")}`:""].filter(Boolean).join(" · ");
+  const dsrAssigned=sumNumeric(digest.dsr,"Assigned"),dsrDelivered=sumNumeric(digest.dsr,"Delivered");
+  const dsr=[...digest.dsr,{Station:"Grand total",Assigned:dsrAssigned,Delivered:dsrDelivered,"Delivery failed":sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"Other / pending":sumNumeric(digest.dsr,"Other / pending"),"DSR %":dsrAssigned?`${(dsrDelivered/dsrAssigned*100).toFixed(1)}%`:"—"}];
+  const dotValid=digest.dot.filter(row=>typeof row.Eligible==="number"),dotEligible=sumNumeric(dotValid,"Eligible"),dotDelivered=sumNumeric(dotValid,"Delivered");
+  const dot=[...digest.dot,{Station:"Grand total",Eligible:dotEligible,Dispatched:sumNumeric(dotValid,"Dispatched"),"At station":sumNumeric(dotValid,"At station"),"On road":sumNumeric(dotValid,"On road"),Delivered:dotDelivered,Failed:sumNumeric(dotValid,"Failed"),Rejected:sumNumeric(dotValid,"Rejected"),"Other / pending":sumNumeric(dotValid,"Other / pending"),"DOT %":dotEligible?`${(dotDelivered/dotEligible*100).toFixed(1)}%`:"—"}];
+  const cTotal=sumNumeric(digest.creturn,"Total"),cPicked=sumNumeric(digest.creturn,"Picked up");
+  const creturn=[...digest.creturn,{Station:"Grand total",Total:cTotal,"Picked up":cPicked,"Pending pickup":sumNumeric(digest.creturn,"Pending pickup"),"Pickup %":cTotal?`${(cPicked/cTotal*100).toFixed(1)}%`:"—"}];
+  const tables=[
+    {key:"dsr",title:`Final DSR · ${region} · ${day}`,rows:dsr},
+    {key:"dot",title:`Final DOT · ${region} · ${day}`,rows:dot},
+    {key:"creturn",title:`Final C-Return · ${region} · ${day}`,rows:creturn},
+  ];
+  const outputs:SendOutput[]=[];
+  const formats=route.formats?.length?route.formats:[route.format];
+  if(formats.includes("photo")) for(const table of tables) {
+    const columns=Object.keys(table.rows[0]||{}),values=table.rows.map(row=>columns.map(column=>(row as Record<string,string|number>)[column]));
+    outputs.push({key:`photo_${table.key}`,body:{image_base64:await tablePhoto(table.title,columns,values,note),mime:"image/png",caption:`*${table.title}*\n${note}`,...(mentions.length?{mentions}:{})}});
+  }
+  if(formats.includes("excel")) {
+    const buffer=workbookBuffer([{name:"Final DSR",rows:dsr},{name:"Final DOT",rows:dot},{name:"Final C-Return",rows:creturn}]);
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*Final EOD · ${region} · ${day}*\nDSR + DOT + C-Return\n${note}`,...(mentions.length?{mentions}:{})}});
+  }
+  return outputs.sort((a,b)=>a.key.localeCompare(b.key));
 }
 
 async function standardOutputs(route:Route, header:string, rows:[string,string|number][], caption:string, day:string):Promise<SendOutput[]> {
@@ -193,10 +241,18 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           else {
             const scope=route.scope_type==="region" ? (route.source_region_codes||[]).join(", ") : sources.map(row=>row.station_code).join(", ");
             const header=`${scope} · Today EDD pending · ${asIst(snapshot.asOf)}`;
-            const caption=[route.question,route.mentions.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
-            outputs=await eddOutputs(route,snapshot,sources,header,caption,day);
+            const pendingSources=sources.filter(source=>snapshot.stations.some(station=>station.stationCode===source.station_code&&station.count>0));
+            const mentionNumbers=await resolveRouteMentionNumbers(company,pendingSources,route,day);
+            const caption=[route.question,mentionNumbers.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
+            outputs=await eddOutputs(route,snapshot,sources,header,caption,day,mentionNumbers);
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
           }
+        } else if (route.report==="eod") {
+          if(route.scope_type!=="region") throw new Error("Final EOD requires regional scope.");
+          const digest=await loadEodDigest(sources.map(row=>row.station_code),day);
+          const region=(route.source_region_codes||[]).join(", ");
+          outputs=await eodOutputs(route,digest,region,day);
+          detail=`${region} · ${sources.length} source station(s) · Final DSR + DOT + C-Return`;
         } else {
           const reports=await Promise.all(sources.map(source=>loadDispatchReport(route.report,company,source.id,source.report_code || source.station_code,day)));
           const pending=reports.some(row=>row.pending);

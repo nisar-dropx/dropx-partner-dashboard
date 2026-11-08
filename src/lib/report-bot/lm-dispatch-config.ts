@@ -1,7 +1,8 @@
 export const dispatchReports = {
   edd: "EDD pendency", station: "At station", dsr: "DSR", creturn: "C-Return", ageing: "Ageing",
   zero: "Zero-delivery DAs", scrub: "Scrub", cod: "COD", recon: "DA reconciliation",
-  deposit: "Prepare deposit", bank: "Bank remittance", slip: "COD slip"
+  deposit: "Prepare deposit", bank: "Bank remittance", slip: "COD slip",
+  eod: "Final EOD · DSR + DOT + C-Return"
 };
 export type ReportKey = keyof typeof dispatchReports;
 const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -25,6 +26,7 @@ export function scheduleSlots(start: string, end: string, intervalMinutes: numbe
 }
 
 export function suggestedTimes(key: ReportKey) {
+  if (key === "eod") return ["23:30"];
   if (key === "ageing") return ["10:00", "17:00"];
   if (key === "zero") return scheduleSlots("13:00", "21:00", 60);
   return ["edd", "station", "dsr", "creturn"].includes(key) ? scheduleSlots("08:00", "21:00", 60) : [];

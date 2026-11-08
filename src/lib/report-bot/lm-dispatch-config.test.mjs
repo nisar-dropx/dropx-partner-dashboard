@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scheduleSlots } from "./lm-dispatch-config.ts";
+import { scheduleSlots, suggestedTimes } from "./lm-dispatch-config.ts";
 
 test("dispatch windows are generated from master values rather than a fixed runtime list", () => {
   const slots = scheduleSlots("07:00", "22:00", 60);
@@ -16,4 +16,8 @@ test("dispatch windows reject invalid or excessive master configurations", () =>
   assert.throws(() => scheduleSlots("22:00", "07:00", 30), /after the start/);
   assert.throws(() => scheduleSlots("07:00", "22:00", 1), /between 5 and 720/);
   assert.throws(() => scheduleSlots("bad", "22:00", 30), /valid start and end/);
+});
+
+test("final EOD defaults to one configurable 23:30 slot", () => {
+  assert.deepEqual(suggestedTimes("eod"), ["23:30"]);
 });
