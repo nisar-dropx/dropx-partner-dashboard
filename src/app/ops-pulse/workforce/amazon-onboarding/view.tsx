@@ -15,6 +15,7 @@ async function api<T>(url:string,signal?:AbortSignal):Promise<T>{const res=await
 function Photo({person,station}:{person:AmazonDaPerson;station:string}){
  const [failed,setFailed]=useState(false);
  const src=person.photoUrl||(person.photoTicket?`/api/ops-pulse/amazon-da?${new URLSearchParams({view:'photo',station,profile:person.providerId,ticket:person.photoTicket})}`:null);
+ useEffect(()=>setFailed(false),[src]);
  return <span className={styles.avatar}>{src&&!failed?<img src={src} alt="" width={52} height={52} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<span>{person.name.trim().split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span>}</span>;
 }
 export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string}){
