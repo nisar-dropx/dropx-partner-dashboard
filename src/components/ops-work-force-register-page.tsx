@@ -2,12 +2,14 @@ import { FieldExecutivePageContent } from "@/components/field-executive-page-con
 import { OpsWorkforcePeople } from "@/components/ops-workforce-people";
 import { OpsWorkforceNavigation } from "@/components/ops-workforce-navigation";
 import { OpsBetaVerification } from "@/components/ops-beta-verification";
+import { OpsWorkforceLifecycle } from "@/components/ops-workforce-lifecycle";
 export type WorkForceRegisterSearchParams = {
   section?: string; profile?: string; ids?: string; status?: string; edit?: string; view?: string; error?: string; notice?: string;
   full_name?: string; mobile_country_code?: string; mobile?: string; email?: string;
   date_of_join?: string; reported_on?: string; location_id?: string; designation?: string;
 };
 export function OpsWorkforceRegisterPage({ searchParams = {} }: { searchParams?: WorkForceRegisterSearchParams }) {
+  if (searchParams.section === "lifecycle") return <OpsWorkforceLifecycle selectedId={searchParams.profile} />;
   if (searchParams.section === "bgc") return <OpsBetaVerification status={searchParams.status} />;
   if (searchParams.section === "register" && !searchParams.edit && !searchParams.view) return <OpsWorkforcePeople profile={searchParams.profile} ids={searchParams.ids} />;
   return <FieldExecutivePageContent

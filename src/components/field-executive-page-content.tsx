@@ -557,7 +557,7 @@ function AddFieldExecutiveForm({
           <div className="field-executive-country-code">
             <SearchableSelect name="mobile_country_code" options={countryCodeSelectOptions} defaultValue={values?.mobileCountryCode ?? "91"} placeholder="+91" required />
           </div>
-          <WorkforceMobileInput required defaultValue={values?.mobile ?? ""} />
+          <WorkforceMobileInput required checkRejoin={returnPath === "/work-force-register"} defaultValue={values?.mobile ?? ""} />
         </div>
       </label>
       {returnPath !== "/work-force-register" ? <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /><small>Use the created mailbox. Where the partner workflow requires it, end the name with .stationcode before @. Any valid domain is allowed.</small></label> : null}
