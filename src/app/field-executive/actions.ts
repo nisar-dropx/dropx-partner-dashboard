@@ -1385,6 +1385,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     const mapping = providerMappingFor(clientWorker, await loadClientIdMappings(supabaseAdmin, companyId), dashboardDateInputValue());
     if (mapping.current) {
       revalidatePath("/work-force-register");
+      if(formData.get("amazon_desk_return")==="1") redirect(`${destination}&notice=${encodeURIComponent("Amazon ID already linked. No invitation is needed.")}`);
       redirect(`/work-force-register?tab=amazon-id&notice=${encodeURIComponent("This associate already has a valid provider ID mapping in Dashboard. No invitation is needed.")}`);
     }
     if (mapping.known) {
@@ -1393,6 +1394,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     const existingPartner = (await loadClientIdPartnerStates(supabaseAdmin, companyId, [workforceId])).get(workforceId);
     if (existingPartner) {
       revalidatePath("/work-force-register");
+      if(formData.get("amazon_desk_return")==="1") redirect(`${destination}&notice=${encodeURIComponent(existingPartner.instruction)}`);
       const tab = existingPartner.queue === "mapping" ? "mapping" : existingPartner.queue === "progress" ? "da-onboarding" : "attention";
       redirect(`/work-force-register?tab=${tab}&notice=${encodeURIComponent(existingPartner.instruction)}`);
     }

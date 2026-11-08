@@ -3,9 +3,12 @@ import { getAuthorization, hasPermission } from '@/lib/authorization';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { loadOpsWorkforceLocations } from '@/lib/ops-workforce-locations';
 import { workforceStationPolicy } from '@/lib/workforce-register-policy';
-import { callWorkforceAmazonWorker } from '@/lib/workforce-amazon-worker';
+import { callWorkforceAmazonWorker, workforceAmazonWorkerConfig } from '@/lib/workforce-amazon-worker';
 import { deskProfileId, deskUuid, validateDeskAction } from '@/lib/amazon-da-desk-policy';
 import type { AmazonDaProfile } from '@/lib/amazon-da-desk-types';
+import {loadClientIdMappingsForWorkers,needsClientId,providerMappingFor,type ClientIdWorker} from '@/lib/workforce-client-id-queue';
+import {loadClientIdPartnerStates} from '@/lib/workforce-client-id-partner';
+import {dashboardDateInputValue} from '@/lib/date-format';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -35,6 +38,16 @@ export async function GET(request:Request) {
     const view = params.get('view') || 'onboarding';
     const providerId = params.get('profile');
     if (providerId && !deskProfileId.test(providerId)) throw new DeskError('Select a valid Amazon profile.');
+    if(view==='photo') {
+      const ticket=params.get('ticket')||'';
+      if(!providerId||!ticket||ticket.length>4096)throw new DeskError('Photo unavailable.',404);
+      const config=workforceAmazonWorkerConfig();if(!config.configured)throw new DeskError('Photo unavailable.',404);
+      const response=await fetch(`${config.baseUrl}/api/admin/amazon/station-desk/photo`,{method:'POST',headers:{'Content-Type':'application/json','x-admin-key':config.adminKey},
+        body:JSON.stringify({companyId,stationId,providerId,ticket}),cache:'no-store',signal:AbortSignal.timeout(20000)});
+      const type=response.headers.get('content-type')||'';
+      if(!response.ok||!['image/jpeg','image/png','image/webp','image/gif'].includes(type))return new Response(null,{status:404,headers:{'Cache-Control':'private, no-store'}});
+      return new Response(response.body,{headers:{'Content-Type':type,'Cache-Control':'private, max-age=300','Vary':'Cookie','X-Content-Type-Options':'nosniff'}});
+    }
     if (view === 'history') {
       // History stays with the original station even after an external Amazon transfer.
       let query = db.from('amazon_da_commands').select(columns).eq('company_id',companyId).eq('station_id',stationId).order('created_at',{ascending:false}).limit(100);
@@ -46,14 +59,22 @@ export async function GET(request:Request) {
     if (providerId) return reply(await worker('profile',{companyId,stationId,providerId}));
     if (view === 'invite') {
       const [people,requests] = await Promise.all([
-        db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status').eq('company_id',companyId).eq('location_id',stationId).is('deleted_at',null).in('onboarding_status',['under_review','approved','active']).order('full_name').limit(500),
+        db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,source_profile_type,source_profile_id,lifecycle_status,migration_state,location_id,stations(provider_id),designations(provider_mapping_required)').eq('company_id',companyId).eq('location_id',stationId).is('deleted_at',null).in('onboarding_status',['under_review','approved','active']).order('full_name').limit(500),
         db.from('workforce_amazon_invitation_requests').select('id,workforce_id,status,requested_at,error_message').eq('company_id',companyId).eq('station_id',stationId).order('requested_at',{ascending:false}).limit(100),
       ]);
       if(people.error || requests.error) throw new Error('Could not load invitation records.');
-      return reply({people:people.data,requests:requests.data});
+      const workers=people.data as unknown as (ClientIdWorker&{full_name:string;dropx_id:string|null;email:string|null})[];
+      const mappings=await loadClientIdMappingsForWorkers(db,companyId,workers);
+      const states=new Map(workers.map(p=>[p.id,providerMappingFor(p,mappings,dashboardDateInputValue())]));
+      const partners=await loadClientIdPartnerStates(db,companyId,workers.filter(p=>needsClientId(p)&&!states.get(p.id)?.known).map(p=>p.id));
+      return reply({people:workers.map(p=>({id:p.id,full_name:p.full_name,dropx_id:p.dropx_id,email:p.email,onboarding_status:p.onboarding_status,
+        inviteBlocked:!needsClientId(p)?'This profile does not require an invitation.':states.get(p.id)?.current?'Amazon ID already linked.':states.get(p.id)?.known?'Amazon ID exists · review its mapping.':partners.has(p.id)?partners.get(p.id)!.instruction:null})),requests:requests.data});
     }
     if (!['onboarding','associates','offboarded'].includes(view)) throw new DeskError('Select a valid view.');
-    return reply(await worker('list',{companyId,stationId,view}));
+    return reply(await worker('list',{companyId,stationId,view,
+      ...(params.has('pageSize')?{pageSize:24,offset:Math.max(0,Math.floor(Number(params.get('offset'))||0)),
+        query:(params.get('query')||'').slice(0,100),status:(params.get('status')||'').slice(0,30),
+        snapshot:params.get('snapshot')||'',fresh:params.get('fresh')==='1'}:{})}));
   } catch(error) { return reply({error:error instanceof Error ? error.message : 'Unable to load Amazon onboarding.'},error instanceof DeskError?error.status:503); }
 }
 export async function POST(request:Request) {

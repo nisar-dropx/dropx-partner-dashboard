@@ -1,6 +1,9 @@
 const ts=require('typescript');const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');
 // Bundle the actual API with only its infrastructure replaced. No production requests.
 const stubs={
+ '@/lib/workforce-client-id-queue':'exports.loadClientIdMappingsForWorkers=async()=>[];exports.needsClientId=()=>true;exports.providerMappingFor=()=>({});',
+ '@/lib/workforce-client-id-partner':'exports.loadClientIdPartnerStates=async()=>new Map();',
+ '@/lib/date-format':'exports.dashboardDateInputValue=()=>"2026-11-08";',
  'next/server':'exports.NextResponse={json:(b,i)=>Response.json(b,i)};',
  '@/lib/authorization':'exports.getAuthorization=async()=>fixture.auth; exports.hasPermission=(a,p,m)=>m===\"edit\"?a.edit:a.view;',
  '@/lib/supabase-admin':'exports.supabaseAdmin={from:()=>fixture.query()};',
@@ -18,6 +21,12 @@ const action={stationId:station,id,providerId:provider,action:'OFFBOARD',reasonC
 const post=(body=action)=>route.POST(new Request(url,{method:'POST',headers:{Origin:'https://ops.dropxlogistics.com','Content-Type':'application/json'},body:JSON.stringify(body)}));
 fixture.auth.view=false;assert.equal((await route.GET(new Request(url))).status,403);assert.equal(fixture.calls.length,0);fixture.auth.view=true;
 assert.equal((await route.GET(new Request(url.replace(station,'00000000-0000-4000-8000-000000000099')))).status,403);assert.equal(fixture.calls.length,0);
+fixture.calls=[];
+assert.equal((await route.GET(new Request(url+'&view=associates&pageSize=999&offset=-4&query='+('x'.repeat(130))+'&fresh=1'))).status,200);
+assert.equal(fixture.calls[0].body.pageSize,24);assert.equal(fixture.calls[0].body.offset,0);assert.equal(fixture.calls[0].body.query.length,100);assert.equal(fixture.calls[0].body.fresh,true);
+fixture.calls=[];
+assert.equal((await route.GET(new Request(url.replace(station,'00000000-0000-4000-8000-000000000099')+'&view=photo&profile='+provider+'&ticket=example'))).status,403);
+assert.equal(fixture.calls.length,0);
 fixture.auth.readOnly=true;assert.equal((await post()).status,403);fixture.auth.readOnly=false;
 fixture.auth.isPreview=true;assert.equal((await post()).status,403);fixture.auth.isPreview=false;
 assert.equal((await post({...action,action:'TRANSFER'})).status,400);
