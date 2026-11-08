@@ -1,5 +1,6 @@
 import "server-only";
-import { fetchLoadFlashBoard, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
+import { fetchLoadFlashBoard, fetchLoadFlashTracking, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
+import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
 import { CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
@@ -7,6 +8,8 @@ import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
+export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
+export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unverifiedStations: string[]; pending: boolean };
 export function istDay(now: Date) { return new Date(+now + 330 * 60000).toISOString().slice(0, 10); }
 function fresh(stamp: string | null, day: string) {
   const at = Date.parse(stamp || "");
@@ -14,6 +17,40 @@ function fresh(stamp: string | null, day: string) {
   return stamp!;
 }
 const money = (value: number) => "₹" + value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+/**
+ * Exact Today EDD queue used by the Last Mile Report Bot. A station is eligible
+ * only after the station-inventory reconciliation completed (version 2). The
+ * package source is BoardPendingToday: due today, physically at station, and
+ * never dispatched/attempted. The requested station allow-list is reapplied
+ * because older workers may ignore their stations query parameter.
+ */
+export async function loadTodayEddSnapshot(stationCodes: string[], day: string): Promise<TodayEddSnapshot> {
+  const requested = [...new Set(stationCodes.map(code => code.trim().toUpperCase()).filter(Boolean))];
+  if (!requested.length) throw new Error("No active source stations are configured.");
+  const board = await fetchLoadFlashBoard(day, requested);
+  const byCode = new Map(board.stations.filter(row => row.businessDate === day).map(row => [row.stationCode, row]));
+  const verified = requested.filter(code => {
+    const row = byCode.get(code);
+    return Boolean(row?.hasSnapshot && row.board.stationInventoryVersion === 2);
+  });
+  const unverifiedStations = requested.filter(code => !verified.includes(code));
+  if (!verified.length) throw new Error("Today EDD source is not verified for the configured stations yet.");
+  const tracking = await fetchLoadFlashTracking(day, verified, { buckets: [BOARD_TID.PENDING_TODAY] });
+  const allowed = new Set(verified);
+  const exact = mapBoardTidExportRows(
+    tracking.filter(row => allowed.has(row.stationCode) && row.edd === day),
+    "edd-today",
+  );
+  const stations = verified.map((stationCode) => {
+    const source = byCode.get(stationCode)!;
+    const trackingIds = exact.filter(row => row.stationCode === stationCode);
+    return { stationCode, count: trackingIds.length, trackingIds, asOf: fresh(source.fetchedAt, day) };
+  }).sort((a, b) => b.count - a.count || a.stationCode.localeCompare(b.stationCode));
+  const asOf = stations.map(row => row.asOf).sort().at(-1) ?? board.asOf;
+  return { asOf, stations, unverifiedStations, pending: stations.some(row => row.count > 0) };
+}
+
 export async function loadDispatchReport(key: ReportKey, company: string, location: string, code: string, day: string): Promise<DispatchReport> {
   if (key === "slip") {
     const [r] = await loadCodPendingReport(reportBotDb(), company, [location], false, day);
@@ -55,12 +92,20 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     return { asOf: fresh(s.fetchedAt, day), pending: !station || !road, rows: [["In-station checks", station], ["On-road checks", road]] };
   }
   if (key === "edd" || key === "station") {
+    if (key === "edd") {
+      const exact = await loadTodayEddSnapshot([code], day);
+      const station = exact.stations[0];
+      return {
+        asOf: exact.asOf,
+        pending: station.count > 0,
+        rows: [["Today EDD pending", station.count], ...station.trackingIds.map(row => ["TID", row.trackingId] as [string, string])],
+      };
+    }
     const result = await fetchEddStation({ stationCode: code });
     if (result.status !== "ok" || result.payload.todayYmd !== day || result.payload.stationCode !== code) throw new Error("No current EDD snapshot.");
     const s = result.payload, b = s.buckets;
-    return { asOf: fresh(s.fetchedAt, day), pending: key === "edd" ? b.dueToday + b.overdue > 0 : s.totalCount > 0,
-      rows: key === "edd" ? [["Due today", b.dueToday], ["Overdue", b.overdue]] :
-        [["At station", s.totalCount], ["Overdue", b.overdue], ["Due today", b.dueToday], ["Due tomorrow", b.dueTomorrow], ["Later", b.future], ["EDD unknown", b.unknown]] };
+    return { asOf: fresh(s.fetchedAt, day), pending: s.totalCount > 0,
+      rows: [["At station", s.totalCount], ["Overdue", b.overdue], ["Due today", b.dueToday], ["Due tomorrow", b.dueTomorrow], ["Later", b.future], ["EDD unknown", b.unknown]] };
   }
   const s = (await fetchLoadFlashBoard(day, [code])).stations.find(s => s.stationCode === code && s.businessDate === day && s.hasSnapshot);
   if (!s) throw new Error("Station board unavailable for this date.");
