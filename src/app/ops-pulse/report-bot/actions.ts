@@ -973,7 +973,7 @@ export async function saveDispatchRoutes(form: FormData) {
     if (report === "eod" && scopeType !== "region") throw new Error("Final EOD must use Regional / Internal LM scope.");
     const formats = [...new Set(form.getAll("format").map(String))];
     if (!formats.length || formats.some(value => !["photo","text","excel"].includes(value))) throw new Error("Choose at least one output format.");
-    if (report === "eod" && (!formats.includes("photo") || !formats.includes("excel"))) throw new Error("Final EOD requires both the table images and Excel workbook.");
+    if (report === "eod" && (formats.length !== 1 || formats[0] !== "photo")) throw new Error("Final EOD sends compact table images only.");
     const scheduleStart = field(form,"schedule_start"), scheduleEnd = field(form,"schedule_end");
     const intervalMinutes = Number(field(form,"interval_minutes"));
     const times = scheduleSlots(scheduleStart,scheduleEnd,intervalMinutes);
@@ -998,12 +998,17 @@ export async function saveDispatchRoutes(form: FormData) {
     const activeById = new Map(lastMileLocations.map(location => [location.id,location]));
     const sourceLocationIds = [...new Set(form.getAll("source_location_id").map(String))];
     const sourceRegionCodes = [...new Set(form.getAll("source_region_code").map(String).map(value=>value.trim()).filter(Boolean))];
+    const sourceModelCodes = [...new Set(form.getAll("source_model_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
+    const availableModelCodes = new Set(lastMileLocations.map(location=>locationModelName(location).trim().toUpperCase()).filter(Boolean));
+    if (sourceModelCodes.length > 25 || sourceModelCodes.some(code=>!availableModelCodes.has(code))) throw new Error("Choose active source models from the location master.");
+    if (report === "eod" && !sourceModelCodes.length) throw new Error("Choose at least one source model for Final EOD.");
     if (scopeType === "station") {
       if (!sourceLocationIds.length || sourceLocationIds.length > 100 || sourceLocationIds.some(id=>!activeById.has(id))) throw new Error("Choose between 1 and 100 active source stations in your scope.");
     } else {
       if (!authorization.hasAllLocationAccess) throw new Error("Regional Internal LM schedules require all-location access.");
       const availableRegions = new Set(lastMileLocations.map(location=>String(location.region || "").trim()).filter(Boolean));
       if (!sourceRegionCodes.length || sourceRegionCodes.length > 25 || sourceRegionCodes.some(region=>!availableRegions.has(region))) throw new Error("Choose one or more active regions from the location master.");
+      if (sourceModelCodes.length && !lastMileLocations.some(location=>sourceRegionCodes.includes(String(location.region || "").trim()) && sourceModelCodes.includes(locationModelName(location).trim().toUpperCase()))) throw new Error("The selected region and model combination has no active source stations.");
     }
     const rows = await Promise.all(ids.map(async id => {
       const g = await scopedGroup(authorization,companyId,id);
@@ -1014,6 +1019,7 @@ export async function saveDispatchRoutes(form: FormData) {
         scope_type:scopeType,
         source_location_ids:scopeType === "station" ? sourceLocationIds : [],
         source_region_codes:scopeType === "region" ? sourceRegionCodes : [],
+        source_model_codes:scopeType === "region" ? sourceModelCodes : [],
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
         schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",

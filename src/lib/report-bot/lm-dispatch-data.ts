@@ -12,8 +12,8 @@ import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
 export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unverifiedStations: string[]; pending: boolean };
-export type EodDsrRow = { Station:string; Assigned:number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "Other / pending":number; "DSR %":string };
-export type EodDotRow = { Station:string; Eligible:number|string; Dispatched:number|string; "At station":number|string; "On road":number|string; Delivered:number|string; Failed:number|string; Rejected:number|string; "Other / pending":number|string; "DOT %":string };
+export type EodDsrRow = { Station:string; "Verified total":number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "DSR %":string };
+export type EodDotRow = { Station:string; "Verified eligible":number|string; Dispatched:number|string; "At station":number|string; "On road":number|string; Delivered:number|string; Failed:number|string; Rejected:number|string; "DOT %":string };
 export type EodCReturnRow = { Station:string; Total:number; "Picked up":number; "Pending pickup":number; "Pickup %":string };
 export type EodDigest = { asOf:string; missingStations:string[]; dsr:EodDsrRow[]; dot:EodDotRow[]; creturn:EodCReturnRow[] };
 export function istDay(now: Date) { return new Date(+now + 330 * 60000).toISOString().slice(0, 10); }
@@ -72,11 +72,17 @@ export async function loadEodDigest(stationCodes: string[], day: string): Promis
     stamps.push(fresh(station.fetchedAt, day));
     const das = station.board.daDsr;
     const sum = (key:"delivered"|"failed"|"rejected"|"oor"|"total") => das.reduce((total,row)=>total+Number(row[key] || 0),0);
-    const assigned = sum("total"), delivered = sum("delivered");
+    const delivered = sum("delivered");
     const known = delivered + sum("failed") + sum("rejected") + sum("oor");
-    dsr.push({Station:station.stationCode,Assigned:assigned,Delivered:delivered,"Delivery failed":sum("failed"),Rejected:sum("rejected"),"On road":sum("oor"),"Other / pending":Math.max(0,assigned-known),"DSR %":assigned ? `${(delivered/assigned*100).toFixed(1)}%` : "—"});
+    dsr.push({Station:station.stationCode,"Verified total":known,Delivered:delivered,"Delivery failed":sum("failed"),Rejected:sum("rejected"),"On road":sum("oor"),"DSR %":known ? `${(delivered/known*100).toFixed(1)}%` : "—"});
     const totals:DotTotals|undefined = stationDotTotals(station.board,"dot");
-    dot.push(totals ? {Station:station.stationCode,Eligible:totals.total,Dispatched:totals.dispatched,"At station":totals.atStation,"On road":totals.oor,Delivered:totals.delivered,Failed:totals.failed,Rejected:totals.rejected,"Other / pending":totals.other,"DOT %":`${totals.dotPct.toFixed(1)}%`} : {Station:station.stationCode,Eligible:"—",Dispatched:"—","At station":"—","On road":"—",Delivered:"—",Failed:"—",Rejected:"—","Other / pending":"—","DOT %":"—"});
+    if (totals) {
+      const dispatched = totals.delivered + totals.oor + totals.failed + totals.rejected;
+      const eligible = dispatched + totals.atStation;
+      dot.push({Station:station.stationCode,"Verified eligible":eligible,Dispatched:dispatched,"At station":totals.atStation,"On road":totals.oor,Delivered:totals.delivered,Failed:totals.failed,Rejected:totals.rejected,"DOT %":eligible ? `${(totals.delivered/eligible*100).toFixed(1)}%` : "—"});
+    } else {
+      dot.push({Station:station.stationCode,"Verified eligible":"—",Dispatched:"—","At station":"—","On road":"—",Delivered:"—",Failed:"—",Rejected:"—","DOT %":"—"});
+    }
     const total = Number(station.board.cReturnTotal || 0), picked = Number(station.board.cReturn.PICKUP_DONE || 0);
     creturn.push({Station:station.stationCode,Total:total,"Picked up":picked,"Pending pickup":Math.max(0,total-picked),"Pickup %":total ? `${(picked/total*100).toFixed(1)}%` : "—"});
   }
