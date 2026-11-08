@@ -327,9 +327,11 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     }
   }
 
+  let activePermissionRoleIds: string[] = [];
   if (effectiveRoleIds.length) {
     const roles = await loadActiveRoles(companyId as string, effectiveRoleIds).catch(() => null);
     if (!roles) return null;
+    activePermissionRoleIds = roles.map(role => role.id);
     effectiveRoleCodes = roles.map(role => String(role.code ?? "").trim().toUpperCase());
     const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
     roleName = primaryRole?.name ?? null;
@@ -388,6 +390,21 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     permissions.company_master = { ...noPermission };
   }
 
+  // This rollout is explicitly controlled in Users & Access, including owners.
+  // Broad Workforce/location access must not enable the new workspace.
+  const rolloutGrants = activePermissionRoleIds.length
+    ? await loadRolePageGrants(companyId as string, activePermissionRoleIds).catch(() => null)
+    : null;
+  permissions.workforce_onboarding = { ...noPermission };
+  const rolloutPageIds = new Set(rolloutGrants?.pages.filter(page => page.code === "workforce_onboarding").map(page => page.id));
+  for (const grant of rolloutGrants?.grants ?? []) {
+    if (!rolloutPageIds.has(grant.page_id)) continue;
+    const current = permissions.workforce_onboarding;
+    current.canView ||= grant.can_view || grant.can_edit;
+    current.canAdd ||= grant.can_add;
+    current.canEdit ||= grant.can_edit;
+  }
+
   const designation = companyId ? await loadPeopleDesignation(companyId, profile.id) : undefined;
   if (!hasAllLocationAccess && locationScopeIds.length) {
     const locationResult = await supabaseAdmin
@@ -444,6 +461,11 @@ export function hasPermission(
   if (authorization.readOnly && (action === "add" || action === "edit")) return false;
   // This desk is granted by current location access, without widening the Workforce register.
   if (pageCode === 'ops_amazon_da') return Boolean(authorization.companyId && (authorization.hasAllLocationAccess || authorization.locationScopeIds.length)) && (!(action==='edit'||action==='add') || !authorization.isPreview);
+  if (pageCode === "workforce_onboarding") {
+    const grant = authorization.permissions[pageCode] ?? noPermission;
+    return action === "access" ? grant.canView || grant.canAdd || grant.canEdit
+      : action === "add" ? grant.canAdd : action === "edit" ? grant.canEdit : grant.canView;
+  }
   if (isCompanyOwner(authorization)) return true;
   if (inheritsMappingSummaryAccess(authorization.permissions, pageCode, action)) return true;
   const permission = authorization.permissions[pageCode] ?? noPermission;
