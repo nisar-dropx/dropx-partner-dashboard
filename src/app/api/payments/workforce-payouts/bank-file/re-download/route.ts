@@ -1,3 +1,4 @@
+import { assertPaymentRelease } from "@/lib/payment-release-access";
 import { createHash } from "node:crypto";
 
 import JSZip from "jszip";
@@ -226,6 +227,7 @@ export async function POST(request: Request) {
     }
 
     const groups = new Map<string, RedownloadItem[]>();
+    await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id)), periodStart.slice(0, 7), audience);
     items.forEach((item) => {
       const batchId = String(item.batch_id ?? "").trim().toLowerCase();
       if (!UUID.test(batchId) || !UUID.test(String(item.payment_item_id ?? ""))) {

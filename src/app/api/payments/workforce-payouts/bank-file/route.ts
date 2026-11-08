@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertPaymentRelease } from "@/lib/payment-release-access";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
@@ -264,6 +265,7 @@ export async function GET(request: Request) {
     if (!immutableLocationsAreInScope(access.authorization, items.map((item) => item.location_id_snapshot))) {
       return errorResponse("This payment batch includes a location outside your location scope.", 403);
     }
+    await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id_snapshot)), String(batch.period_start).slice(0, 7), audience);
     return workbookResponse({
       batch_id: batch.id,
       period_start: batch.period_start,
@@ -326,6 +328,7 @@ export async function POST(request: Request) {
       payoutRows.map((row) => row.stationId)
     );
     if (scopeError) return scopeError;
+    await assertPaymentRelease(access.companyId, payoutRows.map(row => row.stationId), periodStart.slice(0, 7), audience);
 
     // Idempotency belongs to the user's normalized request, not to the live
     // calculation snapshot used by the first-execution safety gate. Keep this

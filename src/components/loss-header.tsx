@@ -28,6 +28,7 @@ export function LossHeader({ eyebrow = "Team Ops · Losses", title, intro, tabs,
           <p title={intro}>{intro}</p>
         </div>
         <div className={styles.search}><LossTidSearch /></div>
+        <Link href="/team-ops/losses/payment-release">Payment release review</Link>
       </div>
       <LossTabs tabs={tabs} active={["slp","slp-initial","slp-final","potential","summary"].includes(active)?"nl":active} />
       {["nl","slp","slp-initial","slp-final","potential","summary"].includes(active)?<nav className={styles.tabs} aria-label="Loss sources">{[["nl","NL"],["slp","SLP"],["summary","Summary"]].map(([key,label])=><Link key={key} prefetch={false} className={`${styles.tab} ${(active===key || key==="slp"&&active.startsWith("slp-"))?styles.activeTab:""}`} aria-current={(active===key || key==="slp"&&active.startsWith("slp-"))?"page":undefined} href={`/team-ops/losses/${key}`}>{label}</Link>)}</nav>:null}
