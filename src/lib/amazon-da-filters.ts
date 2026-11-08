@@ -9,6 +9,10 @@ export function addressPending(p:AmazonDaPerson){return ['candidate_pending','in
 export function pendingMilestones(steps:AmazonDaMilestone[]){return [...new Set(steps.flatMap(s=>[...(!/^(completed|complete|done|approved|passed)$/i.test(s.status)?[s.name]:[]),...s.subtasks.filter(t=>!/^(completed|complete|done|approved|passed)$/i.test(t.status)).map(t=>`${s.name} · ${t.name}`)]))];}
 export type DeskFilters={query:string;station:string[];status:string[];stage:string[];milestone:string[];address:string[];check:string[];health:string[]};
 export const emptyDeskFilters=():DeskFilters=>({query:'',station:[],status:[],stage:[],milestone:[],address:[],check:[],health:[]});
+/** Only a complete, unfiltered, authorized response can supply local facets. */
+export function completeRequestInbox(data:{requestOnly?:boolean;incomplete?:boolean;warnings:string[];nextOffset:number|null;total:number;rows:unknown[]},filters:DeskFilters){
+ return data.requestOnly===true&&!data.incomplete&&!data.warnings.length&&data.nextOffset===null&&data.total===data.rows.length&&!filters.query.trim()&&Object.entries(filters).every(([key,value])=>key==='query'||!(value as string[]).length);
+}
 export function checkValues(p:AmazonDaPerson){return [...new Set([p.bgc?.status||'Not checked',...(needsInformation(p)?['Needs information']:[])])];}
 export function deskMatchesSearch(p:DeskPerson,query:string){const hay=[p.name,p.transporterId,p.email,p.phone,p.providerId,p.stationCode].join(' ').toLowerCase();return query.toLowerCase().trim().split(/\s+/).every(t=>hay.includes(t));}
 export function deskFacets(rows:DeskPerson[],f:DeskFilters){return facetRows(rows,{
