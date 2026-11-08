@@ -21,8 +21,9 @@ export function Photo({person,station}:{person:AmazonDaPerson;station:string}){
  useEffect(()=>setFailed(false),[src]);
  return <span className={styles.avatar}>{src&&!failed?<img src={src} alt="" width={52} height={52} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<span>{person.name.trim().split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span>}</span>;
 }
-export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError,embedded=false}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string;embedded?:boolean}){
+export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError,embedded=false,onStationChange}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string;embedded?:boolean;onStationChange?:(station:string)=>void}){
  const [station,setStation]=useState(stations.some(s=>s.id===initialStation)?initialStation!:stations[0]?.id||'');
+ useEffect(()=>{onStationChange?.(station);},[station,onStationChange]);
  const [allScope,setAllScope]=useState(initialView==='approvals'||initialView==='history'),[historyPage,setHistoryPage]=useState(0);
  const [view,setView]=useState(initialView);const [query,setQuery]=useState('');const [debouncedQuery,setDebouncedQuery]=useState('');const [statusFilter,setStatusFilter]=useState('');
  const [data,setData]=useState<DeskData>({});const [dataKey,setDataKey]=useState('');const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [expanded,setExpanded]=useState('');
