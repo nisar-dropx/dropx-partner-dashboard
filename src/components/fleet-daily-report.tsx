@@ -1,4 +1,5 @@
 'use client';
+import { vehicleTypeKey } from "@/lib/fleet/vehicle-type";
 import { facetRows } from '@/lib/dependent-filters';
 import { FleetMobileSection } from "./fleet-mobile-section";
 import { FleetVehicleMeta, useFleetVehicleMetadata } from "@/components/fleet-vehicle-meta";
@@ -73,15 +74,25 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
   useEffect(() => { setPage(1); }, [vehicleTypes, search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, sort, pageSize]);
 
   const vehicles = report?.vehicles ?? [];
+  const stationOptions = [...new Set(vehicles.map(v => v.station_code))].sort();
+  const fuelOptions = [...new Set(vehicles.map(v => v.fuel_type).filter(Boolean))].sort();
+  const stationByCode = useMemo(() => new Map(masterStations.map((station) => [station.code, station])), [masterStations]);
+  const filterOption = (values: string[]) => [...new Set(values.filter(Boolean))].sort().map((value) => ({ value, label: value }));
   const facets = useMemo(() => facetRows(report?.rows ?? [], {
-    station: { selected: station ? [station] : [], values: row => row.station_code },
-    vehicle: { selected: vehicle ? [vehicle] : [], values: row => row.vehicle_no },
-    fuel: { selected: fuelType ? [fuelType] : [], values: row => row.fuel_type },
-    status: { selected: status ? [status] : [], values: row => row.dataStatus }
-  }, row => !search.trim() || `${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g, '').includes(search.trim().toLowerCase().replace(/\s+/g, ''))), [report, search, station, vehicle, fuelType, status]);
-  const stationOptions = facets.values("station");
-  const fuelOptions = facets.values("fuel");
-  const rows = useMemo(() => sortDailyRows(facets.rows, sort.column, sort.direction), [facets, sort]);
+    station:{selected:stations,values:row=>row.station_code},
+    region:{selected:regions,values:row=>stationByCode.get(row.station_code)?.region??'Unassigned region'},
+    cluster:{selected:clusters,values:row=>stationByCode.get(row.station_code)?.cluster??'Unassigned cluster'},
+    vehicle:{selected:selectedVehicles,values:row=>row.vehicle_no},
+    type:{selected:vehicleTypes,values:row=>vehicleTypeKey(metadata.get(row.vehicle_no))},
+    fuel:{selected:fuelTypes,values:row=>row.fuel_type},
+    status:{selected:statuses,values:row=>row.dataStatus},
+    source:{selected:fuelSource==='all'?[]:[fuelSource],values:row=>[['bpcl',/bpcl/i],['iocl',/ioc|iocl/i],['paytap',/paytm|paytap/i]].filter(([,pattern])=>row.fuelBreakdown.some(item=>(pattern as RegExp).test(item.provider))).map(([value])=>String(value))}
+  },row=>!search.trim()||`${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g,'').includes(search.trim().toLowerCase().replace(/\s+/g,''))),[report,stations,regions,clusters,selectedVehicles,vehicleTypes,fuelTypes,statuses,fuelSource,metadata,stationByCode,search]);
+  const rows = useMemo(() => {
+    const query = search.trim().toLowerCase().replace(/\s+/g, '');
+    const sourcePattern = fuelSource === 'bpcl' ? /bpcl/i : fuelSource === 'iocl' ? /ioc|iocl/i : fuelSource === 'paytap' ? /paytm|paytap/i : null;
+    return sortDailyRows((report?.rows ?? []).filter(row => matchesVehicleType(metadata.get(row.vehicle_no), vehicleTypes) && (!stations.length || stations.includes(row.station_code)) && (!clusters.length || clusters.includes(stationByCode.get(row.station_code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(row.station_code)?.region ?? 'Unassigned region')) && (!selectedVehicles.length || selectedVehicles.includes(row.vehicle_no)) && (!fuelTypes.length || fuelTypes.includes(row.fuel_type)) && (!statuses.length || statuses.includes(row.dataStatus)) && (!sourcePattern || row.fuelBreakdown.some((item) => sourcePattern.test(item.provider))) && (!query || `${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g, '').includes(query))).map((row) => { if (!sourcePattern) return row; const parts = row.fuelBreakdown.filter((item) => sourcePattern.test(item.provider)); const litres = parts.reduce((sum, item) => sum + item.litres, 0); const amount = parts.reduce((sum, item) => sum + item.amount, 0); return { ...row, litres:parts.every(p=>p.quantityComplete)?litres:null, estimatedLitres:parts.reduce((n,p)=>n+p.estimatedLitres,0), fuelAmount: amount, fuelTransactions: parts.reduce((sum, item) => sum + item.transactions, 0), fuelSources: parts.map((item) => item.provider), mileage: row.km !== null && litres > 0 && parts.every(p=>p.quantityComplete) ? row.km / litres : null, costPerKm: row.km !== null && row.km > 0 ? amount / row.km : null }; }), sort.column, sort.direction);
+  }, [metadata, vehicleTypes, report, search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, fuelSource, sort, stationByCode]);
   const totals = useMemo(() => rows.reduce((total, row) => {
     total.km += row.km ?? 0; total.litres += row.litres ?? 0; total.amount += row.fuelAmount ?? 0;
     if (row.km === null) total.missing++;
@@ -145,16 +156,16 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
       </form>
       {draftError ? <p className="daily-form-error" role="alert">{draftError}</p> : datesChanged ? <p className="daily-filter-note">Apply dates to update the report. Currently showing {dateLabel(range.from)}–{dateLabel(range.to)}.</p> : null}
       <div className="daily-select-filters">
-        {metadata.size > 0 && <FleetVehicleTypeFilter values={vehicleTypes} onChange={setVehicleTypes} disabled={syncing} />}
-        {masterStations.length ? <FleetMultiSelect allLabel="All regions" disabled={syncing} label="Region" onChange={setRegions} options={filterOption(masterStations.map((station) => station.region))} values={regions} /> : null}
-        {masterStations.length ? <FleetMultiSelect allLabel="All clusters" disabled={syncing} label="Cluster" onChange={setClusters} options={filterOption(masterStations.map((station) => station.cluster))} values={clusters} /> : null}
-        <FleetMultiSelect allLabel="All permitted stations" disabled={syncing} label="Station" onChange={setStations} options={stationOptions.filter((code) => (!clusters.length || clusters.includes(stationByCode.get(code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(code)?.region ?? 'Unassigned region'))).map((value) => ({ value, label: value }))} values={stations} />
-        <FleetMultiSelect allLabel="All vehicles" disabled={syncing} label="Vehicle" onChange={setSelectedVehicles} options={vehicles.filter(v => !stations.length || stations.includes(v.station_code)).map(v => ({ value: v.vehicle_no, label: v.vehicle_no, helper: `${v.model || "Model not recorded"} · ${v.station_code || "Station not mapped"}` }))} values={selectedVehicles} />
-        <FleetMultiSelect allLabel="All fuel types" disabled={syncing} label="Fuel type" onChange={setFuelTypes} options={filterOption(fuelOptions)} searchable={false} values={fuelTypes} />
-        <FleetMultiSelect allLabel="All vehicle-days" disabled={syncing} label="Data availability" onChange={setStatuses} options={Object.entries(statusLabel).filter(([value]) => facets.values("status").includes(value)).map(([value, label]) => ({ value, label }))} values={statuses} />
+        {metadata.size > 0 && <FleetVehicleTypeFilter availableValues={facets.values("type")} values={vehicleTypes} onChange={setVehicleTypes} disabled={syncing} />}
+        {masterStations.length ? <FleetMultiSelect allLabel="All regions" disabled={syncing} label="Region" onChange={setRegions} options={facets.options("region",filterOption(masterStations.map((station) => station.region)))} values={regions} /> : null}
+        {masterStations.length ? <FleetMultiSelect allLabel="All clusters" disabled={syncing} label="Cluster" onChange={setClusters} options={facets.options("cluster",filterOption(masterStations.map((station) => station.cluster)))} values={clusters} /> : null}
+        <FleetMultiSelect allLabel="All permitted stations" disabled={syncing} label="Station" onChange={setStations} options={facets.options("station",stationOptions.map(value=>({value,label:value})))} values={stations} />
+        <FleetMultiSelect allLabel="All vehicles" disabled={syncing} label="Vehicle" onChange={setSelectedVehicles} options={facets.options("vehicle",vehicles.map(v=>({value:v.vehicle_no,label:v.vehicle_no,helper:`${v.model || "Model not recorded"} · ${v.station_code || "Station not mapped"}`})))} values={selectedVehicles} />
+        <FleetMultiSelect allLabel="All fuel types" disabled={syncing} label="Fuel type" onChange={setFuelTypes} options={facets.options("fuel",filterOption(fuelOptions))} searchable={false} values={fuelTypes} />
+        <FleetMultiSelect allLabel="All vehicle-days" disabled={syncing} label="Data availability" onChange={setStatuses} options={facets.options("status",Object.entries(statusLabel).map(([value, label]) => ({ value, label })))} values={statuses} />
         <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setVehicleTypes([]); setStations([]); setClusters([]); setRegions([]); setSelectedVehicles([]); setFuelTypes([]); setStatuses([]); }}>Clear filters</button>
       </div>
-      {focus === 'fuel' ? <div className="daily-source-switch"><span>Fuel source</span>{([['all','All'],['iocl','IOCL'],['bpcl','BPCL'],['paytap','PayTap']] as const).map(([value, text]) => <button className={fuelSource === value ? 'active' : ''} key={value} onClick={() => setFuelSource(value)} type="button">{text}</button>)}</div> : null}<div className="daily-group-switch"><span>Summarise by</span><button className={groupBy === 'vehicle' ? 'active' : ''} onClick={() => setGroupBy('vehicle')} type="button">Vehicle-wise</button><button className={groupBy === 'station' ? 'active' : ''} onClick={() => setGroupBy('station')} type="button">Station-wise</button></div>
+      {focus === 'fuel' ? <div className="daily-source-switch"><span>Fuel source</span>{([['all','All'],['iocl','IOCL'],['bpcl','BPCL'],['paytap','PayTap']] as const).filter(([value])=>value==='all'||facets.available.source.has(value)||fuelSource===value).map(([value, text]) => <button className={fuelSource === value ? 'active' : ''} key={value} onClick={() => setFuelSource(value)} type="button">{text}</button>)}</div> : null}<div className="daily-group-switch"><span>Summarise by</span><button className={groupBy === 'vehicle' ? 'active' : ''} onClick={() => setGroupBy('vehicle')} type="button">Vehicle-wise</button><button className={groupBy === 'station' ? 'active' : ''} onClick={() => setGroupBy('station')} type="button">Station-wise</button></div>
     </section></FleetMobileSection>
     {error ? <div className="daily-error" role="alert">{error} <button type="button" onClick={() => setVersion(v => v + 1)}>Retry</button></div> : null}
     {loading ? <div className="daily-loading" role="status">Loading daily distance and fuel records…</div> : report ? <>
