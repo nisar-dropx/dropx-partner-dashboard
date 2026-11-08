@@ -2,8 +2,10 @@ import "server-only";
 import sharp from "sharp";
 import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
+import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } from "@/lib/ops-pulse/station-board";
 import { dispatchReports, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
+import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
 import { reportBotDb, type ReportBotSettings } from "./settings";
 import { workerRequest } from "./worker-client";
@@ -13,6 +15,7 @@ type Route = {
   id: string; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
+  source_model_codes?: string[];
   mention_manager_policy?: MentionManagerPolicy; mention_present_designation_codes?: string[];
 };
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; report_code?:string };
@@ -35,18 +38,31 @@ async function photo(title: string, rows: [string,string|number][]) {
   return (await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64");
 }
 
-async function tablePhoto(title:string, columns:string[], rows:Array<Array<string|number>>, note="") {
-  const columnWidth = Math.max(120,Math.min(230,Math.floor(1780/columns.length)));
-  const width = Math.max(900,columns.length*columnWidth);
-  const rowHeight = 36, titleHeight = note ? 82 : 54;
+type PercentageTone = "performance"|"pickup";
+
+function percentageStyle(value:string|number,tone:PercentageTone) {
+  const percentage=Number.parseFloat(String(value));
+  if(!Number.isFinite(percentage)) return null;
+  return tone === "pickup"
+    ? {background:pickupPctColor(percentage),color:pickupPctTextColor(percentage)}
+    : {background:dsrHeatColor(percentage),color:dsrPctTextColor(percentage)};
+}
+
+async function tablePhoto(title:string, columns:string[], rows:Array<Array<string|number>>, percentageColumn:string, tone:PercentageTone) {
+  const columnWidth = Math.max(102,Math.min(158,Math.floor(1264/columns.length)));
+  const width = Math.max(760,columns.length*columnWidth);
+  const rowHeight = 29, titleHeight = 45;
   const allRows = rows.slice(0,55);
-  const header = columns.map((label,index)=>`<rect x="${index*columnWidth}" y="${titleHeight}" width="${columnWidth}" height="${rowHeight}" fill="#dce8f6"/><text x="${index*columnWidth+10}" y="${titleHeight+24}" font-weight="700">${xml(label.slice(0,26))}</text>`).join("");
+  const header = columns.map((label,index)=>`<rect x="${index*columnWidth}" y="${titleHeight}" width="${columnWidth}" height="${rowHeight}" fill="#dce8f6"/><text x="${index*columnWidth+8}" y="${titleHeight+20}" font-weight="700">${xml(label.slice(0,22))}</text>`).join("");
   const body = allRows.map((row,rowIndex)=>row.map((value,columnIndex)=>{
     const y=titleHeight+rowHeight*(rowIndex+1),align=columnIndex===0?"start":"end",x=columnIndex===0?columnIndex*columnWidth+10:(columnIndex+1)*columnWidth-10;
-    return `<rect x="${columnIndex*columnWidth}" y="${y}" width="${columnWidth}" height="${rowHeight}" fill="${rowIndex%2 ? "#f2f5f9":"#fff"}"/><text x="${x}" y="${y+24}" text-anchor="${align}"${rowIndex===allRows.length-1?' font-weight="700"':""}>${xml(value)}</text>`;
+    const total=rowIndex===allRows.length-1;
+    const style=!total&&columns[columnIndex]===percentageColumn?percentageStyle(value,tone):null;
+    const background=style?.background || (total?"#e8eef6":rowIndex%2 ? "#f6f8fb":"#fff");
+    const color=style?.color || "#172033";
+    return `<rect x="${columnIndex*columnWidth}" y="${y}" width="${columnWidth}" height="${rowHeight}" fill="${background}"/><text x="${x}" y="${y+20}" text-anchor="${align}" fill="${color}"${total||style?' font-weight="700"':""}>${xml(value)}</text>`;
   }).join("")).join("");
-  const subtitle=note?`<text x="16" y="70" fill="#c9d7e7" font-size="15">${xml(note.slice(0,180))}</text>`:"";
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${titleHeight+rowHeight*(allRows.length+1)}" font-family="Arial,sans-serif" font-size="16"><rect width="${width}" height="${titleHeight}" fill="#193456"/><text x="16" y="34" fill="white" font-size="21" font-weight="700">${xml(title)}</text>${subtitle}${header}${body}</svg>`;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${titleHeight+rowHeight*(allRows.length+1)}" font-family="Arial,sans-serif" font-size="13"><rect width="${width}" height="${titleHeight}" fill="#193456"/><text x="12" y="29" fill="white" font-size="17" font-weight="700">${xml(title)}</text>${header}${body}</svg>`;
   return (await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64");
 }
 
@@ -65,6 +81,7 @@ function splitText(lines:string[], limit=3900) {
 async function routeSources(route:Route, company:string):Promise<SourceStation[]> {
   const db = reportBotDb();
   const scopeType = route.scope_type || "station";
+  if (route.report === "eod" && !route.source_model_codes?.length) throw new Error("Choose source models for Final EOD in Last Mile Report Bot master");
   const legacy = route.location_id ? [route.location_id] : [];
   const ids = route.source_location_ids?.length ? route.source_location_ids : legacy;
   let query = db.from("stations").select("id,station_code,station_name,region,is_ho,hide_from_location_list,location_models(code)").eq("company_id",company).eq("is_active",true);
@@ -78,10 +95,8 @@ async function routeSources(route:Route, company:string):Promise<SourceStation[]
   }
   const result = await query.order("station_code");
   if (result.error) throw new Error(result.error.message);
-  const stations = ((result.data || []) as SourceStationRow[]).filter(row=>{
-    const model = Array.isArray(row.location_models) ? row.location_models[0] : row.location_models;
-    return !row.is_ho && !row.hide_from_location_list && String(model?.code || "").trim().toUpperCase() !== "NOW";
-  }).map(({is_ho: _isHo,hide_from_location_list: _hidden,location_models: _models,...row})=>row);
+  const stations = filterDispatchSourceRows((result.data || []) as SourceStationRow[],route.source_model_codes)
+    .map(({is_ho: _isHo,hide_from_location_list: _hidden,location_models: _models,...row})=>row);
   if (!stations.length) throw new Error("Configured source has no active stations");
   if (scopeType === "station" && stations.length !== ids.length) throw new Error("One or more configured source stations are inactive or unavailable");
   if (["cod","recon","deposit","bank"].includes(route.report)) {
@@ -127,27 +142,28 @@ function sumNumeric<T extends Record<string,string|number>>(rows:T[],key:string)
 
 async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string):Promise<SendOutput[]> {
   const mentions=(route.mentions||[]).map(number=>number+"@s.whatsapp.net");
-  const note=[`As of ${asIst(digest.asOf)}`,digest.missingStations.length?`Snapshot pending: ${digest.missingStations.join(", ")}`:""].filter(Boolean).join(" · ");
-  const dsrAssigned=sumNumeric(digest.dsr,"Assigned"),dsrDelivered=sumNumeric(digest.dsr,"Delivered");
-  const dsr=[...digest.dsr,{Station:"Grand total",Assigned:dsrAssigned,Delivered:dsrDelivered,"Delivery failed":sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"Other / pending":sumNumeric(digest.dsr,"Other / pending"),"DSR %":dsrAssigned?`${(dsrDelivered/dsrAssigned*100).toFixed(1)}%`:"—"}];
-  const dotValid=digest.dot.filter(row=>typeof row.Eligible==="number"),dotEligible=sumNumeric(dotValid,"Eligible"),dotDelivered=sumNumeric(dotValid,"Delivered");
-  const dot=[...digest.dot,{Station:"Grand total",Eligible:dotEligible,Dispatched:sumNumeric(dotValid,"Dispatched"),"At station":sumNumeric(dotValid,"At station"),"On road":sumNumeric(dotValid,"On road"),Delivered:dotDelivered,Failed:sumNumeric(dotValid,"Failed"),Rejected:sumNumeric(dotValid,"Rejected"),"Other / pending":sumNumeric(dotValid,"Other / pending"),"DOT %":dotEligible?`${(dotDelivered/dotEligible*100).toFixed(1)}%`:"—"}];
+  const dsrTotal=sumNumeric(digest.dsr,"Verified total"),dsrDelivered=sumNumeric(digest.dsr,"Delivered");
+  const dsr=[...digest.dsr,{Station:"Grand total","Verified total":dsrTotal,Delivered:dsrDelivered,"Delivery failed":sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"DSR %":dsrTotal?`${(dsrDelivered/dsrTotal*100).toFixed(1)}%`:"—"}];
+  const dotValid=digest.dot.filter(row=>typeof row["Verified eligible"]==="number"),dotEligible=sumNumeric(dotValid,"Verified eligible"),dotDelivered=sumNumeric(dotValid,"Delivered");
+  const dot=[...digest.dot,{Station:"Grand total","Verified eligible":dotEligible,Dispatched:sumNumeric(dotValid,"Dispatched"),"At station":sumNumeric(dotValid,"At station"),"On road":sumNumeric(dotValid,"On road"),Delivered:dotDelivered,Failed:sumNumeric(dotValid,"Failed"),Rejected:sumNumeric(dotValid,"Rejected"),"DOT %":dotEligible?`${(dotDelivered/dotEligible*100).toFixed(1)}%`:"—"}];
   const cTotal=sumNumeric(digest.creturn,"Total"),cPicked=sumNumeric(digest.creturn,"Picked up");
   const creturn=[...digest.creturn,{Station:"Grand total",Total:cTotal,"Picked up":cPicked,"Pending pickup":sumNumeric(digest.creturn,"Pending pickup"),"Pickup %":cTotal?`${(cPicked/cTotal*100).toFixed(1)}%`:"—"}];
+  const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
+  const regionLabel=`${region} Region`;
   const tables=[
-    {key:"dsr",title:`Final DSR · ${region} · ${day}`,rows:dsr},
-    {key:"dot",title:`Final DOT · ${region} · ${day}`,rows:dot},
-    {key:"creturn",title:`Final C-Return · ${region} · ${day}`,rows:creturn},
+    {key:"dsr",title:`EOD DSR Report · ${dateLabel} · ${regionLabel}`,rows:dsr,percentage:"DSR %",tone:"performance" as const},
+    {key:"dot",title:`EOD DOT Report · ${dateLabel} · ${regionLabel}`,rows:dot,percentage:"DOT %",tone:"performance" as const},
+    {key:"creturn",title:`EOD C-Return Report · ${dateLabel} · ${regionLabel}`,rows:creturn,percentage:"Pickup %",tone:"pickup" as const},
   ];
   const outputs:SendOutput[]=[];
   const formats=route.formats?.length?route.formats:[route.format];
   if(formats.includes("photo")) for(const table of tables) {
     const columns=Object.keys(table.rows[0]||{}),values=table.rows.map(row=>columns.map(column=>(row as Record<string,string|number>)[column]));
-    outputs.push({key:`photo_${table.key}`,body:{image_base64:await tablePhoto(table.title,columns,values,note),mime:"image/png",caption:`*${table.title}*\n${note}`,...(mentions.length?{mentions}:{})}});
+    outputs.push({key:`photo_${table.key}`,body:{image_base64:await tablePhoto(table.title,columns,values,table.percentage,table.tone),mime:"image/png",caption:`*${table.title}*`,...(mentions.length?{mentions}:{})}});
   }
   if(formats.includes("excel")) {
     const buffer=workbookBuffer([{name:"Final DSR",rows:dsr},{name:"Final DOT",rows:dot},{name:"Final C-Return",rows:creturn}]);
-    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*Final EOD · ${region} · ${day}*\nDSR + DOT + C-Return\n${note}`,...(mentions.length?{mentions}:{})}});
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*EOD Report · ${dateLabel} · ${regionLabel}*`,...(mentions.length?{mentions}:{})}});
   }
   return outputs.sort((a,b)=>a.key.localeCompare(b.key));
 }
