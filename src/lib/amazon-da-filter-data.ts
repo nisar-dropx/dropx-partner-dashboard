@@ -6,6 +6,20 @@ import {pendingMilestones,type DeskPerson} from './amazon-da-filters';
 
 type Source={rows:DeskPerson[];checkedAt:string;snapshot:string;warnings:string[];incomplete?:boolean};
 const cache=new Map<string,{at:number;value:Promise<Source>}>();
+/** The insufficiency inbox must never wait for every associate at every station. */
+export async function loadAmazonRequestSource(companyId:string,stationIds:string[],fresh=false):Promise<Source>{
+ if(!stationIds.length)return {rows:[],checkedAt:new Date().toISOString(),snapshot:'empty',warnings:[]};
+ const ids=[...new Set(stationIds)].sort(),key=`requests:${companyId}:${ids.join(',')}`;
+ const saved=cache.get(key);if(!fresh&&saved&&Date.now()-saved.at<30_000)return saved.value;
+ const value=(async()=>{
+  const result=await callWorkforceAmazonWorker<{rows:DeskPerson[];checkedAt:string}>('/api/admin/amazon/station-desk/idfy-queue',{method:'POST',body:JSON.stringify({companyId,stationIds:ids,fresh}),signal:AbortSignal.timeout(110_000)});
+  if(!Array.isArray(result.rows)||result.rows.some(p=>!p.stationId||!ids.includes(p.stationId)))throw Error('IDfy request scope could not be verified. Refresh to retry.');
+  return {rows:result.rows,checkedAt:result.checkedAt,snapshot:createHash('sha256').update(JSON.stringify(result.rows)).digest('hex'),warnings:[]};
+ })();
+ for(const [k,v] of cache)if(Date.now()-v.at>=30_000)cache.delete(k);
+ if(cache.size>=64)cache.delete(cache.keys().next().value!);
+ cache.set(key,{at:Date.now(),value});value.then(()=>{const current=cache.get(key);if(current?.value===value)current.at=Date.now();},()=>{if(cache.get(key)?.value===value)cache.delete(key);});return value;
+}
 /** Call only after current company/station authorization. Filter complete rosters on
  * the server; return only the requested page and compact dependent choices. No
  * per-person browser calls are triggered by opening or filtering this list. */
