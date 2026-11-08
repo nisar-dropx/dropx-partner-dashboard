@@ -5,7 +5,7 @@ type Rel<T>=T|T[]|null;
 export function amazonDeskLocation(s:{providers?:Rel<{name?:string|null;code?:string|null}>;location_models?:Rel<{name?:string|null;code?:string|null}>}){const p=Array.isArray(s.providers)?s.providers[0]:s.providers,m=Array.isArray(s.location_models)?s.location_models[0]:s.location_models;return /amazon/i.test(p?.name||p?.code||'')&&['EDSP','XPT','AMXL'].includes((m?.code||m?.name||'').toUpperCase().replace(/[ _-]/g,''));}
 const cache=new Map<string,{at:number;result:Promise<{count:number;href:string;checkedAt:string|null}>}>();
 export async function loadAmazonDaAttention(auth:AuthorizationContext,selectedIds?:string[]){
- if(!auth.companyId||!hasPermission(auth,'ops_amazon_da','access'))return null;
+ if(!hasPermission(auth,'workforce_onboarding','access')||!auth.companyId||!hasPermission(auth,'ops_amazon_da','access'))return null;
  const stations=(await loadOpsWorkforceLocations(auth.companyId,auth)).filter(s=>amazonDeskLocation(s)&&(!selectedIds||selectedIds.includes(s.id)));
  if(!stations.length)return null;
  const ids=stations.map(s=>s.id).sort(),key=auth.companyId+':'+ids.join(',');const saved=cache.get(key);if(saved&&Date.now()-saved.at<30000)return saved.result;

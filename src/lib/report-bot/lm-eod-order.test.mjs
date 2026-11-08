@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order.ts";
+import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption.ts";
 
 test("EOD DSR is ordered by DSR percentage descending", () => {
   const rows = orderEodDsrRows([
@@ -33,4 +34,26 @@ test("missing percentages sort last", () => {
     { Station: "ACTIVE", "DSR %": "0.0%" },
   ]);
   assert.deepEqual(rows.map(row => row.Station), ["ACTIVE", "NO DATA"]);
+});
+
+test("EOD DSR caption follows the configured performance bands", () => {
+  const rows = [
+    { Station: "OUT", "DSR %": "96.0%" },
+    { Station: "GREAT", "DSR %": "94.0%" },
+    { Station: "WATCH", "DSR %": "90.0%" },
+    { Station: "FOCUS", "DSR %": "85.0%" },
+    { Station: "URGENT", "DSR %": "82.0%" },
+  ];
+  assert.deepEqual(eodDsrMentionStations(rows), {
+    recognition: ["OUT", "GREAT"],
+    focus: ["FOCUS", "URGENT"],
+  });
+  const caption = eodDsrPerformanceCaption("EOD DSR Report · 8 Nov 2026 · KL Region", rows, ["919111111111"], ["919222222222"]);
+  assert.match(caption, /Outstanding \(>95%\).*OUT 96\.0%/);
+  assert.match(caption, /Great \(>93–95%\).*GREAT 94\.0%/);
+  assert.match(caption, /Good \/ watch \(88–93%\).*WATCH 90\.0%/);
+  assert.match(caption, /Needs focus \(83–<88%\).*FOCUS 85\.0%/);
+  assert.match(caption, /Immediate focus \(<83%\).*URGENT 82\.0%/);
+  assert.match(caption, /Great performance — TL & Cluster\/AOM.*@919111111111/);
+  assert.match(caption, /Needs focus — TL & Cluster\/AOM.*@919222222222/);
 });

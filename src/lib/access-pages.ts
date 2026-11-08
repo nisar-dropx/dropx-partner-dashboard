@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { workforceCategoryPageCode, workforceCategoryPagePrefix } from "@/lib/dynamic-workforce";
 
 export const accessPages = [
+  { code: "workforce_onboarding", name: "Workforce onboarding", sort_order: 32 },
   { code: "workforce_connect", name: "Workforce Connect Centre", sort_order: 31 },
   {code:'ops_notification_settings',name:'Ops Settings · Notifications',sort_order:133},
   { code: "finance_pricing", name: "Pricing Master", sort_order: 110 },
@@ -709,7 +710,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await upsertPermissionRows(
       supabase,
       companyId,
-      activePages.map((page) => ({ role_id: ownerRole.id, page_id: page.id, ...fullAccess }))
+      activePages.filter((page) => page.code !== "workforce_onboarding").map((page) => ({ role_id: ownerRole.id, page_id: page.id, ...fullAccess }))
     );
   }
 

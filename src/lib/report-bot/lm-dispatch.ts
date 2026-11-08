@@ -7,6 +7,7 @@ import { dispatchReports, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
+import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
 import { reportBotDb, type ReportBotSettings } from "./settings";
 import { workerRequest } from "./worker-client";
 
@@ -143,8 +144,7 @@ function sumNumeric<T extends Record<string,string|number>>(rows:T[],key:string)
   return rows.reduce((sum,row)=>sum+(typeof row[key]==="number" ? Number(row[key]) : 0),0);
 }
 
-async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string):Promise<SendOutput[]> {
-  const mentions=(route.mentions||[]).map(number=>number+"@s.whatsapp.net");
+async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,recognitionNumbers:string[],focusNumbers:string[],staticNumbers:string[]):Promise<SendOutput[]> {
   const dsrTotal=sumNumeric(digest.dsr,"Verified total"),dsrDelivered=sumNumeric(digest.dsr,"Delivered");
   const dsr=[...digest.dsr,{Station:"Grand total","Verified total":dsrTotal,Delivered:dsrDelivered,"Delivery failed":sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"DSR %":dsrTotal?`${(dsrDelivered/dsrTotal*100).toFixed(1)}%`:"—"}];
   const dotValid=digest.dot.filter(row=>typeof row["Verified eligible"]==="number"),dotEligible=sumNumeric(dotValid,"Verified eligible"),dotDelivered=sumNumeric(dotValid,"Delivered");
@@ -153,20 +153,24 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string)
   const creturn=[...digest.creturn,{Station:"Grand total",Total:cTotal,"Picked up":cPicked,"Pending pickup":sumNumeric(digest.creturn,"Pending pickup"),"Pickup %":cTotal?`${(cPicked/cTotal*100).toFixed(1)}%`:"—"}];
   const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
   const regionLabel=`${region} Region`;
+  const dsrTitle=`EOD DSR Report · ${dateLabel} · ${regionLabel}`;
+  const dsrCaption=eodDsrPerformanceCaption(dsrTitle,digest.dsr,recognitionNumbers,focusNumbers);
+  const dsrMentionNumbers=[...new Set([...staticNumbers,...recognitionNumbers,...focusNumbers])];
+  const dsrMentions=dsrMentionNumbers.map(number=>number+"@s.whatsapp.net");
   const tables=[
-    {key:"dsr",title:`EOD DSR Report · ${dateLabel} · ${regionLabel}`,rows:dsr,percentage:"DSR %",tone:"performance" as const},
-    {key:"dot",title:`EOD DOT Report · ${dateLabel} · ${regionLabel}`,rows:dot,percentage:"DOT %",tone:"performance" as const},
-    {key:"creturn",title:`EOD C-Return Report · ${dateLabel} · ${regionLabel}`,rows:creturn,percentage:"Pickup %",tone:"pickup" as const},
+    {key:"01_dsr",title:dsrTitle,rows:dsr,percentage:"DSR %",tone:"performance" as const,caption:dsrCaption,mentions:dsrMentions},
+    {key:"02_dot",title:`EOD DOT Report · ${dateLabel} · ${regionLabel}`,rows:dot,percentage:"DOT %",tone:"performance" as const,caption:`*EOD DOT Report · ${dateLabel} · ${regionLabel}*`,mentions:[]},
+    {key:"03_creturn",title:`EOD C-Return Report · ${dateLabel} · ${regionLabel}`,rows:creturn,percentage:"Pickup %",tone:"pickup" as const,caption:`*EOD C-Return Report · ${dateLabel} · ${regionLabel}*`,mentions:[]},
   ];
   const outputs:SendOutput[]=[];
   const formats=route.formats?.length?route.formats:[route.format];
   if(formats.includes("photo")) for(const table of tables) {
     const columns=Object.keys(table.rows[0]||{}),values=table.rows.map(row=>columns.map(column=>(row as Record<string,string|number>)[column]));
-    outputs.push({key:`photo_${table.key}`,body:{image_base64:await tablePhoto(table.title,columns,values,table.percentage,table.tone),mime:"image/png",caption:`*${table.title}*`,...(mentions.length?{mentions}:{})}});
+    outputs.push({key:`photo_${table.key}`,body:{image_base64:await tablePhoto(table.title,columns,values,table.percentage,table.tone),mime:"image/png",caption:table.caption,...(table.mentions.length?{mentions:table.mentions}:{})}});
   }
   if(formats.includes("excel")) {
     const buffer=workbookBuffer([{name:"Final DSR",rows:dsr},{name:"Final DOT",rows:dot},{name:"Final C-Return",rows:creturn}]);
-    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*EOD Report · ${dateLabel} · ${regionLabel}*`,...(mentions.length?{mentions}:{})}});
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*EOD Report · ${dateLabel} · ${regionLabel}*`}});
   }
   return outputs.sort((a,b)=>a.key.localeCompare(b.key));
 }
@@ -270,7 +274,17 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           if(route.scope_type!=="region") throw new Error("Final EOD requires regional scope.");
           const digest=await loadEodDigest(sources.map(row=>row.station_code),day);
           const region=(route.source_region_codes||[]).join(", ");
-          outputs=await eodOutputs(route,digest,region,day);
+          const mentionStations=eodDsrMentionStations(digest.dsr);
+          const sourceByCode=new Map(sources.map(source=>[source.station_code.trim().toUpperCase(),source]));
+          const recognitionSources=mentionStations.recognition.map(code=>sourceByCode.get(code)).filter((source):source is SourceStation=>Boolean(source));
+          const focusSources=mentionStations.focus.map(code=>sourceByCode.get(code)).filter((source):source is SourceStation=>Boolean(source));
+          const dynamicRoute={...route,mentions:[]};
+          const [recognitionNumbers,focusNumbers,staticNumbers]=await Promise.all([
+            recognitionSources.length?resolveRouteMentionNumbers(company,recognitionSources,dynamicRoute,day):Promise.resolve([]),
+            focusSources.length?resolveRouteMentionNumbers(company,focusSources,dynamicRoute,day):Promise.resolve([]),
+            resolveRouteMentionNumbers(company,[],route,day),
+          ]);
+          outputs=await eodOutputs(route,digest,region,day,recognitionNumbers,focusNumbers,staticNumbers);
           detail=`${region} · ${sources.length} source station(s) · Final DSR + DOT + C-Return`;
         } else {
           const reports=await Promise.all(sources.map(source=>loadDispatchReport(route.report,company,source.id,source.report_code || source.station_code,day)));

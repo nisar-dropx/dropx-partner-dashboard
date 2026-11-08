@@ -6,6 +6,7 @@ export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
 
 export const opsAccessPageCodes = [
+  "workforce_onboarding",
   'ops_amazon_da',
   'ops_notification_settings',
   "payment_settings",
@@ -109,6 +110,7 @@ export const opsAccessPageCodes = [
 const opsPageCodes = new Set<string>(opsAccessPageCodes);
 
 const sharedPageCodes = new Set([
+  "workforce_onboarding",
   "payment_settings",
   "imports",
   "business_documents",
