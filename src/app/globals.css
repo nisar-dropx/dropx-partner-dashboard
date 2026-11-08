@@ -24437,3 +24437,22 @@ td strong,
 .payment-detail-expand { margin:0; }
 .payment-detail-expand > summary { cursor:pointer; color:#1e3a5f; font-weight:500; white-space:normal; }
 .payment-detail-full { max-height:160px; overflow:auto; margin-top:6px; padding:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; white-space:pre-wrap; }
+
+/* Shared payment drawer: past evidence and future milestones stay distinct. */
+.payment-track-drawer .payment-track-tone-done { color: #087443; background: #e9f7ef; }
+.payment-track-drawer .payment-track-tone-issue { color: #b42318; background: #fff0ee; }
+.payment-track-drawer .payment-track-tone-current { color: #1d4d86; background: #edf4ff; }
+.payment-track-progress { margin: 12px 0; font-size: 12px; }
+.payment-track-next { margin: 0 0 6px; padding: 8px 10px; border-radius: 6px; }
+.payment-track-progress ol { list-style: none; margin: 0; padding: 0 10px; }
+.payment-track-progress li { display: grid; grid-template-columns: 16px 1fr auto; gap: 6px; align-items: center; padding: 5px 0; color: #66758b; }
+.payment-track-progress li small { font-size: 10px; }
+.payment-track-progress li[data-state="done"] { color: #087443; }
+.payment-track-progress li[data-state="current"] { color: #1d4d86; font-weight: 650; }
+.payment-track-progress li[data-state="issue"] { color: #b42318; }
+.payment-track-timeline li[data-tone="done"] > div strong { color: #087443; }
+.payment-track-timeline li[data-tone="done"]::before { background: #11945a; }
+.payment-track-timeline li[data-tone="issue"] > div strong { color: #b42318; }
+.payment-track-timeline li[data-tone="issue"]::before { background: #d92d20; }
+.payment-track-timeline li[data-tone="current"] > div strong { color: #1d4d86; }
+.payment-track-timeline li[data-tone="current"]::before { background: #2b6bb1; }
