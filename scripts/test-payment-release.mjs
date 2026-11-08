@@ -34,6 +34,7 @@ create function workforce_create_payout_payment_batch(p_company_id uuid) returns
 `);
 const sql=fs.readFileSync('supabase/migrations/20261108142437_loss_payment_clearance_and_people_finance.sql','utf8');
 await db.exec(sql);await db.exec(sql);
+const aliasSql=fs.readFileSync('supabase/migrations/20261108143132_loss_release_legacy_aliases.sql','utf8');await db.exec(aliasSql);await db.exec(aliasSql);
 await db.query('insert into profiles values($1,$3,true,\'Manager\',\'manager@example.test\'),($2,$3,true,\'Payroll\',\'payroll@example.test\')',[manager,submitter,company]);
 await db.query("insert into user_roles(id,is_active,code) values($1,true,'FINANCE_FINMGR')",[role]);
 for(const actor of [manager,submitter]) await db.query("insert into company_product_memberships values($1,$2,$3,true,'finance',false,array[$4]::uuid[])",[company,actor,role,station]);
@@ -53,7 +54,7 @@ await db.query("insert into nl_loss_month_cases(company_id,station_code,report,m
 await assert.rejects(()=>gate(),/approval is required/);
 assert.equal((await review()).pendingAmount,1000);
 await db.exec('update nl_loss_month_cases set source_present=false');
-assert.equal((await review()).pending[0].status,'source_missing');
+assert.equal((await review()).pending[0].status,'Missing from latest source');
 assert.equal((await review()).pendingCount,1);
 await db.exec('update nl_loss_month_cases set source_present=true');
 await assert.rejects(()=>approve(),/explicit exception/);
@@ -75,6 +76,11 @@ await approve();await gate();
 await db.exec(`update workforce_payout_publications set snapshot=jsonb_set(snapshot,'{item,net_amount}','999')`);
 await assert.rejects(()=>gate(),/approval is required/);
 await db.exec('delete from due');
+await db.query("insert into nl_loss_month_cases(company_id,station_code,report,month,case_key,amount,source_status,source_present) values($1,'EDRD','nl','2026-09','12345',100,'Approved',true),($1,'EDRD','nl','2026-09','=12345',100,'Approved',false)",[company]);
+assert.equal((await review()).pendingAmount,100,'obsolete Excel alias must not double-count pending recovery');
+await db.query("insert into nl_loss_recoveries(company_id,month,case_key) values($1,'2026-09','=12345')",[company]);
+assert.equal((await review()).pendingAmount,200,'alias with a recovery record must remain for explicit reconciliation');
+await db.exec("delete from nl_loss_recoveries where case_key='=12345';delete from nl_loss_month_cases where case_key in ('12345','=12345')");
 await db.query("insert into hr_payroll_runs(id,company_id,period_start,period_end,status) values($1,$2,'2026-10-01','2026-10-31','reviewed')",[run,company]);
 await db.query("insert into hr_payroll_run_people values($1,$2,$3,$4,'employee',$1,'EMP1','Test employee','ready',900,900)",[worker,company,run,station]);
 await db.query("insert into employees values($1,$2,'1234567890','FDRL0001234')",[worker,company]);
