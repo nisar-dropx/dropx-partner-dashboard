@@ -1,7 +1,10 @@
 const ts=require('typescript');const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');
 // Bundle the actual API with only its infrastructure replaced. No production requests.
 const stubs={
- '@/lib/workforce-client-id-queue':'exports.loadClientIdMappingsForWorkers=async()=>[];exports.needsClientId=()=>true;exports.providerMappingFor=()=>({});',
+ '@/lib/amazon-da-filter-data':'exports.loadAmazonFilterScope=async(db,companyId,stations)=>{fixture.calls.push({scope:stations,companyId});return {rows:[],snapshot:"s",warnings:[]};};exports.loadAmazonFilterSource=async(db,companyId,stationId,view)=>{fixture.calls.push({filtered:true,companyId,stationId,view});return {rows:[],snapshot:"s",warnings:[]};};',
+ '@/lib/amazon-da-filters':'exports.emptyDeskFilters=()=>({});exports.filterDeskPage=(rows,filters)=>({rows,filters});',
+ '@/lib/dependent-filters':'exports.facetRows=()=>({rows:[],values:()=>[]});',
+ '@/lib/workforce-client-id-queue':'exports.allClientIdRows=async()=>[];exports.loadClientIdMappingsForWorkers=async()=>[];exports.needsClientId=()=>true;exports.providerMappingFor=()=>({});',
  '@/lib/workforce-client-id-partner':'exports.loadClientIdPartnerStates=async()=>new Map();',
  '@/lib/date-format':'exports.dashboardDateInputValue=()=>"2026-11-08";',
  'next/server':'exports.NextResponse={json:(b,i)=>Response.json(b,i)};',
@@ -60,6 +63,12 @@ fixture.idfySource.idfy.profileId='123';assert.equal((await post({...idfyRequest
 assert.equal((await post(idfyRequest)).status,200);assert.equal(fixture.inserted.actor_id,'real-user');assert.equal(fixture.inserted.actor_name,'Real User');assert.equal(fixture.inserted.status,'queued');
 fixture.auth.isPreview=true;assert.equal((await post(idfyRequest)).status,403);fixture.auth.isPreview=false;
 fixture.calls=[];assert.equal((await route.GET(new Request(url.replace(station,'00000000-0000-4000-8000-000000000099')+'&view=bgc-pending'))).status,403);assert.equal(fixture.calls.length,0);
+fixture.calls=[];
+assert.equal((await route.GET(new Request(url.replace(station,'00000000-0000-4000-8000-000000000099')+'&view=bgc-address&filters=1'))).status,403);assert.equal(fixture.calls.length,0);
+const enhanced=await route.GET(new Request(url+'&view=bgc-address&filters=1&status=ACTIVE&status=ONBOARDING&address=candidate_pending'));
+assert.equal(enhanced.status,200);const filtered=await enhanced.json();assert.deepEqual(filtered.filters.status,['ACTIVE','ONBOARDING']);assert.equal(fixture.calls[0].companyId,'company');assert.equal(fixture.calls[0].stationId,station);
+fixture.calls=[];assert.equal((await route.GET(new Request(url.replace(station,'all')+'&view=bgc-address&filters=1&location=00000000-0000-4000-8000-000000000099'))).status,403);assert.equal(fixture.calls.length,0);
+assert.equal((await route.GET(new Request(url.replace(station,'all')+'&view=bgc-address&filters=1'))).status,200);assert.equal(JSON.stringify(fixture.calls[0].scope.map(s=>s.id)),JSON.stringify([station]));
 console.log('IDfy API: station scope, trusted actor, preview denial, forged identity and changed form blocked before reservation.');
 console.log('Amazon DA API: scoped reads, edit/preview guards, forbidden transfer, confirmation, stale status, reason validation, trusted actor/name, replay and origin checks passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

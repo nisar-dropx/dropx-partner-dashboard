@@ -75,3 +75,31 @@ Apply only 20261108133039_amazon_da_approval_gate.sql to the shared project.
 The migration also corrects the old provider-ID regex. No real requests were
 created for validation. Run test-amazon-da-approval-migration.mjs,
 test-amazon-da-desk-api.cjs, verify-portal-preview.mjs and worker station-desk tests.
+
+## Priority verification queues and filters — 9 November 2026
+
+The BGC / IDfy tab now opens Insufficiencies, followed by Address verification
+pending and All current IDs. The current-ID population combines the verified
+Amazon onboarding and associate rosters; offboarded IDs stay in their own view.
+Counts apply search and the selected filters, independently of the selected
+priority tab. One ID can legitimately appear in both priority queues. Unknown
+address checks are labelled and counted separately, never treated as verified.
+My associates cards show saved address pendency, red address results and specific
+information requests even when Amazon status is Active or overall BGC is Green.
+
+Searchable multi-select filters cover status, address and overall BGC checks;
+onboarding additionally exposes current stage, pending saved milestone and
+progress. Invitation filters use registration status and availability; approval
+and history filters use action and request status. Filters use OR within a field,
+AND across fields, retain zero-match selections and derive choices after all other
+filters. No options or priority totals are derived from a visible pagination page.
+
+The filters=1 API reads complete verified station rosters into a bounded private
+30-second server cache, overlays company/station/email-matched saved detail
+snapshots, filters server-side and returns only 24 cards plus compact choices.
+No per-associate live milestone/IDfy fetch is triggered by list filters. Current
+access is checked before each cache read. Refresh bypasses the roster cache;
+individual details retain the existing live refresh. Source errors fail explicitly;
+no empty success/count-zero fallback is used. Saved-check timestamps and refresh
+errors remain visible. Changed pagination snapshots restart the cards explicitly.
+No database migration, status mutation, offboarding or payroll change is included.
