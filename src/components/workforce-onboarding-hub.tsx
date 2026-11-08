@@ -42,7 +42,7 @@ export async function WorkforceOnboardingHub({params={}}:{params?:OnboardingHubP
   <nav className="workforce-lifecycle-tabs" aria-label="Onboarding views">
    {[['joiners','Guided onboarding'],['amazon','Amazon IDs'],['lifecycle','Lifecycle & exits']].map(([key,label])=><Link key={key} className={tab===key?'active':''} href={`${path}?tab=${key}`}>{label}</Link>)}
   </nav>
-  {tab==='lifecycle'?<WorkforceLifecycleDesk/>:tab==='amazon'?<AmazonDaDesk stations={stations.filter(s=>workforceStationPolicy(s).requiresStationEmail).map(s=>({id:s.id,code:s.station_code||''}))} initialView="onboarding" initialStation={params.station} canEdit={canEdit}/>:<>
+  {tab==='lifecycle'?<WorkforceLifecycleDesk/>:tab==='amazon'?<AmazonDaDesk stations={stations.filter(s=>workforceStationPolicy(s).requiresStationEmail).map(s=>({id:s.id,code:s.station_code||''}))} initialView="onboarding" initialStation={params.station} canEdit={hasPermission(auth,'ops_amazon_da','edit')}/>:<>
    <section className="panel"><div className="panel-body" style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
     <form action={path} style={{display:'flex',gap:8,flex:'1 1 280px'}}><select className="select" name="station" aria-label="Station" defaultValue={params.station||''}><option value="">All permitted stations</option>{stations.map(s=><option key={s.id} value={s.id}>{s.station_code}</option>)}</select><button className="button secondary">Apply</button></form>
     <Link className="button secondary" href={`${path}${params.station?`?station=${encodeURIComponent(params.station)}`:''}`}>Refresh status</Link>

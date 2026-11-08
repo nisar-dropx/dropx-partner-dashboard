@@ -52,6 +52,7 @@ const commonStart: NavItem[] = [
     icon: "+",
     children: [
       { code: "delivery_associates", label: "Onboarding & lifecycle", href: "/workforce/onboarding" },
+      { code: "ops_amazon_da", label: "Amazon DA Onboarding", href: "/workforce/amazon-onboarding" },
       { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register" },
       { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping" },
       { code: "ops_provider_mapping", label: "Worked ID review", href: "/provider-id-mapping/worked-days" },
@@ -180,13 +181,12 @@ function modelOperations(mode: OperatingMode): NavItem {
   return {
     code: "cod",
     label: "Operations",
-    permissionCodes: ["ops_lm_report_bot", "daily_submission", "cod_validation", "cod_portal_checks", "station_edd", "delivery_associates"],
+    permissionCodes: ["ops_lm_report_bot", "daily_submission", "cod_validation", "cod_portal_checks", "station_edd"],
     icon: "O",
     children: [
       lastMileReportBot,
       networkPlanning,
       scrub,
-      { code: "delivery_associates", label: "Amazon DA Onboarding", href: "/workforce/amazon-onboarding" },
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
