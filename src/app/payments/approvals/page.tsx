@@ -1,3 +1,4 @@
+import { PaymentTracker } from "@/components/payment-tracker";
 
 import { ReportTable } from "@/components/report-table";
 import { isPendingPaymentApproval } from '@/lib/payment-pending-approval';
@@ -403,7 +404,7 @@ export default async function PaymentApprovalsPage({
         eyebrow="Payments"
         title="Approvals"
         subtitle="Review your assigned requests or act for a lower approver in your People reporting tree."
-        action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
+        action={<PaymentTracker />}
       />
 
       <nav className="payment-approval-stage-legend payment-approval-views" aria-label="Approval views">
