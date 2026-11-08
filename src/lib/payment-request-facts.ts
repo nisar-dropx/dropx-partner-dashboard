@@ -12,8 +12,12 @@ export function paymentRequestFacts(row: Record<string, unknown>): PaymentReques
     if (typeof value === 'string' && value.trim()) facts.push({ label, value: value.trim() });
   };
   add('Requested for', row.requested_for_name);
+  const modes: Record<string, string> = { van_driver: 'Van driver', bike_da: 'Existing bike DA', existing_odcd: 'Existing ODCD DA', standalone_odcd: 'ODCD delivery associate' };
+  const mode = typeof row.delivery_performer_mode === 'string' ? modes[row.delivery_performer_mode] : undefined;
+  add('Who is doing delivery?', mode);
   add('Delivery associate', row.delivery_performer_name || row.adhoc_da_name);
   add('Provider / employee ID', row.delivery_provider_employee_id || row.adhoc_provider_employee_id);
+  if (row.delivery_identity_confirmed === true) add('Delivery ID confirmation', 'Own delivery ID confirmed');
   add('Work date', driver.work_date || row.delivery_work_date || row.adhoc_work_date || row.work_date || row.adhoc_deployment_date);
   add('Reason', driver.reason_label || replacement.reason);
   add('Person on leave', driver.person_name);

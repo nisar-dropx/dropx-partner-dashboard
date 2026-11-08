@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { Search, X, Route } from 'lucide-react';
+import { PaymentDetailValue, isLongPaymentDetail } from '@/components/payment-detail-value';
 import { PaymentRequestFacts } from '@/components/payment-request-facts';
 import type { PaymentRequestFact } from '@/lib/payment-request-facts';
 
@@ -74,7 +75,7 @@ export function PaymentTracker() {
               {result.reference ? <p>Bank reference: {result.reference}</p> : null}
             </section>
             <PaymentRequestFacts facts={result.facts} />
-            {result.answers.length ? <details className="payment-track-fields"><summary>Submitted fields & attachments ({result.answers.length})</summary><dl>{result.answers.map(answer => <div key={answer.id}><dt>{answer.label}<small>{answer.stage}</small></dt><dd>{answer.value || '—'}{answer.attachments.map(file => <a key={file.url} href={file.url} target="_blank" rel="noreferrer">{file.name} ↗</a>)}</dd></div>)}</dl></details> : null}
+            {result.answers.length ? <details className="payment-track-fields"><summary>Submitted fields & attachments ({result.answers.length})</summary><dl>{result.answers.map(answer => <div key={answer.id} className={isLongPaymentDetail(answer.value || "") ? "payment-detail-wide" : undefined}><dt>{answer.label}<small>{answer.stage}</small></dt><dd><PaymentDetailValue value={answer.value || '—'} label={answer.label} />{answer.attachments.map(file => <a key={file.url} href={file.url} target="_blank" rel="noreferrer">{file.name} ↗</a>)}</dd></div>)}</dl></details> : null}
             <h3 className="payment-track-history-title">Request history</h3>
             <ol className="payment-track-timeline">{result.events.map(event => <li key={event.id}><div><strong>{event.action}</strong><time dateTime={event.at}>{dateTime(event.at)}</time></div><p>{event.actor}{event.role ? ` · ${event.role}` : ''}</p>{event.note ? <p className="payment-track-note">{event.note}</p> : null}</li>)}</ol>
           </> : null}
