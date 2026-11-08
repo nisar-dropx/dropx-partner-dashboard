@@ -1,4 +1,5 @@
 "use client";
+import { facetRows } from "@/lib/dependent-filters";
 import { FleetAttachmentPreview } from "./fleet-attachment-preview";
 import { FleetMobileSection } from "./fleet-mobile-section";
 import { FleetVehicleTypeFilter } from "./fleet-vehicle-type-filter";
@@ -89,6 +90,19 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
     return { vehicle, type, document, expiryDate, ...rowState(document, expiryDate, type, data.today) };
   })), [data.documentTypes, data.today, documents, vehicles]);
 
+  const facets = useMemo(() => {
+    const placements = new Map(data.stationOptions.map(row => [row.code, row]));
+    return facetRows(rows, {
+      region: {selected: regions, values: row => placements.get(row.vehicle.stationCode)?.region ?? "Unassigned region"},
+      cluster: {selected: clusters, values: row => placements.get(row.vehicle.stationCode)?.cluster ?? "Unassigned cluster"},
+      station: {selected: stations, values: row => row.vehicle.stationCode},
+      vehicle: {selected: vehicleNos, values: row => row.vehicle.vehicleNo},
+      type: {selected: vehicleTypes, values: row => vehicleTypeKey(row.vehicle)},
+      document: {selected: documentTypes, values: row => row.type.value},
+      state: {selected: states, values: row => row.state}
+    }, row => (workspaceMode === "register" || ["expired", "urgent", "file_missing", "validity_missing", "due"].includes(row.state))
+      && (!query.trim() || `${row.vehicle.vehicleNo} ${row.vehicle.stationCode} ${row.vehicle.model} ${row.type.label} ${row.document?.fileName ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())));
+  }, [rows, data.stationOptions, regions, clusters, stations, vehicleNos, vehicleTypes, documentTypes, states, workspaceMode, query]);
   const scopedRows = useMemo(() => rows.filter((row) => {
     const needle = query.trim().toLowerCase();
     const placement = data.stationOptions.find((station) => station.code === row.vehicle.stationCode);
@@ -165,13 +179,13 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
 
     <FleetMobileSection title="Search & filters" summary={[query,...regions,...clusters,...stations,...vehicleNos,...documentTypes,...states].filter(Boolean).join(" · ") || "All stations · all vehicles"} className="fc-mobile-filters"><div className="fc-document-filters">
       <label className="fc-document-search"><span>Search</span><div><Search size={15} /><input onChange={(event) => setQuery(event.target.value)} placeholder="Vehicle, station, file or document" value={query} /></div></label>
-      <FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={uniqueRegions.map((value) => ({ value, label: value }))} values={regions} />
-      <FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={uniqueClusters.map((value) => ({ value, label: value }))} values={clusters} />
-      <FleetMultiSelect allLabel="All stations" label="Station" onChange={setStations} options={uniqueStations.map((value) => ({ value, label: value }))} values={stations} />
-      <FleetVehicleTypeFilter vehicles={vehicles} values={vehicleTypes} onChange={setVehicleTypes} />
-      <FleetMultiSelect allLabel="All vehicles" label="Vehicle" onChange={setVehicleNos} options={vehicles.map((vehicle) => ({ value: vehicle.vehicleNo, label: vehicle.vehicleNo, helper: `${vehicle.stationCode} · ${vehicleTypeLabel(vehicle)} · ${vehicle.model}` }))} values={vehicleNos} />
-      <FleetMultiSelect allLabel="All document types" label="Document" onChange={setDocumentTypes} options={data.documentTypes.filter(type => { const v=vehicles.find(v=>v.vehicleNo===uploadVehicle); return !v || documentApplies(type,v); }).map((type) => ({ value: type.value, label: type.label }))} values={documentTypes} />
-      <FleetMultiSelect allLabel="All states" label="Status" onChange={setStates} options={Object.entries(stateLabels).map(([value, label]) => ({ value, label }))} values={states} />
+      <FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={facets.values("region").map(value => ({value, label:value}))} values={regions} />
+      <FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={facets.values("cluster").map(value => ({value, label:value}))} values={clusters} />
+      <FleetMultiSelect allLabel="All stations" label="Station" onChange={setStations} options={facets.values("station").map(value => ({value, label:value}))} values={stations} />
+      <FleetVehicleTypeFilter availableValues={facets.values("type")} vehicles={vehicles} values={vehicleTypes} onChange={setVehicleTypes} />
+      <FleetMultiSelect allLabel="All vehicles" label="Vehicle" onChange={setVehicleNos} options={vehicles.filter(vehicle => (facets.available.vehicle.has(vehicle.vehicleNo) || vehicleNos.includes(vehicle.vehicleNo))).map((vehicle) => ({ value: vehicle.vehicleNo, label: vehicle.vehicleNo, helper: `${vehicle.stationCode} · ${vehicleTypeLabel(vehicle)} · ${vehicle.model}` }))} values={vehicleNos} />
+      <FleetMultiSelect allLabel="All document types" label="Document" onChange={setDocumentTypes} options={data.documentTypes.filter(type => (facets.available.document.has(type.value) || documentTypes.includes(type.value))).map(type => ({value:type.value,label:type.label}))} values={documentTypes} />
+      <FleetMultiSelect allLabel="All states" label="Status" onChange={setStates} options={Object.entries(stateLabels).filter(([value]) => (facets.available.state.has(value) || states.includes(value))).map(([value, label]) => ({ value, label }))} values={states} />
     </div></FleetMobileSection>
 
     <div className="fc-table-panel">
