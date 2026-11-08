@@ -6,9 +6,12 @@ import { workforceStationPolicy } from '@/lib/workforce-register-policy';
 import { callWorkforceAmazonWorker, workforceAmazonWorkerConfig } from '@/lib/workforce-amazon-worker';
 import { deskProfileId, deskUuid, validateDeskAction } from '@/lib/amazon-da-desk-policy';
 import type { AmazonDaProfile } from '@/lib/amazon-da-desk-types';
-import {loadClientIdMappingsForWorkers,needsClientId,providerMappingFor,type ClientIdWorker} from '@/lib/workforce-client-id-queue';
+import {allClientIdRows,loadClientIdMappingsForWorkers,needsClientId,providerMappingFor,type ClientIdWorker} from '@/lib/workforce-client-id-queue';
 import {loadClientIdPartnerStates} from '@/lib/workforce-client-id-partner';
 import {dashboardDateInputValue} from '@/lib/date-format';
+import {loadAmazonFilterSource,loadAmazonFilterScope,loadAmazonRequestSource} from '@/lib/amazon-da-filter-data';
+import {filterDeskPage,emptyDeskFilters} from '@/lib/amazon-da-filters';
+import {facetRows} from '@/lib/dependent-filters';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -26,7 +29,7 @@ async function context(stationId: string, write=false, all=false) {
   const scope=stations.filter(s=>workforceStationPolicy(s).requiresStationEmail).map(s=>s.id);
   if (!(all&&stationId==='all') && !scope.includes(stationId))
     throw new DeskError('This station is outside your access.',403);
-  return {auth, companyId:auth.companyId, db:supabaseAdmin,scope};
+  return {auth, companyId:auth.companyId, db:supabaseAdmin,scope,stationCodes:Object.fromEntries(stations.map(s=>[s.id,s.station_code]))};
 }
 function worker<T>(operation:string,body:unknown) {
   return callWorkforceAmazonWorker<T>(`/api/admin/amazon/station-desk/${operation}`,{method:'POST',body:JSON.stringify(body),...(['milestones','idfy','idfy-submit','idfy-queue','idfy-reconcile'].includes(operation)?{signal:AbortSignal.timeout(110_000)}:{})});
@@ -36,9 +39,19 @@ export async function GET(request:Request) {
     const params = new URL(request.url).searchParams;
     const stationId = params.get('station') || '';
     const view = params.get('view') || 'onboarding';
-    const {auth,companyId, db,scope} = await context(stationId,false,['approvals','history'].includes(view));
+    const {auth,companyId, db,scope,stationCodes} = await context(stationId,false,['approvals','history','bgc-pending','bgc-address','bgc'].includes(view));
     const providerId = params.get('profile');
     if (providerId && !deskProfileId.test(providerId)) throw new DeskError('Select a valid Amazon profile.');
+    if(params.get('filters')==='1'&&!providerId&&['onboarding','associates','offboarded','bgc','bgc-pending','bgc-address'].includes(view)){
+      const filters=emptyDeskFilters();filters.query=(params.get('query')||'').slice(0,100);
+      filters.station=params.getAll('location');
+      if(filters.station.some(id=>!scope.includes(id)))throw new DeskError('This station is outside your access.',403);
+      for(const key of ['status','stage','milestone','address','check','health'] as const)filters[key]=params.getAll(key).slice(0,50).map(v=>v.slice(0,200));
+      const requestOnly=view==='bgc-pending';
+      const source=requestOnly?await loadAmazonRequestSource(companyId,stationId==='all'?scope:[stationId],params.get('fresh')==='1'):stationId==='all'?await loadAmazonFilterScope(db,companyId,scope.map(id=>({id,code:stationCodes[id]||id})),params.get('fresh')==='1'):await loadAmazonFilterSource(db,companyId,stationId,view,params.get('fresh')==='1');
+      const page=filterDeskPage(source.rows,filters,view,Math.max(0,Math.min(10000,Math.floor(Number(params.get('offset'))||0))),source.snapshot,params.get('snapshot')||'');
+      return reply({...page,...(requestOnly?{requestOnly:true,counts:{...page.counts,address:null,all:null,unchecked:0}}:{}),checkedAt:source.checkedAt,warnings:source.warnings,incomplete:source.incomplete});
+    }
     if(view==='photo') {
       const ticket=params.get('ticket')||'';
       if(!providerId||!ticket||ticket.length>4096)throw new DeskError('Photo unavailable.',404);
@@ -52,6 +65,21 @@ export async function GET(request:Request) {
     if (view === 'history' || view === 'approvals') {
       // History stays with the original station even after an external Amazon transfer.
       const offset=Math.max(0,Math.min(100000,Math.floor(Number(params.get('offset'))||0)));
+      if(params.get('filters')==='1'){
+        const ids=stationId==='all'?(scope.length?scope:['00000000-0000-0000-0000-000000000000']):[stationId];
+        const compact=await allClientIdRows<{id:string;associate_name:string;provider_id:string;status:string;action:string}>((from,to)=>{
+          let q=db.from('amazon_da_commands').select('id,associate_name,provider_id,status,action').eq('company_id',companyId).in('station_id',ids).order('created_at',{ascending:false}).order('id',{ascending:false}).range(from,to);
+          if(providerId)q=q.eq('provider_id',providerId);
+          if(view==='approvals'&&params.get('all')!=='1')q=q.eq('status','pending_approval');return q;
+        });
+        const terms=(params.get('query')||'').slice(0,100).toLowerCase().trim().split(/\s+/);
+        const selected={status:params.getAll('status').slice(0,30),action:params.getAll('action').slice(0,30)};
+        const f=facetRows(compact,{status:{selected:selected.status,values:r=>r.status},action:{selected:selected.action,values:r=>r.action}},r=>terms.every(t=>`${r.associate_name} ${r.provider_id}`.toLowerCase().includes(t)));
+        const pageIds=f.rows.slice(offset,offset+50).map(r=>r.id);
+        const [rows,reviewer]=await Promise.all([pageIds.length?db.from('amazon_da_commands').select(columns).eq('company_id',companyId).in('station_id',ids).in('id',pageIds).order('created_at',{ascending:false}).order('id',{ascending:false}):Promise.resolve({data:[],error:null}),db.rpc('amazon_da_reviewer_role',{p_company:companyId,p_actor:auth.userId})]);
+        if(rows.error||reviewer.error)throw Error('Could not load action records.');
+        return reply({commands:rows.data,canApprove:!!reviewer.data&&!auth.readOnly&&!auth.isPreview,moreHistory:offset+50<f.rows.length,total:f.rows.length,commandFacets:{status:f.values('status'),action:f.values('action')}});
+      }
       let query = db.from('amazon_da_commands').select(columns).eq('company_id',companyId).in('station_id',stationId==='all'?(scope.length?scope:['00000000-0000-0000-0000-000000000000']):[stationId]).order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+49);
       if (providerId) query=query.eq('provider_id',providerId);
       if(view==='approvals' && params.get('all')!=='1')query=query.eq('status','pending_approval');
@@ -74,7 +102,13 @@ export async function GET(request:Request) {
       if(!providerId)throw new DeskError('Select an associate.');
       return reply(await worker('idfy',{companyId,stationId,providerId}));
     }
-    if(view==='bgc-pending')return reply(await worker('idfy-queue',{companyId,stationId,query:(params.get('query')||'').slice(0,100)}));
+    if(view==='bgc-pending'){
+      const requested=params.get('stations')?.split(',').filter(Boolean);
+      if(requested?.some(id=>!scope.includes(id)))throw new DeskError('This station is outside your access.',403);
+      const stationIds=stationId==='all'?(requested?.length?requested:scope):[stationId];
+      if(!stationIds.length)return reply({rows:[],checkedAt:new Date().toISOString()});
+      return reply(await worker('idfy-queue',{companyId,stationIds,query:(params.get('query')||'').slice(0,100),fresh:params.get('fresh')==='1'}));
+    }
     if(view==='idfy-report'){
       if(!providerId)throw new DeskError('Select an associate.');
       const config=workforceAmazonWorkerConfig();if(!config.configured)throw new DeskError('IDfy is not connected.',503);
@@ -88,11 +122,11 @@ export async function GET(request:Request) {
     if (providerId) return reply(await worker('profile',{companyId,stationId,providerId}));
     if (view === 'invite') {
       const [people,requests] = await Promise.all([
-        db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,source_profile_type,source_profile_id,lifecycle_status,migration_state,location_id,stations(provider_id),designations(provider_mapping_required)').eq('company_id',companyId).eq('location_id',stationId).is('deleted_at',null).in('onboarding_status',['under_review','approved','active']).order('full_name').limit(500),
+        allClientIdRows((from,to)=>db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,source_profile_type,source_profile_id,lifecycle_status,migration_state,location_id,stations(provider_id),designations(provider_mapping_required)').eq('company_id',companyId).eq('location_id',stationId).is('deleted_at',null).in('onboarding_status',['under_review','approved','active']).order('full_name').order('id').range(from,to)),
         db.from('workforce_amazon_invitation_requests').select('id,workforce_id,status,requested_at,error_message').eq('company_id',companyId).eq('station_id',stationId).order('requested_at',{ascending:false}).limit(100),
       ]);
-      if(people.error || requests.error) throw new Error('Could not load invitation records.');
-      const workers=people.data as unknown as (ClientIdWorker&{full_name:string;dropx_id:string|null;email:string|null})[];
+      if(requests.error) throw new Error('Could not load invitation records.');
+      const workers=people as unknown as (ClientIdWorker&{full_name:string;dropx_id:string|null;email:string|null})[];
       const mappings=await loadClientIdMappingsForWorkers(db,companyId,workers);
       const states=new Map(workers.map(p=>[p.id,providerMappingFor(p,mappings,dashboardDateInputValue())]));
       const partners=await loadClientIdPartnerStates(db,companyId,workers.filter(p=>needsClientId(p)&&!states.get(p.id)?.known).map(p=>p.id));

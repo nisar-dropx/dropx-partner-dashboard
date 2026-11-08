@@ -141,7 +141,7 @@ test('payout dispute attention is skipped when no selected stations remain in sc
 test('BGC priority opens only requested information within selected Amazon stations',async()=>{
  const f=fixture(['ops_amazon_da'],false,null,true);
  const item=(await f.run()).find(i=>i.key==='idfy');
- assert.equal(item.count,2);assert.equal(item.action,'Resolve BGC');assert.equal(item.tone,'action');
+ assert.equal(item.count,2);assert.equal(item.action,'Resolve BGC');assert.equal(item.tone,'urgent');
  assert.deepEqual(f.calls,[['idfy',['a']]]);assert.match(item.href,/stations=a/);
  assert.deepEqual(await fixture(['ops_amazon_da'],false,null,false).run(),[]);
  assert.deepEqual(await fixture(['ops_amazon_da'],false,null,true).run('amazon_now'),[]);

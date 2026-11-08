@@ -970,8 +970,10 @@ export async function saveDispatchRoutes(form: FormData) {
     if (!Object.prototype.hasOwnProperty.call(dispatchReports,report)) throw new Error("Select a report.");
     const scopeType = field(form,"scope_type");
     if (!['station','region'].includes(scopeType)) throw new Error("Choose station or region scope.");
+    if (report === "eod" && scopeType !== "region") throw new Error("Final EOD must use Regional / Internal LM scope.");
     const formats = [...new Set(form.getAll("format").map(String))];
     if (!formats.length || formats.some(value => !["photo","text","excel"].includes(value))) throw new Error("Choose at least one output format.");
+    if (report === "eod" && (formats.length !== 1 || formats[0] !== "photo")) throw new Error("Final EOD sends compact table images only.");
     const scheduleStart = field(form,"schedule_start"), scheduleEnd = field(form,"schedule_end");
     const intervalMinutes = Number(field(form,"interval_minutes"));
     const times = scheduleSlots(scheduleStart,scheduleEnd,intervalMinutes);
@@ -979,6 +981,15 @@ export async function saveDispatchRoutes(form: FormData) {
     const question = field(form,"question");
     if (mentions.length > 10 || mentions.some(n=>!/^\d{8,15}$/.test(n))) throw new Error("Enter up to 10 international numbers with country codes.");
     if (question.length > 400) throw new Error("Keep the question under 400 characters.");
+    const managerPolicy = field(form,"mention_manager_policy") || "none";
+    if (!["none","cluster_then_aom"].includes(managerPolicy)) throw new Error("Choose a valid manager tagging policy.");
+    const requestedDesignationCodes = [...new Set(form.getAll("mention_present_designation_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
+    if (requestedDesignationCodes.length > 25) throw new Error("Choose no more than 25 present-team designations.");
+    if (requestedDesignationCodes.length) {
+      const activeDesignations = check(await reportBotDb().from("designations").select("code").eq("company_id",companyId).eq("is_active",true).in("code",requestedDesignationCodes),"Check designations") as Array<{code:string|null}>;
+      const available = new Set(activeDesignations.map(row=>String(row.code||"").trim().toUpperCase()));
+      if (requestedDesignationCodes.some(code=>!available.has(code))) throw new Error("One or more selected designations are inactive or unavailable.");
+    }
     const ids = [...new Set(form.getAll("group_id").map(String))];
     if (!ids.length || ids.length > 100) throw new Error("Select between 1 and 100 mapped Last Mile groups.");
     const scope = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
@@ -987,12 +998,17 @@ export async function saveDispatchRoutes(form: FormData) {
     const activeById = new Map(lastMileLocations.map(location => [location.id,location]));
     const sourceLocationIds = [...new Set(form.getAll("source_location_id").map(String))];
     const sourceRegionCodes = [...new Set(form.getAll("source_region_code").map(String).map(value=>value.trim()).filter(Boolean))];
+    const sourceModelCodes = [...new Set(form.getAll("source_model_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
+    const availableModelCodes = new Set(lastMileLocations.map(location=>locationModelName(location).trim().toUpperCase()).filter(Boolean));
+    if (sourceModelCodes.length > 25 || sourceModelCodes.some(code=>!availableModelCodes.has(code))) throw new Error("Choose active source models from the location master.");
+    if (report === "eod" && !sourceModelCodes.length) throw new Error("Choose at least one source model for Final EOD.");
     if (scopeType === "station") {
       if (!sourceLocationIds.length || sourceLocationIds.length > 100 || sourceLocationIds.some(id=>!activeById.has(id))) throw new Error("Choose between 1 and 100 active source stations in your scope.");
     } else {
       if (!authorization.hasAllLocationAccess) throw new Error("Regional Internal LM schedules require all-location access.");
       const availableRegions = new Set(lastMileLocations.map(location=>String(location.region || "").trim()).filter(Boolean));
       if (!sourceRegionCodes.length || sourceRegionCodes.length > 25 || sourceRegionCodes.some(region=>!availableRegions.has(region))) throw new Error("Choose one or more active regions from the location master.");
+      if (sourceModelCodes.length && !lastMileLocations.some(location=>sourceRegionCodes.includes(String(location.region || "").trim()) && sourceModelCodes.includes(locationModelName(location).trim().toUpperCase()))) throw new Error("The selected region and model combination has no active source stations.");
     }
     const rows = await Promise.all(ids.map(async id => {
       const g = await scopedGroup(authorization,companyId,id);
@@ -1003,10 +1019,12 @@ export async function saveDispatchRoutes(form: FormData) {
         scope_type:scopeType,
         source_location_ids:scopeType === "station" ? sourceLocationIds : [],
         source_region_codes:scopeType === "region" ? sourceRegionCodes : [],
+        source_model_codes:scopeType === "region" ? sourceModelCodes : [],
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
         schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",
-        mentions,question,pending_only:form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()
+        mentions,question,mention_manager_policy:managerPolicy,mention_present_designation_codes:requestedDesignationCodes,
+        pending_only:report === "eod" ? false : form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()
       };
     }));
     check(await reportBotDb().from("report_bot_lm_dispatch_routes").upsert(rows,{onConflict:"group_id,report"}),"Save report schedules");

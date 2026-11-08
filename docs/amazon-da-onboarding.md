@@ -75,3 +75,62 @@ Apply only 20261108133039_amazon_da_approval_gate.sql to the shared project.
 The migration also corrects the old provider-ID regex. No real requests were
 created for validation. Run test-amazon-da-approval-migration.mjs,
 test-amazon-da-desk-api.cjs, verify-portal-preview.mjs and worker station-desk tests.
+
+## Priority verification queues and filters — 9 November 2026
+
+The BGC / IDfy tab now opens Insufficiencies, followed by Address verification
+pending and All current IDs. The current-ID population combines the verified
+Amazon onboarding and associate rosters; offboarded IDs stay in their own view.
+Counts apply search and the selected filters, independently of the selected
+priority tab. One ID can legitimately appear in both priority queues. Unknown
+address checks are labelled and counted separately, never treated as verified.
+My associates cards show saved address pendency, red address results and specific
+information requests even when Amazon status is Active or overall BGC is Green.
+
+Searchable multi-select filters cover status, address and overall BGC checks;
+onboarding additionally exposes current stage, pending saved milestone and
+progress. Invitation filters use registration status and availability; approval
+and history filters use action and request status. Filters use OR within a field,
+AND across fields, retain zero-match selections and derive choices after all other
+filters. No options or priority totals are derived from a visible pagination page.
+
+The filters=1 API reads complete verified station rosters into a bounded private
+30-second server cache, overlays company/station/email-matched saved detail
+snapshots, filters server-side and returns only 24 cards plus compact choices.
+No per-associate live milestone/IDfy fetch is triggered by list filters. Current
+access is checked before each cache read. Refresh bypasses the roster cache;
+individual details retain the existing live refresh. Source errors fail explicitly;
+no empty success/count-zero fallback is used. Saved-check timestamps and refresh
+errors remain visible. Changed pagination snapshots restart the cards explicitly.
+No database migration, status mutation, offboarding or payroll change is included.
+
+## Workforce onboarding entry (9 November)
+
+`/workforce/onboarding` opens **Needs action**, followed by **Onboarding**, **Active**,
+**Inactive** and **Offboarded**. These groups use DropX registration/operational
+flags, not Amazon's activation status. Legacy activated registrations with a stale
+`lifecycle_status=onboarding` retain the existing `onboarding_status=active` plus
+`is_active=true` definition. Inactive/offboarded lifecycle flags take precedence.
+Amazon status is a secondary in-workspace reference (`?tab=amazon`); existing
+BGC links still open the priority queues.
+
+**Invite associate** runs locally in OpsPulse and Dashboard. It requires current
+station scope, delivery_associates add permission, designation onboarding and
+portal add permissions, and DA/PTDA/DCD/ODCD. No email field is requested. The
+existing managed-candidate, biometric-series and invitation RPC flow is reused;
+there is no direct employee activation or payroll mutation. Request UUIDs resume
+saved invitations after a network/queue failure. Existing-phone matches require
+review before a separate person can be created. Retry requires edit permission.
+
+Production requires `AMAZON_EMAIL_ROUTING_PROVIDER=resend` and the existing
+`RESEND_INBOUND_DOMAIN`, plus the already-connected Amazon worker. Disabled or
+unconfigured station settings are shown before submission. The Workforce-owned
+migration `20261109143000_live_da_invitation_validation.sql` repairs the deployed
+domain regex and enforces the four roles in the RPC too; release it through that
+repository's GitHub Actions workflow.
+
+Expanded records fetch permission-scoped registration completion flags/missing
+field labels, return notes and (managed accounts only) a paginated inbox. Saved
+identity/bank values are not returned for progress display. Existing personal
+mailboxes get no managed inbox. Message HTML is never rendered, and action links
+allow only HTTPS Amazon/IDfy/e-Shram domains. No production test invitation is sent.

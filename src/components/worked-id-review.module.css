@@ -2,6 +2,61 @@
   display: grid;
   gap: 16px;
 }
+.filterActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.daily {
+  gap: 14px;
+}
+.daily .filters {
+  background: #fafbfd;
+  gap: 12px;
+  padding: 16px 20px;
+}
+.daily .filters label,
+.daily .filters :global(.fc-multi-select) {
+  font-size: 11px;
+  color: #687585;
+}
+.daily .filters input,
+.daily .filters select,
+.daily .filters :global(.fc-multi-select) > button {
+  font-size: 12px;
+  border-radius: 9px;
+  min-height: 36px;
+}
+.daily .overlay {
+  background: #16243865;
+  backdrop-filter: blur(3px);
+}
+.daily .dialog {
+  border-radius: 18px;
+  box-shadow: 0 18px 70px #12223938;
+}
+.daily .dialogBody {
+  background: #f9fbfe;
+}
+.daily .evidence > div {
+  background: #eef4fc;
+}
+.daily .dayCard > summary {
+  background: white;
+  padding: 12px 14px;
+}
+.daily .dayCard[open] {
+  border-color: #bad0ef;
+}
+.daily .check input {
+  accent-color: #1967d2;
+}
+.daily label > select:focus,
+.daily label > input:focus,
+.daily textarea:focus {
+  outline-color: #1967d2;
+}
 .filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));

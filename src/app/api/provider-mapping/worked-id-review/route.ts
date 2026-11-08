@@ -69,6 +69,7 @@ export async function GET(req: Request) {
             period.to,
             a.userId,
             worker,
+            p.get("scope") === "daily",
           ),
           { headers },
         );
@@ -100,6 +101,8 @@ export async function GET(req: Request) {
         period.from,
         period.to,
         a.userId,
+        undefined,
+        p.get("scope") === "daily",
       ),
       { headers },
     );
@@ -171,12 +174,27 @@ export async function POST(req: Request) {
       }
       clean.push(item);
     }
-    const result = await supabaseAdmin.rpc("save_workforce_worked_id_batch", {
-      p_company: a.companyId,
-      p_actor: a.userId,
-      p_entries: clean,
-    });
+    const result = await supabaseAdmin.rpc(
+      p.scope === "daily"
+        ? p.preview === true
+          ? "validate_daily_id_usage_batch"
+          : "save_daily_id_usage_batch"
+        : "save_workforce_worked_id_batch",
+      {
+        p_company: a.companyId,
+        p_actor: a.userId,
+        p_entries: clean,
+      },
+    );
     if (result.error) throw Error(result.error.message);
+    if (p.scope === "daily" && p.preview === true)
+      return Response.json(
+        {
+          validated: true,
+          affectedCount: new Set(result.data.affected_workforce_ids || []).size,
+        },
+        { headers },
+      );
     let warning = "";
     try {
       const period = workedIdMonth(String(clean[0].date).slice(0, 7));

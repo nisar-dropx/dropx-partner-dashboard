@@ -60,7 +60,7 @@ export const navItems: NavItem[] = [
     ]
   },
   { code: "delivery_associates", label: "Workforce", icon: "+", children: [
-    { code: "delivery_associates", accessAnyOf: ["delivery_associates", "ops_amazon_da"], label: "DA onboarding", href: "/workforce/onboarding" },
+    { code: "delivery_associates", accessAnyOf: ["delivery_associates", "ops_amazon_da"], label: "Workforce onboarding", href: "/workforce/onboarding" },
     { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register?section=register" }
   ] },
   { code: "executive_id_onboarding", label: "Executive ID Onboarding", href: "/executive-id-onboarding", icon: "ID" },

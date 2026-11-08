@@ -1,6 +1,6 @@
 import type { AmazonDaPerson } from './amazon-da-desk-types';
 export type GuidedDA={id:string;full_name:string;alias_email:string;mobile:string;biometric_id:string;status:string;closed_at:string|null;duplicate_identity_detected:boolean;inbox_status:string;driverId?:string|null;amazonProfileId?:string|null;amazonStatus?:string|null;registration?:string|null;bgc?:string|null;uan?:string|null;learning?:string|null;observedAt?:string|null;syncError?:string|null};
-export type DAOwner={id:string;full_name:string;dropx_id:string|null;email:string|null;onboarding_status:string;lifecycle_status?:string|null;provider_employee_id:string|null};
+export type DAOwner={is_active?:boolean;designation?:string|null;designation_id?:string|null;id:string;full_name:string;dropx_id:string|null;email:string|null;onboarding_status:string;lifecycle_status?:string|null;provider_employee_id:string|null};
 export type DALink={workforce_id:string;amazon_provider_id:string|null;transporter_id:string|null};
 export type DARow={key:string;name:string;email:string|null;phone:string|null;amazon:AmazonDaPerson|null;guided:GuidedDA|null;owner:DAOwner|null;conflict:boolean;status:string;next:string;origin:string};
 const norm=(s:string|null|undefined)=>(s||'').trim().toLowerCase();

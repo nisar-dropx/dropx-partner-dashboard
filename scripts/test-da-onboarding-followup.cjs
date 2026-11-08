@@ -1,6 +1,6 @@
 const fs=require('node:fs'),assert=require('node:assert/strict'),ts=require('typescript');
 function load(file,stubs={}){const m={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>stubs[id]||require(id),m,m.exports);return m.exports;}
-const view=load('src/lib/da-onboarding-view.ts',{'./dependent-filters':load('src/lib/dependent-filters.ts'),'./da-onboarding-registry':{daNeedsAttention:r=>r.conflict}});
+const view=load('src/lib/da-onboarding-view.ts',{'./da-onboarding-policy':load('src/lib/da-onboarding-policy.ts'),'./dependent-filters':load('src/lib/dependent-filters.ts'),'./da-onboarding-registry':{daNeedsAttention:r=>r.conflict}});
 const person={key:'p',stationId:'s1',stationCode:'QLDA',name:'=Test person',phone:'001234567890',email:'person@example.test',status:'ACTIVE',origin:'Existing Amazon ID',next:'Account active',conflict:false,owner:{dropx_id:'000000012345678901',full_name:'Owner'},amazon:{providerId:'amzn1.flex.provider.v1.test',transporterId:'A1234567',bgc:{status:'Stage2 Green',address:{state:'candidate_pending',label:'Address pending · candidate'},checks:[{needsResponse:true}]}}};
 const f={query:'',statuses:[],origins:[],verification:[],attention:false};
 assert.equal(view.filterDA([person],{...f,query:'qlda 001234'}).length,1);

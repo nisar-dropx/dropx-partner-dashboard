@@ -198,6 +198,9 @@ eq("Write-off is in the case history", Number((await one(`select count(*) n from
 const CM = "00000000-0000-0000-0000-0000000000cc";
 const claim = async (ref, amount = 800) => (await one(`select * from station_claim_submit('${C}','${S}','blr1','${ref}',current_date-3,'cash_shortage',${amount},'Cash short at day close by 800','https://drive.example/x','DA One','${ACT}','Station Lead')`));
 const act = (id, action, version, actor, note = null, patch = {}) => `select * from station_claim_transition('${C}','${id}','${action}',${version},'${actor}','Someone',${note ? `'${note}'` : "null"},'${JSON.stringify(patch)}')`;
+// PGlite timestamps have millisecond precision. Separate successful transitions
+// so UUID tie-breaking cannot reorder otherwise simultaneous test events.
+const nextClaimEvent = () => new Promise(resolve => setTimeout(resolve, 5));
 const c1 = await claim("blr-cash-001");
 eq("Claim is submitted with an upper-case reference", [c1.status, c1.reference, c1.station_code], ["submitted", "BLR-CASH-001", "BLR1"]);
 await throws("Reference is unique", `select station_claim_submit('${C}','${S}','BLR1','BLR-CASH-001',current_date,'other',10,'Duplicate reference here','','','${ACT}','x')`, /already used/);
@@ -205,11 +208,14 @@ await throws("Future incident refused", `select station_claim_submit('${C}','${S
 await throws("Raiser cannot approve", act(c1.id, "approve", 1, ACT), /cluster manager must decide/);
 await throws("Return needs a reason", act(c1.id, "return", 1, CM), /at least 5/);
 await throws("Stale version refused", act(c1.id, "approve", 9, CM), /Someone else updated/);
+await nextClaimEvent();
 const r1 = await one(act(c1.id, "return", 1, CM, "Attach the cash book photo"));
 eq("Returned for information", r1.status, "returned");
 await throws("Only the raiser resubmits", act(c1.id, "resubmit", 2, CM, null, { amount: "750", description: "Corrected after recount" }), /Only the person who raised/);
+await nextClaimEvent();
 const s1 = await one(act(c1.id, "resubmit", 2, ACT, null, { amount: "750", description: "Corrected after recount", evidence_url: "https://drive.example/y" }));
 eq("Resubmitted with corrections", [s1.status, s1.amount], ["submitted", "750.00"]);
+await nextClaimEvent();
 const a1 = await one(act(c1.id, "approve", 3, CM));
 eq("Approved claim links to its loss case", [a1.status, a1.case_key, a1.case_month], ["approved", "station:BLR-CASH-001", a1.case_month]);
 const sc = await one(`select report,amount::text,source_status,nl_case_recoverable(company_id,report,source_status) ok from nl_loss_month_cases where case_key='station:BLR-CASH-001'`);

@@ -1,4 +1,5 @@
 import "server-only";
+import { dailyUsageDates, dailyUsageShares } from "./daily-id-usage";
 import { loadPeopleOperationalHierarchy } from "./people-operational-hierarchy";
 import { nlPeopleClusters } from "./ops-pulse/nl-loss-clusters";
 import { supabaseAdmin } from "./supabase-admin";
@@ -23,6 +24,7 @@ export async function loadWorkedIdReview(
   to: string,
   viewerId: string,
   evidenceWorker?: string,
+  dailyUsage = false,
 ) {
   if (!supabaseAdmin) throw Error("Database is unavailable.");
   const db = supabaseAdmin;
@@ -34,9 +36,12 @@ export async function loadWorkedIdReview(
   if (st.error || st.data.length !== stationIds.length)
     throw Error("Location unavailable.");
   const hierarchy = await loadPeopleOperationalHierarchy(company, stationIds);
-  if (hierarchy.error) throw Error("Current People ownership unavailable. Please retry.");
+  if (hierarchy.error)
+    throw Error("Current People ownership unavailable. Please retry.");
   const owners = nlPeopleClusters(st.data, hierarchy.byLocation);
-  const selectedStations = new Map(st.data.map((s) => [s.id, { ...s, ...owners.byStation.get(s.id)! }]));
+  const selectedStations = new Map(
+    st.data.map((s) => [s.id, { ...s, ...owners.byStation.get(s.id)! }]),
+  );
   const selectedCodes = st.data.map((s) => s.station_code);
   const bulkResult = await readAllRows(
     db
@@ -184,6 +189,7 @@ export async function loadWorkedIdReview(
   // Check the candidate's IDs across stations privately. A transfer or report station
   // mismatch must not manufacture a "no delivery" attendance exception.
   const candidateIds = new Set([
+    ...(dailyUsage ? mids.map((m) => m.workforceId) : []),
     ...bulkInputs.map((p) => p.workforce_id),
     ...punches
       .map(
@@ -279,16 +285,55 @@ export async function loadWorkedIdReview(
   const reportDays = new Set(
     shipments.map((s) => `${s.station_code}|${s.work_date}`),
   );
-  for (const p of punches) {
+  const dayEvidence = [...punches];
+  if (dailyUsage) {
+    const existing = new Set(
+      punches.map(
+        (p) =>
+          `${p.location_id}|${wm.get(p.account_id || p.field_executive_id || p.contractor_id || p.employee_id)?.id}|${p.punch_date}`,
+      ),
+    );
+    for (const m of [...mappings, ...allocations]) {
+      const worker = wm.get(
+        m.workforce_id ||
+          m.contractor_id ||
+          m.employee_id ||
+          m.field_executive_id,
+      );
+      if (
+        !worker ||
+        !selectedStations.has(m.station_id) ||
+        (evidenceWorker && worker.id !== evidenceWorker)
+      )
+        continue;
+      for (const date of dailyUsageDates(
+        from,
+        [to, todayKolkata()].sort()[0],
+      )) {
+        const key = `${m.station_id}|${worker.id}|${date}`;
+        if (!active(m, date) || existing.has(key)) continue;
+        existing.add(key);
+        dayEvidence.push({
+          account_id: worker.id,
+          location_id: m.station_id,
+          punch_date: date,
+          punch_time: null,
+          synthetic: true,
+        });
+      }
+    }
+  }
+  for (const p of dayEvidence) {
     if (p.punch_date < from || p.punch_date > to) continue;
     let w = wm.get(
       p.account_id || p.field_executive_id || p.contractor_id || p.employee_id,
     );
     if (
       !w ||
-      !workedIdDeliveryRoles.includes(
-        first(w.designations)?.code || w.designation,
-      ) ||
+      (!dailyUsage &&
+        !workedIdDeliveryRoles.includes(
+          first(w.designations)?.code || w.designation,
+        )) ||
       (w.date_of_join && p.punch_date < w.date_of_join) ||
       (w.last_working_date && p.punch_date > w.last_working_date)
     )
@@ -332,6 +377,8 @@ export async function loadWorkedIdReview(
             .map((m) => ({
               name: first(m.payment_methods)?.name || "Mapped payment",
               providerId: m.provider_member_id,
+              client:
+                first(m.providers)?.name || first(m.providers)?.code || "",
               from: m.effective_from,
               to: m.effective_to,
               values: m.payment_values || {},
@@ -407,8 +454,14 @@ export async function loadWorkedIdReview(
         reason: "",
         shares: [],
       };
-    r.punches++;
-    r.punchTimes.push(p.punch_time);
+    if (!(p as any).synthetic) {
+      r.punches++;
+      r.punchTimes.push(p.punch_time);
+    }
+    if (dailyUsage)
+      r.hasPaySetup = r.payPlans.some(
+        (plan: any) => plan.components.length > 0,
+      );
     r.bulkPeriods = bulkInputs.filter(
       (a) =>
         a.workforce_id === w.id &&
@@ -416,6 +469,109 @@ export async function loadWorkedIdReview(
         active(a, p.punch_date),
     );
     rows.set(k, r);
+  }
+  const locksByWorker = new Map<string, any[]>();
+  if (dailyUsage) {
+    const { incoming, outgoing } = dailyUsageShares(shipments, reviews, wm);
+    const lockResult = await readAllRows(
+      db
+        .rpc("daily_id_usage_locks", {
+          p_company: company,
+          p_from: from,
+          p_to: to,
+        })
+        .order("workforce_id")
+        .order("from_date")
+        .order("to_date")
+        .order("reason"),
+    );
+    if (lockResult.error)
+      throw Error("Payment locks could not be checked. Retry before editing.");
+    for (const lock of lockResult.data || [])
+      locksByWorker.set(lock.workforce_id, [
+        ...(locksByWorker.get(lock.workforce_id) || []),
+        lock,
+      ]);
+    const sourcesByDay = new Map<string, any[]>(),
+      namesByMember = new Map<string, string>();
+    for (const shipment of shipments) {
+      const workerId = resolve(shipment).workforceId;
+      const key = `${shipment.station_code}|${workerId}|${shipment.work_date}`;
+      sourcesByDay.set(key, [...(sourcesByDay.get(key) || []), shipment]);
+      if (shipment.provider_employee_name)
+        namesByMember.set(
+          `${shipment.station_code}|${shipment.provider_employee_id}`,
+          shipment.provider_employee_name,
+        );
+    }
+    for (const r of rows.values()) {
+      const ownSources =
+        sourcesByDay.get(`${r.stationCode}|${r.workerId}|${r.date}`) || [];
+      r.dailyUsage = true;
+      const received = incoming.get(r.key) || [];
+      r.ownDeliveries = ownSources.reduce(
+        (sum, s) => sum + Number(s.total_delivery || 0),
+        0,
+      );
+      r.receivedDeliveries = received.reduce((sum, s) => sum + s.deliveries, 0);
+      r.givenDeliveries = ownSources.reduce(
+        (sum, s) =>
+          sum +
+          (outgoing.get(s.id) || []).reduce((n, v) => n + v.deliveries, 0),
+        0,
+      );
+      r.adjustedDeliveries =
+        r.ownDeliveries + r.receivedDeliveries - r.givenDeliveries;
+      r.ownerExcluded = ownSources.some((s) =>
+        (outgoing.get(s.id) || []).some((v) => v.ownerWorked === false),
+      );
+      r.payMethod = [...new Set(r.payPlans.map((p: any) => p.name))].join(
+        " / ",
+      );
+      r.usages = [
+        ...r.payPlans
+          .filter((p: any) => p.providerId)
+          .map((p: any) => ({
+            providerId: p.providerId,
+            providerName:
+              namesByMember.get(`${r.stationCode}|${p.providerId}`) || "",
+            client:
+              ownSources.find((s) => s.provider_employee_id === p.providerId)
+                ?.client || p.client,
+            deliveries: ownSources
+              .filter((s) => s.provider_employee_id === p.providerId)
+              .reduce(
+                (sum, s) =>
+                  sum +
+                  Number(s.total_delivery || 0) -
+                  (outgoing.get(s.id) || []).reduce(
+                    (n, v) => n + v.deliveries,
+                    0,
+                  ),
+                0,
+              ),
+            ownerName: r.name,
+            ownerDropxId: r.dropxId,
+            borrowed: false,
+          })),
+        ...received.map((s) => ({ ...s, borrowed: true })),
+      ];
+      const lock = (locksByWorker.get(r.workerId) || []).find(
+        (l: any) =>
+          l.workforce_id === r.workerId &&
+          l.from_date <= r.date &&
+          l.to_date >= r.date,
+      );
+      r.paymentLocked = Boolean(lock);
+      r.lockReason = lock?.reason || "";
+      r.canAllocate = workedIdDeliveryRoles.includes(
+        first(wm.get(r.workerId)?.designations)?.code ||
+          wm.get(r.workerId)?.designation,
+      );
+      if (!r.canAllocate && !r.lockReason)
+        r.lockReason =
+          "Delivery allocation is available for DA, DCD, ODCD and Wish Master only.";
+    }
   }
   const reviewerIds = [...new Set(reviews.map((r) => r.updated_by))],
     reviewers = new Map<string, string>();
@@ -503,6 +659,10 @@ export async function loadWorkedIdReview(
         ].join(", "),
         rates: sourceMappings.map((m) => m?.payment_values || {}),
         mappingIssue: rr.kind !== "mapped",
+        lockReason:
+          (locksByWorker.get(owner?.id) || []).find(
+            (l) => l.from_date <= s.work_date && l.to_date >= s.work_date,
+          )?.reason || "",
       };
     });
   const trainingResult = await readAllRows(
@@ -554,6 +714,9 @@ export async function loadWorkedIdReview(
       : "";
     r.registeredDate = registered;
     r.trainingEligible =
+      r.payPlans.some((p: any) =>
+        hasWorkedIdFixedSalary(p.components, p.values),
+      ) &&
       !!registered &&
       !!r.dropxId &&
       registered.slice(0, 7) === r.date.slice(0, 7) &&
@@ -686,8 +849,9 @@ export async function loadWorkedIdReview(
       .filter(
         (r) =>
           (!evidenceWorker || r.workerId === evidenceWorker) &&
-          r.hasPaySetup &&
-          (r.ownDeliveries === 0 || r.decision !== "pending"),
+          (dailyUsage ||
+            (r.hasPaySetup &&
+              (r.ownDeliveries === 0 || r.decision !== "pending"))),
       )
       .sort(
         (a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name),
