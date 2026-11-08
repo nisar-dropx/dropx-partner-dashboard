@@ -1,0 +1,21 @@
+const fs=require('fs'),path=require('path'),ts=require('typescript'),assert=require('node:assert/strict');
+const cache=new Map();function load(file){file=path.resolve(file);if(cache.has(file))return cache.get(file);const m={exports:{}};cache.set(file,m.exports);new Function('require','module','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(k=>k.startsWith('.')?load(path.resolve(path.dirname(file),k+'.ts')):require(k),m,m.exports);return m.exports;}
+const setup=load('src/lib/da-onboarding-setup.ts'),view=load('src/lib/da-onboarding-view.ts'),policy=load('src/lib/da-onboarding-policy.ts');
+const owner={id:'w1',dropx_id:'DF1',full_name:'One',onboarding_status:'active',is_active:true,source_profile_type:'field_executive',source_profile_id:'legacy1',provider_employee_id:'2001'};
+const row={key:'w1',name:'One',status:'ACTIVE',owner,guided:null,amazon:null,conflict:false,origin:'Existing DropX profile',stationId:'s1',stationCode:'S1',setup:{mapping:'confirmed',rateCard:'pending'}};
+const mapping={id:'m1',workforce_id:'w1',field_executive_id:'legacy1',station_id:'s1',provider_member_id:'2001',effective_from:'2026-10-01',effective_to:null,status:'active',payment_method_id:'method',payment_values:{rate:0}};
+assert.equal(setup.savedRateCard(mapping),true,'a configured zero rate is not missing');
+assert.equal(setup.savedRateCard({...mapping,payment_values:{}}),false);
+assert.equal(setup.mappingBelongsTo({...mapping,workforce_id:'another'},owner),false,'canonical owner wins over legacy ID');
+assert.equal(setup.mappingBelongsTo({...mapping,workforce_id:null},owner),true);
+assert.equal(setup.currentSetupMappings([mapping],owner,'other','2026-11-09').length,0,'other station does not complete setup');
+assert.equal(setup.currentSetupMappings([{...mapping,effective_to:'2026-10-31'}],owner,'s1','2026-11-09').length,0);
+assert.equal(setup.currentSetupMappings([{...mapping,effective_from:'2026-12-01'}],owner,'s1','2026-11-09').length,0);
+assert.equal(policy.workforceStage(row),'active');assert.equal(policy.workforceNeedsAction(row),true,'active with missing rate card still needs action');
+assert.match(policy.workforceAction(row),/rate card/);
+const filter={query:'',statuses:[],origins:[],verification:['rate_card'],attention:false,workforce:true};
+assert.equal(view.filterDA([row],filter).length,1);assert.equal(view.filterDA([row],{...filter,verification:['registration']}).length,0);
+assert.equal(view.daFacets([row],filter).values('statuses')[0],'ACTIVE');
+const exported=view.daExportRows([row])[0];assert.equal(exported.Status,'active');assert.equal(exported['Rate card'],'pending');
+assert.equal(setup.setupMilestones({...row,setup:undefined}).find(m=>m.id==='mapping').state,'unknown');
+console.log('DropX setup: effective dates, zero rates, exact ownership, station boundaries, active exceptions, filters and exports passed.');

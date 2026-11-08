@@ -1,6 +1,7 @@
 export type AddressVerification={state:string;label:string;pending?:boolean;followUp?:boolean;stage?:string;detail?:string;needsResponse?:boolean;verificationUrl?:null};
 export type AmazonBgcStatus={profileId:string;status:string;reportAvailable:boolean;checkedAt:string;address?:AddressVerification;checks:Array<{id:string;label:string;status:string;needsResponse:boolean;address?:AddressVerification|null}>};
 export type AmazonDaPerson = {
+  dropxLinkState?:'linked'|'missing'|'review'|'unknown';
   bgc?:AmazonBgcStatus|null;
   providerId: string; name: string; transporterId: string | null; status: string; photoUrl?:string|null;photoTicket?:string|null;
   email: string | null; phone: string | null; stage: string | null; nextAction: string | null;

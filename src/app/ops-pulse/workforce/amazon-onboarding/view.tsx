@@ -88,6 +88,7 @@ export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialS
       {needsInformation(person)?<span className={`${styles.badge} ${styles.danger}`}>Information needed{person.bgc?.checks.filter(c=>c.needsResponse).length?`: ${person.bgc.checks.filter(c=>c.needsResponse).map(c=>c.label).join(', ')}`:''}</span>:null}
       {addressPending(person)?<span className={`${styles.badge} ${styles.warning}`}>{person.bgc?.address?.label||'Address verification pending'}</span>:person.bgc?.address?.state==='red'?<span className={`${styles.badge} ${styles.danger}`}>Address verification · red</span>:null}
      </span>:null}
+     {person.dropxLinkState&&person.dropxLinkState!=='linked'?<span className={styles.attentionBadges}><span className={`${styles.badge} ${styles.warning}`}>{person.dropxLinkState==='missing'?'DropX ID not linked':person.dropxLinkState==='review'?'DropX link needs review':'DropX link not checked'}</span></span>:null}
      {person.verificationWarning?<span className={styles.attentionBadges}><small>{person.verificationWarning}</small></span>:null}
      {!person.bgc?.address?<span className={styles.attentionBadges}><small>Address · not checked</small></span>:null}
      {isBgc?<span className={styles.stage}><span>{person.bgc?.status||'Status not synced yet'}</span><strong>{person.bgc?.reportAvailable?'Report available':''}</strong></span>:null}

@@ -1,3 +1,4 @@
+import {loadDASetup} from './da-onboarding-setup';
 import {daDesignationCodes} from './da-onboarding-policy';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {allClientIdRows} from './workforce-client-id-queue';
@@ -26,13 +27,23 @@ export async function loadDARegistry(db:SupabaseClient,companyId:string,stationI
  const [onboarding,active,closed,guided,owners]=await Promise.all([
   amazonAccess?source('Amazon onboarding',()=>amazon('onboarding')):[],amazonAccess?source('Amazon associates',()=>amazon('associates')):[],amazonAccess&&includeClosed?source('Amazon history',()=>amazon('offboarded')):[],
   guidedAccess?source<GuidedDA>('System registrations',()=>allClientIdRows((from,to)=>db.from('workforce_amazon_email_pilot_candidates').select('id,full_name,alias_email,mobile,biometric_id,status,closed_at,duplicate_identity_detected,inbox_status').eq('company_id',companyId).eq('station_id',stationId).in('designation_id',roleIds).order('id').range(from,to))):[],
-  source<DAOwner>('DropX owners',()=>allClientIdRows((from,to)=>db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,lifecycle_status,is_active,designation,designation_id,provider_employee_id').eq('company_id',companyId).eq('location_id',stationId).in('designation_id',roleIds).is('deleted_at',null).order('id').range(from,to)))
+  source<DAOwner>('DropX owners',()=>allClientIdRows((from,to)=>db.from('workforce').select('id,full_name,dropx_id,email,onboarding_status,lifecycle_status,is_active,designation,designation_id,provider_employee_id,mobile,source_profile_type,source_profile_id').eq('company_id',companyId).eq('location_id',stationId).in('designation_id',roleIds).is('deleted_at',null).order('id').range(from,to)))
  ]);
+ // A promoted invitation follows its canonical profile after a station transfer.
+ // Do not leave a second invitation row behind at the former station.
+ const movedInvitations=new Set<string>();
+ for(let start=0;start<guided.length;start+=100){
+  const batch=guided.slice(start,start+100);
+  const promoted=await db.from('workforce').select('id,location_id,deleted_at').eq('company_id',companyId).in('id',batch.map(g=>g.id));
+  if(promoted.error){warnings.push('Invitation ownership could not be checked. Refresh to retry.');continue;}
+  for(const g of batch)if(promoted.data?.some(o=>o.id===g.id&&(o.location_id!==stationId||o.deleted_at)))movedInvitations.add(g.id);
+ }
+ const localGuided=guided.filter(g=>!movedInvitations.has(g.id));
  if(!amazonAccess)warnings.push('Amazon status access is not enabled for your role. Ask an administrator for Amazon DA access.');
  const links:DALink[]=[];
  for(let i=0;i<owners.length;i+=100)links.push(...await source<DALink>('Owner links',()=>allClientIdRows((from,to)=>db.from('workforce_amazon_portal_links').select('workforce_id,amazon_provider_id,transporter_id').eq('company_id',companyId).in('workforce_id',owners.slice(i,i+100).map(p=>p.id)).order('id').range(from,to))));
- for(let i=0;i<guided.length;i+=100){
-  const batch=guided.slice(i,i+100),ids=batch.map(p=>p.id);
+ for(let i=0;i<localGuided.length;i+=100){
+  const batch=localGuided.slice(i,i+100),ids=batch.map(p=>p.id);
   const [s,r,m]=await Promise.all([
    db.from('workforce_beta_verification_snapshots').select('candidate_id,identity_email,amazon_profile_id,driver_id,operational_status,bgc_status,uan_status,learning_status,lsc_observed_at,sync_error').eq('company_id',companyId).in('candidate_id',ids),
    db.from('workforce_amazon_email_pilot_registrations').select('candidate_id,status').eq('company_id',companyId).in('candidate_id',ids),
@@ -45,5 +56,7 @@ export async function loadDARegistry(db:SupabaseClient,companyId:string,stationI
    else if(snap)g.syncError='Identity mismatch';
   }
  }
- return {rows:mergeDARegistry([...onboarding,...active,...closed],guided,owners,links),warnings:[...new Set(warnings)],checkedAt:observed.sort()[0]||null};
+ const rows=mergeDARegistry([...onboarding,...active,...closed],localGuided,owners,links);
+ try{await loadDASetup(db,companyId,stationId,rows);}catch{warnings.push('ID mapping and rate-card configuration could not be checked. Refresh to retry.');}
+ return {rows,warnings:[...new Set(warnings)],checkedAt:observed.sort()[0]||null};
 }

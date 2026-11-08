@@ -21,15 +21,16 @@ export function workforceAction(row:DARow){
  if(row.guided?.inbox_status==='route_failed'||row.guided?.status==='failed')return 'Retry invitation';
  if(['returned','rejected'].includes(registration))return 'Associate: correct returned registration';
  if(['submitted','under_review','approved','confirmed'].includes(registration)&&stage!=='active')return registration==='approved'||registration==='confirmed'?'Team: complete activation review':'Team: review submitted registration';
- if(stage==='onboarding'&&!row.owner&&!row.guided)return 'Team: link this Amazon ID to a DropX associate';
  if(stage==='onboarding')return 'Associate: complete registration in DropX One';
  if(row.amazon?.bgc?.checks.some(c=>c.needsResponse))return 'Associate: provide requested IDfy information';
  if(['candidate_pending','information_needed'].includes(row.amazon?.bgc?.address?.state||''))return 'Associate: complete address verification';
+ if(row.setup?.mapping==='pending')return 'System: waiting for confirmed ID mapping';
+ if(row.setup?.rateCard==='pending')return 'Team: configure the rate card';
  if(row.guided?.syncError)return 'Team: check status sync';
- return 'No pending registration action';
+ return 'No pending setup action';
 }
 export function workforceNeedsAction(row:DARow){
  if(['inactive','offboarded'].includes(workforceStage(row)))return false;
- return workforceStage(row)==='onboarding'||row.conflict||Boolean(row.guided?.syncError)||row.guided?.inbox_status==='route_failed'||row.guided?.status==='failed'||Boolean(row.amazon?.bgc?.checks.some(c=>c.needsResponse))||['candidate_pending','information_needed'].includes(row.amazon?.bgc?.address?.state||'');
+ return workforceStage(row)==='onboarding'||row.setup?.mapping==='pending'||row.setup?.rateCard==='pending'||row.conflict||Boolean(row.guided?.syncError)||row.guided?.inbox_status==='route_failed'||row.guided?.status==='failed'||Boolean(row.amazon?.bgc?.checks.some(c=>c.needsResponse))||['candidate_pending','information_needed'].includes(row.amazon?.bgc?.address?.state||'');
 }
 export function inWorkforceQueue(row:DARow,queue:WorkforceQueue){return queue==='attention'?workforceNeedsAction(row):workforceStage(row)===queue;}
