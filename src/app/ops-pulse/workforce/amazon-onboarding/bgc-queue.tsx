@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {FleetMultiSelect,type FleetFilterOption} from '@/components/fleet-multi-select';
-import {emptyDeskFilters,needsInformation,addressPending,type DeskFilters,type DeskPerson} from '@/lib/amazon-da-filters';
+import {emptyDeskFilters,needsInformation,addressPending,filterDeskPage,completeRequestInbox,type DeskFilters,type DeskPerson} from '@/lib/amazon-da-filters';
 import {BgcPanel,type BgcResponse} from './bgc';
 import {Photo} from './view';
 import styles from './view.module.css';
@@ -12,10 +12,15 @@ export function BgcQueue({stations,canEdit,initialStations=[],revision=0,onEmpty
  const [filters,setFilters]=useState<DeskFilters>(()=>({...emptyDeskFilters(),station:initialStations}));
  const empty=useRef(onEmpty);empty.current=onEmpty;const seq=useRef(0);const fresh=useRef(false);const lastRevision=useRef(revision);
  const scope=stations.map(s=>s.id).sort().join(',');const key=JSON.stringify([scope,view,search,filters,revision,reload]);
+ const inbox=useRef<{key:string;data:Data}|null>(null);const sourceKey=JSON.stringify([scope,revision,reload]);
  useEffect(()=>{const timer=setTimeout(()=>setSearch(query.trim()),300);return()=>clearTimeout(timer);},[query]);
  function url(offset=0,snapshot=''){const p=new URLSearchParams({view,station:'all',filters:'1',query:search,offset:String(offset),snapshot});for(const k of ['status','address','check','station'] as const)for(const v of filters[k])p.append(k==='station'?'location':k,v);if(fresh.current){p.set('fresh','1');fresh.current=false;}return '/api/ops-pulse/amazon-da?'+p;}
- useEffect(()=>{const request=++seq.current,controller=new AbortController();if(lastRevision.current!==revision){fresh.current=true;lastRevision.current=revision;}setBusy(true);setError('');setData(null);setExpanded('');
-  fetch(url(),{cache:'no-store',signal:controller.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error||'Could not check IDfy requests.');return d as Data;}).then(d=>{if(request!==seq.current||controller.signal.aborted)return;setData(d);if(!d.incomplete&&!d.warnings.length&&!search&&!filters.station.length&&!filters.status.length&&!filters.address.length&&!filters.check.length&&d.counts.information===0&&(d.requestOnly||d.counts.address===0))empty.current?.();}).catch(e=>{if(request===seq.current&&e.name!=='AbortError')setError(e.message);}).finally(()=>{if(request===seq.current&&!controller.signal.aborted)setBusy(false);});return()=>controller.abort();
+ useEffect(()=>{const request=++seq.current,controller=new AbortController();if(lastRevision.current!==revision){fresh.current=true;lastRevision.current=revision;}setError('');setExpanded('');
+  if(inbox.current?.key!==sourceKey)inbox.current=null;
+  const saved=inbox.current?.data;
+  if(view==='bgc-pending'&&saved&&!fresh.current){const page=filterDeskPage(saved.rows,{...filters,query:search},view,0,saved.snapshot,'');setData({...saved,...page,rows:page.rows as Row[],facets:page.facets as Data['facets'],counts:{...page.counts,address:null,all:null,unchecked:0}});setBusy(false);return()=>controller.abort();}
+  setBusy(true);setData(null);
+  fetch(url(),{cache:'no-store',signal:controller.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error||'Could not check IDfy requests.');return d as Data;}).then(d=>{if(request!==seq.current||controller.signal.aborted)return;if(view==='bgc-pending'&&completeRequestInbox(d,{...filters,query:search}))inbox.current={key:sourceKey,data:d};setData(d);if(!d.incomplete&&!d.warnings.length&&!search&&!filters.station.length&&!filters.status.length&&!filters.address.length&&!filters.check.length&&d.counts.information===0&&(d.requestOnly||d.counts.address===0))empty.current?.();}).catch(e=>{if(request===seq.current&&e.name!=='AbortError')setError(e.message);}).finally(()=>{if(request===seq.current&&!controller.signal.aborted)setBusy(false);});return()=>controller.abort();
  // Each dependency is included in the stable request key.
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[key]);
