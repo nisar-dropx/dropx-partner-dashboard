@@ -144,7 +144,7 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       if(!data)throw Error('Unavailable');
       return {value:data.count?`${data.count} need information`:'Check status',count:data.count,href:data.href,
         detail:data.count?'Complete the details requested for these associates.':'Open onboarding to see saved verification checks.',
-        action:data.count?'Resolve BGC':'Open onboarding',tone:data.count?'action':'unknown'};
+        action:data.count?'Resolve BGC':'Open onboarding',tone:data.count?'urgent':'unknown'};
     })
   ];
 }
