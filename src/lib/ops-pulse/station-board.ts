@@ -352,19 +352,20 @@ export function heatColor(value: number, max: number): string {
   return `rgba(${r}, ${g}, ${b}, ${0.22 + t * 0.55})`;
 }
 
-/** Operational DSR bands. The configured target is the dark-green threshold. */
-export function dsrBand(pct: number, target = 94) {
-  const goal = Number.isFinite(target) && target > 14 && target <= 100 ? target : 94;
+/** Operational DSR bands. Green starts strictly above the configured target. */
+export function dsrBand(pct: number, target = 93) {
+  const goal = Number.isFinite(target) && target > 10 && target < 100 ? target : 93;
   const p = Math.max(0, Math.min(100, Number(pct) || 0));
-  if (p >= goal) return { background: "#166534", color: "#ffffff", label: "Target met" };
-  if (p >= goal - 4) return { background: "#dcfce7", color: "#14532d", label: "Near target" };
-  if (p >= goal - 14) return { background: "#fef3c7", color: "#78350f", label: "Needs attention" };
-  return { background: "#fee2e2", color: "#991b1b", label: "Critical" };
+  if (p > goal + 2) return { background: "#166534", color: "#ffffff", label: "Excellent" };
+  if (p > goal) return { background: "#dcfce7", color: "#14532d", label: "Target met" };
+  if (p >= goal - 5) return { background: "#fef3c7", color: "#78350f", label: "Needs attention" };
+  if (p >= goal - 10) return { background: "#fee2e2", color: "#991b1b", label: "At risk" };
+  return { background: "#b91c1c", color: "#ffffff", label: "Critical" };
 }
-export function dsrHeatColor(pct: number, target = 94): string { return dsrBand(pct, target).background; }
-export function dsrPctTextColor(pct: number, target = 94): string { return dsrBand(pct, target).color; }
-export function dsrBandLegend(target = 94): string {
-  return `DSR: <${target - 14}% red · ${target - 14}–<${target - 4}% amber · ${target - 4}–<${target}% light green · ≥${target}% dark green`;
+export function dsrHeatColor(pct: number, target = 93): string { return dsrBand(pct, target).background; }
+export function dsrPctTextColor(pct: number, target = 93): string { return dsrBand(pct, target).color; }
+export function dsrBandLegend(target = 93): string {
+  return `DSR: <${target - 10}% strong red · ${target - 10}–<${target - 5}% mild red · ${target - 5}–${target}% beige/orange · >${target}–${target + 2}% light green · >${target + 2}% green`;
 }
 
 /** Use the station snapshot time, not when an old report happens to be opened. */
