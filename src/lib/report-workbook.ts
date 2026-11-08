@@ -13,7 +13,7 @@ import JSZip from "jszip";
  * A sheet with zero rows still gets a one-column "No data" placeholder so a
  * blank tab in the workbook never reads as a rendering bug.
  */
-export function workbookResponse(sheets: Array<{ name: string; rows: Record<string, unknown>[] }>, filename: string): Response {
+export function workbookBuffer(sheets: Array<{ name: string; rows: Record<string, unknown>[] }>) {
   const workbook = XLSX.utils.book_new();
   for (const sheet of sheets) {
     const rows = sheet.rows.length ? sheet.rows : [{ "No data": "Nothing to report for this selection." }];
@@ -24,7 +24,11 @@ export function workbookResponse(sheets: Array<{ name: string; rows: Record<stri
   // Buffer/DOM lib types the build resolves -- a plain Buffer tripped a
   // Vercel-only type-check failure (Buffer assignable in a local build,
   // rejected as "missing URLSearchParams properties" in Vercel's).
-  const raw = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+}
+
+export function workbookResponse(sheets: Array<{ name: string; rows: Record<string, unknown>[] }>, filename: string): Response {
+  const raw = workbookBuffer(sheets);
   const body = new Uint8Array(raw);
   return new Response(body, {
     headers: {

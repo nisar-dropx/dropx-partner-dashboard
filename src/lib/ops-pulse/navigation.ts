@@ -51,8 +51,7 @@ const commonStart: NavItem[] = [
     label: "Workforce",
     icon: "+",
     children: [
-      { code: "delivery_associates", label: "Onboarding & lifecycle", href: "/workforce/onboarding" },
-      { code: "ops_amazon_da", label: "Amazon DA Onboarding", href: "/workforce/amazon-onboarding" },
+      { code: "delivery_associates", accessAnyOf: ["delivery_associates", "ops_amazon_da"], label: "DA onboarding", href: "/workforce/onboarding" },
       { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register" },
       { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping" },
       { code: "ops_provider_mapping", label: "Worked ID review", href: "/provider-id-mapping/worked-days" },
@@ -295,7 +294,7 @@ export function firstAllowedOpsHref(authorization: AuthorizationContext) {
         if (section?.href?.startsWith("/")) return section.href;
         continue;
       }
-      if (child.href && child.code && hasPermission(authorization, child.code, "access")) return child.href;
+      if (child.href && (child.accessAnyOf?.some(code => hasPermission(authorization, code, "access")) || (child.code && hasPermission(authorization, child.code, "access")))) return child.href;
     }
   }
   return null;

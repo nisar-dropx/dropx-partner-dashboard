@@ -134,6 +134,29 @@ test("send accepts an image with optional caption instead of plain text", () => 
   assert.match(validateSend({ client_ref: image.client_ref, to: GROUP, text: "" }, live), /text/);
 });
 
+test("send accepts an Excel document with a safe filename", () => {
+  const error = validateSend({
+    client_ref: "edd_region_excel_1",
+    to: "120363000000000001@g.us",
+    document_base64: Buffer.from("xlsx").toString("base64"),
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    filename: "EDD_KL_2026-11-08.xlsx",
+    caption: "Today EDD details",
+  }, { mode: "live", groups: ["120363000000000001@g.us"] });
+  assert.equal(error, null);
+});
+
+test("send rejects documents without a safe filename", () => {
+  const error = validateSend({
+    client_ref: "edd_region_excel_2",
+    to: "120363000000000001@g.us",
+    document_base64: Buffer.from("xlsx").toString("base64"),
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    filename: "../secret.xlsx",
+  }, { mode: "live", groups: ["120363000000000001@g.us"] });
+  assert.match(error, /filename/);
+});
+
 test("lru forgets the oldest entries", () => {
   const lru = new Lru(2).set("a", 1).set("b", 2).set("a", 3).set("c", 4);
   assert.deepEqual(lru.entries(), [["a", 3], ["c", 4]]);

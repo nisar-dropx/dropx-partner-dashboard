@@ -304,6 +304,10 @@ export function normalizeConfig(body) {
 }
 
 const SEND_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const SEND_DOCUMENT_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+]);
 
 /** Text and optional image/caption for portal-driven flashes (station board, etc.). */
 export function validateSend(body, config) {
@@ -314,6 +318,17 @@ export function validateSend(body, config) {
   if (!config.groups.includes(body.to)) return "This group is not enabled in the portal.";
 
   const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
+  const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
+  if (hasImage && hasDocument) return "Send either an image or a document, not both.";
+  if (hasDocument) {
+    const mime = typeof body.mime === "string" ? body.mime : "";
+    if (!SEND_DOCUMENT_MIMES.has(mime)) return "Unsupported document mime type.";
+    if (body.document_base64.length > 16_000_000) return "document is too large.";
+    if (typeof body.filename !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,119}$/.test(body.filename)) return "filename is required for a document.";
+    const caption = typeof body.caption === "string" ? body.caption : "";
+    if (caption.length > 1024) return "caption must be at most 1024 characters.";
+    return null;
+  }
   if (hasImage) {
     const mime = typeof body.mime === "string" ? body.mime : "image/jpeg";
     if (!SEND_IMAGE_MIMES.has(mime)) return "mime must be image/jpeg, image/png or image/webp.";

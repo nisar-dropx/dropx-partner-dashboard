@@ -136,16 +136,18 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
     );
   }
 
-  const [groupsResult, reportTypesResult, steps] = await Promise.all([
+  const [groupsResult, reportTypesResult, steps, dispatchLocationResult] = await Promise.all([
     db.from("report_bot_groups").select("*").eq("company_id", companyId).eq("workspace", workspace).order("group_name"),
     db.from("report_bot_report_types").select("*").eq("company_id", companyId).eq("workspace", workspace).order("name"),
-    loadSetupSteps(settings)
+    loadSetupSteps(settings),
+    workspace === "last_mile" ? loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess) : Promise.resolve({locations:[],error:null})
   ]);
   const groups = ((groupsResult.data ?? []) as GroupRow[]).filter((group) => canSeeGroup(authorization, group));
   const groupIds = groups.map((group) => group.id);
   const dispatch = workspace === "last_mile" && tab === "reports" && groupIds.length
     ? await db.from("report_bot_lm_dispatch_routes").select("*").eq("company_id",companyId).in("group_id",groupIds).order("report") : {data:[],error:null};
   const dispatchRoutes = (dispatch.data ?? []) as Schedule[];
+  const dispatchLocations = dispatchLocationResult.locations.filter(location=>!location.is_ho && !location.hide_from_location_list && locationModelName(location).toUpperCase() !== "NOW");
   const deliveries = dispatchRoutes.length ? await db.from("report_bot_lm_dispatch_runs").select("route_id,day,slot,status,detail").in("route_id",dispatchRoutes.map(r=>r.id)).order("created_at",{ascending:false}).limit(25) : {data:[],error:null};
   const reportTypes = (reportTypesResult.data ?? []) as ReportTypeRow[];
   const [schedulesResult, waitingCount, attentionCount] = groupIds.length ? await Promise.all([
@@ -233,7 +235,9 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         {tab === "groups" ? await GroupsTab({ workspace, authorization, groups, canEdit }) : null}
         {workspace === "last_mile" && tab === "reports" && <>
           {dispatch.error || deliveries.error ? <p role="alert">Could not load outbound schedules or delivery history.</p> : null}
-          <DispatchForm canEdit={canEdit} schedules={dispatchRoutes} groups={groups.map(g=>({id:g.id,name:g.group_name || g.wa_group_id,mode:g.mode || "observe",mapped:Boolean(g.location_id && g.is_enabled && g.bot_in_group)}))}/>
+          <DispatchForm canEdit={canEdit} schedules={dispatchRoutes}
+            groups={groups.map(g=>({id:g.id,name:g.group_name || g.wa_group_id,mode:g.mode || "observe",available:Boolean(g.is_enabled && g.bot_in_group)}))}
+            locations={dispatchLocations.map(location=>({id:location.id,station_code:location.station_code,station_name:location.station_name,region:location.region || null,model:locationModelName(location)}))}/>
           {deliveries.data?.length ? <details className={s.cardBody}><summary>Recent dispatches</summary>{deliveries.data.map(r=><p key={r.route_id+r.day+r.slot}>{groups.find(g=>g.id===dispatchRoutes.find(d=>d.id===r.route_id)?.group_id)?.group_name} · {r.day} {r.slot} IST · {r.status} · {r.detail}</p>)}</details> : null}
         </>}
         {tab === "reports" ? <ReportsTab workspace={workspace} groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
