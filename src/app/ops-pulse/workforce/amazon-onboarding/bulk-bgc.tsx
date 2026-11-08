@@ -2,7 +2,7 @@
 import {useState} from 'react';
 import type {AmazonDaPerson} from '@/lib/amazon-da-desk-types';
 import styles from './view.module.css';
-export function BulkBgc({station,people}:{station:string;people:AmazonDaPerson[]}){
+export function BulkBgc({station,people}:{station:string;people:(AmazonDaPerson&{stationId?:string})[]}){
  const [selected,setSelected]=useState<string[]>([]),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  async function download(){
   setBusy(true);setMessage('Preparing reports…');
@@ -11,14 +11,14 @@ export function BulkBgc({station,people}:{station:string;people:AmazonDaPerson[]
    for(const [index,id] of selected.entries()){
     const person=people.find(p=>p.providerId===id);if(!person)continue;
     setMessage(`Preparing ${index+1} of ${selected.length}…`);
-    try{const response=await fetch(`/api/ops-pulse/amazon-da?${new URLSearchParams({view:'idfy-report',station,profile:id,download:'1'})}`);
+    try{const response=await fetch(`/api/ops-pulse/amazon-da?${new URLSearchParams({view:'idfy-report',station:person.stationId||station,profile:id,download:'1'})}`);
      if(!response.ok)throw Error('Report unavailable');const blob=await response.blob();bytes+=blob.size;
      if(bytes>60*1024*1024)throw Error('Download size limit reached; download this report individually');
      zip.file(`${(person.transporterId||id).replace(/[^a-z0-9-]/gi,'_')}.pdf`,blob);count++;
     }catch(e){notes.push(`${person.name}: ${(e as Error).message}`);}
    }
    if(notes.length)zip.file('Unavailable reports.txt',notes.join('\n'));
-   if(count){const blob=await zip.generateAsync({type:'blob',compression:'STORE'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='BGC-reports.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+   if(count||notes.length){const blob=await zip.generateAsync({type:'blob',compression:'STORE'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='BGC-reports.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
    setMessage(`${count} reports downloaded${notes.length?` · ${notes.length} unavailable (listed in download)`:''}.`);
   }catch(e){setMessage((e as Error).message);}finally{setBusy(false);}
  }

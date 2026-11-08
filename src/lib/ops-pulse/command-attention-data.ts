@@ -16,6 +16,7 @@ import { loadCapacitySnapshot } from './capacity-snapshot';
 import type { CodLocationRow } from './cod';
 import { isManager as isStoreAuditManager } from './store-audits/model';
 import { loadPayoutDisputeAttention } from '@/lib/payout-dispute-attention';
+import {amazonDeskLocation,loadAmazonDaAttention} from '@/lib/amazon-da-attention';
 import { attentionOrder, auditAttention, storeAuditAttention, codAttention, documentAttention, type AttentionDocument, type AttentionItem } from './command-attention';
 
 export function startCommandAttention(a:AuthorizationContext,locations:CodLocationRow[],today:string,mode:string,now=Date.now()) {
@@ -137,7 +138,14 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       if(has('payment_approvals'))items.push({key:'payments',title:'Your payment approvals',href:'/payments/approvals',value:data.payment===null?'Unavailable':`${data.payment.count} pending`,detail:'Assigned to you · across authorized LM + DS locations',action:'Open approval inbox',tone:data.payment===null?'unknown':data.payment.count?'action':'clear'});
       if(has('ops_rostering'))items.push({key:'rosters',title:'Your roster approvals',href:'/rostering?view=approvals',value:data.rosterCount===null?'Unavailable':`${data.rosterCount} plans pending`,detail:'Unique plans assigned to you · across authorized LM + DS locations',action:'Review plans',tone:data.rosterCount===null?'unknown':data.rosterCount?'action':'clear'});
       return items;
-    })()
+    })(),
+    check(mode!=='amazon_now'&&has('ops_amazon_da')&&selected.some(amazonDeskLocation),'idfy','IDfy insufficiencies','/workforce/onboarding?view=bgc-pending',async()=>{
+      const data=await loadAmazonDaAttention(a,ids);
+      if(!data)throw Error('Unavailable');
+      return {value:data.count?`${data.count} need information`:'Check status',count:data.count,href:data.href,
+        detail:data.count?'Complete the details requested for these associates.':'Open onboarding to see saved verification checks.',
+        action:data.count?'Resolve BGC':'Open onboarding',tone:data.count?'action':'unknown'};
+    })
   ];
 }
 

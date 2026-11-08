@@ -25,7 +25,7 @@ export function CommandAttentionResult({id,items}:{id:number;items:AttentionItem
   return null;
 }
 
-const icons={audits:ClipboardCheck,people:Users,vehicles:Truck,cod:Wallet,capacity:Boxes,documents:FileCheck,'payout-disputes':MessageSquareWarning,payments:Banknote,rosters:CalendarDays};
+const icons={idfy:Users,audits:ClipboardCheck,people:Users,vehicles:Truck,cod:Wallet,capacity:Boxes,documents:FileCheck,'payout-disputes':MessageSquareWarning,payments:Banknote,rosters:CalendarDays};
 export function CommandAttentionView({items,today,pending=0,stations=[],station='',range}:{items:AttentionItem[];today:string;pending?:number;stations?:AttentionStation[];station?:string;range?:{from:string;to:string}}) {
   const router=useRouter();
   const [pendingNav,startTransition]=useTransition();

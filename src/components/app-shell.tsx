@@ -32,6 +32,7 @@ import {
   resolveActivitiesNavAccess,
 } from "@/lib/ops-pulse/activities-nav-access";
 import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
+import {amazonDeskLocation} from '@/lib/amazon-da-attention';
 import { isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { hasPeoplePortalAccess, peopleNavItems } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
@@ -120,6 +121,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
     .map((item) => item.children?.length ? {
       ...item,
       children: item.children.filter((child) => {
+        if(isOpsHost&&child.href==='/workforce/onboarding'&&!opsLocationsResult.locations.some(amazonDeskLocation))return false;
         return child.permissionSections?.length
           ? child.permissionSections.some((section) => hasPermission(authorization, section.code, "access"))
           : child.accessAnyOf?.length ? child.accessAnyOf.some(code => hasPermission(authorization, code, "access")) : !child.code || hasPermission(authorization, child.code, "access");
