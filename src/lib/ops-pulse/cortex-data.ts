@@ -12,10 +12,10 @@ import {
   type CortexAuth,
 } from "@/lib/ops-pulse/cortex-client";
 import {
+  assessScan,
   asLatLng,
   cleanGpsTrail,
-  distanceKm,
-  scanQuality,
+  type ScanIssue,
   type ScanQuality,
   type TimedPoint,
 } from "@/lib/ops-pulse/cortex-geo";
@@ -30,6 +30,9 @@ export type CortexStationOption = {
 };
 
 export type CortexRouteRow = {
+  stationId: string;
+  stationCode: string;
+  stationName: string;
   itineraryId: string;
   transporterId: string;
   amazonName: string;
@@ -79,6 +82,7 @@ export type CortexStopTask = {
   lng: number | null;
   scanDistanceM: number | null;
   scanQuality: ScanQuality;
+  scanIssue: ScanIssue;
 };
 
 export type CortexStop = {
@@ -354,6 +358,9 @@ export async function loadCortexBoard(input: {
     const pkg = packageCounts(stub.packageSummary || stub.ndPackageSummary);
     const wf = linked.get(transporterId);
     return {
+      stationId: input.station.id,
+      stationCode: input.station.code,
+      stationName: input.station.name,
       itineraryId: String(stub.itineraryId),
       transporterId,
       amazonName: transporterDisplayName(person, transporterId),
@@ -456,8 +463,7 @@ export async function loadCortexRouteDetail(input: {
     const tasks: CortexStopTask[] = (stop.tasks || []).map((task: any) => {
       const geo = task.executionGeocode;
       const taskPoint = asLatLng(geo?.latitude, geo?.longitude);
-      const scanDistanceM =
-        stopPoint && taskPoint ? Math.round(distanceKm(stopPoint, taskPoint) * 1000) : null;
+      const scan = assessScan(stopPoint, taskPoint);
       if (taskPoint) actualPath.push(taskPoint);
       return {
         taskId: String(task.taskId || ""),
@@ -468,8 +474,9 @@ export async function loadCortexRouteDetail(input: {
         actualExecutionTime: asEpochMs(task.actualExecutionTime),
         lat: taskPoint?.[0] ?? null,
         lng: taskPoint?.[1] ?? null,
-        scanDistanceM,
-        scanQuality: scanQuality(scanDistanceM),
+        scanDistanceM: scan.distanceM,
+        scanQuality: scan.quality,
+        scanIssue: scan.issue,
       };
     });
     if (stopPoint) plannedPath.push(stopPoint);

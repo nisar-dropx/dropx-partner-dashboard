@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assessScan,
   asLatLng,
   cleanGpsTrail,
   completionPct,
@@ -21,6 +22,31 @@ test("scanQuality applies the 50 metre good/bad rule", () => {
   assert.equal(scanQuality(0), "good");
   assert.equal(scanQuality(50), "good");
   assert.equal(scanQuality(51), "bad");
+});
+
+test("assessScan keeps missing planned and actual coordinates separate", () => {
+  assert.deepEqual(assessScan(null, [12.97, 77.59]), {
+    distanceM: null,
+    quality: "unavailable",
+    issue: "missing_planned",
+  });
+  assert.deepEqual(assessScan([12.97, 77.59], null), {
+    distanceM: null,
+    quality: "unavailable",
+    issue: "missing_actual",
+  });
+});
+
+test("assessScan scores only when both planned and actual points exist", () => {
+  assert.deepEqual(assessScan([12.97, 77.59], [12.97, 77.59]), {
+    distanceM: 0,
+    quality: "good",
+    issue: null,
+  });
+  const bad = assessScan([12.97, 77.59], [12.971, 77.59]);
+  assert.equal(bad.quality, "bad");
+  assert.equal(bad.issue, null);
+  assert.ok(bad.distanceM > 50);
 });
 
 test("isValidGeo rejects missing, infinite, and out-of-range values", () => {

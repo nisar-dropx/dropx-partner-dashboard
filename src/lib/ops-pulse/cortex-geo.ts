@@ -46,11 +46,36 @@ export function distanceKm(a: Point, b: Point) {
 }
 
 export type ScanQuality = "good" | "bad" | "unavailable";
+export type ScanIssue = "missing_planned" | "missing_actual" | null;
+
+export type ScanAssessment = {
+  distanceM: number | null;
+  quality: ScanQuality;
+  issue: ScanIssue;
+};
 
 /** Operational rule: within 50 m is good; anything farther is a bad scan. */
 export function scanQuality(distanceM: number | null | undefined): ScanQuality {
   if (distanceM == null || !Number.isFinite(distanceM)) return "unavailable";
   return distanceM <= 50 ? "good" : "bad";
+}
+
+/**
+ * Compare the Amazon itinerary's planned stop point with the execution scan GPS.
+ * A missing coordinate is not silently treated as a good or bad scan.
+ */
+export function assessScan(
+  plannedPoint: Point | null | undefined,
+  actualPoint: Point | null | undefined,
+): ScanAssessment {
+  if (!plannedPoint) {
+    return { distanceM: null, quality: "unavailable", issue: "missing_planned" };
+  }
+  if (!actualPoint) {
+    return { distanceM: null, quality: "unavailable", issue: "missing_actual" };
+  }
+  const distanceM = Math.round(distanceKm(plannedPoint, actualPoint) * 1000);
+  return { distanceM, quality: scanQuality(distanceM), issue: null };
 }
 
 /** Clean Amazon locationsByTime into a chronological Driver Trace. */

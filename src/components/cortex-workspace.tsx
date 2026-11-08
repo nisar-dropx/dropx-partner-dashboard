@@ -11,12 +11,37 @@ import type {
   CortexStopTask,
 } from "@/lib/ops-pulse/cortex-data";
 import { completionPct } from "@/lib/ops-pulse/cortex-geo";
+import { FleetMultiSelect } from "./fleet-multi-select";
 import { CortexRouteMap } from "./cortex-route-map";
 import styles from "./cortex-workspace.module.css";
 
 type RouteFilter = "all" | "on-road" | "closed" | "review";
-type TaskFilter = "all" | "remaining" | "failed" | "good" | "bad" | "unavailable";
+type TaskFilter = "all" | "remaining" | "failed" | "good" | "bad" | "missing_actual" | "missing_planned";
 type ListMode = "routes" | "drivers";
+
+function routeKey(row: CortexRouteRow) {
+  return `${row.stationId}:${row.itineraryId}`;
+}
+
+function aggregateBoards(boards: CortexBoard[]): CortexBoard | null {
+  if (!boards.length) return null;
+  const routes = boards.flatMap((board) => board.routes);
+  const metrics = boards.reduce<CortexBoard["metrics"]>((sum, board) => {
+    for (const key of Object.keys(sum) as Array<keyof CortexBoard["metrics"]>) {
+      sum[key] += board.metrics[key];
+    }
+    return sum;
+  }, { routes: 0, drivers: 0, delivered: 0, remaining: 0, attempted: 0, rejected: 0, total: 0, linked: 0, unlinked: 0, closed: 0, onRoad: 0 });
+  metrics.drivers = new Set(routes.map((row) => row.transporterId)).size;
+  return {
+    date: boards[0].date,
+    station: boards[0].station,
+    sessionOk: boards.every((board) => board.sessionOk),
+    sessionError: boards.filter((board) => board.sessionError).map((board) => `${board.station.code}: ${board.sessionError}`).join(" · ") || null,
+    routes,
+    metrics,
+  };
+}
 
 function statusBadge(row: CortexRouteRow) {
   if (row.driverSessionEnded || row.executionStatus === "COMPLETE") {
@@ -41,7 +66,8 @@ function taskMatches(task: CortexStopTask, filter: TaskFilter) {
   if (filter === "all") return true;
   if (filter === "good") return task.scanQuality === "good";
   if (filter === "bad") return task.scanQuality === "bad";
-  if (filter === "unavailable") return task.scanQuality === "unavailable";
+  if (filter === "missing_actual") return task.scanIssue === "missing_actual";
+  if (filter === "missing_planned") return task.scanIssue === "missing_planned";
   if (filter === "failed") return /FAIL|ATTEMPT|UNDELIVER|REJECT/.test(state);
   return !/DELIVERED|COMPLETED|SUCCESS|PICKED_UP/.test(state);
 }
@@ -70,13 +96,21 @@ function mergeDetail(body: CortexRouteDetail, row: CortexRouteRow): CortexRouteD
 
 export function CortexWorkspace({
   stations,
-  board,
+  boards,
+  selectedStationIds,
   initialQuery = "",
 }: {
   stations: CortexStationOption[];
-  board: CortexBoard | null;
+  boards: CortexBoard[];
+  selectedStationIds: string[];
   initialQuery?: string;
 }) {
+  const board = useMemo(() => aggregateBoards(boards), [boards]);
+  const boardKey = useMemo(
+    () => `${boards.map((item) => item.station.id).sort().join(",")}:${board?.date || ""}`,
+    [board?.date, boards],
+  );
+  const [stationValues, setStationValues] = useState(selectedStationIds);
   const [query, setQuery] = useState(initialQuery);
   const [stopQuery, setStopQuery] = useState("");
   const [listMode, setListMode] = useState<ListMode>("routes");
@@ -101,14 +135,14 @@ export function CortexWorkspace({
       if (routeFilter === "closed" && !row.driverSessionEnded && row.executionStatus !== "COMPLETE") return false;
       if (routeFilter === "review" && row.workforceId && row.attempted <= 0) return false;
       if (!q) return true;
-      return [row.amazonName, row.workforceName, row.dropxId, row.transporterId, row.routeCode, row.itineraryId]
+      return [row.stationCode, row.stationName, row.amazonName, row.workforceName, row.dropxId, row.transporterId, row.routeCode, row.itineraryId]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
   }, [board?.routes, query, routeFilter]);
 
   const selected = useMemo(
-    () => board?.routes.find((row) => row.itineraryId === selectedId) || null,
+    () => board?.routes.find((row) => routeKey(row) === selectedId) || null,
     [board?.routes, selectedId],
   );
 
@@ -122,21 +156,21 @@ export function CortexWorkspace({
     setTaskFilter("all");
     setStopQuery("");
     requestSeq.current += 1;
-  }, [board?.station.id, board?.date]);
+  }, [boardKey]);
 
   useEffect(() => {
     if (!board?.routes.length || selectedId) return;
-    const key = `${board.station.id}:${board.date}`;
+    const key = boardKey;
     if (autoOpenedBoard.current === key) return;
     autoOpenedBoard.current = key;
     void openRoute(board.routes[0]);
     // Auto-open once per board selection; openRoute is deliberately not a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board?.station.id, board?.date, board?.routes.length, selectedId]);
+  }, [board?.routes.length, boardKey, selectedId]);
 
   async function fetchTrail(row: CortexRouteRow, seq: number, base: CortexRouteDetail) {
     if (!board) return;
-    const key = `${board.station.id}:${board.date}:${row.itineraryId}:trail`;
+    const key = `${row.stationId}:${board.date}:${row.itineraryId}:trail`;
     const cached = trailCache.current.get(key);
     if (cached) {
       setDetail({ ...base, ...cached });
@@ -145,7 +179,7 @@ export function CortexWorkspace({
     setTrailLoading(true);
     try {
       const params = new URLSearchParams({
-        stationId: board.station.id,
+        stationId: row.stationId,
         date: board.date,
         itineraryId: row.itineraryId,
         transporterId: row.transporterId,
@@ -178,8 +212,8 @@ export function CortexWorkspace({
   async function openRoute(row: CortexRouteRow) {
     if (!board) return;
     const seq = ++requestSeq.current;
-    const key = `${board.station.id}:${board.date}:${row.itineraryId}`;
-    setSelectedId(row.itineraryId);
+    const key = `${row.stationId}:${board.date}:${row.itineraryId}`;
+    setSelectedId(routeKey(row));
     setDetailError("");
     setTaskFilter("all");
     setStopQuery("");
@@ -195,7 +229,7 @@ export function CortexWorkspace({
     setDetailLoading(true);
     try {
       const params = new URLSearchParams({
-        stationId: board.station.id,
+        stationId: row.stationId,
         date: board.date,
         itineraryId: row.itineraryId,
         view: "detail",
@@ -240,7 +274,8 @@ export function CortexWorkspace({
     return {
       good: tasks.filter((task) => task.scanQuality === "good").length,
       bad: tasks.filter((task) => task.scanQuality === "bad").length,
-      unavailable: tasks.filter((task) => task.scanQuality === "unavailable").length,
+      missingActual: tasks.filter((task) => task.scanIssue === "missing_actual").length,
+      missingPlanned: tasks.filter((task) => task.scanIssue === "missing_planned").length,
     };
   }, [detail]);
 
@@ -253,13 +288,24 @@ export function CortexWorkspace({
   return (
     <div className={styles.workspace}>
       <form className={styles.filters} method="get" aria-label="Cortex filters">
-        <label>Station<select name="station" defaultValue={board?.station.id || stations[0]?.id || ""} required>{stations.map((station) => <option key={station.id} value={station.id}>{station.code} · {station.name}</option>)}</select></label>
+        <input name="stations" type="hidden" value={stationValues.join(",")} />
+        <div className={styles.stationFilter}>
+          <FleetMultiSelect
+            allLabel="Select stations"
+            alwaysSearch
+            label="Stations"
+            onChange={(values) => setStationValues(values.slice(0, 8))}
+            options={stations.map((station) => ({ value: station.id, label: `${station.code} · ${station.name}`, helper: station.region || station.cluster }))}
+            values={stationValues}
+          />
+          <small>Search and select up to 8</small>
+        </div>
         <label>Day<input type="date" name="date" defaultValue={board?.date} max={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())} required /></label>
-        <label className={styles.search}>{selected ? "Search tracking ID, order or address" : "Search driver, ID or route"}<span className={styles.searchInput}><Search size={15} aria-hidden /><input type="search" name={selected ? undefined : "q"} value={selected ? stopQuery : query} onChange={(event) => selected ? setStopQuery(event.target.value) : setQuery(event.target.value)} placeholder={selected ? "Tracking ID, order ID or address" : "Name, DropX ID, Amazon ID or route"} /></span></label>
+        <label className={styles.search}>Search associate / ID / route<span className={styles.searchInput}><Search size={15} aria-hidden /><input type="search" name="q" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, DropX ID, Amazon ID or route" /></span></label>
         <div className={styles.actions}><button className="button compact" type="submit">Apply</button></div>
       </form>
 
-      {board && !board.sessionOk ? <div className={styles.alert} role="alert"><strong>Cortex session unavailable</strong>{board.sessionError}</div> : null}
+      {board && !board.sessionOk ? <div className={styles.alert} role="alert"><strong>Some selected stations could not load</strong>{board.sessionError}</div> : null}
 
       {metrics ? (
         <section className={styles.overview} aria-label="Cortex live summary">
@@ -292,7 +338,7 @@ export function CortexWorkspace({
         </section>
       ) : null}
 
-      <div className={styles.routeTabs} role="tablist" aria-label="Cortex views"><button type="button" role="tab" aria-selected={listMode === "routes"} onClick={() => { setListMode("routes"); setSelectedId(null); setDetail(null); requestSeq.current += 1; }}>Routes</button><button type="button" role="tab" aria-selected={listMode === "drivers"} onClick={() => { setListMode("drivers"); setSelectedId(null); setDetail(null); requestSeq.current += 1; }}>DAs / DPs</button>{board ? <span>{board.station.code} · {board.date}</span> : null}</div>
+      <div className={styles.routeTabs} role="tablist" aria-label="Cortex views"><button type="button" role="tab" aria-selected={listMode === "routes"} onClick={() => { setListMode("routes"); setSelectedId(null); setDetail(null); requestSeq.current += 1; }}>Routes</button><button type="button" role="tab" aria-selected={listMode === "drivers"} onClick={() => { setListMode("drivers"); setSelectedId(null); setDetail(null); requestSeq.current += 1; }}>DAs / DPs</button>{board ? <span>{boards.length === 1 ? boards[0].station.code : `${boards.length} stations`} · {board.date}</span> : null}</div>
 
       <div className={styles.layout}>
         <aside className={styles.rail} aria-label="Driver and stop inspector">
@@ -304,8 +350,8 @@ export function CortexWorkspace({
                   const badge = statusBadge(row);
                   const progress = completionPct(row.delivered, row.attempted, row.remaining, row.total);
                   return (
-                    <button key={row.itineraryId} type="button" className={styles.routeCard} onClick={() => openRoute(row)}>
-                      <div className={styles.routeTop}><div><strong>{listMode === "routes" ? row.routeCode || row.itineraryId : row.workforceName || row.amazonName}</strong><small>{listMode === "routes" ? `${row.workforceName || row.amazonName}${row.phone ? ` · ${row.phone}` : ""}` : `${row.routeCode ? `Route ${row.routeCode}` : "Route pending"}${row.phone ? ` · ${row.phone}` : ""}`}</small></div><span className={`${styles.badge} ${badge.className}`}>{badge.label}</span></div>
+                    <button key={routeKey(row)} type="button" className={styles.routeCard} onClick={() => openRoute(row)}>
+                      <div className={styles.routeTop}><div><strong>{listMode === "routes" ? row.routeCode || row.itineraryId : row.workforceName || row.amazonName}</strong><small>{row.stationCode} · {listMode === "routes" ? `${row.workforceName || row.amazonName}${row.phone ? ` · ${row.phone}` : ""}` : `${row.routeCode ? `Route ${row.routeCode}` : "Route pending"}${row.phone ? ` · ${row.phone}` : ""}`}</small></div><span className={`${styles.badge} ${badge.className}`}>{badge.label}</span></div>
                       <div className={styles.routeProgress}><span style={{ width: `${progress}%` }} /></div>
                       <div className={styles.pkgRow}><span><b>{row.delivered}</b> delivered</span><span><b>{row.remaining}</b> remaining</span><span><b>{row.attempted}</b> failed</span><span><b>{row.total}</b> total</span></div>
                       <div className={styles.ids}>{row.dropxId ? <code>{row.dropxId}</code> : <code>Not linked</code>}<code title="Amazon transporter ID">{row.transporterId.slice(0, 15)}…</code></div>
@@ -319,20 +365,22 @@ export function CortexWorkspace({
             <>
               <div className={styles.driverHeader}>
                 <button type="button" onClick={() => { setSelectedId(null); setDetail(null); requestSeq.current += 1; }} aria-label="Back to all drivers"><ArrowLeft size={17} /></button>
-                <div><strong>{selected.workforceName || selected.amazonName}</strong><span>{selected.routeCode ? `Route ${selected.routeCode}` : "Route"}{selected.phone ? ` · ${selected.phone}` : ""}</span></div>
+                <div><strong>{selected.workforceName || selected.amazonName}</strong><span>{selected.stationCode} · {selected.routeCode ? `Route ${selected.routeCode}` : "Route"}{selected.phone ? ` · ${selected.phone}` : ""}</span></div>
                 <span className={`${styles.badge} ${statusBadge(selected).className}`}>{statusBadge(selected).label}</span>
               </div>
               <div className={styles.driverStats}><span><strong>{selected.delivered}</strong>Delivered</span><span><strong>{selected.remaining}</strong>Remaining</span><span><strong>{selected.attempted}</strong>Failed</span><span><strong>{selected.total}</strong>Total</span></div>
               {detail ? (
                 <div className={styles.scanSummary} aria-label="Scan quality filters">
                   <span className={styles.scanSummaryLabel}>Scan quality</span>
-                  <button type="button" className={taskFilter === "all" ? styles.scanFilterActive : undefined} onClick={() => setTaskFilter("all")}><b>{scanSummary.good + scanSummary.bad + scanSummary.unavailable}</b> All</button>
+                  <button type="button" className={taskFilter === "all" ? styles.scanFilterActive : undefined} onClick={() => setTaskFilter("all")}><b>{scanSummary.good + scanSummary.bad + scanSummary.missingActual + scanSummary.missingPlanned}</b> All</button>
                   <button type="button" className={`${styles.scanFilterGood} ${taskFilter === "good" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("good")} title="Good scan: marked within 50 metres of the planned stop"><b>{scanSummary.good}</b> Good ≤50 m</button>
                   <button type="button" className={`${styles.scanFilterBad} ${taskFilter === "bad" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("bad")} title="Bad scan: marked more than 50 metres from the planned stop"><b>{scanSummary.bad}</b> Bad &gt;50 m</button>
-                  <button type="button" className={`${styles.scanFilterUnknown} ${taskFilter === "unavailable" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("unavailable")} title="Amazon did not provide a scan coordinate"><b>{scanSummary.unavailable}</b> No location</button>
+                  <button type="button" className={`${styles.scanFilterUnknown} ${taskFilter === "missing_actual" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("missing_actual")} title="Cortex did not provide the actual execution GPS"><b>{scanSummary.missingActual}</b> No scan GPS</button>
+                  <button type="button" className={`${styles.scanFilterUnknown} ${taskFilter === "missing_planned" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("missing_planned")} title="Amazon did not provide the planned stop coordinate"><b>{scanSummary.missingPlanned}</b> No planned point</button>
+                  <small className={styles.scanRule}>Distance = actual Cortex scan GPS ↔ Amazon planned stop. Missing either point is not scored.</small>
                 </div>
               ) : null}
-              <div className={styles.stopToolbar}><select value={taskFilter} onChange={(event) => setTaskFilter(event.target.value as TaskFilter)} aria-label="Filter route tasks"><option value="all">All stops</option><option value="remaining">Remaining</option><option value="failed">Delivery failed</option><option value="good">Good scans · ≤50 m</option><option value="bad">Bad scans · &gt;50 m</option><option value="unavailable">No scan location</option></select><label><input type="checkbox" checked={hideCompleted} onChange={(event) => setHideCompleted(event.target.checked)} /> Hide completed</label></div>
+              <div className={styles.stopToolbar}><span className={styles.stopSearch}><Search size={13} aria-hidden /><input type="search" value={stopQuery} onChange={(event) => setStopQuery(event.target.value)} placeholder="Search TID, order or address" aria-label="Search route stops" /></span><select value={taskFilter} onChange={(event) => setTaskFilter(event.target.value as TaskFilter)} aria-label="Filter route tasks"><option value="all">All stops</option><option value="remaining">Remaining</option><option value="failed">Delivery failed</option><option value="good">Good scans · ≤50 m</option><option value="bad">Bad scans · &gt;50 m</option><option value="missing_actual">No actual scan GPS</option><option value="missing_planned">No planned point</option></select><label><input type="checkbox" checked={hideCompleted} onChange={(event) => setHideCompleted(event.target.checked)} /> Hide completed</label></div>
               {detailLoading ? <div className={styles.railLoading}><span /><span /><span /></div> : null}
               {detailError ? <div className={styles.alert}><strong>Route unavailable</strong>{detailError}</div> : null}
               {detail ? (
@@ -344,7 +392,7 @@ export function CortexWorkspace({
                       <ul className={styles.stopTasks}>
                         {stop.tasks.map((task) => (
                           <li key={task.taskId || `${task.scannableId}-${task.actualExecutionTime}`}>
-                            <div><span className={styles.taskTitle}>{task.taskType || "Task"} · {task.taskState || "Pending"}</span><span className={styles.taskId}>{task.scannableId || task.orderId || "Tracking ID unavailable"}</span><span className={`${styles.scanBadge} ${task.scanQuality === "good" ? styles.scanGood : task.scanQuality === "bad" ? styles.scanReview : styles.scanUnknown}`}>{task.scanDistanceM == null ? "No scan location" : task.scanQuality === "good" ? `Good scan · ${task.scanDistanceM} m from planned stop` : `Bad scan · ${task.scanDistanceM} m from planned stop`}</span></div>
+                            <div><span className={styles.taskTitle}>{task.taskType || "Task"} · {task.taskState || "Pending"}</span><span className={styles.taskId}>{task.scannableId || task.orderId || "Tracking ID unavailable"}</span><span className={`${styles.scanBadge} ${task.scanQuality === "good" ? styles.scanGood : task.scanQuality === "bad" ? styles.scanReview : styles.scanUnknown}`}>{task.scanIssue === "missing_planned" ? "Not scored · planned point missing" : task.scanIssue === "missing_actual" ? "Not scored · actual scan GPS missing" : task.scanQuality === "good" ? `Good scan · ${task.scanDistanceM} m from planned stop` : `Bad scan · ${task.scanDistanceM} m from planned stop`}</span></div>
                             <div className={styles.taskActions}><time>{formatTime(task.actualExecutionTime)}</time>{task.scannableId ? <button type="button" onClick={() => navigator.clipboard.writeText(task.scannableId!)} title="Copy tracking ID"><Copy size={13} /></button> : null}</div>
                           </li>
                         ))}
@@ -361,7 +409,7 @@ export function CortexWorkspace({
         <section className={styles.mapPanel} aria-label="Cortex route map">
           <header className={styles.mapPanelHead}><div><MapPinned size={17} aria-hidden /><span>{selected ? `${selected.workforceName || selected.amazonName} · live route` : "Select a driver"}</span></div><span>{trailLoading ? "Loading Driver Trace…" : detail?.gpsTrail.length ? `${detail.gpsTrail.length.toLocaleString("en-IN")} GPS points` : "Planned route"}</span></header>
           {detail ? (
-            <CortexRouteMap plannedPath={detail.plannedPath} actualPath={detail.actualPath} gpsTrail={detail.gpsTrail || []} gpsTrailError={detail.gpsTrailError || null} gpsLoading={trailLoading} stops={detail.stops} movementStart={detail.movementStart} movementEnd={detail.movementEnd} scanFilter={taskFilter === "good" || taskFilter === "bad" || taskFilter === "unavailable" ? taskFilter : "all"} />
+            <CortexRouteMap plannedPath={detail.plannedPath} actualPath={detail.actualPath} gpsTrail={detail.gpsTrail || []} gpsTrailError={detail.gpsTrailError || null} gpsLoading={trailLoading} stops={detail.stops} movementStart={detail.movementStart} movementEnd={detail.movementEnd} scanFilter={taskFilter === "good" || taskFilter === "bad" ? taskFilter : "all"} />
           ) : detailLoading ? (
             <div className={styles.mapSkeleton}><span /><span /><span /><p>Loading route map…</p></div>
           ) : (
