@@ -36,7 +36,7 @@ export async function GET(request:Request) {
     const params = new URL(request.url).searchParams;
     const stationId = params.get('station') || '';
     const view = params.get('view') || 'onboarding';
-    const {auth,companyId, db,scope} = await context(stationId,false,['approvals','history'].includes(view));
+    const {auth,companyId, db,scope} = await context(stationId,false,['approvals','history','bgc-pending'].includes(view));
     const providerId = params.get('profile');
     if (providerId && !deskProfileId.test(providerId)) throw new DeskError('Select a valid Amazon profile.');
     if(view==='photo') {
@@ -74,7 +74,13 @@ export async function GET(request:Request) {
       if(!providerId)throw new DeskError('Select an associate.');
       return reply(await worker('idfy',{companyId,stationId,providerId}));
     }
-    if(view==='bgc-pending')return reply(await worker('idfy-queue',{companyId,stationId,query:(params.get('query')||'').slice(0,100)}));
+    if(view==='bgc-pending'){
+      const requested=params.get('stations')?.split(',').filter(Boolean);
+      if(requested?.some(id=>!scope.includes(id)))throw new DeskError('This station is outside your access.',403);
+      const stationIds=stationId==='all'?(requested?.length?requested:scope):[stationId];
+      if(!stationIds.length)return reply({rows:[],checkedAt:new Date().toISOString()});
+      return reply(await worker('idfy-queue',{companyId,stationIds,query:(params.get('query')||'').slice(0,100),fresh:params.get('fresh')==='1'}));
+    }
     if(view==='idfy-report'){
       if(!providerId)throw new DeskError('Select an associate.');
       const config=workforceAmazonWorkerConfig();if(!config.configured)throw new DeskError('IDfy is not connected.',503);

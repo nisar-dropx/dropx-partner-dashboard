@@ -27,6 +27,13 @@ assert.equal(fixture.calls[0].body.pageSize,24);assert.equal(fixture.calls[0].bo
 fixture.calls=[];
 assert.equal((await route.GET(new Request(url.replace(station,'00000000-0000-4000-8000-000000000099')+'&view=photo&profile='+provider+'&ticket=example'))).status,403);
 assert.equal(fixture.calls.length,0);
+
+fixture.calls=[];
+assert.equal((await route.GET(new Request(url.replace(station,'all')+'&view=bgc-pending'))).status,200);
+assert.deepEqual(Array.from(fixture.calls[0].body.stationIds),[station]);
+fixture.calls=[];
+assert.equal((await route.GET(new Request(url.replace(station,'all')+'&view=bgc-pending&stations=00000000-0000-4000-8000-000000000099'))).status,403);
+assert.equal(fixture.calls.length,0);
 fixture.auth.readOnly=true;assert.equal((await post()).status,403);fixture.auth.readOnly=false;
 fixture.auth.isPreview=true;assert.equal((await post()).status,403);fixture.auth.isPreview=false;
 assert.equal((await post({...action,action:'TRANSFER'})).status,400);
