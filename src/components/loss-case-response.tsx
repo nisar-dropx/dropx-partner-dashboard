@@ -41,10 +41,10 @@ const labels: Record<string, string> = {
   awaiting_station: "Station evidence needed",
   awaiting_review: "Awaiting review",
   returned: "Returned for correction",
-  approved: "Approved · file post-dispute ticket",
-  with_vendor: "With vendor",
-  won: "Won · recovery stopped",
-  lost: "Unsuccessful · recovery resumed",
+  approved: "Approved · LSC ticket to file",
+  with_vendor: "Pending with Amazon",
+  won: "Non-recoverable · recovery stopped",
+  lost: "Recoverable · recovery resumed",
   cancelled: "Cancelled",
   legacy: "Earlier follow-up",
 };
@@ -70,6 +70,9 @@ export function LossCaseResponse({
   const [view, setView] = useState<"case" | "history">(initialView);
   useEffect(()=>setView(initialView),[initialView,viewRequest]);
   const paneId = useId();
+  const istNow = new Date(Date.now() + 330 * 60_000);
+  const payrollMonth = (offset: number) => new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() + offset, 1)).toISOString().slice(0, 7);
+  const nextPayrollMonth = payrollMonth(1), lastPayrollMonth = payrollMonth(12);
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
@@ -106,17 +109,17 @@ export function LossCaseResponse({
         setCctv(j.window.response_details?.cctv_url || "");
         setCctvNotRequired(j.window.response_details?.cctv_not_required === true);
         setNote(embedded || !j.canActivate ? j.window.response_details?.note || "" : "");
-        setTicket((embedded || !j.canActivate ? j.window.response_details?.tt_reference : j.window.tt_reference) || "");
+        setTicket((embedded || !j.canActivate ? j.window.response_details?.tt_reference : ["with_vendor","won","lost"].includes(j.window.workflow_status||"") ? j.window.tt_reference : "") || "");
         setTicketUrl(j.window.tt_url || "");
         setDue(j.window.followup_on || "");
-        setPayMonth(j.window.recovery_month || "");
+        setPayMonth(j.window.recovery_month || nextPayrollMonth);
 
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [month, caseKey, revision, embedded]);
+  }, [month, caseKey, revision, embedded, nextPayrollMonth]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!data || !selectedAction) return;
@@ -166,17 +169,18 @@ export function LossCaseResponse({
     evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
   const validNote = note.trim().length >= 10 && note.trim().length <= 4000;
   const canSubmit = selectedAction === "response" ? !evidenceError : !!selectedAction && validNote
-    && (!["tracking", "won", "lost"].includes(selectedAction) || ticket.trim().length >= 3)
-    && (selectedAction !== "tracking" || !!due);
+    && (!["tracking", "won", "lost"].includes(selectedAction) || (ticket.trim().length >= 3 && ticket.trim().length <= 160 && (!ticketUrl || (ticketUrl.startsWith("https://") && ticketUrl.length <= 2000))))
+    && (selectedAction !== "tracking" || !!due)
+    && (selectedAction !== "lost" || (/^\d{4}-(0[1-9]|1[0-2])$/.test(payMonth) && payMonth >= nextPayrollMonth && payMonth <= lastPayrollMonth));
   const returnEvent = state === "returned" ? data?.events.find((event) => event.action === "return") : null;
   const actionNames: Record<string, string> = {
     activate: "Activate redispute",
     response: state === "returned" ? "Resubmit station evidence" : "Submit station evidence",
     approve: "Approve response",
     return: "Return for correction",
-    tracking: "Update post-dispute ticket",
-    won: "Final outcome · won",
-    lost: "Final outcome · unsuccessful",
+    tracking: "Record / update LSC ticket",
+    won: "Final outcome · non-recoverable",
+    lost: "Final outcome · recoverable",
     revoke: "Remove redispute",
   };
   return (
@@ -321,9 +325,10 @@ export function LossCaseResponse({
                   {["tracking", "won", "lost"].includes(selectedAction) ? (
                     <>
                       <label>
-                        Post-dispute ticket
+                        LSC ticket ID *
                         <input
                           value={ticket}
+                          readOnly={selectedAction !== "tracking"}
                           onChange={(e) => setTicket(e.target.value)}
                           minLength={3}
                           maxLength={160}
@@ -335,6 +340,8 @@ export function LossCaseResponse({
                         <input
                           type="url"
                           value={ticketUrl}
+                          readOnly={selectedAction !== "tracking"}
+                          maxLength={2000}
                           onChange={(e) => setTicketUrl(e.target.value)}
                         />
                       </label>
@@ -355,11 +362,13 @@ export function LossCaseResponse({
                           <input
                             type="month"
                             value={payMonth}
+                            min={nextPayrollMonth}
+                            max={lastPayrollMonth}
+                            required
                             onChange={(e) => setPayMonth(e.target.value)}
                           />
                           <small>
-                            Defaults to next month; the payroll cutoff still
-                            applies.
+                            Recovery resumes in the selected upcoming payroll.
                           </small>
                         </label>
                       ) : null}
