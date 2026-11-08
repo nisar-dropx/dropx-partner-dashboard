@@ -26,7 +26,7 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>)
   const url = new URL(request.url);
   const profileType = String(body?.profileType ?? url.searchParams.get("profileType") ?? "") as ConnectAccount["profileType"];
   const accountId = String(body?.accountId ?? url.searchParams.get("accountId") ?? "");
-  return requireConnectAccount(profileType, accountId);
+  return requireConnectAccount(profileType, accountId, {allowActivationOnly:true});
 }
 
 export async function GET(request: Request) {
@@ -69,6 +69,17 @@ export async function GET(request: Request) {
 
     const nowMs = Date.now();
     const staleIds = new Set<string>(rows.filter((row) => expiredConnectNotification(row, nowMs)).map((row) => row.id));
+    if(rows.some(row=>row.event_code==='IDFY_INFORMATION_REQUIRED')){
+      const ownership=await supabaseAdmin.from('connect_idfy_owners').select('provider_id,identity_email').eq('company_id',account.companyId).eq('account_id',account.id).eq('profile_type',account.profileType);
+      if(ownership.error)throw new Error('Verification notifications could not load.');
+      const ownerIds=(ownership.data||[]).map(o=>o.provider_id);
+      const current=ownerIds.length?await supabaseAdmin.from('amazon_da_detail_snapshots').select('provider_id,identity_email,request_block_ids').eq('company_id',account.companyId).eq('enabled',true).in('provider_id',ownerIds):{data:[],error:null};
+      if(current.error)throw new Error('Verification notifications could not load.');
+      for(const row of rows.filter(r=>r.event_code==='IDFY_INFORMATION_REQUIRED')){
+        const d=row.data as {providerId?:string;blockId?:string};
+        if(!current.data?.some(s=>s.provider_id===d.providerId&&ownership.data?.some(o=>o.provider_id===s.provider_id&&o.identity_email===s.identity_email)&&s.request_block_ids?.includes(d.blockId)))staleIds.add(row.id);
+      }
+    }
     if (requestIds.length) {
       const requests = await supabaseAdmin.from("hr_expense_claim_requests")
         .select("id,status")

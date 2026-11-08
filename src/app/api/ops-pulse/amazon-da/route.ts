@@ -39,7 +39,11 @@ export async function GET(request:Request) {
     const params = new URL(request.url).searchParams;
     const stationId = params.get('station') || '';
     const view = params.get('view') || 'onboarding';
-    const {auth,companyId, db,scope,stationCodes} = await context(stationId,false,['approvals','history','bgc-pending','bgc-address','bgc'].includes(view));
+    const {auth,companyId, db,scope,stationCodes} = await context(stationId,false,['approvals','history','bgc-pending','bgc-address','bgc','idfy-request-status'].includes(view));
+    if(view==='idfy-request-status'){
+      const status=await db.from('amazon_da_detail_snapshots').select('provider_id,station_id,request_block_ids,requests_checked_at').eq('company_id',companyId).in('station_id',stationId==='all'?scope:[stationId]).eq('enabled',true).not('request_block_ids','is',null);
+      if(status.error)throw new DeskError('Request status unavailable.',503);return reply({rows:status.data});
+    }
     const providerId = params.get('profile');
     if (providerId && !deskProfileId.test(providerId)) throw new DeskError('Select a valid Amazon profile.');
     if(params.get('filters')==='1'&&!providerId&&['onboarding','associates','offboarded','bgc','bgc-pending','bgc-address'].includes(view)){

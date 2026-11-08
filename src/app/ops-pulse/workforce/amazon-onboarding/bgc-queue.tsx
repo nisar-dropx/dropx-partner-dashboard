@@ -24,6 +24,14 @@ export function BgcQueue({stations,canEdit,initialStations=[],revision=0,onEmpty
  // Each dependency is included in the stable request key.
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[key]);
+ // Remove externally answered requests without resetting other users' in-progress fields.
+ useEffect(()=>{if(view!=='bgc-pending')return;let cancelled=false;const poll=async()=>{if(document.visibilityState!=='visible')return;try{
+  const r=await fetch('/api/ops-pulse/amazon-da?view=idfy-request-status&station=all',{cache:'no-store'});if(!r.ok)return;const d=await r.json();if(cancelled)return;
+  const cleared=new Set<string>((d.rows||[]).filter((x:{request_block_ids:string[]})=>x.request_block_ids.length===0).map((x:{station_id:string;provider_id:string})=>x.station_id+':'+x.provider_id));
+  if(!cleared.size)return;
+  const prune=(old:Data|null)=>{if(!old)return old;const rows=old.rows.filter(p=>!cleared.has(p.stationId+':'+p.providerId));const page=filterDeskPage(rows,{...filters,query:search},view,0,old.snapshot,'');return {...old,...page,rows:page.rows as Row[],facets:page.facets as Data['facets'],counts:{...page.counts,address:null,all:null,unchecked:0}};};
+  if(inbox.current){const saved=inbox.current.data;inbox.current.data={...saved,rows:saved.rows.filter(p=>!cleared.has(p.stationId+':'+p.providerId))};setData(prune({...saved,rows:inbox.current.data.rows}));}else setData(prune);
+ }catch{/* Retain last confirmed requests on a connection failure. */}};const timer=setInterval(()=>void poll(),30000);return()=>{cancelled=true;clearInterval(timer);};},[scope,view,search,filters]);
  function refresh(){fresh.current=true;setReload(n=>n+1);}
  function reset(){setFilters(emptyDeskFilters());setQuery('');setSearch('');}
  async function more(){if(!data||data.nextOffset==null||moreBusy)return;const request=seq.current;setMoreBusy(true);try{const r=await fetch(url(data.nextOffset,data.snapshot),{cache:'no-store'}),d=await r.json();if(!r.ok)throw Error(d.error);if(request!==seq.current)return;setData(d.reset?d:{...d,rows:[...new Map([...data.rows,...d.rows].map(p=>[p.stationId+':'+p.providerId,p])).values()]});}catch(e){if(request===seq.current)setError((e as Error).message);}finally{setMoreBusy(false);}}

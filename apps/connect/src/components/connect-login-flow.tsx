@@ -1,5 +1,6 @@
 "use client";
 
+import {ConnectIdfyCorrections} from './connect-idfy-corrections';
 import Image from "next/image";
 import { ConnectPreviewSwitcher, exitConnectPreview } from "./connect-preview-switcher";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -179,6 +180,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const [drawer, setDrawer] = useState(false);
   const [paymentsExpanded, setPaymentsExpanded] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
+  const [idfyOpenRequest,setIdfyOpenRequest]=useState(0);
   const [notificationMenu, setNotificationMenu] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationClearing, setNotificationClearing] = useState(false);
@@ -477,6 +479,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     navigateNotification(notification);
   }
   function navigateNotification(notification: ConnectNotification) {
+    if(notification.route==='idfy'){setNotificationMenu(false);setIdfyOpenRequest(n=>n+1);return;}
     const destination = connectNotificationStep(notification.route);
     if (destination) {
       setNotificationMenu(false);
@@ -961,6 +964,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         <AttendanceLocationMonitor account={account} />
       ) : null}
       {!userPreview && !isolatedBetaJourney && account ? <ConnectNativeBridge account={account} /> : null}
+      {account && isWorkforceWorkspace(account) && !userPreview ? <ConnectIdfyCorrections key={accountKey(account)} account={account} openRequest={idfyOpenRequest}/> : null}
       <PullToRefresh />
       {isolatedBetaJourney && account?.betaWorkspaceActive && ["dashboard","work","attendance","payments","earnings"].includes(step) ? <div className="dx-beta-journey-shell"><ConnectBetaWorkspace account={account} view={step === "work" || step === "attendance" ? "work" : step === "payments" || step === "earnings" ? "payments" : "home"} onOpen={open}/></div> : null}
       {step === "dashboard" && account ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}

@@ -56,7 +56,7 @@
     "test:station-board": "node --experimental-strip-types --test src/lib/ops-pulse/edd-scope.test.mjs src/lib/ops-pulse/station-board.test.mjs src/lib/ops-pulse/station-board-tids.test.mjs src/lib/ops-pulse/station-dsr-summary.test.mjs src/lib/ops-pulse/board-detail-report.test.mjs src/lib/ops-pulse/compact-board-report.test.mjs src/lib/ops-pulse/station-board-regions.test.mjs",
     "test:payout-dispute-window": "node --experimental-strip-types --test src/lib/payout-dispute-window.test.mjs src/app/api/payments/workforce-payouts/send-review/route.test.mjs",
     "test:amazon-priority": "node scripts/test-amazon-priority-filters.cjs && node scripts/test-amazon-da-desk-api.cjs",
-    "test:workforce-lifecycle": "node scripts/test-live-workforce-onboarding.cjs && pnpm run test:amazon-priority && node --experimental-strip-types --test src/lib/da-onboarding-registry.test.mjs && node scripts/test-da-onboarding-api.cjs && node scripts/test-workforce-lifecycle.mjs && node --experimental-strip-types --test src/lib/workforce-lifecycle-policy.test.mjs",
+    "test:workforce-lifecycle": "node scripts/test-workforce-onboarding-access.cjs && node scripts/test-live-workforce-onboarding.cjs && pnpm run test:amazon-priority && node --experimental-strip-types --test src/lib/da-onboarding-registry.test.mjs && node scripts/test-da-onboarding-api.cjs && node scripts/test-workforce-lifecycle.mjs && node --experimental-strip-types --test src/lib/workforce-lifecycle-policy.test.mjs",
     "test:payment-release": "node scripts/test-payment-release.mjs"
   },
   "dependencies": {

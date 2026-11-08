@@ -10,6 +10,7 @@ export async function GET(request:Request){
  const reply=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'Cache-Control':'private, no-store'}});
  const auth=await getAuthorization();
  if(!auth?.companyId)return reply({error:'Sign in to continue.'},401);
+ if(!hasPermission(auth,'workforce_onboarding','access'))return reply({error:'Workforce onboarding access is required.'},403);
  const amazon=hasPermission(auth,'ops_amazon_da','access'),guided=hasPermission(auth,'delivery_associates','access');
  if(!amazon&&!guided)return reply({error:'DA onboarding access is required.'},403);
  const station=new URL(request.url).searchParams.get('station');
