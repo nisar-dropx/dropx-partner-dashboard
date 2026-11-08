@@ -32,7 +32,7 @@ create function nl_recovery_source_status_key(text) returns text language sql as
 create function nl_loss_recovery_due(uuid,text,text,uuid default null) returns setof due language sql as $$select * from public.due$$;
 create function workforce_create_payout_payment_batch(p_company_id uuid) returns void language plpgsql as $$begin return;end$$;
 `);
-const sql=fs.readFileSync('supabase/migrations/20261108134354_loss_payment_clearance_and_people_finance.sql','utf8');
+const sql=fs.readFileSync('supabase/migrations/20261108142437_loss_payment_clearance_and_people_finance.sql','utf8');
 await db.exec(sql);await db.exec(sql);
 await db.query('insert into profiles values($1,$3,true,\'Manager\',\'manager@example.test\'),($2,$3,true,\'Payroll\',\'payroll@example.test\')',[manager,submitter,company]);
 await db.query("insert into user_roles(id,is_active,code) values($1,true,'FINANCE_FINMGR')",[role]);
