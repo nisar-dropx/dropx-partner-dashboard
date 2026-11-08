@@ -326,11 +326,17 @@ begin
  perform set_config('app.people_finance_issue','allowed',true);
  for v_person in select * from public.hr_payroll_run_people where company_id=p_company and run_id=r.run_id and location_id=r.station_id order by worker_id loop
   if v_person.calculation_status='blocked' then raise exception 'Payroll contains blocked people. Return it to People for correction.'; end if;
+  if exists(select 1 from public.hr_payroll_bank_lines b join public.hr_payroll_runs other_run on other_run.company_id=b.company_id and other_run.id=b.run_id
+    join public.hr_payroll_runs this_run on this_run.company_id=p_company and this_run.id=r.run_id
+    where b.company_id=p_company and b.run_id<>r.run_id and b.worker_id=v_person.worker_id and b.worker_type=v_person.worker_type
+      and b.status in ('issued','processing','paid') and other_run.period_start<=this_run.period_end and other_run.period_end>=this_run.period_start)
+  then raise exception 'This person has payment history in another overlapping payroll run. Reconcile and revise the original payroll instead of paying a second run.'; end if;
   if exists(select 1 from public.hr_payroll_bank_lines where company_id=p_company and run_id=r.run_id and worker_id=v_person.worker_id and status in ('processing','issued'))
   then raise exception 'A selected person already has an issued or processing payment. Reconcile or cancel that instruction first.'; end if;
   select coalesce(sum(amount),0) into v_paid from public.hr_payroll_bank_lines where company_id=p_company and run_id=r.run_id and worker_id=v_person.worker_id and status='paid';
   select coalesce(sum(amount),0),coalesce(bool_or(item_type='deduction' and amount>0),false) into v_hold,v_inside
     from public.hr_payroll_run_items where company_id=p_company and run_person_id=v_person.id and upper(code)='SALARY_HOLD';
+  if exists(select 1 from public.hr_payroll_run_items where company_id=p_company and run_person_id=v_person.id and upper(code)='SALARY_HOLD' and metadata->>'full_month'='true') then continue; end if;
   v_amount:=round(greatest(0,coalesce(v_person.adjusted_net_pay,v_person.net_pay)-case when v_inside then 0 else v_hold end)-v_paid,2);
   if v_amount<=0 then continue; end if;
   if v_person.worker_type='employee' then
