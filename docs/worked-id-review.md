@@ -1,5 +1,17 @@
 # Worked ID review
 
+## Daily ID usage within ID Mapping
+
+`/provider-id-mapping?view=days` is a section of the existing ID Mapping menu. It defaults to the previous month and all permitted stations. Search and multi-select region, Cluster/AOM and station filters apply to associate and provider-ID views. Expand an associate or provider ID to see effective mapped dates, provider name, registered owner, actual allocated worker, biometric evidence, bulk-period attendance, remaining/reassigned delivery quantities, payment method and locks. Current calculated earnings and dated rate components remain available in the review drawer.
+
+Daily mode includes mapped days even when there is no punch or delivery. Only delivery roles with their own effective payment terms may allocate work. Unlike the exception queue, a daily recipient may have variable pay or deliveries already on their own ID. Allocating production never creates attendance or transfers the owner's rate card. The exception queue retains its fixed-pay/no-own-delivery scope. Monthly bulk totals retain their period-only meaning.
+
+Selected days must belong to one associate in one month (maximum 31). Validate runs the exact save transaction in a rolled-back subtransaction, then confirmation rechecks versions, source counts and payment locks before committing. Both participants' payout dependencies refresh through the existing ledger and publication workflow. Validation is not a quoted net-pay amount; payroll calculates using the configured rates, thresholds and deductions.
+
+Ad hoc locks resolve company-wide canonical workforce/provider identity, including payments recorded at a different station. Paid, processing and approved payroll stays locked. A later ad hoc payment cannot bypass an existing worked-ID allocation by changing station. No historical payment is cancelled, transferred or marked paid by the deployment. Financial corrections to finalized records remain Finance work.
+
+Migration `20261108173134_daily_id_usage_review.sql` adds private server-only read/validation/save functions and reuses the existing reviews/shares/events. `scripts/test-daily-id-usage.mjs`, invoked by the existing Worked ID test script, checks idempotence, validation rollback, variable recipients, own-ID deliveries, quantity conservation, unchanged attendance, stale edits, over-allocation, cross-station locks in both directions and RPC privileges.
+
 Open **Workforce → Worked ID review** on OpsPulse, or **Worked ID review** on Dashboard. Access follows the existing ID Mapping permission and location scope; saving requires edit access.
 
 All permitted stations load by default. Region, cluster and station filters support search and multiple selections. Choose Associate view to review several dates together, or Day view for individual cases. Reasons distinguish no own ID, no recorded own-ID deliveries, and missing station delivery reports. This is a mismatch, not proof of absence; the reverse case (deliveries without biometric attendance) is outside this desk.

@@ -1,8 +1,11 @@
 "use client";
 
 import { useDeferredValue, useEffect, useRef, useMemo, useState } from "react";
+import workspace from "./id-mapping-workspace.module.css";
+import { providerFirstValidationStatus } from "@/lib/provider-first-mapping-view";
+import { facetRows } from "@/lib/dependent-filters";
 import { useRouter } from "next/navigation";
-import { Download, FileSpreadsheet, FileText, X } from "lucide-react";
+import { ChevronRight, Download, FileSpreadsheet, FileText, X } from "lucide-react";
 import { clearProviderMappingPeriod, saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
@@ -249,6 +252,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
 }) {
   const router=useRouter();
   const appliedMappings=useRef(mappings);
+  const [expandedMappings, setExpandedMappings] = useState<Set<string>>(() => new Set());
   const [scheduleIndex, setScheduleIndex] = useState<number | null>(null);
   const [rows, setRows] = useState(() => mappings);
   const [baselineRows, setBaselineRows] = useState(() => mappings);
@@ -316,21 +320,15 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
 
   // Filter persisted values: selecting an associate or changing a rate card must
   // not remove an unfinished row. A successful save updates baselineRows.
-  const visibleIndexes = useMemo(() => filterProviderFirstRowIndexes({
-    rows: baselineRows,
-    workerById,
-    paymentMethodById,
-    clusterKeysByStation,
-    filters: {
-      clusterKeys: clusterFilters,
-      outboundMonths: monthFilters,
-      query: deferredQuery,
-      stationIds: stationFilters,
-      paymentMethodIds: methodFilters,
-      mappingStatuses: mappingFilters,
-      validationStatuses: validationFilters
-    }
-  }), [baselineRows, workerById, paymentMethodById, clusterKeysByStation, clusterFilters, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  const mappingFacets = useMemo(() => facetRows(baselineRows.map((row,index)=>({...row,index})), {
+    months: {selected: monthFilters, values: r=>r.outboundMonths || []},
+    stations: {selected: stationFilters, values: r=>r.stationId},
+    clusters: {selected: clusterFilters, values: r=>clusterKeysByStation[r.stationId] || []},
+    methods: {selected: methodFilters, values: r=>r.paymentMethodId || "unassigned"},
+    mapping: {selected: mappingFilters, values: r=>r.workforceId ? "mapped" : "unmapped"},
+    validation: {selected: validationFilters, values: r=>providerFirstValidationStatus(r,workerById.get(r.workforceId),paymentMethodById.get(r.paymentMethodId))}
+  }, r=>[r.providerMemberId,r.providerMemberName,r.dropxId,r.dropxName,r.stationLabel].join(" ").toLowerCase().includes(deferredQuery.trim().toLowerCase())), [baselineRows, workerById, paymentMethodById, clusterKeysByStation, clusterFilters, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  const visibleIndexes = useMemo(()=>mappingFacets.rows.map(r=>r.index),[mappingFacets]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
   const selectableWorkerOptionsByIndex = useMemo(() => new Map(paginatedIndexes.map((index) => {
@@ -1101,18 +1099,18 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     <ProviderMappingLookup entries={currentLookupEntries} onShowMapping={(stationId, providerId) => { clearFilters(); setStationFilters([stationId]); setQuery(providerId); }} />
     <section className="panel">
       <div className="panel-head provider-first-panel-head">
-        <div><h2>Provider member mapping</h2><p className="subtle">Available associates across your permitted locations. Use Find mapping to locate an ID already assigned.</p>{saveNotice ? <p aria-live="polite" className={saveNotice.kind === "error" ? "mapping-upload-error" : "mapping-upload-success"}>{saveNotice.message}</p> : null}</div>
+        <div><h2>Provider member mapping</h2><p className="subtle">Expand a mapping to edit rates, dates or see its history.</p>{saveNotice ? <p aria-live="polite" className={saveNotice.kind === "error" ? "mapping-upload-error" : "mapping-upload-success"}>{saveNotice.message}</p> : null}</div>
         <button className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict || hasDirtyLocationMismatch || isSaving} onClick={() => void saveIndexes(dirtyIndexes)} type="button">{isSaving ? "Saving..." : !canEdit ? "No edit access" : hasDirtyLocationMismatch ? "Fix location mismatches" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : hasDirty ? "Save changes" : "No edits"}</button>
       </div>
       {clusterFilterUnavailable ? <p className="subtle mapping-cluster-unavailable" role="status">People assignments could not be loaded. Refresh to use the Cluster / AOM filter; other filters are available.</p> : null}
       <div className="provider-first-filters">
         <label className="provider-first-search"><span>Search</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); resetPage(); }} placeholder="Provider member, DropX ID or name" /></label>
-        <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={monthFilters} setSelected={(values) => { setMonthFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={clusterOptions} selected={clusterFilters} setSelected={(values) => { setClusterFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All records" label="ID link" options={[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All months" label="Outbound month" options={mappingFacets.options("months",monthOptions)} selected={monthFilters} setSelected={(values) => { setMonthFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All locations" label="Location" options={mappingFacets.options("stations",stations.map(([value, label]) => ({ value, label, searchText: label })))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={mappingFacets.options("clusters",clusterOptions)} selected={clusterFilters} setSelected={(values) => { setClusterFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All methods" label="Payment method" options={mappingFacets.options("methods",[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))])} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All records" label="ID link" options={mappingFacets.options("mapping",[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }])} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All statuses" label="Validation" options={mappingFacets.options("validation",[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }])} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
         <label className="mapping-page-size">Rows<select onChange={(event) => { const value = event.target.value; setPageSize(value === "all" ? "all" : Number(value) as ProviderFirstPageSize); resetPage(); }} value={pageSize}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="all">All</option></select></label>
         <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span><button className="button secondary compact provider-mapping-download-trigger" disabled={!rows.length} onClick={openExport} type="button"><Download aria-hidden="true" size={15} /> Download</button>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
         {exportOpen ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target && !exporting) setExportOpen(false); }}>
@@ -1159,6 +1157,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           </section>
         </div> : null}
       </div>
+      <div className={workspace.toolbar}><span>{visibleIndexes.length} mappings · {hasDirty ? `${dirtyIndexes.length} unsaved` : "All changes saved"}</span>
+        <button type="button" className="button secondary compact" onClick={()=>setExpandedMappings(new Set(paginatedIndexes.map(i=>providerMemberKey(rows[i].stationId,rows[i].providerMemberId))))}>Expand page</button>
+        <button type="button" className="button secondary compact" onClick={()=>setExpandedMappings(new Set())}>Collapse all</button>
+      </div>
       <div className="mapping-rows provider-first-rows">{paginatedIndexes.map((index) => {
         const row = rows[index];
         const selectedWorker = workerById.get(row.workforceId);
@@ -1187,7 +1189,18 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const historicalMappingEnd = baselineRows[index].mappingId && baselineRows[index].effectiveTo
           ? baselineRows[index].effectiveTo
           : "";
-        return <div className={`mapping-row-card provider-first-row ${dirtyRows[index] ? "unsaved-row" : ""}`} key={providerMemberKey(row.stationId, row.providerMemberId)}>
+        const rowKey = providerMemberKey(row.stationId,row.providerMemberId);
+        const rowStatus = providerFirstValidationStatus(row,selectedWorker,selectedPaymentMethod);
+        return <details className={workspace.mapping} key={rowKey} open={expandedMappings.has(rowKey)}>
+          <summary onClick={event=>{event.preventDefault();setExpandedMappings(current=>{const next=new Set(current);next.has(rowKey)?next.delete(rowKey):next.add(rowKey);return next;});}}>
+            <span className={workspace.chevron}><ChevronRight size={15} aria-hidden="true" /></span>
+            <span><strong>{row.providerMemberName || "Provider ID"}</strong><small>{row.providerMemberId} · {row.stationLabel}</small></span>
+            <span><strong>{row.dropxName || "No associate linked"}</strong><small>{row.dropxId || "Select an associate to configure pay"}</small></span>
+            <span><strong>{selectedPaymentMethod?.name || "No payment method"}</strong><small>{row.effectiveFrom ? `${formatDashboardDate(row.effectiveFrom)} – ${row.effectiveTo ? formatDashboardDate(row.effectiveTo) : "Ongoing"}` : "Dates not set"}</small></span>
+            <span className={workspace.badge} data-tone={errors[index] || rowStatus!=="ready" ? "warning" : dirtyRows[index] ? "" : "success"}>{errors[index] ? "Save failed" : dirtyRows[index] ? "Unsaved" : rowStatus==="ready" ? "Ready" : rowStatus==="unmapped" ? "Not linked" : "Needs attention"}</span>
+          </summary>
+        <div className={`mapping-row-card provider-first-row ${dirtyRows[index] ? "unsaved-row" : ""}`}>
+
           {dirtyRows[index] ? <span className="unsaved-badge mapping-unsaved-badge">Unsaved</span> : null}
           <div className="mapping-identity">
             <span className="mapping-identity-kicker">Provider ID</span>
@@ -1219,7 +1232,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
           <div className="mapping-row-actions">{previousPayment && !row.paymentMethodId && paymentMethodById.has(previousPayment.paymentMethodId) ? <button type="button" className="button secondary compact" disabled={!canEditRow} onClick={() => usePreviousPaymentDetails(index)}>Use previous payment details</button> : null}<button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton canClearMappingPeriod={canEdit && !isSaving} loadMappingAudit entries={row.history} onClearMappingPeriod={clearSavedMappingPeriod} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
-        </div>;
+        </div></details>;
       })}{!paginatedIndexes.length ? <div className="empty-state"><strong>No matching provider members.</strong><p className="subtle">Change or clear the filters to see more records.</p></div> : null}</div>
       <div className="mapping-pagination">
         <span>Showing {pageWindow.shownFrom}–{pageWindow.shownTo} of {visibleIndexes.length}</span>

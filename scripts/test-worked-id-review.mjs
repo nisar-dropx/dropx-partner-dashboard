@@ -303,4 +303,6 @@ console.log(
 );
 const {testExpandedWorkedReview}=await import('./test-worked-id-expanded.mjs');
 await testExpandedWorkedReview(db,{id,company,station,worker,owner,third,actor,source,method,date,share});
+const {testDailyIdUsage}=await import('./test-daily-id-usage.mjs');
+await testDailyIdUsage(db,{id,company,station,actor,provider});
 await db.close();

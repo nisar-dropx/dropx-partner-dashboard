@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { facetRows } from "@/lib/dependent-filters";
+import { DailyIdUsageTable } from "./daily-id-usage-table";
 import { SearchableSelect } from "./searchable-select";
 import { FleetMultiSelect } from "./fleet-multi-select";
 import { PeopleOwnershipRefresh } from "./people-ownership-refresh";
@@ -68,11 +70,13 @@ export function WorkedIdReview({
   initialMonth,
   managerOptions,
   canEdit,
+  dailyUsage = false,
 }: {
   locations: Location[];
   initialMonth: string;
   managerOptions: { value: string; label: string }[];
   canEdit: boolean;
+  dailyUsage?: boolean;
 }) {
   const request = useRef(0),
     payRequest = useRef(0),
@@ -86,7 +90,7 @@ export function WorkedIdReview({
     [clusters, setClusters] = useState<string[]>([]),
     [stations, setStations] = useState<string[]>([]),
     [query, setQuery] = useState(""),
-    [show, setShow] = useState("pending"),
+    [show, setShow] = useState(dailyUsage ? "all" : "pending"),
     [caseType, setCaseType] = useState("all"),
     [view, setView] = useState("associate");
   const [drafts, setDrafts] = useState<Draft[]>([]),
@@ -97,6 +101,8 @@ export function WorkedIdReview({
     [bulkReason, setBulkReason] = useState("");
   const [evidence, setEvidence] = useState<any[]>([]),
     [evidenceReady, setEvidenceReady] = useState(false);
+  const [validatedSignature, setValidatedSignature] = useState("");
+  const [affectedCount, setAffectedCount] = useState(0);
   const allIds = locations.map((l) => l.id).join(",");
   async function load() {
     const id = ++request.current;
@@ -108,7 +114,7 @@ export function WorkedIdReview({
         return;
       }
       const res = await fetch(
-          `/api/provider-mapping/worked-id-review?${new URLSearchParams({ stations: allIds, month })}`,
+          `/api/provider-mapping/worked-id-review?${new URLSearchParams({ stations: allIds, month, scope: dailyUsage ? "daily" : "exceptions" })}`,
           { cache: "no-store" },
         ),
         body = await res.json();
@@ -129,54 +135,139 @@ export function WorkedIdReview({
     setDrafts([]);
     void load();
   }, [month, allIds]);
-  const managerRevision = managerOptions.map(option => option.value).sort().join(",");
-  useEffect(() => {
-    const valid = new Set(managerOptions.map(option => option.value));
-    setClusters(previous => previous.filter(key => valid.has(key)));
-  }, [managerRevision]);
-  const currentLocations = new Map(locations.map(location => [location.id, location]));
-  const currentRow = (row: any) => ({ ...row, cluster: currentLocations.get(row.stationId)?.cluster ?? "Not mapped in People" });
-  const regional = locations.filter(
-    (l) => !regions.length || regions.includes(l.region || "Unassigned"),
+  const currentLocations = new Map(
+    locations.map((location) => [location.id, location]),
   );
-  const geographic = regional.filter(
-    (l) => !clusters.length || l.clusterKeys.some(key => clusters.includes(key)),
-  );
-  const managerKeys = new Set(regional.filter(l => !stations.length || stations.includes(l.id)).flatMap(l => l.clusterKeys));
+  const currentRow = (row: any) => ({
+    ...row,
+    cluster:
+      currentLocations.get(row.stationId)?.cluster ?? "Not mapped in People",
+  });
+  const statusOptions = dailyUsage
+    ? [
+        { value: "gaps", label: "Attendance / delivery gaps" },
+        { value: "locked", label: "Payment locked" },
+        { value: "reviewed", label: "Work reviewed" },
+        { value: "evidence", label: "Daily evidence available" },
+        { value: "none", label: "No daily evidence" },
+      ]
+    : [
+        {
+          value: "pending",
+          label:
+            view === "bulk" ? "Needs period review" : "Needs review / approval",
+        },
+        {
+          value: "reviewed",
+          label: view === "bulk" ? "No day-count shortfall" : "Reviewed",
+        },
+      ];
+  const reviewFacets = useMemo(() => {
+    const locationById = new Map(locations.map((l) => [l.id, l]));
+    const items: any[] =
+      view === "bulk" ? data?.bulkPeriods || [] : data?.rows || [];
+    return facetRows<any, "region" | "cluster" | "station" | "status">(
+      items,
+      {
+        region: {
+          selected: regions,
+          values: (r) => locationById.get(r.stationId)?.region || "Unassigned",
+        },
+        cluster: {
+          selected: clusters,
+          values: (r) => locationById.get(r.stationId)?.clusterKeys || [],
+        },
+        station: { selected: stations, values: (r) => r.stationId },
+        status: {
+          selected: show === "all" ? [] : [show],
+          values: (r) =>
+            view === "bulk"
+              ? r.needsReview
+                ? "pending"
+                : "reviewed"
+              : !dailyUsage
+                ? pending(r)
+                  ? "pending"
+                  : "reviewed"
+                : [
+                    ...(r.lockReason ? ["locked"] : []),
+                    ...(["worked", "not_worked"].includes(r.decision)
+                      ? ["reviewed"]
+                      : []),
+                    ...(r.punches || r.ownDeliveries ? ["evidence"] : ["none"]),
+                    ...(!r.lockReason &&
+                    !["worked", "not_worked"].includes(r.decision) &&
+                    r.hasStationDeliveryData &&
+                    ((r.punches > 0 && !r.ownDeliveries) ||
+                      (!r.punches && r.ownDeliveries > 0))
+                      ? ["gaps"]
+                      : []),
+                  ],
+        },
+      },
+      (r) =>
+        `${r.name} ${r.dropxId} ${(r.providerIds || []).join(" ")} ${(r.usages || []).map((u: any) => `${u.providerId} ${u.providerName} ${u.ownerName}`).join(" ")} ${r.stationCode} ${r.date || ""}`
+          .toLowerCase()
+          .includes(query.trim().toLowerCase()),
+    );
+  }, [
+    locations,
+    data,
+    view,
+    dailyUsage,
+    regions,
+    clusters,
+    stations,
+    show,
+    query,
+  ]);
   const scope = new Set(
-    geographic
-      .filter((l) => !stations.length || stations.includes(l.id))
+    locations
+      .filter(
+        (l) =>
+          (!regions.length || regions.includes(l.region || "Unassigned")) &&
+          (!clusters.length ||
+            l.clusterKeys.some((k) => clusters.includes(k))) &&
+          (!stations.length || stations.includes(l.id)),
+      )
       .map((l) => l.id),
   );
-  const scoped = (data?.rows || []).map(currentRow).filter(
-    (r: any) =>
-      scope.has(r.stationId) &&
-      `${r.name} ${r.dropxId} ${r.providerIds.join(" ")} ${r.stationCode} ${r.date}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
+  const statusRows = useMemo(
+    () => reviewFacets.rows.map(currentRow),
+    [reviewFacets],
   );
-  const statusRows = scoped.filter(
-    (r: any) =>
-      show === "all" || (show === "pending" ? pending(r) : !pending(r)),
+  const rows = useMemo(
+    () =>
+      statusRows.filter(
+        (r: any) =>
+          caseType === "all" ||
+          (caseType === "training"
+            ? r.training?.status === "pending"
+            : category(r) === caseType),
+      ),
+    [statusRows, caseType],
   );
-  const rows = statusRows.filter(
-    (r: any) =>
-      caseType === "all" ||
-      (caseType === "training"
-        ? r.training?.status === "pending"
-        : category(r) === caseType),
-  );
-  const groups = [...new Set(rows.map((r: any) => r.workerId))]
-    .map((id) => ({ id, rows: rows.filter((r: any) => r.workerId === id) }))
-    .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name));
-  const bulkScoped = (data?.bulkPeriods || []).map(currentRow).filter(
-    (p: any) =>
-      scope.has(p.stationId) &&
-      `${p.name} ${p.dropxId} ${p.providerIds.join(" ")} ${p.stationCode} ${p.effective_from} ${p.effective_to}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
-  const bulkRows = bulkScoped.filter(
+  const groups = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    for (const r of rows) {
+      const list = grouped.get(r.workerId) || [];
+      list.push(r);
+      grouped.set(r.workerId, list);
+    }
+    return [...grouped]
+      .map(([id, rows]) => ({ id, rows }))
+      .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name));
+  }, [rows]);
+  const bulkScoped = (data?.bulkPeriods || [])
+    .map(currentRow)
+    .filter(
+      (p: any) =>
+        scope.has(p.stationId) &&
+        `${p.name} ${p.dropxId} ${p.providerIds.join(" ")} ${p.stationCode} ${p.effective_from} ${p.effective_to}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+    );
+  const bulkRows = reviewFacets.rows.filter(
     (p: any) =>
       show === "all" || (show === "pending" ? p.needsReview : !p.needsReview),
   );
@@ -220,6 +311,7 @@ export function WorkedIdReview({
     });
   }
   async function open(list: any[]) {
+    setValidatedSignature("");
     setError("");
     setBulkReason("");
     setBulkDecision("worked");
@@ -233,6 +325,8 @@ export function WorkedIdReview({
         enabled:
           canEdit &&
           !r.reviewElsewhere &&
+          !r.lockReason &&
+          r.hasPaySetup &&
           list.filter((x) => x.date === r.date).length === 1 &&
           (!r.training || r.training.status === "cancelled"),
         decision:
@@ -258,6 +352,7 @@ export function WorkedIdReview({
         stations: [...new Set(list.map((r) => r.stationId))].join(","),
         month,
         worker: list[0].workerId,
+        scope: dailyUsage ? "daily" : "exceptions",
       });
     await Promise.all([
       (async () => {
@@ -442,6 +537,9 @@ export function WorkedIdReview({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            scope: dailyUsage ? "daily" : "exceptions",
+            preview:
+              dailyUsage && validatedSignature !== JSON.stringify(selected),
             entries: selected.map((d) => ({
               stationId: d.row.stationId,
               workerId: d.row.workerId,
@@ -456,6 +554,11 @@ export function WorkedIdReview({
         }),
         body = await res.json();
       if (!res.ok) throw Error(body.error);
+      if (body.validated) {
+        setValidatedSignature(JSON.stringify(selected));
+        setAffectedCount(body.affectedCount);
+        return;
+      }
       setNotice(body.message);
       close();
       await load();
@@ -466,7 +569,7 @@ export function WorkedIdReview({
     }
   }
   return (
-    <div className={styles.review}>
+    <div className={`${styles.review} ${dailyUsage ? styles.daily : ""}`}>
       <PeopleOwnershipRefresh paused={saving || drafts.length > 0} />
       <section className={`panel ${styles.filters}`}>
         <FleetMultiSelect
@@ -474,34 +577,36 @@ export function WorkedIdReview({
           label="Regions"
           allLabel="All permitted regions"
           values={regions}
-          options={choices(locations.map((l) => l.region || "Unassigned"))}
-          onChange={(v) => {
-            setRegions(v);
-            setClusters([]);
-            setStations([]);
-          }}
+          options={reviewFacets.options(
+            "region",
+            choices([
+              ...locations.map((l) => l.region || "Unassigned"),
+              ...regions,
+            ]),
+          )}
+          onChange={setRegions}
         />
         <FleetMultiSelect
           alwaysSearch
           label="Cluster / AOM"
           allLabel="All clusters"
           values={clusters}
-          options={managerOptions.filter(option => managerKeys.has(option.value))}
-          onChange={(v) => {
-            setClusters(v);
-            setStations([]);
-          }}
+          options={reviewFacets.options("cluster", managerOptions)}
+          onChange={setClusters}
         />
         <FleetMultiSelect
           alwaysSearch
           label="Stations"
           allLabel="All permitted stations"
           values={stations}
-          options={geographic.map((l) => ({
-            value: l.id,
-            label: `${l.station_code} · ${l.station_name}`,
-            helper: [l.cluster, l.region].filter(Boolean).join(" · "),
-          }))}
+          options={reviewFacets.options(
+            "station",
+            locations.map((l) => ({
+              value: l.id,
+              label: `${l.station_code} · ${l.station_name}`,
+              helper: [l.cluster, l.region].filter(Boolean).join(" · "),
+            })),
+          )}
           onChange={setStations}
         />
         <label>
@@ -523,55 +628,77 @@ export function WorkedIdReview({
         <label>
           Status
           <select value={show} onChange={(e) => setShow(e.target.value)}>
-            <option value="pending">
-              {view === "bulk"
-                ? "Needs period review"
-                : "Needs review / approval"}
-            </option>
-            <option value="reviewed">
-              {view === "bulk" ? "No day-count shortfall" : "Reviewed"}
-            </option>
             <option value="all">All statuses</option>
+            {reviewFacets.options("status", statusOptions).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
         </label>
-        <button
-          className="button secondary"
-          disabled={loading}
-          onClick={() => void load()}
-        >
-          Refresh
-        </button>
+        <div className={styles.filterActions}>
+          <button
+            className="button secondary compact"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            Refresh
+          </button>
+          {(regions.length > 0 ||
+            clusters.length > 0 ||
+            stations.length > 0 ||
+            query ||
+            show !== "all") && (
+            <button
+              className="button secondary compact"
+              onClick={() => {
+                setRegions([]);
+                setClusters([]);
+                setStations([]);
+                setQuery("");
+                setShow("all");
+                setCaseType("all");
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       </section>
-      <details className={styles.scope}>
-        <summary>What is included?</summary>
-        <p>
-          Biometric-punched days with no deliveries recorded on the associate’s
-          own mapped IDs, only for DA, DCD, ODCD and Wish Master with positive
-          fixed salary/MG for that date. Fixed salary plus fuel, kilometres or
-          variable components is included. A missing station report is shown
-          separately. This is a mismatch to investigate, not proof of absence.
-        </p>
-        <p>
-          Sorters, other roles, purely variable pay, and fuel/van rent or ODCD
-          incentives without fixed salary/MG are excluded. Deliveries without
-          biometric attendance are not included. Reviewed days remain in
-          history. Buddy training is restricted to the DropX registration month,
-          at most two days in total, and needs separate CM/AOM approval.
-        </p>
-        <p>
-          Bulk periods compare uploaded attendance totals against distinct
-          delivery dates on mapped IDs. Bulk and biometric attendance are not
-          added together. A period shortfall flags a discrepancy; it does not
-          mark particular dates absent or reduce pay.
-        </p>
-      </details>
+      {!dailyUsage && (
+        <details className={styles.scope}>
+          <summary>What is included?</summary>
+          <p>
+            Biometric-punched days with no deliveries recorded on the
+            associate’s own mapped IDs, only for DA, DCD, ODCD and Wish Master
+            with positive fixed salary/MG for that date. Fixed salary plus fuel,
+            kilometres or variable components is included. A missing station
+            report is shown separately. This is a mismatch to investigate, not
+            proof of absence.
+          </p>
+          <p>
+            Sorters, other roles, purely variable pay, and fuel/van rent or ODCD
+            incentives without fixed salary/MG are excluded. Deliveries without
+            biometric attendance are not included. Reviewed days remain in
+            history. Buddy training is restricted to the DropX registration
+            month, at most two days in total, and needs separate CM/AOM
+            approval.
+          </p>
+          <p>
+            Bulk periods compare uploaded attendance totals against distinct
+            delivery dates on mapped IDs. Bulk and biometric attendance are not
+            added together. A period shortfall flags a discrepancy; it does not
+            mark particular dates absent or reduce pay.
+          </p>
+        </details>
+      )}
       {notice && !current && <p role="status">{notice}</p>}
       {error && !current && (
         <p role="alert" className={styles.error}>
           {error}
         </p>
       )}
-      {view !== "bulk" && (
+      {!dailyUsage && view !== "bulk" && (
         <div className={styles.tabs} aria-label="Review reasons">
           {[
             ["all", "All cases"],
@@ -607,38 +734,46 @@ export function WorkedIdReview({
             <h2>
               {error
                 ? "Cases unavailable"
-                : view === "bulk"
-                  ? `${new Set(bulkRows.map((p: any) => p.workerId)).size} associates · ${bulkRows.length} bulk periods`
-                  : `${groups.length} associates · ${rows.length} day cases`}
+                : loading
+                  ? "Loading daily evidence…"
+                  : dailyUsage
+                    ? "Daily activity"
+                    : view === "bulk"
+                      ? `${new Set(bulkRows.map((p: any) => p.workerId)).size} associates · ${bulkRows.length} bulk periods`
+                      : `${groups.length} associates · ${rows.length} day cases`}
             </h2>
             <p className="subtle">
               {scope.size} permitted stations ·{" "}
               {view === "bulk"
                 ? "Bulk attendance days compared with mapped-ID delivery days"
-                : "Punch found, delivery evidence needs review"}
+                : dailyUsage
+                  ? "ID ownership and actual daily usage · expand for dates"
+                  : "Punch found, delivery evidence needs review"}
             </p>
           </div>
-          <div className={styles.tabs}>
-            <button
-              aria-pressed={view === "associate"}
-              onClick={() => setView("associate")}
-            >
-              Associate view
-            </button>
-            <button
-              aria-pressed={view === "day"}
-              onClick={() => setView("day")}
-            >
-              Day view
-            </button>
-            <button
-              aria-pressed={view === "bulk"}
-              onClick={() => setView("bulk")}
-            >
-              Bulk periods ·{" "}
-              {bulkScoped.filter((p: any) => p.needsReview).length} flagged
-            </button>
-          </div>
+          {!dailyUsage && (
+            <div className={styles.tabs}>
+              <button
+                aria-pressed={view === "associate"}
+                onClick={() => setView("associate")}
+              >
+                Associate view
+              </button>
+              <button
+                aria-pressed={view === "day"}
+                onClick={() => setView("day")}
+              >
+                Day view
+              </button>
+              <button
+                aria-pressed={view === "bulk"}
+                onClick={() => setView("bulk")}
+              >
+                Bulk periods ·{" "}
+                {bulkScoped.filter((p: any) => p.needsReview).length} flagged
+              </button>
+            </div>
+          )}
         </div>
         {loading ? (
           <p className="panel-body">Loading all permitted stations…</p>
@@ -646,6 +781,8 @@ export function WorkedIdReview({
           <p className="panel-body">
             Refresh to load the cases before reviewing.
           </p>
+        ) : dailyUsage ? (
+          <DailyIdUsageTable rows={rows} onReview={(list) => void open(list)} />
         ) : view === "bulk" ? (
           <WorkedIdBulkPeriods periods={bulkRows} month={month} />
         ) : (
@@ -732,7 +869,7 @@ export function WorkedIdReview({
                         <td>
                           <strong>
                             {r.hasStationDeliveryData
-                              ? "0 recorded"
+                              ? `${r.ownDeliveries} recorded`
                               : "Report unavailable"}
                           </strong>
                           <small className={styles.sub}>
@@ -943,6 +1080,7 @@ export function WorkedIdReview({
                           disabled={
                             saving ||
                             !!r.reviewElsewhere ||
+                            !!r.lockReason ||
                             (!canEdit && !r.training?.canApprove)
                           }
                           onChange={(e) =>
@@ -956,12 +1094,18 @@ export function WorkedIdReview({
                       <span>
                         {r.punches} punches ·{" "}
                         {r.hasStationDeliveryData
-                          ? "0 own-ID deliveries"
+                          ? `${r.ownDeliveries} own-ID deliveries`
                           : "report missing"}{" "}
                         · {status(r)}
                       </span>
                     </summary>
                     <div className={styles.dayBody}>
+                      {r.lockReason && (
+                        <p role="alert">
+                          {r.lockReason} View only. Finance must resolve this
+                          before changing the day.
+                        </p>
+                      )}
                       <div className={styles.evidence}>
                         <div>
                           <small>Biometric attendance</small>
@@ -985,7 +1129,7 @@ export function WorkedIdReview({
                           <small>Own mapped ID / deliveries</small>
                           <strong>
                             {r.hasStationDeliveryData
-                              ? "0 recorded"
+                              ? `${r.ownDeliveries} recorded`
                               : "Report unavailable"}
                           </strong>
                           <span>
@@ -1216,6 +1360,7 @@ export function WorkedIdReview({
                               options={daySources(r)
                                 .filter(
                                   (s: any) =>
+                                    !s.lockReason &&
                                     !d.shares.some(
                                       (x) => x.source_shipment_id === s.id,
                                     ),
@@ -1309,39 +1454,41 @@ export function WorkedIdReview({
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {workedIdPaymentMetrics
-                                        .map((k) => (
-                                          <tr key={k}>
-                                            <td>{workedIdPaymentLabels[k]}</td>
-                                            <td>{remaining[k]}</td>
-                                            <td>
-                                              <input
-                                                type="number"
-                                                min={0}
-                                                max={remaining[k]}
-                                                step={1}
-                                                aria-label={`${r.date} ${workedIdPaymentLabels[k]} performed`}
-                                                value={s.quantities[k]}
-                                                disabled={
-                                                  !canEdit ||
-                                                  saving ||
-                                                  s.owner_worked !== true
-                                                }
-                                                onChange={(e) => {
-                                                  updateShare(i, j, {
-                                                    quantities: updateWorkedIdPaymentShare(
-                                                      remaining, s.quantities, k,
+                                      {workedIdPaymentMetrics.map((k) => (
+                                        <tr key={k}>
+                                          <td>{workedIdPaymentLabels[k]}</td>
+                                          <td>{remaining[k]}</td>
+                                          <td>
+                                            <input
+                                              type="number"
+                                              min={0}
+                                              max={remaining[k]}
+                                              step={1}
+                                              aria-label={`${r.date} ${workedIdPaymentLabels[k]} performed`}
+                                              value={s.quantities[k]}
+                                              disabled={
+                                                !canEdit ||
+                                                saving ||
+                                                s.owner_worked !== true
+                                              }
+                                              onChange={(e) => {
+                                                updateShare(i, j, {
+                                                  quantities:
+                                                    updateWorkedIdPaymentShare(
+                                                      remaining,
+                                                      s.quantities,
+                                                      k,
                                                       Number(e.target.value),
                                                     ),
-                                                  });
-                                                }}
-                                              />
-                                            </td>
-                                            <td>
-                                              {remaining[k] - s.quantities[k]}
-                                            </td>
-                                          </tr>
-                                        ))}
+                                                });
+                                              }}
+                                            />
+                                          </td>
+                                          <td>
+                                            {remaining[k] - s.quantities[k]}
+                                          </td>
+                                        </tr>
+                                      ))}
                                     </tbody>
                                   </table>
                                 </div>
@@ -1469,8 +1616,9 @@ export function WorkedIdReview({
                 </p>
               )}
               <span>
-                {selected.length} days selected · Each day is checked before
-                saving
+                {dailyUsage && validatedSignature === JSON.stringify(selected)
+                  ? `Validated · ${selected.length} days · ${affectedCount} associates affected. Both payouts recalculate using their own terms.`
+                  : `${selected.length} days selected · Each day is checked before saving`}
               </span>
               <button
                 className="button"
@@ -1478,8 +1626,11 @@ export function WorkedIdReview({
                 onClick={() => void save()}
               >
                 {saving
-                  ? "Saving and refreshing payouts…"
-                  : `Save ${selected.length} day${selected.length === 1 ? "" : "s"} & update payouts`}
+                  ? "Checking and updating…"
+                  : dailyUsage &&
+                      validatedSignature !== JSON.stringify(selected)
+                    ? "Validate selected changes"
+                    : `Confirm ${selected.length} day${selected.length === 1 ? "" : "s"} & update payouts`}
               </button>
             </footer>
           </section>
