@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Search,RefreshCw,Plus,ChevronDown,ArrowUpRight} from 'lucide-react';
 import {setupMilestones} from '@/lib/da-onboarding-setup';
-import {daNeedsAttention,type DARow} from '@/lib/da-onboarding-registry';
+import {linkedAmazonProfiles,daNeedsAttention,type DARow} from '@/lib/da-onboarding-registry';
 import {Profile} from '@/app/ops-pulse/workforce/amazon-onboarding/profile';
 import {BgcPanel} from '@/app/ops-pulse/workforce/amazon-onboarding/bgc';
 import {FleetMultiSelect} from './fleet-multi-select';
@@ -43,7 +43,7 @@ export function DAOnboardingDesk({stations,initialStation,initialStations,initia
  const allRows=useMemo(()=>result?.rows||[],[result]);
  const rows=useMemo(()=>allRows.filter(r=>inWorkforceQueue(r,queue)),[allRows,queue]);
  const facets=useMemo(()=>daFacets(rows,{query,statuses,origins,verification,attention:attentionOnly,workforce:true}),[rows,query,statuses,origins,verification,attentionOnly]);
- const bgcCount=allRows.filter(r=>r.amazon?.bgc?.checks.some(c=>c.needsResponse)).length;
+ const bgcCount=allRows.filter(r=>linkedAmazonProfiles(r).some(a=>a.bgc?.checks.some(c=>c.needsResponse))).length;
  const filtered=useMemo(()=>filterDA(rows,{query,statuses,origins,verification,attention:attentionOnly,workforce:true}).sort((a,b)=>sort==='station'?a.stationCode.localeCompare(b.stationCode)||a.name.localeCompare(b.name):sort==='status'?workforceStage(a).localeCompare(workforceStage(b))||a.name.localeCompare(b.name):a.name.localeCompare(b.name)),[rows,query,statuses,origins,verification,attentionOnly,sort]);
  const countRows=useMemo(()=>filterDA(allRows,{query,statuses:[],origins,verification,attention:false,workforce:true}),[allRows,query,origins,verification]);
  const shown=filtered.slice((page-1)*25,page*25);
@@ -66,7 +66,7 @@ export function DAOnboardingDesk({stations,initialStation,initialStations,initia
     <div className={styles.multi}><FleetMultiSelect label="Account source" allLabel="All sources" values={origins} options={facets.options('origins',['System invitation','Existing DropX profile'].map(value=>({value,label:value})))} onChange={v=>selectFilter(setOrigins,v)} alwaysSearch/></div>
     <select aria-label="Sort associates" value={sort} onChange={e=>{setSort(e.target.value);setPage(1);}}><option value="name">Name A–Z</option><option value="station">Station</option><option value="status">Status</option></select><button onClick={reset}>Reset</button><button disabled={busy||!!exporting||!filtered.length||!!result?.warnings.length} onClick={()=>void exportRows('xlsx')}>{exporting==='xlsx'?'Preparing…':'Excel'}</button><button disabled={busy||!!exporting||!filtered.length||!!result?.warnings.length} onClick={()=>void exportRows('pdf')}>{exporting==='pdf'?'Preparing…':'PDF'}</button>
    </div>{result?.warnings.length?<small className={styles.exportNote}>Exports are available when every selected source has loaded. Refresh to retry.</small>:null}
-   {canAmazon&&verification.some(v=>['details_needed','candidate_pending','information_needed','review','red'].includes(v))?<BulkBgc key={scopeKey+verification.join(',')+query} station={station} people={filtered.flatMap(r=>r.amazon?[{...r.amazon,stationId:r.stationId}]:[])}/>:null}
+   {canAmazon&&verification.some(v=>['details_needed','candidate_pending','information_needed','review','red'].includes(v))?<BulkBgc key={scopeKey+verification.join(',')+query} station={station} people={filtered.flatMap(r=>linkedAmazonProfiles(r).map(a=>({...a,stationId:r.stationId})))}/>:null}
    <div className={styles.cards}>
    {busy&&!rows.length?<div className={styles.loading} role="status">{[0,1,2].map(i=><div key={i} className={styles.skeleton}/>)}<span>Loading workforce records…</span></div>:shown.map(row=>{const open=expanded===row.key,attention=workforceNeedsAction(row),active=workforceStage(row)==='active';return <article key={row.key} className={`${styles.card} ${open?styles.selected:''}`}>
     <button className={styles.cardSummary} aria-label={`View ${row.name}`} aria-expanded={open} onClick={()=>setExpanded(open?'':row.key)}>

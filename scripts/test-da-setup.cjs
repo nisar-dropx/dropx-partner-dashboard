@@ -18,4 +18,6 @@ assert.equal(view.filterDA([row],filter).length,1);assert.equal(view.filterDA([r
 assert.equal(view.daFacets([row],filter).values('statuses')[0],'ACTIVE');
 const exported=view.daExportRows([row])[0];assert.equal(exported.Status,'active');assert.equal(exported['Rate card'],'pending');
 assert.equal(setup.setupMilestones({...row,setup:undefined}).find(m=>m.id==='mapping').state,'unknown');
+const multi={...row,setup:{mapping:'confirmed',rateCard:'configured'},linkedAmazon:[{providerId:'a1',bgc:{checks:[]}},{providerId:'a2',bgc:{checks:[{needsResponse:true}],address:{state:'candidate_pending'}}}]};
+assert.equal(policy.workforceNeedsAction(multi),true);assert.match(policy.workforceAction(multi),/IDfy/);assert.equal(view.filterDA([multi],{...filter,verification:['details_needed']}).length,1);
 console.log('DropX setup: effective dates, zero rates, exact ownership, station boundaries, active exceptions, filters and exports passed.');

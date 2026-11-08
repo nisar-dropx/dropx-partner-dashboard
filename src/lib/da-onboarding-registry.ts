@@ -32,4 +32,5 @@ export function mergeDARegistry(amazon:AmazonDaPerson[],guided:GuidedDA[],owners
    amazon:a,linkedAmazon:linked,guided:g,owner:o,conflict,status,origin:g?'System invitation':'Existing DropX profile',next:conflict?'Review identity link':status==='ACTIVE'?'Check setup progress':'Complete DropX registration'};
  }).sort((a,b)=>Number(b.conflict)-Number(a.conflict)||a.name.localeCompare(b.name));
 }
+export function linkedAmazonProfiles(row:DARow){return row.linkedAmazon?.length?row.linkedAmazon:row.amazon?[row.amazon]:[];}
 export function daNeedsAttention(row:DARow){return row.conflict||Boolean(row.guided?.syncError)||/behind|blocked|error|failed/i.test(row.amazon?.health||row.guided?.status||'');}
