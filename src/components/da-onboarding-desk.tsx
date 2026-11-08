@@ -1,0 +1,59 @@
+'use client';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import Link from 'next/link';
+import {Search,RefreshCw,Plus,ChevronDown,ArrowUpRight,Users,ShieldCheck,AlertCircle,UserPlus} from 'lucide-react';
+import {daNeedsAttention,type DARow} from '@/lib/da-onboarding-registry';
+import {Profile} from '@/app/ops-pulse/workforce/amazon-onboarding/profile';
+import {AmazonDaDesk} from '@/app/ops-pulse/workforce/amazon-onboarding/view';
+import styles from './da-onboarding-desk.module.css';
+type Station={id:string;code:string;provider:string;supported:boolean};
+type Result={rows:DARow[];warnings:string[];checkedAt:string|null};
+const editor='https://workforce.dropxlogistics.com/delivery-network/amazon-pilot';
+const human=(s:string|null|undefined)=>(s==='ID_NOT_LINKED'?'ID not linked':s||'Awaiting confirmation').replaceAll('_',' ').replace(/([a-z])([A-Z][a-z])/g,'$1 $2');
+const stamp=(s:string)=>new Date(s).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+export function DAOnboardingDesk({stations,initialStation,initialView,canEdit,canAdd,canAmazon}:{stations:Station[];initialStation?:string;initialView?:string;canEdit:boolean;canAdd:boolean;canAmazon:boolean}){
+ const [station,setStation]=useState(stations.some(s=>s.id===initialStation)?initialStation!:stations.find(s=>s.supported)?.id||stations[0]?.id||'');
+ const [result,setResult]=useState<Result|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[revision,setRevision]=useState(0);
+ const [query,setQuery]=useState(''),[filter,setFilter]=useState(initialView==='offboarded'?'closed':initialView==='associates'?'active':'all'),[origin,setOrigin]=useState(''),[expanded,setExpanded]=useState(''),[page,setPage]=useState(1);
+ const [tool,setTool]=useState(['invite','approvals','history','bgc','bgc-pending'].includes(initialView||'')?initialView!:'');
+ const cache=useRef(new Map<string,{data:Result;at:number}>());const selected=stations.find(s=>s.id===station);
+ const archive=filter==='closed',cacheKey=`${station}:${archive}`;
+ function refresh(){cache.current.clear();setRevision(x=>x+1);}
+ useEffect(()=>{const controller=new AbortController();setError('');setResult(null);setExpanded('');setPage(1);
+  if(!selected?.supported){setBusy(false);return;}
+  const saved=cache.current.get(cacheKey);if(saved&&Date.now()-saved.at<60000){setResult(saved.data);setBusy(false);return;}
+  setBusy(true);fetch(`/api/ops-pulse/da-onboarding?station=${encodeURIComponent(station)}&archive=${archive?1:0}`,{signal:controller.signal,cache:'no-store'}).then(async r=>{const data=await r.json();if(!r.ok)throw Error(data.error||'Unable to load onboarding');return data as Result;}).then(data=>{if(!controller.signal.aborted){cache.current.set(cacheKey,{data,at:Date.now()});setResult(data);}}).catch(e=>{if(e.name!=='AbortError')setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setBusy(false);});return()=>controller.abort();
+ },[station,revision,selected?.supported,archive,cacheKey]);
+ const rows=result?.rows||[];
+ const counts={all:rows.filter(r=>!['OFFBOARDED','CLOSED'].includes(r.status.toUpperCase())).length,attention:rows.filter(daNeedsAttention).length,onboarding:rows.filter(r=>!['ACTIVE','INACTIVE','OFFBOARDED','CLOSED'].includes(r.status.toUpperCase())).length,active:rows.filter(r=>r.status.toUpperCase()==='ACTIVE').length,closed:rows.filter(r=>['INACTIVE','OFFBOARDED','CLOSED'].includes(r.status.toUpperCase())).length};
+ const filtered=useMemo(()=>rows.filter(r=>(!origin||r.origin===origin)&&`${r.name} ${r.email||''} ${r.phone||''} ${r.owner?.dropx_id||''} ${r.owner?.provider_employee_id||''} ${r.amazon?.transporterId||r.guided?.driverId||''}`.toLowerCase().includes(query.trim().toLowerCase())&&(filter==='all'&&!['OFFBOARDED','CLOSED'].includes(r.status.toUpperCase())||filter==='attention'&&daNeedsAttention(r)||filter==='active'&&r.status.toUpperCase()==='ACTIVE'||filter==='closed'&&['INACTIVE','OFFBOARDED','CLOSED'].includes(r.status.toUpperCase())||filter==='onboarding'&&!['ACTIVE','INACTIVE','OFFBOARDED','CLOSED'].includes(r.status.toUpperCase()))),[rows,query,filter,origin]);
+ const shown=filtered.slice((page-1)*25,page*25);
+ function changeStation(id:string){setStation(id);setExpanded('');setPage(1);const url=new URL(window.location.href);url.searchParams.delete('tab');url.searchParams.set('station',id);window.history.replaceState(null,'',url);}
+ return <div className={styles.desk}>
+  <header className={styles.heading}><div><small>WORKFORCE</small><h1>{selected?.supported?'Amazon DA onboarding':'DA onboarding'}</h1><p>Every associate, one record—from invitation to active ID.</p></div><div className={styles.headerActions}>{canAmazon?<select aria-label="Onboarding tools" value={tool} onChange={e=>setTool(e.target.value)}><option value="">More actions</option><option value="invite">Invite existing registration</option><option value="bgc-pending">BGC / IDfy follow-up</option><option value="approvals">Approval requests</option><option value="history">Action history</option></select>:null}{canAdd&&selected?.supported?<a className={styles.primary} href={`${editor}?new=1&station=${encodeURIComponent(station)}#arrival`}><Plus size={16}/>Add associate</a>:null}</div></header>
+  <section className={styles.toolbar}><label>Station<select aria-label="Station" value={station} onChange={e=>changeStation(e.target.value)}>{stations.map(s=><option key={s.id} value={s.id}>{s.code} · {s.provider}</option>)}</select></label><span className={styles.provider}>{selected?.provider||'Select station'}</span><p>{selected?.supported?'New associates get a system email. Existing Amazon accounts stay in the same list.':'Choose a supported Amazon station to onboard a DA.'}</p><button onClick={refresh} disabled={busy||!selected?.supported}><RefreshCw size={15} className={busy?styles.spin:''}/>{busy?'Loading':'Refresh'}</button></section>
+  {tool&&canAmazon?<section className={styles.tools}><div><strong>{tool==='invite'?'Existing registrations':tool==='approvals'?'Approval requests':tool.startsWith('bgc')?'BGC / IDfy follow-up':'Action history'}</strong><button onClick={()=>setTool('')}>Back to all associates</button></div><AmazonDaDesk key={`${station}:${tool}`} stations={stations.filter(s=>s.supported)} initialStation={station} initialView={tool} canEdit={canEdit}/></section>:<>
+  <nav className={styles.stats} aria-label="Filter associates">{([['all','Current accounts',Users],['attention','Needs attention',AlertCircle],['onboarding','Onboarding',UserPlus],['active','Active IDs',ShieldCheck]] as const).map(([id,label,Icon])=><button key={id} aria-pressed={filter===id} onClick={()=>{setFilter(id);setPage(1);}}><Icon size={19}/><span>{label}<strong>{busy?'—':counts[id]}</strong></span></button>)}</nav>
+  {error?<div role="alert" className={styles.warning}>{error}<button onClick={refresh}>Retry</button></div>:null}
+  {result?.warnings.map(w=><div key={w} role="status" className={styles.warning}>{w}</div>)}
+  {!selected?.supported?<div className={styles.empty}>Onboarding for this provider is not connected yet. Existing profiles remain in <Link href="/work-force-register">Workforce Register</Link>.</div>:<section className={styles.register} aria-busy={busy}>
+   <div className={styles.filters}><label className={styles.search}><Search size={16}/><input aria-label="Search associates" placeholder="Name, DropX ID, Amazon ID or email" value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}}/></label><select aria-label="Account source" value={origin} onChange={e=>{setOrigin(e.target.value);setPage(1);}}><option value="">All account sources</option>{['System email','Existing Amazon ID','Existing registration'].map(v=><option key={v}>{v}</option>)}</select><button aria-pressed={filter==='closed'} onClick={()=>{setFilter(filter==='closed'?'all':'closed');setPage(1);}}>Inactive / closed</button></div>
+   <div className={styles.cards}>
+   {busy?<div className={styles.loading} role="status">{[0,1,2].map(i=><div key={i} className={styles.skeleton}/>)}<span>Loading Amazon IDs and DropX registrations…</span></div>:shown.map(row=>{const open=expanded===row.key,attention=daNeedsAttention(row),active=row.status.toUpperCase()==='ACTIVE';return <article key={row.key} className={`${styles.card} ${open?styles.selected:''}`}>
+    <button className={styles.cardSummary} aria-label={`View ${row.name}`} aria-expanded={open} onClick={()=>setExpanded(open?'':row.key)}>
+     <span className={styles.person}><span className={styles.avatar}>{row.name.trim().split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span><span><strong>{row.name}</strong><small>{row.amazon?.transporterId||row.guided?.driverId||'Amazon ID not received'}</small><em>{row.origin}</em></span></span>
+     <span className={styles.owner}><small>DROPX OWNER</small><strong className={!row.owner?styles.attention:undefined}>{row.owner?.dropx_id||'Owner not linked'}</strong><span>{row.owner?.full_name||'Review ID mapping'}</span></span>
+     <span className={styles.status}><span className={`${styles.badge} ${active?styles.active:''}`}>{human(row.status)}</span><strong className={attention?styles.attention:undefined}>{human(row.next)}</strong>{row.amazon?.totalSteps&&!active?<span className={styles.progressLine}><progress max={row.amazon.totalSteps} value={row.amazon.completedSteps||0}/><small>{row.amazon.completedSteps} / {row.amazon.totalSteps}</small></span>:null}</span>
+     <span className={styles.expand}>{open?'Close':attention?'Review':active?'Details':'Continue'}<ChevronDown size={16}/></span>
+    </button>
+    {open?<div className={styles.detail}><div className={styles.record}><div><small>Sign-in email</small><strong>{row.email||'Not received'}</strong><span>{row.guided?'System mailbox · '+human(row.guided.inbox_status):'Existing mailbox · managed by the associate'}</span></div><div><small>Contact / IDs</small><strong>{row.phone||'Contact not received'}</strong><span>{row.owner?.provider_employee_id?`Provider ID: ${row.owner.provider_employee_id}`:'Provider ID not linked'}</span></div><div><small>Registration</small><strong>{human(row.guided?.registration||row.owner?.onboarding_status)}</strong><span>{row.guided?.observedAt?`Updated ${stamp(row.guided.observedAt)} IST`:''}</span></div></div>
+   <div className={styles.recordActions}>{row.guided?<a href={`${editor}?candidate=${encodeURIComponent(row.guided.id)}#candidate`}>Registration & inbox<ArrowUpRight size={14}/></a>:null}<Link href={`/provider-id-mapping?mapping=all&q=${encodeURIComponent(row.owner?.provider_employee_id||row.amazon?.transporterId||row.name)}`}>Review ID ownership<ArrowUpRight size={14}/></Link>{row.owner?<Link href={`/work-force-register?section=register&ids=${encodeURIComponent(row.owner.id)}`}>DropX profile<ArrowUpRight size={14}/></Link>:null}</div>
+   {row.guided?<div className={styles.checks}>{[['BGC',row.guided.bgc],['UAN',row.guided.uan],['Learning',row.guided.learning]].map(([label,value])=><span key={label}>{label}<strong>{human(value)}</strong></span>)}</div>:null}
+   {row.amazon&&canAmazon?<Profile station={station} providerId={row.amazon.providerId} initialPerson={row.amazon} canEdit={canEdit} onChanged={refresh}/>:<p>Continue from the registration record. Amazon details appear when the ID is received.</p>}</div>:null}
+   </article>;})}
+   {!busy&&!error&&!shown.length?<div className={styles.empty}>No associates match these filters.</div>:null}
+   </div><footer><span>{filtered.length} associates{result?.checkedAt?` · Amazon updated ${stamp(result.checkedAt)} IST`:''}</span><div><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>Previous</button><span>{page} / {Math.max(1,Math.ceil(filtered.length/25))}</span><button disabled={page*25>=filtered.length} onClick={()=>setPage(p=>p+1)}>Next</button></div></footer>
+  </section>}
+  </>}
+ </div>;
+}
