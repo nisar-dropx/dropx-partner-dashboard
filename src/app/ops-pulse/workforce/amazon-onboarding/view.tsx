@@ -5,10 +5,11 @@ import {Users,UserPlus,UserCheck,UserMinus,History,RefreshCw,Search,ChevronDown,
 import { queueAmazonInvitationFromOpsPulse } from '@/app/field-executive/actions';
 import type { AmazonDaPerson, AmazonDaCommand, AmazonDaList } from '@/lib/amazon-da-desk-types';
 import {Profile,Audit} from './profile';
+import {Approvals} from './approvals';
 import styles from './view.module.css';
 type InviteData={people:Array<{id:string;full_name:string;dropx_id:string|null;email:string|null;onboarding_status:string;inviteBlocked?:string|null}>;requests:Array<{id:string;workforce_id:string;status:string;requested_at:string;error_message:string|null}>};
-type DeskData=Partial<AmazonDaList>&Partial<InviteData>&{commands?:AmazonDaCommand[]};
-const tabs=[['onboarding','Onboarding',UserPlus],['associates','My associates',Users],['offboarded','Offboarded',UserMinus],['invite','Invite',UserCheck],['history','History',History]] as const;
+type DeskData=Partial<AmazonDaList>&Partial<InviteData>&{commands?:AmazonDaCommand[];canApprove?:boolean;moreHistory?:boolean};
+const tabs=[['onboarding','Onboarding',UserPlus],['associates','My associates',Users],['offboarded','Offboarded',UserMinus],['invite','Invite',UserCheck],['approvals','Approvals',UserCheck],['history','History',History]] as const;
 const human=(v:string|null|undefined)=>v?v.replaceAll('_',' ').replace(/([a-z])([A-Z])/g,'$1 $2').toLowerCase().replace(/^\w/,c=>c.toUpperCase()):'';
 const date=(v:string)=>new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true});
 async function api<T>(url:string,signal?:AbortSignal):Promise<T>{const res=await fetch(url,{cache:'no-store',signal});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not load this view.');return data;}
@@ -20,15 +21,16 @@ function Photo({person,station}:{person:AmazonDaPerson;station:string}){
 }
 export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string}){
  const [station,setStation]=useState(stations.some(s=>s.id===initialStation)?initialStation!:stations[0]?.id||'');
+ const [allScope,setAllScope]=useState(initialView==='approvals'||initialView==='history'),[historyPage,setHistoryPage]=useState(0);
  const [view,setView]=useState(initialView);const [query,setQuery]=useState('');const [debouncedQuery,setDebouncedQuery]=useState('');const [statusFilter,setStatusFilter]=useState('');
  const [data,setData]=useState<DeskData>({});const [dataKey,setDataKey]=useState('');const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [expanded,setExpanded]=useState('');
  const [revision,setRevision]=useState(0);const [moreBusy,setMoreBusy]=useState(false);const requestSeq=useRef(0);const force=useRef(false);const cache=useRef(new Map<string,{data:DeskData;at:number}>());
- const isList=['onboarding','associates','offboarded'].includes(view);const key=`${station}:${view}:${isList?debouncedQuery:''}:${statusFilter}`;const current=dataKey===key?data:{};const rows=current.rows||[];
+ const isList=['onboarding','associates','offboarded'].includes(view);const auditView=['history','approvals'].includes(view);const requestStation=auditView&&allScope?'all':station;const key=`${requestStation}:${view}:${isList?debouncedQuery:''}:${statusFilter}:${historyPage}`;const current=dataKey===key?data:{};const rows=current.rows||[];
  useEffect(()=>{const timer=setTimeout(()=>setDebouncedQuery(query.trim()),300);return()=>clearTimeout(timer);},[query]);
- function resetFilters(){setExpanded('');setQuery('');setDebouncedQuery('');setStatusFilter('');}
+ function resetFilters(){setExpanded('');setQuery('');setDebouncedQuery('');setStatusFilter('');setHistoryPage(0);}
  function refresh(){cache.current.clear();force.current=true;setRevision(n=>n+1);}
  function listUrl(offset=0,snapshot=''){
-  const p=new URLSearchParams({station,view});if(isList){p.set('pageSize','24');p.set('offset',String(offset));p.set('query',debouncedQuery);p.set('status',statusFilter);if(snapshot)p.set('snapshot',snapshot);if(force.current)p.set('fresh','1');}return `/api/ops-pulse/amazon-da?${p}`;
+  const p=new URLSearchParams({station:requestStation,view});if(auditView)p.set('offset',String(historyPage*50));if(isList){p.set('pageSize','24');p.set('offset',String(offset));p.set('query',debouncedQuery);p.set('status',statusFilter);if(snapshot)p.set('snapshot',snapshot);if(force.current)p.set('fresh','1');}return `/api/ops-pulse/amazon-da?${p}`;
  }
  useEffect(()=>{
   if(!station)return;const seq=++requestSeq.current;const controller=new AbortController();setError('');setExpanded('');setMoreBusy(false);
@@ -45,8 +47,8 @@ export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialS
  return <section className={styles.desk} aria-busy={busy}>
   {notice?<p role="status" className={styles.next}>{notice}</p>:null}{initialError?<p role="alert" className={styles.error}>{initialError}</p>:null}
   <div className={styles.toolbar}>
-   <label className={styles.station}>Station<select value={station} onChange={e=>{setStation(e.target.value);resetFilters();}} aria-label="Amazon station">{stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
-   <nav className={styles.tabs} aria-label="Amazon associates">{tabs.map(([id,label,Icon])=><button key={id} type="button" aria-pressed={view===id} onClick={()=>{setView(id);resetFilters();}}><Icon size={15} aria-hidden="true"/>{label}</button>)}</nav>
+   <label className={styles.station}>Station<select value={auditView&&allScope?'all':station} onChange={e=>{setAllScope(e.target.value==='all');if(e.target.value!=='all')setStation(e.target.value);resetFilters();}} aria-label="Amazon station">{auditView?<option value="all">All my stations</option>:null}{stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
+   <nav className={styles.tabs} aria-label="Amazon associates">{tabs.map(([id,label,Icon])=><button key={id} type="button" aria-pressed={view===id} onClick={()=>{setView(id);setAllScope(id==='approvals'||id==='history');resetFilters();}}><Icon size={15} aria-hidden="true"/>{label}</button>)}</nav>
    <button className={styles.refresh} type="button" onClick={refresh} disabled={busy||!station} aria-label="Refresh Amazon data" title="Refresh Amazon data"><RefreshCw size={16} className={busy?styles.spin:''}/><span>Refresh</span></button>
   </div>
   {!stations.length?<p className={styles.empty}>No Amazon stations are in your access.</p>:null}
@@ -76,6 +78,6 @@ export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialS
    {invite.filter(p=>`${p.full_name} ${p.dropx_id||''}`.toLowerCase().includes(query.toLowerCase())).map(p=>{const latest=current.requests?.find(r=>r.workforce_id===p.id);return <div className={styles.inviteRow} key={p.id}><div><strong>{p.full_name}</strong><small>{p.dropx_id||'DropX ID pending'} · {p.email||'Email missing'}</small>{p.inviteBlocked?<small>{p.inviteBlocked}</small>:latest?<small className={latest.status==='failed'?styles.danger:''}>{human(latest.status)} · {date(latest.requested_at)} {latest.error_message||''}</small>:null}</div>
     <form action={queueAmazonInvitationFromOpsPulse}><input type="hidden" name="workforce_id" value={p.id}/><input type="hidden" name="amazon_desk_return" value="1"/><input type="hidden" name="amazon_desk_station" value={station}/><button disabled={!canEdit||!p.email||!!p.inviteBlocked||['sent','processing','pending','queued'].includes(latest?.status||'')} type="submit">{p.inviteBlocked?'Unavailable':latest?.status==='sent'?'Sent':latest?.status==='failed'?'Retry invite':'Send invite'}</button></form></div>;})}
    {!busy&&!invite.length?<p className={styles.empty}>No registered associates at this station.</p>:null}
-  </div>:busy?<p className={styles.meta}>Loading history…</p>:<Audit commands={current.commands||[]} station={station} canEdit={canEdit} onChecked={refresh}/>}
+  </div>:busy?<p className={styles.meta}>Loading requests…</p>:<>{view==='approvals'?<Approvals commands={current.commands||[]} stations={stations} canApprove={!!current.canApprove} onChanged={refresh}/>:<Audit commands={current.commands||[]} station={station} canEdit={canEdit} onChecked={refresh}/>}<div className={styles.reviewButtons}>{historyPage>0?<button onClick={()=>setHistoryPage(n=>n-1)}>Previous</button>:null}{current.moreHistory?<button onClick={()=>setHistoryPage(n=>n+1)}>Next 50</button>:null}</div></>}
  </section>;
 }

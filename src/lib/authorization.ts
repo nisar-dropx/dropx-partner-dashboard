@@ -442,6 +442,8 @@ export function hasPermission(
 ) {
   if (pageCode === "request_tracker") return (action === "access" || action === "view") && isCompanyOwner(authorization);
   if (authorization.readOnly && (action === "add" || action === "edit")) return false;
+  // This desk is granted by current location access, without widening the Workforce register.
+  if (pageCode === 'ops_amazon_da') return Boolean(authorization.companyId && (authorization.hasAllLocationAccess || authorization.locationScopeIds.length)) && (!(action==='edit'||action==='add') || !authorization.isPreview);
   if (isCompanyOwner(authorization)) return true;
   if (inheritsMappingSummaryAccess(authorization.permissions, pageCode, action)) return true;
   const permission = authorization.permissions[pageCode] ?? noPermission;

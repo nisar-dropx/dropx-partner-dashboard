@@ -204,3 +204,12 @@ assert.equal(realPreview.selectedPreviewUserId("different-viewer"), null);
 previewCookie = "owner:malformed";
 assert.equal(realPreview.selectedPreviewUserId("owner"), null);
 console.log("Live helper tests passed: eligible viewer, portal membership, scoped candidates and actor-bound cookie.");
+
+// Amazon DA desk is location-granted, without granting the broader register.
+const locationDesk={companyId:'company',hasAllLocationAccess:false,locationScopeIds:['station'],permissions:{},roleCode:'LOCATION',isMasterOwner:false};
+assert.equal(auth.hasPermission(locationDesk,'ops_amazon_da','access'),true);
+assert.equal(auth.hasPermission(locationDesk,'ops_amazon_da','edit'),true);
+assert.equal(auth.hasPermission(locationDesk,'delivery_associates','access'),false);
+assert.equal(auth.hasPermission({...locationDesk,locationScopeIds:[]},'ops_amazon_da','access'),false);
+assert.equal(auth.hasPermission({...locationDesk,readOnly:true},'ops_amazon_da','edit'),false);
+assert.equal(auth.hasPermission({...locationDesk,isPreview:true},'ops_amazon_da','edit'),false);

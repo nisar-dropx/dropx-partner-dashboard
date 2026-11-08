@@ -6,6 +6,7 @@ export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
 
 export const opsAccessPageCodes = [
+  'ops_amazon_da',
   'ops_notification_settings',
   "payment_settings",
   "ops_pulse",

@@ -408,6 +408,7 @@ export default async function PaymentApprovalsPage({
       />
 
       <nav className="payment-approval-stage-legend payment-approval-views" aria-label="Approval views">
+          <PendingLink className="button compact secondary" prefetch={false} href="/workforce/amazon-onboarding?view=approvals">Amazon ID approvals</PendingLink>
         <PendingLink className={`button compact ${oversight ? "secondary" : ""}`} aria-current={!oversight ? "page" : undefined} prefetch={false} href="/payments/approvals">Needs my action</PendingLink>
         <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} aria-current={oversight ? "page" : undefined} prefetch={false} href="/payments/approvals?view=scope" title="Review the reporting team within my permitted locations">Entire team</PendingLink>
       </nav>
