@@ -21,7 +21,8 @@ supplied by the browser. History expands to timestamped request/result events.
 Unconfirmed outcomes stay locked; Check Amazon result verifies without repeating
 the mutation. Historic direct-Amazon changes cannot identify the original user.
 
-Release: apply only `20261108101331_amazon_da_desk_audit.sql` to the shared project;
+Release: apply `20261108101331_amazon_da_desk_audit.sql` then
+`20261108104050_amazon_da_audit_privileges.sql` individually to the shared project;
 deploy the matching `DROPX-LOGISTICS/workforce-worker` station-desk implementation;
 then release this app. Do not blanket-push migrations. The tables have RLS and no
 anon/authenticated grants. Existing profile/mapping/payroll data is untouched.
