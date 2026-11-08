@@ -1,5 +1,7 @@
 "use client";
 
+import { PaymentRequestFacts } from "@/components/payment-request-facts";
+import type { PaymentRequestFact } from "@/lib/payment-request-facts";
 import { ExternalLink, Eye, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -56,6 +58,7 @@ type ReviewLog = {
   role: string;
 };
 type ReviewDetail = {
+  facts?: PaymentRequestFact[];
   driver?: { reason_label: string; work_date: string; person_name?: string; dropx_id?: string; vehicle_no?: string; workforce_id?: string } | null;
   fuelHistory?: { rows: { provider: string; reference: string; amount: number; litres: number }[]; latestDate: string | null; error?: string } | null;
   vehicle?: { vehicle_no: string } | null;
@@ -272,6 +275,7 @@ export function PaymentApprovalReviewLauncher({
           <div className="payment-review-section-head"><div><h3>Request details</h3><p>Fields and evidence supplied with this request.</p></div><span>{detail ? `${detail.attachmentCount} attachments` : "Loading"}</span></div>
           {detailLoading ? <div className="payment-review-optional-loading" role="status"><span className="inline-spinner" aria-hidden="true" /><div><strong>Loading additional evidence</strong><small>You can approve, return, reject, or open another request now.</small></div></div> : null}
           {detailError ? <div className="message-panel error" role="alert"><strong>Additional evidence unavailable</strong><p>{detailError}</p><button className="button secondary compact" onClick={() => { setDetailError(""); setDetailAttempt((value) => value + 1); }} type="button">Retry details</button></div> : null}
+          <PaymentRequestFacts facts={detail?.facts ?? []} />
           {detail?.replacement ? <div className="message-panel"><strong>{detail.replacement.reason}</strong><p>{detail.replacement.number} · {detail.replacement.model} · Replacement date: {detail.replacement.date}</p></div> : null}
           {detail?.answers.length ? <div className="table-wrap payment-review-answers"><table><tbody>{detail.answers.map((answer) => <tr key={answer.id}><th>{answer.questionText}</th><td>{answer.attachments.length ? <span className="payment-attachment-list">{answer.attachments.map((file) => <span className="payment-attachment-cell" key={file.url}><span>{file.name}</span><button aria-label={`View ${file.name}`} className="icon-button payment-attachment-view" onClick={() => setAttachment(file)} title="View attachment" type="button"><Eye size={16} /></button></span>)}</span> : <span className="payment-review-answer-value">{answer.answerValue || "-"}</span>}</td></tr>)}</tbody></table></div> : detail && !detail.answers.length ? <p className="subtle">No additional fields were supplied.</p> : null}
 
