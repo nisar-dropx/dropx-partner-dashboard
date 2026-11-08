@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { betaUanProgress } from '@/lib/workforce-onboarding-evidence';
 import { AppShell } from '@/components/app-shell';
 import { PageHead } from '@/components/page-head';
 import { requirePagePermission, hasPermission } from '@/lib/authorization';
@@ -28,10 +29,11 @@ export async function WorkforceOnboardingHub({params={}}:{params?:OnboardingHubP
  // Database pagination bounds the source joins. No full-mailbox fetch on page load.
  const candidates=tab==='joiners'?await query.order('created_at',{ascending:false}).range((page-1)*50,page*50):{data:[],error:null};
  const people=(candidates.data||[]).slice(0,50),more=(candidates.data||[]).length>50,ids=people.map(p=>p.id);
- const [snapshots,registrations]=ids.length?await Promise.all([
+ const [snapshots,registrations,uanMail]=ids.length?await Promise.all([
   db.from('workforce_beta_verification_snapshots').select('candidate_id,identity_email,driver_id,operational_status,bgc_status,uan_status,learning_status,lsc_observed_at,idfy_observed_at,sync_error').eq('company_id',company).in('candidate_id',ids),
-  db.from('workforce_amazon_email_pilot_registrations').select('candidate_id,status').eq('company_id',company).in('candidate_id',ids)
- ]):[{data:[],error:null},{data:[],error:null}];
+  db.from('workforce_amazon_email_pilot_registrations').select('candidate_id,status').eq('company_id',company).in('candidate_id',ids),
+  db.from('workforce_amazon_email_pilot_messages').select('id,candidate_id,sender,subject,preview,received_at').eq('company_id',company).in('candidate_id',ids).or('subject.ilike.%uan%,subject.ilike.%shram%').order('received_at',{ascending:false}).limit(1000)
+ ]):[{data:[],error:null},{data:[],error:null},{data:[],error:null}];
  const byId=new Map((snapshots.data||[]).map(s=>[s.candidate_id,s]));
  const regs=new Map((registrations.data||[]).map(r=>[r.candidate_id,r.status]));
  const error=candidates.error||snapshots.error||registrations.error;
@@ -49,9 +51,11 @@ export async function WorkforceOnboardingHub({params={}}:{params?:OnboardingHubP
    {error?<section className="panel"><div className="panel-body" role="alert">Onboarding sources could not be loaded. Refresh to retry; no status has been changed.</div></section>:<section className="panel"><div style={{overflowX:'auto'}}><table className="table"><thead><tr><th>Associate / IDs</th><th>Station</th><th>Current progress</th><th>Source updated</th><th>Next action</th></tr></thead><tbody>
     {people.map(p=>{const observed=byId.get(p.id),matched=observed?.identity_email?.trim().toLowerCase()===p.alias_email.trim().toLowerCase(),s=matched?observed:null;
      const old=s?.lsc_observed_at?Date.now()-Date.parse(s.lsc_observed_at)>30*60000:true;
-     const state=p.closed_at?'Closed':p.duplicate_identity_detected?'Identity review':s?.operational_status?.toUpperCase()==='ACTIVE'?'Amazon active':human(regs.get(p.id)||p.status);
+     const state=p.closed_at?'Closed':s?.operational_status?.toUpperCase()==='ACTIVE'?'Amazon active':human(regs.get(p.id)||p.status);
+     const uan=betaUanProgress(s??null,(uanMail.data||[]).filter(m=>m.candidate_id===p.id));
+     const uanLabel=uanMail.error||(uanMail.data||[]).length>=1000?'Check journey':uan.status==='unknown'?'Awaiting confirmation':human(uan.status);
      return <tr key={p.id}><td><strong>{p.full_name}</strong><div>{p.mobile}</div><small>Driver: {s?.driver_id||'Awaiting source'} · Biometric: {p.biometric_id}</small><details><summary>Amazon sign-in email</summary><span style={{overflowWrap:'anywhere'}}>{p.alias_email}</span><div>Inbox: {human(p.inbox_status)}</div></details></td>
-      <td>{stations.find(x=>x.id===p.station_id)?.station_code||'Closed / former station'}</td><td><strong>{state}</strong><div>Registration: {human(regs.get(p.id))}</div><small>BGC: {human(s?.bgc_status)} · UAN: {human(s?.uan_status)}<br/>Learning: {human(s?.learning_status)}</small></td>
+      <td>{stations.find(x=>x.id===p.station_id)?.station_code||'Closed / former station'}</td><td><strong>{state}</strong>{p.duplicate_identity_detected?<div>Identity review required</div>:null}<div>Registration: {human(regs.get(p.id))}</div><small>BGC: {human(s?.bgc_status)} · UAN: {uanLabel}<br/>Learning: {human(s?.learning_status)}</small></td>
       <td><small>Amazon: {stamp(s?.lsc_observed_at)}<br/>IDfy: {stamp(s?.idfy_observed_at)}</small>{old||s?.sync_error||observed&&!matched?<div role="status">{observed&&!matched?'Identity mismatch — review required':s?.sync_error?'Source sync needs attention':'Awaiting fresh source update'}</div>:null}</td>
       <td><a className="button secondary" href={`${editor}?candidate=${encodeURIComponent(p.id)}#candidate`}>Open journey</a><small style={{display:'block',marginTop:6}}>Registration, inbox, reports and controls</small></td></tr>;
     })}
