@@ -49,6 +49,16 @@ function define(
     definitions[path] = { kind, description, columns, examples, action };
 }
 define(
+  ["/workforce/amazon-onboarding"], "workforce",
+  "Station-scoped Amazon onboarding, current status and recorded user actions.",
+  ["Associate", "Amazon status", "Current step", "Next action"],
+  [
+    ["Alex Rao", "Onboarding", "Invitation", "Accept invitation"],
+    ["Maya Das", "Onboarding", "Background check", "Await verification"],
+    ["Leena Shah", "Active", "Complete", "View profile and history"],
+  ], "View profile",
+);
+define(
   ["/provider-id-mapping/worked-days"],
   "review",
   "Confirm the provider ID used on a biometric day, split shared deliveries, or exclude a not-worked day.",
