@@ -29,7 +29,7 @@ async function context(stationId: string, write=false, all=false) {
   return {auth, companyId:auth.companyId, db:supabaseAdmin,scope};
 }
 function worker<T>(operation:string,body:unknown) {
-  return callWorkforceAmazonWorker<T>(`/api/admin/amazon/station-desk/${operation}`,{method:'POST',body:JSON.stringify(body),...(operation==='milestones'?{signal:AbortSignal.timeout(110_000)}:{})});
+  return callWorkforceAmazonWorker<T>(`/api/admin/amazon/station-desk/${operation}`,{method:'POST',body:JSON.stringify(body),...(['milestones','idfy','idfy-submit','idfy-queue','idfy-reconcile'].includes(operation)?{signal:AbortSignal.timeout(110_000)}:{})});
 }
 export async function GET(request:Request) {
   try {
@@ -65,6 +65,26 @@ export async function GET(request:Request) {
       if(!providerId)throw new DeskError('Select an associate.');
       return reply(await worker('milestones',{companyId,stationId,providerId,fresh:params.get('fresh')==='1'}));
     }
+    if(view==='idfy-history'){
+      if(!providerId)throw new DeskError('Select an associate.');
+      const result=await db.from('amazon_da_idfy_actions').select('id,action,status,actor_name,actor_role,changes,result_message,created_at,updated_at,events:amazon_da_idfy_events(status,message,created_at)').eq('company_id',companyId).eq('station_id',stationId).eq('provider_id',providerId).order('created_at',{ascending:false}).limit(50);
+      if(result.error)throw new DeskError('IDfy history is unavailable.',503);return reply({history:result.data});
+    }
+    if(view==='idfy'){
+      if(!providerId)throw new DeskError('Select an associate.');
+      return reply(await worker('idfy',{companyId,stationId,providerId}));
+    }
+    if(view==='bgc-pending')return reply(await worker('idfy-queue',{companyId,stationId,query:(params.get('query')||'').slice(0,100)}));
+    if(view==='idfy-report'){
+      if(!providerId)throw new DeskError('Select an associate.');
+      const config=workforceAmazonWorkerConfig();if(!config.configured)throw new DeskError('IDfy is not connected.',503);
+      const response=await fetch(`${config.baseUrl}/api/admin/amazon/station-desk/idfy-report`,{method:'POST',headers:{'Content-Type':'application/json','x-admin-key':config.adminKey},body:JSON.stringify({companyId,stationId,providerId}),cache:'no-store',signal:AbortSignal.timeout(110000)});
+      if(!response.ok||!response.headers.get('content-type')?.startsWith('application/pdf'))throw new DeskError('IDfy has not provided a downloadable report. Refresh the BGC status and retry.',503);
+      const profile=response.headers.get('X-IDfy-Profile');if(!profile||!/^\d+$/.test(profile))throw new DeskError('Report identity was not confirmed.',503);
+      const audit=await db.from('amazon_da_idfy_actions').insert({id:crypto.randomUUID(),company_id:companyId,station_id:stationId,provider_id:providerId,idfy_profile_id:profile,action:params.get('download')==='1'?'report_download':'report_view',actor_id:auth.userId,actor_name:auth.fullName||auth.email||'User',actor_role:auth.designationName||auth.roleName||auth.roleCode||'User',status:'downloaded',result_message:'IDfy report prepared for authorized access.'});
+      if(audit.error)throw new DeskError('Could not record report access.',503);
+      return new Response(response.body,{headers:{'Content-Type':'application/pdf','Content-Disposition':`${params.get('download')==='1'?'attachment':'inline'}; filename="IDfy-${profile}.pdf"`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+    }
     if (providerId) return reply(await worker('profile',{companyId,stationId,providerId}));
     if (view === 'invite') {
       const [people,requests] = await Promise.all([
@@ -79,7 +99,7 @@ export async function GET(request:Request) {
       return reply({people:workers.map(p=>({id:p.id,full_name:p.full_name,dropx_id:p.dropx_id,email:p.email,onboarding_status:p.onboarding_status,
         inviteBlocked:!needsClientId(p)?'This profile does not require an invitation.':states.get(p.id)?.current?'Amazon ID already linked.':states.get(p.id)?.known?'Amazon ID exists · review its mapping.':partners.has(p.id)?partners.get(p.id)!.instruction:null})),requests:requests.data});
     }
-    if (!['onboarding','associates','offboarded'].includes(view)) throw new DeskError('Select a valid view.');
+    if (!['onboarding','associates','offboarded','bgc'].includes(view)) throw new DeskError('Select a valid view.');
     return reply(await worker('list',{companyId,stationId,view,
       ...(params.has('pageSize')?{pageSize:24,offset:Math.max(0,Math.floor(Number(params.get('offset'))||0)),
         query:(params.get('query')||'').slice(0,100),status:(params.get('status')||'').slice(0,30),
@@ -93,6 +113,28 @@ export async function POST(request:Request) {
     const body=await request.json() as Record<string,unknown>;
     const stationId=String(body.stationId || '');
     const {auth,companyId,db}=await context(stationId,true);
+    if(body.operation==='idfy-reconcile'){
+      const id=String(body.id||'');if(!deskUuid.test(id))throw new DeskError('Select a response.');
+      const existing=await db.from('amazon_da_idfy_actions').select('id').eq('id',id).eq('company_id',companyId).eq('station_id',stationId).eq('action','response').maybeSingle();
+      if(existing.error||!existing.data)throw new DeskError('Response is outside your access.',403);
+      return reply(await worker('idfy-reconcile',{id}));
+    }
+    if(body.operation==='idfy-submit'){
+      const id=String(body.id||''),providerId=String(body.providerId||''),profileId=String(body.profileId||''),blockId=String(body.blockId||''),version=String(body.version||'');
+      if(!deskUuid.test(id)||!deskProfileId.test(providerId)||!/^\d+$/.test(profileId)||!/^\d+$/.test(blockId)||!/^[a-f0-9]{64}$/.test(version))throw new DeskError('Reload the IDfy response form.');
+      const values=body.values;
+      if(!values||typeof values!=='object'||Array.isArray(values)||JSON.stringify(values).length>50000)throw new DeskError('Invalid response details.');
+      const prior=await db.from('amazon_da_idfy_actions').select('company_id,station_id,provider_id,actor_id,status,result_message').eq('id',id).maybeSingle();
+      if(prior.error)throw new DeskError('Response history unavailable.',503);
+      if(prior.data){if(prior.data.company_id!==companyId||prior.data.station_id!==stationId||prior.data.provider_id!==providerId||prior.data.actor_id!==auth.userId)throw new DeskError('Response reference is not yours.',403);return reply({status:prior.data.status,message:prior.data.result_message});}
+      // Validate identity before reserving a block, preventing forged IDs from blocking another station's response.
+      const source=await worker<{idfy:{profileId:string};forms:Array<{blockId:string;version:string;unsupported:boolean}>}>('idfy',{companyId,stationId,providerId});
+      if(source.idfy.profileId!==profileId||!source.forms.some(f=>f.blockId===blockId&&f.version===version&&!f.unsupported))throw new DeskError('The IDfy request changed. Reload the response form.',409);
+      // Worker rechecks exact Amazon email, current station, IDfy profile and fresh form before sending.
+      const insert=await db.from('amazon_da_idfy_actions').insert({id,company_id:companyId,station_id:stationId,provider_id:providerId,idfy_profile_id:profileId,block_id:blockId,action:'response',actor_id:auth.userId,actor_name:auth.fullName||auth.email||'User',actor_role:auth.designationName||auth.roleName||auth.roleCode||'User',form_version:version,values_submitted:values,status:'queued'});
+      if(insert.error)throw new DeskError(insert.error.code==='23505'?'A response is already awaiting IDfy confirmation. Open History.':'Could not record the response. Nothing was sent.',409);
+      try{return reply(await worker('idfy-submit',{id}));}catch{return reply({status:'unconfirmed',message:'Response recorded. Check History for confirmation; do not submit again.'},202);}
+    }
     if(body.operation==='review') {
       if(!deskUuid.test(String(body.id||''))||!['approved','rejected'].includes(String(body.decision)))throw new DeskError('Choose a request and decision.');
       const reviewer=await db.rpc('amazon_da_reviewer_role',{p_company:companyId,p_actor:auth.userId});
