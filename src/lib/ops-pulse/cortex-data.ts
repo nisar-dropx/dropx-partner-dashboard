@@ -11,7 +11,14 @@ import {
   transporterDisplayName,
   type CortexAuth,
 } from "@/lib/ops-pulse/cortex-client";
-import { asLatLng, cleanGpsTrail, type TimedPoint } from "@/lib/ops-pulse/cortex-geo";
+import {
+  asLatLng,
+  cleanGpsTrail,
+  distanceKm,
+  scanQuality,
+  type ScanQuality,
+  type TimedPoint,
+} from "@/lib/ops-pulse/cortex-geo";
 
 export type CortexStationOption = {
   id: string;
@@ -52,8 +59,12 @@ export type CortexBoard = {
     delivered: number;
     remaining: number;
     attempted: number;
+    rejected: number;
+    total: number;
     linked: number;
     unlinked: number;
+    closed: number;
+    onRoad: number;
   };
 };
 
@@ -66,6 +77,8 @@ export type CortexStopTask = {
   actualExecutionTime: number | null;
   lat: number | null;
   lng: number | null;
+  scanDistanceM: number | null;
+  scanQuality: ScanQuality;
 };
 
 export type CortexStop = {
@@ -105,6 +118,27 @@ export type CortexRouteDetail = {
   movementStart: number | null;
   movementEnd: number | null;
 };
+
+export type CortexGpsTrailResult = Pick<
+  CortexRouteDetail,
+  "gpsTrail" | "gpsTrailError" | "movementStart" | "movementEnd"
+>;
+
+function emptyMetrics(): CortexBoard["metrics"] {
+  return {
+    routes: 0,
+    drivers: 0,
+    delivered: 0,
+    remaining: 0,
+    attempted: 0,
+    rejected: 0,
+    total: 0,
+    linked: 0,
+    unlinked: 0,
+    closed: 0,
+    onRoad: 0,
+  };
+}
 
 async function loadWorkforceSessionCookie(): Promise<string | null> {
   if (!supabaseAdmin) return null;
@@ -286,7 +320,7 @@ export async function loadCortexBoard(input: {
       sessionOk: false,
       sessionError: authResult.error,
       routes: [],
-      metrics: { routes: 0, drivers: 0, delivered: 0, remaining: 0, attempted: 0, linked: 0, unlinked: 0 },
+      metrics: emptyMetrics(),
     };
   }
 
@@ -303,7 +337,7 @@ export async function loadCortexBoard(input: {
       sessionError:
         "Amazon rejected the itinerary request. Refresh the shared workforce cookie and try again.",
       routes: [],
-      metrics: { routes: 0, drivers: 0, delivered: 0, remaining: 0, attempted: 0, linked: 0, unlinked: 0 },
+      metrics: emptyMetrics(),
     };
   }
 
@@ -351,8 +385,12 @@ export async function loadCortexBoard(input: {
     delivered: routes.reduce((s, r) => s + r.delivered, 0),
     remaining: routes.reduce((s, r) => s + r.remaining, 0),
     attempted: routes.reduce((s, r) => s + r.attempted, 0),
+    rejected: routes.reduce((s, r) => s + r.rejected, 0),
+    total: routes.reduce((s, r) => s + r.total, 0),
     linked: routes.filter((r) => r.workforceId).length,
     unlinked: routes.filter((r) => !r.workforceId).length,
+    closed: routes.filter((r) => r.driverSessionEnded || r.executionStatus === "COMPLETE").length,
+    onRoad: routes.filter((r) => !r.driverSessionEnded && r.remaining > 0).length,
   };
 
   return {
@@ -372,6 +410,7 @@ export async function loadCortexRouteDetail(input: {
   stationId: string;
   date: string;
   itineraryId: string;
+  includeGpsTrail?: boolean;
 }): Promise<CortexRouteDetail> {
   const stations = await loadCortexStations(
     input.companyId,
@@ -417,6 +456,8 @@ export async function loadCortexRouteDetail(input: {
     const tasks: CortexStopTask[] = (stop.tasks || []).map((task: any) => {
       const geo = task.executionGeocode;
       const taskPoint = asLatLng(geo?.latitude, geo?.longitude);
+      const scanDistanceM =
+        stopPoint && taskPoint ? Math.round(distanceKm(stopPoint, taskPoint) * 1000) : null;
       if (taskPoint) actualPath.push(taskPoint);
       return {
         taskId: String(task.taskId || ""),
@@ -427,6 +468,8 @@ export async function loadCortexRouteDetail(input: {
         actualExecutionTime: asEpochMs(task.actualExecutionTime),
         lat: taskPoint?.[0] ?? null,
         lng: taskPoint?.[1] ?? null,
+        scanDistanceM,
+        scanQuality: scanQuality(scanDistanceM),
       };
     });
     if (stopPoint) plannedPath.push(stopPoint);
@@ -444,7 +487,7 @@ export async function loadCortexRouteDetail(input: {
 
   let gpsTrail: TimedPoint[] = [];
   let gpsTrailError: string | null = null;
-  if (transporterId) {
+  if (input.includeGpsTrail !== false && transporterId) {
     try {
       const gpsRes = await fetchCortexGpsTrail(
         authResult.auth,
@@ -467,7 +510,7 @@ export async function loadCortexRouteDetail(input: {
       gpsTrailError =
         error instanceof Error ? error.message : "Could not load Amazon GPS trail.";
     }
-  } else {
+  } else if (input.includeGpsTrail !== false) {
     gpsTrailError = "Itinerary has no transporter id for GPS trail lookup.";
   }
 
@@ -492,4 +535,58 @@ export async function loadCortexRouteDetail(input: {
     movementStart: gpsTrail[0]?.time ?? null,
     movementEnd: gpsTrail.at(-1)?.time ?? null,
   };
+}
+
+export async function loadCortexGpsTrail(input: {
+  companyId: string;
+  locationScopeIds: string[];
+  hasAllLocationAccess: boolean;
+  stationId: string;
+  date: string;
+  itineraryId: string;
+  transporterId: string;
+}): Promise<CortexGpsTrailResult> {
+  const stations = await loadCortexStations(
+    input.companyId,
+    input.locationScopeIds,
+    input.hasAllLocationAccess,
+  );
+  const station = stations.find((s) => s.id === input.stationId);
+  if (!station) throw new Error("Station is outside your approved locations.");
+  if (!input.transporterId) throw new Error("Itinerary has no transporter id for GPS trail lookup.");
+
+  const authResult = await resolveCortexAuth();
+  if (!authResult.ok) throw new Error(authResult.error);
+  try {
+    const gpsRes = await fetchCortexGpsTrail(
+      authResult.auth,
+      input.transporterId,
+      input.itineraryId,
+      station.serviceAreaId,
+      input.date,
+    );
+    if (gpsRes.expired) throw new Error("Amazon session expired while loading the GPS trail.");
+    if (!Array.isArray(gpsRes.data?.transporterLocations)) {
+      throw new Error("Amazon returned no GPS trail for this itinerary.");
+    }
+    const gpsTrail = cleanGpsTrail(
+      gpsRes.data.transporterLocations,
+      input.transporterId,
+      input.date,
+    );
+    if (!gpsTrail.length) throw new Error("GPS trail had no usable locations for this day.");
+    return {
+      gpsTrail: gpsTrail.map((p) => ({ lat: p.point[0], lng: p.point[1], time: p.time })),
+      gpsTrailError: null,
+      movementStart: gpsTrail[0]?.time ?? null,
+      movementEnd: gpsTrail.at(-1)?.time ?? null,
+    };
+  } catch (error) {
+    return {
+      gpsTrail: [],
+      gpsTrailError: error instanceof Error ? error.message : "Could not load Amazon GPS trail.",
+      movementStart: null,
+      movementEnd: null,
+    };
+  }
 }

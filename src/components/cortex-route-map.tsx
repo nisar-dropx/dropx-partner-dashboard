@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Flame,
   LocateFixed,
   Minus,
   Pause,
   Play,
   Plus,
+  Route,
   RotateCcw,
 } from "lucide-react";
 import type { CortexGpsPoint, CortexStop } from "@/lib/ops-pulse/cortex-data";
@@ -83,6 +85,7 @@ export function CortexRouteMap({
   actualPath,
   gpsTrail,
   gpsTrailError,
+  gpsLoading = false,
   stops,
   movementStart,
   movementEnd,
@@ -91,6 +94,7 @@ export function CortexRouteMap({
   actualPath: Point[];
   gpsTrail: CortexGpsPoint[];
   gpsTrailError: string | null;
+  gpsLoading?: boolean;
   stops: CortexStop[];
   movementStart: number | null;
   movementEnd: number | null;
@@ -102,6 +106,8 @@ export function CortexRouteMap({
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(30);
   const [playhead, setPlayhead] = useState<number | null>(null);
+  const [showTrace, setShowTrace] = useState(true);
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   const trace = useMemo(() => toTimed(gpsTrail), [gpsTrail]);
   const startMs = movementStart ?? trace[0]?.time ?? null;
@@ -165,6 +171,10 @@ export function CortexRouteMap({
 
   const gpsSegments = useMemo(() => trailSegments(activeTrail), [activeTrail]);
   const fullGpsSegments = useMemo(() => trailSegments(trace), [trace]);
+  const heatPoints = useMemo(() => {
+    const every = Math.max(1, Math.ceil(trace.length / 180));
+    return trace.filter((_, index) => index % every === 0);
+  }, [trace]);
 
   const driverPoint = useMemo(() => {
     if (!trace.length || playhead == null) return null;
@@ -288,7 +298,7 @@ export function CortexRouteMap({
       <div className={styles.mapEmpty} role="status">
         <strong>No map coordinates</strong>
         <span>
-          {gpsTrailError ||
+          {gpsLoading ? "Loading planned stops and Driver Trace…" : gpsTrailError ||
             "This itinerary has no GPS trail or stop locations to plot."}
         </span>
       </div>
@@ -375,20 +385,22 @@ export function CortexRouteMap({
               : "Scan locations only"}
           </span>
         </div>
-        <div className={styles.mapButtons}>
-          <button type="button" onClick={() => zoomBy(1)} aria-label="Zoom in" title="Zoom in">
-            <Plus size={14} />
-          </button>
-          <button type="button" onClick={() => zoomBy(-1)} aria-label="Zoom out" title="Zoom out">
-            <Minus size={14} />
-          </button>
-          <button type="button" onClick={() => setCamera(null)} aria-label="Fit route" title="Fit route">
-            <LocateFixed size={14} />
-          </button>
+        <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+          <div className={styles.mapLayers}>
+            <button type="button" className={showTrace ? styles.mapLayerActive : undefined} aria-pressed={showTrace} onClick={() => setShowTrace((value) => !value)} title="Show or hide Driver Trace"><Route size={13} /> Trace</button>
+            <button type="button" className={showHeatmap ? styles.mapLayerActive : undefined} aria-pressed={showHeatmap} onClick={() => setShowHeatmap((value) => !value)} title="Show GPS density heatmap"><Flame size={13} /> Heatmap</button>
+          </div>
+          <div className={styles.mapButtons}>
+            <button type="button" onClick={() => zoomBy(1)} aria-label="Zoom in" title="Zoom in"><Plus size={14} /></button>
+            <button type="button" onClick={() => zoomBy(-1)} aria-label="Zoom out" title="Zoom out"><Minus size={14} /></button>
+            <button type="button" onClick={() => setCamera(null)} aria-label="Fit route" title="Fit route"><LocateFixed size={14} /></button>
+          </div>
         </div>
       </div>
 
-      {gpsTrailError && !trace.length ? (
+      {gpsLoading ? <div className={styles.mapNotice} role="status">Route ready. Loading Driver Trace in the background…</div> : null}
+
+      {!gpsLoading && gpsTrailError && !trace.length ? (
         <div className={styles.mapNotice} role="status">
           {gpsTrailError} Showing planned / scan locations instead.
         </div>
@@ -455,6 +467,14 @@ export function CortexRouteMap({
           onLostPointerCapture={finish}
         >
           <title>GPS trail, planned stops and driver playback</title>
+          <defs>
+            <radialGradient id="cortex-heat" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.58" />
+              <stop offset="36%" stopColor="#f59e0b" stopOpacity="0.38" />
+              <stop offset="72%" stopColor="#22c55e" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+            </radialGradient>
+          </defs>
           {tiles.map((tile) => (
             <image
               key={`${zoom}/${tile.x}/${tile.y}`}
@@ -466,15 +486,22 @@ export function CortexRouteMap({
             />
           ))}
 
+          {showHeatmap
+            ? heatPoints.map((item, index) => {
+                const point = screen(item.point);
+                return <circle key={`heat-${index}`} cx={point.x} cy={point.y} r={24} fill="url(#cortex-heat)" />;
+              })
+            : null}
+
           {/* Full GPS as faint ghost so the remaining day path is visible while playing */}
-          {playing || (playhead != null && startMs != null && playhead > startMs)
+          {showTrace && (playing || (playhead != null && startMs != null && playhead > startMs))
             ? drawSegments(fullGpsSegments, "ghost")
             : null}
 
           {planned.length > 1 ? drawSegments([planned], "planned") : null}
 
           {/* Prefer dense GPS road trail; fall back to scan-to-scan if trail missing */}
-          {gpsSegments.length
+          {showTrace && gpsSegments.length
             ? drawSegments(gpsSegments, "gps")
             : scanPath.length > 1
               ? drawSegments([scanPath], "gps")
@@ -531,7 +558,7 @@ export function CortexRouteMap({
             );
           })}
 
-          {driverPoint ? (
+          {showTrace && driverPoint ? (
             <g aria-label="Driver position">
               <circle
                 cx={screen(driverPoint).x}
@@ -552,7 +579,7 @@ export function CortexRouteMap({
         </svg>
       </div>
 
-      {trace.length && startMs != null && endMs != null ? (
+      {showTrace && trace.length && startMs != null && endMs != null ? (
         <div className={styles.playback} aria-label="Driver movement playback">
           <div className={styles.playbackControls}>
             <button

@@ -6,6 +6,7 @@ import {
   completionPct,
   isValidGeo,
   pointAtTime,
+  scanQuality,
   trailSegments,
   trailUpTo,
 } from "./cortex-geo.ts";
@@ -13,6 +14,13 @@ import {
 test("isValidGeo accepts India-range coordinates", () => {
   assert.equal(isValidGeo(28.6139, 77.209), true);
   assert.equal(isValidGeo(8.5241, 76.9366), true);
+});
+
+test("scanQuality applies the 50 metre good/bad rule", () => {
+  assert.equal(scanQuality(null), "unavailable");
+  assert.equal(scanQuality(0), "good");
+  assert.equal(scanQuality(50), "good");
+  assert.equal(scanQuality(51), "bad");
 });
 
 test("isValidGeo rejects missing, infinite, and out-of-range values", () => {

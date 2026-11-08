@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 const AMAZON = "https://logistics.amazon.in";
 const UA =
@@ -6,6 +6,9 @@ const UA =
 
 export type CortexSession = { sessionKey: string; sessionId: string };
 export type CortexAuth = { cookie: string; session: CortexSession };
+
+const SESSION_TTL_MS = 2 * 60 * 1000;
+const sessionCache = new Map<string, { value: CortexSession; expiresAt: number }>();
 
 function indiaToday() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -46,6 +49,11 @@ function signCortex(
 }
 
 export async function readCortexSession(cookie: string): Promise<CortexSession | "expired"> {
+  const cacheKey = createHash("sha256").update(cookie).digest("hex");
+  const cached = sessionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) sessionCache.delete(cacheKey);
+
   const res = await fetch(`${AMAZON}/operations/execution/itineraries?navMenuVariant=external`, {
     redirect: "manual",
     headers: {
@@ -65,7 +73,9 @@ export async function readCortexSession(cookie: string): Promise<CortexSession |
     const parsed = JSON.parse(html.slice(start, end + 1));
     const session = parsed.hmacSession;
     if (!session?.enabled || !session.sessionKey || !session.sessionId) return "expired";
-    return { sessionKey: session.sessionKey, sessionId: session.sessionId };
+    const value = { sessionKey: session.sessionKey, sessionId: session.sessionId };
+    sessionCache.set(cacheKey, { value, expiresAt: Date.now() + SESSION_TTL_MS });
+    return value;
   } catch {
     return "expired";
   }

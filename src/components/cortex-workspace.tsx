@@ -1,18 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ListTree, MapPinned, PackageSearch, Route as RouteIcon } from "lucide-react";
+import { ArrowLeft, Check, Copy, Filter, MapPinned, PackageSearch, Search } from "lucide-react";
 import type {
   CortexBoard,
+  CortexGpsTrailResult,
   CortexRouteDetail,
   CortexRouteRow,
   CortexStationOption,
+  CortexStopTask,
 } from "@/lib/ops-pulse/cortex-data";
 import { completionPct } from "@/lib/ops-pulse/cortex-geo";
 import { CortexRouteMap } from "./cortex-route-map";
 import styles from "./cortex-workspace.module.css";
 
-type DetailView = "map" | "detail";
+type RouteFilter = "all" | "on-road" | "closed" | "review";
+type TaskFilter = "all" | "remaining" | "failed" | "bad";
+type ListMode = "routes" | "drivers";
 
 function statusBadge(row: CortexRouteRow) {
   if (row.driverSessionEnded || row.executionStatus === "COMPLETE") {
@@ -32,6 +36,36 @@ function formatTime(epoch: number | null) {
   });
 }
 
+function taskMatches(task: CortexStopTask, filter: TaskFilter) {
+  const state = String(task.taskState || "").toUpperCase();
+  if (filter === "all") return true;
+  if (filter === "bad") return task.scanQuality === "bad";
+  if (filter === "failed") return /FAIL|ATTEMPT|UNDELIVER|REJECT/.test(state);
+  return !/DELIVERED|COMPLETED|SUCCESS|PICKED_UP/.test(state);
+}
+
+function mergeDetail(body: CortexRouteDetail, row: CortexRouteRow): CortexRouteDetail {
+  const delivered = Number(body.delivered) || row.delivered || 0;
+  const attempted = Number(body.attempted) || row.attempted || 0;
+  const remaining = Number(body.remaining) || row.remaining || 0;
+  return {
+    ...body,
+    name: row.workforceName || row.amazonName,
+    phone: row.phone,
+    delivered,
+    attempted,
+    remaining,
+    total: Number(body.total) || row.total || delivered + attempted + remaining,
+    plannedPath: Array.isArray(body.plannedPath) ? body.plannedPath : [],
+    actualPath: Array.isArray(body.actualPath) ? body.actualPath : [],
+    gpsTrail: Array.isArray(body.gpsTrail) ? body.gpsTrail : [],
+    gpsTrailError: body.gpsTrailError || null,
+    movementStart: body.movementStart ?? null,
+    movementEnd: body.movementEnd ?? null,
+    stops: Array.isArray(body.stops) ? body.stops : [],
+  };
+}
+
 export function CortexWorkspace({
   stations,
   board,
@@ -42,411 +76,287 @@ export function CortexWorkspace({
   initialQuery?: string;
 }) {
   const [query, setQuery] = useState(initialQuery);
+  const [stopQuery, setStopQuery] = useState("");
+  const [listMode, setListMode] = useState<ListMode>("drivers");
+  const [routeFilter, setRouteFilter] = useState<RouteFilter>("all");
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
+  const [hideCompleted, setHideCompleted] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CortexRouteDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [trailLoading, setTrailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
-  const [detailView, setDetailView] = useState<DetailView>("detail");
   const requestSeq = useRef(0);
+  const detailCache = useRef(new Map<string, CortexRouteDetail>());
+  const trailCache = useRef(new Map<string, CortexGpsTrailResult>());
+  const autoOpenedBoard = useRef("");
 
   const filtered = useMemo(() => {
     const rows = board?.routes || [];
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.amazonName, r.workforceName, r.dropxId, r.transporterId, r.routeCode, r.itineraryId]
+    return rows.filter((row) => {
+      if (routeFilter === "on-road" && (row.driverSessionEnded || row.remaining <= 0)) return false;
+      if (routeFilter === "closed" && !row.driverSessionEnded && row.executionStatus !== "COMPLETE") return false;
+      if (routeFilter === "review" && row.workforceId && row.attempted <= 0) return false;
+      if (!q) return true;
+      return [row.amazonName, row.workforceName, row.dropxId, row.transporterId, row.routeCode, row.itineraryId]
         .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q)),
-    );
-  }, [board?.routes, query]);
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [board?.routes, query, routeFilter]);
+
+  const selected = useMemo(
+    () => board?.routes.find((row) => row.itineraryId === selectedId) || null,
+    [board?.routes, selectedId],
+  );
 
   useEffect(() => {
     setSelectedId(null);
     setDetail(null);
     setDetailError("");
     setDetailLoading(false);
+    setTrailLoading(false);
+    setRouteFilter("all");
+    setTaskFilter("all");
+    setStopQuery("");
     requestSeq.current += 1;
   }, [board?.station.id, board?.date]);
+
+  useEffect(() => {
+    if (!board?.routes.length || selectedId) return;
+    const key = `${board.station.id}:${board.date}`;
+    if (autoOpenedBoard.current === key) return;
+    autoOpenedBoard.current = key;
+    void openRoute(board.routes[0]);
+    // Auto-open once per board selection; openRoute is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board?.station.id, board?.date, board?.routes.length, selectedId]);
+
+  async function fetchTrail(row: CortexRouteRow, seq: number, base: CortexRouteDetail) {
+    if (!board) return;
+    const key = `${board.station.id}:${board.date}:${row.itineraryId}:trail`;
+    const cached = trailCache.current.get(key);
+    if (cached) {
+      setDetail({ ...base, ...cached });
+      return;
+    }
+    setTrailLoading(true);
+    try {
+      const params = new URLSearchParams({
+        stationId: board.station.id,
+        date: board.date,
+        itineraryId: row.itineraryId,
+        transporterId: row.transporterId,
+        view: "trail",
+      });
+      const response = await fetch(`/api/ops-pulse/performance/cortex?${params}`);
+      const body = await response.json().catch(() => ({}));
+      if (seq !== requestSeq.current) return;
+      if (!response.ok) throw new Error(body.error || "Could not load Driver Trace.");
+      const trail: CortexGpsTrailResult = {
+        gpsTrail: Array.isArray(body.gpsTrail) ? body.gpsTrail : [],
+        gpsTrailError: body.gpsTrailError || null,
+        movementStart: body.movementStart ?? null,
+        movementEnd: body.movementEnd ?? null,
+      };
+      trailCache.current.set(key, trail);
+      setDetail((current) => (current?.itineraryId === base.itineraryId ? { ...current, ...trail } : current));
+    } catch (error) {
+      if (seq !== requestSeq.current) return;
+      setDetail((current) =>
+        current?.itineraryId === base.itineraryId
+          ? { ...current, gpsTrailError: error instanceof Error ? error.message : "Could not load Driver Trace." }
+          : current,
+      );
+    } finally {
+      if (seq === requestSeq.current) setTrailLoading(false);
+    }
+  }
 
   async function openRoute(row: CortexRouteRow) {
     if (!board) return;
     const seq = ++requestSeq.current;
+    const key = `${board.station.id}:${board.date}:${row.itineraryId}`;
     setSelectedId(row.itineraryId);
-    setDetail(null);
     setDetailError("");
+    setTaskFilter("all");
+    setStopQuery("");
+    const cached = detailCache.current.get(key);
+    if (cached) {
+      setDetail(cached);
+      setDetailLoading(false);
+      void fetchTrail(row, seq, cached);
+      return;
+    }
+
+    setDetail(null);
     setDetailLoading(true);
     try {
       const params = new URLSearchParams({
         stationId: board.station.id,
         date: board.date,
         itineraryId: row.itineraryId,
+        view: "detail",
       });
-      const res = await fetch(`/api/ops-pulse/performance/cortex?${params}`, {
-        cache: "no-store",
-      });
-      const body = await res.json().catch(() => ({}));
+      const response = await fetch(`/api/ops-pulse/performance/cortex?${params}`);
+      const body = await response.json().catch(() => ({}));
       if (seq !== requestSeq.current) return;
-      if (!res.ok) throw new Error(body.error || "Could not load route detail.");
-      if (!body || typeof body !== "object" || !Array.isArray(body.stops)) {
-        throw new Error("Route detail response was incomplete.");
-      }
-      const delivered = Number(body.delivered) || row.delivered || 0;
-      const attempted = Number(body.attempted) || row.attempted || 0;
-      const remaining = Number(body.remaining) || row.remaining || 0;
-      const total =
-        Number(body.total) ||
-        row.total ||
-        delivered + attempted + remaining;
-      setDetail({
-        ...body,
-        name: row.workforceName || row.amazonName,
-        phone: row.phone,
-        delivered,
-        attempted,
-        remaining,
-        total,
-        plannedPath: Array.isArray(body.plannedPath) ? body.plannedPath : [],
-        actualPath: Array.isArray(body.actualPath) ? body.actualPath : [],
-        gpsTrail: Array.isArray(body.gpsTrail) ? body.gpsTrail : [],
-        gpsTrailError: body.gpsTrailError || null,
-        movementStart: body.movementStart ?? null,
-        movementEnd: body.movementEnd ?? null,
-        stops: body.stops,
-      });
-      setDetailView("detail");
-    } catch (e) {
+      if (!response.ok) throw new Error(body.error || "Could not load route detail.");
+      if (!body || typeof body !== "object" || !Array.isArray(body.stops)) throw new Error("Route detail response was incomplete.");
+      const next = mergeDetail(body, row);
+      detailCache.current.set(key, next);
+      setDetail(next);
+      setDetailLoading(false);
+      void fetchTrail(row, seq, next);
+    } catch (error) {
       if (seq !== requestSeq.current) return;
-      setDetailError(e instanceof Error ? e.message : "Could not load route detail.");
-    } finally {
-      if (seq === requestSeq.current) setDetailLoading(false);
+      setDetailError(error instanceof Error ? error.message : "Could not load route detail.");
+      setDetailLoading(false);
     }
   }
 
-  const selected = filtered.find((r) => r.itineraryId === selectedId) || null;
-  const m = board?.metrics;
+  const visibleStops = useMemo(() => {
+    if (!detail) return [];
+    const q = stopQuery.trim().toLowerCase();
+    return detail.stops
+      .map((stop) => ({
+        ...stop,
+        tasks: stop.tasks.filter((task) => {
+          if (!taskMatches(task, taskFilter)) return false;
+          if (hideCompleted && /DELIVERED|COMPLETED|SUCCESS|PICKED_UP/.test(String(task.taskState || "").toUpperCase())) return false;
+          if (!q) return true;
+          return [stop.address, stop.city, task.scannableId, task.orderId, task.taskState]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(q));
+        }),
+      }))
+      .filter((stop) => stop.tasks.length || (!q && taskFilter === "all" && !hideCompleted));
+  }, [detail, hideCompleted, stopQuery, taskFilter]);
+
+  const scanSummary = useMemo(() => {
+    const tasks = detail?.stops.flatMap((stop) => stop.tasks) || [];
+    return {
+      good: tasks.filter((task) => task.scanQuality === "good").length,
+      bad: tasks.filter((task) => task.scanQuality === "bad").length,
+      unavailable: tasks.filter((task) => task.scanQuality === "unavailable").length,
+    };
+  }, [detail]);
+
+  const metrics = board?.metrics;
+  const deliveredPct = metrics?.total ? Math.round((metrics.delivered / metrics.total) * 100) : 0;
+  const attemptSuccess = metrics && metrics.delivered + metrics.attempted
+    ? Math.round((metrics.delivered / (metrics.delivered + metrics.attempted)) * 100)
+    : 0;
 
   return (
     <div className={styles.workspace}>
       <form className={styles.filters} method="get" aria-label="Cortex filters">
-        <label>
-          Station
-          <select name="station" defaultValue={board?.station.id || stations[0]?.id || ""} required>
-            {stations.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code} · {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Day
-          <input
-            type="date"
-            name="date"
-            defaultValue={board?.date}
-            max={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())}
-            required
-          />
-        </label>
-        <label className={styles.search}>
-          Search DA / ID / route
-          <input
-            type="search"
-            name="q"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Name, DropX ID, Amazon ID, route code"
-          />
-        </label>
-        <div className={styles.actions}>
-          <button className="button compact" type="submit">
-            Apply
-          </button>
-        </div>
+        <label>Station<select name="station" defaultValue={board?.station.id || stations[0]?.id || ""} required>{stations.map((station) => <option key={station.id} value={station.id}>{station.code} · {station.name}</option>)}</select></label>
+        <label>Day<input type="date" name="date" defaultValue={board?.date} max={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())} required /></label>
+        <label className={styles.search}>{selected ? "Search tracking ID, order or address" : "Search driver, ID or route"}<span className={styles.searchInput}><Search size={15} aria-hidden /><input type="search" name={selected ? undefined : "q"} value={selected ? stopQuery : query} onChange={(event) => selected ? setStopQuery(event.target.value) : setQuery(event.target.value)} placeholder={selected ? "Tracking ID, order ID or address" : "Name, DropX ID, Amazon ID or route"} /></span></label>
+        <div className={styles.actions}><button className="button compact" type="submit">Apply</button></div>
       </form>
 
-      {board && !board.sessionOk ? (
-        <div className={styles.alert} role="alert">
-          <strong>Cortex session unavailable</strong>
-          {board.sessionError}
-        </div>
+      {board && !board.sessionOk ? <div className={styles.alert} role="alert"><strong>Cortex session unavailable</strong>{board.sessionError}</div> : null}
+
+      {metrics ? (
+        <section className={styles.overview} aria-label="Cortex live summary">
+          <article className={styles.summaryGroup}>
+            <header>DA / route status</header>
+            <div className={styles.summaryStats}>
+              <button type="button" onClick={() => setRouteFilter("all")}><strong>{metrics.drivers}</strong><span>Total</span></button>
+              <button type="button" onClick={() => setRouteFilter("on-road")}><strong>{metrics.onRoad}</strong><span>On road</span></button>
+              <button type="button" onClick={() => setRouteFilter("closed")}><strong>{metrics.closed}</strong><span>Closed</span></button>
+              <button type="button" onClick={() => setRouteFilter("review")}><strong>{metrics.unlinked}</strong><span>Needs review</span></button>
+            </div>
+          </article>
+          <article className={styles.summaryGroup}>
+            <header>Execution progress</header>
+            <div className={styles.rings}>
+              <div className={styles.ring} style={{ "--progress": `${deliveredPct * 3.6}deg` } as React.CSSProperties}><strong>{deliveredPct}%</strong><span>Delivered</span></div>
+              <div className={styles.ring} style={{ "--progress": `${attemptSuccess * 3.6}deg` } as React.CSSProperties}><strong>{attemptSuccess}%</strong><span>Attempt success</span></div>
+            </div>
+          </article>
+          <article className={`${styles.summaryGroup} ${styles.packageSummary}`}>
+            <header>Package status</header>
+            <div className={styles.summaryStats}>
+              <span><strong>{metrics.total}</strong><small>Assigned</small></span>
+              <span><strong>{metrics.delivered}</strong><small>Delivered</small></span>
+              <span><strong>{metrics.remaining}</strong><small>Remaining</small></span>
+              <span><strong>{metrics.attempted}</strong><small>Delivery failed</small></span>
+              <span><strong>{metrics.rejected}</strong><small>Rejected</small></span>
+            </div>
+          </article>
+        </section>
       ) : null}
 
-      {m ? (
-        <div className={styles.metrics}>
-          <article>
-            <span>Routes today</span>
-            <strong>{m.routes}</strong>
-            <small>
-              {m.drivers} driver{m.drivers === 1 ? "" : "s"} on this station
-            </small>
-          </article>
-          <article>
-            <span>Delivered</span>
-            <strong>{m.delivered}</strong>
-            <small>Packages completed</small>
-          </article>
-          <article>
-            <span>Remaining</span>
-            <strong>{m.remaining}</strong>
-            <small>Still on route</small>
-          </article>
-          <article>
-            <span>Attempted</span>
-            <strong>{m.attempted}</strong>
-            <small>Tried, not delivered</small>
-          </article>
-          <article>
-            <span>Linked to DropX</span>
-            <strong>{m.linked}</strong>
-            <small>Mapped workforce IDs</small>
-          </article>
-          <article>
-            <span>Unlinked</span>
-            <strong>{m.unlinked}</strong>
-            <small>Amazon ID only</small>
-          </article>
-        </div>
-      ) : null}
+      <div className={styles.routeTabs} role="tablist" aria-label="Cortex views"><button type="button" role="tab" aria-selected={listMode === "routes"} onClick={() => { setListMode("routes"); setSelectedId(null); setDetail(null); requestSeq.current += 1; }}>Routes</button><button type="button" role="tab" aria-selected={listMode === "drivers"} onClick={() => { setListMode("drivers"); setSelectedId(null); setDetail(null); requestSeq.current += 1; }}>DAs / DPs</button>{board ? <span>{board.station.code} · {board.date}</span> : null}</div>
 
       <div className={styles.layout}>
-        <section className={styles.panel} aria-label="Driver routes">
-          <header className={styles.panelHead}>
-            <div>
-              <h2>Drivers & routes</h2>
-              <p>
-                {board
-                  ? `${filtered.length} of ${board.routes.length} routes · ${board.station.code} · ${board.date}`
-                  : "Select a station and day"}
-              </p>
-            </div>
-            <RouteIcon size={18} aria-hidden color="#94a3b8" />
-          </header>
-          <div className={styles.list}>
-            {filtered.map((row) => {
-              const badge = statusBadge(row);
-              const active = row.itineraryId === selectedId;
-              return (
-                <button
-                  key={row.itineraryId}
-                  type="button"
-                  className={`${styles.routeCard} ${active ? styles.routeCardActive : ""}`}
-                  onClick={() => openRoute(row)}
-                  aria-pressed={active}
-                >
-                  <div className={styles.routeTop}>
-                    <div>
-                      <strong>{row.workforceName || row.amazonName}</strong>
-                      <small>
-                        {row.routeCode ? `Route ${row.routeCode}` : "Route pending"}
-                        {row.phone ? ` · ${row.phone}` : ""}
-                      </small>
-                    </div>
-                    <span className={`${styles.badge} ${badge.className}`}>{badge.label}</span>
-                  </div>
-                  <div className={styles.pkgRow}>
-                    <span>
-                      Delivered <b>{row.delivered}</b>
-                    </span>
-                    <span>
-                      Remaining <b>{row.remaining}</b>
-                    </span>
-                    <span>
-                      Attempted <b>{row.attempted}</b>
-                    </span>
-                    <span>
-                      Total <b>{row.total}</b>
-                    </span>
-                  </div>
-                  <div className={styles.ids}>
-                    {row.dropxId ? <code>{row.dropxId}</code> : <code>Not linked</code>}
-                    <code title="Amazon transporter">{row.transporterId.slice(0, 12)}…</code>
-                  </div>
-                </button>
-              );
-            })}
-            {!filtered.length ? (
-              <div className={styles.listEmpty}>
-                <PackageSearch size={28} aria-hidden style={{ margin: "0 auto 10px", opacity: 0.45 }} />
-                <strong>No routes match</strong>
-                <span>
-                  {board?.sessionOk
-                    ? "Try another search, day, or station in your approved locations."
-                    : "Cortex could not load routes for this selection."}
-                </span>
+        <aside className={styles.rail} aria-label="Driver and stop inspector">
+          {!selected ? (
+            <>
+              <div className={styles.railToolbar}><strong>{filtered.length} {listMode === "routes" ? "routes" : "drivers"}</strong><label><Filter size={14} aria-hidden /><select value={routeFilter} onChange={(event) => setRouteFilter(event.target.value as RouteFilter)}><option value="all">All routes</option><option value="on-road">On road</option><option value="closed">Closed</option><option value="review">Needs review</option></select></label></div>
+              <div className={styles.list}>
+                {filtered.map((row) => {
+                  const badge = statusBadge(row);
+                  const progress = completionPct(row.delivered, row.attempted, row.remaining, row.total);
+                  return (
+                    <button key={row.itineraryId} type="button" className={styles.routeCard} onClick={() => openRoute(row)}>
+                      <div className={styles.routeTop}><div><strong>{listMode === "routes" ? row.routeCode || row.itineraryId : row.workforceName || row.amazonName}</strong><small>{listMode === "routes" ? `${row.workforceName || row.amazonName}${row.phone ? ` · ${row.phone}` : ""}` : `${row.routeCode ? `Route ${row.routeCode}` : "Route pending"}${row.phone ? ` · ${row.phone}` : ""}`}</small></div><span className={`${styles.badge} ${badge.className}`}>{badge.label}</span></div>
+                      <div className={styles.routeProgress}><span style={{ width: `${progress}%` }} /></div>
+                      <div className={styles.pkgRow}><span><b>{row.delivered}</b> delivered</span><span><b>{row.remaining}</b> remaining</span><span><b>{row.attempted}</b> failed</span><span><b>{row.total}</b> total</span></div>
+                      <div className={styles.ids}>{row.dropxId ? <code>{row.dropxId}</code> : <code>Not linked</code>}<code title="Amazon transporter ID">{row.transporterId.slice(0, 15)}…</code></div>
+                    </button>
+                  );
+                })}
+                {!filtered.length ? <div className={styles.listEmpty}><PackageSearch size={28} aria-hidden /><strong>No routes match</strong><span>Try another filter, search, day or station.</span></div> : null}
               </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section className={styles.panel} aria-label="Route inspector">
-          <header className={styles.panelHead}>
-            <div>
-              <h2>{detailView === "map" ? "Route map" : "Route detail"}</h2>
-              <p>
-                {selected
-                  ? `${selected.workforceName || selected.amazonName} · ${
-                      detailView === "map" ? "planned & scan path" : "stops & packages"
-                    }`
-                  : "Select a driver to inspect the route"}
-              </p>
-            </div>
-            <div className={styles.viewToggle} role="group" aria-label="Route panel view">
-              <button
-                type="button"
-                className={detailView === "detail" ? styles.viewToggleActive : undefined}
-                aria-pressed={detailView === "detail"}
-                onClick={() => setDetailView("detail")}
-                title="Route detail"
-              >
-                <ListTree size={15} aria-hidden />
-                <span>Route detail</span>
-              </button>
-              <button
-                type="button"
-                className={detailView === "map" ? styles.viewToggleActive : undefined}
-                aria-pressed={detailView === "map"}
-                onClick={() => setDetailView("map")}
-                title="Map view"
-              >
-                <MapPinned size={15} aria-hidden />
-                <span>Map</span>
-              </button>
-            </div>
-          </header>
-
-          {!selectedId ? (
-            <div className={styles.detailEmpty}>
-              <strong>Pick a route</strong>
-              <span>
-                Open any driver on the left, then switch between the map and stop-by-stop route
-                detail without leaving OpsPulse.
-              </span>
-            </div>
-          ) : null}
-
-          {detailLoading ? <p className={styles.loading}>Loading route from Cortex…</p> : null}
-          {detailError ? (
-            <div className={styles.alert} role="alert" style={{ margin: 16 }}>
-              <strong>Detail unavailable</strong>
-              {detailError}
-            </div>
-          ) : null}
-
-          {detail && !detailLoading ? (
-            <div className={styles.detailBody}>
-              <div className={styles.detailMeta}>
-                <div>
-                  <span>Associate</span>
-                  <strong>{detail.name}</strong>
-                </div>
-                <div>
-                  <span>Route code</span>
-                  <strong>{detail.routeCode || "—"}</strong>
-                </div>
-                <div>
-                  <span>Status</span>
-                  <strong>
-                    {detail.driverSessionEnded ? "Session closed" : detail.executionStatus || "Open"}
-                  </strong>
-                </div>
-                <div>
-                  <span>Stops</span>
-                  <strong>{detail.stops.length}</strong>
-                </div>
+            </>
+          ) : (
+            <>
+              <div className={styles.driverHeader}>
+                <button type="button" onClick={() => { setSelectedId(null); setDetail(null); requestSeq.current += 1; }} aria-label="Back to all drivers"><ArrowLeft size={17} /></button>
+                <div><strong>{selected.workforceName || selected.amazonName}</strong><span>{selected.routeCode ? `Route ${selected.routeCode}` : "Route"}{selected.phone ? ` · ${selected.phone}` : ""}</span></div>
+                <span className={`${styles.badge} ${statusBadge(selected).className}`}>{statusBadge(selected).label}</span>
               </div>
-
-              <div className={styles.progress}>
-                <div className={styles.progressTrack}>
-                  <div
-                    className={styles.progressFill}
-                    style={{
-                      width: `${completionPct(
-                        detail.delivered,
-                        detail.attempted,
-                        detail.remaining,
-                        detail.total,
-                      )}%`,
-                    }}
-                  />
-                </div>
-                <div className={styles.progressLegend}>
-                  <span>
-                    Delivered <b>{detail.delivered}</b>
-                  </span>
-                  <span>
-                    Remaining <b>{detail.remaining}</b>
-                  </span>
-                  <span>
-                    Attempted <b>{detail.attempted}</b>
-                  </span>
-                  <span>
-                    {completionPct(
-                      detail.delivered,
-                      detail.attempted,
-                      detail.remaining,
-                      detail.total,
-                    )}
-                    % complete
-                  </span>
-                </div>
-              </div>
-
-              {detailView === "map" ? (
-                <CortexRouteMap
-                  plannedPath={detail.plannedPath}
-                  actualPath={detail.actualPath}
-                  gpsTrail={detail.gpsTrail || []}
-                  gpsTrailError={detail.gpsTrailError || null}
-                  stops={detail.stops}
-                  movementStart={detail.movementStart}
-                  movementEnd={detail.movementEnd}
-                />
-              ) : (
+              <div className={styles.driverStats}><span><strong>{selected.delivered}</strong>Delivered</span><span><strong>{selected.remaining}</strong>Remaining</span><span><strong>{selected.attempted}</strong>Failed</span><span><strong>{selected.total}</strong>Total</span></div>
+              {detail ? <div className={styles.scanSummary}><span><b>{scanSummary.good}</b> Good scan ≤50 m</span><span className={scanSummary.bad ? styles.hasBadScans : undefined}><b>{scanSummary.bad}</b> Bad scan &gt;50 m</span><span><b>{scanSummary.unavailable}</b> No scan location</span></div> : null}
+              <div className={styles.stopToolbar}><select value={taskFilter} onChange={(event) => setTaskFilter(event.target.value as TaskFilter)} aria-label="Filter route tasks"><option value="all">All stops</option><option value="remaining">Remaining</option><option value="failed">Delivery failed</option><option value="bad">Bad scans</option></select><label><input type="checkbox" checked={hideCompleted} onChange={(event) => setHideCompleted(event.target.checked)} /> Hide completed</label></div>
+              {detailLoading ? <div className={styles.railLoading}><span /><span /><span /></div> : null}
+              {detailError ? <div className={styles.alert}><strong>Route unavailable</strong>{detailError}</div> : null}
+              {detail ? (
                 <div className={styles.stops}>
-                  {detail.stops.map((stop) => (
+                  {visibleStops.map((stop) => (
                     <article key={`${stop.sequence}-${stop.address}`} className={styles.stop}>
-                      <div className={styles.stopHead}>
-                        <strong>
-                          Stop {stop.sequence}
-                          {stop.type ? ` · ${stop.type}` : ""}
-                        </strong>
-                        <span>
-                          {stop.tasks.length} task{stop.tasks.length === 1 ? "" : "s"}
-                        </span>
-                      </div>
-                      <div className={styles.stopAddress}>
-                        {stop.address}
-                        {stop.city ? `, ${stop.city}` : ""}
-                      </div>
-                      {stop.tasks.length ? (
-                        <ul className={styles.stopTasks}>
-                          {stop.tasks.map((task) => (
-                            <li
-                              key={task.taskId || `${task.scannableId}-${task.actualExecutionTime}`}
-                            >
-                              <span>
-                                {task.taskType || "Task"}
-                                {task.taskState ? ` · ${task.taskState}` : ""}
-                                {task.scannableId ? ` · ${task.scannableId}` : ""}
-                              </span>
-                              <span>{formatTime(task.actualExecutionTime)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      <div className={styles.stopHead}><strong>Stop {stop.sequence}{stop.type ? ` · ${stop.type}` : ""}</strong><span>{stop.tasks.length} task{stop.tasks.length === 1 ? "" : "s"}</span></div>
+                      <div className={styles.stopAddress}>{stop.address}{stop.city ? `, ${stop.city}` : ""}</div>
+                      <ul className={styles.stopTasks}>
+                        {stop.tasks.map((task) => (
+                          <li key={task.taskId || `${task.scannableId}-${task.actualExecutionTime}`}>
+                            <div><span className={styles.taskTitle}>{task.taskType || "Task"} · {task.taskState || "Pending"}</span><span className={styles.taskId}>{task.scannableId || task.orderId || "Tracking ID unavailable"}</span><span className={`${styles.scanBadge} ${task.scanQuality === "good" ? styles.scanGood : task.scanQuality === "bad" ? styles.scanReview : styles.scanUnknown}`}>{task.scanDistanceM == null ? "No scan location" : task.scanQuality === "good" ? `Good scan · ${task.scanDistanceM} m` : `Bad scan · ${task.scanDistanceM} m`}</span></div>
+                            <div className={styles.taskActions}><time>{formatTime(task.actualExecutionTime)}</time>{task.scannableId ? <button type="button" onClick={() => navigator.clipboard.writeText(task.scannableId!)} title="Copy tracking ID"><Copy size={13} /></button> : null}</div>
+                          </li>
+                        ))}
+                      </ul>
                     </article>
                   ))}
-                  {!detail.stops.length ? (
-                    <div className={styles.detailEmpty}>
-                      <strong>No stop detail yet</strong>
-                      <span>Amazon returned the itinerary without stop rows for this day.</span>
-                    </div>
-                  ) : null}
+                  {!visibleStops.length ? <div className={styles.listEmpty}><Check size={26} /><strong>No matching stops</strong><span>Change the stop filter or search.</span></div> : null}
                 </div>
-              )}
-            </div>
-          ) : null}
+              ) : null}
+            </>
+          )}
+        </aside>
+
+        <section className={styles.mapPanel} aria-label="Cortex route map">
+          <header className={styles.mapPanelHead}><div><MapPinned size={17} aria-hidden /><span>{selected ? `${selected.workforceName || selected.amazonName} · live route` : "Select a driver"}</span></div><span>{trailLoading ? "Loading Driver Trace…" : detail?.gpsTrail.length ? `${detail.gpsTrail.length.toLocaleString("en-IN")} GPS points` : "Planned route"}</span></header>
+          {detail ? (
+            <CortexRouteMap plannedPath={detail.plannedPath} actualPath={detail.actualPath} gpsTrail={detail.gpsTrail || []} gpsTrailError={detail.gpsTrailError || null} gpsLoading={trailLoading} stops={detail.stops} movementStart={detail.movementStart} movementEnd={detail.movementEnd} />
+          ) : detailLoading ? (
+            <div className={styles.mapSkeleton}><span /><span /><span /><p>Loading route map…</p></div>
+          ) : (
+            <div className={styles.mapEmptyState}><MapPinned size={34} /><strong>Map-first Cortex</strong><span>Choose a driver to inspect planned stops, scan locations and Driver Trace.</span></div>
+          )}
         </section>
       </div>
     </div>

@@ -17,10 +17,6 @@ export const dynamic = "force-dynamic";
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
-function yesterdayIst(today: string) {
-  return new Date(Date.parse(today + "T00:00:00Z") - 86400000).toISOString().slice(0, 10);
-}
-
 export default async function CortexPerformancePage({
   searchParams = {},
 }: {
@@ -65,7 +61,7 @@ export default async function CortexPerformancePage({
   }
 
   const today = todayKolkata();
-  const defaultDay = yesterdayIst(today);
+  const defaultDay = today;
   const requestedDate = one(searchParams.date) || defaultDay;
   const date =
     /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && requestedDate <= today
@@ -99,7 +95,7 @@ export default async function CortexPerformancePage({
         <PageHead
           eyebrow="Performance"
           title="Cortex"
-            subtitle="Live Amazon routes for your approved stations — drivers, deliveries, map, and stop detail."
+          subtitle="Live Amazon routes for your approved stations — drivers, deliveries, map, and stop detail."
         />
         <PerformanceWorkspaceTabs
           active="cortex"
