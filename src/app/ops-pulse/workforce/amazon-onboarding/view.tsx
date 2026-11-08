@@ -15,13 +15,13 @@ const tabs=[['onboarding','Onboarding',UserPlus],['associates','My associates',U
 const human=(v:string|null|undefined)=>v?v.replaceAll('_',' ').replace(/([a-z])([A-Z])/g,'$1 $2').toLowerCase().replace(/^\w/,c=>c.toUpperCase()):'';
 const date=(v:string)=>new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true});
 async function api<T>(url:string,signal?:AbortSignal):Promise<T>{const res=await fetch(url,{cache:'no-store',signal});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not load this view.');return data;}
-function Photo({person,station}:{person:AmazonDaPerson;station:string}){
+export function Photo({person,station}:{person:AmazonDaPerson;station:string}){
  const [failed,setFailed]=useState(false);
  const src=person.photoUrl||(person.photoTicket?`/api/ops-pulse/amazon-da?${new URLSearchParams({view:'photo',station,profile:person.providerId,ticket:person.photoTicket})}`:null);
  useEffect(()=>setFailed(false),[src]);
  return <span className={styles.avatar}>{src&&!failed?<img src={src} alt="" width={52} height={52} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<span>{person.name.trim().split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span>}</span>;
 }
-export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string}){
+export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError,embedded=false}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string;embedded?:boolean}){
  const [station,setStation]=useState(stations.some(s=>s.id===initialStation)?initialStation!:stations[0]?.id||'');
  const [allScope,setAllScope]=useState(initialView==='approvals'||initialView==='history'),[historyPage,setHistoryPage]=useState(0);
  const [view,setView]=useState(initialView);const [query,setQuery]=useState('');const [debouncedQuery,setDebouncedQuery]=useState('');const [statusFilter,setStatusFilter]=useState('');
@@ -50,7 +50,7 @@ export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialS
   {notice?<p role="status" className={styles.next}>{notice}</p>:null}{initialError?<p role="alert" className={styles.error}>{initialError}</p>:null}
   <div className={styles.toolbar}>
    <label className={styles.station}>Station<select value={auditView&&allScope?'all':station} onChange={e=>{setAllScope(e.target.value==='all');if(e.target.value!=='all')setStation(e.target.value);resetFilters();}} aria-label="Amazon station">{auditView?<option value="all">All my stations</option>:null}{stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
-   <nav className={styles.tabs} aria-label="Amazon associates">{tabs.map(([id,label,Icon])=><button key={id} type="button" aria-pressed={view===id||(id==='bgc-pending'&&isBgc)} onClick={()=>{setView(id);setAllScope(id==='approvals'||id==='history');resetFilters();}}><Icon size={15} aria-hidden="true"/>{label}</button>)}</nav>
+   {!embedded?<nav className={styles.tabs} aria-label="Amazon associates">{tabs.map(([id,label,Icon])=><button key={id} type="button" aria-pressed={view===id||(id==='bgc-pending'&&isBgc)} onClick={()=>{setView(id);setAllScope(id==='approvals'||id==='history');resetFilters();}}><Icon size={15} aria-hidden="true"/>{label}</button>)}</nav>:null}
    <button className={styles.refresh} type="button" onClick={refresh} disabled={busy||!station} aria-label="Refresh Amazon data" title="Refresh Amazon data"><RefreshCw size={16} className={busy?styles.spin:''}/><span>Refresh</span></button>
   </div>
   {!stations.length?<p className={styles.empty}>No Amazon stations are in your access.</p>:null}

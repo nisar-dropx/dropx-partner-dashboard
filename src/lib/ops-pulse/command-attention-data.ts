@@ -16,6 +16,7 @@ import { loadCapacitySnapshot } from './capacity-snapshot';
 import type { CodLocationRow } from './cod';
 import { isManager as isStoreAuditManager } from './store-audits/model';
 import { loadPayoutDisputeAttention } from '@/lib/payout-dispute-attention';
+import {amazonDeskLocation,loadAmazonDaAttention} from '@/lib/amazon-da-attention';
 import { attentionOrder, auditAttention, storeAuditAttention, codAttention, documentAttention, type AttentionDocument, type AttentionItem } from './command-attention';
 
 export function startCommandAttention(a:AuthorizationContext,locations:CodLocationRow[],today:string,mode:string,now=Date.now()) {
