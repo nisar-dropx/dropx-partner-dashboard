@@ -101,7 +101,7 @@ export function SidebarNav({ active, items, prefetch = true, opsDesign = false }
             {item.children.map((child) => child.href ? (
               <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label} prefetch={prefetch}>
                 <span className="nav-label">{child.label}</span>
-                <PaymentNavBadge code={child.hideBadge || (item.code === "people_all" && child.code === "people_all") ? undefined : child.code} />
+                <PaymentNavBadge code={child.hideBadge || (item.code === "people_all" && child.code === "people_all") ? undefined : child.badgeCode ?? child.code} />
               </PendingLink>
             ) : (
               <span className="nav-subitem disabled" key={child.label}>{child.label}</span>
