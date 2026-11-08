@@ -43,8 +43,17 @@ export async function GET(request:Request) {
   const events=await db.from('workforce_status_events').select('id,workforce_id,action,from_status,to_status,reason,created_at')
    .eq('company_id',companyId).order('created_at',{ascending:false}).limit(100);
   if(events.error) throw events.error;
+  const [automation,failures]=await Promise.all([
+   db.from('workforce_lifecycle_automation_settings').select('enabled,updated_at').eq('company_id',companyId).maybeSingle(),
+   db.from('workforce_lifecycle_failures').select('workforce_id,error,attempted_at,attempts').eq('company_id',companyId)
+  ]);
+  if(automation.error) throw automation.error;
+  if(failures.error) throw failures.error;
   const allowedIds=new Set(rows.map(r=>r.id));
-  return reply({rows,stations:stations.map(s=>({id:s.id,code:s.station_code})),canManage,events:(events.data||[]).filter(e=>allowedIds.has(e.workforce_id))});
+  return reply({rows,stations:stations.map(s=>({id:s.id,code:s.station_code})),canManage,
+   automation:{enabled:automation.data?.enabled===true,updatedAt:automation.data?.updated_at||null},
+   failures:(failures.data||[]).filter(e=>allowedIds.has(e.workforce_id)),
+   events:(events.data||[]).filter(e=>allowedIds.has(e.workforce_id))});
  } catch(error){return reply({error:error instanceof Error?error.message:'Unable to load lifecycle.'},error instanceof AccessError?error.status:503);}
 }
 export async function POST(request:Request) {

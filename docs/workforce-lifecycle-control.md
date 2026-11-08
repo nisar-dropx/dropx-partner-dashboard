@@ -22,6 +22,16 @@ Profiles can still have historical `lifecycle_status = onboarding` while registr
 
 `workforce_lifecycle_sweep` processes up to 30 eligible rows per enabled company under an advisory lock. `/api/cron/workforce-lifecycle` runs hourly at minute 10 and requires a configured CRON_SECRET. Company rollout is controlled by `workforce_lifecycle_automation_settings.enabled`; the migration defaults it off. Exceptions are never silently changed. Failed transitions return errors for the run, with no partial profile transition.
 
-## Verification
+## Review-first rollout (8 November 2026)
+
+Automatic execution is **paused** for the company while the Managing Partner reviews the Excel backlog. The scheduler remains implemented; do not enable the setting or run status transitions merely to validate the UI. The first batch had already changed 17 IDs to offboarded and 11 to inactive before the review-first instruction. Those immutable events are explicitly included in the review file.
+
+The lifecycle desk now displays the actual automation setting, a compact flow explanation, closed-station exit candidates and per-person retry failures. The same canonical record drives the shared Workforce registration/status views. Scheduled automation rechecks eligibility before each transition and retains failed attempts with an hourly retry delay, so one failing person cannot indefinitely starve the queue.
+
+ERSE, AWEZ, SBPD and JUGE were explicitly confirmed closed. They are stored as closure evidence rather than inferred from a stale feed. Exit candidates require known mapped delivery history older than 30 days, no newer work on the linked ID at any station, no recent punch, no approved leave, no duplicate mobile and no existing exit case. IDs delivering elsewhere are retained. Missing mappings remain exceptions. Financial attribution continues to use effective-dated station mappings; the cross-station scan is only a protective check, never a new payment attribution.
+
+The biometric canonicalization trigger writes `profile_type = workforce` and clears legacy owner columns. Its owner constraint now accepts that exact shape; all prior ownership shapes and restrictions remain enforced. This resolves the two first-batch failures without changing either associate's status.
+
+Tests additionally cover canonical biometric owners, conflicting owners, cross-station deliveries, inactive profiles with stale pending registration, disabled scheduler, closed-location eligibility and persistent failure retry/recovery.
 
 `pnpm run test:workforce-lifecycle` runs a real PGlite migration twice and verifies response/submission protection, disabled unfinished registrations, missing feed data, recent attendance, identity-preserving rejoin, late-sync protection, stale-version rejection, API-role policy and immutable/private history. Registration policy regression tests also pass.

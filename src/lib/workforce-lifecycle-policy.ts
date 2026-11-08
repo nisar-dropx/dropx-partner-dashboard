@@ -1,4 +1,5 @@
 export const lifecycleQueues: Record<string, string> = {
+ closed_station_exit: "Closed station · exit review",
  registration_overdue: "Registration overdue · 15 days", delivery_inactive: "No deliveries · 30 days",
  registration_exception: "Registration exceptions", delivery_exception: "Delivery exceptions",
  inactive: "Inactive", offboarded: "Offboarded", exit_pending: "Exit pending", current: "Current"
