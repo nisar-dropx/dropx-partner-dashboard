@@ -133,3 +133,38 @@ test("all financial readers use reviewed facts; operational evidence remains raw
     /\.from\("attendance_punches"\)/,
   );
 });
+
+test("combined Delivery splits conserve Amazon/SWA and all four payment categories", async () => {
+  const { workedIdPaymentMetrics, updateWorkedIdPaymentShare } = await import("./worked-id-review.ts");
+  assert.deepEqual(workedIdPaymentMetrics, ["total_delivery", "c_return", "mfn", "mfn_return"]);
+  const source = workedIdCounts({ total_delivery: 37, amazon_delivery: 36, swa_delivery: 1,
+    c_return: 2, mfn: 3, mfn_return: 1, assigned_count: 50,
+    delivery_assigned_count: 42, pickup_assigned_count: 8 });
+  for (let deliveries = 1; deliveries <= 37; deliveries++) {
+    let allocated = workedIdCounts({});
+    for (const [metric, value] of [["total_delivery", deliveries], ["c_return", 1], ["mfn", 2], ["mfn_return", 1]])
+      allocated = updateWorkedIdPaymentShare(source, allocated, metric, value);
+    assert.equal(workedIdShareError(source, allocated, true), null);
+    assert.equal(allocated.amazon_delivery + allocated.swa_delivery, deliveries);
+    const remaining = workedIdCounts(Object.fromEntries(Object.keys(source).map(k => [k, source[k] - allocated[k]])));
+    if (remaining.total_delivery) {
+      let second = workedIdCounts({});
+      for (const metric of workedIdPaymentMetrics)
+        second = updateWorkedIdPaymentShare(remaining, second, metric, remaining[metric]);
+      assert.equal(workedIdShareError(remaining, second, false), null);
+      for (const metric of Object.keys(source)) assert.equal(allocated[metric] + second[metric], source[metric]);
+    }
+  }
+});
+
+test("editing returns preserves a saved delivery split; invalid counts remain blocked", async () => {
+  const { updateWorkedIdPaymentShare } = await import("./worked-id-review.ts");
+  const source = workedIdCounts({ total_delivery: 37, amazon_delivery: 36, swa_delivery: 1, c_return: 2 });
+  const previous = workedIdCounts({ total_delivery: 10, amazon_delivery: 9, swa_delivery: 1 });
+  const revised = updateWorkedIdPaymentShare(source, previous, "c_return", 1);
+  assert.equal(revised.amazon_delivery, 9);
+  assert.equal(revised.swa_delivery, 1);
+  assert.equal(workedIdShareError(source, revised, true), null);
+  for (const value of [-1, 38, 1.5, NaN])
+    assert.match(workedIdShareError(source, updateWorkedIdPaymentShare(source, previous, "total_delivery", value), true), /whole/);
+});

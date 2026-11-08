@@ -7,6 +7,9 @@ import { WorkedIdBulkPeriods } from "./worked-id-bulk-periods";
 import {
   workedIdCounts,
   workedIdMetrics,
+  workedIdPaymentMetrics,
+  workedIdPaymentLabels,
+  updateWorkedIdPaymentShare,
   workedIdShareError,
 } from "@/lib/worked-id-review";
 import styles from "./worked-id-review.module.css";
@@ -32,17 +35,6 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(n);
-const labels: Record<string, string> = {
-  total_delivery: "Deliveries",
-  amazon_delivery: "Amazon deliveries",
-  swa_delivery: "SWA deliveries",
-  c_return: "Customer returns",
-  mfn: "Pickups",
-  mfn_return: "Seller returns",
-  assigned_count: "All assigned shipments",
-  delivery_assigned_count: "Assigned deliveries",
-  pickup_assigned_count: "Assigned pickups",
-};
 const pending = (r: any) =>
   ["pending", "reopened"].includes(r.decision) ||
   r.training?.status === "pending" ||
@@ -1317,15 +1309,10 @@ export function WorkedIdReview({
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {workedIdMetrics
-                                        .filter(
-                                          (k) =>
-                                            k === "total_delivery" ||
-                                            source.counts[k] > 0,
-                                        )
+                                      {workedIdPaymentMetrics
                                         .map((k) => (
                                           <tr key={k}>
-                                            <td>{labels[k]}</td>
+                                            <td>{workedIdPaymentLabels[k]}</td>
                                             <td>{remaining[k]}</td>
                                             <td>
                                               <input
@@ -1333,7 +1320,7 @@ export function WorkedIdReview({
                                                 min={0}
                                                 max={remaining[k]}
                                                 step={1}
-                                                aria-label={`${r.date} ${labels[k]} performed`}
+                                                aria-label={`${r.date} ${workedIdPaymentLabels[k]} performed`}
                                                 value={s.quantities[k]}
                                                 disabled={
                                                   !canEdit ||
@@ -1341,34 +1328,11 @@ export function WorkedIdReview({
                                                   s.owner_worked !== true
                                                 }
                                                 onChange={(e) => {
-                                                  const values = {
-                                                    ...s.quantities,
-                                                    [k]: Number(e.target.value),
-                                                  };
-                                                  if (k === "total_delivery") {
-                                                    if (
-                                                      source.counts
-                                                        .amazon_delivery ===
-                                                        source.counts
-                                                          .total_delivery &&
-                                                      source.counts
-                                                        .swa_delivery === 0
-                                                    )
-                                                      values.amazon_delivery =
-                                                        Number(e.target.value);
-                                                    if (
-                                                      source.counts
-                                                        .swa_delivery ===
-                                                        source.counts
-                                                          .total_delivery &&
-                                                      source.counts
-                                                        .amazon_delivery === 0
-                                                    )
-                                                      values.swa_delivery =
-                                                        Number(e.target.value);
-                                                  }
                                                   updateShare(i, j, {
-                                                    quantities: values,
+                                                    quantities: updateWorkedIdPaymentShare(
+                                                      remaining, s.quantities, k,
+                                                      Number(e.target.value),
+                                                    ),
                                                   });
                                                 }}
                                               />
