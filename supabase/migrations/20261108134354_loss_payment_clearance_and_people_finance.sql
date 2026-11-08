@@ -61,13 +61,12 @@ begin
  if v_code is null then raise exception 'Payroll station is missing or outside the company.'; end if;
  -- Include older unresolved cases and salary allocations regardless of the case's source period.
  select coalesce(jsonb_agg(jsonb_build_object('report',c.report,'month',c.month,'reference',c.case_key,
-  'amount',c.amount,'status',c.lifecycle_status,'present',c.source_present,'sourceStatus',c.source_status,
+  'amount',c.amount,'status',case when not c.source_present then 'source_missing' else c.lifecycle_status end,'present',c.source_present,'sourceStatus',c.source_status,
   'final',c.final_seen_at is not null,'period',c.details->>'period',
   'plan',case when r.case_key is null then null else to_jsonb(r)-array['updated_at','assigned_at'] end,
   'response',case when rw.case_key is null then null else to_jsonb(rw)-array['updated_at'] end,
-  'pending',c.source_present
-    and c.lifecycle_status not in ('recovered','written_off','rejected','not_recoverable')
-    and (not coalesce(public.nl_case_recoverable(p_company,c.report,c.source_status),false) or r.case_key is null or r.is_deleted or r.approval_status is distinct from 'approved'
+  'pending',c.lifecycle_status not in ('recovered','written_off','rejected','not_recoverable')
+    and (not c.source_present or not coalesce(public.nl_case_recoverable(p_company,c.report,c.source_status),false) or r.case_key is null or r.is_deleted or r.approval_status is distinct from 'approved'
       or round(r.source_amount,2)<>round(c.amount,2)
       or public.nl_recovery_source_status_key(r.source_status) is distinct from public.nl_recovery_source_status_key(c.source_status)
       or c.lifecycle_status not in ('recovery_approved_scheduled','recovery_in_progress','exit_balance')
@@ -265,7 +264,7 @@ begin
  submitted_by=excluded.submitted_by,submitted_at=clock_timestamp(),reviewed_by=null,reviewed_at=null,review_note='',version=people_finance_requests.version+1
  returning id into v_id;
  insert into public.people_finance_events(request_id,company_id,actor_id,action,reason,snapshot)
- values(v_id,p_company,p_actor,'submitted','Payroll sent to Finance',jsonb_build_object('hash',v_hash,'people',jsonb_array_length(v_payload)));
+ values(v_id,p_company,p_actor,'submitted','Payroll sent to Finance',jsonb_build_object('hash',v_hash,'people',jsonb_array_length(v_payload),'payroll',v_payload));
  return v_id;
 end $$;
 
