@@ -147,6 +147,7 @@ export function WorkedIdReview({
     ? [
         { value: "gaps", label: "Attendance / delivery gaps" },
         { value: "locked", label: "Payment locked" },
+        { value: "readonly", label: "Non-delivery roles · view only" },
         { value: "reviewed", label: "Work reviewed" },
         { value: "evidence", label: "Daily evidence available" },
         { value: "none", label: "No daily evidence" },
@@ -190,7 +191,8 @@ export function WorkedIdReview({
                   ? "pending"
                   : "reviewed"
                 : [
-                    ...(r.lockReason ? ["locked"] : []),
+                    ...(r.paymentLocked ? ["locked"] : []),
+                    ...(r.canAllocate === false ? ["readonly"] : []),
                     ...(["worked", "not_worked"].includes(r.decision)
                       ? ["reviewed"]
                       : []),

@@ -67,7 +67,7 @@ export function DailyIdUsageTable({
     [new Set(rows.map((r) => r.workerId)).size, "Associates"],
     [rows.filter((r) => r.punches > 0).length, "Days with biometric punch"],
     [rows.filter(mismatch).length, "Attendance / delivery gaps"],
-    [rows.filter((r) => r.lockReason).length, "Payment-locked days"],
+    [rows.filter((r) => r.paymentLocked).length, "Payment-locked days"],
   ];
   return (
     <div className={styles.desk}>
@@ -147,9 +147,9 @@ export function DailyIdUsageTable({
                   {g.rows.filter(mismatch).length} gaps
                 </span>
               )}
-              {g.rows.some((r) => r.lockReason) && (
+              {g.rows.some((r) => r.paymentLocked) && (
                 <span className={styles.status} data-tone="locked">
-                  {g.rows.filter((r) => r.lockReason).length} locked
+                  {g.rows.filter((r) => r.paymentLocked).length} locked
                 </span>
               )}
             </span>
@@ -290,7 +290,7 @@ export function DailyIdUsageTable({
                           </div>
                           {r.lockReason && (
                             <details>
-                              <summary>Why locked?</summary>
+                              <summary>Why read-only?</summary>
                               <small>{r.lockReason}</small>
                             </details>
                           )}
