@@ -1,4 +1,5 @@
 export type AmazonDaPerson = {
+  bgc?:{profileId:string;status:string;reportAvailable:boolean;checkedAt:string;checks:Array<{id:string;label:string;status:string;needsResponse:boolean}>}|null;
   providerId: string; name: string; transporterId: string | null; status: string; photoUrl?:string|null;photoTicket?:string|null;
   email: string | null; phone: string | null; stage: string | null; nextAction: string | null;
   progress: number | null; completedSteps: number | null; totalSteps: number | null;
