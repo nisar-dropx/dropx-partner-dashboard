@@ -13,29 +13,30 @@ import {dashboardDateInputValue} from '@/lib/date-format';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 const reply = (body: unknown, status=200) => NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});
-const columns = 'id,provider_id,associate_name,actor_name,actor_role,action,reason_code,remarks,expected_status,status,result_message,observed_status,created_at,updated_at,events:amazon_da_command_events(status,message,observed_status,created_at)';
+const columns = 'id,station_id,provider_id,associate_name,actor_name,actor_role,action,reason_code,remarks,expected_status,status,result_message,observed_status,created_at,updated_at,reviewed_by,reviewer_name,reviewer_role,reviewed_at,review_decision,review_remarks,events:amazon_da_command_events(status,message,observed_status,created_at)';
 class DeskError extends Error { constructor(message:string, readonly status=400){super(message);} }
-async function context(stationId: string, write=false) {
+async function context(stationId: string, write=false, all=false) {
   const auth = await getAuthorization();
   if (!auth) throw new DeskError('Sign in to continue.',401);
-  if (!auth.companyId || !hasPermission(auth,'delivery_associates',write?'edit':'access') || (write && (auth.readOnly || auth.isPreview)))
+  if (!auth.companyId || !hasPermission(auth,'ops_amazon_da',write?'edit':'access') || (write && (auth.readOnly || auth.isPreview)))
     throw new DeskError('You do not have access to this action.',403);
   if (!supabaseAdmin) throw new DeskError('The onboarding service is unavailable.',503);
-  if (!deskUuid.test(stationId)) throw new DeskError('Choose a station.');
+  if (!(all&&stationId==='all') && !deskUuid.test(stationId)) throw new DeskError('Choose a station.');
   const stations = await loadOpsWorkforceLocations(auth.companyId,auth);
-  if (!stations.some(s=>s.id===stationId && workforceStationPolicy(s).requiresStationEmail))
+  const scope=stations.filter(s=>workforceStationPolicy(s).requiresStationEmail).map(s=>s.id);
+  if (!(all&&stationId==='all') && !scope.includes(stationId))
     throw new DeskError('This station is outside your access.',403);
-  return {auth, companyId:auth.companyId, db:supabaseAdmin};
+  return {auth, companyId:auth.companyId, db:supabaseAdmin,scope};
 }
 function worker<T>(operation:string,body:unknown) {
-  return callWorkforceAmazonWorker<T>(`/api/admin/amazon/station-desk/${operation}`,{method:'POST',body:JSON.stringify(body)});
+  return callWorkforceAmazonWorker<T>(`/api/admin/amazon/station-desk/${operation}`,{method:'POST',body:JSON.stringify(body),...(operation==='milestones'?{signal:AbortSignal.timeout(110_000)}:{})});
 }
 export async function GET(request:Request) {
   try {
     const params = new URL(request.url).searchParams;
     const stationId = params.get('station') || '';
-    const {companyId, db} = await context(stationId);
     const view = params.get('view') || 'onboarding';
+    const {auth,companyId, db,scope} = await context(stationId,false,['approvals','history'].includes(view));
     const providerId = params.get('profile');
     if (providerId && !deskProfileId.test(providerId)) throw new DeskError('Select a valid Amazon profile.');
     if(view==='photo') {
@@ -48,13 +49,21 @@ export async function GET(request:Request) {
       if(!response.ok||!['image/jpeg','image/png','image/webp','image/gif'].includes(type))return new Response(null,{status:404,headers:{'Cache-Control':'private, no-store'}});
       return new Response(response.body,{headers:{'Content-Type':type,'Cache-Control':'private, max-age=300','Vary':'Cookie','X-Content-Type-Options':'nosniff'}});
     }
-    if (view === 'history') {
+    if (view === 'history' || view === 'approvals') {
       // History stays with the original station even after an external Amazon transfer.
-      let query = db.from('amazon_da_commands').select(columns).eq('company_id',companyId).eq('station_id',stationId).order('created_at',{ascending:false}).limit(100);
+      const offset=Math.max(0,Math.min(100000,Math.floor(Number(params.get('offset'))||0)));
+      let query = db.from('amazon_da_commands').select(columns).eq('company_id',companyId).in('station_id',stationId==='all'?(scope.length?scope:['00000000-0000-0000-0000-000000000000']):[stationId]).order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+49);
       if (providerId) query=query.eq('provider_id',providerId);
+      if(view==='approvals' && params.get('all')!=='1')query=query.eq('status','pending_approval');
       const rows=await query;
       if(rows.error) throw rows.error;
-      return reply({commands:rows.data});
+      const reviewer=await db.rpc('amazon_da_reviewer_role',{p_company:companyId,p_actor:auth.userId});
+      if(reviewer.error)throw reviewer.error;
+      return reply({commands:rows.data,canApprove:!!reviewer.data&&!auth.readOnly&&!auth.isPreview,moreHistory:rows.data?.length===50});
+    }
+    if(view==='milestones') {
+      if(!providerId)throw new DeskError('Select an associate.');
+      return reply(await worker('milestones',{companyId,stationId,providerId,fresh:params.get('fresh')==='1'}));
     }
     if (providerId) return reply(await worker('profile',{companyId,stationId,providerId}));
     if (view === 'invite') {
@@ -84,6 +93,32 @@ export async function POST(request:Request) {
     const body=await request.json() as Record<string,unknown>;
     const stationId=String(body.stationId || '');
     const {auth,companyId,db}=await context(stationId,true);
+    if(body.operation==='review') {
+      if(!deskUuid.test(String(body.id||''))||!['approved','rejected'].includes(String(body.decision)))throw new DeskError('Choose a request and decision.');
+      const reviewer=await db.rpc('amazon_da_reviewer_role',{p_company:companyId,p_actor:auth.userId});
+      if(reviewer.error)throw reviewer.error;
+      if(!reviewer.data)throw new DeskError('Finance Manager, National Head or Managing Partner approval is required.',403);
+      const remarks=String(body.remarks||'').trim();
+      if(remarks.length<3||remarks.length>1000)throw new DeskError('Add a decision remark (3–1,000 characters).');
+      const saved=await db.from('amazon_da_commands').select('*').eq('id',String(body.id)).eq('company_id',companyId).eq('station_id',stationId).maybeSingle();
+      if(saved.error)throw saved.error;
+      if(!saved.data)throw new DeskError('Request is outside your access.',403);
+      if(saved.data.status!=='pending_approval')throw new DeskError('This request was already decided. Refresh the queue.',409);
+      if(body.decision==='approved') {
+        const profile=await worker<AmazonDaProfile>('profile',{companyId,stationId,providerId:saved.data.provider_id});
+        if(profile.person.status!==saved.data.expected_status||!profile.options.some(o=>o.action===saved.data.action&&o.reasonCode===saved.data.reason_code))
+          throw new DeskError('Amazon status or allowed action changed. Reject this request and ask the station to review the current profile.',409);
+      }
+      const updated=await db.from('amazon_da_commands').update({status:body.decision==='approved'?'queued':'rejected',
+        reviewed_by:auth.userId,reviewer_name:auth.fullName||auth.email||'User',reviewer_role:reviewer.data,reviewed_at:new Date().toISOString(),review_decision:body.decision,review_remarks:remarks,
+        result_message:body.decision==='approved'?'Approved · waiting for Amazon confirmation.':'Request rejected. Amazon status was not changed.'})
+        .eq('id',saved.data.id).eq('company_id',companyId).eq('station_id',stationId).eq('status','pending_approval').select(columns).maybeSingle();
+      if(updated.error)throw updated.error;
+      if(!updated.data)throw new DeskError('Another approver already decided this request.',409);
+      if(body.decision==='rejected')return reply({command:updated.data});
+      try{return reply(await worker('command',{commandId:saved.data.id}));}
+      catch{return reply({pending:true,message:'Approval saved. Check Amazon result in History; do not submit another request.'},202);}
+    }
     if(body.operation==='reconcile') {
       if(!deskUuid.test(String(body.id||''))) throw new DeskError('Select a recorded action.');
       const saved=await db.from('amazon_da_commands').select('id').eq('id',String(body.id)).eq('company_id',companyId).eq('station_id',stationId).maybeSingle();
@@ -111,11 +146,14 @@ export async function POST(request:Request) {
       associate_name:profile.person.name,actor_id:auth.userId,actor_name:auth.fullName || auth.email || 'User',
       actor_role:auth.designationName || auth.roleName || auth.roleCode || 'User',
       action:action.action,reason_code:action.reasonCode,remarks:action.remarks,expected_status:action.expectedStatus,
+      status:action.action==='RESEND_INVITATION'?'queued':'pending_approval',
+      result_message:action.action==='RESEND_INVITATION'?null:'Awaiting Finance Manager, National Head or Managing Partner approval.',
     });
     if(inserted.error) {
       if(inserted.error.code==='23505') throw new DeskError('An action is already in progress or awaiting confirmation for this associate. Open History.',409);
       throw new Error('Could not record this action. Nothing was sent to Amazon.');
     }
+    if(action.action!=='RESEND_INVITATION') return reply({pending:true,message:'Request submitted for approval. Amazon delivery access is unchanged.'},202);
     try { return reply(await worker('command',{commandId:action.id})); }
     catch { return reply({pending:true,message:'The action was recorded. Check History for the result before trying anything else.'},202); }
   } catch(error) { return reply({error:error instanceof Error?error.message:'Unable to process this action.'},error instanceof DeskError?error.status:503); }
