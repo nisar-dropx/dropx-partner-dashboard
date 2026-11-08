@@ -9,7 +9,7 @@ import type { AmazonDaProfile } from '@/lib/amazon-da-desk-types';
 import {allClientIdRows,loadClientIdMappingsForWorkers,needsClientId,providerMappingFor,type ClientIdWorker} from '@/lib/workforce-client-id-queue';
 import {loadClientIdPartnerStates} from '@/lib/workforce-client-id-partner';
 import {dashboardDateInputValue} from '@/lib/date-format';
-import {loadAmazonFilterSource,loadAmazonFilterScope} from '@/lib/amazon-da-filter-data';
+import {loadAmazonFilterSource,loadAmazonFilterScope,loadAmazonRequestSource} from '@/lib/amazon-da-filter-data';
 import {filterDeskPage,emptyDeskFilters} from '@/lib/amazon-da-filters';
 import {facetRows} from '@/lib/dependent-filters';
 
@@ -47,9 +47,10 @@ export async function GET(request:Request) {
       filters.station=params.getAll('location');
       if(filters.station.some(id=>!scope.includes(id)))throw new DeskError('This station is outside your access.',403);
       for(const key of ['status','stage','milestone','address','check','health'] as const)filters[key]=params.getAll(key).slice(0,50).map(v=>v.slice(0,200));
-      const source=stationId==='all'?await loadAmazonFilterScope(db,companyId,scope.map(id=>({id,code:stationCodes[id]||id})),params.get('fresh')==='1'):await loadAmazonFilterSource(db,companyId,stationId,view,params.get('fresh')==='1');
+      const requestOnly=view==='bgc-pending';
+      const source=requestOnly?await loadAmazonRequestSource(companyId,stationId==='all'?scope:[stationId],params.get('fresh')==='1'):stationId==='all'?await loadAmazonFilterScope(db,companyId,scope.map(id=>({id,code:stationCodes[id]||id})),params.get('fresh')==='1'):await loadAmazonFilterSource(db,companyId,stationId,view,params.get('fresh')==='1');
       const page=filterDeskPage(source.rows,filters,view,Math.max(0,Math.min(10000,Math.floor(Number(params.get('offset'))||0))),source.snapshot,params.get('snapshot')||'');
-      return reply({...page,checkedAt:source.checkedAt,warnings:source.warnings,incomplete:source.incomplete});
+      return reply({...page,...(requestOnly?{requestOnly:true,counts:{...page.counts,address:null,all:null,unchecked:0}}:{}),checkedAt:source.checkedAt,warnings:source.warnings,incomplete:source.incomplete});
     }
     if(view==='photo') {
       const ticket=params.get('ticket')||'';

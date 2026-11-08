@@ -1,7 +1,7 @@
 const ts=require('typescript');const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');
 // Bundle the actual API with only its infrastructure replaced. No production requests.
 const stubs={
- '@/lib/amazon-da-filter-data':'exports.loadAmazonFilterScope=async(db,companyId,stations)=>{fixture.calls.push({scope:stations,companyId});return {rows:[],snapshot:"s",warnings:[]};};exports.loadAmazonFilterSource=async(db,companyId,stationId,view)=>{fixture.calls.push({filtered:true,companyId,stationId,view});return {rows:[],snapshot:"s",warnings:[]};};',
+ '@/lib/amazon-da-filter-data':'exports.loadAmazonRequestSource=async(companyId,stationIds)=>{fixture.calls.push({requestsOnly:true,companyId,stationIds});return {rows:[],snapshot:"s",warnings:[]};};exports.loadAmazonFilterScope=async(db,companyId,stations)=>{fixture.calls.push({scope:stations,companyId});return {rows:[],snapshot:"s",warnings:[]};};exports.loadAmazonFilterSource=async(db,companyId,stationId,view)=>{fixture.calls.push({filtered:true,companyId,stationId,view});return {rows:[],snapshot:"s",warnings:[]};};',
  '@/lib/amazon-da-filters':'exports.emptyDeskFilters=()=>({});exports.filterDeskPage=(rows,filters)=>({rows,filters});',
  '@/lib/dependent-filters':'exports.facetRows=()=>({rows:[],values:()=>[]});',
  '@/lib/workforce-client-id-queue':'exports.allClientIdRows=async()=>[];exports.loadClientIdMappingsForWorkers=async()=>[];exports.needsClientId=()=>true;exports.providerMappingFor=()=>({});',
@@ -37,6 +37,9 @@ assert.deepEqual(Array.from(fixture.calls[0].body.stationIds),[station]);
 fixture.calls=[];
 assert.equal((await route.GET(new Request(url.replace(station,'all')+'&view=bgc-pending&stations=00000000-0000-4000-8000-000000000099'))).status,403);
 assert.equal(fixture.calls.length,0);
+fixture.calls=[];
+const fast=await route.GET(new Request(url.replace(station,'all')+'&view=bgc-pending&filters=1'));
+assert.equal(fast.status,200);assert.equal(fixture.calls.length,1);assert.equal(fixture.calls[0].requestsOnly,true);assert.equal((await fast.json()).counts.all,null,'Do not present the pending-only count as every associate');
 fixture.auth.readOnly=true;assert.equal((await post()).status,403);fixture.auth.readOnly=false;
 fixture.auth.isPreview=true;assert.equal((await post()).status,403);fixture.auth.isPreview=false;
 assert.equal((await post({...action,action:'TRANSFER'})).status,400);
