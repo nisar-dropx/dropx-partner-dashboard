@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     const notFound = () => json({ error: 'No matching request in your permitted locations.' }, 404);
     if (!auth.hasAllLocationAccess && !auth.locationScopeIds.length) return notFound();
     const lookup = (column: string, value: string) => {
-      let query = supabaseAdmin!.from('payment_requests').select('id,request_no,location_id,location_code,payment_heads(name),amount,amount_requested,created_at,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,current_step_order,total_steps,bank_status,utr_cin,processed_at,remarks,requested_for_name,work_date,details,adhoc_da_name,adhoc_provider_employee_id,adhoc_work_date,delivery_performer_name,delivery_provider_employee_id,delivery_work_date,adhoc_vehicle_snapshot,adhoc_deployment_date').eq('company_id', companyId).eq(column, value);
+      let query = supabaseAdmin!.from('payment_requests').select('id,request_no,location_id,location_code,payment_heads(name),amount,amount_requested,created_at,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,current_step_order,total_steps,bank_status,utr_cin,processed_at,remarks,requested_for_name,work_date,details,adhoc_da_name,adhoc_provider_employee_id,adhoc_work_date,delivery_performer_mode,delivery_identity_confirmed,delivery_performer_name,delivery_provider_employee_id,delivery_work_date,adhoc_vehicle_snapshot,adhoc_deployment_date').eq('company_id', companyId).eq(column, value);
       if (!auth.hasAllLocationAccess) query = query.in('location_id', auth.locationScopeIds);
       return query.limit(2);
     };

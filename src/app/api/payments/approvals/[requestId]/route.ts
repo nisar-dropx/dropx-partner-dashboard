@@ -37,7 +37,7 @@ async function authorizedRequest(requestId: string, requireEdit = false) {
   const companyId = requireCompanyId(authorization);
   const result = await supabaseAdmin
     .from("payment_requests")
-    .select("remarks,requested_for_name,work_date,adhoc_da_name,adhoc_provider_employee_id,adhoc_work_date,delivery_performer_name,delivery_provider_employee_id,delivery_work_date,details,id,request_no,location_id,location_code,payment_head_id,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,current_step_order,total_steps,adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date,stations(location_model_id),payment_heads(name,code)")
+    .select("remarks,requested_for_name,work_date,adhoc_da_name,adhoc_provider_employee_id,adhoc_work_date,delivery_performer_mode,delivery_identity_confirmed,delivery_performer_name,delivery_provider_employee_id,delivery_work_date,details,id,request_no,location_id,location_code,payment_head_id,requested_by,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,current_step_order,total_steps,adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date,stations(location_model_id),payment_heads(name,code)")
     .eq("company_id", companyId)
     .eq("id", requestId)
     .maybeSingle();

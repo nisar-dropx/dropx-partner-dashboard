@@ -11,7 +11,7 @@ async function call(options={}) {
  const visited=[];
  const row={id:'request',company_id:'company',location_id:'station',request_no:'RX123',location_code:'TEST',payment_heads:{name:'Adhoc driver'},amount:1200,created_at:'2026-11-01T10:00:00Z',requested_by:'actor',status:'APPROVED',delivery_performer_name:'Latest driver',delivery_provider_employee_id:'DA123',details:{adhoc_driver:{reason_label:'Driver on leave',person_name:'Absent driver',work_date:'2026-11-01'}},...options.row};
  const data={payment_requests:[row],payment_request_approvals:[{id:'event',company_id:'company',payment_request_id:'request',action:'APPROVED',approver_user_id:'actor',created_at:'2026-11-02T10:00:00Z',comments:'Checked'}],payment_request_answers:[],profiles:[{id:'actor',company_id:'company',full_name:'Approver'}],user_roles:[]};
- const admin={from(table){visited.push(table);let rows=data[table];return {select(){return this},eq(k,v){rows=rows.filter(r=>r[k]===v);return this},in(k,v){rows=rows.filter(r=>v.includes(r[k]));return this},limit(n){rows=rows.slice(0,n);return this},order(){return this},then(resolve){return Promise.resolve({data:rows,error:options.fail?new Error('internal secret'):null}).then(resolve)}}}};
+ const admin={from(table){visited.push(table);let rows=data[table];return {select(columns){if(table==='payment_requests') { const selected=columns.split(','); rows=rows.map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>key==='company_id'||selected.includes(key)||columns.includes(key+'(')))); } return this},eq(k,v){rows=rows.filter(r=>r[k]===v);return this},in(k,v){rows=rows.filter(r=>v.includes(r[k]));return this},limit(n){rows=rows.slice(0,n);return this},order(){return this},then(resolve){return Promise.resolve({data:rows,error:options.fail?new Error('internal secret'):null}).then(resolve)}}}};
  const deps={'next/server':{NextResponse:{json:(body,options)=>({body,...options})}},'@/lib/authorization':{getAuthorization:async()=>options.auth===undefined?auth:options.auth,hasPermission:()=>options.permission!==false},'@/lib/company-scope':{requireCompanyId:a=>a.companyId},'@/lib/supabase-admin':{supabaseAdmin:admin},'@/lib/payment-request-facts':facts,'@/lib/payment-status-label':status,'@/lib/payment-request-attachments':attachments};
  const module={exports:{}};new Function('require','exports','module',compiled)(key=>deps[key],module.exports,module);
  return {response:await module.exports.GET(new Request('https://example.com/api/payments/track?q='+encodeURIComponent(options.query??'rx123'))),visited};
@@ -41,4 +41,14 @@ test('invalid searches and database errors do not expose details',async()=>{
 });
 test('facts exclude arbitrary JSON and bank details',()=>{
  assert.deepEqual(facts.paymentRequestFacts({details:{account_number:'secret',unknown:'secret'},payment_reference:'secret'}),[]);
+});
+
+test('tracks every saved delivery performer mode and confirmation', async () => {
+ for (const [mode,label] of Object.entries({van_driver:'Van driver',bike_da:'Existing bike DA',existing_odcd:'Existing ODCD DA',standalone_odcd:'ODCD delivery associate'})) {
+  const {response}=await call({row:{delivery_performer_mode:mode,delivery_identity_confirmed:true}});
+  assert.ok(response.body.facts.some(f=>f.label==='Who is doing delivery?' && f.value===label));
+  assert.ok(response.body.facts.some(f=>f.label==='Delivery ID confirmation'));
+ }
+ const {response}=await call();
+ assert.ok(!response.body.facts.some(f=>f.label==='Who is doing delivery?'));
 });
