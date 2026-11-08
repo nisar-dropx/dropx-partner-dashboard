@@ -9,6 +9,17 @@ export const workedIdMetrics = [
   "delivery_assigned_count",
   "pickup_assigned_count",
 ] as const;
+// Match ID Mapping's payable production categories. Amazon/SWA are parts of
+// Delivery, never additional work to enter or add to the payable total.
+export const workedIdPaymentMetrics = [
+  "total_delivery", "c_return", "mfn", "mfn_return",
+] as const;
+export const workedIdPaymentLabels = {
+  total_delivery: "Delivery (including SWA)",
+  c_return: "C-return",
+  mfn: "MFN",
+  mfn_return: "MFN return",
+} as const;
 export const workedIdDeliveryRoles = ["DA", "DCD", "ODCD", "WM"];
 export const workedIdSalaryCodes = [
   "MG_PER_DAY",
@@ -34,6 +45,38 @@ export function workedIdCounts(row: Record<string, unknown>) {
   return Object.fromEntries(
     workedIdMetrics.map((k) => [k, Number(row[k] ?? 0)]),
   ) as Record<WorkedMetric, number>;
+}
+/** Allocate internal source counters proportionally when the combined work
+ * changes. These are accounting shares, not shipment-level attribution. Work
+ * already allocated to another review is excluded from `available` by callers.
+ * Preserve existing breakdowns when their corresponding work count is unchanged.
+ */
+export function updateWorkedIdPaymentShare(
+  available: Record<WorkedMetric, number>,
+  previous: Record<WorkedMetric, number>,
+  metric: (typeof workedIdPaymentMetrics)[number],
+  value: number,
+) {
+  const share = { ...previous, [metric]: value };
+  if (previous[metric] === value) return share;
+  // Keep invalid input visible for validation; do not conceal an over-allocation.
+  if (!Number.isInteger(value) || value < 0 || value > available[metric]) return share;
+  const portion = (count: number, selected: number, total: number) =>
+    total > 0 ? Math.min(count, Math.round(count * selected / total)) : 0;
+  if (metric === "total_delivery") {
+    share.amazon_delivery = portion(available.amazon_delivery, value, available.total_delivery);
+    share.swa_delivery = available.amazon_delivery + available.swa_delivery === available.total_delivery
+      ? value - share.amazon_delivery
+      : portion(available.swa_delivery, value, available.total_delivery);
+    share.delivery_assigned_count = portion(available.delivery_assigned_count, value, available.total_delivery);
+  }
+  const pickups = (counts: Record<WorkedMetric, number>) => counts.c_return + counts.mfn + counts.mfn_return;
+  if (metric !== "total_delivery") {
+    share.pickup_assigned_count = portion(available.pickup_assigned_count, pickups(share), pickups(available));
+  }
+  share.assigned_count = portion(available.assigned_count,
+    share.total_delivery + pickups(share), available.total_delivery + pickups(available));
+  return share;
 }
 export function workedIdShareError(
   available: Record<WorkedMetric, number>,
