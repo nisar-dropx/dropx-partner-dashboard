@@ -562,6 +562,7 @@ export async function loadWorkedIdReview(
           l.from_date <= r.date &&
           l.to_date >= r.date,
       );
+      r.paymentLocked = Boolean(lock);
       r.lockReason = lock?.reason || "";
       r.canAllocate = workedIdDeliveryRoles.includes(
         first(wm.get(r.workerId)?.designations)?.code ||

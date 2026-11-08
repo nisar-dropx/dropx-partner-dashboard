@@ -50,7 +50,8 @@ export function dailyUsageShares(
 }
 
 export function dailyUsageStatus(row: any) {
-  if (row.lockReason) return "Payment locked";
+  if (row.paymentLocked || (row.lockReason && row.canAllocate !== false)) return "Payment locked";
+  if (row.canAllocate === false) return "Non-delivery role · view only";
   if (row.ownerExcluded) return "Owner attendance excluded";
   if (row.decision === "not_worked") return "Marked absent";
   if (row.decision === "worked") return "Work allocated";
