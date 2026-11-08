@@ -34,5 +34,21 @@ export async function GET(request:Request){try{
   if(mail.error||invite.error)throw new OnboardingError('Mailbox or invitation status unavailable. Please retry.',503);
   messages=(mail.data||[]).slice(0,20);more=(mail.data?.length||0)>20;invitation=invite.data;
  }
- return reply({status:rawStatus,progress:progress?{stage:progress.stage,status:progress.status,action:progress.action,missing:progress.missing,requiredFilled:progress.requiredFilled,requiredTotal:progress.requiredTotal}:null,returnNote:reg?.return_note||null,email:guided?person.alias_email:null,biometricId:guided?person.biometric_id:null,inboxStatus:guided?person.inbox_status:null,closed:!!person.closed_at,invitation,messages,more});
+ // Delivery evidence is loaded only when a record is expanded, using its stored numeric ID.
+ // Never infer ownership from names, and never call a missing source a zero-delivery day.
+ let delivery:{state:string;date:string|null;detail:string}={state:'unknown',date:null,detail:'Delivery source not checked'};
+ const canonical=guided?await db.from('workforce').select('id,provider_employee_id,date_of_join').eq('company_id',companyId).eq('location_id',station.id).eq('id',id).is('deleted_at',null).maybeSingle():result;
+ const provider=canonical.data?.provider_employee_id;
+ if(!canonical.error&&!provider)delivery={state:'pending',date:null,detail:'Waiting for a confirmed payroll ID before checking deliveries'};
+ else if(!canonical.error&&provider){
+  const ownership=await db.from('workforce').select('id').eq('company_id',companyId).eq('provider_employee_id',provider).is('deleted_at',null).limit(2);
+  if(!ownership.error&&ownership.data?.length===1&&ownership.data[0].id===id){
+   let query=db.from('cps_shipment_daily').select('work_date').eq('company_id',companyId).eq('station_code',station.station_code).eq('client','Amazon').eq('provider_employee_id',provider).gt('total_delivery',0);
+   const since=canonical.data?.date_of_join||person.reported_on;
+   if(since)query=query.gte('work_date',String(since).slice(0,10));
+   const first=await query.order('work_date').limit(1).maybeSingle();
+   if(!first.error)delivery=first.data?{state:'complete',date:first.data.work_date,detail:'First recorded delivery at this station'}:{state:'pending',date:null,detail:'No delivery recorded at this station since joining'};
+  }else if(!ownership.error)delivery={state:'review',date:null,detail:'Payroll ID ownership needs review before checking activity'};
+ }
+ return reply({delivery,status:rawStatus,progress:progress?{stage:progress.stage,status:progress.status,action:progress.action,missing:progress.missing,requiredFilled:progress.requiredFilled,requiredTotal:progress.requiredTotal}:null,returnNote:reg?.return_note||null,email:guided?person.alias_email:null,biometricId:guided?person.biometric_id:null,inboxStatus:guided?person.inbox_status:null,closed:!!person.closed_at,invitation,messages,more});
  }catch(e){return reply({error:e instanceof OnboardingError?e.message:'Could not load the associate record.'},e instanceof OnboardingError?e.status:503);}}

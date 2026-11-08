@@ -5,7 +5,7 @@ import { loadOpsWorkforceLocations } from '@/lib/ops-workforce-locations';
 import { workforceStationPolicy } from '@/lib/workforce-register-policy';
 import { callWorkforceAmazonWorker, workforceAmazonWorkerConfig } from '@/lib/workforce-amazon-worker';
 import { deskProfileId, deskUuid, validateDeskAction } from '@/lib/amazon-da-desk-policy';
-import type { AmazonDaProfile } from '@/lib/amazon-da-desk-types';
+import type { AmazonDaProfile, AmazonDaPerson } from '@/lib/amazon-da-desk-types';
 import {allClientIdRows,loadClientIdMappingsForWorkers,needsClientId,providerMappingFor,type ClientIdWorker} from '@/lib/workforce-client-id-queue';
 import {loadClientIdPartnerStates} from '@/lib/workforce-client-id-partner';
 import {dashboardDateInputValue} from '@/lib/date-format';
@@ -34,6 +34,19 @@ async function context(stationId: string, write=false, all=false) {
 function worker<T>(operation:string,body:unknown) {
   return callWorkforceAmazonWorker<T>(`/api/admin/amazon/station-desk/${operation}`,{method:'POST',body:JSON.stringify(body),...(['milestones','idfy','idfy-submit','idfy-queue','idfy-reconcile'].includes(operation)?{signal:AbortSignal.timeout(110_000)}:{})});
 }
+async function withDropXOwnership(db:NonNullable<typeof supabaseAdmin>,companyId:string,rows:AmazonDaPerson[]){
+ if(!rows.length)return rows;
+ try{
+  const links=await db.from('workforce_amazon_portal_links').select('workforce_id,amazon_provider_id,transporter_id').eq('company_id',companyId).in('amazon_provider_id',rows.map(r=>r.providerId));
+  if(links.error)throw Error('Link source unavailable');
+  const ids=[...new Set((links.data||[]).map(l=>l.workforce_id))];
+  const owners=ids.length?await db.from('workforce').select('id,dropx_id').eq('company_id',companyId).in('id',ids).is('deleted_at',null):{data:[],error:null};
+  if(owners.error)throw Error('Owner source unavailable');
+  return rows.map(r=>{const matched=(links.data||[]).filter(l=>l.amazon_provider_id===r.providerId),valid=matched.filter(l=>owners.data?.some(o=>o.id===l.workforce_id&&o.dropx_id)&&(!l.transporter_id||!r.transporterId||l.transporter_id===r.transporterId));
+   const state:AmazonDaPerson['dropxLinkState']=matched.length>1||matched.some(l=>l.transporter_id&&r.transporterId&&l.transporter_id!==r.transporterId)?'review':valid.length===1?'linked':'missing';
+   return {...r,dropxLinkState:state};});
+ }catch{return rows.map(r=>({...r,dropxLinkState:'unknown' as const}));}
+}
 export async function GET(request:Request) {
   try {
     const params = new URL(request.url).searchParams;
@@ -54,7 +67,8 @@ export async function GET(request:Request) {
       const requestOnly=view==='bgc-pending';
       const source=requestOnly?await loadAmazonRequestSource(companyId,stationId==='all'?scope:[stationId],params.get('fresh')==='1'):stationId==='all'?await loadAmazonFilterScope(db,companyId,scope.map(id=>({id,code:stationCodes[id]||id})),params.get('fresh')==='1'):await loadAmazonFilterSource(db,companyId,stationId,view,params.get('fresh')==='1');
       const page=filterDeskPage(source.rows,filters,view,Math.max(0,Math.min(10000,Math.floor(Number(params.get('offset'))||0))),source.snapshot,params.get('snapshot')||'');
-      return reply({...page,...(requestOnly?{requestOnly:true,counts:{...page.counts,address:null,all:null,unchecked:0}}:{}),checkedAt:source.checkedAt,warnings:source.warnings,incomplete:source.incomplete});
+      const ownedRows=await withDropXOwnership(db,companyId,page.rows);
+      return reply({...page,rows:ownedRows,...(requestOnly?{requestOnly:true,counts:{...page.counts,address:null,all:null,unchecked:0}}:{}),checkedAt:source.checkedAt,warnings:source.warnings,incomplete:source.incomplete});
     }
     if(view==='photo') {
       const ticket=params.get('ticket')||'';
