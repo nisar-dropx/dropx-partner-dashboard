@@ -301,7 +301,7 @@ export function CortexWorkspace({
           <small>Search and select up to 8</small>
         </div>
         <label>Day<input type="date" name="date" defaultValue={board?.date} max={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())} required /></label>
-        <label className={styles.search}>Search associate / ID / route<span className={styles.searchInput}><Search size={15} aria-hidden /><input type="search" name="q" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, DropX ID, Amazon ID or route" /></span></label>
+        <label className={styles.search}>Search driver / associate / ID / route<span className={styles.searchInput}><Search size={15} aria-hidden /><input type="search" name="q" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Driver name, DropX ID, Amazon ID or route" /></span></label>
         <div className={styles.actions}><button className="button compact" type="submit">Apply</button></div>
       </form>
 
