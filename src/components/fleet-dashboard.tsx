@@ -1396,6 +1396,7 @@ function FuelLog({
   const stationOptions = facets.values("station");
   const sourceOptions = facets.values("source");
   const filtered = facets.rows;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / 50));
   const pageRows = filtered.slice((page - 1) * 50, page * 50);
 
   useEffect(() => {
@@ -1557,6 +1558,7 @@ function FleetFuelReport({ rows }: { rows: FuelRow[] }) {
   const stationOptions = facets.values("station");
   const sourceOptions = facets.values("source");
   const filtered = facets.rows;
+  const rowsForReport = buildFuelReportRows(filtered, reportType);
   const reportHeaders = rowsForReport[0]?.map(String) ?? [];
   const reportDataRows = rowsForReport.slice(1);
   const totalPages = Math.max(1, Math.ceil(reportDataRows.length / 50));
