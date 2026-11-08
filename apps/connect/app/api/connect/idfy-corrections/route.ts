@@ -8,7 +8,7 @@ export async function GET(request:Request){
  try{
   const {account,owner,snapshot,db}=await ownIdfyContext(request);
   if(!owner||!snapshot)return reply({pending:0,linked:false,history:[]});
-  const history=await db.from('amazon_da_idfy_actions').select('id,block_id,status,actor_name,actor_role,changes,result_message,created_at,updated_at,events:amazon_da_idfy_events(status,message,created_at)').eq('company_id',account.companyId).eq('provider_id',owner.provider_id).eq('action','response').order('created_at',{ascending:false}).limit(20);
+  const history=await db.from('amazon_da_idfy_actions').select('id,block_id,status,actor_name,actor_role,changes,result_message,created_at,updated_at,events:amazon_da_idfy_events(status,message,created_at)').eq('company_id',account.companyId).eq('provider_id',owner.provider_id).eq('idfy_profile_id',String(snapshot.idfy?.profileId||'')).eq('action','response').order('created_at',{ascending:false}).limit(20);
   if(history.error)throw new Error('Verification history could not load.');
   const base={linked:true,pending:snapshot.request_block_ids?.length||0,checkedAt:snapshot.requests_checked_at,history:history.data};
   if(new URL(request.url).searchParams.get('details')!=='1')return reply(base);
