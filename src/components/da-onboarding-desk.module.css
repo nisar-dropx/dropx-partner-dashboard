@@ -26,4 +26,6 @@
 
 @media(max-width:650px){.multi :global(.fc-multi-menu){width:100%;max-width:100%;min-width:0}.multi :global(.fc-multi-options) strong{overflow-wrap:anywhere}}
 
-.workspaceTabs{display:flex;gap:8px;padding:6px;border:1px solid #e0e6ef;border-radius:13px;background:#fff}.desk .workspaceTabs button{display:grid;gap:4px;text-align:left;flex:1;padding:12px 16px;border-color:transparent}.workspaceTabs button span{font-size:11px;font-weight:400;color:#6e7d91}.desk .workspaceTabs button[aria-current=page]{background:#26304b;color:#fff}.workspaceTabs button[aria-current=page] span{color:#d9dfeb}@media(max-width:650px){.desk .workspaceTabs button{padding:10px;font-size:12px}.workspaceTabs button span{font-size:10px}}
+.workspace{display:grid;gap:14px}.workspaceTabs{display:flex;gap:8px;padding:6px;border:1px solid #e0e6ef;border-radius:13px;background:#fff}.workspaceTabs button{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:9px;background:white;color:#25324a;display:grid;gap:4px;text-align:left;flex:1;padding:12px 16px;border-color:transparent}.workspaceTabs button span{font-size:11px;font-weight:400;color:#6e7d91}.workspaceTabs button[aria-current=page]{background:#26304b;color:#fff}.workspaceTabs button[aria-current=page] span{color:#d9dfeb}@media(max-width:650px){.workspaceTabs button{padding:10px;font-size:12px}.workspaceTabs button span{font-size:10px}}
+
+.workspaceTabs button:focus-visible{outline:2px solid #c53d63;outline-offset:2px}
