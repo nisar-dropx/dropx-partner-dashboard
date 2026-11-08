@@ -81,7 +81,12 @@ test("advance register filters are searchable multi-check controls with an inclu
 });
 
 test("filtered rows drive totals, table pagination and the view-scoped CSV export", () => {
-  assert.match(registerComponent, /filterWorkforceAdvanceRows\(rows,\s*search,\s*filters\)/);
+  assert.match(registerComponent, /facetRows\(rows,/);
+  for (const [facet, selection] of Object.entries({ location: "locations", paidLocation: "paidLocations", designation: "designations", paymentMode: "paymentModes", status: "statuses", source: "sources", registration: "registrationStatuses" })) {
+    assert.match(registerComponent, new RegExp(`${facet}: \\{ selected: ${selection},`));
+  }
+  assert.match(registerComponent, /matchesWorkforceAdvanceFilters\(row, search, \{ \.\.\.filters, locations: \[\], paidLocations: \[\], designations: \[\], paymentModes: \[\], statuses: \[\], sources: \[\], registrationStatuses: \[\] \}\)/);
+  assert.match(registerComponent, /const filtered = facets\.rows;/);
   assert.doesNotMatch(registerComponent, /useDeferredValue/);
   assert.match(registerComponent, /summarizeWorkforceAdvanceRows\(filtered\)/);
   assert.match(registerComponent, /money\(summary\.total\)/);
