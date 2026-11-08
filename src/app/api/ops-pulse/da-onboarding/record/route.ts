@@ -34,5 +34,5 @@ export async function GET(request:Request){try{
   if(mail.error||invite.error)throw new OnboardingError('Mailbox or invitation status unavailable. Please retry.',503);
   messages=(mail.data||[]).slice(0,20);more=(mail.data?.length||0)>20;invitation=invite.data;
  }
- return reply({status:rawStatus,progress:progress?{status:progress.status,action:progress.action,missing:progress.missing,requiredFilled:progress.requiredFilled,requiredTotal:progress.requiredTotal}:null,returnNote:reg?.return_note||null,email:guided?person.alias_email:null,biometricId:guided?person.biometric_id:null,inboxStatus:guided?person.inbox_status:null,closed:!!person.closed_at,invitation,messages,more});
+ return reply({status:rawStatus,progress:progress?{stage:progress.stage,status:progress.status,action:progress.action,missing:progress.missing,requiredFilled:progress.requiredFilled,requiredTotal:progress.requiredTotal}:null,returnNote:reg?.return_note||null,email:guided?person.alias_email:null,biometricId:guided?person.biometric_id:null,inboxStatus:guided?person.inbox_status:null,closed:!!person.closed_at,invitation,messages,more});
  }catch(e){return reply({error:e instanceof OnboardingError?e.message:'Could not load the associate record.'},e instanceof OnboardingError?e.status:503);}}
