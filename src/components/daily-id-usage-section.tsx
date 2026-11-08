@@ -14,7 +14,7 @@ import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarc
 import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 
-export async function DailyIdUsageSection({ month }: { month?: string }) {
+export async function DailyIdUsageSection({ month, review = false }: { month?: string; review?: boolean }) {
   const code = currentProviderMappingPageCode(),
     auth = await requirePagePermission(code, "access");
   const company = requireCompanyId(auth);
@@ -49,24 +49,24 @@ export async function DailyIdUsageSection({ month }: { month?: string }) {
       <div className={workspace.workspace}>
         <PageHead
           eyebrow="ID & pay mapping"
-          title="Daily ID usage"
-          subtitle="See who owns each ID, who worked on it, and review selected dates before payout."
+          title={review ? "Worked ID review" : "Daily ID usage"}
+          subtitle={review ? "Review attendance and delivery differences before deciding pay." : "See who owns each ID, who worked on it, and review selected dates before payout."}
         />
         <nav className={workspace.nav} aria-label="ID mapping views">
           <Link href="/provider-id-mapping">ID & pay mapping</Link>
-          <Link aria-current="page" href="/provider-id-mapping?view=days">
+          <Link aria-current={!review ? "page" : undefined} href="/provider-id-mapping?view=days">
             Daily ID usage
           </Link>
+          <Link aria-current={review ? "page" : undefined} href="/provider-id-mapping?view=review">Worked ID review</Link>
           <Link href="/provider-mapping/direct-pay">
             Direct pay allocations
           </Link>
-          <Link href="/provider-id-mapping/worked-days">Worked ID review</Link>
         </nav>
         {result.error || hierarchy.error ? (
           <p role="alert">Unable to load permitted stations. Please refresh.</p>
         ) : (
           <WorkedIdReview
-            dailyUsage
+            dailyUsage={!review}
             locations={locations.map((s) => ({
               ...s,
               ...owners!.byStation.get(s.id)!,

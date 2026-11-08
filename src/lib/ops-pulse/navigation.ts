@@ -54,7 +54,6 @@ const commonStart: NavItem[] = [
       { code: "delivery_associates", badgeCode: "ops_amazon_da", accessAnyOf: ["delivery_associates", "ops_amazon_da"], label: "Workforce onboarding", href: "/workforce/onboarding" },
       { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register" },
       { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping" },
-      { code: "ops_provider_mapping", label: "Worked ID review", href: "/provider-id-mapping/worked-days" },
       { code: "ops_provider_mapping_summary", label: "Mapping Summary", href: "/provider-id-mapping/summary" },
       { code: "ops_workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
       { code: "ops_workforce_payout_disputes", label: "Payout Disputes", href: "/payments/disputes" },
