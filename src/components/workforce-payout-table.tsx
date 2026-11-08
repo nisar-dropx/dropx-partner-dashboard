@@ -1,4 +1,5 @@
 "use client";
+import { facetRows } from "@/lib/dependent-filters";
 
 import { groupWorkforceDeductionDisplay } from "@/lib/workforce-loss-recovery";
 import { routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
@@ -9,7 +10,6 @@ import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import {
   WORKFORCE_PAYOUT_FILTER_NONE,
   matchesWorkforcePayoutFilters,
-  reconcileWorkforcePayoutFilterSelection,
   toggleWorkforcePayoutFilterOption,
   workforcePayoutFacetValues
 } from "@/lib/workforce-payout-filters";
@@ -463,13 +463,21 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     const status = payoutDisplayStatus(row.status);
     return status === row.status ? row : { ...row, status };
   }), [rows]);
-  const locationOptions = useMemo(() => Array.from(new Set(displayRows.flatMap((row) => workforcePayoutFacetValues(row.location || "-"))).values()).sort(), [displayRows]);
-  const designationOptions = useMemo(() => Array.from(new Set(displayRows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [displayRows]);
-  const providerOptions = useMemo(() => Array.from(new Set(displayRows.flatMap((row) => workforcePayoutFacetValues(row.provider || "-"))).values()).sort(), [displayRows]);
-  const mappingStatusOptions = useMemo(() => Array.from(new Set(displayRows.map((row) => row.mappingStatus).filter(Boolean))).sort(), [displayRows]);
-  const statusOptions = useMemo(() => Array.from(new Set(displayRows.map((row) => row.status || "-")).values()).sort(), [displayRows]);
-  const methodOptions = useMemo(() => Array.from(new Set(displayRows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [displayRows]);
-  const filtered = useMemo(() => displayRows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, designations, providers, methods, mappingStatuses, statuses })), [displayRows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
+  const facets = useMemo(() => facetRows(displayRows, {
+    location: { selected: locations, values: row => workforcePayoutFacetValues(row.location) },
+    designation: { selected: designations, values: row => row.designation },
+    provider: { selected: providers, values: row => workforcePayoutFacetValues(row.provider) },
+    mappingStatus: { selected: mappingStatuses, values: row => row.mappingStatus },
+    status: { selected: statuses, values: row => row.status },
+    method: { selected: methods, values: row => row.paymentMethodBreakdown.map(item => item.label) }
+  }, row => matchesWorkforcePayoutFilters(row, deferredSearch, { locations: [], designations: [], providers: [], methods: [], mappingStatuses: [], statuses: [] })), [displayRows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
+  const locationOptions = facets.values("location").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
+  const designationOptions = facets.values("designation").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
+  const providerOptions = facets.values("provider").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
+  const mappingStatusOptions = facets.values("mappingStatus").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
+  const statusOptions = facets.values("status").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
+  const methodOptions = facets.values("method").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
+  const filtered = facets.rows;
   const preliminaryBankBalances = useMemo(
     () => buildWorkforcePayoutPreliminaryBalanceIndex(rows),
     [rows]
@@ -597,14 +605,6 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     setSelected((current) => new Set([...current].filter((id) => selectableIds.has(id))));
   }, [selectableIds]);
 
-  useEffect(() => {
-    setLocations((current) => reconcileWorkforcePayoutFilterSelection(locationOptions, current));
-    setDesignations((current) => reconcileWorkforcePayoutFilterSelection(designationOptions, current));
-    setProviders((current) => reconcileWorkforcePayoutFilterSelection(providerOptions, current));
-    setMethods((current) => reconcileWorkforcePayoutFilterSelection(methodOptions, current));
-    setMappingStatuses((current) => reconcileWorkforcePayoutFilterSelection(mappingStatusOptions, current));
-    setStatuses((current) => reconcileWorkforcePayoutFilterSelection(statusOptions, current));
-  }, [designationOptions, locationOptions, mappingStatusOptions, methodOptions, providerOptions, statusOptions]);
 
   useEffect(() => {
     function handlePayoutInputsChanged(event: Event) {
