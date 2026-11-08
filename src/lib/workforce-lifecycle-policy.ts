@@ -1,10 +1,12 @@
 export const lifecycleQueues: Record<string, string> = {
+ payment_review: "Payment clearance review",
  closed_station_exit: "Closed station · exit review",
  registration_overdue: "Registration overdue · 15 days", delivery_inactive: "No deliveries · 30 days",
  registration_exception: "Registration exceptions", delivery_exception: "Delivery exceptions",
  inactive: "Inactive", offboarded: "Offboarded", exit_pending: "Exit pending", current: "Current"
 };
 export type WorkforceLifecycleRow = {
+ payment_review_required?: boolean;
  id: string; dropx_id: string; full_name: string; mobile: string; location_id: string; station_code: string;
  onboarding_status: string; control_status: string; queue: string; reason: string; provider_ids: string | null;
  updated_at: string; version: number; last_delivery: string | null; last_punch: string | null;
@@ -17,7 +19,8 @@ export function mayManageWorkforceLifecycle(auth: { effectiveRoleCodes?: string[
  'MANAGING_PARTNER','OPERATIONS_MANAGING_PARTNER','WORKFORCE_MANAGING_PARTNER']);
  return owner || [...(auth.effectiveRoleCodes || []),auth.roleCode || ''].some(role=>allowed.has(role.toUpperCase()));
 }
-export function workforceLifecycleActions(row: Pick<WorkforceLifecycleRow,'queue'|'onboarding_status'>) {
+export function workforceLifecycleActions(row: Pick<WorkforceLifecycleRow,'queue'|'onboarding_status'|'payment_review_required'>) {
+ if(row.payment_review_required || row.queue==='payment_review') return [];
  if(row.queue==='exit_pending') return [];
  if(row.queue==='offboarded') return ['rejoin'];
  if(row.queue==='inactive') return row.onboarding_status==='active' ? ['reactivate','offboard','rejoin'] : ['rejoin','offboard'];

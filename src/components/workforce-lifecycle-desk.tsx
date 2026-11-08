@@ -48,7 +48,7 @@ export function WorkforceLifecycleDesk({selectedId}:{selectedId?:string}) {
      <li>Return: use the existing mobile and DropX ID for Reactivate or Rejoin.</li>
     </ol></details>
    </div></section>
-   <div style={{display:'flex',flexWrap:'wrap',gap:8}}>{['registration_overdue','delivery_inactive','closed_station_exit','registration_exception','delivery_exception','inactive','offboarded'].map(key=><button key={key} className={`button ${queue===key?'':'secondary'}`} onClick={()=>setQueue(key)}>{lifecycleQueues[key]} · {data.rows.filter(r=>r.queue===key).length}</button>)}</div>
+   <div style={{display:'flex',flexWrap:'wrap',gap:8}}>{['registration_overdue','delivery_inactive','closed_station_exit','payment_review','registration_exception','delivery_exception','inactive','offboarded'].map(key=><button key={key} className={`button ${queue===key?'':'secondary'}`} onClick={()=>setQueue(key)}>{lifecycleQueues[key]} · {data.rows.filter(r=>r.queue===key).length}</button>)}</div>
    <section className="panel"><div className="panel-body" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
     <input className="field" style={{flex:'1 1 240px'}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, DropX ID, Amazon ID or mobile" aria-label="Find associate"/>
     <select className="select" aria-label="Station" value={station} onChange={e=>setStation(e.target.value)}><option value="">All permitted stations</option>{data.stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select>
