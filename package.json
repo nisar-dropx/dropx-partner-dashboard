@@ -55,7 +55,8 @@
     "test:unified-advances": "node scripts/test-unified-paid-advance-ledger.mjs && node scripts/test-unified-advance-cutover.mjs && node --experimental-strip-types --test src/lib/advance-register-payout-deductions.test.mjs src/lib/paid-advance-register.test.mjs src/lib/workforce-paid-advances-allocation.test.mjs apps/connect/src/lib/connect-pay-advance-approval-data.test.mjs apps/connect/src/lib/connect-advances-route.test.mjs src/app/api/internal/workforce-advance-deduction/route.test.mjs",
     "test:station-board": "node --experimental-strip-types --test src/lib/ops-pulse/edd-scope.test.mjs src/lib/ops-pulse/station-board.test.mjs src/lib/ops-pulse/station-board-tids.test.mjs src/lib/ops-pulse/station-dsr-summary.test.mjs src/lib/ops-pulse/board-detail-report.test.mjs src/lib/ops-pulse/compact-board-report.test.mjs src/lib/ops-pulse/station-board-regions.test.mjs",
     "test:payout-dispute-window": "node --experimental-strip-types --test src/lib/payout-dispute-window.test.mjs src/app/api/payments/workforce-payouts/send-review/route.test.mjs",
-    "test:workforce-lifecycle": "node scripts/test-workforce-lifecycle.mjs && node --experimental-strip-types --test src/lib/workforce-lifecycle-policy.test.mjs"
+    "test:workforce-lifecycle": "node scripts/test-workforce-lifecycle.mjs && node --experimental-strip-types --test src/lib/workforce-lifecycle-policy.test.mjs",
+    "test:payment-release": "node scripts/test-payment-release.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",

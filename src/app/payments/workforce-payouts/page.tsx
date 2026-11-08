@@ -863,6 +863,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     <div className="workforce-payout-page">
       <div className="payout-page-titlebar">
         <PageHead title="Workforce & Helper Payments" />
+        <Link href={`${accessSurface === "ops" ? "/team-ops/losses/payment-release" : "/payments/loss-clearance"}?month=${period.month}&scope=${audience}`}>Review payment release</Link>
         <nav aria-label="Payment population" className="performance-tabs">
           <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
           <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>

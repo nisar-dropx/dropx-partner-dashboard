@@ -26,6 +26,7 @@ export function LossPeriodClose({report,period,label,stations,closures,canClose}
   return <section className={styles.panel} aria-label="Final loss submission" style={{padding:"10px 14px"}}>
     <div className={styles.toolbar}>
       <strong>{period ? `${report.toUpperCase()} · ${label}` : "Final submission"}</strong>
+      <a href="/team-ops/losses/payment-release" className={styles.button}>Review payment release</a>
       <span>{matching.length ? `${matching.length} station${matching.length===1?"":"s"} closed · read-only` : "Open for updates"}</span>
       {canClose&&period&&open.length>0 ? <button type="button" className={styles.button} onClick={()=>setConfirm(true)} disabled={busy}>Final submit / Close period</button> : null}
       {canClose&&!period ? <span>Select one loss period to finally submit.</span> : null}
