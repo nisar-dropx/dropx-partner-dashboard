@@ -14,5 +14,5 @@ export async function GET() {
 
   const [snapshot,bgc] = await Promise.all([loadPaymentNotificationSnapshot(authorization),currentAccessSurface()==='ops'?loadAmazonDaAttention(authorization).catch(()=>null):null]);
   if(!bgc?.count)return NextResponse.json(snapshot);
-  return NextResponse.json({...snapshot,total:snapshot.total+bgc.count,badges:{...snapshot.badges,delivery_associates:bgc.count,workforce:(snapshot.badges.workforce||0)+bgc.count},items:[...snapshot.items,{key:'idfy',label:'IDfy insufficiencies',detail:`${bgc.count} associates need information`,count:bgc.count,href:bgc.href}]});
+  return NextResponse.json({...snapshot,total:snapshot.total+bgc.count,badges:{...snapshot.badges,ops_amazon_da:bgc.count,workforce:(snapshot.badges.workforce||0)+bgc.count},items:[...snapshot.items,{key:'idfy',label:'IDfy insufficiencies',detail:`${bgc.count} associates need information`,count:bgc.count,href:bgc.href}]});
 }
