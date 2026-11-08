@@ -53,9 +53,12 @@ async function tablePhoto(title:string, columns:string[], rows:Array<Array<strin
   const width = Math.max(760,columns.length*columnWidth);
   const rowHeight = 29, titleHeight = 45;
   const allRows = rows.slice(0,55);
-  const header = columns.map((label,index)=>`<rect x="${index*columnWidth}" y="${titleHeight}" width="${columnWidth}" height="${rowHeight}" fill="#dce8f6"/><text x="${index*columnWidth+8}" y="${titleHeight+20}" font-weight="700">${xml(label.slice(0,22))}</text>`).join("");
+  const header = columns.map((label,index)=>{
+    const align=index===0?"start":"middle",x=index===0?index*columnWidth+8:index*columnWidth+columnWidth/2;
+    return `<rect x="${index*columnWidth}" y="${titleHeight}" width="${columnWidth}" height="${rowHeight}" fill="#dce8f6"/><text x="${x}" y="${titleHeight+20}" text-anchor="${align}" font-weight="700">${xml(label.slice(0,22))}</text>`;
+  }).join("");
   const body = allRows.map((row,rowIndex)=>row.map((value,columnIndex)=>{
-    const y=titleHeight+rowHeight*(rowIndex+1),align=columnIndex===0?"start":"end",x=columnIndex===0?columnIndex*columnWidth+10:(columnIndex+1)*columnWidth-10;
+    const y=titleHeight+rowHeight*(rowIndex+1),align=columnIndex===0?"start":"middle",x=columnIndex===0?columnIndex*columnWidth+10:columnIndex*columnWidth+columnWidth/2;
     const total=rowIndex===allRows.length-1;
     const style=!total&&columns[columnIndex]===percentageColumn?percentageStyle(value,tone):null;
     const background=style?.background || (total?"#e8eef6":rowIndex%2 ? "#f6f8fb":"#fff");

@@ -222,17 +222,21 @@ test("DSR normalization preserves incomplete history and unattempted assigned sh
   assert.equal(sheets[0].rows.at(-1)["Outcome missing"], 1);
 });
 
-test('DSR uses four operational bands and respects the configured target', async () => {
+test('DSR uses the agreed five operational bands and respects the configured target', async () => {
  const {dsrHeatColor,dsrPctTextColor,dsrBandLegend}=await import('./station-board.ts');
- assert.equal(dsrHeatColor(77),'#fee2e2');
- assert.equal(dsrHeatColor(79.99),'#fee2e2');
- assert.equal(dsrHeatColor(80),'#fef3c7');
- assert.equal(dsrHeatColor(89.99),'#fef3c7');
- assert.equal(dsrHeatColor(90),'#dcfce7');
- assert.equal(dsrHeatColor(93.99),'#dcfce7');
- assert.equal(dsrHeatColor(94),'#166534');
- assert.equal(dsrPctTextColor(94),'#ffffff');
- assert.equal(dsrHeatColor(94,95),'#dcfce7');
- assert.equal(dsrHeatColor(95,95),'#166534');
- assert.match(dsrBandLegend(94), /80–<90% amber/);
+ assert.equal(dsrHeatColor(82.99),'#b91c1c');
+ assert.equal(dsrPctTextColor(82.99),'#ffffff');
+ assert.equal(dsrHeatColor(83),'#fee2e2');
+ assert.equal(dsrHeatColor(87.99),'#fee2e2');
+ assert.equal(dsrHeatColor(88),'#fef3c7');
+ assert.equal(dsrHeatColor(93),'#fef3c7');
+ assert.equal(dsrHeatColor(93.01),'#dcfce7');
+ assert.equal(dsrHeatColor(95),'#dcfce7');
+ assert.equal(dsrHeatColor(95.01),'#166534');
+ assert.equal(dsrPctTextColor(95.01),'#ffffff');
+ assert.equal(dsrHeatColor(95,95),'#fef3c7');
+ assert.equal(dsrHeatColor(95.01,95),'#dcfce7');
+ assert.equal(dsrHeatColor(97.01,95),'#166534');
+ assert.match(dsrBandLegend(93), /<83% strong red/);
+ assert.match(dsrBandLegend(93), />95% green/);
 });
