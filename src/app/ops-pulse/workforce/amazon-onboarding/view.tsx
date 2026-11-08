@@ -8,6 +8,7 @@ import {Profile,Audit} from './profile';
 import {Approvals} from './approvals';
 import {BgcPanel} from './bgc';
 import {BulkBgc} from './bulk-bgc';
+import {BgcQueue} from './bgc-queue';
 import styles from './view.module.css';
 type InviteData={people:Array<{id:string;full_name:string;dropx_id:string|null;email:string|null;onboarding_status:string;inviteBlocked?:string|null}>;requests:Array<{id:string;workforce_id:string;status:string;requested_at:string;error_message:string|null}>};
 type DeskData=Partial<AmazonDaList>&Partial<InviteData>&{commands?:AmazonDaCommand[];canApprove?:boolean;moreHistory?:boolean};
@@ -21,14 +22,14 @@ export function Photo({person,station}:{person:AmazonDaPerson;station:string}){
  useEffect(()=>setFailed(false),[src]);
  return <span className={styles.avatar}>{src&&!failed?<img src={src} alt="" width={52} height={52} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<span>{person.name.trim().split(/\s+/).slice(0,2).map(n=>n[0]).join('')}</span>}</span>;
 }
-export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,notice,initialError,embedded=false,onStationChange}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;notice?:string;initialError?:string;embedded?:boolean;onStationChange?:(station:string)=>void}){
+export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialStation,initialStations,notice,initialError,embedded=false,onStationChange}:{stations:Array<{id:string;code:string}>;canEdit:boolean;initialView?:string;initialStation?:string;initialStations?:string[];notice?:string;initialError?:string;embedded?:boolean;onStationChange?:(station:string)=>void}){
  const [station,setStation]=useState(stations.some(s=>s.id===initialStation)?initialStation!:stations[0]?.id||'');
  useEffect(()=>{onStationChange?.(station);},[station,onStationChange]);
  const [allScope,setAllScope]=useState(initialView==='approvals'||initialView==='history'),[historyPage,setHistoryPage]=useState(0);
  const [view,setView]=useState(initialView);const [query,setQuery]=useState('');const [debouncedQuery,setDebouncedQuery]=useState('');const [statusFilter,setStatusFilter]=useState('');
  const [data,setData]=useState<DeskData>({});const [dataKey,setDataKey]=useState('');const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [expanded,setExpanded]=useState('');
  const [revision,setRevision]=useState(0);const [moreBusy,setMoreBusy]=useState(false);const requestSeq=useRef(0);const force=useRef(false);const cache=useRef(new Map<string,{data:DeskData;at:number}>());
- const isBgc=view==='bgc'||view==='bgc-pending';const isList=['onboarding','associates','offboarded','bgc','bgc-pending'].includes(view);const auditView=['history','approvals'].includes(view);const requestStation=auditView&&allScope?'all':station;const key=`${requestStation}:${view}:${isList?debouncedQuery:''}:${statusFilter}:${historyPage}`;const current=dataKey===key?data:{};const rows=current.rows||[];
+ const pendingView=view==='bgc-pending'||view==='auto';const isBgc=view==='bgc'||pendingView;const isList=['onboarding','associates','offboarded','bgc','bgc-pending'].includes(view);const auditView=['history','approvals'].includes(view);const requestStation=auditView&&allScope?'all':station;const key=`${requestStation}:${view}:${isList?debouncedQuery:''}:${statusFilter}:${historyPage}`;const current=dataKey===key?data:{};const rows=current.rows||[];
  useEffect(()=>{const timer=setTimeout(()=>setDebouncedQuery(query.trim()),300);return()=>clearTimeout(timer);},[query]);
  function resetFilters(){setExpanded('');setQuery('');setDebouncedQuery('');setStatusFilter('');setHistoryPage(0);}
  function refresh(){cache.current.clear();force.current=true;setRevision(n=>n+1);}
@@ -36,7 +37,7 @@ export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialS
   const p=new URLSearchParams({station:requestStation,view});if(auditView)p.set('offset',String(historyPage*50));if(isList){p.set('pageSize','24');p.set('offset',String(offset));p.set('query',debouncedQuery);p.set('status',statusFilter);if(snapshot)p.set('snapshot',snapshot);if(force.current)p.set('fresh','1');}return `/api/ops-pulse/amazon-da?${p}`;
  }
  useEffect(()=>{
-  if(!station)return;const seq=++requestSeq.current;const controller=new AbortController();setError('');setExpanded('');setMoreBusy(false);
+  if(pendingView){setBusy(false);setError('');return;}if(!station)return;const seq=++requestSeq.current;const controller=new AbortController();setError('');setExpanded('');setMoreBusy(false);
   const saved=cache.current.get(key);if(saved&&!force.current&&Date.now()-saved.at<25_000){setData(saved.data);setDataKey(key);setBusy(false);return()=>{requestSeq.current++;};}
   setBusy(true);setData({});setDataKey(key);const url=listUrl();force.current=false;
   api<DeskData>(url,controller.signal).then(result=>{if(seq!==requestSeq.current)return;setData(result);if(cache.current.size>=8)cache.current.delete(cache.current.keys().next().value!);cache.current.set(key,{data:result,at:Date.now()});})
@@ -50,13 +51,13 @@ export function AmazonDaDesk({stations,canEdit,initialView='onboarding',initialS
  return <section className={styles.desk} aria-busy={busy}>
   {notice?<p role="status" className={styles.next}>{notice}</p>:null}{initialError?<p role="alert" className={styles.error}>{initialError}</p>:null}
   <div className={styles.toolbar}>
-   <label className={styles.station}>Station<select value={auditView&&allScope?'all':station} onChange={e=>{setAllScope(e.target.value==='all');if(e.target.value!=='all')setStation(e.target.value);resetFilters();}} aria-label="Amazon station">{auditView?<option value="all">All my stations</option>:null}{stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
+   {!pendingView?<label className={styles.station}>Station<select value={auditView&&allScope?'all':station} onChange={e=>{setAllScope(e.target.value==='all');if(e.target.value!=='all')setStation(e.target.value);resetFilters();}} aria-label="Amazon station">{auditView?<option value="all">All my stations</option>:null}{stations.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>:null}
    {!embedded?<nav className={styles.tabs} aria-label="Amazon associates">{tabs.map(([id,label,Icon])=><button key={id} type="button" aria-pressed={view===id||(id==='bgc-pending'&&isBgc)} onClick={()=>{setView(id);setAllScope(id==='approvals'||id==='history');resetFilters();}}><Icon size={15} aria-hidden="true"/>{label}</button>)}</nav>:null}
    <button className={styles.refresh} type="button" onClick={refresh} disabled={busy||!station} aria-label="Refresh Amazon data" title="Refresh Amazon data"><RefreshCw size={16} className={busy?styles.spin:''}/><span>Refresh</span></button>
   </div>
   {!stations.length?<p className={styles.empty}>No Amazon stations are in your access.</p>:null}
   {error?<div role="alert" className={styles.error}>{error}<button onClick={refresh}>Retry</button></div>:null}
-  {isList?<>
+  {pendingView?<BgcQueue stations={stations} initialStations={initialStations} canEdit={canEdit} revision={revision} onEmpty={view==='auto'?()=>setView('onboarding'):undefined} onAllProfiles={()=>setView('bgc')}/>:isList?<>
    {isBgc?<div className={styles.split}><div className={styles.milestoneFilters}><button aria-pressed={view==='bgc-pending'} onClick={()=>{setView('bgc-pending');resetFilters();}}>Needs information</button><button aria-pressed={view==='bgc'} onClick={()=>{setView('bgc');resetFilters();}}>All BGC profiles</button></div><small>Current station access · verified Amazon identity</small></div>:null}
    <div className={styles.filters}><label className={styles.search}><Search size={16}/><input aria-label="Search associates" placeholder="Find a name, Amazon ID or email" value={query} onChange={e=>setQuery(e.target.value)}/></label>
     {view==='associates'?<select aria-label="Filter associate status" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select>:null}
