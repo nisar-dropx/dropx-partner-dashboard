@@ -9,6 +9,7 @@ export type NavItem = {
     code?: string;
     accessAnyOf?: string[];
     hideBadge?: boolean;
+    badgeCode?: string;
     href?: string;
     label: string;
     /** In-page tabs or sections that can be granted independently. */

@@ -27,7 +27,7 @@ export function Profile({station,providerId,initialPerson,canEdit,onChanged}:{st
   function selectAction(value:string){setAction(value);setReason('');setRemarks('');setConfirmed(false);commandId.current=null;setNotice('');}
   const pending=history.find(c=>['pending_approval','queued','checking','sending','unconfirmed'].includes(c.status));
   const locked=Boolean(notice)||saving||!!pending; const person=data?.person||initialPerson;
-  return <div className={styles.profile}>
+  return <div className={`${styles.desk} ${styles.profile}`}>
     <div className={styles.split}><strong>Associate profile</strong><button onClick={()=>{setShowHistory(!showHistory);if(!showHistory)void loadHistory();}}>◷ History</button></div>
     {busy?<p className={styles.meta}>Checking available actions…</p>:null}{error?<p className={styles.error} role="alert">{error}</p>:null}
     {pending?<div className={styles.next}><strong>{pending.status==='pending_approval'?'Awaiting approval':pending.status==='unconfirmed'?'Amazon confirmation pending':'Approved · processing'}</strong><span>{human(pending.action)} · requested by {pending.actor_name}</span>{pending.reviewer_name?<span>Approved by {pending.reviewer_name}</span>:null}</div>:null}

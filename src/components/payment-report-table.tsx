@@ -1,4 +1,5 @@
 "use client";
+import { facetRows } from "@/lib/dependent-filters";
 import { ReportTable } from "@/components/report-table";
 
 
@@ -301,35 +302,32 @@ export function PaymentReportTable({ requests, checkedAt }: { requests: PaymentR
   const [pageSize, setPageSize] = useState("20");
   const [page, setPage] = useState(1);
   const history = selectedRequest ? buildHistory(selectedRequest) : [];
-  const locations = useMemo(() => [...new Set(requests.map((item) => item.location_code).filter(Boolean))].sort(), [requests]);
-  const heads = useMemo(() => [...new Set(requests.map((item) => item.payment_head_name).filter(Boolean))].sort(), [requests]);
-  const externalIds = useMemo(() => [...new Set(requests.map((item) => item.payment_head_external_id).filter((item) => item && item !== "-"))].sort(), [requests]);
-  const requestTypes = useMemo(() => [...new Set(requests.map(requestTypeLabel))].sort(), [requests]);
-  const statuses = useMemo(() => [...new Set(requests.map(reportStatusLabel).filter(Boolean))].sort(), [requests]);
-  const paymentModes = useMemo(() => [...new Set(requests.map((item) => item.payment_mode).filter(Boolean) as string[])].sort(), [requests]);
-  const requesters = useMemo(() => [...new Set(requests.map((item) => item.requested_by_name ?? item.requested_by_email).filter(Boolean) as string[])].sort(), [requests]);
-  const accountHolders = useMemo(() => [...new Set(requests.map((item) => item.account_holder_name).filter(Boolean) as string[])].sort(), [requests]);
-  const filteredRequests = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return requests.filter((request) => {
-      const createdDate = request.created_at.slice(0, 10);
-      const searchable = [request.request_no, request.location_code, request.payment_head_name, request.payment_head_external_id,
-        request.account_holder_name, request.bank_account_no, request.ifsc, request.contact_no, request.email, request.utr_cin,
-        request.requested_by_name, request.requested_by_email, request.current_approver_name, request.current_approver_email,
-        ...request.current_approver_role_names].filter(Boolean).join(" ").toLowerCase();
-      return (!needle || searchable.includes(needle)) &&
-        (!locationsSelected.length || locationsSelected.includes(request.location_code)) &&
-        (!headsSelected.length || headsSelected.includes(request.payment_head_name)) &&
-        (!externalIdsSelected.length || externalIdsSelected.includes(request.payment_head_external_id)) &&
-        (!requestTypesSelected.length || requestTypesSelected.includes(requestTypeLabel(request))) &&
-        (!statusesSelected.length || statusesSelected.includes(reportStatusLabel(request))) &&
-        (!paymentModesSelected.length || (request.payment_mode != null && paymentModesSelected.includes(request.payment_mode))) &&
-        (!requestersSelected.length || requestersSelected.includes(request.requested_by_name ?? request.requested_by_email ?? "")) &&
-        (!accountHoldersSelected.length || accountHoldersSelected.includes(request.account_holder_name ?? "")) &&
-        (!fromDate || createdDate >= fromDate) &&
-        (!toDate || createdDate <= toDate);
-    });
-  }, [requests, search, locationsSelected, headsSelected, externalIdsSelected, requestTypesSelected, statusesSelected, paymentModesSelected, requestersSelected, accountHoldersSelected, fromDate, toDate]);
+  const facets = useMemo(() => facetRows(requests, {
+    locations: { selected: locationsSelected, values: row => row.location_code },
+    heads: { selected: headsSelected, values: row => row.payment_head_name },
+    externalIds: { selected: externalIdsSelected, values: row => row.payment_head_external_id },
+    requestTypes: { selected: requestTypesSelected, values: row => requestTypeLabel(row) },
+    statuses: { selected: statusesSelected, values: row => reportStatusLabel(row) },
+    paymentModes: { selected: paymentModesSelected, values: row => row.payment_mode },
+    requesters: { selected: requestersSelected, values: row => row.requested_by_name ?? row.requested_by_email ?? "" },
+    accountHolders: { selected: accountHoldersSelected, values: row => row.account_holder_name }
+  }, request => {
+    const createdDate = request.created_at.slice(0, 10);
+    const searchable = [request.request_no, request.location_code, request.payment_head_name, request.payment_head_external_id,
+      request.account_holder_name, request.bank_account_no, request.ifsc, request.contact_no, request.email, request.utr_cin,
+      request.requested_by_name, request.requested_by_email, request.current_approver_name, request.current_approver_email,
+      ...request.current_approver_role_names].filter(Boolean).join(" ").toLowerCase();
+    return (!search.trim() || searchable.includes(search.trim().toLowerCase())) && (!fromDate || createdDate >= fromDate) && (!toDate || createdDate <= toDate);
+  }), [requests, search, locationsSelected, headsSelected, externalIdsSelected, requestTypesSelected, statusesSelected, paymentModesSelected, requestersSelected, accountHoldersSelected, fromDate, toDate]);
+  const locations = facets.values("locations");
+  const heads = facets.values("heads");
+  const externalIds = facets.values("externalIds");
+  const requestTypes = facets.values("requestTypes");
+  const statuses = facets.values("statuses");
+  const paymentModes = facets.values("paymentModes");
+  const requesters = facets.values("requesters");
+  const accountHolders = facets.values("accountHolders");
+  const filteredRequests = facets.rows;
   const summary = useMemo(() => summarizePaymentReport(filteredRequests), [filteredRequests]);
 
   function downloadCsv() {

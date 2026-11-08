@@ -1,4 +1,6 @@
 "use client";
+
+import { facetRows } from "@/lib/dependent-filters";
 import { ReportTable } from "@/components/report-table";
 
 
@@ -577,19 +579,13 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
     [editOptions.status, editableSheet, rows]
   );
 
-  const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (categories.length && !categories.includes(row.categoryCode)) return false;
-      if (locations.length && !locations.includes(row.location)) return false;
-      if (designations.length && !designations.includes(row.designation)) return false;
-      const statusValue = editableSheet
-        ? activationFilterValues[`${row.categoryCode}:${row.id}`] ?? row.exportValues.active
-        : row.status;
-      if (statuses.length && !statuses.includes(statusValue)) return false;
-      return !term || `${row.code} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.model} ${row.provider} ${row.designation} ${row.category}`.toLowerCase().includes(term);
-    });
-  }, [activationFilterValues, categories, designations, editableSheet, locations, rows, search, statuses]);
+  const facets = useMemo(() => facetRows(rows, {
+    category: { selected: categories, values: row => row.categoryCode },
+    location: { selected: locations, values: row => row.location },
+    designation: { selected: designations, values: row => row.designation },
+    status: { selected: statuses, values: row => editableSheet ? activationFilterValues[`${row.categoryCode}:${row.id}`] ?? row.exportValues.active : row.status }
+  }, row => !search.trim() || `${row.code} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.model} ${row.provider} ${row.designation} ${row.category}`.toLowerCase().includes(search.trim().toLowerCase())), [activationFilterValues, categories, designations, editableSheet, locations, rows, search, statuses]);
+  const filteredRows = facets.rows;
   const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = pageSize === "all"
@@ -900,10 +896,10 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
         </div>
         <div className="all-people-filters">
           <input className="field all-people-search" onChange={(event) => setSearch(event.target.value)} placeholder="Search ID, name, mobile, email" value={search} />
-          <MultiCheckFilter allLabel="All categories" label="Category" onChange={setCategories} options={categoryOptions} selected={categories} />
-          <MultiCheckFilter allLabel="All locations" label="Location" onChange={setLocations} options={locationOptions} selected={locations} />
-          <MultiCheckFilter allLabel="All designations" label="Designation" onChange={setDesignations} options={designationOptions} selected={designations} />
-          <MultiCheckFilter allLabel="All statuses" label="Status" onChange={setStatuses} options={statusOptions} selected={statuses} />
+          <MultiCheckFilter allLabel="All categories" label="Category" onChange={setCategories} options={facets.options("category", categoryOptions)} selected={categories} />
+          <MultiCheckFilter allLabel="All locations" label="Location" onChange={setLocations} options={facets.options("location", locationOptions)} selected={locations} />
+          <MultiCheckFilter allLabel="All designations" label="Designation" onChange={setDesignations} options={facets.options("designation", designationOptions)} selected={designations} />
+          <MultiCheckFilter allLabel="All statuses" label="Status" onChange={setStatuses} options={facets.options("status", statusOptions)} selected={statuses} />
           {editableSheet ? (
             <>
               <button className={sheetEditMode ? "button secondary" : "button"} disabled={savingAll} onClick={toggleSheetEditMode} type="button">

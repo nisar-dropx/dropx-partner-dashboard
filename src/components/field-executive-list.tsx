@@ -1,4 +1,6 @@
 "use client";
+
+import { facetRows } from "@/lib/dependent-filters";
 import { ReportTable } from "@/components/report-table";
 
 
@@ -176,24 +178,14 @@ export function FieldExecutiveList({
       .sort((left, right) => left.localeCompare(right))
       .map((status) => ({ value: status.toLowerCase(), label: status }))
   ), [rows]);
-  const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    const selectedStatuses = new Set(statusFilter);
-    return rows.filter((row) => {
-      const matchesSearch = !term || (
-        `${row.dropxId} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.provider} ${row.model} ${row.designation}`
-          .toLowerCase()
-          .includes(term)
-      );
-      const matchesProvider = !providerFilter.length || providerFilter.includes(row.provider);
-      const matchesModel = !modelFilter.length || modelFilter.includes(row.model);
-      const matchesLocation = !locationFilter.length || locationFilter.includes(row.location);
-      const matchesDesignation = !designationFilter.length || designationFilter.includes(row.designation);
-      const matchesStatus = !statusFilter.length || selectedStatuses.has(row.status.toLowerCase());
-
-      return matchesSearch && matchesProvider && matchesModel && matchesLocation && matchesDesignation && matchesStatus;
-    });
-  }, [designationFilter, locationFilter, modelFilter, providerFilter, rows, search, statusFilter]);
+  const facets = useMemo(() => facetRows(rows, {
+    provider: { selected: providerFilter, values: row => row.provider },
+    model: { selected: modelFilter, values: row => row.model },
+    location: { selected: locationFilter, values: row => row.location },
+    designation: { selected: designationFilter, values: row => row.designation },
+    status: { selected: statusFilter, values: row => row.status.toLowerCase() }
+  }, row => !search.trim() || `${row.dropxId} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.provider} ${row.model} ${row.designation}`.toLowerCase().includes(search.trim().toLowerCase())), [designationFilter, locationFilter, modelFilter, providerFilter, rows, search, statusFilter]);
+  const filteredRows = facets.rows;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -213,7 +205,7 @@ export function FieldExecutiveList({
               setProviderFilter(values);
               setPage(1);
             }}
-            options={providerOptions}
+            options={facets.options("provider", providerOptions)}
             selected={providerFilter}
           />
           <MultiCheckFilter
@@ -223,7 +215,7 @@ export function FieldExecutiveList({
               setLocationFilter(values);
               setPage(1);
             }}
-            options={locationOptions}
+            options={facets.options("location", locationOptions)}
             selected={locationFilter}
           />
           <MultiCheckFilter
@@ -233,7 +225,7 @@ export function FieldExecutiveList({
               setModelFilter(values);
               setPage(1);
             }}
-            options={modelOptions}
+            options={facets.options("model", modelOptions)}
             selected={modelFilter}
           />
           <MultiCheckFilter
@@ -243,7 +235,7 @@ export function FieldExecutiveList({
               setDesignationFilter(values);
               setPage(1);
             }}
-            options={designationOptions}
+            options={facets.options("designation", designationOptions)}
             selected={designationFilter}
           />
           <MultiCheckFilter
@@ -253,7 +245,7 @@ export function FieldExecutiveList({
               setStatusFilter(values);
               setPage(1);
             }}
-            options={statusOptions}
+            options={facets.options("status", statusOptions)}
             selected={statusFilter}
           />
           <input

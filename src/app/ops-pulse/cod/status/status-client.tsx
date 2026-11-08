@@ -1,4 +1,5 @@
 'use client';
+import { facetRows } from '@/lib/dependent-filters';
 import { ReportTable } from "@/components/report-table";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -80,6 +81,21 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
   const visible = statusBase.filter(l=>matchesSelection(filter,[status(l)])).sort((a,b)=>compareCodRows(a,b,snapshots,sort,direction,now,collectionDate));
   const totals:Record<CodTone,number> = {attention:0,active:0,waiting:0,clear:0,unavailable:0,unchecked:0};
   statusBase.forEach(l=>totals[status(l)]++);
+  const facets = useMemo(() => facetRows(locations.map(location => ({
+    location, checks: checks(location), status: status(location),
+    freshness: codFreshness(rows[location.id]?.snapshot,location.maxAgeMinutes,now,!!rows[location.id]?.loading,!!rows[location.id]?.error)
+  })), {
+    station: {selected: stations, values: row => row.location.id},
+    model: {selected: model, values: row => row.location.model},
+    manager: {selected: manager, values: row => row.location.manager ? row.location.managers || [row.location.manager] : ['__unmapped']},
+    region: {selected: region, values: row => row.location.region || '__unmapped'},
+    overall: {selected: filter, values: row => row.status},
+    reconciliation: {selected: parts.reconciliation, values: row => row.checks.reconciliation.tone},
+    prepareDeposit: {selected: parts.prepareDeposit, values: row => row.checks.prepareDeposit.tone},
+    remittances: {selected: parts.remittances, values: row => row.checks.remittances.tone},
+    freshness: {selected: freshness, values: row => row.freshness}
+  }, row => !search.trim() || `${row.location.code} ${row.location.name}`.toLowerCase().includes(search.trim().toLowerCase())),
+  [locations, rows, now, collectionDate, stations, model, manager, region, filter, parts, freshness, search]);
   const options = useMemo(()=>({models:[...new Set(locations.map(l=>l.model).filter(Boolean))].sort(),managers:[...new Set(locations.flatMap(l=>l.managers || [l.manager]).filter(Boolean))].sort(),regions:[...new Set(locations.map(l=>l.region).filter(Boolean))].sort()}),[locations]);
   const reset = () => {setDateMode('all');setSearch('');setModel([]);setManager([]);setRegion([]);setFilter([]);setStations([]);setFreshness([]);setParts({reconciliation:[],prepareDeposit:[],remittances:[]});setSort('station');setDirection('asc');};
   const statusOptions=Object.entries(codToneLabels).map(([value,label])=>({value,label}));
@@ -146,18 +162,18 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
     </section>
     <div className={styles.filters}>
       <input aria-label="Find station" placeholder="Find station…" value={search} onChange={e=>setSearch(e.target.value)} />
-      <CompactFilter label="Region" values={region} onChange={setRegion} options={[...options.regions.map(option),{value:'__unmapped',label:'Region not mapped'}]}/>
-      <CompactFilter label="Cluster / AOM" values={manager} onChange={setManager} options={[...options.managers.map(option),{value:'__unmapped',label:'Manager not mapped'}]}/>
-      <CompactFilter label="Model" values={model} onChange={setModel} options={options.models.map(option)}/>
-      <CompactFilter label="Overall status" values={filter} onChange={setFilter} options={statusOptions}/>
+      <CompactFilter label="Region" values={region} onChange={setRegion} options={facets.options('region', [...options.regions.map(option),{value:'__unmapped',label:'Region not mapped'}])}/>
+      <CompactFilter label="Cluster / AOM" values={manager} onChange={setManager} options={facets.options('manager', [...options.managers.map(option),{value:'__unmapped',label:'Manager not mapped'}])}/>
+      <CompactFilter label="Model" values={model} onChange={setModel} options={facets.options('model', options.models.map(option))}/>
+      <CompactFilter label="Overall status" values={filter} onChange={setFilter} options={facets.options('overall', statusOptions)}/>
     </div>
     <div className={styles.summary} aria-label="Filter by overall status">{Object.entries(codToneLabels).map(([key,label])=><button key={key} aria-pressed={filter.includes(key)} title={`Toggle ${label} stations`} onClick={()=>setFilter(current=>toggleCodSelection(current,key))}><strong className={toneClass(key as CodTone)}>{totals[key as CodTone]}</strong><span>{label}<small>{filter.includes(key)?'✓ Selected · click to remove':'Click to filter'}</small></span></button>)}</div>
     <div className={styles.viewbar}><span><b>{visible.length}</b> of {locations.length} stations</span><div><label>Sort by <select value={sort} onChange={e=>setSort(e.target.value as CodSort)}><option value="station">Station</option><option value="region">Region</option><option value="manager">Cluster / AOM</option><option value="reconciliation">DA pending amount</option><option value="prepareDeposit">Amount to prepare</option><option value="remittances">Deposit priority</option><option value="checkedAt">Last check</option></select></label><button onClick={()=>setDirection(d=>d==='asc'?'desc':'asc')}>{direction==='asc'?'↑ Ascending':'↓ Descending'}</button><button onClick={reset}>Reset filters</button><CodExcelDownload entries={visible.map(location=>({location,...rows[location.id]}))} options={{collectionDate,now}}/></div></div>
     <div className={styles.legend}><span className={styles.active}>● Today · within delivery hours</span><span className={styles.good}>● Complete / clear</span><span className={styles.warn}>● Pending within process</span><span className={styles.bad}>● Overdue / timing issue / difference</span><span className={styles.neutral}>● Needs verification</span></div>
     <section className={styles.tableSection} aria-label="Station COD status"><div className={styles.tableHeader}>
-      <div><span>Station</span><CompactFilter label="Stations" values={stations} onChange={setStations} options={locations.map(l=>({value:l.id,label:`${l.code} · ${l.name}`}))}/></div>
-      {(['reconciliation','prepareDeposit','remittances'] as const).map((part,i)=><div key={part}><span>{i===0?`DA cash · ${collectionDate==='undated'?'date unverified':collectionDate?dateLabel(collectionDate):'all dates'}`:i===1?'Prepare deposit · live':'COD deposition · live'}</span><CompactFilter label={['DA status','Prepare status','Deposition status'][i]} values={parts[part]} onChange={values=>setParts(p=>({...p,[part]:values}))} options={statusOptions}/></div>)}
-      <div><span>Last check · IST</span><CompactFilter label="Last check" values={freshness} onChange={setFreshness} options={[{value:'fresh',label:'Fresh'},{value:'stale',label:'Refresh due'},{value:'failed',label:'Check failed'},{value:'checking',label:'Checking'},{value:'unchecked',label:'Not checked'}]}/></div>
+      <div><span>Station</span><CompactFilter label="Stations" values={stations} onChange={setStations} options={facets.options('station', locations.map(l=>({value:l.id,label:`${l.code} · ${l.name}`})))}/></div>
+      {(['reconciliation','prepareDeposit','remittances'] as const).map((part,i)=><div key={part}><span>{i===0?`DA cash · ${collectionDate==='undated'?'date unverified':collectionDate?dateLabel(collectionDate):'all dates'}`:i===1?'Prepare deposit · live':'COD deposition · live'}</span><CompactFilter label={['DA status','Prepare status','Deposition status'][i]} values={parts[part]} onChange={values=>setParts(p=>({...p,[part]:values}))} options={facets.options(part, statusOptions)}/></div>)}
+      <div><span>Last check · IST</span><CompactFilter label="Last check" values={freshness} onChange={setFreshness} options={facets.options('freshness', [{value:'fresh',label:'Fresh'},{value:'stale',label:'Refresh due'},{value:'failed',label:'Check failed'},{value:'checking',label:'Checking'},{value:'unchecked',label:'Not checked'}])}/></div>
     </div>
       {visible.map(l=>{const row=rows[l.id];return <Fragment key={l.id}><div className={styles.stationRow}><div className={styles.station}>
         <button className={styles.stationTitle} onClick={()=>setTeamLocation(l)} aria-label={`${l.code} station team details`}><strong>{l.code}</strong><span>{l.name}</span><span aria-hidden>›</span></button>

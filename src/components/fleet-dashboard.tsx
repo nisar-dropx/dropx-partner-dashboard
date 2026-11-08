@@ -4,6 +4,7 @@ import { ReportTable } from "@/components/report-table";
 
 import { FleetReports } from "@/components/fleet-daily-report";
 import { Activity, Download, Eye, Fuel, Gauge, MoreVertical, TriangleAlert } from "lucide-react";
+import { facetRows } from "@/lib/dependent-filters";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
@@ -512,17 +513,18 @@ function ActionCenter({ rows }: { rows: FleetMetric[] }) {
   const [stations, setStations] = useState<string[]>([]);
   const [issues, setIssues] = useState<string[]>([]);
   const issueOptions = ["Expired", "Due", "Insurance", "PUC", "Fitness", "Tax"];
-  const filtered = rows.filter((row) => (
-    (stations.length === 0 || stations.includes(row.station_code)) &&
-    (issues.length === 0 || issues.some((issue) => row.alerts.some((alert) => alert.toLowerCase().includes(issue.toLowerCase()))))
-  ));
+  const facets = useMemo(() => facetRows(rows, {
+    station: { selected: stations, values: row => row.station_code },
+    issue: { selected: issues, values: row => issueOptions.filter(issue => row.alerts.some(alert => alert.toLowerCase().includes(issue.toLowerCase()))) }
+  }), [rows, stations, issues]);
+  const filtered = facets.rows;
   const vehicles = [...filtered].sort((a, b) => a.healthScore - b.healthScore || a.vehicle_no.localeCompare(b.vehicle_no));
 
   return (
     <div className="fleet-action-center">
       <div className="fleet-local-filters">
-        <MultiCheckFilter allLabel="All locations" label="Location" onChange={setStations} selected={stations} values={uniqueValues(rows.map((row) => row.station_code))} />
-        <MultiCheckFilter allLabel="All issues" label="Issue" onChange={setIssues} selected={issues} values={issueOptions} />
+        <MultiCheckFilter allLabel="All locations" label="Location" onChange={setStations} selected={stations} values={facets.values("station")} />
+        <MultiCheckFilter allLabel="All issues" label="Issue" onChange={setIssues} selected={issues} values={facets.values("issue")} />
       </div>
       <div className="fleet-section-title">Vehicles</div>
       {vehicles.length ? (
@@ -602,7 +604,12 @@ function DateView({
     (!documents.length || documents.includes(row.documentType)) &&
     (!search.trim() || row.vehicle.vehicle_no.toLowerCase().includes(search.trim().toLowerCase()) || row.vehicle.station_code.toLowerCase().includes(search.trim().toLowerCase()))
   ));
-  const dateRows = baseDateRows.filter((row) => !urgencies.length || (row.days !== null && urgencies.includes(dateUrgencyBucket(row.days))))
+  const facets = useMemo(() => facetRows(allDateRows, {
+    station: { selected: stations, values: row => row.vehicle.station_code },
+    document: { selected: documents, values: row => row.documentType },
+    urgency: { selected: urgencies, values: row => row.days === null ? null : dateUrgencyBucket(row.days) }
+  }, row => !search.trim() || `${row.vehicle.vehicle_no} ${row.vehicle.station_code}`.toLowerCase().includes(search.trim().toLowerCase())), [rows, documentTypes, stations, documents, urgencies, search]);
+  const dateRows = facets.rows
     .sort((a, b) => (a.days ?? 9999) - (b.days ?? 9999) || a.vehicle.vehicle_no.localeCompare(b.vehicle.vehicle_no) || a.document.localeCompare(b.document));
   const totalPages = Math.max(1, Math.ceil(dateRows.length / 50));
   const pageRows = dateRows.slice((page - 1) * 50, page * 50);
@@ -640,9 +647,9 @@ function DateView({
         <Field label="Search">
           <input placeholder="Vehicle or location" value={search} onChange={(event) => setSearch(event.target.value)} />
         </Field>
-        <MultiCheckFilter allLabel="All locations" label="Location" onChange={setStations} selected={stations} values={uniqueValues(rows.map((row) => row.station_code))} />
-        <MultiCheckFilter allLabel="All documents" getLabel={(value) => documentLabelByType.get(value) ?? documentLabel(value)} label="Document" onChange={setDocuments} selected={documents} values={documentFilterOptions} />
-        <MultiCheckFilter allLabel="All expiry" getLabel={(value) => statusLabels[value] ?? value} label="Expiry" onChange={setUrgencies} selected={urgencies} values={statusOptions} />
+        <MultiCheckFilter allLabel="All locations" label="Location" onChange={setStations} selected={stations} values={facets.values("station")} />
+        <MultiCheckFilter allLabel="All documents" getLabel={(value) => documentLabelByType.get(value) ?? documentLabel(value)} label="Document" onChange={setDocuments} selected={documents} values={facets.values("document")} />
+        <MultiCheckFilter allLabel="All expiry" getLabel={(value) => statusLabels[value] ?? value} label="Expiry" onChange={setUrgencies} selected={urgencies} values={facets.values("urgency")} />
       </div>
       <div className="fleet-date-summary">
         <DateSummary active={!urgencies.length} label="All" onClick={() => setUrgencies([])} value={counts.all} tone="all" />
@@ -794,11 +801,11 @@ function VehicleView({
   const [station, setStation] = useState("ALL");
   const [status, setStatus] = useState("ALL");
   const [page, setPage] = useState(1);
-  const filtered = rows.filter((row) => (
-    (!search.trim() || row.vehicle_no.toLowerCase().includes(search.trim().toLowerCase()) || row.model.toLowerCase().includes(search.trim().toLowerCase())) &&
-    (station === "ALL" || row.station_code === station) &&
-    (status === "ALL" || (row.status || "active").toLowerCase() === status)
-  ));
+  const facets = useMemo(() => facetRows(rows, {
+    station: { selected: station === "ALL" ? [] : [station], values: row => row.station_code },
+    status: { selected: status === "ALL" ? [] : [status], values: row => (row.status || "active").toLowerCase() }
+  }, row => !search.trim() || `${row.vehicle_no} ${row.model}`.toLowerCase().includes(search.trim().toLowerCase())), [rows, search, station, status]);
+  const filtered = facets.rows;
   const totalPages = Math.max(1, Math.ceil(filtered.length / 50));
   const pageRows = filtered.slice((page - 1) * 50, page * 50);
 
@@ -815,13 +822,13 @@ function VehicleView({
         <Field label="Location">
           <select value={station} onChange={(event) => setStation(event.target.value)}>
             <option value="ALL">All locations</option>
-            {uniqueValues(rows.map((row) => row.station_code)).map((item) => <option key={item}>{item}</option>)}
+            {facets.values("station").map((item) => <option key={item}>{item}</option>)}
           </select>
         </Field>
         <Field label="Status">
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="ALL">All statuses</option>
-            {uniqueValues(rows.map((row) => (row.status || "active").toLowerCase())).map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+            {facets.values("status").map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
           </select>
         </Field>
       </div>
@@ -1380,16 +1387,15 @@ function FuelLog({
   const [toDate, setToDate] = useState("");
   const [quickPeriod, setQuickPeriod] = useState("CUSTOM");
   const [page, setPage] = useState(1);
-  const vehicleOptions = uniqueValues(rows.map((row) => row.vehicle_no));
-  const stationOptions = uniqueValues(rows.map((row) => row.station_code));
-  const sourceOptions = uniqueValues(rows.map((row) => row.source));
-  const filtered = rows.filter((row) => (
-    (vehicles.length === 0 || vehicles.includes(row.vehicle_no)) &&
-    (stations.length === 0 || stations.includes(row.station_code)) &&
-    (sources.length === 0 || sources.includes(row.source)) &&
-    (!fromDate || (row.transaction_at || "").slice(0, 10) >= fromDate) &&
-    (!toDate || (row.transaction_at || "").slice(0, 10) <= toDate)
-  ));
+  const facets = useMemo(() => facetRows(rows, {
+    vehicle: { selected: vehicles, values: row => row.vehicle_no },
+    station: { selected: stations, values: row => row.station_code },
+    source: { selected: sources, values: row => row.source }
+  }, row => (!fromDate || (row.transaction_at || "").slice(0, 10) >= fromDate) && (!toDate || (row.transaction_at || "").slice(0, 10) <= toDate)), [rows, vehicles, stations, sources, fromDate, toDate]);
+  const vehicleOptions = facets.values("vehicle");
+  const stationOptions = facets.values("station");
+  const sourceOptions = facets.values("source");
+  const filtered = facets.rows;
   const totalPages = Math.max(1, Math.ceil(filtered.length / 50));
   const pageRows = filtered.slice((page - 1) * 50, page * 50);
 
@@ -1543,16 +1549,15 @@ function FleetFuelReport({ rows }: { rows: FuelRow[] }) {
   const [quickPeriod, setQuickPeriod] = useState("CURRENT_MONTH");
   const [showResults, setShowResults] = useState(false);
   const [page, setPage] = useState(1);
-  const vehicleOptions = uniqueValues(rows.map((row) => row.vehicle_no));
-  const stationOptions = uniqueValues(rows.map((row) => row.station_code));
-  const sourceOptions = uniqueValues(rows.map((row) => row.source));
-  const filtered = rows.filter((row) => (
-    (vehicles.length === 0 || vehicles.includes(row.vehicle_no)) &&
-    (stations.length === 0 || stations.includes(row.station_code)) &&
-    (sources.length === 0 || sources.includes(row.source)) &&
-    (!fromDate || (row.transaction_at || "").slice(0, 10) >= fromDate) &&
-    (!toDate || (row.transaction_at || "").slice(0, 10) <= toDate)
-  ));
+  const facets = useMemo(() => facetRows(rows, {
+    vehicle: { selected: vehicles, values: row => row.vehicle_no },
+    station: { selected: stations, values: row => row.station_code },
+    source: { selected: sources, values: row => row.source }
+  }, row => (!fromDate || (row.transaction_at || "").slice(0, 10) >= fromDate) && (!toDate || (row.transaction_at || "").slice(0, 10) <= toDate)), [rows, vehicles, stations, sources, fromDate, toDate]);
+  const vehicleOptions = facets.values("vehicle");
+  const stationOptions = facets.values("station");
+  const sourceOptions = facets.values("source");
+  const filtered = facets.rows;
   const rowsForReport = buildFuelReportRows(filtered, reportType);
   const reportHeaders = rowsForReport[0]?.map(String) ?? [];
   const reportDataRows = rowsForReport.slice(1);
@@ -1674,6 +1679,8 @@ function LiveGps({ rows }: { rows: GpsRow[] }) {
     (ignition === "ALL" || (ignition === "ON" ? row.ignition : !row.ignition))
   ));
 
+  const ignitionOptions = [...new Set([...rows.filter(row => !search.trim() || row.vehicle_no.toLowerCase().includes(search.trim().toLowerCase())).map(row => row.ignition ? "ON" : "OFF"), ...(ignition === "ALL" ? [] : [ignition])])];
+
   return (
     <>
       <div className="fleet-local-filters compact">
@@ -1683,8 +1690,7 @@ function LiveGps({ rows }: { rows: GpsRow[] }) {
         <Field label="Ignition">
           <select value={ignition} onChange={(event) => setIgnition(event.target.value)}>
             <option value="ALL">All</option>
-            <option value="ON">ON</option>
-            <option value="OFF">OFF</option>
+            {ignitionOptions.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </Field>
       </div>
