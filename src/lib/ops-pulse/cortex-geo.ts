@@ -45,6 +45,14 @@ export function distanceKm(a: Point, b: Point) {
   return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+export type ScanQuality = "good" | "bad" | "unavailable";
+
+/** Operational rule: within 50 m is good; anything farther is a bad scan. */
+export function scanQuality(distanceM: number | null | undefined): ScanQuality {
+  if (distanceM == null || !Number.isFinite(distanceM)) return "unavailable";
+  return distanceM <= 50 ? "good" : "bad";
+}
+
 /** Clean Amazon locationsByTime into a chronological Driver Trace. */
 export function cleanGpsTrail(
   rows: any[] | null | undefined,
