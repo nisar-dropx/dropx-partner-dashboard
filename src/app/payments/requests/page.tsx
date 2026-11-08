@@ -1,3 +1,4 @@
+import { PaymentTracker } from "@/components/payment-tracker";
 
 import { ReportTable } from "@/components/report-table";
 import { vehiclePaymentPolicy, paymentVehicleDetails } from "@/lib/vehicle-payment";
@@ -498,7 +499,7 @@ export default async function PaymentRequestsPage({
         eyebrow="Payments"
         title="Payment Requests"
         subtitle="Track requests and submit payment details."
-        action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
+        action={<PaymentTracker />}
       />
 
       {error ? (
