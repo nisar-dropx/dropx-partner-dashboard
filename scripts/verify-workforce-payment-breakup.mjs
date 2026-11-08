@@ -95,12 +95,7 @@ assert.match(workforceTable, /<div aria-label="Payout filters" className="payout
 assert.equal((workforceTable.match(/<PayoutMultiFilter /g) ?? []).length, 6, "Location, designation, provider, payment method, mapping status, and payout status must each use a searchable multi-select");
 assert.match(workforceTable, /placeholder=\{`Search \$\{label\.toLowerCase\(\)\}`\}/, "Every payout multi-select must expose option search");
 assert.match(workforceTable, /label="Designation"/, "The payout worksheet must expose a searchable Designation filter");
-assert.match(workforceTable, /facetRows\(displayRows,/, "Visible rows must derive from the complete display dataset");
-for (const [facet, selection] of Object.entries({ location: "locations", designation: "designations", provider: "providers", mappingStatus: "mappingStatuses", status: "statuses", method: "methods" })) {
-  assert.match(workforceTable, new RegExp(`${facet}: \\{ selected: ${selection}, values:`), `Visible rows must apply the ${facet} selection`);
-}
-assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, deferredSearch, \{ locations: \[\], designations: \[\], providers: \[\], methods: \[\], mappingStatuses: \[\], statuses: \[\] \}\)/, "Facets must retain the shared search predicate");
-assert.match(workforceTable, /const filtered = facets\.rows;/, "Visible rows must apply all active facet selections");
+assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, deferredSearch, \{ locations, designations, providers, methods, mappingStatuses, statuses \}\)/, "Visible rows must use the shared multi-select predicate");
 assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, search, \{ locations, designations, providers, methods, mappingStatuses, statuses \}\)/, "CSV export must use the same multi-select predicate over all filtered rows");
 assert.match(workforceTable, /const \[size, setSize\] = useState\("50"\)/, "Payout pagination must default to at least 50 rows");
 assert.match(workforceTable, /\["50","100","500","1000","all"\]/, "Payout pagination must start at 50 and omit the 20-row option");

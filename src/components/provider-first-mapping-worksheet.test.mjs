@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import * as facets from '../lib/dependent-filters.ts';
 import * as mapping from '../lib/provider-first-mapping-view.ts';
 import * as history from '../lib/payment-allocation-history.ts';
 import * as lookup from '../lib/provider-mapping-lookup.ts';
@@ -47,6 +48,8 @@ function worksheet(
     useDeferredValue(value) { return value; }
   };
   const boundaries = {
+    './id-mapping-workspace.module.css': { default: new Proxy({}, { get: (_, key) => String(key) }) },
+    '@/lib/dependent-filters': facets,
     react: hooks,
     "next/navigation": {useRouter:()=>({refresh(){}})},
     '@/app/provider-mapping/actions': { clearProviderMappingPeriod: clearPeriod, saveProviderFirstMappingsInline: save },
@@ -896,4 +899,34 @@ test('server refresh reveals an automatic identity link without replacing unsave
  const linked={...row,workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName,identityLinked:true,effectiveFrom:'2026-10-01'};
  const clean=worksheet({initialMappingStatus:'all'});clean.rerender({mappings:[linked]});assert.equal(clean.select('provider_first_worker_0').value,worker.id);
  const dirty=worksheet({initialMappingStatus:'all'});dirty.change('provider_first_worker_0',worker.id);dirty.rerender({mappings:[{...row,providerMemberName:'Server update'}]});assert.equal(dirty.select('provider_first_worker_0').value,worker.id);
+});
+
+test('compact mappings open independently and collapsing preserves unsaved rates',()=>{
+ const ui=worksheet({mappings:[row,{...row,providerMemberId:'second'}]});
+ const disclosures=()=>ui.all(n=>n.type==='details');
+ assert.equal(disclosures().length,2);
+ assert.ok(disclosures().every(n=>!n.props.open));
+ ui.all(n=>n.type==='summary')[0].props.onClick({preventDefault(){}});ui.render();
+ ui.all(n=>n.type==='summary')[1].props.onClick({preventDefault(){}});ui.render();
+ assert.ok(disclosures().every(n=>n.props.open));
+ ui.change('provider_first_worker_0',worker.id);
+ ui.change('provider_first_payment_method_0',method.id);
+ ui.one(n=>n.type==='input'&&n.props.type==='number').props.onChange({target:{value:'17'}});ui.render();
+ ui.one(n=>n.type==='button'&&n.props.children==='Collapse all').props.onClick();ui.render();
+ assert.ok(disclosures().every(n=>!n.props.open));
+ ui.one(n=>n.type==='button'&&n.props.children==='Expand page').props.onClick();ui.render();
+ assert.equal(ui.one(n=>n.type==='input'&&n.props.type==='number').props.value,'17');
+});
+
+test('mapping filter choices follow other filters and retain selected zero-match stations',()=>{
+ const other={...row,providerMemberId:'second',stationId:'station-2',stationLabel:'GNTF',providerMemberName:'Other'};
+ const ui=worksheet({mappings:[row,other]});
+ ui.filter('Location').setSelected(['station-2']);ui.render();
+ ui.one(n=>n.type==='input'&&n.props.type==='search').props.onChange({target:{value:'Asha'}});ui.render();
+ assert.equal(ui.cards().length,0);
+ assert.deepEqual(ui.filter('Location').selected,['station-2']);
+ assert.deepEqual(ui.filter('Location').options.map(o=>o.value).sort(),['station-1','station-2']);
+ ui.filter('Location').setSelected([]);ui.render();
+ assert.equal(ui.cards().length,1);
+ assert.deepEqual(ui.filter('Location').options.map(o=>o.value),['station-1']);
 });

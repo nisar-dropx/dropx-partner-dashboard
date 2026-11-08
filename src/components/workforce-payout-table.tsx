@@ -511,7 +511,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const mappingStatusOptions = facets.values("mappingStatus").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const statusOptions = facets.values("status").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const methodOptions = facets.values("method").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
-  const filtered = facets.rows;
+  const filtered = useMemo(() => displayRows.filter(row => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, designations, providers, methods, mappingStatuses, statuses })), [displayRows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
   const preliminaryBankBalances = useMemo(
     () => buildWorkforcePayoutPreliminaryBalanceIndex(rows),
     [rows]
