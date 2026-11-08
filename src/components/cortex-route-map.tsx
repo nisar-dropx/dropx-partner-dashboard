@@ -24,6 +24,17 @@ import {
 import styles from "./cortex-workspace.module.css";
 
 type XY = { x: number; y: number };
+type ScanMapFilter = "all" | "good" | "bad" | "unavailable";
+type ScanPoint = {
+  key: string;
+  point: Point;
+  plannedPoint: Point | null;
+  quality: "good" | "bad";
+  distanceM: number;
+  trackingId: string;
+  state: string;
+  stopSequence: number;
+};
 
 const TILE = 256;
 const MIN_ZOOM = 4;
@@ -89,6 +100,7 @@ export function CortexRouteMap({
   stops,
   movementStart,
   movementEnd,
+  scanFilter = "all",
 }: {
   plannedPath: Point[];
   actualPath: Point[];
@@ -98,6 +110,7 @@ export function CortexRouteMap({
   stops: CortexStop[];
   movementStart: number | null;
   movementEnd: number | null;
+  scanFilter?: ScanMapFilter;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 640, height: 420 });
@@ -108,6 +121,8 @@ export function CortexRouteMap({
   const [playhead, setPlayhead] = useState<number | null>(null);
   const [showTrace, setShowTrace] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showScans, setShowScans] = useState(true);
+  const [selectedScan, setSelectedScan] = useState<string | null>(null);
 
   const trace = useMemo(() => toTimed(gpsTrail), [gpsTrail]);
   const startMs = movementStart ?? trace[0]?.time ?? null;
@@ -163,6 +178,39 @@ export function CortexRouteMap({
     [actualPath],
   );
 
+  const scanPoints = useMemo(() => {
+    const points: ScanPoint[] = [];
+    for (const stop of stops) {
+      const plannedPoint = isValidGeo(stop.lat, stop.lng)
+        ? ([stop.lat!, stop.lng!] as Point)
+        : null;
+      for (const task of stop.tasks) {
+        if (!isValidGeo(task.lat, task.lng) || task.scanDistanceM == null || task.scanQuality === "unavailable") continue;
+        if (scanFilter !== "all" && task.scanQuality !== scanFilter) continue;
+        points.push({
+          key: task.taskId || task.scannableId || `${stop.sequence}-${task.actualExecutionTime}`,
+          point: [task.lat!, task.lng!],
+          plannedPoint,
+          quality: task.scanQuality,
+          distanceM: task.scanDistanceM,
+          trackingId: task.scannableId || task.orderId || "Tracking ID unavailable",
+          state: task.taskState || "Pending",
+          stopSequence: stop.sequence,
+        });
+      }
+    }
+    return points;
+  }, [scanFilter, stops]);
+
+  const selectedScanPoint = useMemo(
+    () => scanPoints.find((point) => point.key === selectedScan) || null,
+    [scanPoints, selectedScan],
+  );
+
+  useEffect(() => {
+    if (selectedScan && !scanPoints.some((point) => point.key === selectedScan)) setSelectedScan(null);
+  }, [scanPoints, selectedScan]);
+
   const activeTrail = useMemo(() => {
     if (!trace.length) return [] as TimedPoint[];
     if (playhead == null) return trace;
@@ -187,9 +235,10 @@ export function CortexRouteMap({
       ...scanPath,
       ...trace.map((p) => p.point),
       ...geoStops.map(({ stop }) => [stop.lat, stop.lng] as Point),
+      ...scanPoints.map((item) => item.point),
     ];
     return pts;
-  }, [planned, scanPath, trace, geoStops]);
+  }, [planned, scanPath, trace, geoStops, scanPoints]);
 
   useEffect(() => {
     if (!wrap.current) return;
@@ -379,15 +428,13 @@ export function CortexRouteMap({
         <div className={styles.mapLegend}>
           <span className={styles.legendPlanned}>Planned stops</span>
           <span className={styles.legendActual}>GPS trail</span>
-          <span>
-            {trace.length
-              ? `${trace.length.toLocaleString("en-IN")} GPS points`
-              : "Scan locations only"}
-          </span>
+          <span className={styles.legendGood}>Good scan ≤50 m</span>
+          <span className={styles.legendBad}>Bad scan &gt;50 m</span>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
           <div className={styles.mapLayers}>
             <button type="button" className={showTrace ? styles.mapLayerActive : undefined} aria-pressed={showTrace} onClick={() => setShowTrace((value) => !value)} title="Show or hide Driver Trace"><Route size={13} /> Trace</button>
+            <button type="button" className={showScans ? styles.mapLayerActive : undefined} aria-pressed={showScans} onClick={() => setShowScans((value) => !value)} title="Show scan positions and quality">Scans</button>
             <button type="button" className={showHeatmap ? styles.mapLayerActive : undefined} aria-pressed={showHeatmap} onClick={() => setShowHeatmap((value) => !value)} title="Show GPS density heatmap"><Flame size={13} /> Heatmap</button>
           </div>
           <div className={styles.mapButtons}>
@@ -507,6 +554,25 @@ export function CortexRouteMap({
               ? drawSegments([scanPath], "gps")
               : null}
 
+          {showScans && selectedScanPoint?.plannedPoint ? (
+            <g aria-label="Distance from planned stop to selected scan">
+              <line x1={screen(selectedScanPoint.plannedPoint).x} y1={screen(selectedScanPoint.plannedPoint).y} x2={screen(selectedScanPoint.point).x} y2={screen(selectedScanPoint.point).y} stroke="#fff" strokeWidth="6" opacity=".9" />
+              <line x1={screen(selectedScanPoint.plannedPoint).x} y1={screen(selectedScanPoint.plannedPoint).y} x2={screen(selectedScanPoint.point).x} y2={screen(selectedScanPoint.point).y} stroke={selectedScanPoint.quality === "good" ? "#16a34a" : "#dc2626"} strokeWidth="3" strokeDasharray="6 4" />
+            </g>
+          ) : null}
+
+          {showScans ? scanPoints.map((item) => {
+            const p = screen(item.point);
+            const active = selectedScan === item.key;
+            const color = item.quality === "good" ? "#16a34a" : "#dc2626";
+            return (
+              <g key={`scan-${item.key}`} role="button" tabIndex={0} aria-label={`${item.quality === "good" ? "Good" : "Bad"} scan, ${item.distanceM} metres from planned stop, ${item.trackingId}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => { setSelectedScan(item.key); setSelected(null); const z = Math.max(zoom, 15); setCamera({ zoom: z, center: world(item.point, z) }); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedScan(item.key); } }} style={{ cursor: "pointer" }}>
+                <circle cx={p.x} cy={p.y} r={active ? 10 : 7} fill="#fff" opacity=".96" />
+                <circle cx={p.x} cy={p.y} r={active ? 7 : 4.5} fill={color} stroke={active ? "#172033" : "#fff"} strokeWidth={active ? 2 : 1.5} />
+              </g>
+            );
+          }) : null}
+
           {geoStops.map(({ stop, index, reachedAt }) => {
             const p = screen([stop.lat, stop.lng]);
             const active = selected === index || activeStop?.index === index;
@@ -521,6 +587,7 @@ export function CortexRouteMap({
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => {
                   setSelected(index);
+                  setSelectedScan(null);
                   if (reachedAt != null) {
                     setPlaying(false);
                     setPlayhead(reachedAt);
@@ -649,7 +716,14 @@ export function CortexRouteMap({
         </p>
       )}
 
-      {selectedStop ? (
+      {selectedScanPoint ? (
+        <div className={`${styles.mapStopCard} ${selectedScanPoint.quality === "good" ? styles.mapScanGood : styles.mapScanBad}`}>
+          <strong>{selectedScanPoint.quality === "good" ? "Good scan" : "Bad scan"} · {selectedScanPoint.distanceM} m</strong>
+          <span>{selectedScanPoint.trackingId}</span>
+          <span>Stop {selectedScanPoint.stopSequence} · {selectedScanPoint.state}</span>
+          <small>{selectedScanPoint.quality === "good" ? "Within the 50 m planned-location limit" : "More than 50 m from the planned location"}</small>
+        </div>
+      ) : selectedStop ? (
         <div className={styles.mapStopCard}>
           <strong>
             Stop {selectedStop.sequence}

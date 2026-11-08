@@ -15,7 +15,7 @@ import { CortexRouteMap } from "./cortex-route-map";
 import styles from "./cortex-workspace.module.css";
 
 type RouteFilter = "all" | "on-road" | "closed" | "review";
-type TaskFilter = "all" | "remaining" | "failed" | "bad";
+type TaskFilter = "all" | "remaining" | "failed" | "good" | "bad" | "unavailable";
 type ListMode = "routes" | "drivers";
 
 function statusBadge(row: CortexRouteRow) {
@@ -39,7 +39,9 @@ function formatTime(epoch: number | null) {
 function taskMatches(task: CortexStopTask, filter: TaskFilter) {
   const state = String(task.taskState || "").toUpperCase();
   if (filter === "all") return true;
+  if (filter === "good") return task.scanQuality === "good";
   if (filter === "bad") return task.scanQuality === "bad";
+  if (filter === "unavailable") return task.scanQuality === "unavailable";
   if (filter === "failed") return /FAIL|ATTEMPT|UNDELIVER|REJECT/.test(state);
   return !/DELIVERED|COMPLETED|SUCCESS|PICKED_UP/.test(state);
 }
@@ -77,7 +79,7 @@ export function CortexWorkspace({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [stopQuery, setStopQuery] = useState("");
-  const [listMode, setListMode] = useState<ListMode>("drivers");
+  const [listMode, setListMode] = useState<ListMode>("routes");
   const [routeFilter, setRouteFilter] = useState<RouteFilter>("all");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [hideCompleted, setHideCompleted] = useState(false);
@@ -321,8 +323,16 @@ export function CortexWorkspace({
                 <span className={`${styles.badge} ${statusBadge(selected).className}`}>{statusBadge(selected).label}</span>
               </div>
               <div className={styles.driverStats}><span><strong>{selected.delivered}</strong>Delivered</span><span><strong>{selected.remaining}</strong>Remaining</span><span><strong>{selected.attempted}</strong>Failed</span><span><strong>{selected.total}</strong>Total</span></div>
-              {detail ? <div className={styles.scanSummary}><span><b>{scanSummary.good}</b> Good scan ≤50 m</span><span className={scanSummary.bad ? styles.hasBadScans : undefined}><b>{scanSummary.bad}</b> Bad scan &gt;50 m</span><span><b>{scanSummary.unavailable}</b> No scan location</span></div> : null}
-              <div className={styles.stopToolbar}><select value={taskFilter} onChange={(event) => setTaskFilter(event.target.value as TaskFilter)} aria-label="Filter route tasks"><option value="all">All stops</option><option value="remaining">Remaining</option><option value="failed">Delivery failed</option><option value="bad">Bad scans</option></select><label><input type="checkbox" checked={hideCompleted} onChange={(event) => setHideCompleted(event.target.checked)} /> Hide completed</label></div>
+              {detail ? (
+                <div className={styles.scanSummary} aria-label="Scan quality filters">
+                  <span className={styles.scanSummaryLabel}>Scan quality</span>
+                  <button type="button" className={taskFilter === "all" ? styles.scanFilterActive : undefined} onClick={() => setTaskFilter("all")}><b>{scanSummary.good + scanSummary.bad + scanSummary.unavailable}</b> All</button>
+                  <button type="button" className={`${styles.scanFilterGood} ${taskFilter === "good" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("good")} title="Good scan: marked within 50 metres of the planned stop"><b>{scanSummary.good}</b> Good ≤50 m</button>
+                  <button type="button" className={`${styles.scanFilterBad} ${taskFilter === "bad" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("bad")} title="Bad scan: marked more than 50 metres from the planned stop"><b>{scanSummary.bad}</b> Bad &gt;50 m</button>
+                  <button type="button" className={`${styles.scanFilterUnknown} ${taskFilter === "unavailable" ? styles.scanFilterActive : ""}`} onClick={() => setTaskFilter("unavailable")} title="Amazon did not provide a scan coordinate"><b>{scanSummary.unavailable}</b> No location</button>
+                </div>
+              ) : null}
+              <div className={styles.stopToolbar}><select value={taskFilter} onChange={(event) => setTaskFilter(event.target.value as TaskFilter)} aria-label="Filter route tasks"><option value="all">All stops</option><option value="remaining">Remaining</option><option value="failed">Delivery failed</option><option value="good">Good scans · ≤50 m</option><option value="bad">Bad scans · &gt;50 m</option><option value="unavailable">No scan location</option></select><label><input type="checkbox" checked={hideCompleted} onChange={(event) => setHideCompleted(event.target.checked)} /> Hide completed</label></div>
               {detailLoading ? <div className={styles.railLoading}><span /><span /><span /></div> : null}
               {detailError ? <div className={styles.alert}><strong>Route unavailable</strong>{detailError}</div> : null}
               {detail ? (
@@ -334,7 +344,7 @@ export function CortexWorkspace({
                       <ul className={styles.stopTasks}>
                         {stop.tasks.map((task) => (
                           <li key={task.taskId || `${task.scannableId}-${task.actualExecutionTime}`}>
-                            <div><span className={styles.taskTitle}>{task.taskType || "Task"} · {task.taskState || "Pending"}</span><span className={styles.taskId}>{task.scannableId || task.orderId || "Tracking ID unavailable"}</span><span className={`${styles.scanBadge} ${task.scanQuality === "good" ? styles.scanGood : task.scanQuality === "bad" ? styles.scanReview : styles.scanUnknown}`}>{task.scanDistanceM == null ? "No scan location" : task.scanQuality === "good" ? `Good scan · ${task.scanDistanceM} m` : `Bad scan · ${task.scanDistanceM} m`}</span></div>
+                            <div><span className={styles.taskTitle}>{task.taskType || "Task"} · {task.taskState || "Pending"}</span><span className={styles.taskId}>{task.scannableId || task.orderId || "Tracking ID unavailable"}</span><span className={`${styles.scanBadge} ${task.scanQuality === "good" ? styles.scanGood : task.scanQuality === "bad" ? styles.scanReview : styles.scanUnknown}`}>{task.scanDistanceM == null ? "No scan location" : task.scanQuality === "good" ? `Good scan · ${task.scanDistanceM} m from planned stop` : `Bad scan · ${task.scanDistanceM} m from planned stop`}</span></div>
                             <div className={styles.taskActions}><time>{formatTime(task.actualExecutionTime)}</time>{task.scannableId ? <button type="button" onClick={() => navigator.clipboard.writeText(task.scannableId!)} title="Copy tracking ID"><Copy size={13} /></button> : null}</div>
                           </li>
                         ))}
@@ -351,7 +361,7 @@ export function CortexWorkspace({
         <section className={styles.mapPanel} aria-label="Cortex route map">
           <header className={styles.mapPanelHead}><div><MapPinned size={17} aria-hidden /><span>{selected ? `${selected.workforceName || selected.amazonName} · live route` : "Select a driver"}</span></div><span>{trailLoading ? "Loading Driver Trace…" : detail?.gpsTrail.length ? `${detail.gpsTrail.length.toLocaleString("en-IN")} GPS points` : "Planned route"}</span></header>
           {detail ? (
-            <CortexRouteMap plannedPath={detail.plannedPath} actualPath={detail.actualPath} gpsTrail={detail.gpsTrail || []} gpsTrailError={detail.gpsTrailError || null} gpsLoading={trailLoading} stops={detail.stops} movementStart={detail.movementStart} movementEnd={detail.movementEnd} />
+            <CortexRouteMap plannedPath={detail.plannedPath} actualPath={detail.actualPath} gpsTrail={detail.gpsTrail || []} gpsTrailError={detail.gpsTrailError || null} gpsLoading={trailLoading} stops={detail.stops} movementStart={detail.movementStart} movementEnd={detail.movementEnd} scanFilter={taskFilter === "good" || taskFilter === "bad" || taskFilter === "unavailable" ? taskFilter : "all"} />
           ) : detailLoading ? (
             <div className={styles.mapSkeleton}><span /><span /><span /><p>Loading route map…</p></div>
           ) : (
