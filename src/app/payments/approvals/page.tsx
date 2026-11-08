@@ -117,6 +117,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       requests: [] as RequestRow[],
       canDownloadProcessData: false,
       eligibleIds: new Set<string>(),
+      facetRows: [] as { station: string; head: string; date: string }[],
       filterOptions: {
         stations: [] as PaymentApprovalFilterOption[],
         paymentHeads: [] as PaymentApprovalFilterOption[],
@@ -244,7 +245,10 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       if (!wasApprovedByCurrentUser) return false;
     }
     if (stageTones && !stageTones.includes(paymentApprovalStatusTone(request) ?? "")) return false;
-    return true;
+    return !normalizedSearch || [request.request_no, request.location_code, request.payment_heads?.name,
+      request.payment_heads?.code, request.amount == null ? "" : String(request.amount),
+      request.profiles?.full_name, request.profiles?.email, request.status, request.approval_status
+    ].join(" ").toLowerCase().includes(normalizedSearch);
   });
   const stationOptions = [...new Set(statusScopedRequests.map((request) => request.location_code).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right))
@@ -263,30 +267,14 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   const dateOptions = [...new Set(statusScopedRequests.map((request) => paymentApprovalDateKey(request.created_at)).filter(Boolean))]
     .sort((left, right) => right.localeCompare(left))
     .map((value) => ({ value, label: formatDashboardDate(value) }));
-  const allowedStations = new Set(stationOptions.map((option) => option.value));
-  const allowedPaymentHeads = new Set(paymentHeadOptions.map((option) => option.value));
-  const allowedDates = new Set(dateOptions.map((option) => option.value));
   const selectedFilters: PaymentApprovalFacetSelection = {
-    stations: filters.stations.filter((value) => allowedStations.has(value)),
-    paymentHeads: filters.paymentHeads.filter((value) => allowedPaymentHeads.has(value)),
-    dates: filters.dates.filter((value) => allowedDates.has(value))
+    stations: filters.stations, paymentHeads: filters.paymentHeads, dates: filters.dates
   };
-  const requests = statusScopedRequests.filter((request) => {
-    if (!matchesPaymentApprovalFacets(request, selectedFilters)) return false;
-    if (!normalizedSearch) return true;
-    const haystack = [
-      request.request_no,
-      request.location_code,
-      request.payment_heads?.name,
-      request.payment_heads?.code,
-      request.amount == null ? "" : String(request.amount),
-      request.profiles?.full_name,
-      request.profiles?.email,
-      request.status,
-      request.approval_status
-    ].join(" ").toLowerCase();
-    return haystack.includes(normalizedSearch);
-  });
+  const requests = statusScopedRequests.filter(request => matchesPaymentApprovalFacets(request, selectedFilters));
+  const facetRows = [...new Map(statusScopedRequests.map(request => {
+    const row = { station: request.location_code, head: request.payment_head_id, date: paymentApprovalDateKey(request.created_at) };
+    return [JSON.stringify(row), row];
+  })).values()];
   const ownerIds = [...new Set(requests.map(row => row.current_approver_user_id).filter((id): id is string => Boolean(id)))];
   const roleIds = [...new Set(requests.map(row => row.current_approver_role_id).filter((id): id is string => Boolean(id)))];
   const [owners, roles] = await Promise.all([
@@ -302,6 +290,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     })),
     eligibleIds,
     canDownloadProcessData: Boolean(authorization.roleId && (processHeadsResult.count ?? 0) > 0),
+    facetRows,
     filterOptions: { stations: stationOptions, paymentHeads: paymentHeadOptions, dates: dateOptions },
     selectedFilters,
     error: requestsResult.error?.message || processHeadsResult.error?.message || approvalHistoryResult.error?.message || null
@@ -333,7 +322,7 @@ export default async function PaymentApprovalsPage({
     paymentHeads: selectedPaymentApprovalValues(searchParams?.head),
     dates: selectedPaymentApprovalValues(searchParams?.date)
   };
-  const { requests: matchingRequests, eligibleIds, canDownloadProcessData, filterOptions, selectedFilters, error } = await loadApprovals(companyId, authorization, {
+  const { requests: matchingRequests, eligibleIds, canDownloadProcessData, filterOptions, selectedFilters, facetRows, error } = await loadApprovals(companyId, authorization, {
     oversight,
     status: currentStatus,
     search: currentSearch,
@@ -449,6 +438,7 @@ export default async function PaymentApprovalsPage({
             {pageNumber < pageCount ? <PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "page", String(pageNumber + 1))}`} scroll={false}>Next 50</PendingLink> : null}
           </div> : null}
           <PaymentApprovalFilters
+            rows={facetRows}
             oversight={oversight}
             dateOptions={filterOptions.dates}
             paymentHeadOptions={filterOptions.paymentHeads}

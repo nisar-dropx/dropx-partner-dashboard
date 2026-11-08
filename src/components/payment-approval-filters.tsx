@@ -1,4 +1,5 @@
 "use client";
+import { facetRows } from "@/lib/dependent-filters";
 
 import { Check, ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -37,9 +38,8 @@ function ApprovalMultiSelect({ allLabel, label, options, selectedValues, onChang
       : `${selectedLabels.length} selected`;
 
   useEffect(() => {
-    const allowed = new Set(options.map((option) => option.value));
-    setSelected(selectedValues.filter((value) => allowed.has(value)));
-  }, [options, selectedValues]);
+    setSelected(selectedValues);
+  }, [selectedValues]);
 
   useEffect(() => {
     if (!open) {
@@ -118,6 +118,7 @@ function ApprovalMultiSelect({ allLabel, label, options, selectedValues, onChang
 }
 
 export function PaymentApprovalFilters({
+  rows,
   search,
   status,
   oversight = false,
@@ -128,6 +129,7 @@ export function PaymentApprovalFilters({
   selectedPaymentHeads,
   selectedDates
 }: {
+  rows: { station: string; head: string | null; date: string }[];
   search: string;
   status: string;
   oversight?: boolean;
@@ -148,6 +150,15 @@ export function PaymentApprovalFilters({
   const [draftStations, setDraftStations] = useState(selectedStations);
   const [draftPaymentHeads, setDraftPaymentHeads] = useState(selectedPaymentHeads);
   const [draftDates, setDraftDates] = useState(selectedDates);
+  const facets = useMemo(() => facetRows(rows, {
+    station: { selected: draftStations, values: row => row.station },
+    head: { selected: draftPaymentHeads, values: row => row.head },
+    date: { selected: draftDates, values: row => row.date }
+  }), [rows, draftStations, draftPaymentHeads, draftDates]);
+  const availableOptions = (key: "station" | "head" | "date", options: PaymentApprovalFilterOption[], selected: string[]) => {
+    const known = new Set(options.map(option => option.value));
+    return facets.options(key, [...options, ...selected.filter(value => !known.has(value)).map(value => ({ value, label: value }))]);
+  };
   const hasFacetFilters = selectedStations.length > 0 || selectedPaymentHeads.length > 0 || selectedDates.length > 0;
   const hasDraftChanges = !sameValues(draftStations, selectedStations)
     || !sameValues(draftPaymentHeads, selectedPaymentHeads)
@@ -206,21 +217,21 @@ export function PaymentApprovalFilters({
         allLabel="All stations"
         label="Stations"
         onChange={setDraftStations}
-        options={stationOptions}
+        options={availableOptions("station", stationOptions, draftStations)}
         selectedValues={draftStations}
       />
       <ApprovalMultiSelect
         allLabel="All payment heads"
         label="Payment heads"
         onChange={setDraftPaymentHeads}
-        options={paymentHeadOptions}
+        options={availableOptions("head", paymentHeadOptions, draftPaymentHeads)}
         selectedValues={draftPaymentHeads}
       />
       <ApprovalMultiSelect
         allLabel="All dates"
         label="Created dates"
         onChange={setDraftDates}
-        options={dateOptions}
+        options={availableOptions("date", dateOptions, draftDates)}
         selectedValues={draftDates}
       />
       <button

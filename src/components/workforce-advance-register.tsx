@@ -1,4 +1,5 @@
 "use client";
+import { facetRows } from "@/lib/dependent-filters";
 import { ReportTable } from "@/components/report-table";
 
 
@@ -8,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { WorkforceAdvanceBulkUpload } from "@/components/workforce-advance-bulk-upload";
 import {
   buildWorkforceAdvanceCsv,
-  filterWorkforceAdvanceRows,
+  matchesWorkforceAdvanceFilters,
   summarizeWorkforceAdvanceRows,
   workforceAdvanceExportFilename,
   workforceAdvanceFacetValues
@@ -509,7 +510,16 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
     dateFrom,
     dateTo
   }), [designations, locations, paidLocations, paymentModes, statuses, sources, registrationStatuses, dateFrom, dateTo]);
-  const filtered = useMemo(() => filterWorkforceAdvanceRows(rows, search, filters), [rows, search, filters]);
+  const facets = useMemo(() => facetRows(rows, {
+    location: { selected: locations, normalize: value => value.toLocaleLowerCase(), values: row => (row.location).trim() || "—" },
+    paidLocation: { selected: paidLocations, normalize: value => value.toLocaleLowerCase(), values: row => (row.paidLocation).trim() || "—" },
+    designation: { selected: designations, normalize: value => value.toLocaleLowerCase(), values: row => (row.designation).trim() || "—" },
+    paymentMode: { selected: paymentModes, normalize: value => value.toLocaleLowerCase(), values: row => (row.paymentMode).trim() || "—" },
+    status: { selected: statuses, normalize: value => value.toLocaleLowerCase(), values: row => (row.status).trim() || "—" },
+    source: { selected: sources, normalize: value => value.toLocaleLowerCase(), values: row => (row.source).trim() || "—" },
+    registration: { selected: registrationStatuses, normalize: value => value.toLocaleLowerCase(), values: row => (row.linkStatus).trim() || "—" }
+  }, row => matchesWorkforceAdvanceFilters(row, search, { ...filters, locations: [], paidLocations: [], designations: [], paymentModes: [], statuses: [], sources: [], registrationStatuses: [] })), [rows, search, filters]);
+  const filtered = facets.rows;
   const summary = useMemo(() => summarizeWorkforceAdvanceRows(filtered), [filtered]);
   const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
   const activeFilterCount = (search.trim() ? 1 : 0)
@@ -621,13 +631,13 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
       </div>
       <div aria-label="Advance register filters" className="workforce-advance-filter-panel">
         <label className="workforce-advance-filter-field workforce-advance-search-filter"><span>Search advances</span><input className="field" onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="ID, name, location or reference" type="search" value={search} /></label>
-        <AdvanceMultiFilter allLabel="All current locations" label="Current location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
-        <AdvanceMultiFilter allLabel="All paid locations" label="Advance paid at" onChange={(values) => { setPaidLocations(values); setPage(1); }} options={paidLocationOptions} selected={paidLocations} />
-        <AdvanceMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
-        <AdvanceMultiFilter allLabel="All payment modes" label="Payment mode" onChange={(values) => { setPaymentModes(values); setPage(1); }} options={paymentModeOptions} selected={paymentModes} />
-        <AdvanceMultiFilter allLabel="All deduction statuses" label="Deduction status" onChange={(values) => { setStatuses(values); setPage(1); }} options={statusOptions} selected={statuses} />
-        <AdvanceMultiFilter allLabel="All registration statuses" label="Registration status" onChange={(values) => { setRegistrationStatuses(values.filter((value): value is WorkforceAdvanceRegisterRow["linkStatus"] => value === "linked" || value === "pending")); setPage(1); }} options={registrationOptions} selected={registrationStatuses} />
-        <AdvanceMultiFilter allLabel="All sources" label="Source" onChange={(values) => { setSources(values); setPage(1); }} options={sourceOptions} selected={sources} />
+        <AdvanceMultiFilter allLabel="All current locations" label="Current location" onChange={(values) => { setLocations(values); setPage(1); }} options={facets.options("location", locationOptions)} selected={locations} />
+        <AdvanceMultiFilter allLabel="All paid locations" label="Advance paid at" onChange={(values) => { setPaidLocations(values); setPage(1); }} options={facets.options("paidLocation", paidLocationOptions)} selected={paidLocations} />
+        <AdvanceMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={facets.options("designation", designationOptions)} selected={designations} />
+        <AdvanceMultiFilter allLabel="All payment modes" label="Payment mode" onChange={(values) => { setPaymentModes(values); setPage(1); }} options={facets.options("paymentMode", paymentModeOptions)} selected={paymentModes} />
+        <AdvanceMultiFilter allLabel="All deduction statuses" label="Deduction status" onChange={(values) => { setStatuses(values); setPage(1); }} options={facets.options("status", statusOptions)} selected={statuses} />
+        <AdvanceMultiFilter allLabel="All registration statuses" label="Registration status" onChange={(values) => { setRegistrationStatuses(values.filter((value): value is WorkforceAdvanceRegisterRow["linkStatus"] => value === "linked" || value === "pending")); setPage(1); }} options={facets.options("registration", registrationOptions)} selected={registrationStatuses} />
+        <AdvanceMultiFilter allLabel="All sources" label="Source" onChange={(values) => { setSources(values); setPage(1); }} options={facets.options("source", sourceOptions)} selected={sources} />
         <label className="workforce-advance-filter-field"><span>Paid from</span><input className="field" max={dateTo || undefined} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} type="date" value={dateFrom} /></label>
         <label className="workforce-advance-filter-field"><span>Paid to</span><input className="field" min={dateFrom || undefined} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} type="date" value={dateTo} /></label>
         <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>

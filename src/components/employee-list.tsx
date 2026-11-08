@@ -1,4 +1,6 @@
 "use client";
+
+import { facetRows } from "@/lib/dependent-filters";
 import { ReportTable } from "@/components/report-table";
 
 
@@ -125,19 +127,15 @@ export function EmployeeList({
   const designationOptions = useMemo(() => uniqueOptions(rows.map((row) => row.designation)), [rows]);
   const statutoryOptions = useMemo(() => uniqueOptions(rows.map((row) => row.statutory)), [rows]);
   const statusOptions = useMemo(() => uniqueOptions(rows.map((row) => row.status)), [rows]);
-  const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return rows.filter((row) => {
-      const searchable = `${row.employeeCode} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.dateOfJoin} ${row.provider} ${row.model} ${row.location} ${row.designation} ${row.statutory} ${row.status}`.toLowerCase();
-      return (!term || searchable.includes(term))
-        && (!providers.length || providers.includes(row.provider))
-        && (!models.length || models.includes(row.model))
-        && (!locations.length || locations.includes(row.location))
-        && (!designations.length || designations.includes(row.designation))
-        && (!statutory.length || statutory.includes(row.statutory))
-        && (!statuses.length || statuses.includes(row.status));
-    });
-  }, [designations, locations, models, providers, rows, search, statuses, statutory]);
+  const facets = useMemo(() => facetRows(rows, {
+    provider: { selected: providers, values: row => row.provider },
+    model: { selected: models, values: row => row.model },
+    location: { selected: locations, values: row => row.location },
+    designation: { selected: designations, values: row => row.designation },
+    statutory: { selected: statutory, values: row => row.statutory },
+    status: { selected: statuses, values: row => row.status }
+  }, row => !search.trim() || `${row.employeeCode} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.dateOfJoin} ${row.provider} ${row.model} ${row.location} ${row.designation} ${row.statutory} ${row.status}`.toLowerCase().includes(search.trim().toLowerCase())), [designations, locations, models, providers, rows, search, statuses, statutory]);
+  const filteredRows = facets.rows;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -155,12 +153,12 @@ export function EmployeeList({
           <p className="subtle">{filteredRows.length} of {rows.length} records</p>
         </div>
         <div className="field-executive-filters">
-          <MultiCheckFilter allLabel="All providers" label="Provider" onChange={(values) => updateFilter(setProviders, values)} options={providerOptions} selected={providers} />
-          <MultiCheckFilter allLabel="All models" label="Model" onChange={(values) => updateFilter(setModels, values)} options={modelOptions} selected={models} />
-          <MultiCheckFilter allLabel="All locations" label="Location" onChange={(values) => updateFilter(setLocations, values)} options={locationOptions} selected={locations} />
-          <MultiCheckFilter allLabel="All designations" label="Designation" onChange={(values) => updateFilter(setDesignations, values)} options={designationOptions} selected={designations} />
-          <MultiCheckFilter allLabel="All statutory" label="Statutory" onChange={(values) => updateFilter(setStatutory, values)} options={statutoryOptions} selected={statutory} />
-          <MultiCheckFilter allLabel="All statuses" label="Status" onChange={(values) => updateFilter(setStatuses, values)} options={statusOptions} selected={statuses} />
+          <MultiCheckFilter allLabel="All providers" label="Provider" onChange={(values) => updateFilter(setProviders, values)} options={facets.options("provider", providerOptions)} selected={providers} />
+          <MultiCheckFilter allLabel="All models" label="Model" onChange={(values) => updateFilter(setModels, values)} options={facets.options("model", modelOptions)} selected={models} />
+          <MultiCheckFilter allLabel="All locations" label="Location" onChange={(values) => updateFilter(setLocations, values)} options={facets.options("location", locationOptions)} selected={locations} />
+          <MultiCheckFilter allLabel="All designations" label="Designation" onChange={(values) => updateFilter(setDesignations, values)} options={facets.options("designation", designationOptions)} selected={designations} />
+          <MultiCheckFilter allLabel="All statutory" label="Statutory" onChange={(values) => updateFilter(setStatutory, values)} options={facets.options("statutory", statutoryOptions)} selected={statutory} />
+          <MultiCheckFilter allLabel="All statuses" label="Status" onChange={(values) => updateFilter(setStatuses, values)} options={facets.options("status", statusOptions)} selected={statuses} />
           <input
             className="field field-executive-search"
             onChange={(event) => {
