@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildGuidedPlan,normalizeGuidedClaim,disputeItems,disputeDays,guidedFields,disputeEvidenceValues} from './payout-dispute-guide.ts';
+import {buildGuidedPlan,normalizeGuidedClaim,disputeItems,disputeDays,associateDisputeDays,publishedDayCount,guidedFields,disputeEvidenceValues} from './payout-dispute-guide.ts';
 import {monthlyAttendanceAmountForAggregateUnits} from './workforce-payment-policy.ts';
 const policy={effective_from:'2026-09-01',calculation_method:'earned_paid_offs',paid_off_days:4,work_units_per_paid_off:6,cap_at_monthly_amount:true};
 let cumulative=0;
@@ -73,27 +73,48 @@ test('ownership and wrongful deduction claims need no replacement amount',()=>{
  }
 });
 
-test('per-package-only payouts do not offer an irrelevant attendance dispute',()=>{
+test('pure per-packet payout hides and rejects attendance even with recorded work days',()=>{
+ const {s,raw}=dailyCountFixture();
+ s.worksheet.production_breakdown=s.worksheet.production_breakdown.filter(l=>l.componentType==='production');
+ for(const line of s.lines)line.calculation_snapshot.paymentLines=line.calculation_snapshot.paymentLines.filter(l=>l.componentType==='production');
+ assert.equal(disputeItems(s).some(i=>i.kind==='attendance'),false);
+ assert.throws(()=>normalizeGuidedClaim(s,{issue:'attendance',component:'attendance',concern:'Wrong attendance',dates:['2026-10-10']}),/actual payment/);
+ const items=disputeItems(s).filter(i=>i.kind==='production');
+ raw.component=items[0].key;
+ raw.counts=raw.counts.map((row,i)=>({...row,component:items[i].key}));
+ const claim=normalizeGuidedClaim(s,raw);
+ assert.equal(claim.counts.length,2);
+ assert.equal(publishedDayCount(associateDisputeDays(s).find(d=>d.date==='2026-10-10'),'DELIVERY'),50);
+});
+
+test('twenty additional shipments at fifteen rupees show a three-hundred-rupee impact',()=>{
  const line={work_date:'2026-10-10',provider_member_id:'200001',calculation_snapshot:{counts:{totalDelivery:20},paymentLines:[{code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300,componentType:'production'}]}};
- const s={item:{work_days:1,gross_amount:300,deduction_amount:0,net_amount:300},lines:[line],worksheet:{production_breakdown:[{code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300}],deduction_breakdown:[]}};
- const items=disputeItems(s);
- assert.equal(items.some(item=>item.kind==='attendance'),false);
- assert.deepEqual([...new Set(items.map(item=>item.kind))],['production']);
- assert.throws(()=>normalizeGuidedClaim(s,{issue:'attendance',component:'attendance',dates:['2026-10-10'],concern:'I worked but the day is missing'}),/actual payment/);
- const production=items[0];
+ const s={item:{work_days:1,gross_amount:300,deduction_amount:0,net_amount:300},lines:[line],worksheet:{production_breakdown:[{code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300,componentType:'production'}],deduction_breakdown:[]}};
+ const production=disputeItems(s).find(item=>item.kind==='production');
  const c=normalizeGuidedClaim(s,{issue:'production',component:production.key,dates:['2026-10-10'],concern:'Count is incorrect',counts:[{date:'2026-10-10',component:production.key,value:40}]});
- const f=new FormData();f.set('value_0','40');f.set('checked_value_0','on');
+ const fields=guidedFields(s,c),f=new FormData();
+ f.set(fields[0].key,'40');f.set(`checked_${fields[0].key}`,'on');
  const p=buildGuidedPlan(s,c,f,{policies:[],percentageDeductions:[],checkedAt:'2026-11-10'});
  assert.equal(p.items[0].kind,'production');
  assert.equal(p.expected_delta_paise,30000);
 });
 
-test('mixed fixed and per-package payouts retain both attendance and production issues',()=>{
- const s=structuredClone(baseSnapshot);
- const delivery={code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300,componentType:'production'};
- s.lines[9].calculation_snapshot.paymentLines.push(delivery);
- s.worksheet.production_breakdown.push(delivery);
- const kinds=new Set(disputeItems(s).map(item=>item.kind));
- assert.equal(kinds.has('attendance'),true);
- assert.equal(kinds.has('production'),true);
+test('fixed and MG schedules retain attendance; mixed periods reject per-packet-only dates',()=>{
+ for(const schedule of ['per_day','per_month','per_hour']){
+  const s=structuredClone(baseSnapshot);
+  s.worksheet.production_breakdown[0].schedule=schedule;
+  s.lines[9].calculation_snapshot.paymentLines[0].schedule=schedule;
+  assert.ok(disputeItems(s).some(i=>i.kind==='attendance'));
+  assert.equal(normalizeGuidedClaim(s,claim).issue,'attendance');
+  s.lines[9].calculation_snapshot.paymentLines=[{code:'DELIVERY',componentType:'production',count:28,rate:10,amount:280}];
+  assert.throws(()=>normalizeGuidedClaim(s,claim),/affected dates/);
+ }
+});
+
+test('worksheet-only daily counts survive projection without inventing missing inputs',()=>{
+ const s={lines:[],worksheet:{daily_breakdown:[{date:'2026-10-01',workDayUnits:0,lines:[{code:'DELIVERY',count:0},{code:'CRETURN',count:2}]}]}};
+ const [day]=associateDisputeDays(s);
+ assert.equal(publishedDayCount(day,'DELIVERY'),0);
+ assert.equal(publishedDayCount(day,'CRETURN'),2);
+ assert.equal(publishedDayCount(day,'SELLER_PICKUP'),null);
 });

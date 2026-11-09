@@ -139,6 +139,11 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,
   '../../../../../../src/lib/workforce-route-distance':{kilometreRate,isKilometreField},
   '@/lib/own-route-fuel':{ownRouteFuel},
   '@/lib/own-loss-recovery':{ownLossRecoveryEstimate},
+  '@/lib/own-loss-due':{loadOwnLossDue:async(db,company,worker,month)=>{
+    const result=await db.rpc('nl_loss_recovery_due',{p_company:company,p_salary_month:month,p_target:'workforce'},{get:true});
+    if(result.error)throw new Error('Your loss deductions could not be verified. Please retry.');
+    return result.data.filter(row=>row.worker_id===worker);
+  }},
   '@/lib/own-advance-deduction':{loadOwnAdvanceDeduction:loadAdvance},
   '@/lib/workforce-payment-mapping':{paymentMappingForDay:resolveMapping},
   '@/lib/workforce-payment-period':{workforcePaymentMonth:()=>({from})},
@@ -289,7 +294,8 @@ test('client guard contract: keyed accounts, latest response only, no silent imp
  for(const source of [payments,monthly]){
   assert.match(source,/key=\{`\$\{/);assert.match(source,/version!==generation.current/);assert.match(source,/generation.current\+\+/);assert.match(source,/set(?:Data|Calculated)\(null\)/);
  }
- assert.match(payments,/if\(!response.ok\)throw new Error\(result.error/);
+ assert.match(payments,/paymentRead<EarningsData>/);
+ assert.match(readFileSync(new URL('./payment-read.ts',import.meta.url),'utf8'),/if \(!response.ok\) throw new Error/);
  assert.match(payments,/tab==='earnings'&&earningsAllowed/);
  assert.match(payments,/result.month!==earningsMonth/);assert.match(payments,/reconcileOwnProduction\(result.earnings,result.summary\)/);
  assert.match(monthly,/data\?\.month===month/);

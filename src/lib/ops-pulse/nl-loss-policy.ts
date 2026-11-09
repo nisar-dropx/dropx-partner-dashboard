@@ -52,6 +52,7 @@ export type RecoveryPerson = {
   installments?: { n: number; amount: number }[];
 };
 export type RecoveryPolicy = {
+  require_loss_payment_clearance?: boolean;
   directory_ceiling_designations?: string[];
   directory_excluded_designations?: string[];
   active_only: boolean;

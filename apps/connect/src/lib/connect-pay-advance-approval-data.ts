@@ -25,7 +25,7 @@ async function mapPayAdvanceRows(
   return Promise.all(requests.map(async (row) => {
     const result = await db().rpc("pay_advance_worker_summary", {
       p_company: companyId, p_worker_type: row.worker_type, p_worker: row.worker_id, p_month: month
-    });
+    }, {get:true});
     if (result.error) throw new Error("Unable to verify the worker's paid advance history. Please retry.");
     const history = result.data;
     const live = await loadCurrentAdvanceCapacity(companyId,String(row.id));

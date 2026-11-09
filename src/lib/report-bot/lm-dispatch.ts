@@ -1,5 +1,5 @@
 import "server-only";
-import sharp from "sharp";
+import { summaryReportSvg, tableReportSvg, reportPngBase64 } from "./lm-report-image";
 import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
 import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } from "@/lib/ops-pulse/station-board";
@@ -25,18 +25,10 @@ type SendOutput = { key:string; body:Record<string,unknown> };
 
 const projection = "*,group:report_bot_groups!inner(wa_group_id,location_id,company_id,workspace,is_enabled,bot_in_group,mode)";
 const linked = (group: Group, company: string) => group && group.company_id === company && group.workspace === "last_mile" && group.mode === "live" && group.is_enabled && group.bot_in_group;
-const xml = (value: unknown) => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const asIst = (value:string) => new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+" IST";
 
 async function photo(title: string, rows: [string,string|number][]) {
-  const visible = rows.slice(0,70);
-  if (visible.length < rows.length) visible.push(["Additional stations",rows.length-visible.length]);
-  const body = visible.map(([label,value],index) => {
-    const y = 50 + index*34;
-    return '<rect y="'+y+'" width="900" height="34" fill="'+(index%2 ? "#f2f5f9" : "#fff")+'"/><text x="18" y="'+(y+23)+'">'+xml(label.slice(0,75))+'</text><text x="875" text-anchor="end" y="'+(y+23)+'" font-weight="700">'+xml(value)+'</text>';
-  }).join("");
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="'+(50+visible.length*34)+'" font-family="Arial,sans-serif" font-size="18"><rect width="900" height="50" fill="#193456"/><text x="18" y="32" fill="white" font-weight="700">'+xml(title)+'</text>'+body+'</svg>';
-  return (await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64");
+  return reportPngBase64(await summaryReportSvg(title, rows));
 }
 
 type PercentageTone = "performance"|"pickup";
@@ -50,24 +42,7 @@ function percentageStyle(value:string|number,tone:PercentageTone) {
 }
 
 async function tablePhoto(title:string, columns:string[], rows:Array<Array<string|number>>, percentageColumn:string, tone:PercentageTone) {
-  const columnWidth = Math.max(102,Math.min(158,Math.floor(1264/columns.length)));
-  const width = Math.max(760,columns.length*columnWidth);
-  const rowHeight = 29, titleHeight = 45;
-  const allRows = rows.slice(0,55);
-  const header = columns.map((label,index)=>{
-    const align=index===0?"start":"middle",x=index===0?index*columnWidth+8:index*columnWidth+columnWidth/2;
-    return `<rect x="${index*columnWidth}" y="${titleHeight}" width="${columnWidth}" height="${rowHeight}" fill="#dce8f6"/><text x="${x}" y="${titleHeight+20}" text-anchor="${align}" font-weight="700">${xml(label.slice(0,22))}</text>`;
-  }).join("");
-  const body = allRows.map((row,rowIndex)=>row.map((value,columnIndex)=>{
-    const y=titleHeight+rowHeight*(rowIndex+1),align=columnIndex===0?"start":"middle",x=columnIndex===0?columnIndex*columnWidth+10:columnIndex*columnWidth+columnWidth/2;
-    const total=rowIndex===allRows.length-1;
-    const style=!total&&columns[columnIndex]===percentageColumn?percentageStyle(value,tone):null;
-    const background=style?.background || (total?"#e8eef6":rowIndex%2 ? "#f6f8fb":"#fff");
-    const color=style?.color || "#172033";
-    return `<rect x="${columnIndex*columnWidth}" y="${y}" width="${columnWidth}" height="${rowHeight}" fill="${background}"/><text x="${x}" y="${y+20}" text-anchor="${align}" fill="${color}"${total||style?' font-weight="700"':""}>${xml(value)}</text>`;
-  }).join("")).join("");
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${titleHeight+rowHeight*(allRows.length+1)}" font-family="Arial,sans-serif" font-size="13"><rect width="${width}" height="${titleHeight}" fill="#193456"/><text x="12" y="29" fill="white" font-size="17" font-weight="700">${xml(title)}</text>${header}${body}</svg>`;
-  return (await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64");
+  return reportPngBase64(await tableReportSvg(title, columns, rows, percentageColumn, value => percentageStyle(value, tone)));
 }
 
 function splitText(lines:string[], limit=3900) {

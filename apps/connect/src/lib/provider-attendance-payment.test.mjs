@@ -31,6 +31,15 @@ const mapping = (changes = {}) => ({
 });
 const attendance = (id, punch_date, status = "P", work_minutes = 480) => ({ id, punch_date, status, work_minutes });
 
+test("one biometric in-punch counts as present for daily/MG pay without inventing worked hours", () => {
+  const result=calculateProviderAttendancePayments({
+    mappings:[mapping()],attendance:[{id:'single',punch_date:'2026-09-01',status:'MIS',in_time:'2026-09-01T03:00:00Z',out_time:null,work_minutes:0}],
+    from:'2026-09-01',to:'2026-09-01',
+  });
+  assert.equal(result[0].workDayUnits,1);
+  assert.equal(result[0].amount,800);
+});
+
 test("provider attendance heads pay full and half days but not absent days", () => {
   const result = calculateProviderAttendancePayments({
     mappings: [mapping()],

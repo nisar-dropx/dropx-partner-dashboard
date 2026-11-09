@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentStatus } from "./workforce-payment-status";
 import { associatePayoutDispute, payoutReviewState } from "./payout-dispute";
 import { publishedPayoutBreakdown } from "./published-payout-breakdown";
-import { disputeItems, disputeDays } from "../../../../src/lib/payout-dispute-guide";
+import { disputeItems, associateDisputeDays } from "../../../../src/lib/payout-dispute-guide";
 import {
   loadPayoutMappingRevisionState,
   payoutMappingPublicationState,
@@ -171,7 +171,7 @@ function payoutOutput({
     lines: detail,
     disputes,
     disputeItems: snapshot ? disputeItems(snapshot) : [],
-    disputeDays: snapshot ? disputeDays(snapshot).map(({ date, units, attendanceKnown, deliveries, deliveryKnown }) => ({ date, units, attendanceKnown, deliveries, deliveryKnown })) : [],
+    disputeDays: snapshot ? associateDisputeDays(snapshot) : [],
   };
 }
 

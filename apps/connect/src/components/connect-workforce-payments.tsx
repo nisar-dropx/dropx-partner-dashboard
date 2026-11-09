@@ -1,4 +1,5 @@
 "use client";
+import {paymentRead,latestPaymentRead} from '@/lib/payment-read';
 import {CalendarDays,ChevronDown,ChevronLeft,ChevronRight,IndianRupee,ReceiptText,RefreshCw,Route,WalletCards} from 'lucide-react';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {useSearchParams} from 'next/navigation';
@@ -41,37 +42,40 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
  const [reference,setReference]=useState<PaymentReference|null>(null),[referenceLoading,setReferenceLoading]=useState(false),[referenceError,setReferenceError]=useState('');
  const [expandedDate,setExpandedDate]=useState(''),[payoutLocked,setPayoutLocked]=useState(false),[payoutVisited,setPayoutVisited]=useState(firstTab==='statements');
  const generation=useRef(0),monthCache=useRef(new Map<string,{at:number;data:EarningsData}>());
+ const paymentRequest=useRef(latestPaymentRead()),referenceRequest=useRef(latestPaymentRead());
  const latestPayoutMonthApplied=useRef(Boolean(requestedPayoutMonth));
  const routeCache=useRef(createRoutePreviewCache<RouteGeometry>());
  const load=useCallback(async(force=false)=>{
   const version=++generation.current,cached=monthCache.current.get(earningsMonth);
+  const request=paymentRequest.current.start();
   setError('');setExpandedDate('');
   if(!force&&cached&&Date.now()-cached.at<60000){setCalculated(cached.data);setLoading(false);return;}
   setCalculated(null);setLoading(true);
   try{
    const query=new URLSearchParams({accountId:account.id,profileType:account.profileType,month:earningsMonth});
-   const response=await fetch(`/api/connect/earnings?${query}`,{cache:'no-store',signal:AbortSignal.timeout(25000)});
-   const result=await response.json() as EarningsData&{error?:string};
-   if(!response.ok)throw new Error(result.error||'Unable to load earnings.');
+   const result=await paymentRead<EarningsData>(`/api/connect/earnings?${query}`,{signal:request.signal});
    if(result.month!==earningsMonth||!result.adjustments||!Array.isArray(result.incentives?.campaigns))throw new Error('Your payment estimate could not be verified.');
    reconcileOwnProduction(result.earnings,result.summary);
-   if(version!==generation.current)return;
+   if(version!==generation.current||!request.isCurrent())return;
    monthCache.current.set(earningsMonth,{at:Date.now(),data:result});if(monthCache.current.size>3)monthCache.current.delete(monthCache.current.keys().next().value!);
    setCalculated(result);
-  }catch(e){if(version===generation.current)setError(e instanceof Error&&e.name!=='TimeoutError'?e.message:'Earnings are taking longer than usual. Please retry.');}
-  finally{if(version===generation.current)setLoading(false);}
+  }catch(e){if(version===generation.current&&request.isCurrent())setError(e instanceof Error?e.message:'Earnings are taking longer than usual. Please retry.');}
+  finally{if(version===generation.current&&request.isCurrent())setLoading(false);}
  },[account.id,account.profileType,earningsMonth]);
- useEffect(()=>{if(tab!=='earnings'||!earningsAllowed)return;void load();return()=>{generation.current++;};},[load,tab,earningsAllowed]);
+ useEffect(()=>{if(tab!=='earnings'||!earningsAllowed)return;void load();return()=>{generation.current++;paymentRequest.current.cancel();};},[load,tab,earningsAllowed]);
  const loadReference=useCallback(async()=>{
+  const request=referenceRequest.current.start();
   setReferenceLoading(true);setReferenceError('');
   try{
    const q=new URLSearchParams({accountId:account.id,profileType:account.profileType});
-   const response=await fetch(`/api/connect/payment-reference?${q}`,{cache:'no-store',signal:AbortSignal.timeout(20000)}),body=await response.json();
-   if(!response.ok||!Array.isArray(body.cards))throw new Error(body.error||'Unable to load your rate card.');
+   const body=await paymentRead<PaymentReference>(`/api/connect/payment-reference?${q}`,{signal:request.signal});
+   if(!Array.isArray(body.cards))throw new Error('Unable to load your rate card.');
+   if(!request.isCurrent())return;
    setReference(body);
-  }catch(e){setReferenceError(e instanceof Error&&e.name!=='TimeoutError'?e.message:'Rate cards are taking longer than usual. Please retry.');}
-  finally{setReferenceLoading(false);}
+  }catch(e){if(request.isCurrent())setReferenceError(e instanceof Error?e.message:'Rate cards are taking longer than usual. Please retry.');}
+  finally{if(request.isCurrent())setReferenceLoading(false);}
  },[account.id,account.profileType]);
+ useEffect(()=>()=>referenceRequest.current.cancel(),[]);
  useEffect(()=>{if(tab==='rate-card'&&!reference&&!referenceLoading&&!referenceError)void loadReference();},[tab,reference,referenceLoading,referenceError,loadReference]);
  const daily=useMemo(()=>calculated?reconcileOwnProduction(calculated.earnings,calculated.summary):[],[calculated]);
  const fuels=calculated?.routeFuel??[],pending=fuels.some(f=>f.status==='pending');
@@ -83,9 +87,9 @@ function WorkforcePayments({account,readOnly}:{account:AppAccount;readOnly:boole
   <div className={styles.headingRow}>
    <header className="dx-page-intro"><small>My pay</small><h1>Payments</h1><p>Earnings, payouts and rates in one place.</p></header>
    {earningsAllowed&&tab!=='rate-card'&&tab!=='disputes'?<div className={monthStyles.monthPicker}><span>Payment month</span><div className={monthStyles.monthControl} role="group" aria-label="Earnings and payout month">
-    <button type="button" aria-label={`Previous ${tab==='statements'?'payout':'earnings'} month`} disabled={(tab==='statements'&&payoutLocked)||loading} onClick={()=>shiftVisibleMonth(-1)}><ChevronLeft/></button>
+    <button type="button" aria-label={`Previous ${tab==='statements'?'payout':'earnings'} month`} disabled={tab==='statements'?payoutLocked:loading} onClick={()=>shiftVisibleMonth(-1)}><ChevronLeft/></button>
     <strong aria-live="polite"><span aria-hidden="true">{payoutMonthLabel(visibleMonth)}</span><span className={monthStyles.srOnly}>Showing {tab==='statements'?'payouts':'earnings'} for {payoutMonthLongLabel(visibleMonth)}</span></strong>
-    <button type="button" aria-label={`Next ${tab==='statements'?'payout':'earnings'} month`} disabled={visibleMonth>=currentPayoutMonth()||(tab==='statements'&&payoutLocked)||loading} onClick={()=>shiftVisibleMonth(1)}><ChevronRight/></button>
+    <button type="button" aria-label={`Next ${tab==='statements'?'payout':'earnings'} month`} disabled={visibleMonth>=currentPayoutMonth()||(tab==='statements'?payoutLocked:loading)} onClick={()=>shiftVisibleMonth(1)}><ChevronRight/></button>
    </div></div>:null}
   </div>
   {earningsAllowed ? <ConnectLossRecoveries accountId={account.id} profileType={account.profileType}/> : null}

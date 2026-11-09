@@ -1,4 +1,5 @@
 "use client";
+import {paymentRead,latestPaymentRead} from '@/lib/payment-read';
 
 import { ChevronLeft, ChevronRight, IndianRupee } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -35,14 +36,14 @@ function MyEarnings({ account }: { account: Account }) {
   const [view, setView] = useState<"monthly" | "daily">("monthly");
   const maxMonth = workforcePaymentMonth().from.slice(0,7);
   const generation=useRef(0);
+  const paymentRequest=useRef(latestPaymentRead());
   const load = useCallback(async () => {
     const version=++generation.current;
+    const request=paymentRequest.current.start();
     setLoading(true); setError("");setData(null);
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, month });
-      const response = await fetch(`/api/connect/earnings?${query}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load earnings.");
+      const payload = await paymentRead(`/api/connect/earnings?${query}`, {signal:request.signal});
       if(payload.month!==month||!payload.adjustments||!Array.isArray(payload.incentives?.campaigns)||!Number.isFinite(payload.summary?.incentiveAmount)||!Number.isFinite(payload.summary?.netAmount))throw new Error('Your payment estimate could not be reconciled. Please retry.');
       reconcileOwnProduction(payload.earnings,payload.summary);
       if(version!==generation.current)return;
@@ -50,7 +51,7 @@ function MyEarnings({ account }: { account: Account }) {
     } catch (reason) { if(version===generation.current)setError(reason instanceof Error ? reason.message : "Unable to load earnings."); }
     finally { if(version===generation.current)setLoading(false); }
   }, [account.id, account.profileType, month]);
-  useEffect(() => { void load();return()=>{generation.current++;}; }, [load]);
+  useEffect(() => { void load();return()=>{generation.current++;paymentRequest.current.cancel();}; }, [load]);
   const summary = data?.summary ?? { workDays: 0, baseAmount: 0,incentiveAmount:0, additions: 0, grossAmount: 0,deductionAmount:0,netAmount:0 };
   const rows = useMemo(() => data?.earnings ?? [], [data]);
 
