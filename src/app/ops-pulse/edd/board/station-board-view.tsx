@@ -17,7 +17,6 @@ import {
   AGEING_DAY_BUCKETS,
   AGEING_DAY_LABELS,
   ageingPivot,
-  ageingStateWeekPivot,
   boardDayLabel,
   collectAgeingWeeks,
   CRETURN_DISPLAY,
@@ -188,38 +187,20 @@ function buildShareTable(
   }
 
   if (view === "ageing") {
-    if (ageingMode === "week") {
-      const weeks = collectAgeingWeeks(stations);
-      const pivot = ageingStateWeekPivot(stations, weeks);
-      const headers = ["State", ...pivot.columns.flatMap((col) => [`${col} #`, `${col} ₹`]), "Total #", "Total ₹"];
-      const rows: BoardShareCell[][] = pivot.rows.map((row) => [
-        { text: row.state, bold: true, align: "left" },
-        ...pivot.columns.flatMap((col) => [
-          { text: row.cells[col]?.count ? String(row.cells[col].count) : "", align: "right" as const },
-          { text: row.cells[col]?.amount ? inr(row.cells[col].amount) : "", align: "right" as const },
-        ]),
-        { text: String(row.total.count), bold: true, align: "right" },
-        { text: inr(row.total.amount), bold: true, bg: heatColor(row.total.amount, pivot.maxAmount), align: "right" },
-      ]);
-      rows.push([
-        { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
-        ...pivot.columns.flatMap((col) => [
-          { text: String(pivot.columnTotals[col]?.count || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
-          { text: inr(pivot.columnTotals[col]?.amount || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
-        ]),
-        { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#edf2f8" },
-        { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#edf2f8" },
-      ]);
-      return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · State × ISO week" };
-    }
-    const pivot = ageingPivot(stations, "day");
-    const headers = ["Station", "Location", ...AGEING_DAY_BUCKETS.flatMap((b) => [`${AGEING_DAY_LABELS[b]} #`, `${AGEING_DAY_LABELS[b]} ₹`]), "Total #", "Total ₹"];
+    // Day and week both use station-wise rows (same layout as EDD) — State × week
+    // stays on the Excel "Ageing State x week" sheet only.
+    const weeks = ageingMode === "week" ? collectAgeingWeeks(stations) : [];
+    const pivot = ageingPivot(stations, ageingMode, weeks);
+    const columns = ageingMode === "day"
+      ? AGEING_DAY_BUCKETS.map((b) => ({ key: b, label: AGEING_DAY_LABELS[b] }))
+      : pivot.columns.map((w) => ({ key: w, label: w }));
+    const headers = ["Station", "Location", ...columns.flatMap((col) => [`${col.label} #`, `${col.label} ₹`]), "Total #", "Total ₹"];
     const rows: BoardShareCell[][] = pivot.rows.map((row) => [
       { text: row.stationCode, bold: true, align: "left" },
       { text: stationNames[row.stationCode] || "", align: "left" },
-      ...AGEING_DAY_BUCKETS.flatMap((b) => [
-        { text: row.cells[b]?.count ? String(row.cells[b].count) : "", align: "right" as const },
-        { text: row.cells[b]?.amount ? inr(row.cells[b].amount) : "", align: "right" as const },
+      ...columns.flatMap((col) => [
+        { text: row.cells[col.key]?.count ? String(row.cells[col.key].count) : "", align: "right" as const },
+        { text: row.cells[col.key]?.amount ? inr(row.cells[col.key].amount) : "", align: "right" as const },
       ]),
       { text: String(row.total.count), bold: true, align: "right" },
       { text: inr(row.total.amount), bold: true, bg: heatColor(row.total.amount, pivot.maxAmount), align: "right" },
@@ -227,14 +208,22 @@ function buildShareTable(
     rows.push([
       { text: "Grand Total", bold: true, align: "left", bg: "#edf2f8" },
       { text: "", bold: true, align: "left", bg: "#edf2f8" },
-      ...AGEING_DAY_BUCKETS.flatMap((b) => [
-        { text: String(pivot.columnTotals[b]?.count || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
-        { text: inr(pivot.columnTotals[b]?.amount || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
+      ...columns.flatMap((col) => [
+        { text: String(pivot.columnTotals[col.key]?.count || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
+        { text: inr(pivot.columnTotals[col.key]?.amount || 0), bold: true, align: "right" as const, bg: "#edf2f8" },
       ]),
       { text: String(pivot.grandTotal.count), bold: true, align: "right", bg: "#edf2f8" },
       { text: inr(pivot.grandTotal.amount), bold: true, align: "right", bg: "#edf2f8" },
     ]);
-    return { title: `Ageing · ${regionLabel}`, subtitle, headers, rows, footerNote: "Ops Pulse Station board · day buckets" };
+    return {
+      title: `Ageing · ${regionLabel}`,
+      subtitle,
+      headers,
+      rows,
+      footerNote: ageingMode === "week"
+        ? "Ops Pulse Station board · station × ISO week"
+        : "Ops Pulse Station board · day buckets",
+    };
   }
 
   const zeroOnly = view === "zero";
@@ -1397,7 +1386,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     <strong>Ageing · {selected.stationCode}{stationNames[selected.stationCode] ? ` · ${stationNames[selected.stationCode]}` : ""}</strong>
                     <small>
                       {formatOpsDate(payload.businessDate, payload.businessDate)}
-                      {ageingMode === "week" ? " · State × ISO week" : " · promised-date age"}
+                      {ageingMode === "week" ? " · station × ISO week" : " · promised-date age"}
                     </small>
                   </div>
                   {(() => {
