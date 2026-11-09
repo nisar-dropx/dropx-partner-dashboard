@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildGuidedPlan,normalizeGuidedClaim,disputeItems,disputeDays,guidedFields,disputeEvidenceValues} from './payout-dispute-guide.ts';
+import {buildGuidedPlan,normalizeGuidedClaim,disputeItems,disputeDays,associateDisputeDays,publishedDayCount,guidedFields,disputeEvidenceValues} from './payout-dispute-guide.ts';
 import {monthlyAttendanceAmountForAggregateUnits} from './workforce-payment-policy.ts';
 const policy={effective_from:'2026-09-01',calculation_method:'earned_paid_offs',paid_off_days:4,work_units_per_paid_off:6,cap_at_monthly_amount:true};
 let cumulative=0;
@@ -71,4 +71,38 @@ test('ownership and wrongful deduction claims need no replacement amount',()=>{
   const c=normalizeGuidedClaim(s,{issue:'deduction',component:item.key,concern,expected:'999'});
   assert.equal(c.expected,'');assert.deepEqual(c.dates,[]);assert.equal(guidedFields(s,c)[0].current,500);
  }
+});
+
+test('pure per-packet payout hides and rejects attendance even with recorded work days',()=>{
+ const {s,raw}=dailyCountFixture();
+ s.worksheet.production_breakdown=s.worksheet.production_breakdown.filter(l=>l.componentType==='production');
+ for(const line of s.lines)line.calculation_snapshot.paymentLines=line.calculation_snapshot.paymentLines.filter(l=>l.componentType==='production');
+ assert.equal(disputeItems(s).some(i=>i.kind==='attendance'),false);
+ assert.throws(()=>normalizeGuidedClaim(s,{issue:'attendance',component:'attendance',concern:'Wrong attendance',dates:['2026-10-10']}),/actual payment/);
+ const items=disputeItems(s).filter(i=>i.kind==='production');
+ raw.component=items[0].key;
+ raw.counts=raw.counts.map((row,i)=>({...row,component:items[i].key}));
+ const claim=normalizeGuidedClaim(s,raw);
+ assert.equal(claim.counts.length,2);
+ assert.equal(publishedDayCount(associateDisputeDays(s).find(d=>d.date==='2026-10-10'),'DELIVERY'),50);
+});
+
+test('fixed and MG schedules retain attendance; mixed periods reject per-packet-only dates',()=>{
+ for(const schedule of ['per_day','per_month','per_hour']){
+  const s=structuredClone(baseSnapshot);
+  s.worksheet.production_breakdown[0].schedule=schedule;
+  s.lines[9].calculation_snapshot.paymentLines[0].schedule=schedule;
+  assert.ok(disputeItems(s).some(i=>i.kind==='attendance'));
+  assert.equal(normalizeGuidedClaim(s,claim).issue,'attendance');
+  s.lines[9].calculation_snapshot.paymentLines=[{code:'DELIVERY',componentType:'production',count:28,rate:10,amount:280}];
+  assert.throws(()=>normalizeGuidedClaim(s,claim),/affected dates/);
+ }
+});
+
+test('worksheet-only daily counts survive projection without inventing missing inputs',()=>{
+ const s={lines:[],worksheet:{daily_breakdown:[{date:'2026-10-01',workDayUnits:0,lines:[{code:'DELIVERY',count:0},{code:'CRETURN',count:2}]}]}};
+ const [day]=associateDisputeDays(s);
+ assert.equal(publishedDayCount(day,'DELIVERY'),0);
+ assert.equal(publishedDayCount(day,'CRETURN'),2);
+ assert.equal(publishedDayCount(day,'SELLER_PICKUP'),null);
 });
