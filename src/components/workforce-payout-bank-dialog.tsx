@@ -150,15 +150,14 @@ export function WorkforcePayoutBankDialog({
         );
       } else {
         setMode(null);
+        router.refresh();
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `Unable to create the ${subjectLabel} bank file.`);
     } finally {
       setBusy(false);
-      // A failed authoritative bank preflight can still follow a successful
-      // publication refresh. Reload so repaired rows and any newly surfaced
-      // blocker are never left stale in the table.
-      router.refresh();
+      // Keep the reason visible. A route refresh remounts the worksheet and
+      // used to erase bank preflight errors before Finance could read them.
     }
   }
 
@@ -240,6 +239,7 @@ export function WorkforcePayoutBankDialog({
           {error ? <div className="payout-inline-message error" role="alert">{error}</div> : null}
           {notice ? <div className="payout-inline-message success" role="status">{notice}</div> : null}
           <div className="form-actions">
+            {mode === "download" && (error || notice) ? <button className="button secondary" disabled={busy} onClick={() => { setMode(null); router.refresh(); }} type="button">Refresh payout status</button> : null}
             <button className="button secondary" disabled={busy} onClick={() => setMode(null)} type="button">Cancel</button>
             <button className="button" disabled={busy || (mode === "download" ? !selectedBank || selectedBank.fileType.toLowerCase() !== "fedone" || !valueDate : !responseFile)} onClick={mode === "download" ? createBankFile : finalizeResponse} type="button">
               {busy ? mode === "download" ? publicationRefreshCount ? "Refreshing & creating…" : "Creating…" : "Finalizing…" : mode === "download" ? publicationRefreshCount ? "Refresh, create & download" : "Create & download" : "Finalize response"}
