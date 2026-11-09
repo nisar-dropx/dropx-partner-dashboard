@@ -6,6 +6,7 @@ const id=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const [company,manager,submitter,station,otherStation,role,run,worker,bank,operation]=[1,2,3,4,5,6,7,8,9,10].map(id);
 await db.exec(`
 create role anon;create role authenticated;create role service_role;
+create table nl_loss_sources(company_id uuid,recovery_policy jsonb);
 create table profiles(id uuid,company_id uuid,is_active boolean,full_name text,email text);
 create table stations(id uuid,company_id uuid,station_code text);
 create table user_roles(id uuid,is_active boolean,code text,location_access_mode text default 'scoped');
@@ -35,6 +36,8 @@ create function workforce_create_payout_payment_batch(p_company_id uuid) returns
 const sql=fs.readFileSync('supabase/migrations/20261108142437_loss_payment_clearance_and_people_finance.sql','utf8');
 await db.exec(sql);await db.exec(sql);
 const aliasSql=fs.readFileSync('supabase/migrations/20261108143132_loss_release_legacy_aliases.sql','utf8');await db.exec(aliasSql);await db.exec(aliasSql);
+const toggleSql=fs.readFileSync('supabase/migrations/20261109115932_configurable_loss_payment_clearance.sql','utf8');
+await db.exec(toggleSql);await db.exec(toggleSql);
 await db.query('insert into profiles values($1,$3,true,\'Manager\',\'manager@example.test\'),($2,$3,true,\'Payroll\',\'payroll@example.test\')',[manager,submitter,company]);
 await db.query("insert into user_roles(id,is_active,code) values($1,true,'FINANCE_FINMGR')",[role]);
 for(const actor of [manager,submitter]) await db.query("insert into company_product_memberships values($1,$2,$3,true,'finance',false,array[$4]::uuid[])",[company,actor,role,station]);
@@ -43,6 +46,19 @@ const review=(scope='workforce',month='2026-10',st=station)=>db.query('select lo
 const approve=async(scope='workforce',action='approve',fingerprint,owner=null,follow=null,actor=manager)=>db.query('select loss_payment_release_decide($1,$2,\'2026-10\',$3,$4,$5,$6,\'Reviewed source completeness and payroll deductions\',$7,$8)',[company,station,scope,actor,action,fingerprint??(await review(scope)).fingerprint,owner,follow]);
 const gate=(scope='workforce',month='2026-10',st=station)=>db.query('select assert_loss_payment_release($1,$2,$3,$4)',[company,st,month,scope]);
 await assert.rejects(()=>gate(),/approval is required/);
+// A different company's switch cannot bypass this company's gate.
+await db.query('insert into nl_loss_sources values($1,$2)',[otherStation,{require_loss_payment_clearance:false}]);
+await assert.rejects(()=>gate(),/approval is required/);
+await db.query('insert into nl_loss_sources values($1,$2)',[company,{require_loss_payment_clearance:false}]);
+await gate();await gate('helpers');
+await assert.rejects(()=>gate('invalid'),/valid payroll source/);
+await assert.rejects(()=>gate(null),/valid payroll source/);
+await assert.rejects(()=>gate('workforce','bad'),/valid salary month/);
+await assert.rejects(()=>gate('workforce','2026-10',id(999)),/outside the company/);
+for(const value of [true,'false',null]) {
+ await db.query('update nl_loss_sources set recovery_policy=$2 where company_id=$1',[company,{require_loss_payment_clearance:value}]);
+ await assert.rejects(()=>gate(),/approval is required/);
+}
 await approve();await gate();
 await assert.rejects(()=>gate('workforce','2026-09'),/approval is required/);
 await assert.rejects(()=>gate('workforce','2026-10',otherStation),/approval is required/);

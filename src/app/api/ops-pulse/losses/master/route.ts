@@ -73,6 +73,7 @@ export async function POST(request: Request) {
           "salary_cap_enabled",
           "reserve_other_recoveries",
           "cctv_public_confirmation",
+          "require_loss_payment_clearance",
         ].some((k) => typeof policy[k] !== "boolean") ||
         !Number.isInteger(policy.salary_month_offset) ||
         policy.salary_month_offset < 0 ||
