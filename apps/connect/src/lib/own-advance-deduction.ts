@@ -1,5 +1,6 @@
 import "server-only";
 import { createHmac } from "node:crypto";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const unavailable = "Your advance deductions could not be verified. Please retry.";
 
@@ -10,6 +11,15 @@ export async function loadOwnAdvanceDeduction(companyId: string, workforceId: st
   try {
     const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!secret) throw new Error("Missing service configuration");
+    if (!supabaseAdmin) throw new Error("Database unavailable");
+    // The shared allocation engine can only add an ADVANCE_RECOVERY line for a
+    // worker present in this due ledger. Avoid a second full payout calculation
+    // when it proves there is nothing to allocate; errors must never mean zero.
+    const due = await supabaseAdmin.rpc("pay_advance_period_due", {
+      p_company: companyId, p_period: `${month}-01`, p_target: "workforce", p_run: null
+    }).eq("worker_id", workforceId).limit(1);
+    if (due.error || !Array.isArray(due.data)) throw new Error("Advance ledger unavailable");
+    if (!due.data.length) return 0;
     const body = JSON.stringify({ companyId, workforceId, month });
     const timestamp = String(Date.now());
     const signature = createHmac("sha256", secret)

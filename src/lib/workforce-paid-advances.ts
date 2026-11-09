@@ -12,14 +12,14 @@ export async function applyWorkforcePaidAdvances<R extends Row>(companyId: strin
   const [payments, publications] = await Promise.all([
     readAllRows(supabaseAdmin.from("workforce_payout_payment_items").select("id,workforce_id,status,instruction_amount")
       .eq("company_id",companyId).eq("period_start",start).eq("period_end",end).in("status",["paid","processing"]).order("id")),
-    readAllRows(supabaseAdmin.from("workforce_payout_publications").select("id,workforce_id,station_id,revision,snapshot")
+    readAllRows(supabaseAdmin.from("workforce_payout_publications").select("id,workforce_id,station_id,revision,deduction_breakdown:snapshot->worksheet->deduction_breakdown")
       .eq("company_id",companyId).eq("period_start",start).eq("period_end",end).eq("publication_kind","worksheet").order("revision",{ascending:false}).order("id")),
   ]);
   if (payments.error || publications.error) throw new Error("Advance recovery could not verify payout history.");
   const seen=new Set<string>(), prior: Prior[]=[];
   for (const p of publications.data ?? []) {
     const key=`${p.workforce_id}:${p.station_id}`; if(seen.has(key)) continue; seen.add(key);
-    for(const line of (p.snapshot as any)?.worksheet?.deduction_breakdown ?? []) {
+    for(const line of p.deduction_breakdown ?? []) {
       if(line.code==='ADVANCE_RECOVERY' && String(line.recoveryKey).startsWith('ADVANCE:'))
         prior.push({workforce_id:p.workforce_id,station_id:p.station_id,advance_id:String(line.recoveryKey).slice(8),amount:Number(line.amount)});
     }
