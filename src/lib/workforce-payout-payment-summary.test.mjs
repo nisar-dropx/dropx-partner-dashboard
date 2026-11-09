@@ -5,10 +5,54 @@ import {
   isWorkforcePayoutPaymentBalanceAvailable,
   mergeWorkforcePayoutPaymentState,
   summarizeWorkforcePayoutPayments,
+  withWorkforcePayoutRecordedSettlements,
   workforcePayoutPaymentEligibilityLabel,
   workforcePayoutPublicationRefreshPending,
   workforcePayoutTargetAmountsMatch
 } from "./workforce-payout-payment-summary.ts";
+
+test("relocking retains actual paid evidence without enabling a second bank file", () => {
+  const blocked = paymentSummary({ eligibilityCode: "mapping_relock_required", eligibilityMessage: "Relock required" });
+  const evidence = [{ payment_allocation_id: "a", payment_item_id: "p", settled_amount_snapshot: "638.29" }];
+  const summary = withWorkforcePayoutRecordedSettlements(blocked, 638.29, evidence);
+  assert.equal(summary.paidAmount, 638.29);
+  assert.equal(summary.balancePayable, 0);
+  assert.equal(summary.overpaidAmount, 0);
+  assert.equal(summary.eligible, false);
+  assert.equal(summary.availableToPay, 0);
+  assert.equal(summary.eligibilityCode, "mapping_relock_required");
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(summary), false);
+  const merged = mergeWorkforcePayoutPaymentState({ netAmount: 638.29, status: "Mapping Unlocked", publicationLockState: "unlocked", publicationPaymentReady: false }, { netAmount: 638.29, status: "Mapping Unlocked", paymentSummary: summary }, "workforce");
+  assert.equal(merged.status, "Paid");
+  assert.equal(merged.publicationPaymentReady, false);
+});
+
+test("blocked revisions show signed differences against actual partial credits once", () => {
+  const evidence = [{ payment_allocation_id: "a", payment_item_id: "p", settled_amount_snapshot: "250.10" }];
+  for (const eligibilityCode of ["publication_missing", "publication_stale_or_incomplete", "publication_refresh_pending"]) {
+    const unpaid = withWorkforcePayoutRecordedSettlements(paymentSummary({ eligibilityCode, paidAmount: 1000 }), 600.20, [...evidence, ...evidence]);
+    assert.equal(unpaid.paidAmount, 250.10);
+    assert.equal(unpaid.balancePayable, 350.10);
+    assert.equal(unpaid.historyCount, 1);
+    assert.equal(unpaid.availableToPay, 0);
+    const excess = withWorkforcePayoutRecordedSettlements(paymentSummary({ eligibilityCode }), 200, evidence);
+    assert.equal(excess.overpaidAmount, 50.10);
+    assert.equal(excess.balancePayable, 0);
+  }
+});
+
+test("recorded settlements reject conflicting evidence and leave eligible previews unchanged", () => {
+  const blocked = paymentSummary({ eligibilityCode: "mapping_relock_required" });
+  assert.throws(() => withWorkforcePayoutRecordedSettlements(blocked, 100, [
+    { payment_allocation_id: "a", payment_item_id: "p", settled_amount_snapshot: 10 },
+    { payment_allocation_id: "a", payment_item_id: "p", settled_amount_snapshot: 20 }
+  ]), /conflicts/);
+  assert.throws(() => withWorkforcePayoutRecordedSettlements(blocked, 100, [
+    { payment_allocation_id: "a", payment_item_id: "p", settled_amount_snapshot: -1 }
+  ]), /invalid/);
+  const eligible = paymentSummary({ eligibilityCode: "eligible", eligible: true, paidAmount: 25, availableToPay: 75 });
+  assert.equal(withWorkforcePayoutRecordedSettlements(eligible, 100, []), eligible);
+});
 
 function paymentSummary(overrides = {}) {
   return {
