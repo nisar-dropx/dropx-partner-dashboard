@@ -17,7 +17,7 @@ export async function loadOwnAdvanceDeduction(companyId: string, workforceId: st
     // when it proves there is nothing to allocate; errors must never mean zero.
     const due = await supabaseAdmin.rpc("pay_advance_period_due", {
       p_company: companyId, p_period: `${month}-01`, p_target: "workforce", p_run: null
-    }).eq("worker_id", workforceId).limit(1);
+    }, { get: true }).eq("worker_id", workforceId).limit(1);
     if (due.error || !Array.isArray(due.data)) throw new Error("Advance ledger unavailable");
     if (!due.data.length) return 0;
     const body = JSON.stringify({ companyId, workforceId, month });
