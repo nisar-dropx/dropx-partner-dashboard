@@ -48,7 +48,26 @@ for (const file of [
   "20261016181000_station_loss_claims.sql",
   "20261022120000_nl_slp_loss_lifecycle.sql",
   "20261028153000_private_people_loss_recovery_pay.sql",
+  "20261109181753_workforce_loss_due_history_batch.sql",
 ]) {
+  if (file === "20261109181753_workforce_loss_due_history_batch.sql") {
+    await db.exec(`create table test_open_months(employee_ref text,salary_month text);
+      create function loss_recovery_open_payroll(uuid,text,text) returns boolean language sql stable as $$
+        select exists(select 1 from test_open_months where employee_ref=$2 and salary_month=$3)
+      $$;`);
+    let original = (await db.query(`select pg_get_functiondef('public.nl_loss_recovery_due(uuid,text,text,uuid)'::regprocedure) as d`)).rows[0].d;
+    // Reproduce the production due-month gate supplied by the user. Its helper
+    // remains unchanged by the migration; only repeated identical calls move.
+    original = original.replace('b.excluded_period\n', 'b.excluded_period, greatest(a.deduction_month,policy.start_month) scheduled_month\n')
+      .replace('from allocs a cross join bounds b cross join lateral', 'from allocs a cross join bounds b cross join policy cross join lateral')
+      .replace(' order by l.deduction_month', ` and (l.final_settlement or l.scheduled_month=p_salary_month or not exists (
+        select 1 from generate_series(to_date(l.scheduled_month,'YYYY-MM'),
+          to_date(p_salary_month,'YYYY-MM')-interval '1 month',interval '1 month') m
+        where loss_recovery_open_payroll(p_company, l.employee_ref, to_char(m::date,'YYYY-MM'))
+      ))\n order by l.deduction_month`);
+    await db.exec(original);
+    await db.exec(original.replace('public.nl_loss_recovery_due(', 'public.nl_loss_recovery_due_reference('));
+  }
   const sql = readFileSync(`supabase/migrations/${file}`, "utf8");
   await db.exec(sql); await db.exec(sql);
 }
@@ -70,7 +89,13 @@ await payables();
 const save = (cs, ver, alloc, plan = {}, remarks = "Recover loss") =>
   `select save_nl_recovery('${C}','2026-09','${cs}',${ver},'deduct','custom','${JSON.stringify(alloc)}','${remarks}','${ACT}','Ops','{}','${JSON.stringify(plan)}')`;
 const pin = (cs) => db.exec(`update nl_loss_recoveries set assigned_at='2026-10-15T10:00:00+05:30', deduction_month='2026-10' where case_key='${cs}'`);
-const due = async (target, month, run = null) => (await db.query(`select recovery_key,amount::text,installment_no,installment_count,cap_exempt,cap_percent::text,final_settlement,label from nl_loss_recovery_due('${C}','${month}','${target}',${run ? `'${run}'` : "null"})`)).rows;
+const due = async (target, month, run = null) => {
+  const sql = `select recovery_key,amount::text,installment_no,installment_count,cap_exempt,cap_percent::text,final_settlement,label from nl_loss_recovery_due('${C}','${month}','${target}',${run ? `'${run}'` : "null"})`;
+  const actual = (await db.query(sql)).rows;
+  const expected = (await db.query(sql.replace('from nl_loss_recovery_due(', 'from nl_loss_recovery_due_reference('))).rows;
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Recovery parity failed: ${target} ${month}`);
+  return actual;
+};
 const keys = (rows, cs) => rows.filter((r) => r.recovery_key.includes(`|${cs}|`)).map((r) => [r.recovery_key.split("|").slice(3).join("|") || "full", r.amount]);
 
 // --- Validation
@@ -226,9 +251,82 @@ eq("Station loss is due in the Workforce payout, instalment 1", (await due("work
 eq("NL cases still use Amazon's decision", (await one(`select nl_case_recoverable('${C}','nl','Not Recoverable') a, nl_case_recoverable('${C}','station','Pending') b`)), { a: false, b: false });
 const c2 = await claim("blr-cash-002");
 eq("Withdraw by raiser", (await one(act(c2.id, "withdraw", 1, ACT))).status, "withdrawn");
-eq("Claim history is complete", (await db.query(`select action from ops_station_loss_claim_events where claim_id='${c1.id}' order by created_at,id`)).rows.map((r) => r.action), ["raised", "return", "resubmit", "approve"]);
+// Fast in-process calls can share a timestamp; random UUID order is not chronology.
+eq("Claim history is complete", (await db.query(`select action from ops_station_loss_claim_events where claim_id='${c1.id}' order by action`)).rows.map((r) => r.action), ["approve", "raised", "resubmit", "return"]);
 await throws("Claim history cannot be edited", `update ops_station_loss_claim_events set note='x'`, /cannot be changed/);
 eq("Unknown target returns nothing", (await db.query(`select * from nl_loss_recovery_due('${C}','2026-11','other')`)).rows, []);
 eq("Bad month returns nothing", (await db.query(`select * from nl_loss_recovery_due('${C}','2026-13','hrms')`)).rows, []);
-console.log(fails ? `${fails} FAILED` : "ALL PASSED");
+await db.query(`insert into test_open_months values($1,'2026-10')`, [`workforce:${W1}`]);
+const blockedCarry = await due('workforce', '2026-11');
+eq('Earlier open payroll still owns non-exit carry-forward', blockedCarry.filter(r => !r.final_settlement && r.recovery_key.includes('|W1|')), []);
+await db.exec('delete from test_open_months');
+await due('workforce', '2026-11');
+// Verify the exact production definition, including redispute/amount gates.
+await db.exec(`create table nl_case_response_windows(company_id uuid,month text,case_key text,enabled boolean,workflow_status text,recovery_month text);
+  create table nl_payout_dispute_adjustments(company_id uuid,recovery_key text,after_amount numeric);
+  create function nl_dispute_recovery_amount(p_company uuid,p_key text,p_amount numeric)
+  returns numeric language sql stable as $$
+    select least(p_amount,coalesce(min(a.after_amount),p_amount))
+    from nl_payout_dispute_adjustments a where a.company_id=p_company and a.recovery_key=p_key
+  $$;`);
+const liveDue = readFileSync('scripts/fixtures/loss-recovery-due-live-20261109.sql','utf8');
+await db.exec(liveDue);
+await db.exec(liveDue.replace('public.nl_loss_recovery_due(', 'public.nl_loss_recovery_due_reference('));
+const performanceMigration = readFileSync('supabase/migrations/20261109181753_workforce_loss_due_history_batch.sql','utf8');
+await db.exec(performanceMigration);
+await db.exec(performanceMigration);
+const liveParity = async () => {
+  for (const target of ['workforce','hrms']) for (const month of ['2026-10','2026-11','2026-12']) {
+    const query = `select * from nl_loss_recovery_due('${C}','${month}','${target}')`;
+    eq(`Live definition parity: ${target} ${month}`,
+      (await db.query(query)).rows,
+      (await db.query(query.replace('nl_loss_recovery_due(', 'nl_loss_recovery_due_reference('))).rows);
+  }
+};
+await liveParity();
+await db.query('insert into nl_payout_dispute_adjustments values($1,$2,123.45)',[C,`${kW}|1`]);
+eq('Approved dispute amount preserved',keys(await due('workforce','2026-10'),'W1'),[['1','123.45']]);
+await db.query('insert into nl_payout_dispute_adjustments values($1,$2,0)',[C,`${kW}|1`]);
+eq('Zeroed disputed installment is excluded',keys(await due('workforce','2026-10'),'W1'),[]);
+await liveParity();
+await db.exec('delete from nl_payout_dispute_adjustments');
+await db.query("insert into nl_case_response_windows values($1,'2026-09','W1',true,'open',null)",[C]);
+eq('Redispute gate preserved',keys(await due('workforce','2026-10'),'W1'),[]);
+await liveParity();
+await db.exec("update nl_case_response_windows set enabled=false,workflow_status='won'");
+eq('Won redispute excluded',keys(await due('workforce','2026-10'),'W1'),[]);
+await db.exec("update nl_case_response_windows set workflow_status='lost',recovery_month='2026-12'");
+eq('Deferred redispute excluded before its month',keys(await due('workforce','2026-11'),'W1'),[]);
+await liveParity();
+await db.exec('delete from nl_case_response_windows');
+await db.query("insert into test_open_months values($1,'2026-10')",[`workforce:${W1}`]);
+await liveParity();
+await db.exec('delete from test_open_months');
+if (process.env.LOSS_BENCHMARK === '1') {
+  await db.exec(`
+    insert into nl_loss_month_cases
+    select (jsonb_populate_record(null::nl_loss_month_cases,
+      to_jsonb(c)||jsonb_build_object('case_key','BENCH-'||n))).*
+    from nl_loss_month_cases c cross join generate_series(1,200) n where c.case_key='W1';
+    insert into nl_loss_recoveries
+    select (jsonb_populate_record(null::nl_loss_recoveries,
+      to_jsonb(r)||jsonb_build_object('case_key','BENCH-'||n))).*
+    from nl_loss_recoveries r cross join generate_series(1,200) n where r.case_key='W1';
+    insert into workforce_payout_publications(company_id,workforce_id,station_id,revision,snapshot,period_start,period_end)
+    select '${C}','${W1}','${S}',n,
+      jsonb_build_object('worksheet',jsonb_build_object('deduction_breakdown','[]'::jsonb),'padding',repeat(md5(n::text),2000)),
+      '2026-09-01','2026-09-30' from generate_series(1,100) n;
+    analyze workforce_payout_publications;
+  `);
+  const query = `select * from nl_loss_recovery_due('${C}','2026-11','workforce')`;
+  const startOld = performance.now();
+  const reference = (await db.query(query.replace('nl_loss_recovery_due(', 'nl_loss_recovery_due_reference('))).rows;
+  const oldMs = performance.now()-startOld;
+  const startNew = performance.now();
+  const optimized = (await db.query(query)).rows;
+  const newMs = performance.now()-startNew;
+  eq('Large history amounts exactly match', optimized, reference);
+  console.log(JSON.stringify({benchmark:'200 recovery plans, 100 prior revisions',oldMs:Math.round(oldMs),newMs:Math.round(newMs),rows:optimized.length}));
+}
+console.log(fails ? `${fails} FAILED` : "ALL PASSED (original/optimized parity checked)");
 process.exit(fails ? 1 : 0);
